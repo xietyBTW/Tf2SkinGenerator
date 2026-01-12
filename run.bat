@@ -12,30 +12,45 @@ REM   run.bat install      - установка зависимостей
 REM   run.bat check        - проверка окружения
 REM ========================================
 
-set PYTHON_CMD=python
+set VENV_PATH=.venv
+set PYTHON_EXE=%VENV_PATH%\Scripts\python.exe
 set PYTHON_VERSION=3.13
 
 REM Определяем режим работы
 set MODE=%1
 if "%MODE%"=="" set MODE=main
 
-REM Проверяем наличие Python
-python --version >nul 2>&1
-if errorlevel 1 (
-    echo ОШИБКА: Python не найден!
-    echo Установите Python 3.8 или выше.
+REM Проверяем наличие .venv
+if not exist "%VENV_PATH%" (
+    echo ОШИБКА: Виртуальное окружение не найдено!
+    echo Создайте виртуальное окружение:
+    echo   python -m venv .venv
+    echo   .venv\Scripts\activate
+    echo   pip install -r requirements.txt
     pause
     exit /b 1
 )
 
-REM Пытаемся использовать Python 3.13 если доступен
-py -3.13 --version >nul 2>&1
-if not errorlevel 1 (
-    set PYTHON_CMD=py -3.13
-    echo Используется Python 3.13
-) else (
-    echo Предупреждение: Python 3.13 не найден, используется системный Python
-    python --version
+REM Проверяем наличие Python в .venv
+if not exist "%PYTHON_EXE%" (
+    echo ОШИБКА: Python не найден в .venv!
+    echo Виртуальное окружение может быть повреждено.
+    echo Пересоздайте его:
+    echo   python -m venv .venv
+    echo   .venv\Scripts\activate
+    echo   pip install -r requirements.txt
+    pause
+    exit /b 1
+)
+
+set PYTHON_CMD=%PYTHON_EXE%
+
+REM Проверяем версию Python
+%PYTHON_CMD% --version >nul 2>&1
+if errorlevel 1 (
+    echo ОШИБКА: Не удалось запустить Python из .venv!
+    pause
+    exit /b 1
 )
 
 goto %MODE%
@@ -89,11 +104,12 @@ goto end
 
 :install
 echo ========================================
-echo Установка зависимостей для Python %PYTHON_VERSION%
+echo Установка зависимостей в .venv
 echo ========================================
 echo.
 
-REM Проверяем наличие Python 3.13
+REM Проверяем версию Python
+echo Версия Python:
 %PYTHON_CMD% --version
 echo.
 
@@ -108,7 +124,7 @@ echo.
 echo ========================================
 echo Проверка установленных библиотек...
 echo ========================================
-%PYTHON_CMD% -c "import sys; print('Python:', sys.version.split()[0]); import PySide6; print('PySide6:', PySide6.__version__); import cv2; print('OpenCV:', cv2.__version__); import numpy; print('NumPy:', numpy.__version__); import PIL; print('Pillow:', PIL.__version__); print('Все библиотеки установлены успешно!')" 2>nul
+%PYTHON_CMD% -c "import sys; print('Python:', sys.version.split()[0]); import PySide6; print('PySide6:', PySide6.__version__); import numpy; print('NumPy:', numpy.__version__); import PIL; print('Pillow:', PIL.__version__); print('Все библиотеки установлены успешно!')" 2>nul
 if errorlevel 1 (
     echo Предупреждение: Не все библиотеки доступны для проверки
 )
@@ -134,8 +150,6 @@ echo - PySide6:
 %PYTHON_CMD% -c "import PySide6; print('  OK -', PySide6.__version__)" 2>nul || echo   ОШИБКА: не установлен
 echo - Pillow:
 %PYTHON_CMD% -c "import PIL; print('  OK -', PIL.__version__)" 2>nul || echo   ОШИБКА: не установлен
-echo - OpenCV:
-%PYTHON_CMD% -c "import cv2; print('  OK -', cv2.__version__)" 2>nul || echo   ОШИБКА: не установлен
 echo - NumPy:
 %PYTHON_CMD% -c "import numpy; print('  OK -', numpy.__version__)" 2>nul || echo   ОШИБКА: не установлен
 echo - qdarkstyle:

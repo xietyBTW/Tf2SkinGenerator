@@ -333,3 +333,181 @@ class TF2VPKExtractService:
         
         print(f"Предупреждение: VMT файл не найден по пути: {vmt_rel_path}")
         return None
+    
+    @staticmethod
+    def extract_texture(
+        textures_vpk_path: str,
+        weapon_key: str,
+        out_dir: str,
+        export_format: str = "VTF"
+    ) -> Optional[str]:
+        """
+        Извлекает оригинальную текстуру (VTF файл) оружия из tf2_textures_dir.vpk
+        и конвертирует в выбранный формат изображения (PNG, TGA, JPG)
+        
+        Пути поиска в порядке приоритета:
+        1. materials/models/workshop_partner/weapons/c_models/{weapon_key}/
+        2. materials/models/workshop/weapons/c_models/{weapon_key}/
+        3. materials/models/weapons/c_models/{weapon_key}/
+        4. materials/models/weapons/c_items/{weapon_key}/
+        
+        Args:
+            textures_vpk_path: Путь к tf2_textures_dir.vpk
+            weapon_key: Ключ оружия (например, c_scattergun)
+            out_dir: Директория для извлечения
+            export_format: Формат экспорта (VTF, PNG, TGA, JPG)
+            
+        Returns:
+            Путь к извлеченному/конвертированному файлу или None если не найден
+        """
+        if not VPK_AVAILABLE:
+            print("Предупреждение: Библиотека vpk не установлена. Текстура не будет извлечена.")
+            return None
+        
+        if not os.path.exists(textures_vpk_path):
+            print(f"Предупреждение: VPK файл не найден: {textures_vpk_path}")
+            return None
+        
+        os.makedirs(out_dir, exist_ok=True)
+        
+        # Пути поиска в порядке приоритета
+        search_paths = [
+            f"materials/models/workshop_partner/weapons/c_models/{weapon_key}",
+            f"materials/models/workshop/weapons/c_models/{weapon_key}",
+            f"materials/models/weapons/c_models/{weapon_key}",
+            f"materials/models/weapons/c_items/{weapon_key}",
+        ]
+        
+        # Возможные имена VTF файлов
+        vtf_candidates = [
+            f"{weapon_key}.vtf",
+            f"c_{weapon_key}.vtf" if not weapon_key.startswith('c_') else None,
+        ]
+        # Убираем None значения
+        vtf_candidates = [name for name in vtf_candidates if name]
+        
+        try:
+            vpk_file = vpk.open(textures_vpk_path)
+            
+            # Пробуем найти VTF файл по каждому пути
+            for search_path in search_paths:
+                for vtf_filename in vtf_candidates:
+                    vtf_rel_path = f"{search_path}/{vtf_filename}"
+                    
+                    # Проверяем, существует ли файл в VPK
+                    if vtf_rel_path in vpk_file:
+                        vpk_entry = vpk_file[vtf_rel_path]
+                        
+                        # Определяем путь для сохранения VTF
+                        extracted_file_path = os.path.join(out_dir, vtf_filename)
+                        
+                        # Извлекаем файл
+                        with open(extracted_file_path, 'wb') as f:
+                            f.write(vpk_entry.read())
+                        
+                        print(f"Извлечена текстура: {vtf_rel_path} -> {extracted_file_path}")
+                        # Закрываем VPK файл если есть метод close
+                        if hasattr(vpk_file, 'close'):
+                            try:
+                                vpk_file.close()
+                            except:
+                                pass
+                        
+                        # Конвертируем VTF в выбранный формат, если нужно
+                        if export_format.upper() != "VTF":
+                            converted_path = TF2VPKExtractService._convert_vtf_to_image(
+                                extracted_file_path,
+                                out_dir,
+                                export_format.upper()
+                            )
+                            if converted_path:
+                                # Удаляем временный VTF файл
+                                try:
+                                    os.remove(extracted_file_path)
+                                except:
+                                    pass
+                                return converted_path
+                        
+                        return extracted_file_path
+            
+            # Закрываем VPK файл если есть метод close
+            if hasattr(vpk_file, 'close'):
+                try:
+                    vpk_file.close()
+                except:
+                    pass
+            print(f"Предупреждение: Текстура не найдена для оружия {weapon_key}")
+            return None
+            
+        except Exception as e:
+            print(f"Ошибка при извлечении текстуры: {e}")
+            return None
+    
+    @staticmethod
+    def _convert_vtf_to_image(vtf_path: str, out_dir: str, image_format: str) -> Optional[str]:
+        """
+        Конвертирует VTF файл в изображение (PNG, TGA, JPG) используя библиотеку vtf2img
+        
+        Args:
+            vtf_path: Путь к VTF файлу
+            out_dir: Директория для сохранения
+            image_format: Формат изображения (PNG, TGA, JPG)
+            
+        Returns:
+            Путь к конвертированному файлу или None если ошибка
+        """
+        try:
+            # Пробуем использовать библиотеку vtf2img для конвертации
+            try:
+                from vtf2img import Parser
+            except ImportError:
+                print("Предупреждение: Библиотека vtf2img не установлена.")
+                print("Установите её через: .venv\\Scripts\\python.exe -m pip install vtf2img")
+                print("Или активируйте .venv и выполните: pip install vtf2img")
+                return None
+            
+            # Формируем имя выходного файла
+            vtf_basename = os.path.splitext(os.path.basename(vtf_path))[0]
+            format_mapping = {
+                "PNG": "png",
+                "TGA": "tga",
+                "JPG": "jpg",
+                "JPEG": "jpg"
+            }
+            ext = format_mapping.get(image_format.upper(), "png")
+            output_filename = f"{vtf_basename}.{ext}"
+            output_path = os.path.join(out_dir, output_filename)
+            
+            # Открываем VTF файл
+            parser = Parser(vtf_path)
+            
+            # Получаем изображение (vtf2img возвращает PIL Image напрямую)
+            from PIL import Image
+            image = parser.get_image()
+            
+            # Логируем информацию об изображении для диагностики
+            print(f"Изображение из VTF: mode={image.mode}, size={image.size}")
+            
+            # Конвертируем изображение в RGB
+            # Используем стандартную конвертацию PIL, которая правильно обрабатывает альфа-канал
+            if image.mode != "RGB":
+                # PIL автоматически смешивает альфа-канал с черным фоном при convert("RGB")
+                # Для текстуры игры нужен черный фон, а не белый
+                image = image.convert("RGB")
+            
+            # Сохраняем изображение в нужном формате
+            if image_format.upper() == "JPG" or image_format.upper() == "JPEG":
+                image.save(output_path, "JPEG", quality=95)
+            elif image_format.upper() == "TGA":
+                image.save(output_path, "TGA")
+            else:  # PNG по умолчанию
+                image.save(output_path, "PNG")
+            
+            print(f"Текстура конвертирована: {vtf_path} -> {output_path}")
+            return output_path
+                
+        except Exception as e:
+            print(f"Ошибка при конвертации VTF в {image_format}: {e}")
+            import traceback
+            traceback.print_exc()
+            return None

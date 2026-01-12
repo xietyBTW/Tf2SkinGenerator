@@ -34,12 +34,15 @@ class VPKService:
         flags: List[str] = None,
         vtf_options: dict = None,
         tf2_root_dir: str = "",
+        export_folder: str = "export",
         keep_temp_on_error: bool = False,
         debug_mode: bool = False,
         replace_model_enabled: bool = False,
         draw_uv_layout: bool = False,
         parent_window=None,  # Для показа диалогов
-        replace_model_path: str = None  # Путь к модели для замены (для тестового режима)
+        replace_model_path: str = None,  # Путь к модели для замены (для тестового режима)
+        language: str = "en",  # Язык для сообщений об ошибках
+        custom_vtf_path: str = None  # Путь к пользовательскому VTF файлу (если указан, используется вместо создания из изображения)
     ) -> Tuple[bool, str]:
         """
         Создает VPK файл из изображения с автоматической сборкой моделей
@@ -53,19 +56,26 @@ class VPKService:
             flags: Флаги VTF (CLAMPS, CLAMPT, NOLOD, etc.)
             vtf_options: Опции VTFCmd (nomipmaps, nothumbnail, noreflectivity, gamma, etc.)
             tf2_root_dir: Корневая директория TF2 (steamapps/common/Team Fortress 2)
+            export_folder: Папка для экспорта файлов (по умолчанию "export")
             keep_temp_on_error: Сохранить временные файлы при ошибке
             debug_mode: Режим отладки (сохраняет состояние на каждом этапе)
             replace_model_enabled: Включена ли замена модели (диалог выбора покажется после декомпиляции)
             parent_window: Родительское окно для диалогов
+            language: Язык для сообщений об ошибках (по умолчанию "en")
             
         Returns:
             Tuple[success, message]
         """
+        # Загружаем переводы
+        from src.data.translations import TRANSLATIONS
+        t = TRANSLATIONS.get(language, TRANSLATIONS['en'])
+        
         ctx = None
         try:
             # Валидация входных данных
+            # Если используется custom_vtf_path, пропускаем проверку image_path
             validation_error = VPKService._validate_build_params(
-                image_path, mode, filename, size, format_type, tf2_root_dir
+                image_path, mode, filename, size, format_type, tf2_root_dir, t, custom_vtf_path
             )
             if validation_error:
                 return False, validation_error
@@ -86,7 +96,7 @@ class VPKService:
             if mode in SPECIAL_MODES.values():
                 result = VPKService._build_special_mode_vpk(
                     ctx, mode, image_path, size, format_type, flags, vtf_options,
-                    keep_temp_on_error, debug_mode
+                    keep_temp_on_error, debug_mode, language, custom_vtf_path
                 )
                 if not result[0]:
                     # В случае ошибки возвращаем только success и message (для обратной совместимости)
@@ -101,7 +111,7 @@ class VPKService:
                 # Проверяем, что TF2 root dir задан
                 if not tf2_root_dir:
                     ctx.cleanup(on_error=True, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
-                    return False, "Не указана папка TF2. Укажите её в настройках."
+                    return False, t['error_tf2_not_specified']
                 
                 # Проверяем Crowbar
                 crowbar_exists, crowbar_error = TF2Paths.check_crowbar()
@@ -119,7 +129,7 @@ class VPKService:
                 # Проверяем, что weapon_key есть в WEAPON_MDL_PATHS
                 if weapon_key not in WEAPON_MDL_PATHS:
                     ctx.cleanup(on_error=True, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
-                    return False, f"Оружие {weapon_key} не найдено в списке путей моделей. Обновите WEAPON_MDL_PATHS в src/data/weapons.py."
+                    return False, t['error_weapon_not_found'].format(weapon_key=weapon_key)
                 
                 # Формируем пути для поиска MDL файла в порядке приоритета:
                 # 1. models/workshop_partner/weapons/c_models (самый приоритетный - здесь хранятся папки с оружиями)
@@ -211,12 +221,10 @@ class VPKService:
                     
                     # Если MDL не найден - возвращаем ошибку
                     if not found_mdl_path:
-                        error_msg = f"Не найден .mdl файл ни по одному из путей:\n"
-                        for path in paths_to_try:
-                            error_msg += f"  - {path}\n"
-                        error_msg += f"VPK файл: {tf2_misc_vpk}\n"
+                        paths_str = "\n".join([f"  - {path}" for path in paths_to_try])
+                        error_msg = t['error_mdl_not_found'].format(paths=paths_str, vpk_file=tf2_misc_vpk)
                         if last_error:
-                            error_msg += f"Последняя ошибка: {str(last_error)}"
+                            error_msg += f"\n{str(last_error)}"
                         ctx.cleanup(on_error=True, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
                         return False, error_msg
                     
@@ -237,7 +245,7 @@ class VPKService:
                             break
                     
                     if not mdl_file:
-                        error_msg = f"MDL файл не был извлечен, хотя был найден по пути: {found_mdl_path}"
+                        error_msg = t['error_mdl_not_extracted'].format(path=found_mdl_path)
                         ctx.cleanup(on_error=True, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
                         return False, error_msg
                     
@@ -258,7 +266,7 @@ class VPKService:
                     
                     # Генерируем UV разметку, если включено
                     if draw_uv_layout:
-                        VPKService._generate_uv_layout(ctx, weapon_key, size)
+                        VPKService._generate_uv_layout(ctx, weapon_key, size, export_folder, language)
                     
                     # Удаляем LOD файлы из декомпилированной директории
                     ModelBuildService.remove_lod_files(ctx.decompile_dir)
@@ -331,13 +339,13 @@ class VPKService:
                     
                     if not original_cdmaterials_path:
                         ctx.cleanup(on_error=True, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
-                        return False, f"Не удалось извлечь путь из $cdmaterials в QC файле: {qc_path}"
+                        return False, t['error_cdmaterials_not_extracted'].format(qc_path=qc_path)
                     
                     # Извлекаем имя файла из $texturegroup (до патчинга)
                     texture_filename = ModelBuildService.extract_texturegroup_filename(qc_path)
                     if not texture_filename:
                         ctx.cleanup(on_error=True, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
-                        return False, f"Не удалось извлечь имя файла из $texturegroup в QC файле: {qc_path}"
+                        return False, t['error_texturegroup_not_extracted'].format(qc_path=qc_path)
                     
                     # Пропатчиваем QC файл: добавляем console\ к $cdmaterials, удаляем $lod
                     ModelBuildService.patch_qc_file(qc_path, weapon_key, original_cdmaterials_path)
@@ -346,7 +354,7 @@ class VPKService:
                     patched_cdmaterials_path = ModelBuildService.extract_cdmaterials_path_from_qc(qc_path)
                     if not patched_cdmaterials_path:
                         ctx.cleanup(on_error=True, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
-                        return False, f"Не удалось извлечь путь из $cdmaterials после патчинга в QC файле: {qc_path}"
+                        return False, t['error_cdmaterials_patched_not_extracted'].format(qc_path=qc_path)
                     
                     # Конвертируем путь из $cdmaterials в путь для материалов (добавляем materials/ и конвертируем слеши)
                     # Путь теперь в формате: console\models\weapons\v_bonesaw
@@ -370,28 +378,36 @@ class VPKService:
                     except OSError as e:
                         if "path too long" in str(e).lower():
                             ctx.cleanup(on_error=True, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
-                            return False, f"Путь слишком длинный для оружия {mode}. Попробуйте использовать более короткое имя файла."
+                            return False, t['error_path_too_long'].format(mode=mode)
                         else:
                             raise
                     
-                    # Обрабатываем изображение
-                    VPKService._process_image(image_path, vtf_temp_png, size)
-                    
-                    # Разделяем флаги на опции VTFCmd и флаги VTF
-                    vtf_flags, flags_parsed_options = VPKService._parse_vtf_flags_and_options(flags)
-                    
-                    # Объединяем опции из UI с опциями из флагов
-                    merged_options = {}
-                    if vtf_options:
-                        merged_options.update(vtf_options)
-                    merged_options.update(flags_parsed_options)
-                    
-                    # Создаем VTF файл
-                    VPKService._create_vtf(vtf_temp_png, vtf_output_path, format_type, vtf_flags, merged_options)
-                    
-                    # Удаляем временный PNG файл
-                    if os.path.exists(vtf_temp_png):
-                        os.remove(vtf_temp_png)
+                    # Если используется пользовательский VTF файл, копируем его
+                    if custom_vtf_path:
+                        # Копируем пользовательский VTF файл в нужную директорию
+                        vtf_file_path = os.path.join(vtf_output_path, vtf_filename)
+                        os.makedirs(vtf_output_path, exist_ok=True)
+                        shutil.copy2(custom_vtf_path, vtf_file_path)
+                        print(f"Использован пользовательский VTF файл: {custom_vtf_path} -> {vtf_file_path}")
+                    else:
+                        # Обрабатываем изображение
+                        VPKService._process_image(image_path, vtf_temp_png, size)
+                        
+                        # Разделяем флаги на опции VTFCmd и флаги VTF
+                        vtf_flags, flags_parsed_options = VPKService._parse_vtf_flags_and_options(flags)
+                        
+                        # Объединяем опции из UI с опциями из флагов
+                        merged_options = {}
+                        if vtf_options:
+                            merged_options.update(vtf_options)
+                        merged_options.update(flags_parsed_options)
+                        
+                        # Создаем VTF файл
+                        VPKService._create_vtf(vtf_temp_png, vtf_output_path, format_type, vtf_flags, merged_options)
+                        
+                        # Удаляем временный PNG файл
+                        if os.path.exists(vtf_temp_png):
+                            os.remove(vtf_temp_png)
                     
                     # Пробуем извлечь VMT файл, используя оригинальный путь из QC (до патчинга)
                     vmt_file = None
@@ -482,10 +498,10 @@ class VPKService:
                         error_msg += f"\n\nВременные файлы сохранены в: {ctx.temp_dir}"
                     
                     ctx.cleanup(on_error=True, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
-                    return False, f"Ошибка при работе с моделью: {error_msg}"
+                    return False, t['error_model_work'].format(error=error_msg)
             
             # Создаем VPK файл
-            vpk_path = VPKService._create_vpk_file(ctx, filename)
+            vpk_path = VPKService._create_vpk_file(ctx, filename, export_folder, language)
             
             # Удаляем отредактированный VMT файл после успешной сборки (если он был использован)
             if vmt_to_delete:
@@ -517,10 +533,12 @@ class VPKService:
             return True, f"VPK успешно создан: {vpk_path}"
             
         except Exception as e:
-            error_msg = f"Ошибка при создании VPK: {str(e)}"
+            from src.data.translations import TRANSLATIONS
+            t = TRANSLATIONS.get(language, TRANSLATIONS['en'])
+            error_msg = t['error_vpk_creation'].format(error=str(e))
             if ctx:
                 if keep_temp_on_error:
-                    error_msg += f"\n\nВременные файлы сохранены в: {ctx.temp_dir}"
+                    error_msg += f"\n\n{t.get('temp_files_saved', 'Temporary files saved in')}: {ctx.temp_dir}"
                 ctx.cleanup(on_error=True, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
             return False, error_msg
     
@@ -534,7 +552,8 @@ class VPKService:
         flags: List[str],
         vtf_options: dict = None,
         keep_temp_on_error: bool = False,
-        debug_mode: bool = False
+        debug_mode: bool = False,
+        language: str = "en"
     ) -> Tuple[bool, str, Optional[str]]:
         """
         Создает VPK для специальных режимов (critHIT и т.д.)
@@ -542,6 +561,9 @@ class VPKService:
         Returns:
             Tuple[success, message, vmt_to_delete] - где vmt_to_delete это имя файла для удаления, если был использован отредактированный VMT
         """
+        from src.data.translations import TRANSLATIONS
+        t = TRANSLATIONS.get(language, TRANSLATIONS['en'])
+        
         try:
             # Получаем относительные пути (без basepath)
             rel_path, vmt_filename, vtf_filename = VMTService.get_weapon_relpaths(mode)
@@ -557,28 +579,38 @@ class VPKService:
             except OSError as e:
                 if "path too long" in str(e).lower():
                     ctx.cleanup(on_error=True, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
-                    return False, f"Путь слишком длинный для оружия {mode}. Попробуйте использовать более короткое имя файла."
+                    return False, t['error_path_too_long'].format(mode=mode)
                 else:
                     raise
             
-            # Обрабатываем изображение
-            VPKService._process_image(image_path, vtf_temp_png, size)
-            
-            # Разделяем флаги на опции VTFCmd и флаги VTF
-            vtf_flags, flags_parsed_options = VPKService._parse_vtf_flags_and_options(flags)
-            
-            # Объединяем опции из UI с опциями из флагов
-            merged_options = {}
-            if vtf_options:
-                merged_options.update(vtf_options)
-            merged_options.update(flags_parsed_options)
-            
-            # Создаем VTF файл
-            VPKService._create_vtf(vtf_temp_png, vtf_output_path, format_type, vtf_flags, merged_options)
-            
-            # Удаляем временный PNG файл
-            if os.path.exists(vtf_temp_png):
-                os.remove(vtf_temp_png)
+            # Если используется пользовательский VTF файл, копируем его
+            if custom_vtf_path:
+                # Копируем пользовательский VTF файл в нужную директорию
+                # Для специальных режимов имя VTF файла соответствует имени VMT файла
+                vtf_filename_for_mode = vmt_filename.replace('.vmt', '.vtf')
+                vtf_file_path = os.path.join(vtf_output_path, vtf_filename_for_mode)
+                os.makedirs(vtf_output_path, exist_ok=True)
+                shutil.copy2(custom_vtf_path, vtf_file_path)
+                print(f"Использован пользовательский VTF файл для специального режима: {custom_vtf_path} -> {vtf_file_path}")
+            else:
+                # Обрабатываем изображение
+                VPKService._process_image(image_path, vtf_temp_png, size)
+                
+                # Разделяем флаги на опции VTFCmd и флаги VTF
+                vtf_flags, flags_parsed_options = VPKService._parse_vtf_flags_and_options(flags)
+                
+                # Объединяем опции из UI с опциями из флагов
+                merged_options = {}
+                if vtf_options:
+                    merged_options.update(vtf_options)
+                merged_options.update(flags_parsed_options)
+                
+                # Создаем VTF файл
+                VPKService._create_vtf(vtf_temp_png, vtf_output_path, format_type, vtf_flags, merged_options)
+                
+                # Удаляем временный PNG файл
+                if os.path.exists(vtf_temp_png):
+                    os.remove(vtf_temp_png)
             
             # Проверяем, есть ли отредактированный VMT файл для специальных режимов
             from src.services.edited_vmt_service import EditedVMTService
@@ -628,7 +660,7 @@ class VPKService:
             return True, "Текстуры для специального режима созданы успешно", vmt_to_delete
         except Exception as e:
             ctx.cleanup(on_error=True, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
-            return False, f"Ошибка при создании VPK для специального режима: {str(e)}", None
+            return False, t['error_special_mode_vpk'].format(error=str(e)), None
     
     @staticmethod
     def _validate_build_params(
@@ -637,62 +669,79 @@ class VPKService:
         filename: str,
         size: Tuple[int, int],
         format_type: str,
-        tf2_root_dir: str
+        tf2_root_dir: str,
+        t: dict = None,
+        custom_vtf_path: str = None
     ) -> Optional[str]:
         """
         Валидирует параметры сборки VPK
         
+        Args:
+            custom_vtf_path: Если указан, пропускается проверка image_path
+        
         Returns:
             None если валидация прошла успешно, иначе строка с описанием ошибки
         """
-        # Проверка изображения
-        if not image_path or not isinstance(image_path, str):
-            return "Не указан путь к изображению"
+        if t is None:
+            from src.data.translations import TRANSLATIONS
+            t = TRANSLATIONS['en']
         
-        if not os.path.exists(image_path):
-            return f"Изображение не найдено: {image_path}"
-        
-        if not os.path.isfile(image_path):
-            return f"Указанный путь не является файлом: {image_path}"
+        # Проверка изображения (пропускаем, если используется custom_vtf_path)
+        if not custom_vtf_path:
+            if not image_path or not isinstance(image_path, str):
+                return t['error_image_not_specified']
+            
+            if not os.path.exists(image_path):
+                return t['error_image_not_found'].format(path=image_path)
+            
+            if not os.path.isfile(image_path):
+                return t['error_image_not_file'].format(path=image_path)
+        else:
+            # Проверяем, что custom_vtf_path существует
+            if not os.path.exists(custom_vtf_path):
+                return t.get('error_custom_vtf_not_found', f'Custom VTF file not found: {custom_vtf_path}')
+            
+            if not os.path.isfile(custom_vtf_path):
+                return t.get('error_custom_vtf_not_file', f'Custom VTF path is not a file: {custom_vtf_path}')
         
         # Проверка режима
         if not mode or not isinstance(mode, str):
-            return "Не указан режим оружия"
+            return t['error_mode_not_specified']
         
         # Проверка имени файла
         if not filename or not isinstance(filename, str):
-            return "Не указано имя выходного файла"
+            return t['error_filename_not_specified']
         
         if not filename.endswith('.vpk'):
-            return "Имя файла должно заканчиваться на .vpk"
+            return t['error_filename_no_vpk']
         
         # Проверка размера
         if not isinstance(size, (tuple, list)) or len(size) != 2:
-            return "Размер должен быть кортежем из двух целых чисел"
+            return t['error_size_invalid']
         
         width, height = size
         if not isinstance(width, int) or not isinstance(height, int):
-            return "Размер должен содержать целые числа"
+            return t['error_size_not_int']
         
         if width <= 0 or height <= 0:
-            return "Размер должен быть положительным числом"
+            return t['error_size_not_positive']
         
         # Проверка формата
         valid_formats = ['DXT1', 'DXT5', 'RGBA8888']
         if format_type not in valid_formats:
-            return f"Неподдерживаемый формат: {format_type}. Доступны: {', '.join(valid_formats)}"
+            return t['error_format_invalid'].format(format=format_type, formats=', '.join(valid_formats))
         
         # Проверка пути TF2 (для обычных режимов)
         weapon_key = mode.split('_', 1)[1] if '_' in mode else mode
         if mode not in SPECIAL_MODES.values():
             if not tf2_root_dir or not isinstance(tf2_root_dir, str):
-                return "Для обычных режимов необходимо указать путь к TF2"
+                return t['error_tf2_required']
             
             if not os.path.exists(tf2_root_dir):
-                return f"Директория TF2 не найдена: {tf2_root_dir}"
+                return t['error_tf2_not_found'].format(path=tf2_root_dir)
             
             if not os.path.isdir(tf2_root_dir):
-                return f"Указанный путь не является директорией: {tf2_root_dir}"
+                return t['error_tf2_not_dir'].format(path=tf2_root_dir)
         
         return None
     
@@ -832,15 +881,18 @@ class VPKService:
         
         result = subprocess.run(vtf_args, check=True, capture_output=True, text=True)
         if result.returncode != 0:
+            from src.data.translations import TRANSLATIONS
+            t = TRANSLATIONS.get('en', TRANSLATIONS['en'])  # Используем английский для внутренних ошибок
             raise RuntimeError(
-                f"VTF создание не удалось:\n"
-                f"Команда: {' '.join(vtf_args)}\n"
-                f"STDOUT: {result.stdout}\n"
-                f"STDERR: {result.stderr}"
+                t['error_vtf_creation_failed'].format(
+                    command=' '.join(vtf_args),
+                    stdout=result.stdout,
+                    stderr=result.stderr
+                )
             )
     
     @staticmethod
-    def _create_vpk_file(ctx: BuildContext, filename: str) -> str:
+    def _create_vpk_file(ctx: BuildContext, filename: str, export_folder: str = "export", language: str = "en") -> str:
         """
         Создает VPK файл из vpkroot
         
@@ -889,18 +941,23 @@ class VPKService:
             print(f"[DEBUG] STDERR: {result.stderr}")
         
         if result.returncode != 0:
+            from src.data.translations import TRANSLATIONS
+            t = TRANSLATIONS.get('en', TRANSLATIONS['en'])  # Используем английский для внутренних ошибок
             raise RuntimeError(
-                f"VPK создание не удалось:\n"
-                f"STDOUT: {result.stdout}\n"
-                f"STDERR: {result.stderr}"
+                t['error_vpk_creation_failed'].format(
+                    stdout=result.stdout,
+                    stderr=result.stderr
+                )
             )
         
         if not os.path.exists(temp_vpk_path):
-            raise FileNotFoundError(f"Файл vpkroot.vpk не найден после сборки в {vpkroot_parent}")
+            from src.data.translations import TRANSLATIONS
+            t = TRANSLATIONS.get('en', TRANSLATIONS['en'])  # Используем английский для внутренних ошибок
+            raise FileNotFoundError(t['error_vpkroot_not_found'].format(path=vpkroot_parent))
         
         # Перемещаем в export
-        os.makedirs("export", exist_ok=True)
-        final_output = os.path.join("export", filename)
+        os.makedirs(export_folder, exist_ok=True)
+        final_output = os.path.join(export_folder, filename)
         if os.path.exists(final_output):
             os.remove(final_output)
         shutil.move(temp_vpk_path, final_output)
@@ -921,7 +978,9 @@ class VPKService:
         # Извлекаем путь из $modelname в QC файле
         modelname_path = ModelBuildService.extract_modelname_path(qc_path)
         if not modelname_path:
-            raise FileNotFoundError(f"Не удалось извлечь путь из $modelname в QC файле: {qc_path}")
+            from src.data.translations import TRANSLATIONS
+            t = TRANSLATIONS.get('en', TRANSLATIONS['en'])  # Используем английский для внутренних ошибок
+            raise FileNotFoundError(t['error_modelname_not_extracted'].format(qc_path=qc_path))
         
         # Нормализуем путь (заменяем обратные слеши на прямые)
         normalized_path = modelname_path.replace('\\', '/')
@@ -945,7 +1004,9 @@ class VPKService:
         
         # Копируем только файлы модели из compile_dir, которые соответствуют имени модели из $modelname
         if not os.path.exists(ctx.compile_dir):
-            raise FileNotFoundError(f"Директория компила не найдена: {ctx.compile_dir}")
+            from src.data.translations import TRANSLATIONS
+            t = TRANSLATIONS.get('en', TRANSLATIONS['en'])  # Используем английский для внутренних ошибок
+            raise FileNotFoundError(t['error_compile_dir_not_found'].format(path=ctx.compile_dir))
         
         # Извлекаем имя модели из $modelname (без расширения)
         model_filename = os.path.basename(modelname_path)
@@ -962,7 +1023,9 @@ class VPKService:
                     model_files.append(file_name)
         
         if not model_files:
-            raise FileNotFoundError(f"Файлы модели не найдены в {ctx.compile_dir} для модели {model_basename}")
+            from src.data.translations import TRANSLATIONS
+            t = TRANSLATIONS.get('en', TRANSLATIONS['en'])  # Используем английский для внутренних ошибок
+            raise FileNotFoundError(t['error_model_files_not_found'].format(path=ctx.compile_dir, model=model_basename))
         
         # Копируем файлы
         print(f"[DEBUG] Копируем {len(model_files)} файлов модели из {ctx.compile_dir} в {target_dir}")
@@ -976,7 +1039,7 @@ class VPKService:
         print(f"[DEBUG] Все файлы модели скопированы в VPK root: {target_dir}")
     
     @staticmethod
-    def _generate_uv_layout(ctx: BuildContext, weapon_key: str, image_size: Tuple[int, int]) -> None:
+    def _generate_uv_layout(ctx: BuildContext, weapon_key: str, image_size: Tuple[int, int], export_folder: str = "export", language: str = "en") -> None:
         """
         Генерирует UV разметку из SMD файла и сохраняет в export
         
@@ -1005,10 +1068,10 @@ class VPKService:
             
             # Создаем имя файла для UV разметки
             uv_filename = f"{weapon_key}_uv_layout.png"
-            uv_output_path = os.path.join("export", uv_filename)
+            uv_output_path = os.path.join(export_folder, uv_filename)
             
             # Создаем папку export, если её нет
-            os.makedirs("export", exist_ok=True)
+            os.makedirs(export_folder, exist_ok=True)
             
             # Генерируем UV разметку
             if UVLayoutService.generate_uv_layout_from_smd(smd_path, uv_output_path, image_size):

@@ -15,13 +15,14 @@ class PreviewPanel(QWidget):
         self.styles = get_modern_styles()
         self.styles = get_modern_styles()
         self.image_path = None
+        self.vtf_path = None  # Путь к загруженному VTF файлу
         self.image_info = {}  # Хранит информацию об изображении
         
         # Загружаем настройки перевода
         from src.config.app_config import AppConfig
         from src.data.translations import TRANSLATIONS
         config = AppConfig.load_config()
-        current_lang = config.get('language') or 'ru'
+        current_lang = config.get('language') or 'en'
         self.t = TRANSLATIONS[current_lang]
         
         # Включаем поддержку drag & drop
@@ -101,13 +102,14 @@ class PreviewPanel(QWidget):
         
         # Предварительный просмотр изображения
         self.preview = QLabel()
-        self.preview.setStyleSheet("""
+        self.preview_style = """
             QLabel {
                 border: 1px solid #333;
                 border-radius: 4px;
                 background-color: #1a1a1a;
             }
-        """)
+        """
+        self.preview.setStyleSheet(self.preview_style)
         self.preview.setAlignment(Qt.AlignCenter)
         # Устанавливаем фиксированную высоту, ширина зависит от доступного пространства
         self.preview.setFixedHeight(500)
@@ -182,22 +184,29 @@ class PreviewPanel(QWidget):
         self.preview.setAcceptDrops(True)
     
     def browse_image(self):
-        """Открывает диалог выбора файла"""
+        """Открывает диалог выбора файла (изображение или VTF)"""
         from PySide6.QtWidgets import QFileDialog
         file_path, _ = QFileDialog.getOpenFileName(
             self,  # parent
-            self.t['open_dialog_title'],  # caption
+            self.t.get('open_dialog_title', 'Select file'),  # caption
             "",  # dir
-            f"{self.t['images_filter']} (*.png *.jpg *.jpeg *.bmp *.gif *.tiff *.webp)"  # filter
+            f"{self.t.get('images_filter', 'Images')} (*.png *.jpg *.jpeg *.bmp *.gif *.tiff *.webp);;VTF Files (*.vtf);;All Files (*.*)"  # filter
         )
         if file_path:
-            self.load_image(file_path)
+            if self.is_vtf_file(file_path):
+                self.load_vtf(file_path)
+            elif self.is_image_file(file_path):
+                self.load_image(file_path)
     
     def load_image(self, path):
         """Загружает изображение для предварительного просмотра"""
         self.image_path = path
+        # Очищаем путь к VTF, так как используется изображение
+        self.vtf_path = None
         self.empty_state.hide()
         self.preview.show()
+        # Восстанавливаем стиль для изображения
+        self.preview.setStyleSheet(self.preview_style)
         
         # Принудительно обновляем геометрию виджета
         self.preview.updateGeometry()
@@ -227,32 +236,53 @@ class PreviewPanel(QWidget):
         
         # Обновляем информацию
         self.update_info_summary()
-        
-        # Уведомляем панель настроек об изменении состояния изображения
-        if hasattr(self.parent, 'settings_panel'):
-            self.parent.settings_panel.update_remove_bg_button_state()
-        
-        # Уведомляем панель настроек об изменении состояния изображения
-        if hasattr(self.parent, 'settings_panel'):
-            self.parent.settings_panel.update_remove_bg_button_state()
     
     def clear_preview(self):
         """Очищает предварительный просмотр"""
         self.image_path = None
+        self.vtf_path = None
         self.image_info = {}
         self.preview.clear()
         self.preview.hide()
         self.empty_state.show()
         # Обновляем информацию, но не скрываем блок
         self.update_info_summary()
-        
-        # Уведомляем панель настроек об изменении состояния изображения
-        if hasattr(self.parent, 'settings_panel'):
-            self.parent.settings_panel.update_remove_bg_button_state()
     
     def get_image_path(self):
         """Возвращает путь к загруженному изображению"""
         return self.image_path
+    
+    def get_vtf_path(self):
+        """Возвращает путь к загруженному VTF файлу"""
+        return self.vtf_path
+    
+    def load_vtf(self, path):
+        """Загружает VTF файл (сохраняет путь)"""
+        import os
+        if not os.path.exists(path):
+            return
+        
+        self.vtf_path = path
+        # Очищаем путь к изображению, так как используется VTF
+        self.image_path = None
+        
+        # Показываем информацию о VTF файле
+        self.empty_state.hide()
+        self.preview.show()
+        self.preview.clear()
+        
+        # Отображаем текст о том, что VTF файл загружен
+        self.preview.setText(f"VTF файл загружен:\n{os.path.basename(path)}")
+        self.preview.setStyleSheet(self.preview_style + """
+            QLabel {
+                color: #ccc;
+                font-size: 14px;
+            }
+        """)
+        self.preview.setAlignment(Qt.AlignCenter)
+        
+        # Обновляем информацию
+        self.update_info_summary()
     
     def display_image(self, pil_image):
         """Отображает PIL Image в превью"""
@@ -264,6 +294,8 @@ class PreviewPanel(QWidget):
             
             # Обновляем путь к изображению (для совместимости)
             self.image_path = temp_path
+            # Очищаем путь к VTF, так как используется изображение
+            self.vtf_path = None
             
             self.preview.show()
             self.empty_state.hide()
@@ -296,10 +328,6 @@ class PreviewPanel(QWidget):
             
             # Обновляем информацию
             self.update_info_summary()
-            
-            # Уведомляем панель настроек об изменении состояния изображения
-            if hasattr(self.parent, 'settings_panel'):
-                self.parent.settings_panel.update_remove_bg_button_state()
             
         except Exception as e:
             print(f"Ошибка при отображении изображения: {e}")
@@ -347,24 +375,36 @@ class PreviewPanel(QWidget):
         """Обработка события входа в область перетаскивания"""
         if event.mimeData().hasUrls():
             urls = event.mimeData().urls()
-            if urls and self.is_image_file(urls[0].toLocalFile()):
-                event.accept()
-                return
+            if urls:
+                file_path = urls[0].toLocalFile()
+                if self.is_image_file(file_path) or self.is_vtf_file(file_path):
+                    event.accept()
+                    return
         event.ignore()
     
     def dropEvent(self, event):
         """Обработка события отпускания файла"""
         urls = event.mimeData().urls()
-        if urls and self.is_image_file(urls[0].toLocalFile()):
-            self.load_image(urls[0].toLocalFile())
-            event.accept()
-            return
+        if urls:
+            file_path = urls[0].toLocalFile()
+            if self.is_vtf_file(file_path):
+                self.load_vtf(file_path)
+                event.accept()
+                return
+            elif self.is_image_file(file_path):
+                self.load_image(file_path)
+                event.accept()
+                return
         event.ignore()
     
     def is_image_file(self, file_path):
         """Проверяет, является ли файл изображением"""
         image_extensions = ['.png', '.jpg', '.jpeg', '.bmp', '.gif', '.tiff', '.webp']
         return any(file_path.lower().endswith(ext) for ext in image_extensions)
+    
+    def is_vtf_file(self, file_path):
+        """Проверяет, является ли файл VTF"""
+        return file_path.lower().endswith('.vtf')
                 
     def update_language(self, t):
         """Обновляет язык интерфейса"""
