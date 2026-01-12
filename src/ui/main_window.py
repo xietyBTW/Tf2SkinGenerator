@@ -12,9 +12,6 @@ from PySide6.QtCore import QUrl, Qt, QThread, Signal
 from PySide6.QtGui import QPixmap, QDesktopServices
 from PIL import Image
 
-# Импорт проверки зависимостей
-from src.utils.dependencies import REMBG_AVAILABLE
-
 from src.ui.preview_panel import PreviewPanel
 from src.ui.settings_panel import SettingsPanel
 from src.ui.vmt_editor import VMTEditorDialog
@@ -26,34 +23,14 @@ from src.data.weapons import (
 )
 from src.utils.themes import apply_dark_theme
 
-class BackgroundRemovalThread(QThread):
-    """Поток для удаления заднего фона"""
-    finished = Signal(object)  # PIL Image с удаленным фоном
-    error = Signal(str)        # Сообщение об ошибке
-    
-    def __init__(self, input_path):
-        super().__init__()
-        self.input_path = input_path
-    
-    def run(self):
-        try:
-            from src.services.image_service import ImageService
-            result_image = ImageService.remove_background(self.input_path)
-            if result_image is not None:
-                self.finished.emit(result_image)
-            else:
-                self.error.emit("Не удалось удалить фон. Проверьте доступность методов удаления фона.")
-        except Exception as e:
-            self.error.emit(str(e))
-
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         from src.config.app_config import AppConfig
         self.config = AppConfig.load_config()
-        self.language = self.config.get('language') or 'ru'
+        self.language = self.config.get('language') or 'en'
         self.t = TRANSLATIONS[self.language]
-        self.setWindowTitle("TF2 Skin Generator - Modern UI")
+        self.setWindowTitle("TF2 Skin Generator")
         self.setGeometry(100, 100, 1600, 800)
         
         # Текущий выбранный класс и оружие
@@ -735,11 +712,6 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, self.t['error'], self.t['select_weapon_error'])
                 return
                 
-            from_path = self.preview_panel.get_image_path()
-            if not from_path:
-                QMessageBox.warning(self, self.t['error'], self.t['load_image_error'])
-                return
-
             settings = self.settings_panel.get_settings()
             name = settings['filename']
             if not name:
@@ -753,6 +725,15 @@ class MainWindow(QMainWindow):
             flags = settings['flags']
             vtf_options = settings.get('vtf_options', {})
             draw_uv_layout = settings.get('draw_uv_layout', False) and not is_special_mode
+            
+            # Проверяем, используется ли VTF файл из preview_panel
+            custom_vtf_path = self.preview_panel.get_vtf_path()
+            from_path = None
+            if not custom_vtf_path:
+                from_path = self.preview_panel.get_image_path()
+                if not from_path:
+                    QMessageBox.warning(self, self.t['error'], self.t['load_image_error'])
+                    return
             
             # Используем новый VPKService.build_vpk
             from src.services.vpk_service import VPKService
@@ -772,11 +753,14 @@ class MainWindow(QMainWindow):
                 flags=flags,
                 vtf_options=vtf_options,
                 tf2_root_dir=settings.get('tf2_game_folder', ''),
+                export_folder=settings.get('export_folder', 'export'),
                 keep_temp_on_error=settings.get('keep_temp_on_error', False),
                 debug_mode=settings.get('debug_mode', False),
                 replace_model_enabled=replace_model_enabled,
                 draw_uv_layout=draw_uv_layout,
-                parent_window=self  # Передаем главное окно для диалогов
+                parent_window=self,  # Передаем главное окно для диалогов
+                language=self.language,  # Передаем язык для сообщений об ошибках
+                custom_vtf_path=custom_vtf_path  # Путь к пользовательскому VTF файлу
             )
             
             if success:
@@ -788,6 +772,68 @@ class MainWindow(QMainWindow):
             error_msg = str(e)
             QMessageBox.critical(self, self.t['build_error'], error_msg)
 
+    def extract_original_texture(self):
+        """Извлекает оригинальную текстуру оружия из игры"""
+        if not hasattr(self, 'mode') or not self.mode:
+            QMessageBox.warning(self, self.t['error'], self.t['select_weapon_error'])
+            return
+        
+        # Получаем weapon_key из mode
+        weapon_key = self.mode.split('_', 1)[1] if '_' in self.mode else self.mode
+        
+        # Проверяем, что это не специальный режим
+        from src.data.weapons import SPECIAL_MODES
+        if self.mode in SPECIAL_MODES.values():
+            QMessageBox.warning(self, self.t['error'], self.t.get('extract_texture_special_mode_error', 'Cannot extract texture for special modes'))
+            return
+        
+        # Получаем путь к TF2
+        settings = self.settings_panel.get_settings()
+        tf2_root_dir = settings.get('tf2_game_folder', '')
+        
+        if not tf2_root_dir:
+            QMessageBox.warning(self, self.t['error'], self.t.get('tf2_path_not_specified', 'TF2 path not specified in settings'))
+            return
+        
+        # Получаем путь к tf2_textures_dir.vpk
+        from src.services.tf2_paths import TF2Paths
+        textures_vpk = TF2Paths.resolve_textures_vpk(tf2_root_dir)
+        
+        if not textures_vpk:
+            QMessageBox.warning(self, self.t['error'], self.t.get('textures_vpk_not_found', 'tf2_textures_dir.vpk not found'))
+            return
+        
+        # Получаем папку экспорта и формат
+        export_folder = settings.get('export_folder', 'export')
+        export_format = settings.get('export_image_format', 'PNG')
+        os.makedirs(export_folder, exist_ok=True)
+        
+        # Извлекаем текстуру
+        from src.services.tf2_vpk_extract_service import TF2VPKExtractService
+        from src.config.app_config import AppConfig
+        config = AppConfig.load_config()
+        export_format = config.get('export_image_format', 'PNG')
+        
+        vtf_path = TF2VPKExtractService.extract_texture(
+            textures_vpk,
+            weapon_key,
+            export_folder,
+            export_format
+        )
+        
+        if vtf_path and os.path.exists(vtf_path):
+            QMessageBox.information(
+                self,
+                self.t.get('success', 'Success'),
+                self.t.get('texture_extracted_success', 'Texture extracted successfully').format(path=vtf_path)
+            )
+        else:
+            QMessageBox.warning(
+                self,
+                self.t['error'],
+                self.t.get('texture_extract_failed', 'Failed to extract texture').format(weapon=weapon_key)
+            )
+    
     def open_support_link(self):
         QDesktopServices.openUrl(QUrl("https://steamcommunity.com/tradeoffer/new/?partner=394814324&token=GNGCagXk"))
     
@@ -823,51 +869,3 @@ class MainWindow(QMainWindow):
         
         self.resize(current_width, new_height)
     
-    def remove_background(self):
-        """Удаляет задний фон с изображения"""
-        # Проверяем доступность методов удаления фона
-        from src.utils.dependencies import REMBG_AVAILABLE, OPENCV_AVAILABLE
-        if not REMBG_AVAILABLE and not OPENCV_AVAILABLE:
-            QMessageBox.warning(self, self.t['error'], 
-                              "Нет доступных методов удаления фона. Установите rembg или opencv-python.")
-            return
-        
-        # Проверяем, что выбран CritHIT режим
-        is_crit_hit = False
-        if hasattr(self, 'settings_panel') and hasattr(self.settings_panel, 'crit_hit_checkbox'):
-            is_crit_hit = self.settings_panel.crit_hit_checkbox.isChecked()
-        
-        if not is_crit_hit:
-            QMessageBox.warning(self, self.t['error'], self.t['bg_removal_crit_hit_only'])
-            return
-        
-        # Проверяем, что загружено изображение
-        image_path = self.preview_panel.get_image_path()
-        if not image_path:
-            QMessageBox.warning(self, self.t['error'], self.t['load_image_error'])
-            return
-        
-        # Создаем диалог прогресса
-        self.progress_dialog = QProgressDialog(self.t['removing_bg'], self.t['cancel'], 0, 0, self)
-        self.progress_dialog.setWindowModality(Qt.WindowModal)
-        self.progress_dialog.show()
-        
-        # Создаем и запускаем поток
-        self.bg_removal_thread = BackgroundRemovalThread(image_path)
-        self.bg_removal_thread.finished.connect(self.on_background_removed)
-        self.bg_removal_thread.error.connect(self.on_background_removal_error)
-        self.bg_removal_thread.start()
-    
-    def on_background_removed(self, result_image):
-        """Обработка успешного удаления фона"""
-        self.progress_dialog.close()
-        
-        # Отображаем обработанное изображение в превью
-        self.preview_panel.display_image(result_image)
-        
-        QMessageBox.information(self, self.t['bg_removal_success_title'], self.t['bg_removal_success_msg'])
-    
-    def on_background_removal_error(self, error_message):
-        """Обработка ошибки удаления фона"""
-        self.progress_dialog.close()
-        QMessageBox.critical(self, self.t['bg_removal_error_title'], self.t['bg_removal_error_msg'].format(error_message))

@@ -16,7 +16,9 @@ class AppConfig:
     # Значения по умолчанию
     DEFAULT_CONFIG = {
         "tf2_game_folder": "",
-        "language": "ru",
+        "export_folder": "export",
+        "export_image_format": "VTF",
+        "language": "en",
         "last_size": "512",
         "last_format": "DXT1",
         "last_flags": [],

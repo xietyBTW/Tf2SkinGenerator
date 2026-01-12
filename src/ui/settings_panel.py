@@ -2,10 +2,11 @@
 Панель настроек - Минималистичный дизайн
 """
 
+import os
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QComboBox, 
     QPushButton, QLineEdit, QRadioButton, QCheckBox, QButtonGroup,
-    QWidget, QSizePolicy
+    QWidget, QSizePolicy, QFileDialog
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QDoubleValidator
@@ -107,7 +108,7 @@ class SettingsPanel(QWidget):
             self.t = parent.t
         else:
             config = AppConfig.load_config()
-            current_lang = config.get('language') or 'ru'
+            current_lang = config.get('language') or 'en'
             self.t = TRANSLATIONS[current_lang]
         
         # Пресеты
@@ -245,6 +246,13 @@ class SettingsPanel(QWidget):
         self.button.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         main_settings_layout.addWidget(self.button)
         
+        # Кнопка извлечения оригинальной текстуры
+        self.extract_texture_button = QPushButton(self.t.get('extract_texture', 'Extract Original Texture'))
+        self.extract_texture_button.setStyleSheet(self.styles['button_secondary'])
+        self.extract_texture_button.setMinimumHeight(40)
+        self.extract_texture_button.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        main_settings_layout.addWidget(self.extract_texture_button)
+        
         # Добавляем первый контейнер в главный layout
         main_layout.addWidget(main_settings_container, 0)
         
@@ -379,13 +387,6 @@ class SettingsPanel(QWidget):
         self.tools_label.setStyleSheet("font-weight: 500; font-size: 13px; color: #ccc; margin-top: 12px;")
         self.advanced_group.addWidget(self.tools_label)
         
-        # Кнопка удаления фона
-        self.remove_bg_button = QPushButton(self.t['remove_bg'])
-        self.remove_bg_button.setStyleSheet(self.styles['button_secondary'])
-        self.remove_bg_button.setMinimumHeight(36)
-        self.remove_bg_button.setEnabled(False)
-        self.advanced_group.addWidget(self.remove_bg_button)
-        
         # Кнопка редактора VMT
         self.expert_button = QPushButton(self.t['open_editor'])
         self.expert_button.setStyleSheet(self.styles['button_secondary'])
@@ -442,22 +443,15 @@ class SettingsPanel(QWidget):
         if hasattr(self, 'uv_layout_checkbox'):
             self.uv_layout_checkbox.setEnabled(not is_crit_hit)
         
-        # Обновляем состояние кнопки удаления фона
-        self.update_remove_bg_button_state()
-        
         # Для CritHIT устанавливаем формат DXT5
         if is_crit_hit:
             self.format_combo.setCurrentText("DXT5")
-        
-        # Уведомляем главное окно - УБРАНО для предотвращения рекурсии, так как теперь главное окно управляет этим состоянием
-        # if hasattr(self.parent, 'on_crit_hit_changed'):
-        #     self.parent.on_crit_hit_changed(is_crit_hit)
     
     def setup_connections(self):
         """Настраивает соединения сигналов"""
         self.expert_button.clicked.connect(self.expert_mode_triggered)
         self.button.clicked.connect(self.build_vpk)
-        self.remove_bg_button.clicked.connect(self.remove_background)
+        self.extract_texture_button.clicked.connect(self.extract_texture_triggered)
         self.preset_combo.currentTextChanged.connect(self.apply_preset)
         self.filename_input.textChanged.connect(self.validate_vpk_name)
         # Подключаем сигнал сворачивания/разворачивания секции "Дополнительно"
@@ -507,14 +501,14 @@ class SettingsPanel(QWidget):
         invalid_chars = ['<', '>', ':', '"', '/', '\\', '|', '?', '*']
         for char in invalid_chars:
             if char in filename:
-                self.filename_error.setText(f"Недопустимый символ: {char}")
+                self.filename_error.setText(self.t.get('invalid_char_error', 'Invalid character: {char}').format(char=char))
                 self.filename_error.show()
                 self.button.setEnabled(False)
                 return False
         
         # Проверяем длину
         if len(filename) > 50:
-            self.filename_error.setText("Имя файла слишком длинное (макс. 50 символов)")
+            self.filename_error.setText(self.t.get('filename_too_long_error', 'Filename is too long (max 50 characters)'))
             self.filename_error.show()
             self.button.setEnabled(False)
             return False
@@ -568,10 +562,11 @@ class SettingsPanel(QWidget):
         if filename and not filename.lower().endswith(".vpk"):
             filename += ".vpk"
         
-        # Получаем путь к TF2 из конфига
+        # Получаем путь к TF2 и export folder из конфига
         from src.config.app_config import AppConfig
         config = AppConfig.load_config()
         tf2_path = config.get("tf2_game_folder", "")
+        export_folder = config.get("export_folder", "export")
         
         return {
             'size': size,
@@ -581,6 +576,7 @@ class SettingsPanel(QWidget):
             'draw_uv_layout': draw_uv_layout,  # Флаг для рисования UV разметки
             'filename': filename,
             'tf2_game_folder': tf2_path,
+            'export_folder': export_folder,
             'keep_temp_on_error': config.get('keep_temp_files', False),
             'debug_mode': config.get('debug_mode', False)
         }
@@ -609,6 +605,11 @@ class SettingsPanel(QWidget):
         if hasattr(self.parent, 'build_vpk'):
             self.parent.build_vpk()
     
+    def extract_texture_triggered(self):
+        """Обработка нажатия кнопки извлечения текстуры"""
+        if hasattr(self.parent, 'extract_original_texture'):
+            self.parent.extract_original_texture()
+    
     def open_support_link(self):
         """Открывает ссылку поддержки"""
         if hasattr(self.parent, 'open_support_link'):
@@ -619,33 +620,11 @@ class SettingsPanel(QWidget):
         if hasattr(self.parent, 'change_language_from_combo'):
             self.parent.change_language_from_combo(index)
     
-    def update_remove_bg_button_state(self):
-        """Обновляет состояние кнопки удаления фона"""
-        if hasattr(self, 'remove_bg_button'):
-            # Проверяем, выбран ли CritHIT режим
-            is_crit_hit = False
-            if hasattr(self.parent, 'crit_hit_checkbox'):
-                is_crit_hit = self.parent.crit_hit_checkbox.isChecked()
-            
-            # Проверяем, загружено ли изображение
-            has_image = False
-            if hasattr(self.parent, 'preview_panel'):
-                has_image = self.parent.preview_panel.get_image_path() is not None
-            
-            # Кнопка активна, если выбран CritHIT режим И загружено изображение
-            self.remove_bg_button.setEnabled(is_crit_hit and has_image)
-    
-    def remove_background(self):
-        """Удаляет задний фон с изображения"""
-        if hasattr(self.parent, 'remove_background'):
-            self.parent.remove_background()
-    
     def update_language(self, t):
         """Обновляет язык интерфейса"""
         self.t = t
         
         # Обновляем тексты
-        self.remove_bg_button.setText(self.t.get('remove_bg', 'Удалить фон'))
         self.expert_button.setText(self.t.get('open_editor', 'Открыть редактор'))
         self.button.setText(self.t.get('build', 'Собрать VPK'))
         self.filename_input.setPlaceholderText(self.t.get('placeholder', 'Имя VPK'))
@@ -692,6 +671,14 @@ class SettingsPanel(QWidget):
         self.update_preset_items()
         if current_idx >= 0 and current_idx < self.preset_combo.count():
             self.preset_combo.setCurrentIndex(current_idx)
+        
+        # Обновляем кнопку извлечения текстуры
+        if hasattr(self, 'extract_texture_button'):
+            self.extract_texture_button.setText(self.t.get('extract_texture', 'Extract Original Texture'))
+        
+        # Перезапускаем валидацию имени файла, если ошибка уже отображается
+        if hasattr(self, 'filename_error') and self.filename_error.isVisible():
+            self.validate_vpk_name()
 
     def update_preset_items(self):
         """Обновляет список пресетов на текущем языке"""
