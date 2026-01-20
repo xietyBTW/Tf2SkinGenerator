@@ -8,6 +8,9 @@ from typing import Optional, Tuple
 from PIL import Image
 from PySide6.QtGui import QPixmap
 from PySide6.QtCore import Qt
+from src.shared.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 
 class ImageService:
@@ -53,7 +56,7 @@ class ImageService:
             pixmap = QPixmap.fromImage(qt_image)
             return pixmap.scaled(max_size[0], max_size[1], Qt.KeepAspectRatio, Qt.SmoothTransformation)
         except Exception as e:
-            print(f"Ошибка при конвертации PIL в QPixmap: {e}")
+            logger.warning(f"Ошибка при конвертации PIL в QPixmap: {e}, используем fallback", exc_info=True)
             # Fallback - сохраняем во временный файл
             temp_path = tempfile.mktemp(suffix='.png')
             pil_image.save(temp_path, 'PNG')

@@ -5,8 +5,13 @@
 import os
 import sys
 import shutil
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from src.data.weapons import SPECIAL_MODES
+from src.shared.logging_config import get_logger
+from src.shared.file_utils import ensure_directory_exists
+
+logger = get_logger(__name__)
 
 
 class ModelService:
@@ -68,10 +73,10 @@ class ModelService:
         available_weapons = []
         
         models_path = ModelService.get_models_base_path()
-        print(f"[DEBUG] Ищем модели в: {models_path}")
+        logger.debug(f"Ищем модели в: {models_path}")
         
         if not os.path.exists(models_path):
-            print(f"[DEBUG] Папка моделей не найдена: {models_path}")
+            logger.warning(f"Папка моделей не найдена: {models_path}")
             return available_weapons
         
         for item in os.listdir(models_path):
@@ -167,11 +172,11 @@ class ModelService:
         models_path = ModelService.get_models_base_path()
         weapon_path = os.path.join(models_path, weapon_key)
         
-        print(f"[DEBUG] Ищем файлы модели для {weapon_key} в: {weapon_path}")
+        logger.debug(f"Ищем файлы модели для {weapon_key} в: {weapon_path}")
         
         if not os.path.exists(weapon_path):
-            print(f"[DEBUG] Предупреждение: Папка модели не найдена для {weapon_key} по пути: {weapon_path}")
-            print(f"[DEBUG] Текущая рабочая директория: {os.getcwd()}")
+            logger.warning(f"Папка модели не найдена для {weapon_key} по пути: {weapon_path}")
+            logger.debug(f"Текущая рабочая директория: {os.getcwd()}")
             return model_files
         
         # Сканируем файлы в папке
@@ -225,12 +230,12 @@ class ModelService:
             model_files = ModelService.get_weapon_model_files(weapon_key)
             
             if not model_files:
-                print(f"Файлы модели не найдены для {weapon_key}")
+                logger.warning(f"Файлы модели не найдены для {weapon_key}")
                 return False
             
             # Создаем целевую директорию
             target_dir = os.path.join(vpk_root_path, "models", "workshop_partner", "weapons", "c_models", weapon_key)
-            print(f"Создаем директорию: {target_dir}")
+            logger.debug(f"Создаем директорию: {target_dir}")
             os.makedirs(target_dir, exist_ok=True)
             
             # Копируем файлы
@@ -239,13 +244,13 @@ class ModelService:
                 target_path = os.path.join(target_dir, file_name)
                 shutil.copy2(source_path, target_path)
                 copied_count += 1
-                print(f"Скопирован файл модели: {file_name}")
+                logger.debug(f"Скопирован файл модели: {file_name}")
             
-            print(f"Скопировано {copied_count} файлов модели для {weapon_key}")
+            logger.info(f"Скопировано {copied_count} файлов модели для {weapon_key}")
             return True
             
         except Exception as e:
-            print(f"Ошибка при копировании файлов модели: {e}")
+            logger.error(f"Ошибка при копировании файлов модели: {e}", exc_info=True)
             return False
     
     @staticmethod
@@ -310,7 +315,7 @@ class ModelService:
                     'type': ModelService._get_file_type(file_name)
                 }
             except Exception as e:
-                print(f"Ошибка при получении информации о файле {file_name}: {e}")
+                logger.warning(f"Ошибка при получении информации о файле {file_name}: {e}", exc_info=True)
         
         return file_info
     

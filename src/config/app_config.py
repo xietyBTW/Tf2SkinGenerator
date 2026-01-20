@@ -4,17 +4,22 @@
 
 import os
 import json
+from pathlib import Path
 from typing import Optional, Dict, Any
+from src.shared.logging_config import get_logger
+from src.shared.constants import DirectoryPaths, DefaultFilenames
+
+logger = get_logger(__name__)
 
 
 class AppConfig:
     """Класс для работы с конфигурацией приложения"""
     
-    CONFIG_DIR = "config"
-    CONFIG_FILE = os.path.join(CONFIG_DIR, "app_config.json")
+    CONFIG_DIR = Path(DirectoryPaths.CONFIG_DIR)
+    CONFIG_FILE = CONFIG_DIR / DefaultFilenames.CONFIG_FILE
     
     # Значения по умолчанию
-    DEFAULT_CONFIG = {
+    DEFAULT_CONFIG: Dict[str, Any] = {
         "tf2_game_folder": "",
         "export_folder": "export",
         "export_image_format": "VTF",
@@ -27,10 +32,9 @@ class AppConfig:
     }
     
     @staticmethod
-    def _ensure_config_dir():
+    def _ensure_config_dir() -> None:
         """Создает директорию для конфига, если её нет"""
-        if not os.path.exists(AppConfig.CONFIG_DIR):
-            os.makedirs(AppConfig.CONFIG_DIR, exist_ok=True)
+        AppConfig.CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     
     @staticmethod
     def load_config() -> Dict[str, Any]:
@@ -42,8 +46,9 @@ class AppConfig:
         """
         AppConfig._ensure_config_dir()
         
-        if not os.path.exists(AppConfig.CONFIG_FILE):
+        if not AppConfig.CONFIG_FILE.exists():
             # Если файл не существует, создаем с настройками по умолчанию
+            logger.info("Файл конфигурации не найден, создается с настройками по умолчанию")
             AppConfig.save_config(AppConfig.DEFAULT_CONFIG)
             return AppConfig.DEFAULT_CONFIG.copy()
         
@@ -54,9 +59,10 @@ class AppConfig:
             # Объединяем с настройками по умолчанию (на случай, если в файле нет каких-то ключей)
             merged_config = AppConfig.DEFAULT_CONFIG.copy()
             merged_config.update(config)
+            logger.debug("Конфигурация успешно загружена")
             return merged_config
         except (json.JSONDecodeError, IOError) as e:
-            print(f"Ошибка при загрузке конфига: {e}. Используются настройки по умолчанию.")
+            logger.error(f"Ошибка при загрузке конфига: {e}. Используются настройки по умолчанию.", exc_info=True)
             return AppConfig.DEFAULT_CONFIG.copy()
     
     @staticmethod
@@ -75,9 +81,10 @@ class AppConfig:
         try:
             with open(AppConfig.CONFIG_FILE, 'w', encoding='utf-8') as f:
                 json.dump(config, f, indent=4, ensure_ascii=False)
+            logger.debug("Конфигурация успешно сохранена")
             return True
         except IOError as e:
-            print(f"Ошибка при сохранении конфига: {e}")
+            logger.error(f"Ошибка при сохранении конфига: {e}", exc_info=True)
             return False
     
     @staticmethod
@@ -109,6 +116,7 @@ class AppConfig:
         """
         config = AppConfig.load_config()
         config[key] = value
+        logger.debug(f"Установлено значение конфигурации: {key} = {value}")
         return AppConfig.save_config(config)
     
     @staticmethod
@@ -132,4 +140,5 @@ class AppConfig:
         Returns:
             True если успешно, False если ошибка
         """
+        logger.info(f"Установлен путь к TF2: {path}")
         return AppConfig.set("tf2_game_folder", path)

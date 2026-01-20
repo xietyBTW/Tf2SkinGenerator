@@ -9,10 +9,70 @@ from PySide6.QtWidgets import (
     QWidget, QSizePolicy, QFileDialog
 )
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QDoubleValidator
+from PySide6.QtGui import QDoubleValidator, QMouseEvent
 from src.data.translations import TRANSLATIONS
 from src.utils.themes import get_modern_styles
 from src.config.app_config import AppConfig
+
+
+class UVLayoutCheckBox(QCheckBox):
+    """Чекбокс UV разметки, который блокирует включение при активном CritHIT режиме"""
+    
+    def __init__(self, text: str, parent=None):
+        super().__init__(text, parent)
+        self.parent_panel = None
+        self._force_disable = False  # Флаг для принудительного отключения
+    
+    def set_parent_panel(self, panel) -> None:
+        """Устанавливает ссылку на панель настроек для проверки состояния CritHIT"""
+        self.parent_panel = panel
+    
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        """Перехватывает клик мыши и проверяет, можно ли изменить состояние чекбокса"""
+        if event.button() == Qt.LeftButton:
+            # Проверяем состояние CritHIT через панель настроек
+            is_crit_hit = False
+            if self.parent_panel and self.parent_panel.parent:
+                if hasattr(self.parent_panel.parent, 'crit_hit_checkbox'):
+                    is_crit_hit = self.parent_panel.parent.crit_hit_checkbox.isChecked()
+            
+            # Если CritHIT включен, блокируем любое изменение состояния
+            if is_crit_hit:
+                # Не вызываем super(), чтобы предотвратить изменение состояния
+                return
+            
+            # Если CritHIT не включен, разрешаем обычное поведение
+            super().mousePressEvent(event)
+        else:
+            super().mousePressEvent(event)
+    
+    def setChecked(self, checked: bool) -> None:
+        """Переопределяем setChecked, чтобы блокировать включение при CritHIT"""
+        # Если установлен флаг принудительного изменения, пропускаем все проверки
+        if self._force_disable:
+            self._force_disable = False
+            super().setChecked(checked)
+            return
+        
+        # Если пытаются включить чекбокс, проверяем CritHIT
+        if checked:
+            is_crit_hit = False
+            if self.parent_panel and self.parent_panel.parent:
+                if hasattr(self.parent_panel.parent, 'crit_hit_checkbox'):
+                    is_crit_hit = self.parent_panel.parent.crit_hit_checkbox.isChecked()
+            
+            # Если CritHIT включен, не позволяем включить чекбокс
+            if is_crit_hit:
+                return
+        
+        # Разрешаем изменение состояния (включая отключение)
+        super().setChecked(checked)
+    
+    def force_set_checked(self, checked: bool) -> None:
+        """Принудительно устанавливает состояние чекбокса, игнорируя проверки CritHIT"""
+        # Напрямую вызываем setChecked базового класса, минуя наш переопределенный метод
+        QCheckBox.setChecked(self, checked)
+
 
 class CollapsibleGroup(QWidget):
     """Collapsible group для accordion"""
@@ -213,7 +273,35 @@ class SettingsPanel(QWidget):
         main_settings_layout.addWidget(self.format_label)
         
         self.format_combo = QComboBox()
-        self.format_combo.addItems(["DXT1", "DXT5", "RGBA8888", "I8", "A8"])
+        # Добавляем все поддерживаемые форматы VTF (кроме P8, который не поддерживается)
+        self.format_combo.addItems([
+            "DXT1",
+            "DXT3",
+            "DXT5",
+            "RGBA8888",
+            "ABGR8888",
+            "RGB888",
+            "BGR888",
+            "RGB565",
+            "BGR565",
+            "I8",
+            "IA88",
+            "A8",
+            "RGB888 Bluescreen",
+            "BGR888 Bluescreen",
+            "ARGB8888",
+            "BGRA8888",
+            "BGRX8888",
+            "BGRX5551",
+            "BGRA4444",
+            "DXT1 With One Bit Alpha",
+            "BGRA5551",
+            "UV88",
+            "UVWQ8888",
+            "RGBA16161616F",
+            "RGBA16161616",
+            "UVLX8888"
+        ])
         self.format_combo.setStyleSheet(self.styles['combo'])
         self.format_combo.setMinimumHeight(40)
         self.format_combo.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
@@ -252,6 +340,13 @@ class SettingsPanel(QWidget):
         self.extract_texture_button.setMinimumHeight(40)
         self.extract_texture_button.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         main_settings_layout.addWidget(self.extract_texture_button)
+        
+        # Кнопка объединения VPK
+        self.merge_vpk_button = QPushButton(self.t.get('merge_vpk', 'Сборка в один'))
+        self.merge_vpk_button.setStyleSheet(self.styles['button_secondary'])
+        self.merge_vpk_button.setMinimumHeight(40)
+        self.merge_vpk_button.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        main_settings_layout.addWidget(self.merge_vpk_button)
         
         # Добавляем первый контейнер в главный layout
         main_layout.addWidget(main_settings_container, 0)
@@ -323,6 +418,19 @@ class SettingsPanel(QWidget):
         flags_row2.addStretch()
         flags_layout.addLayout(flags_row2)
         
+        # Четвертый ряд - новые флаги (два столбца)
+        flags_row4 = QHBoxLayout()
+        flags_row4.setSpacing(8)
+        flags_row4.setContentsMargins(0, 0, 0, 0)
+        self.flag_nominmipmaps = QCheckBox(self.t.get('no_minimum_mipmap', 'No minimum Mipmap'))
+        self.flag_nominmipmaps.setStyleSheet(compact_checkbox_style)
+        self.option_normal = QCheckBox(self.t.get('normal_map', 'Normal Map'))
+        self.option_normal.setStyleSheet(compact_checkbox_style)
+        flags_row4.addWidget(self.flag_nominmipmaps)
+        flags_row4.addWidget(self.option_normal)
+        flags_row4.addStretch()
+        flags_layout.addLayout(flags_row4)
+        
         # Третий ряд - новые опции VTFCmd (два столбца)
         flags_row3 = QHBoxLayout()
         flags_row3.setSpacing(8)
@@ -366,16 +474,17 @@ class SettingsPanel(QWidget):
         uv_layout_row = QHBoxLayout()
         uv_layout_row.setSpacing(6)
         uv_layout_row.setContentsMargins(0, 0, 0, 0)
-        self.uv_layout_checkbox = QCheckBox(self.t.get('draw_uv_layout', 'Нарисовать UV разметку'))
+        self.uv_layout_checkbox = UVLayoutCheckBox(self.t.get('draw_uv_layout', 'Нарисовать UV разметку'))
+        self.uv_layout_checkbox.set_parent_panel(self)
         self.uv_layout_checkbox.setStyleSheet(compact_checkbox_style)
         self.uv_resolution_label = QLabel("(512x512)")
         self.uv_resolution_label.setStyleSheet("font-size: 11px; color: #999; padding: 0px;")
         uv_layout_row.addWidget(self.uv_layout_checkbox)
         uv_layout_row.addWidget(self.uv_resolution_label)
         uv_layout_row.addStretch()
-        uv_layout_widget = QWidget()
-        uv_layout_widget.setLayout(uv_layout_row)
-        self.advanced_group.addWidget(uv_layout_widget)
+        self.uv_layout_widget = QWidget()  # Сохраняем ссылку для скрытия/показа
+        self.uv_layout_widget.setLayout(uv_layout_row)
+        self.advanced_group.addWidget(self.uv_layout_widget)
         
         # Обновляем разрешение UV при изменении разрешения текстуры
         self.radio_512.toggled.connect(self._update_uv_resolution_label)
@@ -423,6 +532,7 @@ class SettingsPanel(QWidget):
     
     def on_crit_hit_selected(self, is_crit_hit):
         """Обработка выбора CritHIT режима"""
+        print(f"[DEBUG] on_crit_hit_selected called with is_crit_hit={is_crit_hit}")
         # Отключаем/включаем контролы в зависимости от режима
         self.format_combo.setEnabled(not is_crit_hit)
         self.flag_clamps.setEnabled(not is_crit_hit)
@@ -434,14 +544,37 @@ class SettingsPanel(QWidget):
             self.option_nothumbnail.setEnabled(not is_crit_hit)
         if hasattr(self, 'option_noreflectivity'):
             self.option_noreflectivity.setEnabled(not is_crit_hit)
+        if hasattr(self, 'option_normal'):
+            self.option_normal.setEnabled(not is_crit_hit)
+        if hasattr(self, 'flag_nominmipmaps'):
+            self.flag_nominmipmaps.setEnabled(not is_crit_hit)
         if hasattr(self, 'option_gamma'):
             self.option_gamma.setEnabled(not is_crit_hit)
         if hasattr(self, 'gamma_value_input'):
             self.gamma_value_input.setEnabled(not is_crit_hit and 
                                                (hasattr(self, 'option_gamma') and self.option_gamma.isChecked()))
-        # Отключаем UV разметку для CritHIT режима
-        if hasattr(self, 'uv_layout_checkbox'):
-            self.uv_layout_checkbox.setEnabled(not is_crit_hit)
+        # Скрываем/показываем UV разметку для CritHIT режима
+        if hasattr(self, 'uv_layout_widget'):
+            print(f"[DEBUG] uv_layout_widget exists, is_crit_hit={is_crit_hit}")
+            if is_crit_hit:
+                # Если CritHIT включается, скрываем виджет UV разметки и сбрасываем состояние
+                self.uv_layout_checkbox.blockSignals(True)
+                self.uv_layout_checkbox.force_set_checked(False)
+                self.uv_layout_checkbox.blockSignals(False)
+                # Скрываем контейнер и отдельные элементы
+                self.uv_layout_widget.setVisible(False)
+                self.uv_layout_checkbox.setVisible(False)
+                self.uv_resolution_label.setVisible(False)
+                print(f"[DEBUG] UV widget hidden, isVisible={self.uv_layout_widget.isVisible()}")
+            else:
+                # Если CritHIT отключается, показываем виджет UV разметки
+                self.uv_layout_widget.setVisible(True)
+                self.uv_layout_checkbox.setVisible(True)
+                self.uv_resolution_label.setVisible(True)
+            # Принудительно обновляем layout
+            self.uv_layout_widget.updateGeometry()
+            if hasattr(self, 'advanced_group'):
+                self.advanced_group.content_widget.updateGeometry()
         
         # Для CritHIT устанавливаем формат DXT5
         if is_crit_hit:
@@ -452,10 +585,31 @@ class SettingsPanel(QWidget):
         self.expert_button.clicked.connect(self.expert_mode_triggered)
         self.button.clicked.connect(self.build_vpk)
         self.extract_texture_button.clicked.connect(self.extract_texture_triggered)
+        self.merge_vpk_button.clicked.connect(self.merge_vpk_triggered)
         self.preset_combo.currentTextChanged.connect(self.apply_preset)
         self.filename_input.textChanged.connect(self.validate_vpk_name)
         # Подключаем сигнал сворачивания/разворачивания секции "Дополнительно"
         self.advanced_group.toggled.connect(self.on_advanced_toggled)
+        # Подключаем обработчик для чекбокса UV разметки
+        if hasattr(self, 'uv_layout_checkbox'):
+            self.uv_layout_checkbox.stateChanged.connect(self._on_uv_layout_state_changed)
+    
+    def _on_uv_layout_state_changed(self, state: int) -> None:
+        """Обработчик изменения состояния чекбокса UV разметки"""
+        is_checked = (state == Qt.Checked)
+        
+        # Если пытаются включить UV разметку, проверяем, не включен ли CritHIT
+        if is_checked:
+            # Проверяем состояние CritHIT через главное окно
+            is_crit_hit = False
+            if self.parent and hasattr(self.parent, 'crit_hit_checkbox'):
+                is_crit_hit = self.parent.crit_hit_checkbox.isChecked()
+            
+            # Если CritHIT включен, отключаем UV разметку
+            if is_crit_hit:
+                self.uv_layout_checkbox.blockSignals(True)
+                self.uv_layout_checkbox.force_set_checked(False)
+                self.uv_layout_checkbox.blockSignals(False)
     
     def on_advanced_toggled(self, is_expanded):
         """Обработка сворачивания/разворачивания секции Дополнительно"""
@@ -536,6 +690,8 @@ class SettingsPanel(QWidget):
             flags.append("NOMIP")
         if self.flag_nolod.isChecked():
             flags.append("NOLOD")
+        if hasattr(self, 'flag_nominmipmaps') and self.flag_nominmipmaps.isChecked():
+            flags.append("NOMINMIP")
         
         # Опции VTFCmd
         options = {}
@@ -543,6 +699,8 @@ class SettingsPanel(QWidget):
             options['nothumbnail'] = True
         if hasattr(self, 'option_noreflectivity') and self.option_noreflectivity.isChecked():
             options['noreflectivity'] = True
+        if hasattr(self, 'option_normal') and self.option_normal.isChecked():
+            options['normal'] = True
         if hasattr(self, 'option_gamma') and self.option_gamma.isChecked():
             options['gamma'] = True
             if hasattr(self, 'gamma_value_input'):
@@ -610,6 +768,11 @@ class SettingsPanel(QWidget):
         if hasattr(self.parent, 'extract_original_texture'):
             self.parent.extract_original_texture()
     
+    def merge_vpk_triggered(self):
+        """Обработка нажатия кнопки объединения VPK"""
+        if hasattr(self.parent, 'merge_vpk_files'):
+            self.parent.merge_vpk_files()
+    
     def open_support_link(self):
         """Открывает ссылку поддержки"""
         if hasattr(self.parent, 'open_support_link'):
@@ -654,6 +817,10 @@ class SettingsPanel(QWidget):
             self.option_nothumbnail.setText(self.t.get('no_thumbnail', 'No Thumbnail'))
         if hasattr(self, 'option_noreflectivity'):
             self.option_noreflectivity.setText(self.t.get('no_reflectivity', 'No Reflectivity'))
+        if hasattr(self, 'flag_nominmipmaps'):
+            self.flag_nominmipmaps.setText(self.t.get('no_minimum_mipmap', 'No minimum Mipmap'))
+        if hasattr(self, 'option_normal'):
+            self.option_normal.setText(self.t.get('normal_map', 'Normal Map'))
         if hasattr(self, 'option_gamma'):
             self.option_gamma.setText(self.t.get('gamma_correction', 'Gamma Correction'))
         # Обновляем чекбокс UV разметки
@@ -675,6 +842,10 @@ class SettingsPanel(QWidget):
         # Обновляем кнопку извлечения текстуры
         if hasattr(self, 'extract_texture_button'):
             self.extract_texture_button.setText(self.t.get('extract_texture', 'Extract Original Texture'))
+        
+        # Обновляем кнопку объединения VPK
+        if hasattr(self, 'merge_vpk_button'):
+            self.merge_vpk_button.setText(self.t.get('merge_vpk', 'Сборка в один'))
         
         # Перезапускаем валидацию имени файла, если ошибка уже отображается
         if hasattr(self, 'filename_error') and self.filename_error.isVisible():

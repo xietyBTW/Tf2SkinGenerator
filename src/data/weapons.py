@@ -1,8 +1,3 @@
-"""
-Данные оружия Team Fortress 2 с поддержкой двух языков
-"""
-
-# Полный список оружия TF2 по классам с русскими и английскими названиями
 TF2_WEAPONS = {
     "Scout": {
         "Primary": {
@@ -260,7 +255,6 @@ SPECIAL_MODES = {
     "CritHIT": "critHIT"
 }
 
-# Классы TF2 с иконками и цветами
 TF2_CLASSES = {
     "Scout": {"color": "#87CEEB", "icon": ""},
     "Soldier": {"color": "#8B4513", "icon": ""},
@@ -273,27 +267,13 @@ TF2_CLASSES = {
     "Spy": {"color": "#4B0082", "icon": ""}
 }
 
-# Типы оружия
 WEAPON_TYPES = {
     "Primary": {"ru": "Основное", "en": "Primary"},
     "Secondary": {"ru": "Дополнительное", "en": "Secondary"},
     "Melee": {"ru": "Ближний бой", "en": "Melee"}
 }
 
-# Функция для получения названия оружия по языку
 def get_weapon_name(class_name: str, weapon_type: str, weapon_key: str, language: str = "ru") -> str:
-    """
-    Получает название оружия на указанном языке
-    
-    Args:
-        class_name: Имя класса (Scout, Soldier, etc.)
-        weapon_type: Тип оружия (Primary, Secondary, Melee)
-        weapon_key: Ключ оружия (c_scattergun, etc.)
-        language: Язык ('ru' или 'en')
-    
-    Returns:
-        Название оружия на указанном языке или weapon_key, если не найдено
-    """
     if class_name not in TF2_WEAPONS:
         return weapon_key
     
@@ -305,38 +285,19 @@ def get_weapon_name(class_name: str, weapon_type: str, weapon_key: str, language
     
     weapon_data = TF2_WEAPONS[class_name][weapon_type][weapon_key]
     
-    # Если это словарь с языками
     if isinstance(weapon_data, dict):
         return weapon_data.get(language, weapon_data.get("ru", weapon_key))
     
-    # Если это строка (старый формат для обратной совместимости)
     return weapon_data
 
-# Функция для получения типа оружия по языку
 def get_weapon_type_name(weapon_type: str, language: str = "ru") -> str:
-    """
-    Получает название типа оружия на указанном языке
-    
-    Args:
-        weapon_type: Тип оружия (Primary, Secondary, Melee)
-        language: Язык ('ru' или 'en')
-    
-    Returns:
-        Название типа оружия на указанном языке
-    """
     return WEAPON_TYPES.get(weapon_type, {}).get(language, weapon_type)
 
-# Маппинг weaponkey на пути моделей внутри TF2 VPK
-# Формат: models/weapons/c_models/<weapon_key>/<weapon_key>.mdl
-# Структура: каждая модель находится в своей папке
 WEAPON_MDL_PATHS = {}
 for class_name, class_weapons in TF2_WEAPONS.items():
     for weapon_type, weapons in class_weapons.items():
         for weapon_key in weapons.keys():
-            # Путь включает папку с именем оружия: models/weapons/c_models/<weapon_key>/<weapon_key>.mdl
             if weapon_key.startswith("c_") or weapon_key.startswith("w_"):
                 WEAPON_MDL_PATHS[weapon_key] = f"models/weapons/c_models/{weapon_key}/{weapon_key}.mdl"
             else:
-                # Для некоторых оружий путь может отличаться (например, demo_booties, pegleg)
-                # По умолчанию используем стандартный путь с папкой
                 WEAPON_MDL_PATHS[weapon_key] = f"models/weapons/c_models/{weapon_key}/{weapon_key}.mdl"

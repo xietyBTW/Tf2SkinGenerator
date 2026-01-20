@@ -10,6 +10,9 @@ from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices
 from src.config.app_config import AppConfig
 from src.utils.themes import get_modern_styles
+from src.shared.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 class SettingsDialog(QDialog):
     def __init__(self, parent=None):
@@ -113,6 +116,18 @@ class SettingsDialog(QDialog):
         self.language_combo.setMinimumHeight(40)
         layout.addWidget(self.language_combo)
         
+        # Выбор темы
+        theme_label = QLabel(self.t.get('theme_label', 'Theme'))
+        theme_label.setStyleSheet("font-weight: 500; font-size: 13px; color: #ccc; margin-top: 16px;")
+        layout.addWidget(theme_label)
+        
+        self.theme_combo = QComboBox()
+        self.theme_combo.addItem(self.t.get('theme_dark', 'Dark'), "dark")
+        self.theme_combo.addItem(self.t.get('theme_blue', 'Blue'), "blue")
+        self.theme_combo.setStyleSheet(self.styles['combo'])
+        self.theme_combo.setMinimumHeight(40)
+        layout.addWidget(self.theme_combo)
+        
         # Кнопка поддержки
         support_label = QLabel(self.t.get('support_header', 'Support'))
         support_label.setStyleSheet("font-weight: 500; font-size: 13px; color: #ccc; margin-top: 16px;")
@@ -198,6 +213,12 @@ class SettingsDialog(QDialog):
         index = self.language_combo.findData(current_lang)
         if index >= 0:
             self.language_combo.setCurrentIndex(index)
+        
+        # Тема
+        current_theme = self.config.get('theme', 'dark')
+        index = self.theme_combo.findData(current_theme)
+        if index >= 0:
+            self.theme_combo.setCurrentIndex(index)
             
         # Настройки отладки
         self.keep_temp_checkbox.setChecked(self.config.get('keep_temp_files', False))
@@ -224,6 +245,10 @@ class SettingsDialog(QDialog):
         selected_lang = self.language_combo.currentData()
         self.config['language'] = selected_lang
         
+        # Сохраняем тему
+        selected_theme = self.theme_combo.currentData()
+        self.config['theme'] = selected_theme
+        
         # Сохраняем настройки отладки
         self.config['keep_temp_files'] = self.keep_temp_checkbox.isChecked()
         self.config['debug_mode'] = self.debug_mode_checkbox.isChecked()
@@ -234,6 +259,14 @@ class SettingsDialog(QDialog):
         # Применяем язык немедленно
         if hasattr(self.parent(), 'change_language_from_combo'):
             self.parent().change_language_from_combo(self.language_combo.currentIndex())
+        
+        # Применяем тему немедленно
+        from src.utils.themes import apply_theme
+        from PySide6.QtWidgets import QApplication
+        app = QApplication.instance()
+        if app:
+            apply_theme(app, selected_theme)
+            logger.info(f"Тема изменена на: {selected_theme}")
         
         self.accept()
     

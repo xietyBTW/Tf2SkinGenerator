@@ -1,17 +1,17 @@
 @echo off
 chcp 65001 >nul
 echo ========================================
-echo TF2 Skin Generator - Тестовое приложение
+echo TF2 Skin Generator - Test Application
 echo ========================================
 echo.
 
 set VENV_PATH=.venv
 set PYTHON_EXE=%VENV_PATH%\Scripts\python.exe
 
-REM Проверяем наличие .venv
+REM Check if .venv exists
 if not exist "%VENV_PATH%" (
-    echo ОШИБКА: Виртуальное окружение не найдено!
-    echo Создайте виртуальное окружение:
+    echo ERROR: Virtual environment not found!
+    echo Create virtual environment:
     echo   python -m venv .venv
     echo   .venv\Scripts\activate
     echo   pip install -r requirements.txt
@@ -19,11 +19,11 @@ if not exist "%VENV_PATH%" (
     exit /b 1
 )
 
-REM Проверяем наличие Python в .venv
+REM Check if Python exists in .venv
 if not exist "%PYTHON_EXE%" (
-    echo ОШИБКА: Python не найден в .venv!
-    echo Виртуальное окружение может быть повреждено.
-    echo Пересоздайте его:
+    echo ERROR: Python not found in .venv!
+    echo Virtual environment may be corrupted.
+    echo Recreate it:
     echo   python -m venv .venv
     echo   .venv\Scripts\activate
     echo   pip install -r requirements.txt
@@ -31,36 +31,41 @@ if not exist "%PYTHON_EXE%" (
     exit /b 1
 )
 
-REM Проверяем наличие библиотеки vpk
+REM Check if vpk library is installed
 %PYTHON_EXE% -c "import vpk" >nul 2>&1
 if errorlevel 1 (
-    echo Предупреждение: Библиотека vpk не установлена в .venv.
-    echo Устанавливаем библиотеку vpk...
+    echo Warning: vpk library is not installed in .venv.
+    echo Installing vpk library...
     %PYTHON_EXE% -m pip install vpk
     if errorlevel 1 (
-        echo ОШИБКА: Не удалось установить библиотеку vpk!
-        echo Установите вручную: %PYTHON_EXE% -m pip install vpk
+        echo ERROR: Failed to install vpk library!
+        echo Install manually: %PYTHON_EXE% -m pip install vpk
         pause
         exit /b 1
     )
-    echo Библиотека vpk успешно установлена.
+    echo vpk library installed successfully.
     echo.
 )
 
-echo Запуск тестового приложения...
+echo Starting test application...
 echo.
 
-REM Запускаем тестовое приложение
+REM Run test application (without output redirection to see errors)
 %PYTHON_EXE% mainTest.py
+set PYTHON_RESULT=%ERRORLEVEL%
 
-if errorlevel 1 (
+if not %PYTHON_RESULT%==0 (
     echo.
-    echo ОШИБКА: Приложение завершилось с ошибкой!
+    echo ========================================
+    echo ERROR: Application exited with error code %PYTHON_RESULT%!
+    echo ========================================
+    echo.
     pause
-    exit /b 1
+    exit /b %PYTHON_RESULT%
 )
 
 echo.
-echo Тест завершен.
+echo ========================================
+echo Test completed successfully.
+echo ========================================
 pause
-
