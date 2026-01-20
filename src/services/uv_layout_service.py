@@ -4,8 +4,12 @@
 
 import os
 import re
+import traceback
 from typing import List, Tuple, Optional
 from PIL import Image, ImageDraw, ImageFont
+from src.shared.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 
 class UVLayoutService:
@@ -205,20 +209,18 @@ class UVLayoutService:
             True если успешно, False если ошибка
         """
         try:
-            print(f"Начинаем генерацию UV разметки из SMD файла: {smd_path}")
+            logger.info(f"Начинаем генерацию UV разметки из SMD файла: {smd_path}")
             uv_coords = UVLayoutService.parse_smd_uv_coordinates(smd_path)
-            print(f"Найдено UV координат: {len(uv_coords)}")
+            logger.debug(f"Найдено UV координат: {len(uv_coords)}")
             if not uv_coords:
-                print(f"Предупреждение: Не найдено UV координат в SMD файле: {smd_path}")
+                logger.warning(f"Не найдено UV координат в SMD файле: {smd_path}")
                 return False
             
-            print(f"Рисуем UV разметку на изображении размером {image_size}")
+            logger.debug(f"Рисуем UV разметку на изображении размером {image_size}")
             UVLayoutService.draw_uv_layout(uv_coords, output_path, image_size)
-            print(f"UV разметка успешно создана: {output_path}")
+            logger.info(f"UV разметка успешно создана: {output_path}")
             return True
         except Exception as e:
-            import traceback
-            print(f"Ошибка при создании UV разметки: {e}")
-            print(f"Трассировка: {traceback.format_exc()}")
+            logger.error(f"Ошибка при создании UV разметки: {e}", exc_info=True)
             return False
 

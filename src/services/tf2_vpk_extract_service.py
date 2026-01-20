@@ -3,7 +3,12 @@
 """
 
 import os
+from pathlib import Path
 from typing import List, Optional
+from src.shared.logging_config import get_logger
+from src.shared.file_utils import ensure_directory_exists
+
+logger = get_logger(__name__)
 
 try:
     import vpk
@@ -76,7 +81,7 @@ class TF2VPKExtractService:
                 vpk_file = vpk.open(dir_vpk_path)
                 should_close = True
             except Exception as e:
-                print(f"Предупреждение: Не удалось открыть VPK файл для проверки: {e}")
+                logger.warning(f"Не удалось открыть VPK файл для проверки: {e}", exc_info=True)
                 return False
         
         try:
@@ -178,7 +183,7 @@ class TF2VPKExtractService:
                     if normalized_path not in vpk_file:
                         # Для .phy ошибка допустима (файл может не существовать)
                         if not file_path.endswith(".phy"):
-                            print(f"Предупреждение: Файл {normalized_path} не найден в VPK")
+                            logger.debug(f"Файл {normalized_path} не найден в VPK")
                         continue
                     
                     # Получаем файл из VPK
@@ -197,12 +202,12 @@ class TF2VPKExtractService:
                         f.write(vpk_entry.read())
                     
                     extracted_files.append(extracted_file_path)
-                    print(f"Извлечен файл: {file_path} -> {extracted_file_path}")
+                    logger.info(f"Извлечен файл: {file_path} -> {extracted_file_path}")
                 
                 except Exception as e:
                     # Для .phy ошибка допустима
                     if not file_path.endswith(".phy"):
-                        print(f"Предупреждение: Ошибка при извлечении {file_path}: {e}")
+                        logger.warning(f"Ошибка при извлечении {file_path}: {e}", exc_info=True)
             
             # Проверяем, что .mdl был извлечен (обязательный файл)
             mdl_extracted = os.path.join(out_dir, mdl_rel_path.replace("/", os.sep))
@@ -260,11 +265,11 @@ class TF2VPKExtractService:
             Путь к извлеченному VMT файлу или None если не найден
         """
         if not VPK_AVAILABLE:
-            print("Предупреждение: Библиотека vpk не установлена. VMT файл не будет извлечен.")
+            logger.warning("Библиотека vpk не установлена. VMT файл не будет извлечен.")
             return None
         
         if not os.path.exists(dir_vpk_path):
-            print(f"Предупреждение: VPK файл не найден: {dir_vpk_path}")
+            logger.warning(f"VPK файл не найден: {dir_vpk_path}")
             return None
         
         os.makedirs(out_dir, exist_ok=True)
@@ -294,6 +299,7 @@ class TF2VPKExtractService:
                     vmt_filename = f"{weapon_key}.vmt"
         
         # Строим полный путь к VMT файлу в VPK
+        # Сначала пробуем путь как есть (может уже содержать materials/)
         vmt_rel_path = f"{normalized_cdmaterials}/{vmt_filename}" if normalized_cdmaterials else vmt_filename
         
         # Пробуем найти VMT файл в tf2_textures_dir.vpk (обычно текстуры там)
@@ -301,37 +307,51 @@ class TF2VPKExtractService:
         try:
             vpk_file = vpk.open(dir_vpk_path)
             
-            # Проверяем, существует ли файл в VPK
-            if vmt_rel_path in vpk_file:
-                vpk_entry = vpk_file[vmt_rel_path]
-                
-                # Определяем путь для сохранения
-                extracted_file_path = os.path.join(out_dir, vmt_filename)
-                
-                # Извлекаем файл
-                with open(extracted_file_path, 'wb') as f:
-                    f.write(vpk_entry.read())
-                
-                print(f"Извлечен VMT файл: {vmt_rel_path} -> {extracted_file_path}")
-                return extracted_file_path
+            # Список путей для поиска (с разными вариантами)
+            paths_to_try = []
             
-            # Если не нашли по полному пути, пробуем найти в materials/
-            materials_vmt_path = f"materials/{vmt_rel_path}"
-            if materials_vmt_path in vpk_file:
-                vpk_entry = vpk_file[materials_vmt_path]
-                
-                extracted_file_path = os.path.join(out_dir, vmt_filename)
-                with open(extracted_file_path, 'wb') as f:
-                    f.write(vpk_entry.read())
-                
-                print(f"Извлечен VMT файл: {materials_vmt_path} -> {extracted_file_path}")
-                return extracted_file_path
+            # Если путь не начинается с materials/, добавляем оба варианта
+            if not normalized_cdmaterials.startswith("materials/"):
+                # С materials/ (предпочтительно)
+                materials_path = f"materials/{vmt_rel_path}"
+                paths_to_try.append(materials_path)
+            
+            # Путь как есть
+            paths_to_try.append(vmt_rel_path)
+            
+            # Пробуем каждый путь
+            for path_to_try in paths_to_try:
+                if path_to_try in vpk_file:
+                    vpk_entry = vpk_file[path_to_try]
+                    
+                    # Определяем путь для сохранения
+                    extracted_file_path = os.path.join(out_dir, vmt_filename)
+                    
+                    # Извлекаем файл
+                    with open(extracted_file_path, 'wb') as f:
+                        f.write(vpk_entry.read())
+                    
+                    logger.info(f"Извлечен VMT файл: {path_to_try} -> {extracted_file_path}")
+                    # Закрываем VPK файл если есть метод close
+                    if hasattr(vpk_file, 'close'):
+                        try:
+                            vpk_file.close()
+                        except:
+                            pass
+                    return extracted_file_path
+            
+            # Закрываем VPK файл если не нашли файл
+            if hasattr(vpk_file, 'close'):
+                try:
+                    vpk_file.close()
+                except:
+                    pass
             
         except Exception as e:
-            print(f"Предупреждение: Ошибка при извлечении VMT файла: {e}")
+            logger.warning(f"Ошибка при извлечении VMT файла: {e}", exc_info=True)
             return None
         
-        print(f"Предупреждение: VMT файл не найден по пути: {vmt_rel_path}")
+        logger.warning(f"VMT файл не найден по пути: {vmt_rel_path}")
         return None
     
     @staticmethod
@@ -361,14 +381,14 @@ class TF2VPKExtractService:
             Путь к извлеченному/конвертированному файлу или None если не найден
         """
         if not VPK_AVAILABLE:
-            print("Предупреждение: Библиотека vpk не установлена. Текстура не будет извлечена.")
+            logger.warning("Библиотека vpk не установлена. Текстура не будет извлечена.")
             return None
         
         if not os.path.exists(textures_vpk_path):
-            print(f"Предупреждение: VPK файл не найден: {textures_vpk_path}")
+            logger.warning(f"VPK файл не найден: {textures_vpk_path}")
             return None
         
-        os.makedirs(out_dir, exist_ok=True)
+        ensure_directory_exists(out_dir)
         
         # Пути поиска в порядке приоритета
         search_paths = [
@@ -405,7 +425,7 @@ class TF2VPKExtractService:
                         with open(extracted_file_path, 'wb') as f:
                             f.write(vpk_entry.read())
                         
-                        print(f"Извлечена текстура: {vtf_rel_path} -> {extracted_file_path}")
+                        logger.info(f"Извлечена текстура: {vtf_rel_path} -> {extracted_file_path}")
                         # Закрываем VPK файл если есть метод close
                         if hasattr(vpk_file, 'close'):
                             try:
@@ -436,11 +456,11 @@ class TF2VPKExtractService:
                     vpk_file.close()
                 except:
                     pass
-            print(f"Предупреждение: Текстура не найдена для оружия {weapon_key}")
+            logger.warning(f"Текстура не найдена для оружия {weapon_key}")
             return None
             
         except Exception as e:
-            print(f"Ошибка при извлечении текстуры: {e}")
+            logger.error(f"Ошибка при извлечении текстуры: {e}", exc_info=True)
             return None
     
     @staticmethod
@@ -461,9 +481,9 @@ class TF2VPKExtractService:
             try:
                 from vtf2img import Parser
             except ImportError:
-                print("Предупреждение: Библиотека vtf2img не установлена.")
-                print("Установите её через: .venv\\Scripts\\python.exe -m pip install vtf2img")
-                print("Или активируйте .venv и выполните: pip install vtf2img")
+                logger.warning("Библиотека vtf2img не установлена.")
+                logger.info("Установите её через: .venv\\Scripts\\python.exe -m pip install vtf2img")
+                logger.info("Или активируйте .venv и выполните: pip install vtf2img")
                 return None
             
             # Формируем имя выходного файла
@@ -486,7 +506,7 @@ class TF2VPKExtractService:
             image = parser.get_image()
             
             # Логируем информацию об изображении для диагностики
-            print(f"Изображение из VTF: mode={image.mode}, size={image.size}")
+            logger.debug(f"Изображение из VTF: mode={image.mode}, size={image.size}")
             
             # Конвертируем изображение в RGB
             # Используем стандартную конвертацию PIL, которая правильно обрабатывает альфа-канал
@@ -503,11 +523,9 @@ class TF2VPKExtractService:
             else:  # PNG по умолчанию
                 image.save(output_path, "PNG")
             
-            print(f"Текстура конвертирована: {vtf_path} -> {output_path}")
+            logger.info(f"Текстура конвертирована: {vtf_path} -> {output_path}")
             return output_path
                 
         except Exception as e:
-            print(f"Ошибка при конвертации VTF в {image_format}: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.error(f"Ошибка при конвертации VTF в {image_format}: {e}", exc_info=True)
             return None

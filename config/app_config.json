@@ -8,5 +8,6 @@
     "last_flags": [],
     "keep_temp_on_error": false,
     "debug_mode": false,
-    "keep_temp_files": false
+    "keep_temp_files": false,
+    "theme": "dark"
 }

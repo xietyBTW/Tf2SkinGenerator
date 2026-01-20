@@ -7,6 +7,9 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QSizePolicy
 from src.utils.themes import get_modern_styles
+from src.shared.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 class PreviewPanel(QWidget):
     def __init__(self, parent=None):
@@ -330,7 +333,7 @@ class PreviewPanel(QWidget):
             self.update_info_summary()
             
         except Exception as e:
-            print(f"Ошибка при отображении изображения: {e}")
+            logger.error(f"Ошибка при отображении изображения: {e}", exc_info=True)
             # Fallback - сохраняем во временный файл
             import tempfile
             temp_path = tempfile.mktemp(suffix='.png')

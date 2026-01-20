@@ -2,10 +2,12 @@
 Темы для приложения - Элегантный минималистичный дизайн
 """
 
+from typing import Dict, Any
 from PySide6.QtGui import QColor, QPalette, QFont
 from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QApplication
 
-def apply_dark_theme(app):
+def apply_dark_theme(app: QApplication) -> None:
     """Применяет элегантную темную тему к приложению"""
     palette = QPalette()
     
@@ -142,6 +144,7 @@ def apply_dark_theme(app):
         QCheckBox::indicator:checked {
             background-color: #ff6b35;
             border: 2px solid #ff6b35;
+            border-radius: 3px;
         }
         
         QScrollBar:vertical {
@@ -532,3 +535,138 @@ def get_modern_styles():
             }
         """
     }
+
+
+# Доступные темы
+THEMES = {
+    'dark': 'Темная',
+    'blue': 'Синяя'
+}
+
+
+def apply_blue_theme(app: QApplication) -> None:
+    """Применяет синюю тему к приложению"""
+    palette = QPalette()
+    
+    palette.setColor(QPalette.Window, QColor("#0d1b2a"))
+    palette.setColor(QPalette.WindowText, QColor("#e0e1dd"))
+    palette.setColor(QPalette.Base, QColor("#1b263b"))
+    palette.setColor(QPalette.AlternateBase, QColor("#415a77"))
+    palette.setColor(QPalette.ToolTipBase, QColor("#1b263b"))
+    palette.setColor(QPalette.ToolTipText, QColor("#e0e1dd"))
+    palette.setColor(QPalette.Text, QColor("#e0e1dd"))
+    palette.setColor(QPalette.Button, QColor("#415a77"))
+    palette.setColor(QPalette.ButtonText, QColor("#e0e1dd"))
+    palette.setColor(QPalette.BrightText, QColor("#ff6b6b"))
+    palette.setColor(QPalette.Link, QColor("#4a90e2"))
+    palette.setColor(QPalette.Highlight, QColor("#4a90e2"))
+    palette.setColor(QPalette.HighlightedText, QColor("#0d1b2a"))
+    
+    app.setPalette(palette)
+    
+    font = QFont("Inter", 11, QFont.Normal)
+    app.setFont(font)
+    
+    app.setStyleSheet("""
+        QWidget {
+            background-color: #0d1b2a;
+            color: #e0e1dd;
+            font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
+        }
+        
+        QMainWindow {
+            background-color: #0d1b2a;
+        }
+        
+        QComboBox, QLineEdit, QTextEdit {
+            background-color: #1b263b;
+            border: 1px solid #415a77;
+            border-radius: 4px;
+            color: #e0e1dd;
+            padding: 8px 12px;
+        }
+        
+        QComboBox:focus, QLineEdit:focus, QTextEdit:focus {
+            border: 2px solid #4a90e2;
+        }
+        
+        QPushButton {
+            background-color: #4a90e2;
+            color: #0d1b2a;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 4px;
+        }
+        
+        QPushButton:hover {
+            background-color: #5ba0f2;
+        }
+        
+        QRadioButton {
+            spacing: 12px;
+            color: #e0e1dd;
+            font-size: 13px;
+            font-weight: 300;
+        }
+        
+        QRadioButton::indicator {
+            width: 18px;
+            height: 18px;
+            border-radius: 9px;
+            border: 2px solid #415a77;
+            background-color: transparent;
+        }
+        
+        QRadioButton::indicator:checked {
+            background-color: #4a90e2;
+            border: 2px solid #4a90e2;
+        }
+        
+        QCheckBox {
+            spacing: 12px;
+            color: #e0e1dd;
+            font-size: 13px;
+            font-weight: 300;
+        }
+        
+        QCheckBox::indicator {
+            width: 18px;
+            height: 18px;
+            border: 2px solid #415a77;
+            border-radius: 3px;
+            background-color: transparent;
+        }
+        
+        QCheckBox::indicator:checked {
+            background-color: #4a90e2;
+            border: 2px solid #4a90e2;
+            border-radius: 3px;
+        }
+        
+        QScrollBar::handle:vertical:hover {
+            background-color: #4a90e2;
+        }
+        
+        QMenu::item:selected {
+            background-color: #4a90e2;
+        }
+    """)
+
+
+def apply_theme(app: QApplication, theme_name: str = 'dark') -> None:
+    """
+    Применяет указанную тему к приложению
+    
+    Args:
+        app: QApplication для применения темы
+        theme_name: Имя темы ('dark', 'blue')
+    """
+    theme_map = {
+        'dark': apply_dark_theme,
+        'blue': apply_blue_theme
+    }
+    
+    if theme_name not in theme_map:
+        theme_name = 'dark'  # Fallback на темную тему
+    
+    theme_map[theme_name](app)

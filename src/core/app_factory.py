@@ -1,71 +1,85 @@
-"""
-Фабрика для создания и настройки приложения
-Централизует логику инициализации приложения
-"""
-
 import sys
 import os
+from pathlib import Path
+from typing import Optional
 from PySide6.QtWidgets import QApplication
-from src.utils.dependencies import QDARKSTYLE_AVAILABLE, qdarkstyle
-from src.utils.themes import apply_dark_theme
+from PySide6.QtGui import QIcon
+from src.utils.themes import apply_theme
+from src.config.app_config import AppConfig
+from src.shared.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 
 class AppFactory:
-    """Фабрика для создания и настройки Qt приложений"""
-    
     @staticmethod
-    def setup_working_directory():
-        """
-        Устанавливает рабочую директорию приложения
-        Работает как для frozen (cx_Freeze/PyInstaller) так и для обычного запуска
-        """
+    def setup_working_directory() -> None:
         if getattr(sys, 'frozen', False):
-            # Запуск из собранного исполняемого файла
             os.chdir(os.path.dirname(sys.executable))
+            logger.debug(f"Установлена рабочая директория (frozen): {os.getcwd()}")
         else:
-            # Обычный запуск из исходников
-            os.chdir(os.path.dirname(os.path.abspath(__file__ + '/../../')))
+            base_dir = Path(__file__).parent.parent.parent
+            os.chdir(str(base_dir))
+            logger.debug(f"Установлена рабочая директория: {os.getcwd()}")
     
     @staticmethod
-    def create_app(apply_theme=True):
-        """
-        Создает и настраивает QApplication
-        
-        Args:
-            apply_theme: Применять ли темную тему
+    def get_icon_path() -> Optional[Path]:
+        if getattr(sys, 'frozen', False):
+            base_path = Path(sys.executable).parent if hasattr(sys, '_MEIPASS') else Path(sys.executable).parent
             
-        Returns:
-            QApplication: Настроенное приложение
-        """
-        # Устанавливаем рабочую директорию
+            frozen_paths = [
+                base_path / "icon.ico",
+                base_path / "installer" / "assets" / "icon.ico",
+            ]
+            
+            if hasattr(sys, '_MEIPASS'):
+                temp_path = Path(sys._MEIPASS)
+                frozen_paths.insert(0, temp_path / "installer" / "assets" / "icon.ico")
+            
+            for icon_path in frozen_paths:
+                if icon_path.exists():
+                    return icon_path
+        
+        base_dir = Path(__file__).parent.parent.parent
+        dev_paths = [
+            base_dir / "installer" / "assets" / "icon.ico",
+            Path("installer/assets/icon.ico"),
+        ]
+        
+        for icon_path in dev_paths:
+            if icon_path.exists():
+                return icon_path
+        
+        return None
+    
+    @staticmethod
+    def create_app(apply_theme: bool = True) -> QApplication:
         AppFactory.setup_working_directory()
         
-        # Создаем приложение
         app = QApplication(sys.argv)
+        logger.info("QApplication создан")
         
-        # Применяем тему если требуется
+        icon_path = AppFactory.get_icon_path()
+        if icon_path:
+            app.setWindowIcon(QIcon(str(icon_path)))
+            logger.debug(f"Установлена иконка приложения: {icon_path}")
+        else:
+            logger.warning("Иконка приложения не найдена")
+        
         if apply_theme:
             AppFactory._apply_theme(app)
         
         return app
     
     @staticmethod
-    def _apply_theme(app):
-        """
-        Применяет темную тему к приложению
-        Пробует qdarkstyle, если недоступен - использует встроенную тему
+    def _apply_theme(app: QApplication) -> None:
+        config = AppConfig.load_config()
+        theme_name = config.get('theme', 'dark')
         
-        Args:
-            app: QApplication для применения темы
-        """
-        if QDARKSTYLE_AVAILABLE:
-            try:
-                app.setStyleSheet(qdarkstyle.load_stylesheet(qt_api='pyside6'))
-                return
-            except Exception as e:
-                print(f"Ошибка применения qdarkstyle: {e}, используется встроенная тема")
+        if theme_name not in ['dark', 'blue']:
+            theme_name = 'dark'
+            logger.warning(f"Неизвестная тема в конфиге, используется темная")
         
-        # Fallback на встроенную тему
-        print("qdarkstyle не найден, используется встроенная тема")
-        apply_dark_theme(app)
+        logger.info(f"Применяется тема: {theme_name}")
+        apply_theme(app, theme_name)
 
