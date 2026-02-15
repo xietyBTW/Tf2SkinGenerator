@@ -91,30 +91,6 @@ def safe_remove(path: str | Path, is_dir: bool = False) -> bool:
         return False
 
 
-def sanitize_path(user_path: str, base_dir: Path) -> Path:
-    """
-    Обезопашивает путь, предотвращая path traversal атаки
-    
-    Args:
-        user_path: Пользовательский путь
-        base_dir: Базовая директория
-        
-    Returns:
-        Обезопасенный Path объект
-        
-    Raises:
-        ValueError: Если путь выходит за пределы базовой директории
-    """
-    base_resolved = base_dir.resolve()
-    resolved = (base_dir / user_path).resolve()
-    
-    try:
-        resolved.relative_to(base_resolved)
-    except ValueError:
-        raise ValueError(f"Недопустимый путь: {user_path} (выходит за пределы {base_dir})")
-    
-    return resolved
-
 
 def get_file_size_mb(file_path: str | Path) -> float:
     """

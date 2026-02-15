@@ -2,9 +2,10 @@
 Централизованный обработчик ошибок для UI
 """
 
-from typing import Optional, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING, Union
 from PySide6.QtWidgets import QMessageBox, QWidget
 from src.shared.logging_config import get_logger
+from src.shared.exceptions import ErrorPayload
 
 if TYPE_CHECKING:
     from PySide6.QtWidgets import QWidget
@@ -18,7 +19,7 @@ class ErrorHandler:
     @staticmethod
     def show_error(
         parent: Optional['QWidget'],
-        error: Exception,
+        error: Union[Exception, ErrorPayload, str],
         context: str = "",
         title: Optional[str] = None
     ) -> None:
@@ -31,8 +32,15 @@ class ErrorHandler:
             context: Дополнительный контекст ошибки
             title: Заголовок диалога (если None, используется стандартный)
         """
-        error_msg = str(error)
-        error_type = type(error).__name__
+        if isinstance(error, ErrorPayload):
+            error_msg = error.to_text()
+            error_type = error.code
+        elif isinstance(error, Exception):
+            error_msg = str(error)
+            error_type = type(error).__name__
+        else:
+            error_msg = str(error)
+            error_type = "Error"
         
         # Логируем ошибку
         logger.error(

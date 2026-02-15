@@ -3,10 +3,13 @@
 """
 
 import os
+import time
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Callable, Tuple
 from src.shared.logging_config import get_logger
 from src.shared.file_utils import ensure_directory_exists
+from src.shared.validators import sanitize_path
+from src.data.translations import TRANSLATIONS
 
 logger = get_logger(__name__)
 
@@ -190,8 +193,12 @@ class TF2VPKExtractService:
                     vpk_entry = vpk_file[normalized_path]
                     
                     # Определяем путь для сохранения
-                    extracted_file_path = os.path.join(out_dir, file_path.replace("/", os.sep))
-                    extracted_file_dir = os.path.dirname(extracted_file_path)
+                    try:
+                        extracted_file_path = Path(sanitize_path(file_path.replace("/", os.sep), Path(out_dir)))
+                    except ValueError as e:
+                        logger.warning(f"Недопустимый путь при извлечении {file_path}: {e}")
+                        continue
+                    extracted_file_dir = extracted_file_path.parent
                     
                     # Создаем директорию если нужно
                     if extracted_file_dir:
@@ -201,7 +208,7 @@ class TF2VPKExtractService:
                     with open(extracted_file_path, 'wb') as f:
                         f.write(vpk_entry.read())
                     
-                    extracted_files.append(extracted_file_path)
+                    extracted_files.append(str(extracted_file_path))
                     logger.info(f"Извлечен файл: {file_path} -> {extracted_file_path}")
                 
                 except Exception as e:
@@ -210,8 +217,12 @@ class TF2VPKExtractService:
                         logger.warning(f"Ошибка при извлечении {file_path}: {e}", exc_info=True)
             
             # Проверяем, что .mdl был извлечен (обязательный файл)
-            mdl_extracted = os.path.join(out_dir, mdl_rel_path.replace("/", os.sep))
-            if not os.path.exists(mdl_extracted):
+            try:
+                mdl_extracted = Path(sanitize_path(mdl_rel_path.replace("/", os.sep), Path(out_dir)))
+            except ValueError as e:
+                logger.warning(f"Недопустимый путь для mdl: {mdl_rel_path}: {e}")
+                mdl_extracted = None
+            if not mdl_extracted or not os.path.exists(mdl_extracted):
                 # Пробуем найти .mdl файл рекурсивно в out_dir
                 mdl_filename = f"{mdl_basename}.mdl"
                 
@@ -419,7 +430,11 @@ class TF2VPKExtractService:
                         vpk_entry = vpk_file[vtf_rel_path]
                         
                         # Определяем путь для сохранения VTF
-                        extracted_file_path = os.path.join(out_dir, vtf_filename)
+                        try:
+                            extracted_file_path = sanitize_path(vtf_filename, out_dir)
+                        except ValueError as e:
+                            logger.warning(f"Недопустимый путь для сохранения VTF: {vtf_filename}: {e}")
+                            return None
                         
                         # Извлекаем файл
                         with open(extracted_file_path, 'wb') as f:
@@ -462,6 +477,135 @@ class TF2VPKExtractService:
         except Exception as e:
             logger.error(f"Ошибка при извлечении текстуры: {e}", exc_info=True)
             return None
+    
+    @staticmethod
+    def extract_texture_with_progress(
+        textures_vpk_path: str,
+        weapon_key: str,
+        out_dir: str,
+        export_format: str = "VTF",
+        language: str = "en",
+        progress_callback: Optional[Callable[[int, str], None]] = None,
+        cancel_callback: Optional[Callable[[], bool]] = None
+    ) -> Tuple[bool, str, bool]:
+        t = TRANSLATIONS.get(language, TRANSLATIONS['en'])
+        
+        def emit_progress(value: int, message: str) -> None:
+            if progress_callback:
+                progress_callback(value, message)
+        
+        def is_cancelled() -> bool:
+            return bool(cancel_callback and cancel_callback())
+        
+        emit_progress(10, t.get('extract_init', 'Initializing extraction...'))
+        time.sleep(0.1)
+        
+        if is_cancelled():
+            return False, t.get('extract_cancelled', 'Extraction cancelled by user'), True
+        
+        if not VPK_AVAILABLE:
+            return False, t.get('vpk_library_not_available', 'VPK library not available'), False
+        
+        emit_progress(20, t.get('extract_checking', 'Checking VPK file...'))
+        time.sleep(0.1)
+        
+        if not os.path.exists(textures_vpk_path):
+            return False, t.get('textures_vpk_not_found', 'tf2_textures_dir.vpk not found'), False
+        
+        if is_cancelled():
+            return False, t.get('extract_cancelled', 'Extraction cancelled by user'), True
+        
+        ensure_directory_exists(out_dir)
+        emit_progress(30, t.get('extract_searching', 'Searching for texture...'))
+        time.sleep(0.1)
+        
+        search_paths = [
+            f"materials/models/workshop_partner/weapons/c_models/{weapon_key}",
+            f"materials/models/workshop/weapons/c_models/{weapon_key}",
+            f"materials/models/weapons/c_models/{weapon_key}",
+            f"materials/models/weapons/c_items/{weapon_key}",
+        ]
+        
+        vtf_candidates = [
+            f"{weapon_key}.vtf",
+            f"c_{weapon_key}.vtf" if not weapon_key.startswith('c_') else None,
+        ]
+        vtf_candidates = [name for name in vtf_candidates if name]
+        
+        try:
+            emit_progress(50, t.get('extract_extracting', 'Extracting texture...'))
+            vpk_file = vpk.open(textures_vpk_path)
+            
+            for search_path in search_paths:
+                if is_cancelled():
+                    if hasattr(vpk_file, 'close'):
+                        try:
+                            vpk_file.close()
+                        except:
+                            pass
+                    return False, t.get('extract_cancelled', 'Extraction cancelled by user'), True
+                for vtf_filename in vtf_candidates:
+                    if is_cancelled():
+                        if hasattr(vpk_file, 'close'):
+                            try:
+                                vpk_file.close()
+                            except:
+                                pass
+                        return False, t.get('extract_cancelled', 'Extraction cancelled by user'), True
+                    vtf_rel_path = f"{search_path}/{vtf_filename}"
+                    if vtf_rel_path in vpk_file:
+                        vpk_entry = vpk_file[vtf_rel_path]
+                        try:
+                            extracted_file_path = sanitize_path(vtf_filename, out_dir)
+                        except ValueError as e:
+                            logger.warning(f"Недопустимый путь для сохранения VTF: {vtf_filename}: {e}")
+                            return False, t.get('extract_error', 'Extraction error'), False
+                        with open(extracted_file_path, 'wb') as f:
+                            f.write(vpk_entry.read())
+                        
+                        if hasattr(vpk_file, 'close'):
+                            try:
+                                vpk_file.close()
+                            except:
+                                pass
+                        
+                        if export_format.upper() != "VTF":
+                            emit_progress(80, t.get('extract_converting', 'Converting texture...'))
+                            time.sleep(0.1)
+                            converted_path = TF2VPKExtractService._convert_vtf_to_image(
+                                extracted_file_path,
+                                out_dir,
+                                export_format.upper()
+                            )
+                            if converted_path:
+                                try:
+                                    os.remove(extracted_file_path)
+                                except:
+                                    pass
+                                success_msg = t.get('texture_extracted_success', 'Texture extracted successfully: {path}').format(path=converted_path)
+                                emit_progress(100, t.get('extract_completed', 'Extraction completed'))
+                                return True, success_msg, False
+                            error_msg = t.get('texture_extract_failed', 'Failed to extract texture').format(weapon=weapon_key)
+                            emit_progress(0, t.get('extract_error', 'Extraction error'))
+                            return False, error_msg, False
+                        
+                        success_msg = t.get('texture_extracted_success', 'Texture extracted successfully: {path}').format(path=extracted_file_path)
+                        emit_progress(100, t.get('extract_completed', 'Extraction completed'))
+                        return True, success_msg, False
+            
+            if hasattr(vpk_file, 'close'):
+                try:
+                    vpk_file.close()
+                except:
+                    pass
+            
+            error_msg = t.get('texture_extract_failed', 'Failed to extract texture').format(weapon=weapon_key)
+            emit_progress(0, t.get('extract_error', 'Extraction error'))
+            return False, error_msg, False
+        except Exception as e:
+            logger.error(f"Ошибка при извлечении текстуры: {e}", exc_info=True)
+            emit_progress(0, t.get('extract_critical_error', 'Critical error'))
+            return False, str(e), False
     
     @staticmethod
     def _convert_vtf_to_image(vtf_path: str, out_dir: str, image_format: str) -> Optional[str]:

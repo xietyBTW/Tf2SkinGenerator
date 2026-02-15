@@ -52,6 +52,8 @@ def setup_logging(
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
     
+    logger.propagate = False
+    
     return logger
 
 
@@ -65,5 +67,9 @@ def get_logger(name: str) -> logging.Logger:
     Returns:
         Logger для модуля
     """
+    base_logger = logging.getLogger('tf2_skin_generator')
+    if not base_logger.handlers:
+        base_logger.addHandler(logging.NullHandler())
+        base_logger.propagate = False
     return logging.getLogger(f'tf2_skin_generator.{name}')
 

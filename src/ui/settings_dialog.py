@@ -33,8 +33,8 @@ class SettingsDialog(QDialog):
     def init_ui(self):
         """Инициализация UI"""
         layout = QVBoxLayout(self)
-        layout.setSpacing(20)
-        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setSpacing(12)
+        layout.setContentsMargins(20, 20, 20, 20)
         
         # Устанавливаем заголовок окна
         self.setWindowTitle(self.t['settings_title'])
@@ -52,7 +52,7 @@ class SettingsDialog(QDialog):
         
         # TF2 Game Folder
         tf2_label = QLabel(self.t['tf2_folder_label'])
-        tf2_label.setStyleSheet("font-weight: 500; font-size: 13px; color: #ccc; margin-top: 8px;")
+        tf2_label.setStyleSheet("font-weight: 500; font-size: 13px; color: #ccc; margin-top: 4px;")
         layout.addWidget(tf2_label)
         
         tf2_game_layout = QHBoxLayout()
@@ -72,7 +72,7 @@ class SettingsDialog(QDialog):
         
         # Export Folder
         export_label = QLabel(self.t.get('export_folder_label', 'Export Folder'))
-        export_label.setStyleSheet("font-weight: 500; font-size: 13px; color: #ccc; margin-top: 16px;")
+        export_label.setStyleSheet("font-weight: 500; font-size: 13px; color: #ccc; margin-top: 8px;")
         layout.addWidget(export_label)
         
         export_folder_layout = QHBoxLayout()
@@ -92,7 +92,7 @@ class SettingsDialog(QDialog):
         
         # Формат экспорта изображения
         export_format_label = QLabel(self.t.get('export_image_format_label', 'Export Image Format'))
-        export_format_label.setStyleSheet("font-weight: 500; font-size: 13px; color: #ccc; margin-top: 16px;")
+        export_format_label.setStyleSheet("font-weight: 500; font-size: 13px; color: #ccc; margin-top: 8px;")
         layout.addWidget(export_format_label)
         
         self.export_format_combo = QComboBox()
@@ -106,7 +106,7 @@ class SettingsDialog(QDialog):
         
         # Выбор языка
         lang_label = QLabel(self.t['language_label'])
-        lang_label.setStyleSheet("font-weight: 500; font-size: 13px; color: #ccc; margin-top: 16px;")
+        lang_label.setStyleSheet("font-weight: 500; font-size: 13px; color: #ccc; margin-top: 8px;")
         layout.addWidget(lang_label)
         
         self.language_combo = QComboBox()
@@ -118,7 +118,7 @@ class SettingsDialog(QDialog):
         
         # Выбор темы
         theme_label = QLabel(self.t.get('theme_label', 'Theme'))
-        theme_label.setStyleSheet("font-weight: 500; font-size: 13px; color: #ccc; margin-top: 16px;")
+        theme_label.setStyleSheet("font-weight: 500; font-size: 13px; color: #ccc; margin-top: 8px;")
         layout.addWidget(theme_label)
         
         self.theme_combo = QComboBox()
@@ -130,7 +130,7 @@ class SettingsDialog(QDialog):
         
         # Кнопка поддержки
         support_label = QLabel(self.t.get('support_header', 'Support'))
-        support_label.setStyleSheet("font-weight: 500; font-size: 13px; color: #ccc; margin-top: 16px;")
+        support_label.setStyleSheet("font-weight: 500; font-size: 13px; color: #ccc; margin-top: 8px;")
         layout.addWidget(support_label)
         # Ссылка на поддержку
         support_btn = QPushButton(self.t['support'])
@@ -277,5 +277,4 @@ class SettingsDialog(QDialog):
     def get_tf2_path(self):
         """Возвращает путь к TF2"""
         return self.tf2_game_path.text().strip()
-
 

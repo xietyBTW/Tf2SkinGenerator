@@ -136,6 +136,7 @@ TRANSLATIONS = {
         'bg_removal_error_msg': 'Не удалось удалить задний фон:\n{}',
         'load_image_error': 'Сначала загрузите изображение!',
         'select_weapon_error': 'Сначала выберите оружие!',
+        'crit_hit_conflict_error': 'Дополнительные настройки (UV разметка / Normal Map) конфликтуют с CritHIT. Сборка не запущена.',
         'removing_bg': 'Удаление заднего фона...',
         'replace_model': 'Заменить модель:',
         'enable_replace_model': 'Включить замену модели',
@@ -155,6 +156,8 @@ TRANSLATIONS = {
         'error_image_not_specified': 'Не указан путь к изображению',
         'error_image_not_found': 'Изображение не найдено: {path}',
         'error_image_not_file': 'Указанный путь не является файлом: {path}',
+        'error_custom_vtf_not_found': 'VTF файл не найден: {path}',
+        'error_custom_vtf_not_file': 'Указанный путь VTF не является файлом: {path}',
         'error_mode_not_specified': 'Не указан режим оружия',
         'error_filename_not_specified': 'Не указано имя выходного файла',
         'error_filename_no_vpk': 'Имя файла должно заканчиваться на .vpk',
@@ -342,6 +345,7 @@ TRANSLATIONS = {
         'bg_removal_error_msg': 'Failed to remove background:\n{}',
         'load_image_error': 'Please load an image first!',
         'select_weapon_error': 'Please select a weapon first!',
+        'crit_hit_conflict_error': 'Additional settings (UV layout / Normal Map) conflict with CritHIT. Build was not started.',
         'removing_bg': 'Removing background...',
         'replace_model': 'Replace Model:',
         'enable_replace_model': 'Enable model replacement',
@@ -361,6 +365,8 @@ TRANSLATIONS = {
         'error_image_not_specified': 'Image path not specified',
         'error_image_not_found': 'Image not found: {path}',
         'error_image_not_file': 'Specified path is not a file: {path}',
+        'error_custom_vtf_not_found': 'Custom VTF file not found: {path}',
+        'error_custom_vtf_not_file': 'Custom VTF path is not a file: {path}',
         'error_mode_not_specified': 'Weapon mode not specified',
         'error_filename_not_specified': 'Output filename not specified',
         'error_filename_no_vpk': 'Filename must end with .vpk',
@@ -416,4 +422,3 @@ TRANSLATIONS = {
         'duplicate_weapons_question': 'You are trying to merge mods that affect the same weapon.\nContinue?'
     }
 }
-
