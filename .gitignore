@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .coverage
+.coveragerc
 coverage.json
 htmlcov/
 *.log
@@ -18,9 +19,14 @@ Desktop.ini
 *.bat
 !run.bat
 !build.bat
+*.ps1
 
+installer/
 build/
 dist/
+scripts/
+tests/
+
 
 export/
 exportTest/
