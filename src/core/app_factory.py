@@ -4,7 +4,6 @@ from pathlib import Path
 from typing import Optional
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QIcon
-from src.utils.themes import apply_theme
 from src.config.app_config import AppConfig
 from src.shared.logging_config import get_logger
 
@@ -73,6 +72,7 @@ class AppFactory:
     
     @staticmethod
     def _apply_theme(app: QApplication) -> None:
+        from src.utils.themes import apply_theme
         config = AppConfig.load_config()
         theme_name = config.get('theme', 'dark')
         
@@ -82,4 +82,3 @@ class AppFactory:
         
         logger.info(f"Применяется тема: {theme_name}")
         apply_theme(app, theme_name)
-

@@ -6,10 +6,11 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
-from typing import List, Tuple, Set, Dict
+from typing import List, Tuple, Dict, Optional, Callable
 from src.shared.logging_config import get_logger
 from src.shared.constants import ToolPaths, DirectoryPaths
 from src.shared.file_utils import ensure_directory_exists, copy_file_safe
+from src.shared.validators import sanitize_path
 from src.shared.exceptions import VPKCreationError
 
 logger = get_logger(__name__)
@@ -121,7 +122,8 @@ class MergeVPKService:
         vpk_files: List[Path],
         output_filename: str,
         export_folder: str = "export",
-        language: str = "en"
+        language: str = "en",
+        should_cancel: Optional[Callable[[], bool]] = None
     ) -> Tuple[bool, str]:
         """
         Объединяет несколько VPK файлов в один
@@ -155,12 +157,18 @@ class MergeVPKService:
         merged_root = temp_dir / "vpkroot"
         
         try:
+            if should_cancel and should_cancel():
+                return False, t.get('merge_cancelled', 'Объединение отменено пользователем')
+
             ensure_directory_exists(merged_root)
             
             # Извлекаем и объединяем каждый VPK
             logger.info(f"Начинаем объединение {len(vpk_files)} VPK файлов")
             
             for i, vpk_file in enumerate(vpk_files, 1):
+                if should_cancel and should_cancel():
+                    return False, t.get('merge_cancelled', 'Объединение отменено пользователем')
+
                 logger.info(f"[{i}/{len(vpk_files)}] Обрабатываем: {vpk_file.name}")
                 
                 # Извлекаем содержимое VPK во временную папку
@@ -173,11 +181,18 @@ class MergeVPKService:
                     
                     # Извлекаем все файлы
                     for file_path in vpk_archive:
+                        if should_cancel and should_cancel():
+                            return False, t.get('merge_cancelled', 'Объединение отменено пользователем')
+
                         # Получаем содержимое файла
                         file_data = vpk_archive[file_path].read()
                         
                         # Создаем путь в извлеченной директории
-                        extract_file_path = extract_dir / file_path
+                        try:
+                            extract_file_path = Path(sanitize_path(file_path, extract_dir))
+                        except ValueError as e:
+                            logger.warning(f"Недопустимый путь при извлечении {file_path}: {e}")
+                            continue
                         ensure_directory_exists(extract_file_path.parent)
                         
                         # Записываем файл
@@ -193,11 +208,22 @@ class MergeVPKService:
                     logger.error(f"Ошибка при извлечении {vpk_file.name}: {e}", exc_info=True)
                     return False, t.get('error_extracting_vpk', 'Error extracting VPK: {file}').format(file=vpk_file.name)
             
+            if should_cancel and should_cancel():
+                return False, t.get('merge_cancelled', 'Объединение отменено пользователем')
+
             # Создаем новый VPK из объединенной папки
             logger.info("Создаем объединенный VPK файл...")
-            vpk_path = MergeVPKService._create_vpk_from_directory(merged_root, output_filename, export_folder, language)
+            vpk_path = MergeVPKService._create_vpk_from_directory(
+                merged_root,
+                output_filename,
+                export_folder,
+                language,
+                should_cancel=should_cancel
+            )
             
             if not vpk_path:
+                if should_cancel and should_cancel():
+                    return False, t.get('merge_cancelled', 'Объединение отменено пользователем')
                 return False, t.get('error_creating_merged_vpk', 'Error creating merged VPK file')
             
             # Очищаем временные файлы
@@ -218,6 +244,13 @@ class MergeVPKService:
             except:
                 pass
             return False, t.get('error_merging_vpk', 'Error merging VPK files: {error}').format(error=str(e))
+        finally:
+            if should_cancel and should_cancel():
+                try:
+                    if temp_dir.exists():
+                        shutil.rmtree(temp_dir)
+                except Exception:
+                    pass
     
     @staticmethod
     def _merge_directory(source_dir: Path, target_dir: Path):
@@ -270,8 +303,9 @@ class MergeVPKService:
         vpkroot_dir: Path,
         filename: str,
         export_folder: str = "export",
-        language: str = "en"
-    ) -> str:
+        language: str = "en",
+        should_cancel: Optional[Callable[[], bool]] = None
+    ) -> Optional[str]:
         """
         Создает VPK файл из директории vpkroot
         
@@ -297,6 +331,9 @@ class MergeVPKService:
             temp_vpk_path.unlink()
         
         # Создаем VPK
+        if should_cancel and should_cancel():
+            return None
+
         logger.info("Запуск vpk.exe для создания объединенного VPK...")
         result = subprocess.run([
             str(ToolPaths.get_vpk_tool()),

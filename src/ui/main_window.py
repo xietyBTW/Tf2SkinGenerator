@@ -659,6 +659,12 @@ class MainWindow(QMainWindow):
         
         # Получаем weapon_key из mode
         weapon_key = self.mode.split('_', 1)[1] if '_' in self.mode else self.mode
+
+        from src.services.edited_vmt_service import EditedVMTService
+        edited_vmt_path = EditedVMTService.get_edited_vmt(weapon_key)
+        if edited_vmt_path and os.path.exists(edited_vmt_path):
+            self.open_vmt_editor(edited_vmt_path, weapon_key)
+            return
         
         # Извлекаем оригинальный VMT из игры
         settings = self.settings_panel.get_settings()
@@ -790,9 +796,19 @@ class MainWindow(QMainWindow):
             selected_format = settings['format']
             flags = settings['flags']
             vtf_options = settings.get('vtf_options', {})
-            # UV разметка недоступна для CritHIT режима
             is_crit_hit = (hasattr(self, 'crit_hit_checkbox') and 
                           self.crit_hit_checkbox.isChecked())
+            if is_crit_hit and (settings.get('draw_uv_layout', False) or vtf_options.get('normal')):
+                ErrorHandler.show_warning(
+                    self,
+                    self.t.get(
+                        'crit_hit_conflict_error',
+                        'Дополнительные настройки (UV разметка / Normal Map) конфликтуют с CritHIT. Сборка не запущена.'
+                    ),
+                    self.t['error']
+                )
+                return
+            # UV разметка недоступна для CritHIT режима
             draw_uv_layout = settings.get('draw_uv_layout', False) and not is_special_mode and not is_crit_hit
             
             # Проверяем, используется ли VTF файл из preview_panel
@@ -919,19 +935,10 @@ class MainWindow(QMainWindow):
     def _cancel_build(self) -> None:
         """Отменяет сборку"""
         if hasattr(self, '_build_worker') and self._build_worker.isRunning():
-            self._build_worker.terminate()
-            self._build_worker.wait()
-            
             if hasattr(self, '_progress_dialog'):
-                self._progress_dialog.close()
-                self._progress_dialog = None
-            
-            # Включаем кнопку сборки обратно
-            if hasattr(self.settings_panel, 'button'):
-                self.settings_panel.button.setEnabled(True)
-            
-            cancelled_msg = self.t.get('build_cancelled', 'Build cancelled by user')
-            ErrorHandler.show_info(self, cancelled_msg, self.t.get('cancel', 'Cancel'))
+                self._progress_dialog.setLabelText(self.t.get('cancelling', 'Cancelling...'))
+                self._progress_dialog.setCancelButton(None)
+            self._build_worker.requestInterruption()
     
     def _on_request_model_file(self) -> None:
         """Обрабатывает запрос выбора файла модели из рабочего потока"""
@@ -1074,19 +1081,10 @@ class MainWindow(QMainWindow):
     def _cancel_extract(self) -> None:
         """Отменяет извлечение текстуры"""
         if hasattr(self, '_extract_worker') and self._extract_worker.isRunning():
-            self._extract_worker.terminate()
-            self._extract_worker.wait()
-            
             if hasattr(self, '_extract_progress_dialog'):
-                self._extract_progress_dialog.close()
-                self._extract_progress_dialog = None
-            
-            # Включаем кнопку извлечения обратно
-            if hasattr(self.settings_panel, 'extract_texture_button'):
-                self.settings_panel.extract_texture_button.setEnabled(True)
-            
-            cancelled_msg = self.t.get('extract_cancelled', 'Extraction cancelled by user')
-            ErrorHandler.show_info(self, cancelled_msg, self.t.get('cancel', 'Cancel'))
+                self._extract_progress_dialog.setLabelText(self.t.get('cancelling', 'Cancelling...'))
+                self._extract_progress_dialog.setCancelButton(None)
+            self._extract_worker.requestInterruption()
     
     def merge_vpk_files(self) -> None:
         """Открывает диалог объединения VPK файлов"""
@@ -1198,8 +1196,12 @@ class MainWindow(QMainWindow):
                         self.vpk_files,
                         self.filename,
                         self.export_folder,
-                        self.language
+                        self.language,
+                        should_cancel=self.isInterruptionRequested
                     )
+                    if self.isInterruptionRequested():
+                        success = False
+                        message = self.t.get('merge_cancelled', 'Объединение отменено пользователем')
                     self.progress.emit(100, self.t.get('merge_vpk_completed', 'Завершено'))
                     self.finished.emit(success, message)
                 except Exception as e:
@@ -1237,7 +1239,11 @@ class MainWindow(QMainWindow):
         if success:
             ErrorHandler.show_info(self, message, self.t.get('merge_vpk_title', 'Объединить моды'))
         else:
-            ErrorHandler.show_error(self, Exception(message), "Ошибка объединения VPK", self.t['error'])
+            cancelled_msg = self.t.get('merge_cancelled', 'Объединение отменено пользователем')
+            if message == cancelled_msg:
+                ErrorHandler.show_info(self, cancelled_msg, self.t.get('cancel', 'Cancel'))
+            else:
+                ErrorHandler.show_error(self, Exception(message), "Ошибка объединения VPK", self.t['error'])
     
     def _on_merge_progress(self, percentage: int, status: str):
         """Обработчик прогресса объединения VPK"""
@@ -1248,19 +1254,11 @@ class MainWindow(QMainWindow):
     def _cancel_merge(self) -> None:
         """Отменяет объединение VPK"""
         if hasattr(self, '_merge_worker') and self._merge_worker.isRunning():
-            self._merge_worker.terminate()
-            self._merge_worker.wait()
-            
             if hasattr(self, '_merge_progress_dialog'):
-                self._merge_progress_dialog.close()
-                self._merge_progress_dialog = None
-            
-            # Включаем кнопку объединения обратно
-            if hasattr(self.settings_panel, 'merge_vpk_button'):
-                self.settings_panel.merge_vpk_button.setEnabled(True)
-            
-            cancelled_msg = self.t.get('merge_cancelled', 'Объединение отменено пользователем')
-            ErrorHandler.show_info(self, cancelled_msg, self.t.get('cancel', 'Cancel'))
+                self._merge_progress_dialog.setLabelText(self.t.get('cancelling', 'Cancelling...'))
+                self._merge_progress_dialog.setCancelButton(None)
+
+            self._merge_worker.requestInterruption()
     
     def open_support_link(self) -> None:
         QDesktopServices.openUrl(QUrl("https://steamcommunity.com/tradeoffer/new/?partner=394814324&token=GNGCagXk"))

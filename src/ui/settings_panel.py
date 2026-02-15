@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
     QPushButton, QLineEdit, QRadioButton, QCheckBox, QButtonGroup,
     QWidget, QSizePolicy, QFileDialog
 )
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QDoubleValidator, QMouseEvent
 from src.data.translations import TRANSLATIONS
 from src.utils.themes import get_modern_styles
@@ -532,7 +532,6 @@ class SettingsPanel(QWidget):
     
     def on_crit_hit_selected(self, is_crit_hit):
         """Обработка выбора CritHIT режима"""
-        print(f"[DEBUG] on_crit_hit_selected called with is_crit_hit={is_crit_hit}")
         # Отключаем/включаем контролы в зависимости от режима
         self.format_combo.setEnabled(not is_crit_hit)
         self.flag_clamps.setEnabled(not is_crit_hit)
@@ -544,8 +543,6 @@ class SettingsPanel(QWidget):
             self.option_nothumbnail.setEnabled(not is_crit_hit)
         if hasattr(self, 'option_noreflectivity'):
             self.option_noreflectivity.setEnabled(not is_crit_hit)
-        if hasattr(self, 'option_normal'):
-            self.option_normal.setEnabled(not is_crit_hit)
         if hasattr(self, 'flag_nominmipmaps'):
             self.flag_nominmipmaps.setEnabled(not is_crit_hit)
         if hasattr(self, 'option_gamma'):
@@ -553,32 +550,46 @@ class SettingsPanel(QWidget):
         if hasattr(self, 'gamma_value_input'):
             self.gamma_value_input.setEnabled(not is_crit_hit and 
                                                (hasattr(self, 'option_gamma') and self.option_gamma.isChecked()))
-        # Скрываем/показываем UV разметку для CritHIT режима
-        if hasattr(self, 'uv_layout_widget'):
-            print(f"[DEBUG] uv_layout_widget exists, is_crit_hit={is_crit_hit}")
-            if is_crit_hit:
-                # Если CritHIT включается, скрываем виджет UV разметки и сбрасываем состояние
-                self.uv_layout_checkbox.blockSignals(True)
-                self.uv_layout_checkbox.force_set_checked(False)
-                self.uv_layout_checkbox.blockSignals(False)
-                # Скрываем контейнер и отдельные элементы
-                self.uv_layout_widget.setVisible(False)
-                self.uv_layout_checkbox.setVisible(False)
-                self.uv_resolution_label.setVisible(False)
-                print(f"[DEBUG] UV widget hidden, isVisible={self.uv_layout_widget.isVisible()}")
-            else:
-                # Если CritHIT отключается, показываем виджет UV разметки
-                self.uv_layout_widget.setVisible(True)
-                self.uv_layout_checkbox.setVisible(True)
-                self.uv_resolution_label.setVisible(True)
-            # Принудительно обновляем layout
-            self.uv_layout_widget.updateGeometry()
-            if hasattr(self, 'advanced_group'):
-                self.advanced_group.content_widget.updateGeometry()
+        self._sync_crit_hit_dependent_controls(is_crit_hit)
         
         # Для CritHIT устанавливаем формат DXT5
         if is_crit_hit:
             self.format_combo.setCurrentText("DXT5")
+
+    def _sync_crit_hit_dependent_controls(self, is_crit_hit=None) -> None:
+        if is_crit_hit is None:
+            is_crit_hit = self._get_crit_hit_state()
+
+        def apply_state():
+            if hasattr(self, 'option_normal'):
+                self.option_normal.blockSignals(True)
+                if is_crit_hit:
+                    self.option_normal.setCheckState(Qt.Unchecked)
+                self.option_normal.blockSignals(False)
+                self.option_normal.setEnabled(not is_crit_hit)
+
+            if hasattr(self, 'uv_layout_checkbox'):
+                self.uv_layout_checkbox.blockSignals(True)
+                if is_crit_hit:
+                    self.uv_layout_checkbox.force_set_checked(False)
+                self.uv_layout_checkbox.blockSignals(False)
+                self.uv_layout_checkbox.setEnabled(not is_crit_hit)
+
+            if hasattr(self, 'uv_resolution_label'):
+                self.uv_resolution_label.setEnabled(not is_crit_hit)
+
+            if hasattr(self, 'uv_layout_widget'):
+                self.uv_layout_widget.setEnabled(not is_crit_hit)
+                self.uv_layout_widget.setVisible(not is_crit_hit)
+                if hasattr(self, 'uv_layout_checkbox'):
+                    self.uv_layout_checkbox.setVisible(not is_crit_hit)
+                if hasattr(self, 'uv_resolution_label'):
+                    self.uv_resolution_label.setVisible(not is_crit_hit)
+                self.uv_layout_widget.updateGeometry()
+                if hasattr(self, 'advanced_group'):
+                    self.advanced_group.content_widget.updateGeometry()
+
+        QTimer.singleShot(0, apply_state)
     
     def setup_connections(self):
         """Настраивает соединения сигналов"""
@@ -593,6 +604,13 @@ class SettingsPanel(QWidget):
         # Подключаем обработчик для чекбокса UV разметки
         if hasattr(self, 'uv_layout_checkbox'):
             self.uv_layout_checkbox.stateChanged.connect(self._on_uv_layout_state_changed)
+        if hasattr(self, 'option_normal'):
+            self.option_normal.stateChanged.connect(self._on_normal_map_state_changed)
+        if self.parent and hasattr(self.parent, 'crit_hit_checkbox'):
+            self.parent.crit_hit_checkbox.stateChanged.connect(
+                lambda state: self.on_crit_hit_selected(state == Qt.Checked)
+            )
+            self.on_crit_hit_selected(self.parent.crit_hit_checkbox.isChecked())
     
     def _on_uv_layout_state_changed(self, state: int) -> None:
         """Обработчик изменения состояния чекбокса UV разметки"""
@@ -600,22 +618,32 @@ class SettingsPanel(QWidget):
         
         # Если пытаются включить UV разметку, проверяем, не включен ли CritHIT
         if is_checked:
-            # Проверяем состояние CritHIT через главное окно
-            is_crit_hit = False
-            if self.parent and hasattr(self.parent, 'crit_hit_checkbox'):
-                is_crit_hit = self.parent.crit_hit_checkbox.isChecked()
-            
-            # Если CritHIT включен, отключаем UV разметку
+            is_crit_hit = self._get_crit_hit_state()
             if is_crit_hit:
-                self.uv_layout_checkbox.blockSignals(True)
-                self.uv_layout_checkbox.force_set_checked(False)
-                self.uv_layout_checkbox.blockSignals(False)
+                def reset_uv():
+                    self.uv_layout_checkbox.blockSignals(True)
+                    self.uv_layout_checkbox.force_set_checked(False)
+                    self.uv_layout_checkbox.blockSignals(False)
+                QTimer.singleShot(0, reset_uv)
+
+    def _on_normal_map_state_changed(self, state: int) -> None:
+        """Обработчик изменения состояния Normal Map"""
+        is_checked = (state == Qt.Checked)
+        if is_checked:
+            is_crit_hit = self._get_crit_hit_state()
+            if is_crit_hit and hasattr(self, 'option_normal'):
+                def reset_normal():
+                    self.option_normal.blockSignals(True)
+                    self.option_normal.setCheckState(Qt.Unchecked)
+                    self.option_normal.blockSignals(False)
+                QTimer.singleShot(0, reset_normal)
     
     def on_advanced_toggled(self, is_expanded):
         """Обработка сворачивания/разворачивания секции Дополнительно"""
         # Уведомляем главное окно об изменении для пересчета размера
         if hasattr(self.parent, 'on_advanced_section_toggled'):
             self.parent.on_advanced_section_toggled(is_expanded)
+        self._sync_crit_hit_dependent_controls()
     
     def apply_preset(self, preset_name):
         """Применяет выбранный пресет"""
@@ -640,6 +668,12 @@ class SettingsPanel(QWidget):
             self.flag_clampt.setChecked("CLAMPT" in preset["flags"])
             self.flag_nomipmaps.setChecked("NOMIP" in preset["flags"])
             self.flag_nolod.setChecked("NOLOD" in preset["flags"])
+            self._sync_crit_hit_dependent_controls()
+
+    def _get_crit_hit_state(self) -> bool:
+        if self.parent and hasattr(self.parent, 'crit_hit_checkbox'):
+            return self.parent.crit_hit_checkbox.isChecked()
+        return False
     
     def validate_vpk_name(self):
         """Валидация имени VPK файла"""
