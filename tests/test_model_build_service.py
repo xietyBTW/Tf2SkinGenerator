@@ -144,6 +144,64 @@ class ModelBuildServiceTests(unittest.TestCase):
             updated = qc.read_text(encoding="utf-8")
             self.assertIn("console\\models\\c_models", updated)
             self.assertNotIn("$lod", updated.lower())
+    def test_extract_texturegroup_all_columns_red_and_blue(self):
+        """Тест: texturegroup с двумя столбцами (RED и BLU)"""
+        content = "\n".join([
+            "$texturegroup \"skinfamilies\"",
+            "{",
+            "{ \"c_rocketlauncher\" \"c_rocketlauncher_blue\" }",
+            "{ \"c_rocketlauncher_gold\" \"c_rocketlauncher_gold_blue\" }",
+            "}",
+        ])
+        with tempfile.TemporaryDirectory() as tmp:
+            qc = Path(tmp) / "a.qc"
+            qc.write_text(content, encoding="utf-8")
+            columns = ModelBuildService.extract_texturegroup_all_columns(str(qc))
+            self.assertEqual(columns, ["c_rocketlauncher", "c_rocketlauncher_blue"])
+    
+    def test_extract_texturegroup_all_columns_single(self):
+        """Тест: texturegroup с одним столбцом (только RED, без BLU)"""
+        content = "\n".join([
+            "$texturegroup \"skinfamilies\"",
+            "{",
+            "{ \"c_scattergun\" }",
+            "{ \"c_scattergun_gold\" }",
+            "}",
+        ])
+        with tempfile.TemporaryDirectory() as tmp:
+            qc = Path(tmp) / "a.qc"
+            qc.write_text(content, encoding="utf-8")
+            columns = ModelBuildService.extract_texturegroup_all_columns(str(qc))
+            self.assertEqual(columns, ["c_scattergun"])
+    
+    def test_extract_texturegroup_all_columns_missing(self):
+        """Тест: нет $texturegroup в QC файле"""
+        with tempfile.TemporaryDirectory() as tmp:
+            qc = Path(tmp) / "a.qc"
+            qc.write_text("$modelname \"x\"", encoding="utf-8")
+            columns = ModelBuildService.extract_texturegroup_all_columns(str(qc))
+            self.assertEqual(columns, [])
+    
+    def test_extract_texturegroup_all_columns_skips_gold(self):
+        """Тест: если первая строка с суффиксом _gold, а вторая - базовая"""
+        content = "\n".join([
+            "$texturegroup \"skinfamilies\"",
+            "{",
+            "{ \"c_weapon_gold\" \"c_weapon_gold_blue\" }",
+            "{ \"c_weapon\" \"c_weapon_blue\" }",
+            "}",
+        ])
+        with tempfile.TemporaryDirectory() as tmp:
+            qc = Path(tmp) / "a.qc"
+            qc.write_text(content, encoding="utf-8")
+            columns = ModelBuildService.extract_texturegroup_all_columns(str(qc))
+            # Должен выбрать базовую строку (без _gold), а не первую
+            self.assertEqual(columns, ["c_weapon", "c_weapon_blue"])
+    
+    def test_extract_texturegroup_all_columns_file_not_found(self):
+        """Тест: несуществующий QC файл"""
+        columns = ModelBuildService.extract_texturegroup_all_columns("/nonexistent/path.qc")
+        self.assertEqual(columns, [])
 
 
 if __name__ == "__main__":

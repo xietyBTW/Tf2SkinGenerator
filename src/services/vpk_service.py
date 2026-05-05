@@ -476,6 +476,14 @@ class VPKService:
                         ctx.cleanup(on_error=True, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
                         return False, t['error_texturegroup_not_extracted'].format(qc_path=qc_path)
                     
+                    # Извлекаем ВСЕ столбцы из $texturegroup для поддержки команд RED/BLU
+                    # Столбец 0 = RED текстура, столбец 1+ = BLU и другие варианты
+                    texturegroup_columns = ModelBuildService.extract_texturegroup_all_columns(qc_path)
+                    # Дополнительные столбцы (BLU и т.д.) - все кроме первого (RED)
+                    extra_texture_columns = texturegroup_columns[1:] if len(texturegroup_columns) > 1 else []
+                    if extra_texture_columns:
+                        logger.info(f"Найдены дополнительные текстуры команд: {extra_texture_columns}")
+                    
                     # Пропатчиваем QC файл: добавляем console\ к $cdmaterials (чтобы текстуры загружались из консольных команд),
                     # удаляем $lod (они нам не нужны, только мусорят)
                     ModelBuildService.patch_qc_file(qc_path, weapon_key, original_cdmaterials_path)
@@ -640,6 +648,52 @@ class VPKService:
                         normal_weapon_key = f"{texture_filename}_normal"
                         VMTService.update_vmt_bumpmap_path(str(vmt_path), patched_cdmaterials_path, normal_weapon_key)
                         logger.info(f"Обновлен VMT файл для добавления $bumpmap: {normal_weapon_key}")
+                    
+                    # === Создаем текстуры для дополнительных команд (BLU и т.д.) ===
+                    # Если в $texturegroup есть дополнительные столбцы (BLU), создаем копии VTF/VMT для них
+                    # Используем ту же текстуру (изображение юзера), просто с другим именем файла
+                    for extra_tex_name in extra_texture_columns:
+                        logger.info(f"Создаем текстуры для дополнительной команды: {extra_tex_name}")
+                        
+                        extra_vtf_filename = f"{extra_tex_name}.vtf"
+                        extra_vmt_filename = f"{extra_tex_name}.vmt"
+                        extra_vtf_path = vtf_output_path / extra_vtf_filename
+                        extra_vmt_path = vtf_output_path / extra_vmt_filename
+                        
+                        # Копируем VTF файл (та же текстура, другое имя)
+                        red_vtf_path = vtf_output_path / vtf_filename
+                        if red_vtf_path.exists():
+                            copy_file_safe(red_vtf_path, extra_vtf_path)
+                            logger.info(f"Скопирован VTF для доп. команды: {vtf_filename} -> {extra_vtf_filename}")
+                        else:
+                            logger.warning(f"RED VTF файл не найден для копирования: {red_vtf_path}")
+                        
+                        # Создаем VMT файл для доп. команды (копируем RED VMT и обновляем $basetexture)
+                        if vmt_path.exists():
+                            copy_file_safe(vmt_path, extra_vmt_path)
+                            VMTService.update_vmt_basetexture_path(str(extra_vmt_path), patched_cdmaterials_path, extra_tex_name)
+                            logger.info(f"Создан VMT для доп. команды: {extra_vmt_filename}")
+                        else:
+                            # Создаем из шаблона если RED VMT не существует
+                            VMTService.create_vmt_template_from_cdmaterials(str(extra_vmt_path), patched_cdmaterials_path, extra_tex_name)
+                            logger.info(f"Создан VMT из шаблона для доп. команды: {extra_vmt_filename}")
+                        
+                        if animated_fps:
+                            VMTService.enable_animated_basetexture(str(extra_vmt_path), animated_fps)
+                        
+                        # Если normal map включена, создаем _normal VTF/VMT для доп. команды тоже
+                        if is_normal_map:
+                            extra_normal_vtf_filename = f"{extra_tex_name}_normal.vtf"
+                            red_normal_vtf_path = vtf_output_path / f"{texture_filename}_normal.vtf"
+                            extra_normal_vtf_path = vtf_output_path / extra_normal_vtf_filename
+                            
+                            if red_normal_vtf_path.exists():
+                                copy_file_safe(red_normal_vtf_path, extra_normal_vtf_path)
+                                logger.info(f"Скопирован normal VTF для доп. команды: {extra_normal_vtf_filename}")
+                            
+                            extra_normal_key = f"{extra_tex_name}_normal"
+                            VMTService.update_vmt_bumpmap_path(str(extra_vmt_path), patched_cdmaterials_path, extra_normal_key)
+                            logger.info(f"Обновлен VMT $bumpmap для доп. команды: {extra_normal_key}")
                     
                     if debug_mode:
                         DebugService.save_patched_stage(ctx, ctx.decompile_dir)

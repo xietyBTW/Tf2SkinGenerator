@@ -7,7 +7,7 @@ import os
 import re
 import subprocess
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 from src.shared.logging_config import get_logger
 from src.shared.file_utils import ensure_directory_exists
 
@@ -239,6 +239,101 @@ class ModelBuildService:
         
         return None
     
+    @staticmethod
+    def extract_texturegroup_all_columns(qc_path: str) -> List[str]:
+        """
+        Вытаскивает ВСЕ столбцы из базовой строки $texturegroup.
+        
+        В TF2 QC файлах $texturegroup содержит строки (skin families),
+        где каждая строка имеет столбцы для разных команд:
+        - Столбец 0: текстура для RED команды
+        - Столбец 1: текстура для BLU команды (если есть)
+        
+        Формат:
+        $texturegroup "skinfamilies"
+        {
+            { "c_rocketlauncher"      "c_rocketlauncher_blue" }   // RED | BLU
+            { "c_rocketlauncher_gold" "c_rocketlauncher_gold_blue" }  // варианты
+        }
+        
+        Метод находит "базовую" строку (без суффиксов _gold, _xmas и т.д.)
+        и возвращает все имена из этой строки.
+        
+        Args:
+            qc_path: Путь к QC файлу
+            
+        Returns:
+            Список имен текстур из базовой строки (например, ["c_rocketlauncher", "c_rocketlauncher_blue"])
+            Пустой список если $texturegroup не найден
+        """
+        if not os.path.exists(qc_path):
+            return []
+        
+        with open(qc_path, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+        
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            stripped = line.strip()
+            
+            # Ищем $texturegroup
+            if re.match(r'\$texturegroup\s+', stripped, re.IGNORECASE):
+                i += 1
+                
+                # Пропускаем пустые строки и комментарии
+                while i < len(lines) and (not lines[i].strip() or lines[i].strip().startswith('//')):
+                    i += 1
+                
+                # Ищем открывающую скобку внешнего блока
+                if i < len(lines) and lines[i].strip().startswith('{'):
+                    i += 1
+                    
+                    # Пропускаем пустые строки и комментарии
+                    while i < len(lines) and (not lines[i].strip() or lines[i].strip().startswith('//')):
+                        i += 1
+                    
+                    # Собираем строки (rows) из texturegroup
+                    # Каждая строка — это { "имя1" "имя2" }, где имя1 = RED, имя2 = BLU
+                    rows: List[List[str]] = []
+                    
+                    while i < len(lines):
+                        current_line = lines[i]
+                        stripped_current = current_line.strip()
+                        
+                        # Если встретили закрывающую скобку внешнего блока - выходим
+                        if stripped_current == '}':
+                            break
+                        
+                        # Вытаскиваем все имена в кавычках из строки
+                        matches = re.findall(r'"([^"]+)"', current_line)
+                        row_names = [name.strip() for name in matches if name.strip()]
+                        
+                        if row_names:
+                            rows.append(row_names)
+                        
+                        i += 1
+                    
+                    if not rows:
+                        return []
+                    
+                    # Ищем "базовую" строку без суффиксов (_gold, _xmas и т.д.)
+                    suffixes_to_avoid = ['_gold', '_xmas', '_festive', '_australium', '_botkiller', '_strange', '_unusual']
+                    
+                    for row in rows:
+                        # Проверяем первый столбец (RED текстура) - если он без суффиксов, это базовая строка
+                        first_name = row[0]
+                        has_suffix = any(first_name.endswith(suffix) for suffix in suffixes_to_avoid)
+                        if not has_suffix:
+                            return row
+                    
+                    # Если все строки с суффиксами - возвращаем первую (fallback)
+                    return rows[0]
+            
+            i += 1
+        
+        return []
+
     @staticmethod
     def determine_weapon_type_and_path(weapon_key: str, cdmaterials_path: Optional[str]) -> Tuple[str, str]:
         """
