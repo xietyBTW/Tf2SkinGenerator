@@ -34,6 +34,7 @@ class BuildService:
             vtf_temp_png = vtf_output_path / vtf_filename.replace(".vtf", ".png")
             vtf_filename_for_mode = vmt_filename.replace('.vmt', '.vtf')
             is_normal_map = False
+            animated_fps = None
             try:
                 ensure_directory_exists(vtf_output_path)
             except OSError as e:
@@ -48,14 +49,24 @@ class BuildService:
                 copy_file_safe(custom_vtf_path, vtf_file_path)
                 logger.info(f"Использован пользовательский VTF файл для специального режима: {custom_vtf_path} -> {vtf_file_path}")
             else:
-                TextureService.process_image(image_path, vtf_temp_png, size)
                 vtf_flags, flags_parsed_options = TextureService.parse_vtf_flags_and_options(flags)
                 merged_options = {}
                 if vtf_options:
                     merged_options.update(vtf_options)
                 merged_options.update(flags_parsed_options)
                 is_normal_map = merged_options.get("normal", False)
-                if is_normal_map:
+                if TextureService.is_animated_image(image_path):
+                    vtf_file_path = vtf_output_path / vtf_filename_for_mode
+                    animated_fps = TextureService.create_animated_vtf(
+                        image_path,
+                        str(vtf_file_path),
+                        size,
+                        format_type,
+                        vtf_flags,
+                        merged_options
+                    )
+                elif is_normal_map:
+                    TextureService.process_image(image_path, vtf_temp_png, size)
                     normal_options = merged_options.copy()
                     normal_options.pop("normal", None)
                     TextureService.create_vtf(str(vtf_temp_png), str(vtf_output_path), format_type, vtf_flags, normal_options)
@@ -76,6 +87,7 @@ class BuildService:
                     if normal_temp_png.exists():
                         normal_temp_png.unlink()
                 else:
+                    TextureService.process_image(image_path, vtf_temp_png, size)
                     TextureService.create_vtf(str(vtf_temp_png), str(vtf_output_path), format_type, vtf_flags, merged_options)
                 if vtf_temp_png.exists():
                     vtf_temp_png.unlink()
@@ -100,6 +112,8 @@ class BuildService:
                 weapon_type = "Primary"
                 VMTService.create_vmt_template(str(vmt_path), mode, class_name, weapon_type)
                 logger.info(f"Создан VMT файл из шаблона: {vmt_path}")
+            if animated_fps:
+                VMTService.enable_animated_basetexture(str(vmt_path), animated_fps)
             if is_normal_map:
                 normal_texture_filename = vmt_filename.replace('.vmt', '_normal')
                 normal_cdmaterials_path = rel_path.replace('materials/', '').rstrip('/')

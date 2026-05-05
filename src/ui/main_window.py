@@ -7,7 +7,7 @@ import os
 from typing import Optional, Dict, Any, Tuple, List
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
-    QMessageBox, QFileDialog, QCheckBox, QProgressDialog, QPushButton, QDialog
+    QMessageBox, QFileDialog, QCheckBox, QProgressDialog, QPushButton, QDialog, QScrollArea
 )
 from PySide6.QtCore import QUrl, Qt, QThread, Signal
 from PySide6.QtGui import QPixmap, QDesktopServices, QMouseEvent, QIcon
@@ -149,7 +149,23 @@ class MainWindow(QMainWindow):
         
         self.settings_panel = SettingsPanel(self)
         self.settings_panel.update_language(self.t)
-        main_layout.addWidget(self.settings_panel, 1)
+        self.settings_scroll = QScrollArea()
+        self.settings_scroll.setWidgetResizable(True)
+        # При очень узкой колонке показываем горизонтальный скролл вместо обрезки
+        self.settings_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        # Нижняя граница ширины колонки Step 2 (контролы сами подстраиваются под viewport)
+        self.settings_scroll.setMinimumWidth(220)
+        self.settings_scroll.setWidget(self.settings_panel)
+        self.settings_scroll.setStyleSheet("""
+            QScrollArea {
+                background: transparent;
+                border: none;
+            }
+            QScrollArea > QWidget > QWidget {
+                background: transparent;
+            }
+        """)
+        main_layout.addWidget(self.settings_scroll, 1)
         
         main_vertical_layout.addLayout(main_layout)
         
@@ -957,6 +973,205 @@ class MainWindow(QMainWindow):
         if hasattr(self._build_worker, 'set_model_file_result'):
             self._build_worker.set_model_file_result(file_path if file_path else None)
 
+    def extract_original_model(self) -> None:
+        try:
+            if not hasattr(self, 'mode') or not self.mode:
+                ErrorHandler.show_warning(self, self.t['select_weapon_error'], self.t['error'])
+                return
+
+            from src.data.weapons import SPECIAL_MODES
+            if self.mode in SPECIAL_MODES.values():
+                error_msg = self.t.get('extract_model_special_mode_error', 'Cannot extract model for special modes')
+                ErrorHandler.show_warning(self, error_msg, self.t['error'])
+                return
+
+            weapon_key = self.mode.split('_', 1)[1] if '_' in self.mode else self.mode
+            settings = self.settings_panel.get_settings()
+            tf2_root_dir = settings.get('tf2_game_folder', '')
+            if not tf2_root_dir:
+                error_msg = self.t.get('tf2_path_not_specified', 'TF2 path not specified in settings')
+                ErrorHandler.show_warning(self, error_msg, self.t['error'])
+                return
+
+            export_folder = settings.get('export_folder', 'export')
+
+            if hasattr(self, '_extract_model_worker') and self._extract_model_worker.isRunning():
+                error_msg = self.t.get('extract_model_already_running', 'Model extraction is already in progress. Please wait.')
+                ErrorHandler.show_warning(self, error_msg, self.t['error'])
+                return
+
+            from src.services.extract_model_worker import ExtractModelWorker
+
+            self._extract_model_worker = ExtractModelWorker(
+                tf2_root_dir=tf2_root_dir,
+                mode=self.mode,
+                weapon_key=weapon_key,
+                language=self.language,
+                parent=self
+            )
+            self._extract_model_export_folder = export_folder
+
+            self._extract_model_worker.finished.connect(self._on_extract_model_finished)
+            self._extract_model_worker.progress.connect(self._on_extract_model_progress)
+            self._extract_model_worker.error.connect(self._on_extract_model_error)
+
+            progress_text = self.t.get('extract_model_progress_text', 'Extracting model...')
+            cancel_text = self.t.get('cancel', 'Cancel')
+            progress_title = self.t.get('extract_model_progress_title', 'Extract Model')
+
+            self._extract_model_progress_dialog = QProgressDialog(progress_text, cancel_text, 0, 100, self)
+            self._extract_model_progress_dialog.setWindowTitle(progress_title)
+            self._extract_model_progress_dialog.setWindowModality(Qt.WindowModal)
+            self._extract_model_progress_dialog.setAutoClose(False)
+            self._extract_model_progress_dialog.setAutoReset(False)
+            self._extract_model_progress_dialog.canceled.connect(self._cancel_extract_model)
+
+            self._extract_model_worker.start()
+            self._extract_model_progress_dialog.show()
+
+            if hasattr(self.settings_panel, 'extract_model_button'):
+                self.settings_panel.extract_model_button.setEnabled(False)
+        except Exception as e:
+            ErrorHandler.show_error(self, e, "Ошибка при запуске извлечения модели", self.t['error'])
+
+    def _on_extract_model_finished(self, success: bool, message: str) -> None:
+        if hasattr(self, '_extract_model_progress_dialog'):
+            self._extract_model_progress_dialog.close()
+            self._extract_model_progress_dialog = None
+
+        if hasattr(self.settings_panel, 'extract_model_button'):
+            self.settings_panel.extract_model_button.setEnabled(True)
+
+        if success:
+            from src.services.extract_model_service import ExtractModelService
+
+            prepared_files = []
+            temp_dir = None
+            decompile_dir = None
+            if hasattr(self, '_extract_model_worker'):
+                prepared_files = getattr(self._extract_model_worker, 'prepared_files', []) or []
+                temp_dir = getattr(self._extract_model_worker, 'prepared_temp_dir', None)
+                decompile_dir = getattr(self._extract_model_worker, 'prepared_decompile_dir', None)
+
+            if not prepared_files or not temp_dir or not decompile_dir:
+                if temp_dir:
+                    ExtractModelService.cleanup_temp_dir(temp_dir)
+                ErrorHandler.show_warning(self, message, self.t['error'])
+                return
+
+            from src.ui.model_export_dialog import ModelExportDialog
+
+            dialog = ModelExportDialog(
+                self,
+                self.t.get('extract_model_select_title', 'Model Export'),
+                self.t.get('extract_model_select_desc', 'Select files to save into export:'),
+                prepared_files
+            )
+            dialog.set_button_texts(
+                self.t.get('select_all', 'Select all'),
+                self.t.get('deselect_all', 'Select none'),
+                self.t.get('cancel', 'Cancel'),
+                self.t.get('export_btn', 'Export')
+            )
+
+            if dialog.exec() != QDialog.Accepted:
+                ExtractModelService.cleanup_temp_dir(temp_dir)
+                ErrorHandler.show_warning(self, self.t.get('extract_model_cancelled', 'Cancelled'), self.t['error'])
+                return
+
+            selected = dialog.selected_files() or []
+            if not selected:
+                ExtractModelService.cleanup_temp_dir(temp_dir)
+                ErrorHandler.show_warning(self, self.t.get('extract_model_nothing_selected', 'Nothing selected, export cancelled'), self.t['error'])
+                return
+
+            if hasattr(self, '_export_model_worker') and self._export_model_worker.isRunning():
+                ExtractModelService.cleanup_temp_dir(temp_dir)
+                ErrorHandler.show_warning(self, self.t.get('extract_model_already_running', 'Model extraction is already in progress. Please wait.'), self.t['error'])
+                return
+
+            from src.services.export_model_files_worker import ExportModelFilesWorker
+            self._export_model_worker = ExportModelFilesWorker(
+                temp_dir=temp_dir,
+                decompile_dir=decompile_dir,
+                selected_files=selected,
+                export_folder=getattr(self, '_extract_model_export_folder', 'export'),
+                weapon_key=getattr(self, '_extract_model_worker', None).weapon_key if hasattr(self, '_extract_model_worker') else "",
+                language=self.language,
+                parent=self
+            )
+
+            self._export_model_worker.finished.connect(self._on_export_model_finished)
+            self._export_model_worker.progress.connect(self._on_export_model_progress)
+            self._export_model_worker.error.connect(self._on_export_model_error)
+
+            progress_text = self.t.get('extract_model_exporting', 'Exporting model files...')
+            progress_title = self.t.get('extract_model_select_title', 'Model Export')
+            self._export_model_progress_dialog = QProgressDialog(progress_text, "", 0, 100, self)
+            self._export_model_progress_dialog.setCancelButton(None)
+            self._export_model_progress_dialog.setWindowTitle(progress_title)
+            self._export_model_progress_dialog.setWindowModality(Qt.WindowModal)
+            self._export_model_progress_dialog.setAutoClose(False)
+            self._export_model_progress_dialog.setAutoReset(False)
+
+            self._export_model_worker.start()
+            self._export_model_progress_dialog.show()
+            if hasattr(self.settings_panel, 'extract_model_button'):
+                self.settings_panel.extract_model_button.setEnabled(False)
+        else:
+            ErrorHandler.show_warning(self, message, self.t['error'])
+
+    def _on_extract_model_progress(self, percentage: int, status: str) -> None:
+        if hasattr(self, '_extract_model_progress_dialog'):
+            self._extract_model_progress_dialog.setValue(percentage)
+            self._extract_model_progress_dialog.setLabelText(status)
+
+    def _on_extract_model_error(self, error_message: str) -> None:
+        if hasattr(self, '_extract_model_progress_dialog'):
+            self._extract_model_progress_dialog.close()
+            self._extract_model_progress_dialog = None
+
+        if hasattr(self.settings_panel, 'extract_model_button'):
+            self.settings_panel.extract_model_button.setEnabled(True)
+
+        ErrorHandler.show_error(self, Exception(error_message), "Ошибка извлечения модели", self.t['error'])
+
+    def _cancel_extract_model(self) -> None:
+        if hasattr(self, '_extract_model_worker') and self._extract_model_worker.isRunning():
+            if hasattr(self, '_extract_model_progress_dialog'):
+                self._extract_model_progress_dialog.setLabelText(self.t.get('cancelling', 'Cancelling...'))
+                self._extract_model_progress_dialog.setCancelButton(None)
+            self._extract_model_worker.requestInterruption()
+
+    def _on_export_model_finished(self, success: bool, message: str) -> None:
+        if hasattr(self, '_export_model_progress_dialog'):
+            self._export_model_progress_dialog.close()
+            self._export_model_progress_dialog = None
+
+        if hasattr(self.settings_panel, 'extract_model_button'):
+            self.settings_panel.extract_model_button.setEnabled(True)
+
+        if success:
+            success_title = self.t.get('success', 'Success')
+            ErrorHandler.show_info(self, message, success_title)
+        else:
+            ErrorHandler.show_warning(self, message, self.t['error'])
+
+    def _on_export_model_progress(self, percentage: int, status: str) -> None:
+        if hasattr(self, '_export_model_progress_dialog'):
+            self._export_model_progress_dialog.setValue(percentage)
+            self._export_model_progress_dialog.setLabelText(status)
+
+    def _on_export_model_error(self, error_message: str) -> None:
+        if hasattr(self, '_export_model_progress_dialog'):
+            self._export_model_progress_dialog.close()
+            self._export_model_progress_dialog = None
+
+        if hasattr(self.settings_panel, 'extract_model_button'):
+            self.settings_panel.extract_model_button.setEnabled(True)
+
+        ErrorHandler.show_error(self, Exception(error_message), "Ошибка экспорта модели", self.t['error'])
+
     def extract_original_texture(self) -> None:
         """Запускает асинхронное извлечение оригинальной текстуры оружия из игры"""
         try:
@@ -1282,16 +1497,29 @@ class MainWindow(QMainWindow):
     
     def _adjust_window_size(self) -> None:
         """Пересчитывает и применяет оптимальный размер окна"""
+        if self.isMaximized() or self.isFullScreen():
+            self.centralWidget().updateGeometry()
+            self.centralWidget().layout().activate()
+            return
+
         # Обновляем layout
         self.centralWidget().updateGeometry()
         self.centralWidget().layout().activate()
         
-        # Получаем минимальный необходимый размер
-        hint = self.centralWidget().sizeHint()
-        
+        # Учитываем minimumSizeHint, иначе высота окна может быть меньше блока Step 2: Export
+        cw = self.centralWidget()
+        hint = cw.sizeHint()
+        min_hint = cw.minimumSizeHint()
+        needed_h = max(hint.height(), min_hint.height()) + 20
+
         # Применяем новый размер с сохранением ширины
         current_width = self.width()
-        new_height = max(hint.height() + 20, 600)  # Минимум 600px
+        new_height = max(needed_h, 600)
+
+        screen = self.screen()
+        if screen:
+            available = screen.availableGeometry()
+            new_height = min(new_height, available.height())
         
         self.resize(current_width, new_height)
     
