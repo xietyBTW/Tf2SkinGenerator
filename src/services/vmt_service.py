@@ -246,6 +246,100 @@ class VMTService:
         # Записываем обратно
         with open(vmt_path, 'w', encoding='utf-8') as f:
             f.write(new_content)
+
+    @staticmethod
+    def enable_animated_basetexture(vmt_path: str, fps: int) -> None:
+        if not os.path.exists(vmt_path):
+            return
+
+        try:
+            fps_int = int(fps)
+        except Exception:
+            fps_int = 30
+        if fps_int <= 0:
+            fps_int = 30
+
+        with open(vmt_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+
+        def update_framerate(text: str) -> str:
+            return re.sub(
+                r'(?im)^(\s*"?animatedtextureframerate"?\s+)"?\d+(\.\d+)?"?\s*$',
+                r'\g<1>' + str(fps_int),
+                text,
+            )
+
+        if not re.search(r'(?i)"?\$frame"?\s+"?\d+"?', content):
+            m = re.search(r'("?\$basetexture"?\s+)"[^"]+"', content, flags=re.IGNORECASE)
+            if m:
+                insert_at = m.end()
+                content = content[:insert_at] + '\n\t"$frame" "0"' + content[insert_at:]
+            else:
+                end_root = content.rfind('}')
+                if end_root != -1:
+                    content = content[:end_root] + '\n\t"$frame" "0"\n' + content[end_root:]
+
+        proxies_key = re.search(r'(?im)^\s*"?proxies"?\s*(\{)?\s*$', content)
+        if not proxies_key:
+            end_root = content.rfind('}')
+            if end_root != -1:
+                content = (
+                    content[:end_root]
+                    + '\n\t"Proxies"\n\t{\n\t}\n'
+                    + content[end_root:]
+                )
+            proxies_key = re.search(r'(?im)^\s*"?proxies"?\s*(\{)?\s*$', content)
+
+        if proxies_key:
+            proxies_line_start = proxies_key.start()
+            proxies_indent = re.match(r'^\s*', content[proxies_line_start:]).group(0)
+            brace_pos = content.find('{', proxies_key.end() - 1)
+            if brace_pos == -1:
+                nl = content.find('\n', proxies_key.end())
+                if nl == -1:
+                    content = content + '\n' + proxies_indent + '{\n' + proxies_indent + '}\n'
+                    brace_pos = content.find('{', proxies_key.end())
+                else:
+                    content = content[:nl + 1] + proxies_indent + '{\n' + content[nl + 1:]
+                    brace_pos = content.find('{', proxies_key.end())
+
+            if brace_pos != -1:
+                depth = 0
+                end = None
+                for i in range(brace_pos, len(content)):
+                    ch = content[i]
+                    if ch == '{':
+                        depth += 1
+                    elif ch == '}':
+                        depth -= 1
+                        if depth == 0:
+                            end = i
+                            break
+
+                if end is not None:
+                    block = content[brace_pos:end + 1]
+                    if re.search(r'(?i)\banimatedtexture\b', block):
+                        patched_block = update_framerate(block)
+                        content = content[:brace_pos] + patched_block + content[end + 1:]
+                    else:
+                        brace_line_end = content.find('\n', brace_pos)
+                        if brace_line_end == -1:
+                            brace_line_end = brace_pos + 1
+                            content = content + '\n'
+                        insert_at = brace_line_end + 1
+                        inside_indent = proxies_indent + '\t'
+                        insertion = (
+                            inside_indent + 'animatedtexture\n'
+                            + inside_indent + '{\n'
+                            + inside_indent + '\tanimatedtexturevar "$basetexture"\n'
+                            + inside_indent + '\tanimatedtextureframenumvar "$frame"\n'
+                            + inside_indent + '\tanimatedtextureframerate ' + str(fps_int) + '\n'
+                            + inside_indent + '}\n'
+                        )
+                        content = content[:insert_at] + insertion + content[insert_at:]
+
+        with open(vmt_path, 'w', encoding='utf-8') as f:
+            f.write(content)
     
     @staticmethod
     def update_vmt_bumpmap_path(vmt_path: str, cdmaterials_path: str, weapon_key: str):

@@ -1,10 +1,11 @@
 import os
 import subprocess
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 from PIL import Image
 from src.shared.constants import ToolPaths
 from src.shared.logging_config import get_logger
+from src.services.vtflib_wrapper import VTFLib, VTFImageFormat, VTFImageFlags
 
 logger = get_logger(__name__)
 
@@ -25,6 +26,143 @@ class TextureService:
         else:
             img = img.convert("RGB").resize(size)
         img.save(output_path)
+
+    @staticmethod
+    def is_animated_image(input_path: str) -> bool:
+        try:
+            with Image.open(input_path) as img:
+                return bool(getattr(img, "is_animated", False)) and int(getattr(img, "n_frames", 1)) > 1
+        except Exception:
+            return False
+
+    @staticmethod
+    def _extract_animation_frames_rgba(
+        input_path: str,
+        size: Tuple[int, int],
+        max_frames: int = 512,
+    ) -> Tuple[list[bytes], Optional[int]]:
+        frames: list[bytes] = []
+        fps: Optional[int] = None
+
+        with Image.open(input_path) as img:
+            n_frames = int(getattr(img, "n_frames", 1))
+            if n_frames <= 1:
+                frame = img.convert("RGBA").resize(size)
+                frames.append(frame.tobytes())
+                return frames, None
+
+            duration_ms = None
+            try:
+                duration_ms = int(img.info.get("duration", 0)) if isinstance(img.info, dict) else None
+            except Exception:
+                duration_ms = None
+            if duration_ms and duration_ms > 0:
+                fps = max(1, min(240, int(round(1000 / duration_ms))))
+
+            count = min(n_frames, max_frames)
+            for i in range(count):
+                img.seek(i)
+                frame = img.convert("RGBA").resize(size)
+                frames.append(frame.tobytes())
+
+        return frames, fps
+
+    @staticmethod
+    def _map_format_to_vtflib(format_type: str, has_alpha: bool) -> int:
+        format_mapping = {
+            "RGB888 Bluescreen": "RGB888_BLUESCREEN",
+            "BGR888 Bluescreen": "BGR888_BLUESCREEN",
+            "DXT1 With One Bit Alpha": "DXT1_ONEBITALPHA",
+        }
+        vtf_format = format_mapping.get(format_type, format_type).upper()
+
+        if vtf_format == "DXT1" and has_alpha:
+            return VTFImageFormat.DXT5
+
+        if hasattr(VTFImageFormat, vtf_format):
+            return int(getattr(VTFImageFormat, vtf_format))
+        return VTFImageFormat.RGBA8888
+
+    @staticmethod
+    def _map_flags_to_vtflib(flags: List[str], options: dict) -> int:
+        if flags is None:
+            flags = []
+        result = 0
+        for flag in flags:
+            f = (flag or "").upper()
+            if f == "CLAMPS":
+                result |= VTFImageFlags.CLAMPS
+            elif f == "CLAMPT":
+                result |= VTFImageFlags.CLAMPT
+            elif f == "NOMIP":
+                result |= VTFImageFlags.NOMIP
+            elif f == "NOLOD":
+                result |= VTFImageFlags.NOLOD
+            elif f == "POINTSAMPLE":
+                result |= VTFImageFlags.POINTSAMPLE
+            elif f == "TRILINEAR":
+                result |= VTFImageFlags.TRILINEAR
+            elif f == "ANISOTROPIC":
+                result |= VTFImageFlags.ANISOTROPIC
+            elif f == "SRGB":
+                result |= VTFImageFlags.SRGB
+            elif f == "NODEBUGOVERRIDE":
+                result |= VTFImageFlags.NODEBUGOVERRIDE
+            elif f == "SINGLECOPY":
+                result |= VTFImageFlags.SINGLECOPY
+            elif f == "NODEPTHBUFFER":
+                result |= VTFImageFlags.NODEPTHBUFFER
+            elif f == "CLAMPU":
+                result |= VTFImageFlags.CLAMPU
+            elif f == "VERTEXTEXTURE":
+                result |= VTFImageFlags.VERTEXTEXTURE
+            elif f == "SSBUMP":
+                result |= VTFImageFlags.SSBUMP
+            elif f == "BORDER":
+                result |= VTFImageFlags.BORDER
+
+        if options and options.get("nomipmaps", False):
+            result |= VTFImageFlags.NOMIP | VTFImageFlags.NOLOD
+
+        return result
+
+    @staticmethod
+    def create_animated_vtf(
+        input_path: str,
+        output_file: str,
+        size: Tuple[int, int],
+        format_type: str,
+        flags: List[str],
+        options: dict = None,
+    ) -> Optional[int]:
+        if options is None:
+            options = {}
+
+        frames, fps = TextureService._extract_animation_frames_rgba(input_path, size)
+        if not frames:
+            raise RuntimeError("No frames extracted")
+
+        if len(frames) > 1 and fps is None:
+            fps = 30
+
+        has_alpha = True
+        if options.get("normal", False):
+            raise RuntimeError("Animated normal maps are not supported")
+
+        dest_format = TextureService._map_format_to_vtflib(format_type, has_alpha=has_alpha)
+        vtf_flags = TextureService._map_flags_to_vtflib(flags, options)
+        generate_thumbnail = not options.get("nothumbnail", False)
+
+        VTFLib.create_animated_vtf(
+            frames_rgba8888=frames,
+            width=size[0],
+            height=size[1],
+            dest_format=dest_format,
+            flags=vtf_flags,
+            output_file=output_file,
+            generate_thumbnail=generate_thumbnail,
+        )
+        return fps
 
     @staticmethod
     def parse_vtf_flags_and_options(flags: List[str]) -> Tuple[List[str], dict]:

@@ -4,9 +4,9 @@
 
 import os
 from PySide6.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QLabel, QComboBox, 
+    QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QComboBox,
     QPushButton, QLineEdit, QRadioButton, QCheckBox, QButtonGroup,
-    QWidget, QSizePolicy, QFileDialog
+    QWidget, QSizePolicy, QFileDialog,
 )
 from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QDoubleValidator, QMouseEvent
@@ -92,6 +92,8 @@ class CollapsibleGroup(QWidget):
         self.toggle_button = QPushButton(title)
         self.toggle_button.setCheckable(True)
         self.toggle_button.setChecked(False)
+        self.toggle_button.setMinimumWidth(0)
+        self.toggle_button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.toggle_button.setStyleSheet("""
             QPushButton {
                 text-align: left;
@@ -218,12 +220,16 @@ class SettingsPanel(QWidget):
             letter-spacing: 1px;
             padding-bottom: 4px;
         """)
-        self.step_label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        self.step_label.setWordWrap(True)
+        self.step_label.setMinimumWidth(0)
+        self.step_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         main_layout.addWidget(self.step_label)
         
         # ПЕРВЫЙ КОНТЕЙНЕР - Основные настройки
+        # Minimum по вертикали: не сжимать блок (Maximum давал сжатие в QScrollArea)
         main_settings_container = QWidget()
-        main_settings_container.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+        main_settings_container.setMinimumWidth(0)
+        main_settings_container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         main_settings_layout = QVBoxLayout(main_settings_container)
         main_settings_layout.setSpacing(12)
         main_settings_layout.setContentsMargins(0, 0, 0, 0)
@@ -231,7 +237,9 @@ class SettingsPanel(QWidget):
         # Пресет
         self.preset_label = QLabel(self.t['profile_preset'])
         self.preset_label.setStyleSheet("font-weight: 500; font-size: 13px; color: #ccc;")
-        self.preset_label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        self.preset_label.setWordWrap(True)
+        self.preset_label.setMinimumWidth(0)
+        self.preset_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         main_settings_layout.addWidget(self.preset_label)
         
         self.preset_combo = QComboBox()
@@ -240,13 +248,16 @@ class SettingsPanel(QWidget):
         
         self.preset_combo.setStyleSheet(self.styles['combo'])
         self.preset_combo.setMinimumHeight(40)
-        self.preset_combo.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        self.preset_combo.setMinimumWidth(0)
+        self.preset_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         main_settings_layout.addWidget(self.preset_combo)
         
         # Разрешение
         self.res_label = QLabel(self.t['resolution'])
         self.res_label.setStyleSheet("font-weight: 500; font-size: 13px; color: #ccc;")
-        self.res_label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        self.res_label.setWordWrap(True)
+        self.res_label.setMinimumWidth(0)
+        self.res_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         main_settings_layout.addWidget(self.res_label)
         
         self.radio_group = QButtonGroup()
@@ -259,17 +270,21 @@ class SettingsPanel(QWidget):
         self.radio_group.addButton(self.radio_1024)
         self.radio_group.addButton(self.radio_2048)
         
-        res_layout = QHBoxLayout()
-        res_layout.setSpacing(8)
-        res_layout.addWidget(self.radio_512)
-        res_layout.addWidget(self.radio_1024)
-        res_layout.addWidget(self.radio_2048)
+        # Сетка вместо одной строки — при узкой колонке не обрезается третий пункт
+        res_layout = QGridLayout()
+        res_layout.setHorizontalSpacing(8)
+        res_layout.setVerticalSpacing(6)
+        res_layout.addWidget(self.radio_512, 0, 0)
+        res_layout.addWidget(self.radio_1024, 0, 1)
+        res_layout.addWidget(self.radio_2048, 1, 0, 1, 2)
         main_settings_layout.addLayout(res_layout)
         
         # Формат VTF
         self.format_label = QLabel(self.t['format_vtf'])
         self.format_label.setStyleSheet("font-weight: 500; font-size: 13px; color: #ccc;")
-        self.format_label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        self.format_label.setWordWrap(True)
+        self.format_label.setMinimumWidth(0)
+        self.format_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         main_settings_layout.addWidget(self.format_label)
         
         self.format_combo = QComboBox()
@@ -304,48 +319,66 @@ class SettingsPanel(QWidget):
         ])
         self.format_combo.setStyleSheet(self.styles['combo'])
         self.format_combo.setMinimumHeight(40)
-        self.format_combo.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        self.format_combo.setMinimumWidth(0)
+        self.format_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         main_settings_layout.addWidget(self.format_combo)
         
         # Имя VPK
         self.filename_label = QLabel(self.t['filename_vpk'])
         self.filename_label.setStyleSheet("font-weight: 500; font-size: 13px; color: #ccc;")
-        self.filename_label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        self.filename_label.setWordWrap(True)
+        self.filename_label.setMinimumWidth(0)
+        self.filename_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         main_settings_layout.addWidget(self.filename_label)
         
         self.filename_input = QLineEdit()
         self.filename_input.setPlaceholderText(self.t['placeholder'])
         self.filename_input.setStyleSheet(self.styles['line_edit'])
         self.filename_input.setMinimumHeight(40)
-        self.filename_input.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        self.filename_input.setMinimumWidth(0)
+        self.filename_input.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         main_settings_layout.addWidget(self.filename_input)
         
         # Сообщение об ошибке валидации
         self.filename_error = QLabel("")
         self.filename_error.setStyleSheet("color: #ff4757; font-size: 11px; padding-top: 4px;")
         self.filename_error.hide()
-        self.filename_error.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        self.filename_error.setWordWrap(True)
+        self.filename_error.setMinimumWidth(0)
+        self.filename_error.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         main_settings_layout.addWidget(self.filename_error)
         
         # Primary CTA - Собрать VPK
         self.button = QPushButton(self.t['build'])
         self.button.setStyleSheet(self.styles['button_primary'])
         self.button.setMinimumHeight(48)
-        self.button.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        self.button.setMinimumWidth(0)
+        self.button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         main_settings_layout.addWidget(self.button)
+
+        self.extract_model_button = QPushButton(
+            self.t.get('extract_model', 'Extract Original Model (SMD)')
+        )
+        self.extract_model_button.setStyleSheet(self.styles['button_secondary'])
+        self.extract_model_button.setMinimumHeight(40)
+        self.extract_model_button.setMinimumWidth(0)
+        self.extract_model_button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        main_settings_layout.addWidget(self.extract_model_button)
         
         # Кнопка извлечения оригинальной текстуры
         self.extract_texture_button = QPushButton(self.t.get('extract_texture', 'Extract Original Texture'))
         self.extract_texture_button.setStyleSheet(self.styles['button_secondary'])
         self.extract_texture_button.setMinimumHeight(40)
-        self.extract_texture_button.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        self.extract_texture_button.setMinimumWidth(0)
+        self.extract_texture_button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         main_settings_layout.addWidget(self.extract_texture_button)
         
         # Кнопка объединения VPK
         self.merge_vpk_button = QPushButton(self.t.get('merge_vpk', 'Сборка в один'))
         self.merge_vpk_button.setStyleSheet(self.styles['button_secondary'])
         self.merge_vpk_button.setMinimumHeight(40)
-        self.merge_vpk_button.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        self.merge_vpk_button.setMinimumWidth(0)
+        self.merge_vpk_button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         main_settings_layout.addWidget(self.merge_vpk_button)
         
         # Добавляем первый контейнер в главный layout
@@ -354,7 +387,8 @@ class SettingsPanel(QWidget):
         # ВТОРОЙ КОНТЕЙНЕР - Секция "Дополнительно"
         # Уменьшаем отступ сверху, чтобы секция была ближе к кнопке "Собрать VPK"
         advanced_container = QWidget()
-        advanced_container.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+        advanced_container.setMinimumWidth(0)
+        advanced_container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         advanced_container_layout = QVBoxLayout(advanced_container)
         # Устанавливаем отрицательный верхний margin для уменьшения отступа от кнопки
         advanced_container_layout.setContentsMargins(0, -4, 0, 0)
@@ -363,8 +397,8 @@ class SettingsPanel(QWidget):
         # Accordion "Дополнительно" в отдельном контейнере
         self.advanced_group = CollapsibleGroup("▶ " + self.t['advanced_title'])
         self.advanced_group.toggle_button.setText("▶ " + self.t['advanced_title'])
-        # Устанавливаем размерную политику, чтобы accordion не растягивался
-        self.advanced_group.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+        self.advanced_group.setMinimumWidth(0)
+        self.advanced_group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         # Устанавливаем минимальную высоту в 0, чтобы при скрытии контента не было проблем
         self.advanced_group.setMinimumHeight(0)
         
@@ -500,6 +534,8 @@ class SettingsPanel(QWidget):
         self.expert_button = QPushButton(self.t['open_editor'])
         self.expert_button.setStyleSheet(self.styles['button_secondary'])
         self.expert_button.setMinimumHeight(36)
+        self.expert_button.setMinimumWidth(0)
+        self.expert_button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.advanced_group.addWidget(self.expert_button)
         
         # Настройки сборки моделей - УДАЛЕНО: перенесено в диалог настроек
@@ -527,8 +563,20 @@ class SettingsPanel(QWidget):
         # Это делается через установку spacing для конкретных элементов
         main_layout.setSpacing(8)
         
+        # Ширина следует за viewport скролла; по вертикали не ниже содержимого
+        self.setMinimumWidth(0)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+
+        self._apply_step2_responsive_radios()
+
         # Добавляем растяжку, чтобы элементы были сверху и не растягивались
         main_layout.addStretch(1)
+
+    def _apply_step2_responsive_radios(self) -> None:
+        """Радиокнопки разрешения: не тянуть лишнюю минимальную ширину из одной длинной строки."""
+        for rb in (self.radio_512, self.radio_1024, self.radio_2048):
+            rb.setMinimumWidth(0)
+            rb.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
     
     def on_crit_hit_selected(self, is_crit_hit):
         """Обработка выбора CritHIT режима"""
@@ -595,6 +643,7 @@ class SettingsPanel(QWidget):
         """Настраивает соединения сигналов"""
         self.expert_button.clicked.connect(self.expert_mode_triggered)
         self.button.clicked.connect(self.build_vpk)
+        self.extract_model_button.clicked.connect(self.extract_model_triggered)
         self.extract_texture_button.clicked.connect(self.extract_texture_triggered)
         self.merge_vpk_button.clicked.connect(self.merge_vpk_triggered)
         self.preset_combo.currentTextChanged.connect(self.apply_preset)
@@ -796,6 +845,10 @@ class SettingsPanel(QWidget):
             return
         if hasattr(self.parent, 'build_vpk'):
             self.parent.build_vpk()
+
+    def extract_model_triggered(self):
+        if hasattr(self.parent, 'extract_original_model'):
+            self.parent.extract_original_model()
     
     def extract_texture_triggered(self):
         """Обработка нажатия кнопки извлечения текстуры"""
@@ -824,6 +877,8 @@ class SettingsPanel(QWidget):
         # Обновляем тексты
         self.expert_button.setText(self.t.get('open_editor', 'Открыть редактор'))
         self.button.setText(self.t.get('build', 'Собрать VPK'))
+        if hasattr(self, 'extract_model_button'):
+            self.extract_model_button.setText(self.t.get('extract_model', 'Extract Original Model (SMD)'))
         self.filename_input.setPlaceholderText(self.t.get('placeholder', 'Имя VPK'))
         
         # Обновляем метки

@@ -515,6 +515,7 @@ class VPKService:
                             raise
                     
                     is_normal_map = False
+                    animated_fps = None
                     if custom_vtf_path:
                         # Если юзер сам сделал VTF - просто копируем его, не генерируем из картинки
                         vtf_file_path = vtf_output_path / vtf_filename
@@ -522,8 +523,6 @@ class VPKService:
                         copy_file_safe(custom_vtf_path, vtf_file_path)
                         logger.info(f"Использован пользовательский VTF файл: {custom_vtf_path} -> {vtf_file_path}")
                     else:
-                        VPKService._process_image(image_path, vtf_temp_png, size)
-                        
                         # Разделяем флаги на опции VTFCmd и флаги VTF (потому что они передаются по-разному)
                         vtf_flags, flags_parsed_options = VPKService._parse_vtf_flags_and_options(flags)
                         
@@ -534,48 +533,45 @@ class VPKService:
                         merged_options.update(flags_parsed_options)
                         
                         is_normal_map = merged_options.get("normal", False)
-                        
-                        # Если normal map включена, создаем обычную текстуру БЕЗ опции normal
-                        # Потом создаем отдельную normal текстуру с суффиксом _normal (это костыль, но так работает Source)
-                        if is_normal_map:
-                            normal_options = merged_options.copy()
-                            normal_options.pop("normal", None)
-                            
-                            # Создаем обычную VTF текстуру без normal опции (это базовая текстура)
-                            VPKService._create_vtf(str(vtf_temp_png), str(vtf_output_path), format_type, vtf_flags, normal_options)
-                            logger.info(f"Создана обычная VTF текстура: {vtf_filename}")
-                            
-                            # Создаем normal VTF текстуру с суффиксом _normal (это для бампмаппинга)
-                            normal_vtf_filename = f"{texture_filename}_normal.vtf"
-                            normal_temp_png = vtf_output_path / f"{texture_filename}_normal.png"
-                            
-                            import shutil
-                            shutil.copy2(vtf_temp_png, normal_temp_png)
-                            
-                            normal_options_normal = {"normal": True}
-                            
-                            # VTFCmd создает файл с именем входного PNG файла, поэтому создаем с правильным именем
-                            # (это баг VTFCmd, но мы обходим его переименованием)
-                            VPKService._create_vtf(str(normal_temp_png), str(vtf_output_path), format_type, [], normal_options_normal)
-                            
-                            # VTFCmd создает VTF файл с именем PNG файла, переименовываем в правильное имя
-                            normal_png_name = normal_temp_png.stem
-                            created_normal_vtf = vtf_output_path / f"{normal_png_name}.vtf"
-                            normal_vtf_path = vtf_output_path / normal_vtf_filename
-                            
-                            if created_normal_vtf.exists():
-                                created_normal_vtf.rename(normal_vtf_path)
-                                logger.info(f"Создана normal VTF текстура: {normal_vtf_filename}")
-                            else:
-                                logger.warning(f"Normal VTF файл не был создан: {created_normal_vtf}")
-                            
-                            if normal_temp_png.exists():
-                                normal_temp_png.unlink()
+
+                        if TextureService.is_animated_image(image_path):
+                            vtf_file_path = vtf_output_path / vtf_filename
+                            animated_fps = TextureService.create_animated_vtf(
+                                image_path,
+                                str(vtf_file_path),
+                                size,
+                                format_type,
+                                vtf_flags,
+                                merged_options
+                            )
+                            logger.info(f"Создана анимированная VTF текстура: {vtf_filename}")
                         else:
-                            VPKService._create_vtf(str(vtf_temp_png), str(vtf_output_path), format_type, vtf_flags, merged_options)
-                        
-                        if vtf_temp_png.exists():
-                            vtf_temp_png.unlink()
+                            VPKService._process_image(image_path, vtf_temp_png, size)
+                            if is_normal_map:
+                                normal_options = merged_options.copy()
+                                normal_options.pop("normal", None)
+                                VPKService._create_vtf(str(vtf_temp_png), str(vtf_output_path), format_type, vtf_flags, normal_options)
+                                logger.info(f"Создана обычная VTF текстура: {vtf_filename}")
+                                normal_vtf_filename = f"{texture_filename}_normal.vtf"
+                                normal_temp_png = vtf_output_path / f"{texture_filename}_normal.png"
+                                import shutil
+                                shutil.copy2(vtf_temp_png, normal_temp_png)
+                                normal_options_normal = {"normal": True}
+                                VPKService._create_vtf(str(normal_temp_png), str(vtf_output_path), format_type, [], normal_options_normal)
+                                normal_png_name = normal_temp_png.stem
+                                created_normal_vtf = vtf_output_path / f"{normal_png_name}.vtf"
+                                normal_vtf_path = vtf_output_path / normal_vtf_filename
+                                if created_normal_vtf.exists():
+                                    created_normal_vtf.rename(normal_vtf_path)
+                                    logger.info(f"Создана normal VTF текстура: {normal_vtf_filename}")
+                                else:
+                                    logger.warning(f"Normal VTF файл не был создан: {created_normal_vtf}")
+                                if normal_temp_png.exists():
+                                    normal_temp_png.unlink()
+                            else:
+                                VPKService._create_vtf(str(vtf_temp_png), str(vtf_output_path), format_type, vtf_flags, merged_options)
+                            if vtf_temp_png.exists():
+                                vtf_temp_png.unlink()
                     
                     # Пробуем извлечь VMT файл, используя оригинальный путь из QC (до патчинга)
                     # Потому что в VPK он лежит по оригинальному пути, а не по патченному
@@ -634,6 +630,9 @@ class VPKService:
                         # Если VMT файл не извлечен, создаем из шаблона (базовый VMT, ничего особенного)
                         VMTService.create_vmt_template_from_cdmaterials(str(vmt_path), patched_cdmaterials_path, texture_filename)
                         logger.info(f"Создан VMT файл из шаблона: {vmt_path}")
+
+                    if animated_fps:
+                        VMTService.enable_animated_basetexture(str(vmt_path), animated_fps)
                     
                     # Если normal map включена, обновляем VMT файл для добавления $bumpmap
                     # (это нужно для бампмаппинга, иначе нормалмап не загрузится)

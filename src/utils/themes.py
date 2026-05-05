@@ -288,6 +288,7 @@ def get_modern_styles():
                 font-weight: 600;
                 border-radius: 4px;
                 min-height: 24px;
+                min-width: 0px;
             }
             QPushButton:hover {
                 background-color: #ff7f4d;
@@ -311,6 +312,7 @@ def get_modern_styles():
                 font-weight: 500;
                 border-radius: 4px;
                 min-height: 24px;
+                min-width: 0px;
             }
             QPushButton:hover {
                 background-color: rgba(255, 255, 255, 0.05);

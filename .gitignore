@@ -1,39 +1,54 @@
+# --- Python ---
 .venv/
 __pycache__/
-*.pyc
+*.py[cod]
 .pytest_cache/
-.coverage
-.coveragerc
-coverage.json
-htmlcov/
-*.log
-*.tmp
-*.spec
 .mypy_cache/
 .ruff_cache/
+
+# Coverage / reports
+.coverage
+coverage.json
+htmlcov/
+
+# Logs / temp
+*.log
+*.tmp
+
+# --- IDE ---
 .vscode/
 .idea/
+
+# --- OS junk ---
 Thumbs.db
 Desktop.ini
 *.lnk
-*.bat
-!run.bat
-!build.bat
-*.ps1
 
-installer/
+# --- Build / packaging outputs (do not upload) ---
 build/
 dist/
-scripts/
-tests/
-
-
+out/
 export/
 exportTest/
 
-config/*.json
+# PyInstaller spec (build recipe) + build scripts
+*.spec
+*.bat
+*.ps1
 
+# Installer scripts / configs
+installer/
+
+# Project-local config with machine paths (commit an example instead)
+config/*.json
+!config/*.example.json
+
+# Temporary / generated tool data
 tools/temp/
 tools/temp_vmt_extract/
 tools/edited_vmt/
-tools/temp/debug/
+
+# Bundled 3rd-party binaries (do not upload)
+tools/crowbar/
+tools/VPK/
+tools/VTF/

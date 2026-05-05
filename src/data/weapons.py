@@ -301,3 +301,8 @@ for class_name, class_weapons in TF2_WEAPONS.items():
                 WEAPON_MDL_PATHS[weapon_key] = f"models/weapons/c_models/{weapon_key}/{weapon_key}.mdl"
             else:
                 WEAPON_MDL_PATHS[weapon_key] = f"models/weapons/c_models/{weapon_key}/{weapon_key}.mdl"
+
+# Модель в VPK лежит в папке базового топора (c_axtinguisher), а не c_axtinguisher_pyro/
+WEAPON_MDL_PATHS["c_axtinguisher_pyro"] = (
+    "models/weapons/c_models/c_axtinguisher/c_axtinguisher_pyro.mdl"
+)
