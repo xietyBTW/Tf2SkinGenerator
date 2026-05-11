@@ -234,24 +234,6 @@ class SettingsPanel(QWidget):
         main_settings_layout.setSpacing(12)
         main_settings_layout.setContentsMargins(0, 0, 0, 0)
         
-        # Пресет
-        self.preset_label = QLabel(self.t['profile_preset'])
-        self.preset_label.setStyleSheet("font-weight: 500; font-size: 13px; color: #ccc;")
-        self.preset_label.setWordWrap(True)
-        self.preset_label.setMinimumWidth(0)
-        self.preset_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        main_settings_layout.addWidget(self.preset_label)
-        
-        self.preset_combo = QComboBox()
-        # Обновляем ключи пресетов, чтобы они брались из translations
-        self.update_preset_items()
-        
-        self.preset_combo.setStyleSheet(self.styles['combo'])
-        self.preset_combo.setMinimumHeight(40)
-        self.preset_combo.setMinimumWidth(0)
-        self.preset_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        main_settings_layout.addWidget(self.preset_combo)
-        
         # Разрешение
         self.res_label = QLabel(self.t['resolution'])
         self.res_label.setStyleSheet("font-weight: 500; font-size: 13px; color: #ccc;")
@@ -261,22 +243,25 @@ class SettingsPanel(QWidget):
         main_settings_layout.addWidget(self.res_label)
         
         self.radio_group = QButtonGroup()
-        self.radio_512 = QRadioButton(self.t['res_normal'])
+        self.radio_256  = QRadioButton(self.t.get('res_256', '256x256 (Spray)'))
+        self.radio_512  = QRadioButton(self.t['res_normal'])
         self.radio_512.setChecked(True)
         self.radio_1024 = QRadioButton(self.t['res_high'])
         self.radio_2048 = QRadioButton(self.t.get('res_ultra', '2048x2048 (Ultra)'))
-        
+
+        self.radio_group.addButton(self.radio_256)
         self.radio_group.addButton(self.radio_512)
         self.radio_group.addButton(self.radio_1024)
         self.radio_group.addButton(self.radio_2048)
-        
-        # Сетка вместо одной строки — при узкой колонке не обрезается третий пункт
+
+        # 2×2 сетка: 256/512 в первой строке, 1024/2048 во второй
         res_layout = QGridLayout()
         res_layout.setHorizontalSpacing(8)
         res_layout.setVerticalSpacing(6)
-        res_layout.addWidget(self.radio_512, 0, 0)
-        res_layout.addWidget(self.radio_1024, 0, 1)
-        res_layout.addWidget(self.radio_2048, 1, 0, 1, 2)
+        res_layout.addWidget(self.radio_256,  0, 0)
+        res_layout.addWidget(self.radio_512,  0, 1)
+        res_layout.addWidget(self.radio_1024, 1, 0)
+        res_layout.addWidget(self.radio_2048, 1, 1)
         main_settings_layout.addLayout(res_layout)
         
         # Формат VTF
@@ -521,6 +506,7 @@ class SettingsPanel(QWidget):
         self.advanced_group.addWidget(self.uv_layout_widget)
         
         # Обновляем разрешение UV при изменении разрешения текстуры
+        self.radio_256.toggled.connect(self._update_uv_resolution_label)
         self.radio_512.toggled.connect(self._update_uv_resolution_label)
         self.radio_1024.toggled.connect(self._update_uv_resolution_label)
         self.radio_2048.toggled.connect(self._update_uv_resolution_label)
@@ -589,7 +575,7 @@ class SettingsPanel(QWidget):
 
     def _apply_step2_responsive_radios(self) -> None:
         """Радиокнопки разрешения: не тянуть лишнюю минимальную ширину из одной длинной строки."""
-        for rb in (self.radio_512, self.radio_1024, self.radio_2048):
+        for rb in (self.radio_256, self.radio_512, self.radio_1024, self.radio_2048):
             rb.setMinimumWidth(0)
             rb.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
     
@@ -661,7 +647,6 @@ class SettingsPanel(QWidget):
         self.extract_model_button.clicked.connect(self.extract_model_triggered)
         self.extract_texture_button.clicked.connect(self.extract_texture_triggered)
         self.merge_vpk_button.clicked.connect(self.merge_vpk_triggered)
-        self.preset_combo.currentTextChanged.connect(self.apply_preset)
         self.filename_input.textChanged.connect(self.validate_vpk_name)
         # Подключаем сигнал сворачивания/разворачивания секции "Дополнительно"
         self.advanced_group.toggled.connect(self.on_advanced_toggled)
@@ -717,7 +702,9 @@ class SettingsPanel(QWidget):
             preset = self.presets[preset_name]
             
             # Устанавливаем разрешение
-            if preset["resolution"] == 512:
+            if preset["resolution"] == 256:
+                self.radio_256.setChecked(True)
+            elif preset["resolution"] == 512:
                 self.radio_512.setChecked(True)
             elif preset["resolution"] == 1024:
                 self.radio_1024.setChecked(True)
@@ -773,7 +760,9 @@ class SettingsPanel(QWidget):
     
     def get_settings(self):
         """Возвращает текущие настройки"""
-        if self.radio_2048.isChecked():
+        if self.radio_256.isChecked():
+            size = (256, 256)
+        elif self.radio_2048.isChecked():
             size = (2048, 2048)
         elif self.radio_1024.isChecked():
             size = (1024, 1024)
@@ -935,7 +924,6 @@ class SettingsPanel(QWidget):
         
         # Обновляем метки
         self.step_label.setText(self.t['step_2_export'])
-        self.preset_label.setText(self.t['profile_preset'])
         self.res_label.setText(self.t['resolution'])
         self.format_label.setText(self.t['format_vtf'])
         self.filename_label.setText(self.t['filename_vpk'])
@@ -943,6 +931,8 @@ class SettingsPanel(QWidget):
         self.tools_label.setText(self.t['tools'])
         
         # Обновляем радио кнопки
+        if hasattr(self, 'radio_256'):
+            self.radio_256.setText(self.t.get('res_256', '256x256 (Spray)'))
         self.radio_512.setText(self.t['res_normal'])
         self.radio_1024.setText(self.t['res_high'])
         if hasattr(self, 'radio_2048'):
@@ -974,12 +964,6 @@ class SettingsPanel(QWidget):
         prefix = "▼ " if self.advanced_group.is_expanded else "▶ "
         self.advanced_group.toggle_button.setText(prefix + self.t['advanced_title'])
         
-        # Обновляем список пресетов (сохраняя текущий выбор по индексу)
-        current_idx = self.preset_combo.currentIndex()
-        self.update_preset_items()
-        if current_idx >= 0 and current_idx < self.preset_combo.count():
-            self.preset_combo.setCurrentIndex(current_idx)
-        
         # Обновляем кнопку извлечения текстуры
         if hasattr(self, 'extract_texture_button'):
             self.extract_texture_button.setText(self.t.get('extract_texture', 'Extract Original Texture'))
@@ -996,25 +980,6 @@ class SettingsPanel(QWidget):
         if hasattr(self, 'filename_error') and self.filename_error.isVisible():
             self.validate_vpk_name()
 
-    def update_preset_items(self):
-        """Обновляет список пресетов на текущем языке"""
-        self.preset_combo.clear()
-        
-        # Маппинг отображения
-        display_names = [
-            self.t['preset_normal'],
-            self.t['preset_hq'], 
-            self.t['preset_hud'],
-            self.t['preset_neon']
-        ]
-        
-        # Поскольку ключи в self.presets сейчас русские, а мы переводим отображение,
-        # нам нужно просто пересоздать элементы комбобокса с новыми именами, но в том же порядке.
-        # Порядок ключей в self.presets['Обычный', 'HQ', 'HUD/иконки', 'Neon'] (Python 3.7+ сохраняет порядок вставки)
-        
-        # Просто добавляем переведенные имена
-        self.preset_combo.addItems(display_names)
-    
     def _update_uv_resolution_label(self):
         """Обновляет метку разрешения UV разметки в зависимости от выбранного разрешения текстуры"""
         if hasattr(self, 'uv_resolution_label'):
@@ -1022,5 +987,7 @@ class SettingsPanel(QWidget):
                 self.uv_resolution_label.setText("(2048x2048)")
             elif self.radio_1024.isChecked():
                 self.uv_resolution_label.setText("(1024x1024)")
+            elif self.radio_256.isChecked():
+                self.uv_resolution_label.setText("(256x256)")
             else:
                 self.uv_resolution_label.setText("(512x512)")

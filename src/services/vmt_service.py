@@ -63,6 +63,10 @@ class VMTService:
                 rel_path = os.path.join("materials", "effects")
                 vmt_filename = "crit.vmt"
                 vtf_filename = "crit.vtf"
+            elif mode == "spray":
+                rel_path = os.path.join("materials", "vgui", "logos")
+                vmt_filename = "spray.vmt"
+                vtf_filename = "spray.vtf"
             else:
                 # Для других специальных режимов (если будут добавлены новые)
                 rel_path = os.path.join("materials", "effects")
@@ -412,6 +416,16 @@ class VMTService:
 \t"$basetexture" "effects/crit"
 \t"$additive" 1
 \t"$translucent" 1
+}'''
+        if mode == "spray":
+            return '''"UnlitGeneric"
+{
+\t"$basetexture" "vgui/logos/spray"
+\t"$translucent" "1"
+\t"$vertexcolor" "1"
+\t"$vertexalpha" "1"
+\t"$decal" "1"
+\t"$decalscale" "0.25"
 }'''
         return f'''"UnlitGeneric"
 {{

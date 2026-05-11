@@ -28,7 +28,8 @@ class AppConfig:
         "last_format": "DXT1",
         "last_flags": [],
         "keep_temp_on_error": False,
-        "debug_mode": False
+        "debug_mode": False,
+        "window_geometry": None,
     }
     
     @staticmethod

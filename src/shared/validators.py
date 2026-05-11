@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 from typing import Tuple, Optional, List
 from src.data.weapons import SPECIAL_MODES
+from src.data.player_hands import HAND_MODE_KEYS
 from .constants import ValidationLimits, VTFFormat, Resolution
 from .exceptions import InvalidFilenameError, InvalidImageError, ValidationError
 
@@ -278,7 +279,9 @@ def validate_build_params(
     ]
     if format_type not in valid_formats:
         return t['error_format_invalid'].format(format=format_type, formats=', '.join(valid_formats))
-    if mode not in SPECIAL_MODES.values():
+    # Hand modes and special modes don't need TF2 installation (no model extraction)
+    _no_tf2_needed = mode in SPECIAL_MODES.values() or mode in HAND_MODE_KEYS
+    if not _no_tf2_needed:
         if not tf2_root_dir or not isinstance(tf2_root_dir, str):
             return t['error_tf2_required']
         if not os.path.exists(tf2_root_dir):
