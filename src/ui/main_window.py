@@ -862,6 +862,24 @@ class MainWindow(QMainWindow):
                 )
                 return
             
+            # Очищаем старый воркер если он есть — отключаем все его сигналы чтобы
+            # избежать дубльных вызовов каллбаков при повторной сборке
+            if hasattr(self, '_build_worker') and self._build_worker is not None:
+                try:
+                    self._build_worker.finished.disconnect()
+                    self._build_worker.progress.disconnect()
+                    self._build_worker.sub_progress.disconnect()
+                    self._build_worker.error.disconnect()
+                    self._build_worker.request_extra_texture.disconnect()
+                    if hasattr(self._build_worker, 'request_model_file'):
+                        self._build_worker.request_model_file.disconnect()
+                    if hasattr(self._build_worker, 'request_extra_model'):
+                        self._build_worker.request_extra_model.disconnect()
+                except Exception:
+                    pass  # Игнорируем если уже отключено
+                self._build_worker.deleteLater()
+                self._build_worker = None
+            
             # Создаем и запускаем воркер для асинхронной сборки
             from src.services.build_worker import BuildWorker
             
@@ -880,28 +898,25 @@ class MainWindow(QMainWindow):
                 replace_model_enabled=replace_model_enabled,
                 draw_uv_layout=draw_uv_layout,
                 language=self.language,
-                custom_vtf_path=custom_vtf_path,
-                parent=self
+                custom_vtf_path=custom_vtf_path
+                # Без parent=self ! Если дать parent=self, Qt станет владельцем
+                # и не удалит старый воркер при замене, и сигналы будут дублироваться.
             )
             
             # Подключаем сигналы
             self._build_worker.finished.connect(self._on_build_finished)
             self._build_worker.progress.connect(self._on_build_progress)
+            self._build_worker.sub_progress.connect(self._on_build_sub_progress)
             self._build_worker.error.connect(self._on_build_error)
+            self._build_worker.request_extra_texture.connect(self._on_request_extra_texture)
             if replace_model_enabled:
                 self._build_worker.request_model_file.connect(self._on_request_model_file)
+                self._build_worker.request_extra_model.connect(self._on_request_extra_model)
             
-            # Создаем и показываем прогресс-диалог
-            progress_text = self.t.get('build_progress_text', 'Building VPK...')
-            cancel_text = self.t.get('cancel', 'Cancel')
-            progress_title = self.t.get('build_progress_title', 'Build VPK')
-            
-            self._progress_dialog = QProgressDialog(progress_text, cancel_text, 0, 100, self)
-            self._progress_dialog.setWindowTitle(progress_title)
-            self._progress_dialog.setWindowModality(Qt.WindowModal)
-            self._progress_dialog.setAutoClose(False)
-            self._progress_dialog.setAutoReset(False)
-            self._progress_dialog.canceled.connect(self._cancel_build)
+            # Создаем и показываем кастомный прогресс-диалог
+            from src.ui.build_progress_dialog import BuildProgressDialog
+            self._progress_dialog = BuildProgressDialog(self, language=self.language)
+            self._progress_dialog.cancel_requested.connect(self._cancel_build)
             
             # Запускаем воркер
             self._build_worker.start()
@@ -912,7 +927,7 @@ class MainWindow(QMainWindow):
                 self.settings_panel.button.setEnabled(False)
 
         except Exception as e:
-            ErrorHandler.show_error(self, e, "Ошибка при запуске сборки VPK", self.t['build_error'])
+            ErrorHandler.show_error(self, e, self.t.get('build_error', 'Build error'), self.t['build_error'], language=self.language)
     
     def _on_build_finished(self, success: bool, message: str):
         """Обработчик завершения сборки"""
@@ -928,14 +943,19 @@ class MainWindow(QMainWindow):
             success_title = self.t.get('build_success', 'Success')
             ErrorHandler.show_info(self, message, success_title)
         else:
-            ErrorHandler.show_error(self, Exception(message), "Ошибка сборки VPK", self.t['build_error'])
+            ErrorHandler.show_error(self, Exception(message), self.t.get('build_error', 'Build error'), self.t['build_error'], language=self.language)
     
     def _on_build_progress(self, percentage: int, status: str):
         """Обработчик прогресса сборки"""
         if hasattr(self, '_progress_dialog'):
             self._progress_dialog.setValue(percentage)
             self._progress_dialog.setLabelText(status)
-    
+
+    def _on_build_sub_progress(self, percentage: int, label: str):
+        """Обработчик детального прогресса текущего шага сборки"""
+        if hasattr(self, '_progress_dialog') and self._progress_dialog:
+            self._progress_dialog.set_sub_progress(percentage, label)
+
     def _on_build_error(self, error_message: str):
         """Обработчик ошибки сборки"""
         if hasattr(self, '_progress_dialog'):
@@ -946,14 +966,13 @@ class MainWindow(QMainWindow):
         if hasattr(self.settings_panel, 'button'):
             self.settings_panel.button.setEnabled(True)
         
-        ErrorHandler.show_error(self, Exception(error_message), "Ошибка сборки VPK", self.t['error'])
+        ErrorHandler.show_error(self, Exception(error_message), self.t.get('build_error', 'Build error'), self.t.get('build_error', 'Build error'), language=self.language)
     
     def _cancel_build(self) -> None:
         """Отменяет сборку"""
         if hasattr(self, '_build_worker') and self._build_worker.isRunning():
-            if hasattr(self, '_progress_dialog'):
-                self._progress_dialog.setLabelText(self.t.get('cancelling', 'Cancelling...'))
-                self._progress_dialog.setCancelButton(None)
+            if hasattr(self, '_progress_dialog') and self._progress_dialog:
+                self._progress_dialog.mark_cancelling()
             self._build_worker.requestInterruption()
     
     def _on_request_model_file(self) -> None:
@@ -972,6 +991,102 @@ class MainWindow(QMainWindow):
         # Устанавливаем результат в воркере
         if hasattr(self._build_worker, 'set_model_file_result'):
             self._build_worker.set_model_file_result(file_path if file_path else None)
+
+    def _on_request_extra_texture(self, material_name: str, weapon_key: str) -> None:
+        """
+        Обрабатывает запрос дополнительного изображения для материала модели.
+        Показывает диалог: хочет ли пользователь загрузить отдельное изображение
+        для дополнительного материала (shell, scope и т.д.)
+        """
+        if not hasattr(self, '_build_worker'):
+            return
+        
+        # Спрашиваем пользователя
+        from PySide6.QtWidgets import QMessageBox
+        
+        msg_title = self.t.get('extra_texture_title', 'Additional Texture')
+        msg_text = self.t.get(
+            'extra_texture_question',
+            'The weapon model has an additional material: "{material}".\n'
+            'Do you want to provide a separate image for it?\n\n'
+            'If you click "No", the main texture will be used for this material.'
+        ).format(material=material_name)
+        
+        reply = QMessageBox.question(
+            self,
+            msg_title,
+            msg_text,
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        file_path = None
+        if reply == QMessageBox.Yes:
+            # Показываем диалог выбора файла
+            dialog_title = self.t.get(
+                'extra_texture_select',
+                'Select image for "{material}"'
+            ).format(material=material_name)
+            
+            file_path, _ = QFileDialog.getOpenFileName(
+                self,
+                dialog_title,
+                "",
+                self.t.get('images_filter', 'Images') + " (*.png *.jpg *.jpeg *.bmp *.gif *.tga *.vtf);;All Files (*)"
+            )
+            if not file_path:
+                file_path = None
+        
+        # Устанавливаем результат в воркере
+        if hasattr(self._build_worker, 'set_extra_texture_result'):
+            self._build_worker.set_extra_texture_result(file_path)
+
+    def _on_request_extra_model(self, smd_name: str, weapon_key: str) -> None:
+        """
+        Обрабатывает запрос дополнительного SMD файла для части модели.
+        Показывает диалог: хочет ли пользователь загрузить отдельную модель
+        для дополнительной части (shell, scope и т.д.)
+        """
+        if not hasattr(self, '_build_worker'):
+            return
+        
+        from PySide6.QtWidgets import QMessageBox
+        
+        msg_title = self.t.get('extra_model_title', 'Additional Model Part')
+        msg_text = self.t.get(
+            'extra_model_question',
+            'The weapon has an additional model part: "{smd_name}".\n'
+            'Do you want to provide a replacement SMD file for it?\n\n'
+            'If you click "No", the original game model will be used for this part.'
+        ).format(smd_name=smd_name)
+        
+        reply = QMessageBox.question(
+            self,
+            msg_title,
+            msg_text,
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        file_path = None
+        if reply == QMessageBox.Yes:
+            dialog_title = self.t.get(
+                'extra_model_select',
+                'Select SMD file for "{smd_name}"'
+            ).format(smd_name=smd_name)
+            
+            file_path, _ = QFileDialog.getOpenFileName(
+                self,
+                dialog_title,
+                "",
+                "SMD Files (*.smd);;All Files (*)"
+            )
+            if not file_path:
+                file_path = None
+        
+        if hasattr(self._build_worker, 'set_extra_model_result'):
+            self._build_worker.set_extra_model_result(file_path)
+
 
     def extract_original_model(self) -> None:
         try:

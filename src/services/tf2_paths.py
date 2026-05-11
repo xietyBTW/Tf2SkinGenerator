@@ -26,14 +26,14 @@ class TF2Paths:
             FileNotFoundError: Если какой-то файл не найден
         """
         if not os.path.exists(tf2_root_dir):
-            raise FileNotFoundError(f"TF2 корневая директория не найдена: {tf2_root_dir}")
+            raise FileNotFoundError(f"TF2 root directory not found: {tf2_root_dir}")
         
         # Путь к studiomdl.exe
         studiomdl_exe = os.path.join(tf2_root_dir, "bin", "studiomdl.exe")
         if not os.path.exists(studiomdl_exe):
             raise FileNotFoundError(
-                f"studiomdl.exe не найден по пути: {studiomdl_exe}\n"
-                f"Ожидаемый путь: <tf2_root_dir>\\bin\\studiomdl.exe"
+                f"studiomdl.exe not found at: {studiomdl_exe}\n"
+                f"Expected path: <tf2_root_dir>\\bin\\studiomdl.exe"
             )
         
         # Путь к tf2_misc_dir.vpk
@@ -41,8 +41,8 @@ class TF2Paths:
         tf2_misc_dir_vpk = os.path.join(tf_dir, "tf2_misc_dir.vpk")
         if not os.path.exists(tf2_misc_dir_vpk):
             raise FileNotFoundError(
-                f"tf2_misc_dir.vpk не найден по пути: {tf2_misc_dir_vpk}\n"
-                f"Ожидаемый путь: <tf2_root_dir>\\tf\\tf2_misc_dir.vpk"
+                f"tf2_misc_dir.vpk not found at: {tf2_misc_dir_vpk}\n"
+                f"Expected path: <tf2_root_dir>\\tf\\tf2_misc_dir.vpk"
             )
         
         # Путь к tf2_textures_dir.vpk (для извлечения VMT файлов)

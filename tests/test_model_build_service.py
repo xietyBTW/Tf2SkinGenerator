@@ -1,3 +1,4 @@
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -144,23 +145,24 @@ class ModelBuildServiceTests(unittest.TestCase):
             updated = qc.read_text(encoding="utf-8")
             self.assertIn("console\\models\\c_models", updated)
             self.assertNotIn("$lod", updated.lower())
-    def test_extract_texturegroup_all_columns_red_and_blue(self):
-        """Тест: texturegroup с двумя столбцами (RED и BLU)"""
+    def test_extract_texturegroup_all_columns_with_extra_materials(self):
+        """Тест: texturegroup со столбцами = доп. материалы (body + shell)"""
         content = "\n".join([
             "$texturegroup \"skinfamilies\"",
             "{",
-            "{ \"c_rocketlauncher\" \"c_rocketlauncher_blue\" }",
-            "{ \"c_rocketlauncher_gold\" \"c_rocketlauncher_gold_blue\" }",
+            "{ \"c_flaregun\" \"c_flaregun_shell\" }",
+            "{ \"c_flaregun_blue\" \"c_flaregun_shell_blue\" }",
             "}",
         ])
         with tempfile.TemporaryDirectory() as tmp:
             qc = Path(tmp) / "a.qc"
             qc.write_text(content, encoding="utf-8")
+            # extract_texturegroup_all_columns возвращает RED строку (все столбцы)
             columns = ModelBuildService.extract_texturegroup_all_columns(str(qc))
-            self.assertEqual(columns, ["c_rocketlauncher", "c_rocketlauncher_blue"])
+            self.assertEqual(columns, ["c_flaregun", "c_flaregun_shell"])
     
-    def test_extract_texturegroup_all_columns_single(self):
-        """Тест: texturegroup с одним столбцом (только RED, без BLU)"""
+    def test_extract_texturegroup_all_columns_single_material(self):
+        """Тест: texturegroup с одним столбцом (одним материалом)"""
         content = "\n".join([
             "$texturegroup \"skinfamilies\"",
             "{",
@@ -187,21 +189,239 @@ class ModelBuildServiceTests(unittest.TestCase):
         content = "\n".join([
             "$texturegroup \"skinfamilies\"",
             "{",
-            "{ \"c_weapon_gold\" \"c_weapon_gold_blue\" }",
-            "{ \"c_weapon\" \"c_weapon_blue\" }",
+            "{ \"c_weapon_gold\" }",
+            "{ \"c_weapon\" }",
             "}",
         ])
         with tempfile.TemporaryDirectory() as tmp:
             qc = Path(tmp) / "a.qc"
             qc.write_text(content, encoding="utf-8")
             columns = ModelBuildService.extract_texturegroup_all_columns(str(qc))
-            # Должен выбрать базовую строку (без _gold), а не первую
-            self.assertEqual(columns, ["c_weapon", "c_weapon_blue"])
+            # Должен выбрать базовую строку (без _gold)
+            self.assertEqual(columns, ["c_weapon"])
     
     def test_extract_texturegroup_all_columns_file_not_found(self):
         """Тест: несуществующий QC файл"""
         columns = ModelBuildService.extract_texturegroup_all_columns("/nonexistent/path.qc")
         self.assertEqual(columns, [])
+    
+    # === Тесты для extract_texturegroup_structure ===
+    
+    def test_extract_texturegroup_structure_with_teams_and_extras(self):
+        """Тест: полная структура с RED/BLU командами и доп. материалами"""
+        content = "\n".join([
+            "$texturegroup \"skinfamilies\"",
+            "{",
+            "{ \"c_flaregun\" \"c_flaregun_shell\" }",
+            "{ \"c_flaregun_blue\" \"c_flaregun_shell_blue\" }",
+            "}",
+        ])
+        with tempfile.TemporaryDirectory() as tmp:
+            qc = Path(tmp) / "a.qc"
+            qc.write_text(content, encoding="utf-8")
+            info = ModelBuildService.extract_texturegroup_structure(str(qc))
+            
+            self.assertEqual(info['red_row'], ["c_flaregun", "c_flaregun_shell"])
+            self.assertEqual(info['blu_row'], ["c_flaregun_blue", "c_flaregun_shell_blue"])
+            self.assertEqual(info['main_texture'], "c_flaregun")
+            self.assertEqual(info['extra_materials'], ["c_flaregun_shell"])
+    
+    def test_extract_texturegroup_structure_teams_only(self):
+        """Тест: RED/BLU команды без доп. материалов"""
+        content = "\n".join([
+            "$texturegroup \"skinfamilies\"",
+            "{",
+            "{ \"c_rocketlauncher\" }",
+            "{ \"c_rocketlauncher_blue\" }",
+            "}",
+        ])
+        with tempfile.TemporaryDirectory() as tmp:
+            qc = Path(tmp) / "a.qc"
+            qc.write_text(content, encoding="utf-8")
+            info = ModelBuildService.extract_texturegroup_structure(str(qc))
+            
+            self.assertEqual(info['red_row'], ["c_rocketlauncher"])
+            self.assertEqual(info['blu_row'], ["c_rocketlauncher_blue"])
+            self.assertEqual(info['main_texture'], "c_rocketlauncher")
+            self.assertEqual(info['extra_materials'], [])
+    
+    def test_extract_texturegroup_structure_no_teams(self):
+        """Тест: нет BLU команды (только одна строка)"""
+        content = "\n".join([
+            "$texturegroup \"skinfamilies\"",
+            "{",
+            "{ \"c_scattergun\" }",
+            "}",
+        ])
+        with tempfile.TemporaryDirectory() as tmp:
+            qc = Path(tmp) / "a.qc"
+            qc.write_text(content, encoding="utf-8")
+            info = ModelBuildService.extract_texturegroup_structure(str(qc))
+            
+            self.assertEqual(info['red_row'], ["c_scattergun"])
+            self.assertEqual(info['blu_row'], [])
+            self.assertEqual(info['main_texture'], "c_scattergun")
+            self.assertEqual(info['extra_materials'], [])
+    
+    def test_extract_texturegroup_structure_with_gold_variants(self):
+        """Тест: RED/BLU + gold варианты (gold строки должны игнорироваться)"""
+        content = "\n".join([
+            "$texturegroup \"skinfamilies\"",
+            "{",
+            "{ \"c_rocketlauncher\" }",
+            "{ \"c_rocketlauncher_blue\" }",
+            "{ \"c_rocketlauncher_gold\" }",
+            "{ \"c_rocketlauncher_gold_blue\" }",
+            "}",
+        ])
+        with tempfile.TemporaryDirectory() as tmp:
+            qc = Path(tmp) / "a.qc"
+            qc.write_text(content, encoding="utf-8")
+            info = ModelBuildService.extract_texturegroup_structure(str(qc))
+            
+            # Gold строки должны быть отфильтрованы
+            self.assertEqual(info['red_row'], ["c_rocketlauncher"])
+            self.assertEqual(info['blu_row'], ["c_rocketlauncher_blue"])
+            self.assertEqual(info['extra_materials'], [])
+            self.assertEqual(len(info['all_rows']), 4)
+    
+    def test_extract_texturegroup_structure_extras_only(self):
+        """Тест: доп. материалы без BLU команды"""
+        content = "\n".join([
+            "$texturegroup \"skinfamilies\"",
+            "{",
+            "{ \"c_flaregun\" \"c_flaregun_shell\" }",
+            "}",
+        ])
+        with tempfile.TemporaryDirectory() as tmp:
+            qc = Path(tmp) / "a.qc"
+            qc.write_text(content, encoding="utf-8")
+            info = ModelBuildService.extract_texturegroup_structure(str(qc))
+            
+            self.assertEqual(info['red_row'], ["c_flaregun", "c_flaregun_shell"])
+            self.assertEqual(info['blu_row'], [])
+            self.assertEqual(info['main_texture'], "c_flaregun")
+            self.assertEqual(info['extra_materials'], ["c_flaregun_shell"])
+    
+    def test_extract_texturegroup_structure_empty(self):
+        """Тест: нет $texturegroup"""
+        with tempfile.TemporaryDirectory() as tmp:
+            qc = Path(tmp) / "a.qc"
+            qc.write_text("$modelname \"x\"", encoding="utf-8")
+            info = ModelBuildService.extract_texturegroup_structure(str(qc))
+            
+            self.assertEqual(info['red_row'], [])
+            self.assertEqual(info['blu_row'], [])
+            self.assertIsNone(info['main_texture'])
+            self.assertEqual(info['extra_materials'], [])
+
+    # === Тесты для extract_extra_body_smds ===
+    
+    def test_extract_extra_body_smds_with_shell(self):
+        """Тест: модель с дополнительной частью (shell)"""
+        qc_content = "\n".join([
+            "$modelname \"weapons/c_flaregun.mdl\"",
+            "$body studio \"c_flaregun_reference.smd\"",
+            "$bodygroup \"shell\"",
+            "{",
+            "    studio \"c_flaregun_shell.smd\"",
+            "    blank",
+            "}",
+        ])
+        with tempfile.TemporaryDirectory() as tmp:
+            qc = Path(tmp) / "c_flaregun.qc"
+            qc.write_text(qc_content, encoding="utf-8")
+            # Создаем SMD файлы чтобы extract нашел их
+            (Path(tmp) / "c_flaregun_reference.smd").write_text("version 1", encoding="utf-8")
+            (Path(tmp) / "c_flaregun_shell.smd").write_text("version 1", encoding="utf-8")
+            
+            extras = ModelBuildService.extract_extra_body_smds(str(qc), "c_flaregun")
+            self.assertEqual(len(extras), 1)
+            self.assertIn("c_flaregun_shell.smd", os.path.basename(extras[0]))
+    
+    def test_extract_extra_body_smds_no_extras(self):
+        """Тест: модель без дополнительных частей"""
+        qc_content = "\n".join([
+            "$modelname \"weapons/c_bat.mdl\"",
+            "$body studio \"c_bat_reference.smd\"",
+        ])
+        with tempfile.TemporaryDirectory() as tmp:
+            qc = Path(tmp) / "c_bat.qc"
+            qc.write_text(qc_content, encoding="utf-8")
+            (Path(tmp) / "c_bat_reference.smd").write_text("version 1", encoding="utf-8")
+            
+            extras = ModelBuildService.extract_extra_body_smds(str(qc), "c_bat")
+            self.assertEqual(extras, [])
+    
+    def test_extract_extra_body_smds_filters_physics_and_anim(self):
+        """Тест: physics и animation файлы должны быть отфильтрованы"""
+        qc_content = "\n".join([
+            "$modelname \"weapons/c_flaregun.mdl\"",
+            "$body studio \"c_flaregun_reference.smd\"",
+            "$bodygroup \"shell\"",
+            "{",
+            "    studio \"c_flaregun_shell.smd\"",
+            "}",
+            "$collisionmodel \"c_flaregun_physics.smd\"",
+            "{",
+            "}",
+        ])
+        with tempfile.TemporaryDirectory() as tmp:
+            qc = Path(tmp) / "c_flaregun.qc"
+            qc.write_text(qc_content, encoding="utf-8")
+            (Path(tmp) / "c_flaregun_reference.smd").write_text("version 1", encoding="utf-8")
+            (Path(tmp) / "c_flaregun_shell.smd").write_text("version 1", encoding="utf-8")
+            (Path(tmp) / "c_flaregun_physics.smd").write_text("version 1", encoding="utf-8")
+            
+            extras = ModelBuildService.extract_extra_body_smds(str(qc), "c_flaregun")
+            self.assertEqual(len(extras), 1)
+            self.assertIn("c_flaregun_shell.smd", os.path.basename(extras[0]))
+    
+    def test_extract_extra_body_smds_missing_file(self):
+        """Тест: если SMD файл указан в QC, но не существует - пропускаем"""
+        qc_content = "\n".join([
+            "$body studio \"c_weapon_reference.smd\"",
+            "$bodygroup \"shell\"",
+            "{",
+            "    studio \"c_weapon_shell.smd\"",
+            "}",
+        ])
+        with tempfile.TemporaryDirectory() as tmp:
+            qc = Path(tmp) / "c_weapon.qc"
+            qc.write_text(qc_content, encoding="utf-8")
+            (Path(tmp) / "c_weapon_reference.smd").write_text("version 1", encoding="utf-8")
+            # НЕ создаем c_weapon_shell.smd
+            
+            extras = ModelBuildService.extract_extra_body_smds(str(qc), "c_weapon")
+            self.assertEqual(extras, [])
+    
+    def test_extract_extra_body_smds_multiple_bodygroups(self):
+        """Тест: модель с несколькими bodygroup"""
+        qc_content = "\n".join([
+            "$body studio \"c_weapon_reference.smd\"",
+            "$bodygroup \"shell\"",
+            "{",
+            "    studio \"c_weapon_shell.smd\"",
+            "    blank",
+            "}",
+            "$bodygroup \"scope\"",
+            "{",
+            "    studio \"c_weapon_scope.smd\"",
+            "    blank",
+            "}",
+        ])
+        with tempfile.TemporaryDirectory() as tmp:
+            qc = Path(tmp) / "c_weapon.qc"
+            qc.write_text(qc_content, encoding="utf-8")
+            (Path(tmp) / "c_weapon_reference.smd").write_text("version 1", encoding="utf-8")
+            (Path(tmp) / "c_weapon_shell.smd").write_text("version 1", encoding="utf-8")
+            (Path(tmp) / "c_weapon_scope.smd").write_text("version 1", encoding="utf-8")
+            
+            extras = ModelBuildService.extract_extra_body_smds(str(qc), "c_weapon")
+            self.assertEqual(len(extras), 2)
+            basenames = [os.path.basename(e) for e in extras]
+            self.assertIn("c_weapon_shell.smd", basenames)
+            self.assertIn("c_weapon_scope.smd", basenames)
 
 
 if __name__ == "__main__":

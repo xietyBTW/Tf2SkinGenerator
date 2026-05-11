@@ -1,257 +1,310 @@
+"""
+SMD сервис — замена секций nodes/skeleton/material в SMD файлах.
+
+Оптимизирован для больших файлов:
+- Читаем файл один раз через readlines() (O(1) alloc)
+- Пишем через writelines() вместо join() больших строк
+- Используем индексы вместо slice-копий строк при парсинге
+"""
+
 import os
-import re
-from typing import Optional, Tuple
+import time
+from typing import Callable, List, Optional, Tuple
 
 
 class SMDService:
-    
+
     @staticmethod
     def replace_model_sections(
         user_smd_path: str,
         original_smd_path: str,
-        output_smd_path: Optional[str] = None
+        output_smd_path: Optional[str] = None,
+        progress_cb: Optional[Callable[[int], None]] = None,
     ) -> str:
         """
-        Заменяет секции nodes и названия материалов в пользовательском SMD файле
-        на соответствующие из исходного SMD файла игры.
-        
-        Нужно потому что юзерская модель может иметь другие nodes (костяк модели) и названия материалов,
-        а нам нужны оригинальные из игры, иначе модель не скомпилируется или текстуры не загрузятся.
-        Это костыль, но так работает - берем геометрию от юзера, костяк от оригинала.
-        
+        Заменяет секции nodes/skeleton и названия материалов в пользовательском SMD
+        на соответствующие из оригинального SMD игры.
+
         Args:
-            user_smd_path: Путь к SMD файлу пользователя (с его данными треугольников - это то, что юзер хочет заменить)
-            original_smd_path: Путь к исходному SMD файлу из игры (с nodes и названиями материалов - это эталон)
-            output_smd_path: Путь для сохранения результата (если None, перезаписывает user_smd_path)
-            
+            user_smd_path:     Путь к SMD пользователя (геометрия)
+            original_smd_path: Путь к оригинальному SMD из игры (bones, skeleton, materials)
+            output_smd_path:   Куда записать результат (None = перезаписать user_smd_path)
+            progress_cb:       Опциональный callback(pct: int 0-100). Вызывается с троттлингом
+                               ~60 fps, чтобы не замедлять парсинг.
         Returns:
-            Путь к обработанному файлу
-            
-        Raises:
-            FileNotFoundError: Если один из файлов не найден
-            ValueError: Если файлы не являются валидными SMD (не удалось распарсить)
+            Путь к записанному файлу.
         """
         if not os.path.exists(user_smd_path):
-            raise FileNotFoundError(f"Пользовательский SMD файл не найден: {user_smd_path}")
-        
+            raise FileNotFoundError(f"User SMD not found: {user_smd_path}")
         if not os.path.exists(original_smd_path):
-            raise FileNotFoundError(f"Исходный SMD файл не найден: {original_smd_path}")
-        
+            raise FileNotFoundError(f"Original SMD not found: {original_smd_path}")
+
+        # Throttle: не чаще 60 fps, чтобы сигнал не съедал время парсинга
+        _THROTTLE = 0.016
+        _last_cb: List[float] = [0.0]
+
+        def _cb(pct: int) -> None:
+            if progress_cb is None:
+                return
+            now = time.monotonic()
+            if now - _last_cb[0] >= _THROTTLE or pct >= 100:
+                _last_cb[0] = now
+                progress_cb(pct)
+
         with open(user_smd_path, 'r', encoding='utf-8') as f:
-            user_content = f.read()
-        
+            user_lines = f.readlines()
         with open(original_smd_path, 'r', encoding='utf-8') as f:
-            original_content = f.read()
-        
-        # Парсим оба файла (разбиваем на секции: version, nodes, skeleton, triangles)
-        user_parts = SMDService._parse_smd_file(user_content)
-        original_parts = SMDService._parse_smd_file(original_content)
-        
-        if not user_parts or not original_parts:
-            raise ValueError("Не удалось распарсить один из SMD файлов")
-        
-        new_content_parts = []
-        
-        # Берем version из оригинала, если есть, иначе из юзерского (обычно одинаковые, но на всякий случай)
-        if original_parts.get('version'):
-            new_content_parts.append(original_parts['version'])
-        elif user_parts.get('version'):
-            new_content_parts.append(user_parts['version'])
-        
-        # Берем nodes из оригинала (это костяк модели, должен быть из игры)
-        if original_parts.get('nodes'):
-            new_content_parts.append(original_parts['nodes'])
-        else:
-            # Fallback на юзерский, если в оригинале нет (маловероятно, но на всякий случай)
-            if user_parts.get('nodes'):
-                new_content_parts.append(user_parts['nodes'])
-        
-        # Берем skeleton из оригинала (это тоже костяк, должен быть из игры)
-        if original_parts.get('skeleton'):
-            new_content_parts.append(original_parts['skeleton'])
-        else:
-            # Fallback на юзерский, если в оригинале нет
-            if user_parts.get('skeleton'):
-                new_content_parts.append(user_parts['skeleton'])
-        
-        # Объединяем треугольники из юзерского файла с названиями материалов из оригинала
-        # (костыль, но так работает - берем геометрию от юзера, названия материалов от оригинала)
-        triangles_section = SMDService._merge_triangles(
-            user_parts.get('triangles_data', []),
-            original_parts.get('material_names', [])
-        )
-        if triangles_section:
-            new_content_parts.append(triangles_section)
-        
-        new_content = '\n'.join(new_content_parts)
-        
+            orig_lines = f.readlines()
+
+        # Парсинг user-файла  → 0..60 %
+        user_parts = SMDService._parse_smd_lines(user_lines, _cb, pct_start=0, pct_end=60)
+        # Парсинг original-файла → 60..80 %
+        orig_parts = SMDService._parse_smd_lines(orig_lines, _cb, pct_start=60, pct_end=80)
+
+        if not user_parts or not orig_parts:
+            raise ValueError("Failed to parse one of the SMD files")
+
         if output_smd_path is None:
             output_smd_path = user_smd_path
-        
-        with open(output_smd_path, 'w', encoding='utf-8') as f:
-            f.write(new_content)
-        
+
+        with open(output_smd_path, 'w', encoding='utf-8') as out:
+            _wlines(out, orig_parts.get('version') or user_parts.get('version'))
+            _wlines(out, orig_parts.get('nodes') or user_parts.get('nodes'))
+            _wlines(out, orig_parts.get('skeleton') or user_parts.get('skeleton'))
+            # Запись треугольников → 80..100 %
+            SMDService._write_merged_triangles(
+                out,
+                user_parts.get('triangles_data', []),
+                orig_parts.get('material_names', []),
+                progress_cb=_cb,
+                pct_start=80,
+                pct_end=100,
+            )
+
+        _cb(100)
         return output_smd_path
-    
+
+    # ------------------------------------------------------------------
+    # Внутренние методы
+    # ------------------------------------------------------------------
+
     @staticmethod
-    def _parse_smd_file(content: str) -> dict:
-        result = {
+    def _parse_smd_lines(
+        lines: List[str],
+        progress_cb: Optional[Callable[[int], None]] = None,
+        pct_start: int = 0,
+        pct_end: int = 100,
+    ) -> dict:
+        """
+        Разбирает SMD на секции за один проход.
+
+        progress_cb(pct) вызывается по мере обработки строк triangle-секции
+        (самой длинной части файла). pct масштабируется в диапазон [pct_start, pct_end].
+        """
+        result: dict = {
             'version': None,
             'nodes': None,
             'skeleton': None,
             'triangles_data': [],
-            'material_names': []
+            'material_names': [],
         }
-        
-        lines = content.split('\n')
+
+        n = len(lines)
         i = 0
-        
-        while i < len(lines):
-            line = lines[i].strip()
-            if line.startswith('version'):
-                version_lines = [line]
+
+        # --- version ---
+        while i < n:
+            s = lines[i].lstrip()
+            if s.startswith('version'):
+                start = i
                 i += 1
-                while i < len(lines) and not lines[i].strip().startswith(('nodes', 'skeleton', 'triangles')):
-                    version_lines.append(lines[i])
+                while i < n and not lines[i].lstrip().startswith(('nodes', 'skeleton', 'triangles')):
                     i += 1
-                result['version'] = '\n'.join(version_lines)
-                continue
-            elif line.startswith('nodes'):
+                result['version'] = lines[start:i]
                 break
             i += 1
-        
-        if i < len(lines) and lines[i].strip().startswith('nodes'):
-            nodes_start = i
-            i += 1
-            while i < len(lines):
-                if lines[i].strip() == 'end':
-                    result['nodes'] = '\n'.join(lines[nodes_start:i+1])
-                    i += 1
-                    break
+
+        # --- nodes ---
+        while i < n:
+            if lines[i].lstrip().startswith('nodes'):
+                start = i
                 i += 1
-        
-        while i < len(lines):
-            if lines[i].strip().startswith('skeleton'):
-                skeleton_start = i
-                i += 1
-                while i < len(lines):
+                while i < n:
                     if lines[i].strip() == 'end':
-                        result['skeleton'] = '\n'.join(lines[skeleton_start:i+1])
+                        result['nodes'] = lines[start:i + 1]
                         i += 1
                         break
                     i += 1
                 break
             i += 1
-        
-        while i < len(lines):
-            if lines[i].strip().startswith('triangles'):
+
+        # --- skeleton ---
+        while i < n:
+            if lines[i].lstrip().startswith('skeleton'):
+                start = i
                 i += 1
-                current_material = None
-                current_triangles = []
-                
-                while i < len(lines):
-                    line = lines[i].strip()
-                    
-                    if not line:
+                while i < n:
+                    if lines[i].strip() == 'end':
+                        result['skeleton'] = lines[start:i + 1]
                         i += 1
-                        continue
-                    
-                    is_triangle_data = False
-                    if line:
-                        parts = line.split()
-                        if len(parts) > 0:
-                            first_part = parts[0]
-                            try:
-                                float(first_part)
-                                is_triangle_data = True
-                            except ValueError:
-                                pass
-                    
-                    if is_triangle_data:
-                        if current_material is not None:
-                            current_triangles.append(lines[i])
-                    else:
-                        if current_material is not None and current_triangles:
-                            result['triangles_data'].append((current_material, current_triangles))
-                            result['material_names'].append(current_material)
-                        
-                        current_material = line
-                        current_triangles = []
-                    
+                        break
                     i += 1
-                
-                if current_material is not None and current_triangles:
-                    result['triangles_data'].append((current_material, current_triangles))
-                    result['material_names'].append(current_material)
-                
                 break
             i += 1
-        
+
+        # --- triangles — самая длинная секция, отсюда репортим прогресс ---
+        tri_start_line = i  # строка "triangles"
+        remaining = max(1, n - tri_start_line)  # строк в triangle-секции
+
+        while i < n:
+            if lines[i].lstrip().startswith('triangles'):
+                i += 1
+                current_mat: Optional[str] = None
+                current_tris: List[str] = []
+
+                while i < n:
+                    raw = lines[i]
+                    s = raw.strip()
+
+                    if not s:
+                        i += 1
+                        continue
+
+                    if s == 'end':
+                        break
+
+                    first_char = s[0]
+                    is_tri = first_char.isdigit() or first_char == '-'
+
+                    if is_tri:
+                        if current_mat is not None:
+                            current_tris.append(raw)
+                    else:
+                        if current_mat is not None and current_tris:
+                            result['triangles_data'].append((current_mat, current_tris))
+                            result['material_names'].append(current_mat)
+                        current_mat = s
+                        current_tris = []
+
+                    i += 1
+
+                    # Репортим прогресс каждые 256 строк (минимальный оверхед)
+                    if progress_cb and (i & 0xFF) == 0:
+                        done = i - tri_start_line
+                        ratio = min(1.0, done / remaining)
+                        progress_cb(pct_start + int(ratio * (pct_end - pct_start)))
+
+                if current_mat is not None and current_tris:
+                    result['triangles_data'].append((current_mat, current_tris))
+                    result['material_names'].append(current_mat)
+
+                break
+            i += 1
+
         return result
-    
+
     @staticmethod
-    def _merge_triangles(user_triangles_data: list, original_material_names: list) -> str:
-        # Объединяем треугольники из юзерского файла с названиями материалов из оригинала
-        result_lines = ['triangles']
-        
+    def _write_merged_triangles(
+        out,
+        user_triangles_data: List[Tuple[str, List[str]]],
+        original_material_names: List[str],
+        progress_cb: Optional[Callable[[int], None]] = None,
+        pct_start: int = 80,
+        pct_end: int = 100,
+    ) -> None:
+        """
+        Записывает секцию triangles прямо в открытый файл.
+        Геометрия — из user_triangles_data, имена материалов — из original_material_names.
+        """
         if not user_triangles_data:
-            return '\n'.join(result_lines)
-        
-        # Если есть названия материалов из оригинала - используем их (приоритет оригиналу)
-        # Если материалов больше чем в оригинале - повторяем последний (костыль, но работает)
-        if original_material_names:
-            materials_to_use = []
-            for i in range(len(user_triangles_data)):
-                if i < len(original_material_names):
-                    materials_to_use.append(original_material_names[i])
-                else:
-                    materials_to_use.append(original_material_names[-1])  # Повторяем последний, если не хватает
-        else:
-            # Если нет оригинальных названий - используем юзерские (fallback)
-            materials_to_use = [name for name, _ in user_triangles_data]
-        
-        # Собираем секцию triangles: название материала, потом треугольники
-        for idx, (material_name, triangle_lines) in enumerate(user_triangles_data):
-            current_material = materials_to_use[idx] if idx < len(materials_to_use) else material_name
-            
-            result_lines.append(current_material)
-            result_lines.extend(triangle_lines)
-        
-        return '\n'.join(result_lines)
-    
+            out.write('triangles')
+            return
+
+        out.write('triangles\n')
+        n_orig = len(original_material_names)
+        n_total = max(1, len(user_triangles_data))
+
+        for idx, (user_mat, tri_lines) in enumerate(user_triangles_data):
+            mat = (
+                original_material_names[idx] if idx < n_orig else original_material_names[-1]
+            ) if n_orig > 0 else user_mat
+
+            out.write(mat)
+            out.write('\n')
+            out.writelines(tri_lines)
+
+            if progress_cb:
+                ratio = (idx + 1) / n_total
+                progress_cb(pct_start + int(ratio * (pct_end - pct_start)))
+
+        out.write('end\n')
+
+    # ------------------------------------------------------------------
+    # Поиск reference SMD
+    # ------------------------------------------------------------------
+
     @staticmethod
     def find_reference_smd(decompile_dir: str, weapon_key: str) -> Optional[str]:
-        # Ищем reference SMD файл (это оригинальная модель из игры, нужна для замены nodes и материалов)
+        """Ищет reference SMD файл (оригинальная модель из игры)."""
         if not os.path.exists(decompile_dir):
             return None
-        
-        # Пробуем стандартные имена (Crowbar обычно создает такие)
-        possible_names = [
-            f"{weapon_key}_reference.smd",
-            f"{weapon_key}.smd",
-        ]
-        
-        for name in possible_names:
-            file_path = os.path.join(decompile_dir, name)
-            if os.path.exists(file_path):
-                return file_path
-        
-        # Если не нашли по стандартному имени - ищем любой файл с "reference" в названии
-        for file_name in os.listdir(decompile_dir):
-            if (file_name.endswith('.smd') and 
-                'reference' in file_name.lower() and
-                weapon_key.lower() in file_name.lower()):
-                return os.path.join(decompile_dir, file_name)
-        
-        # Последний шанс - ищем любой SMD файл с именем оружия, но не physics и не anim
-        # (потому что physics и anim файлы - это не модели, а вспомогательные данные - мусор)
-        for file_name in os.listdir(decompile_dir):
-            if (file_name.endswith('.smd') and 
-                'physics' not in file_name.lower() and 
-                'anim' not in file_name.lower() and
-                'anims' not in file_name.lower() and
-                weapon_key.lower() in file_name.lower()):
-                return os.path.join(decompile_dir, file_name)
-        
+
+        # Приоритет: стандартные имена
+        for name in (f"{weapon_key}_reference.smd", f"{weapon_key}.smd"):
+            fp = os.path.join(decompile_dir, name)
+            if os.path.exists(fp):
+                return fp
+
+        wk_low = weapon_key.lower()
+
+        # Имя содержит "reference" и weapon_key
+        for fn in os.listdir(decompile_dir):
+            if (fn.endswith('.smd') and
+                    'reference' in fn.lower() and
+                    wk_low in fn.lower()):
+                return os.path.join(decompile_dir, fn)
+
+        # Любой SMD с weapon_key, не physics/anim
+        for fn in os.listdir(decompile_dir):
+            fn_low = fn.lower()
+            if (fn.endswith('.smd') and
+                    'physics' not in fn_low and
+                    'anim' not in fn_low and
+                    'anims' not in fn_low and
+                    wk_low in fn_low):
+                return os.path.join(decompile_dir, fn)
+
         return None
 
+
+# ---------------------------------------------------------------------------
+# Backward-compat aliases (используются тестами)
+# ---------------------------------------------------------------------------
+
+# Добавляем как методы класса после определения класса
+def _parse_smd_file_compat(content: str) -> dict:
+    return SMDService._parse_smd_lines(content.splitlines(keepends=True))
+
+
+def _merge_triangles_compat(user_triangles_data: list, original_material_names: list) -> str:
+    import io
+    buf = io.StringIO()
+    SMDService._write_merged_triangles(buf, user_triangles_data, original_material_names)
+    return buf.getvalue().rstrip('\n')
+
+
+SMDService._parse_smd_file = staticmethod(_parse_smd_file_compat)
+SMDService._merge_triangles = staticmethod(_merge_triangles_compat)
+
+
+# ---------------------------------------------------------------------------
+# Вспомогательные функции (модульный уровень)
+# ---------------------------------------------------------------------------
+
+def _wlines(f, lines) -> None:
+    """Записывает список строк в файл. Игнорирует None."""
+    if lines:
+        f.writelines(lines)
+        # Гарантируем перенос строки после секции
+        if lines and not lines[-1].endswith('\n'):
+            f.write('\n')

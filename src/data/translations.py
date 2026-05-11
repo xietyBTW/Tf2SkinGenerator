@@ -210,6 +210,16 @@ TRANSLATIONS = {
         'select_vtf_file': 'Выберите VTF файл',
         'success': 'Успех',
         
+        # Extra Texture Dialog
+        'extra_texture_title': 'Дополнительная текстура',
+        'extra_texture_question': 'У оружия есть дополнительный материал: "{material}".\nХотите загрузить отдельное изображение для него?\n\nЕсли нажмёте "Нет" — будет использована основная текстура.',
+        'extra_texture_select': 'Выберите изображение для "{material}"',
+        
+        # Extra Model Dialog
+        'extra_model_title': 'Дополнительная часть модели',
+        'extra_model_question': 'У оружия есть дополнительная часть модели: "{smd_name}".\nХотите загрузить замену SMD для неё?\n\nЕсли нажмёте "Нет", будет использована оригинальная модель из игры.',
+        'extra_model_select': 'Выберите SMD файл для "{smd_name}"',
+        
         # Merge VPK
         'merge_vpk': 'Сборка в один',
         'merge_vpk_title': 'Объединить моды',
@@ -233,7 +243,13 @@ TRANSLATIONS = {
         'merge_cancelled': 'Объединение отменено пользователем',
         'duplicate_weapons_title': 'Дубликаты оружий',
         'duplicate_weapons_warning': 'Обнаружены дубликаты оружий:\n\n',
-        'duplicate_weapons_question': 'Вы пытаетесь соединить моды, которые влияют на одно оружие.\nПродолжить?'
+        'duplicate_weapons_question': 'Вы пытаетесь соединить моды, которые влияют на одно оружие.\nПродолжить?',
+        
+        # Кэш декомпила моделей
+        'clear_decompile_cache': '🗑 Очистить кэш моделей',
+        'clear_cache_confirm': 'Очистить кэш декомпилированных моделей?\n\nРазмер кэша: {size}\n\nКэш ускоряет повторную сборку того же оружия.\nПосле очистки первая сборка каждого оружия будет медленнее.',
+        'clear_cache_done': 'Кэш очищен. Удалено записей: {count}.',
+        'clear_decompile_cache_tooltip': 'Удаляет кэш декомпилированных моделей (~/.tf2skingen_cache).\nИспользуйте если модели перестали собираться после обновления TF2.'
     },
     'en': {
         'error': 'Error',
@@ -442,6 +458,16 @@ TRANSLATIONS = {
         'select_vtf_file': 'Select VTF file',
         'success': 'Success',
         
+        # Extra Texture Dialog
+        'extra_texture_title': 'Additional Texture',
+        'extra_texture_question': 'The weapon model has an additional material: "{material}".\nDo you want to provide a separate image for it?\n\nIf you click "No", the main texture will be used.',
+        'extra_texture_select': 'Select image for "{material}"',
+        
+        # Extra Model Dialog
+        'extra_model_title': 'Additional Model Part',
+        'extra_model_question': 'The weapon has an additional model part: "{smd_name}".\nDo you want to provide a replacement SMD file for it?\n\nIf you click "No", the original game model will be used.',
+        'extra_model_select': 'Select SMD file for "{smd_name}"',
+        
         # Merge VPK
         'merge_vpk': 'Merge into One',
         'merge_vpk_title': 'Merge Mods',
@@ -465,6 +491,12 @@ TRANSLATIONS = {
         'merge_cancelled': 'Merge cancelled by user',
         'duplicate_weapons_title': 'Duplicate Weapons',
         'duplicate_weapons_warning': 'Duplicate weapons found:\n\n',
-        'duplicate_weapons_question': 'You are trying to merge mods that affect the same weapon.\nContinue?'
+        'duplicate_weapons_question': 'You are trying to merge mods that affect the same weapon.\nContinue?',
+        
+        # Decompile model cache
+        'clear_decompile_cache': '🗑 Clear Model Cache',
+        'clear_cache_confirm': 'Clear the model decompile cache?\n\nCache size: {size}\n\nThe cache speeds up repeated builds of the same weapon.\nAfter clearing, the first build of each weapon will be slower.',
+        'clear_cache_done': 'Cache cleared. {count} entries removed.',
+        'clear_decompile_cache_tooltip': 'Deletes cached decompiled models (~/.tf2skingen_cache).\nUse if models stopped building correctly after a TF2 update.'
     }
 }
