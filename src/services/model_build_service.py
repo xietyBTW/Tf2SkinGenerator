@@ -5,11 +5,20 @@
 
 import os
 import re
+import shutil
 import subprocess
 from pathlib import Path
 from typing import List, Optional, Tuple
 from src.shared.logging_config import get_logger
 from src.shared.file_utils import ensure_directory_exists
+
+# Предкомпилированные regex — создаются один раз при импорте модуля
+_RE_LOD          = re.compile(r'^\$lod\s+\d+',                     re.IGNORECASE)
+_RE_CDMATERIALS  = re.compile(r'^\$cdmaterials\s*"([^"]*)"',        re.IGNORECASE)
+_RE_CDMAT_DETECT = re.compile(r'^\$cdmaterials\s+',                  re.IGNORECASE)
+_RE_MODELNAME    = re.compile(r'\$modelname\s+"([^"]+)"',             re.IGNORECASE)
+_RE_TEXGROUP     = re.compile(r'^\$texturegroup\s+',                  re.IGNORECASE)
+_RE_STUDIO_SMD   = re.compile(r'studio\s+"([^"]+\.smd)"',             re.IGNORECASE)
 
 logger = get_logger(__name__)
 
@@ -41,10 +50,10 @@ class ModelBuildService:
             RuntimeError: Если Crowbar вернул ошибку (обычно значит что-то не так с моделью)
         """
         if not os.path.exists(mdl_path):
-            raise FileNotFoundError(f"MDL файл не найден: {mdl_path}")
-        
+            raise FileNotFoundError(f"MDL file not found: {mdl_path}")
+
         if not os.path.exists(crowbar_decomp_exe):
-            raise FileNotFoundError(f"Crowbar decompile exe не найден: {crowbar_decomp_exe}")
+            raise FileNotFoundError(f"Crowbar decompile exe not found: {crowbar_decomp_exe}")
         
         os.makedirs(out_dir, exist_ok=True)
         
@@ -62,8 +71,8 @@ class ModelBuildService:
         
         if result.returncode != 0:
             raise RuntimeError(
-                f"Декомпил не удался:\n"
-                f"Команда: {' '.join([crowbar_decomp_exe, '-p', mdl_path, '-o', out_dir])}\n"
+                f"Decompilation failed:\n"
+                f"Command: {' '.join([crowbar_decomp_exe, '-p', mdl_path, '-o', out_dir])}\n"
                 f"STDOUT: {result.stdout}\n"
                 f"STDERR: {result.stderr}"
             )
@@ -81,7 +90,7 @@ class ModelBuildService:
         
         if not os.path.exists(qc_path):
             raise RuntimeError(
-                f"QC файл не найден после декомпила в {out_dir}\n"
+                f"QC file not found after decompile in {out_dir}\n"
                 f"STDOUT: {result.stdout}\n"
                 f"STDERR: {result.stderr}"
             )
@@ -242,29 +251,43 @@ class ModelBuildService:
     @staticmethod
     def extract_texturegroup_all_columns(qc_path: str) -> List[str]:
         """
-        Вытаскивает ВСЕ столбцы из базовой строки $texturegroup.
+        Вытаскивает ВСЕ столбцы из базовой строки (RED) $texturegroup.
         
-        В TF2 QC файлах $texturegroup содержит строки (skin families),
-        где каждая строка имеет столбцы для разных команд:
-        - Столбец 0: текстура для RED команды
-        - Столбец 1: текстура для BLU команды (если есть)
+        В TF2 QC файлах $texturegroup содержит СТРОКИ (skin families):
+        - Строка 0 (row 0): RED команда
+        - Строка 1 (row 1): BLU команда (если есть)
+        - Строки 2+: gold, festive и другие варианты
+        
+        И СТОЛБЦЫ (разные материалы на модели):
+        - Столбец 0: основная текстура (body)
+        - Столбец 1+: дополнительные текстуры (shell, scope и т.д.)
         
         Формат:
         $texturegroup "skinfamilies"
         {
-            { "c_rocketlauncher"      "c_rocketlauncher_blue" }   // RED | BLU
-            { "c_rocketlauncher_gold" "c_rocketlauncher_gold_blue" }  // варианты
+            { "c_flaregun"      "c_flaregun_shell" }         // RED: body + shell
+            { "c_flaregun_blue" "c_flaregun_shell_blue" }    // BLU: body + shell
         }
         
-        Метод находит "базовую" строку (без суффиксов _gold, _xmas и т.д.)
-        и возвращает все имена из этой строки.
+        Метод возвращает все столбцы из RED строки (базовой строки без суффиксов).
         
         Args:
             qc_path: Путь к QC файлу
             
         Returns:
-            Список имен текстур из базовой строки (например, ["c_rocketlauncher", "c_rocketlauncher_blue"])
+            Список имен текстур из RED строки (например, ["c_flaregun", "c_flaregun_shell"])
             Пустой список если $texturegroup не найден
+        """
+        info = ModelBuildService.extract_texturegroup_structure(qc_path)
+        return info.get('red_row', [])
+    
+    @staticmethod
+    def _parse_texturegroup_rows(qc_path: str) -> List[List[str]]:
+        """
+        Парсит ВСЕ строки из $texturegroup в QC файле.
+        
+        Returns:
+            Список строк, каждая строка - список имен материалов
         """
         if not os.path.exists(qc_path):
             return []
@@ -277,35 +300,27 @@ class ModelBuildService:
             line = lines[i]
             stripped = line.strip()
             
-            # Ищем $texturegroup
             if re.match(r'\$texturegroup\s+', stripped, re.IGNORECASE):
                 i += 1
                 
-                # Пропускаем пустые строки и комментарии
                 while i < len(lines) and (not lines[i].strip() or lines[i].strip().startswith('//')):
                     i += 1
                 
-                # Ищем открывающую скобку внешнего блока
                 if i < len(lines) and lines[i].strip().startswith('{'):
                     i += 1
                     
-                    # Пропускаем пустые строки и комментарии
                     while i < len(lines) and (not lines[i].strip() or lines[i].strip().startswith('//')):
                         i += 1
                     
-                    # Собираем строки (rows) из texturegroup
-                    # Каждая строка — это { "имя1" "имя2" }, где имя1 = RED, имя2 = BLU
                     rows: List[List[str]] = []
                     
                     while i < len(lines):
                         current_line = lines[i]
                         stripped_current = current_line.strip()
                         
-                        # Если встретили закрывающую скобку внешнего блока - выходим
                         if stripped_current == '}':
                             break
                         
-                        # Вытаскиваем все имена в кавычках из строки
                         matches = re.findall(r'"([^"]+)"', current_line)
                         row_names = [name.strip() for name in matches if name.strip()]
                         
@@ -314,25 +329,98 @@ class ModelBuildService:
                         
                         i += 1
                     
-                    if not rows:
-                        return []
-                    
-                    # Ищем "базовую" строку без суффиксов (_gold, _xmas и т.д.)
-                    suffixes_to_avoid = ['_gold', '_xmas', '_festive', '_australium', '_botkiller', '_strange', '_unusual']
-                    
-                    for row in rows:
-                        # Проверяем первый столбец (RED текстура) - если он без суффиксов, это базовая строка
-                        first_name = row[0]
-                        has_suffix = any(first_name.endswith(suffix) for suffix in suffixes_to_avoid)
-                        if not has_suffix:
-                            return row
-                    
-                    # Если все строки с суффиксами - возвращаем первую (fallback)
-                    return rows[0]
+                    return rows
             
             i += 1
         
         return []
+    
+    @staticmethod
+    def extract_texturegroup_structure(qc_path: str) -> dict:
+        """
+        Анализирует $texturegroup и возвращает структурированную информацию
+        о текстурах для RED/BLU команд и дополнительных материалах.
+        
+        В TF2:
+        - СТРОКИ (rows) = skin families (RED, BLU, gold, festive...)
+        - СТОЛБЦЫ (columns) = разные материалы модели (body, shell, scope...)
+        
+        Пример QC:
+        $texturegroup "skinfamilies"
+        {
+            { "c_flaregun"      "c_flaregun_shell" }         // RED row: body + shell
+            { "c_flaregun_blue" "c_flaregun_shell_blue" }    // BLU row: body + shell
+            { "c_flaregun_gold" "c_flaregun_shell_gold" }    // Gold variant
+        }
+        
+        Returns:
+            {
+                'red_row': ['c_flaregun', 'c_flaregun_shell'],          # RED материалы
+                'blu_row': ['c_flaregun_blue', 'c_flaregun_shell_blue'],# BLU материалы (пустой если нет)
+                'main_texture': 'c_flaregun',                           # Главная текстура (col 0 RED)
+                'extra_materials': ['c_flaregun_shell'],                # Доп. материалы RED (col 1+)
+                'all_rows': [...]                                        # Все строки
+            }
+        """
+        rows = ModelBuildService._parse_texturegroup_rows(qc_path)
+        
+        result = {
+            'red_row': [],
+            'blu_row': [],
+            'main_texture': None,
+            'extra_materials': [],
+            'all_rows': rows,
+        }
+        
+        if not rows:
+            return result
+        
+        # Суффиксы вариантов которые нужно пропускать при поиске базовых строк
+        variant_suffixes = ['_gold', '_xmas', '_festive', '_australium', '_botkiller', '_strange', '_unusual']
+        
+        # Находим "базовые" строки — те, у которых первый столбец не имеет суффиксов вариантов
+        base_rows = []
+        for row in rows:
+            first_name = row[0]
+            has_variant_suffix = any(first_name.endswith(suffix) for suffix in variant_suffixes)
+            if not has_variant_suffix:
+                base_rows.append(row)
+        
+        # Если ни одна строка не "базовая" (все с суффиксами) — берем все строки как базовые
+        if not base_rows:
+            base_rows = rows[:]
+        
+        # Первая базовая строка = RED
+        result['red_row'] = base_rows[0]
+        result['main_texture'] = base_rows[0][0]
+        
+        # Ищем BLU строку: вторая базовая строка (если есть)
+        # В TF2 BLU обычно идет сразу после RED
+        blu_row_raw = base_rows[1] if len(base_rows) > 1 else []
+        
+        # Дедублируем BLU строку — некоторые QC файлы содержат дублирующиеся записи
+        # Например: ['c_flaregun_blue', 'c_flaregun_shell_blue', 'c_flaregun_blue', 'c_flaregun_shell_blue']
+        seen = set()
+        blu_row_deduped = []
+        for name in blu_row_raw:
+            if name not in seen:
+                seen.add(name)
+                blu_row_deduped.append(name)
+        result['blu_row'] = blu_row_deduped
+        
+        # extra_materials = столбцы RED строки начиная с col 1, НО без тех что уже есть в BLU строке.
+        # Проблема: Valve иногда пишет ВСЕ скины в одну RED строку:
+        #   { "c_flaregun" "c_flaregun_shell" "c_flaregun_blue" "c_flaregun_shell_blue" }
+        # В этом случае "c_flaregun_blue" и "c_flaregun_shell_blue" — это BLU варианты, а не extra_materials.
+        # Они обрабатываются в BLU loop, поэтому из extra_materials их нужно исключить.
+        blu_names_set = set(blu_row_deduped)
+        extra_raw = base_rows[0][1:] if len(base_rows[0]) > 1 else []
+        result['extra_materials'] = [m for m in extra_raw if m not in blu_names_set]
+        
+        return result
+
+
+
 
     @staticmethod
     def determine_weapon_type_and_path(weapon_key: str, cdmaterials_path: Optional[str]) -> Tuple[str, str]:
@@ -400,6 +488,102 @@ class ModelBuildService:
         return weapon_type, cdmaterials_new_path
     
     @staticmethod
+    def extract_extra_body_smds(qc_path: str, weapon_key: str) -> List[str]:
+        """
+        Находит дополнительные SMD файлы (bodygroup) в QC файле.
+        
+        При декомпиляции MDL через Crowbar получаются несколько SMD:
+        - Основной: c_flaregun_reference.smd (основное тело оружия)
+        - Дополнительные: c_flaregun_shell.smd, c_flaregun_scope.smd и т.д.
+        
+        В QC файле они указаны в $body и $bodygroup:
+        $body studio "c_flaregun_reference.smd"
+        $bodygroup "shell"
+        {
+            studio "c_flaregun_shell.smd"
+            blank
+        }
+        
+        Метод возвращает пути к дополнительным SMD (не основному body).
+        
+        Args:
+            qc_path: Путь к QC файлу
+            weapon_key: Ключ оружия (для определения основного SMD)
+            
+        Returns:
+            Список путей к дополнительным SMD файлам (абсолютные пути)
+        """
+        if not os.path.exists(qc_path):
+            return []
+        
+        with open(qc_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        qc_dir = os.path.dirname(qc_path)
+        
+        # Находим ВСЕ studio ссылки на SMD файлы в QC
+        # Формат: studio "имя_файла.smd" или $body studio "имя_файла.smd"
+        all_smd_refs = re.findall(r'studio\s+"([^"]+\.smd)"', content, re.IGNORECASE)
+        
+        if not all_smd_refs:
+            return []
+        
+        # Определяем основной SMD (reference) - это тот, который содержит weapon_key
+        # и/или имеет "_reference" в названии
+        main_smd_name = None
+        for smd_ref in all_smd_refs:
+            smd_base = os.path.splitext(os.path.basename(smd_ref))[0].lower()
+            wk_lower = weapon_key.lower()
+            
+            # Основной SMD - первый, который:
+            # 1. Содержит weapon_key + "_reference"
+            # 2. Или просто совпадает с weapon_key
+            if wk_lower + '_reference' == smd_base or wk_lower == smd_base:
+                main_smd_name = smd_ref
+                break
+        
+        # Если не нашли по точному совпадению - берем первый SMD с weapon_key в имени
+        if not main_smd_name:
+            for smd_ref in all_smd_refs:
+                smd_base = os.path.basename(smd_ref).lower()
+                if weapon_key.lower() in smd_base and 'reference' in smd_base:
+                    main_smd_name = smd_ref
+                    break
+        
+        # Если и так не нашли - первый SMD = основной
+        if not main_smd_name and all_smd_refs:
+            main_smd_name = all_smd_refs[0]
+        
+        # Все остальные SMD (не основной, не physics, не anim) = дополнительные
+        extra_smds = []
+        seen = set()
+        for smd_ref in all_smd_refs:
+            smd_lower = smd_ref.lower()
+            
+            # Пропускаем основной
+            if smd_ref == main_smd_name:
+                continue
+            
+            # Пропускаем physics и animation файлы
+            if any(skip in smd_lower for skip in ['physics', 'phys', 'anim', 'idle', 'pose']):
+                continue
+            
+            # Пропускаем дубли
+            if smd_lower in seen:
+                continue
+            seen.add(smd_lower)
+            
+            # Проверяем что файл существует
+            smd_full_path = os.path.join(qc_dir, smd_ref)
+            if os.path.exists(smd_full_path):
+                extra_smds.append(smd_full_path)
+            else:
+                logger.debug(f"Доп. SMD файл указан в QC, но не найден: {smd_full_path}")
+        
+        return extra_smds
+
+    
+    @staticmethod
     def patch_qc_file(qc_path: str, weapon_key: str, cdmaterials_path: Optional[str] = None) -> None:
         """
         Пропатчивает QC файл после декомпиляции.
@@ -415,119 +599,76 @@ class ModelBuildService:
             cdmaterials_path: Не используется, оставлен для совместимости (legacy)
         """
         if not os.path.exists(qc_path):
-            raise FileNotFoundError(f"QC файл не найден: {qc_path}")
-        
+            raise FileNotFoundError(f"QC file not found: {qc_path}")
+
         with open(qc_path, 'r', encoding='utf-8') as f:
             lines = f.readlines()
-        
-        # Сначала находим непустые $cdmaterials (нужно для правильной обработки)
-        total_cdmaterials_count = 0
-        non_empty_cdmaterials = []  # Индексы непустых $cdmaterials (пустые пропускаем нахер)
-        for i, line in enumerate(lines):
-            if re.match(r'\$cdmaterials\s+', line.strip(), re.IGNORECASE):
-                total_cdmaterials_count += 1
-                # Проверяем не пустой ли путь
-                path_match = re.search(r'\$cdmaterials\s*"([^"]*)"', line, re.IGNORECASE)
-                if path_match and path_match.group(1).strip():
-                    non_empty_cdmaterials.append(i)
-        
-        new_lines = []
-        cdmaterials_count = 0
-        non_empty_processed = 0
+
+        new_lines: List[str] = []
+        # Индекс в new_lines ПОСЛЕ последнего записанного непустого $cdmaterials.
+        # Туда вставим пустой $cdmaterials "" за один проход, без предварительного счёта.
+        last_cdmat_insert_pos = -1
         i = 0
-        
+
         while i < len(lines):
             line = lines[i]
             stripped = line.strip()
-            
-            # Если это начало блока $lod - удаляем весь блок (LOD нам не нужны)
-            if re.match(r'\$lod\s+\d+', stripped, re.IGNORECASE):
+
+            # --- $lod блок: пропускаем целиком ---
+            if _RE_LOD.match(stripped):
                 i += 1
-                
-                # Пропускаем пустые строки и комментарии после $lod
                 while i < len(lines) and (not lines[i].strip() or lines[i].strip().startswith('//')):
                     i += 1
-                
-                # Если следующая строка начинается с '{' - удаляем весь блок
                 if i < len(lines) and lines[i].strip().startswith('{'):
-                    # Отслеживаем вложенность скобок
-                    brace_count = 0
-                    start_brace = False
-                    
+                    depth = 0
+                    opened = False
                     while i < len(lines):
-                        current_line = lines[i]
-                        stripped_current = current_line.strip()
-                        
-                        # Подсчитываем скобки
-                        for char in current_line:
-                            if char == '{':
-                                brace_count += 1
-                                start_brace = True
-                            elif char == '}':
-                                brace_count -= 1
-                        
-                        # Пропускаем строку (удаляем)
+                        for ch in lines[i]:
+                            if ch == '{':
+                                depth += 1
+                                opened = True
+                            elif ch == '}':
+                                depth -= 1
                         i += 1
-                        
-                        # Если все скобки закрыты - блок закончен
-                        if start_brace and brace_count == 0:
+                        if opened and depth == 0:
                             break
-                    
-                    # Пропускаем пустую строку после блока если есть
                     if i < len(lines) and not lines[i].strip():
                         i += 1
-                    
-                    continue
-            
-            # НЕ трогаем $modelname - оставляем как есть (убрана логика замены)
-            
-            # Обрабатываем $cdmaterials
-            if re.match(r'\$cdmaterials\s+', stripped, re.IGNORECASE):
-                cdmaterials_count += 1
-                
-                # Вытаскиваем исходный путь из строки $cdmaterials (формат: $cdmaterials "path" или $cdmaterials "")
-                path_match = re.search(r'\$cdmaterials\s*"([^"]*)"', line, re.IGNORECASE)
-                if path_match:
-                    original_path = path_match.group(1)
-                    
-                    # Если путь пустой - пропускаем (не добавляем в результат)
+                continue
+
+            # --- $cdmaterials ---
+            if _RE_CDMAT_DETECT.match(stripped):
+                m = _RE_CDMATERIALS.match(stripped)
+                if m:
+                    original_path = m.group(1)
                     if not original_path.strip():
                         i += 1
-                        continue
-                    
-                    non_empty_processed += 1
-                    
-                    # Если это последний непустой $cdmaterials - добавляем пустой в конце
-                    is_last_non_empty = (non_empty_processed == len(non_empty_cdmaterials))
-                    
-                    # Добавляем префикс console\ к исходному пути
+                        continue  # пустой путь — пропускаем
+
                     prefix = 'console\\'
-                    # Если путь уже содержит префикс console\ - не дублируем
-                    if original_path.lower().startswith('console\\') or original_path.lower().startswith('console/'):
+                    lo = original_path.lower()
+                    if lo.startswith('console\\') or lo.startswith('console/'):
                         modified_path = original_path.replace('/', '\\')
+                    elif original_path.startswith(('\\', '/')):
+                        modified_path = prefix + original_path.lstrip('\\/')
                     else:
-                        # Добавляем префикс, убираем лишние слеши
-                        if original_path.startswith('\\') or original_path.startswith('/'):
-                            modified_path = prefix + original_path.lstrip('\\').lstrip('/')
-                        else:
-                            modified_path = prefix + original_path
+                        modified_path = prefix + original_path
+
                     new_lines.append(f'$cdmaterials "{modified_path}"\n')
-                    
-                    # Если это последний непустой - добавляем пустой $cdmaterials в конце
-                    if is_last_non_empty:
-                        new_lines.append('$cdmaterials ""\n')
+                    last_cdmat_insert_pos = len(new_lines)  # позиция после этой строки
                 else:
-                    # Если не удалось извлечь путь - пропускаем (скорее всего пустой)
                     i += 1
                     continue
                 i += 1
                 continue
-            
-            # Оставляем остальные строки как есть (включая $modelname и $texturegroup)
+
             new_lines.append(line)
             i += 1
-        
-        # Записываем обратно
+
+        # Вставляем пустой $cdmaterials "" сразу после последнего непустого
+        if last_cdmat_insert_pos >= 0:
+            new_lines.insert(last_cdmat_insert_pos, '$cdmaterials ""\n')
+
         with open(qc_path, 'w', encoding='utf-8') as f:
             f.writelines(new_lines)
     
@@ -584,15 +725,12 @@ class ModelBuildService:
             RuntimeError: Если компил не удался (обычно значит что-то не так с QC или путями)
         """
         if not os.path.exists(qc_path):
-            raise FileNotFoundError(f"QC файл не найден: {qc_path}")
+            raise FileNotFoundError(f"QC file not found: {qc_path}")
         
         if not os.path.exists(studiomdl_exe):
-            raise FileNotFoundError(f"studiomdl.exe не найден: {studiomdl_exe}")
+            raise FileNotFoundError(f"studiomdl.exe not found: {studiomdl_exe}")
         
         os.makedirs(out_dir, exist_ok=True)
-        
-        # Запускаем studiomdl. Формат: studiomdl.exe -game <game_dir> -nop4 -nopack <qc_file>
-        # или: studiomdl.exe -gameinfo <gameinfo_path> -nop4 -nopack <qc_file>
         
         # Определяем это папка игры или gameinfo.txt
         if os.path.isdir(game_dir_or_gameinfo):
@@ -600,47 +738,47 @@ class ModelBuildService:
         else:
             game_arg = "-gameinfo"
         
+        cmd = [
+            os.path.abspath(studiomdl_exe),
+            game_arg, os.path.abspath(game_dir_or_gameinfo),
+            "-nop4",
+            "-nopack",
+            "-quiet",           # Подавляем вывод прогресса — studiomdl тратит время на буферизацию stdout
+            os.path.abspath(qc_path)
+        ]
+        
+        # Запускаем без capture_output на happy path — быстрее, т.к. нет буферизации stdout/stderr
         result = subprocess.run(
-            [
-                os.path.abspath(studiomdl_exe),
-                game_arg, os.path.abspath(game_dir_or_gameinfo),
-                "-nop4",
-                "-nopack",
-                os.path.abspath(qc_path)
-            ],
-            capture_output=True,
-            text=True,
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
             cwd=os.path.dirname(studiomdl_exe)
         )
         
         if result.returncode != 0:
-            raise RuntimeError(
-                f"Компил не удался:\n"
-                f"Команда: {' '.join([studiomdl_exe, game_arg, game_dir_or_gameinfo, '-nop4', '-nopack', qc_path])}\n"
-                f"STDOUT: {result.stdout}\n"
-                f"STDERR: {result.stderr}"
+            # На ошибке — перезапускаем с захватом stdout для диагностики
+            result2 = subprocess.run(
+                [c for c in cmd if c != "-quiet"],
+                capture_output=True,
+                text=True,
+                cwd=os.path.dirname(studiomdl_exe)
             )
+            raise RuntimeError(
+                f"Compilation failed:\n"
+                f"Command: {' '.join([studiomdl_exe, game_arg, game_dir_or_gameinfo, '-nop4', '-nopack', qc_path])}\n"
+                f"STDOUT: {result2.stdout}\n"
+                f"STDERR: {result2.stderr}"
+            )
+
         
-        # studiomdl компилирует файлы в структуру папок игры на основе $modelname из QC
-        # Путь из $modelname: workshop_partner\weapons\c_models\<weapon_key>\<weapon_key>.mdl
-        # Нужно найти базовое имя модели из QC файла
-        import re
+        # Определяем базовое имя модели из $modelname в QC (переиспользуем уже загруженный метод)
         qc_basename = os.path.splitext(os.path.basename(qc_path))[0]
-        
-        # Пытаемся прочитать $modelname из QC файла
-        modelname_path = None
-        with open(qc_path, 'r', encoding='utf-8') as f:
-            qc_content = f.read()
-            # Ищем $modelname "workshop_partner\weapons\c_models\...\...mdl"
-            modelname_match = re.search(r'\$modelname\s+"([^"]+)"', qc_content, re.IGNORECASE)
-            if modelname_match:
-                modelname_path = modelname_match.group(1)
-                # Нормализуем путь (заменяем обратные слеши на прямые для разделения)
-                normalized_path = modelname_path.replace('\\', '/')
-                modelname_path_parts = normalized_path.split('/')
-                if modelname_path_parts:
-                    model_filename = modelname_path_parts[-1]
-                    qc_basename = os.path.splitext(model_filename)[0]
+        modelname_path = ModelBuildService.extract_modelname_path(qc_path)
+        if modelname_path:
+            normalized_path = modelname_path.replace('\\', '/')
+            modelname_path_parts = normalized_path.split('/')
+            if modelname_path_parts:
+                qc_basename = os.path.splitext(modelname_path_parts[-1])[0]
         
         # Определяем путь где studiomdl создал файлы
         # game_dir_or_gameinfo - это tf_dir (например, D:\Steam\steamapps\common\Team Fortress 2\tf)
@@ -670,7 +808,6 @@ class ModelBuildService:
             model_dir_in_tf = os.path.join(tf_dir, "models", "workshop_partner", "weapons", "c_models", qc_basename)
         
         # Копируем файлы из папки TF2 в out_dir
-        import shutil
         mdl_found = False
         copied_files = []
         
@@ -680,7 +817,7 @@ class ModelBuildService:
         
         if not os.path.exists(model_dir_in_tf):
             raise RuntimeError(
-                f"Папка с скомпилированными файлами не найдена: {model_dir_in_tf}\n"
+                f"Compiled files folder not found: {model_dir_in_tf}\n"
                 f"STDOUT: {result.stdout}\n"
                 f"STDERR: {result.stderr}"
             )
@@ -704,8 +841,8 @@ class ModelBuildService:
         
         if not mdl_found:
             raise RuntimeError(
-                f".mdl файл не найден после компила в {model_dir_in_tf}\n"
-                f"Найденные файлы в папке: {os.listdir(model_dir_in_tf) if os.path.exists(model_dir_in_tf) else 'папка не существует'}\n"
+                f".mdl file not found after compilation in {model_dir_in_tf}\n"
+                f"Files in folder: {os.listdir(model_dir_in_tf) if os.path.exists(model_dir_in_tf) else 'folder does not exist'}\n"
                 f"STDOUT: {result.stdout}\n"
                 f"STDERR: {result.stderr}"
             )

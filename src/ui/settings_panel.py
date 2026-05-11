@@ -538,6 +538,21 @@ class SettingsPanel(QWidget):
         self.expert_button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.advanced_group.addWidget(self.expert_button)
         
+        # Кнопка очистки кэша декомпилированных моделей
+        self.clear_cache_button = QPushButton(self.t.get('clear_decompile_cache', '🗑 Clear Model Cache'))
+        self.clear_cache_button.setStyleSheet(self.styles['button_secondary'])
+        self.clear_cache_button.setMinimumHeight(36)
+        self.clear_cache_button.setMinimumWidth(0)
+        self.clear_cache_button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.clear_cache_button.setToolTip(
+            self.t.get(
+                'clear_decompile_cache_tooltip',
+                'Deletes cached decompiled models (~/.tf2skingen_cache).\n'
+                'Use if models stopped building correctly after a TF2 update.'
+            )
+        )
+        self.advanced_group.addWidget(self.clear_cache_button)
+        
         # Настройки сборки моделей - УДАЛЕНО: перенесено в диалог настроек
         # build_label = QLabel("Настройки сборки")
         # build_label.setStyleSheet("font-weight: 500; font-size: 13px; color: #ccc; margin-top: 12px;")
@@ -660,6 +675,8 @@ class SettingsPanel(QWidget):
                 lambda state: self.on_crit_hit_selected(state == Qt.Checked)
             )
             self.on_crit_hit_selected(self.parent.crit_hit_checkbox.isChecked())
+        if hasattr(self, 'clear_cache_button'):
+            self.clear_cache_button.clicked.connect(self._on_clear_cache_clicked)
     
     def _on_uv_layout_state_changed(self, state: int) -> None:
         """Обработчик изменения состояния чекбокса UV разметки"""
@@ -860,6 +877,41 @@ class SettingsPanel(QWidget):
         if hasattr(self.parent, 'merge_vpk_files'):
             self.parent.merge_vpk_files()
     
+    def _on_clear_cache_clicked(self):
+        """Очищает кэш декомпилированных моделей с подтверждением"""
+        from src.services.decompile_cache import clear_cache, get_cache_size_mb
+        from PySide6.QtWidgets import QMessageBox
+        
+        size_mb = get_cache_size_mb()
+        size_str = f"{size_mb:.1f} MB" if size_mb >= 0.1 else "< 0.1 MB"
+        
+        msg = self.t.get(
+            'clear_cache_confirm',
+            'Clear the model decompile cache?\n\nCache size: {size}\n\n'
+            'The cache speeds up repeated builds of the same weapon.\n'
+            'After clearing, the first build of each weapon will be slower.'
+        ).format(size=size_str)
+        
+        reply = QMessageBox.question(
+            self,
+            self.t.get('clear_decompile_cache', 'Clear Model Cache'),
+            msg,
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            count = clear_cache()
+            ok_msg = self.t.get(
+                'clear_cache_done',
+                'Cache cleared. {count} entries removed.'
+            ).format(count=count)
+            QMessageBox.information(
+                self,
+                self.t.get('clear_decompile_cache', 'Clear Model Cache'),
+                ok_msg
+            )
+    
     def open_support_link(self):
         """Открывает ссылку поддержки"""
         if hasattr(self.parent, 'open_support_link'):
@@ -935,6 +987,10 @@ class SettingsPanel(QWidget):
         # Обновляем кнопку объединения VPK
         if hasattr(self, 'merge_vpk_button'):
             self.merge_vpk_button.setText(self.t.get('merge_vpk', 'Сборка в один'))
+        
+        # Обновляем кнопку очистки кэша
+        if hasattr(self, 'clear_cache_button'):
+            self.clear_cache_button.setText(self.t.get('clear_decompile_cache', '🗑 Clear Model Cache'))
         
         # Перезапускаем валидацию имени файла, если ошибка уже отображается
         if hasattr(self, 'filename_error') and self.filename_error.isVisible():

@@ -44,6 +44,7 @@ def apply_dark_theme(app: QApplication) -> None:
         }
         
         QLabel {
+            background-color: transparent;
             color: #ffffff;
             font-size: 13px;
             font-weight: 400;
@@ -127,6 +128,7 @@ def apply_dark_theme(app: QApplication) -> None:
         }
         
         QCheckBox {
+            background-color: transparent;
             spacing: 12px;
             color: #ffffff;
             font-size: 13px;
@@ -579,6 +581,10 @@ def apply_blue_theme(app: QApplication) -> None:
         QMainWindow {
             background-color: #0d1b2a;
         }
+
+        QLabel {
+            background-color: transparent;
+        }
         
         QComboBox, QLineEdit, QTextEdit {
             background-color: #1b263b;
@@ -625,6 +631,7 @@ def apply_blue_theme(app: QApplication) -> None:
         }
         
         QCheckBox {
+            background-color: transparent;
             spacing: 12px;
             color: #e0e1dd;
             font-size: 13px;
