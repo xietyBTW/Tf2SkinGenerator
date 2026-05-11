@@ -31,38 +31,60 @@ logger = get_logger(__name__)
 
 
 class ExclusiveCheckBox(QCheckBox):
-    """Чекбокс с взаимоисключающим поведением - предотвращает включение, если другой чекбокс уже включен"""
-    
-    def __init__(self, text: str, exclusive_with: 'ExclusiveCheckBox' = None, parent=None):
+    """Чекбокс с взаимоисключающим поведением.
+
+    Поддерживает несколько партнёров: при включении этого чекбокса все
+    партнёры автоматически снимаются (без рекурсии через сигналы).
+    """
+
+    def __init__(self, text: str, exclusive_with=None, parent=None):
         super().__init__(text, parent)
-        self.exclusive_with = exclusive_with
-    
-    def set_exclusive_with(self, other: 'ExclusiveCheckBox') -> None:
-        """Устанавливает другой чекбокс, с которым этот взаимоисключающий"""
-        self.exclusive_with = other
-    
+        # Может быть одним объектом или списком
+        if exclusive_with is None:
+            self._exclusive_partners: list = []
+        elif isinstance(exclusive_with, list):
+            self._exclusive_partners = exclusive_with
+        else:
+            self._exclusive_partners = [exclusive_with]
+
+    # Обратная совместимость: старый атрибут .exclusive_with возвращает первого партнёра
+    @property
+    def exclusive_with(self):
+        return self._exclusive_partners[0] if self._exclusive_partners else None
+
+    @exclusive_with.setter
+    def exclusive_with(self, value):
+        if value is None:
+            self._exclusive_partners = []
+        elif isinstance(value, list):
+            self._exclusive_partners = value
+        else:
+            self._exclusive_partners = [value]
+
+    def set_exclusive_with(self, other) -> None:
+        """Добавляет другой чекбокс в список взаимоисключающих партнёров."""
+        if isinstance(other, list):
+            self._exclusive_partners = other
+        elif other not in self._exclusive_partners:
+            self._exclusive_partners.append(other)
+
     def mousePressEvent(self, event: QMouseEvent) -> None:
-        """Перехватывает клик мыши и проверяет, можно ли включить чекбокс"""
+        """Перехватывает клик: при включении снимает всех партнёров."""
         if event.button() == Qt.LeftButton:
-            # Если чекбокс уже включен, разрешаем отключение
+            # Если уже включён — просто разрешаем отключение
             if self.isChecked():
                 super().mousePressEvent(event)
                 return
-            
-            # Если чекбокс выключен и мы пытаемся его включить
-            # Проверяем, не включен ли взаимоисключающий чекбокс
-            if self.exclusive_with and self.exclusive_with.isChecked():
-                # Блокируем сигналы взаимоисключающего чекбокса
-                self.exclusive_with.blockSignals(True)
-                # Отключаем его
-                self.exclusive_with.setChecked(False)
-                # Разблокируем сигналы
-                self.exclusive_with.blockSignals(False)
-                # Теперь разрешаем включение текущего чекбокса
-                super().mousePressEvent(event)
-            else:
-                # Если взаимоисключающий чекбокс не включен, разрешаем обычное поведение
-                super().mousePressEvent(event)
+
+            # Снимаем всех партнёров (без эмиссии сигналов — обработчики сигналов
+            # всё равно вызовутся из stateChanged этого чекбокса)
+            for partner in self._exclusive_partners:
+                if partner.isChecked():
+                    partner.blockSignals(True)
+                    partner.setChecked(False)
+                    partner.blockSignals(False)
+
+            super().mousePressEvent(event)
         else:
             super().mousePressEvent(event)
 
@@ -88,27 +110,33 @@ class MainWindow(QMainWindow):
         self.mode = None
         
         self.setAcceptDrops(True)
-        
+
         self.init_ui()
         self.setup_connections()
-        
-        from PySide6.QtCore import QTimer
-        QTimer.singleShot(100, self._adjust_window_size)
+
+        # Восстанавливаем геометрию окна из конфига
+        saved_geom = self.config.get('window_geometry')
+        if saved_geom:
+            from PySide6.QtCore import QByteArray
+            self.restoreGeometry(QByteArray.fromBase64(saved_geom.encode()))
+        else:
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(100, self._adjust_window_size)
     
     def init_ui(self) -> None:
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
-        
+
         main_vertical_layout = QVBoxLayout(central_widget)
         main_vertical_layout.setContentsMargins(0, 0, 0, 0)
         main_vertical_layout.setSpacing(0)
-        
+
         top_bar = QWidget()
         top_bar_layout = QHBoxLayout(top_bar)
         top_bar_layout.setContentsMargins(16, 8, 16, 0)
         top_bar_layout.setSpacing(0)
         top_bar_layout.addStretch()
-        
+
         self.settings_button = QPushButton("⚙")
         self.settings_button.setStyleSheet("""
             QPushButton {
@@ -134,19 +162,19 @@ class MainWindow(QMainWindow):
         self.settings_button.setToolTip("Настройки")
         self.settings_button.clicked.connect(self.open_settings_dialog)
         top_bar_layout.addWidget(self.settings_button)
-        
+
         main_vertical_layout.addWidget(top_bar)
-        
+
         main_layout = QHBoxLayout()
         main_layout.setSpacing(20)
         main_layout.setContentsMargins(20, 16, 20, 20)
-        
+
         left_panel = self.create_weapon_selection_panel()
         main_layout.addWidget(left_panel, 1)
-        
+
         self.preview_panel = PreviewPanel(self)
         main_layout.addWidget(self.preview_panel, 2)
-        
+
         self.settings_panel = SettingsPanel(self)
         self.settings_panel.update_language(self.t)
         self.settings_scroll = QScrollArea()
@@ -166,10 +194,10 @@ class MainWindow(QMainWindow):
             }
         """)
         main_layout.addWidget(self.settings_scroll, 1)
-        
+
         main_vertical_layout.addLayout(main_layout)
-        
-        self.settings_panel.preset_combo.currentTextChanged.connect(self.update_preview_info)
+
+        self.settings_panel.radio_256.toggled.connect(self.update_preview_info)
         self.settings_panel.radio_512.toggled.connect(self.update_preview_info)
         self.settings_panel.radio_1024.toggled.connect(self.update_preview_info)
         self.settings_panel.format_combo.currentTextChanged.connect(self.update_preview_info)
@@ -251,17 +279,27 @@ class MainWindow(QMainWindow):
         
         self.crit_hit_checkbox = ExclusiveCheckBox(self.t['enable_crit_hit'])
         group_layout.addWidget(self.crit_hit_checkbox)
-        
+
         self.replace_model_label = QLabel(self.t['replace_model'])
         self.replace_model_label.setStyleSheet("font-weight: 500; font-size: 13px; color: #ccc; margin-top: 16px;")
         group_layout.addWidget(self.replace_model_label)
-        
+
         self.replace_model_checkbox = ExclusiveCheckBox(self.t['enable_replace_model'])
         self.replace_model_checkbox.setStyleSheet("color: #ccc;")
         group_layout.addWidget(self.replace_model_checkbox)
-        
-        self.crit_hit_checkbox.set_exclusive_with(self.replace_model_checkbox)
-        self.replace_model_checkbox.set_exclusive_with(self.crit_hit_checkbox)
+
+        self.spray_label = QLabel(self.t.get('spray_mode', 'Spray Mode:'))
+        self.spray_label.setStyleSheet("font-weight: 500; font-size: 13px; color: #ccc; margin-top: 16px;")
+        group_layout.addWidget(self.spray_label)
+
+        self.spray_checkbox = ExclusiveCheckBox(self.t.get('enable_spray', 'Create spray (256×256, RGBA)'))
+        self.spray_checkbox.setStyleSheet("color: #ccc;")
+        group_layout.addWidget(self.spray_checkbox)
+
+        # Все три режима взаимоисключающие друг с другом
+        self.crit_hit_checkbox.set_exclusive_with([self.replace_model_checkbox, self.spray_checkbox])
+        self.replace_model_checkbox.set_exclusive_with([self.crit_hit_checkbox, self.spray_checkbox])
+        self.spray_checkbox.set_exclusive_with([self.crit_hit_checkbox, self.replace_model_checkbox])
         
         self.selected_smd_path = None
         
@@ -279,7 +317,8 @@ class MainWindow(QMainWindow):
         self.weapon_combo.currentTextChanged.connect(self.on_weapon_changed)
         self.crit_hit_checkbox.stateChanged.connect(self._on_crit_hit_state_changed)
         self.replace_model_checkbox.stateChanged.connect(self._on_replace_model_state_changed)
-        
+        self.spray_checkbox.stateChanged.connect(self._on_spray_state_changed)
+
         # Инициализируем первый класс
         self.on_class_changed(self.class_combo.currentText())
     
@@ -312,10 +351,16 @@ class MainWindow(QMainWindow):
         
         if hasattr(self, 'replace_model_checkbox'):
             self.replace_model_checkbox.setText(self.t['enable_replace_model'])
-        
+
         if hasattr(self, 'replace_model_label'):
             self.replace_model_label.setText(self.t['replace_model'])
-        
+
+        if hasattr(self, 'spray_label'):
+            self.spray_label.setText(self.t.get('spray_mode', 'Spray Mode:'))
+
+        if hasattr(self, 'spray_checkbox'):
+            self.spray_checkbox.setText(self.t.get('enable_spray', 'Create spray (256×256, RGBA)'))
+
         # Обновляем списки оружий с учетом нового языка
         if hasattr(self, 'weapon_type_combo') and self.current_class:
             # Сохраняем текущий выбор
@@ -363,16 +408,40 @@ class MainWindow(QMainWindow):
             if type_name == type_text:
                 weapon_type = key
                 break
-        
+
         if weapon_type and self.current_class:
             self.current_weapon_type = weapon_type
-            
+
+            # Скрываем CritHIT и Replace Model для режима рук — они там неприменимы
+            self._set_hands_mode_ui(weapon_type == "Hands")
+
             # Обновляем список оружия
             self.weapon_combo.clear()
             if self.current_class in TF2_WEAPONS and weapon_type in TF2_WEAPONS[self.current_class]:
                 for weapon_key in TF2_WEAPONS[self.current_class][weapon_type].keys():
                     weapon_name = get_weapon_name(self.current_class, weapon_type, weapon_key, self.language)
                     self.weapon_combo.addItem(f"{weapon_name} ({weapon_key})")
+
+    def _set_hands_mode_ui(self, is_hands: bool) -> None:
+        """Скрывает/показывает секции CritHIT, Replace Model и Spray при выборе режима рук."""
+        # При входе в режим рук — снимаем чекбоксы, чтобы они не висели в фоне
+        if is_hands:
+            for cb in (self.crit_hit_checkbox, self.replace_model_checkbox, self.spray_checkbox):
+                cb.blockSignals(True)
+                cb.setChecked(False)
+                cb.blockSignals(False)
+            # Сбрасываем связанное состояние замены модели
+            self.selected_smd_path = None
+
+        for widget in (
+            self.crit_hit_label,
+            self.crit_hit_checkbox,
+            self.replace_model_label,
+            self.replace_model_checkbox,
+            self.spray_label,
+            self.spray_checkbox,
+        ):
+            widget.setVisible(not is_hands)
     
     def on_weapon_changed(self, weapon_text: str) -> None:
         """Обработка изменения оружия"""
@@ -386,35 +455,56 @@ class MainWindow(QMainWindow):
     def _on_crit_hit_state_changed(self, state: int) -> None:
         """Обработчик изменения состояния чекбокса CritHIT"""
         is_checked = (state == Qt.Checked)
-        
-        # Если CritHIT включается, всегда отключаем замену модели (взаимоисключающие режимы)
+
+        # Если CritHIT включается — отключаем остальные взаимоисключающие режимы
         if is_checked:
-            # Блокируем сигналы, чтобы избежать рекурсии
-            self.replace_model_checkbox.blockSignals(True)
-            self.replace_model_checkbox.setChecked(False)
-            self.replace_model_checkbox.blockSignals(False)
-        
+            for cb in (self.replace_model_checkbox, self.spray_checkbox):
+                cb.blockSignals(True)
+                cb.setChecked(False)
+                cb.blockSignals(False)
+
         # Вызываем основной обработчик
         self.on_crit_hit_changed(is_checked)
     
     def _on_replace_model_state_changed(self, state: int) -> None:
         """Обработчик изменения состояния чекбокса замены модели"""
         is_checked = (state == Qt.Checked)
-        
-        # Если замена модели включается, всегда отключаем CritHIT (взаимоисключающие режимы)
+
+        # Если замена модели включается — отключаем остальные взаимоисключающие режимы
         if is_checked:
-            # Блокируем сигналы, чтобы избежать рекурсии
-            self.crit_hit_checkbox.blockSignals(True)
-            self.crit_hit_checkbox.setChecked(False)
-            self.crit_hit_checkbox.blockSignals(False)
+            for cb in (self.crit_hit_checkbox, self.spray_checkbox):
+                cb.blockSignals(True)
+                cb.setChecked(False)
+                cb.blockSignals(False)
             # Восстанавливаем доступность элементов управления оружием
             self.class_combo.setEnabled(True)
             self.weapon_type_combo.setEnabled(True)
             self.weapon_combo.setEnabled(True)
-        
+
         # Вызываем основной обработчик
         self.on_replace_model_changed(is_checked)
     
+    def _on_spray_state_changed(self, state: int) -> None:
+        """Обработчик изменения состояния чекбокса Spray"""
+        is_checked = (state == Qt.Checked)
+
+        # Если спрей включается — отключаем остальные взаимоисключающие режимы
+        if is_checked:
+            for cb in (self.crit_hit_checkbox, self.replace_model_checkbox):
+                cb.blockSignals(True)
+                cb.setChecked(False)
+                cb.blockSignals(False)
+            self.selected_smd_path = None
+            # Восстанавливаем комбобоксы (CritHIT их блокировал)
+            self.class_combo.setEnabled(True)
+            self.weapon_type_combo.setEnabled(True)
+            self.weapon_combo.setEnabled(True)
+            # Уведомляем панель настроек (сбрасываем CritHIT-специфичные настройки)
+            if hasattr(self, 'settings_panel'):
+                self.settings_panel.on_crit_hit_selected(False)
+
+        self.apply_selection_auto()
+
     def on_crit_hit_changed(self, is_crit_hit: bool) -> None:
         """Обработка изменения состояния CritHIT режима"""
         # Отключаем/включаем элементы управления
@@ -438,10 +528,13 @@ class MainWindow(QMainWindow):
     
     def apply_selection_auto(self) -> None:
         """Автоматически применяет выбранное оружие"""
-        # Проверяем CritHIT режим из локального чекбокса
+        is_spray   = self.spray_checkbox.isChecked()
         is_crit_hit = self.crit_hit_checkbox.isChecked()
-        
-        if is_crit_hit:
+
+        if is_spray:
+            self.mode = "spray"
+            logger.info("Выбран режим Spray")
+        elif is_crit_hit:
             self.mode = "critHIT"
             logger.info("Выбран CritHIT режим")
         elif self.current_class and self.current_weapon:
@@ -807,6 +900,21 @@ class MainWindow(QMainWindow):
                 return
 
             size = settings['size']
+
+            # Спрей поддерживает максимум 256×256 — предупреждаем и принудительно уменьшаем
+            if self.mode == "spray" and (size[0] > 256 or size[1] > 256):
+                from PySide6.QtWidgets import QMessageBox
+                if self.language == 'ru':
+                    msg = (f"Спрей поддерживает максимум 256×256.\n"
+                           f"Выбранное разрешение {size[0]}×{size[1]} будет уменьшено до 256×256.\n\n"
+                           f"Совет: выберите «256×256 (Спрей)» в разделе Разрешение.")
+                else:
+                    msg = (f"Spray supports a maximum of 256×256.\n"
+                           f"The selected resolution {size[0]}×{size[1]} will be downscaled to 256×256.\n\n"
+                           f"Tip: select '256×256 (Spray)' in the Resolution section.")
+                QMessageBox.warning(self, self.t['error'], msg)
+                size = (256, 256)
+
             is_special_mode = self.mode in SPECIAL_MODES.values()
             # Для critHIT используем настройки пользователя (формат, флаги, опции)
             selected_format = settings['format']
@@ -1593,6 +1701,13 @@ class MainWindow(QMainWindow):
     def open_support_link(self) -> None:
         QDesktopServices.openUrl(QUrl("https://steamcommunity.com/tradeoffer/new/?partner=394814324&token=GNGCagXk"))
     
+    def closeEvent(self, event) -> None:
+        """Сохраняем геометрию окна перед закрытием."""
+        from src.config.app_config import AppConfig
+        geom_b64 = self.saveGeometry().toBase64().data().decode()
+        AppConfig.set('window_geometry', geom_b64)
+        super().closeEvent(event)
+
     def open_settings_dialog(self) -> None:
         """Открывает диалог настроек"""
         dialog = SettingsDialog(self)

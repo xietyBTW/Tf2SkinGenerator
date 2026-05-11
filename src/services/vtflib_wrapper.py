@@ -134,6 +134,25 @@ class VTFLib:
         cls._dll.vlSetFloat.restype = None
         cls._dll.vlSetFloat.argtypes = [c_int, c_float]
 
+        # ── Функции для чтения VTF ──────────────────────────────────────── #
+        cls._dll.vlImageLoad.restype = vlBool
+        cls._dll.vlImageLoad.argtypes = [c_char_p, vlBool]
+
+        cls._dll.vlImageGetWidth.restype = vlUInt
+        cls._dll.vlImageGetWidth.argtypes = []
+
+        cls._dll.vlImageGetHeight.restype = vlUInt
+        cls._dll.vlImageGetHeight.argtypes = []
+
+        cls._dll.vlImageGetFormat.restype = c_int
+        cls._dll.vlImageGetFormat.argtypes = []
+
+        cls._dll.vlImageGetData.restype = POINTER(vlByte)
+        cls._dll.vlImageGetData.argtypes = [vlUInt, vlUInt, vlUInt, vlUInt]
+
+        cls._dll.vlImageConvertToRGBA8888.restype = vlBool
+        cls._dll.vlImageConvertToRGBA8888.argtypes = [POINTER(vlByte), POINTER(vlByte), vlUInt, vlUInt, c_int]
+
         return cls._dll
 
     @classmethod
@@ -227,6 +246,69 @@ class VTFLib:
             if not dll.vlImageSave(out_bytes):
                 raise RuntimeError(cls._last_error())
             _ = keepalive_buffers
+        finally:
+            try:
+                dll.vlImageDestroy()
+            except Exception:
+                pass
+            try:
+                dll.vlDeleteImage(img_id.value)
+            except Exception:
+                pass
+
+    @classmethod
+    def read_vtf_as_rgba(cls, vtf_path: str) -> tuple:
+        """
+        Загружает VTF файл и возвращает первый кадр в формате RGBA8888.
+
+        Returns:
+            (rgba_bytes: bytes, width: int, height: int)
+
+        Raises:
+            RuntimeError: если загрузка или конвертация не удалась
+        """
+        cls.initialize()
+        dll = cls._load()
+
+        vlUInt = c_uint
+        vlByte = c_ubyte
+        vlBool = c_int
+
+        img_id = vlUInt(0)
+        if not dll.vlCreateImage(pointer(img_id)):
+            raise RuntimeError(cls._last_error())
+        try:
+            if not dll.vlBindImage(img_id.value):
+                raise RuntimeError(cls._last_error())
+
+            path_bytes = str(vtf_path).encode("utf-8")
+            if not dll.vlImageLoad(path_bytes, vlBool(0)):
+                raise RuntimeError(cls._last_error())
+
+            width  = int(dll.vlImageGetWidth())
+            height = int(dll.vlImageGetHeight())
+            src_format = int(dll.vlImageGetFormat())
+
+            # Получаем указатель на сырые данные первого кадра (frame=0, face=0, slice=0, mip=0)
+            src_ptr = dll.vlImageGetData(vlUInt(0), vlUInt(0), vlUInt(0), vlUInt(0))
+            if not src_ptr:
+                raise RuntimeError("vlImageGetData returned NULL")
+
+            dest_size = width * height * 4
+            dest = (vlByte * dest_size)()
+
+            if src_format == VTFImageFormat.RGBA8888:
+                # Уже в нужном формате — просто копируем
+                import ctypes
+                ctypes.memmove(dest, src_ptr, dest_size)
+            else:
+                ok = bool(dll.vlImageConvertToRGBA8888(
+                    src_ptr, dest, vlUInt(width), vlUInt(height), c_int(src_format)
+                ))
+                if not ok:
+                    raise RuntimeError(cls._last_error())
+
+            return bytes(dest), width, height
         finally:
             try:
                 dll.vlImageDestroy()

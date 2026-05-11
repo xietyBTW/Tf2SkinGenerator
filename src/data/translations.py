@@ -21,6 +21,7 @@ TRANSLATIONS = {
         'drag_image': 'Перетащи сюда изображение',
         'language': 'Язык',
         'image_format': 'Формат изображения:',
+        'res_256': '256x256 (Спрей)',
         'res_high': '1024x1024 (Высокое)',
         'res_normal': '512x512 (Обычное)',
         'res_ultra': '2048x2048 (Ультра)',
@@ -141,6 +142,8 @@ TRANSLATIONS = {
         'replace_model': 'Заменить модель:',
         'enable_replace_model': 'Включить замену модели',
         'select_smd_file': 'Выберите SMD файл модели',
+        'spray_mode': 'Режим спрея:',
+        'enable_spray': 'Создать спрей (256×256, RGBA)',
         
         # Error messages
         'error_tf2_not_specified': 'Не указана папка TF2. Укажите её в настройках.',
@@ -269,6 +272,7 @@ TRANSLATIONS = {
         'drag_image': 'Drag your image here',
         'language': 'Language',
         'image_format': 'Image format:',
+        'res_256': '256x256 (Spray)',
         'res_high': '1024x1024 (High)',
         'res_normal': '512x512 (Normal)',
         'res_ultra': '2048x2048 (Ultra)',
@@ -389,6 +393,8 @@ TRANSLATIONS = {
         'replace_model': 'Replace Model:',
         'enable_replace_model': 'Enable model replacement',
         'select_smd_file': 'Select SMD Model File',
+        'spray_mode': 'Spray Mode:',
+        'enable_spray': 'Create spray (256×256, RGBA)',
         
         # Error messages
         'error_tf2_not_specified': 'TF2 folder not specified. Please specify it in settings.',

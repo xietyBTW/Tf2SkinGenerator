@@ -29,7 +29,10 @@ TF2_WEAPONS = {
             "c_rift_fire_mace": {"ru": "Солнце на палочке", "en": "Sun-On-A-Stick"},
             "c_xms_giftwrap": {"ru": "Обёрточный убийца", "en": "Wrap Assassin"},
             "c_invasion_bat": {"ru": "Веер войны", "en": "The Batsaber"}
-        }
+        },
+        "Hands": {
+            "hands": {"ru": "Руки", "en": "Hands"},
+        },
     },
     "Soldier": {
         "Primary": {
@@ -60,7 +63,10 @@ TF2_WEAPONS = {
             "c_riding_crop": {"ru": "Дисциплинарное взыскание", "en": "Disciplinary Action"},
             "c_market_gardener": {"ru": "Землекоп", "en": "Market Gardener"},
             "c_pickaxe": {"ru": "План эвакуации", "en": "Escape Plan"}
-        }
+        },
+        "Hands": {
+            "hands": {"ru": "Руки", "en": "Hands"},
+        },
     },
     "Pyro": {
         "Primary": {
@@ -92,7 +98,10 @@ TF2_WEAPONS = {
             "c_sd_neonsign": {"ru": "Неоновый аннигилятор", "en": "Neon Annihilator"},
             "c_slapping_glove": {"ru": "Горячая рука", "en": "Hot Hand"},
             "c_lollichop": {"ru": "Заостренный осколок вулкана", "en": "Lollichop"}
-        }
+        },
+        "Hands": {
+            "hands": {"ru": "Руки", "en": "Hands"},
+        },
     },
     "Demoman": {
         "Primary": {
@@ -120,7 +129,10 @@ TF2_WEAPONS = {
             "c_claidheamohmor": {"ru": "Клеймор", "en": "Claidheamh Mòr"},
             "c_shogun_katana": {"ru": "Полудзатоити", "en": "Half-Zatoichi"},
             "c_demo_sultan_sword": {"ru": "Персидский заклинатель", "en": "Persian Persuader"}
-        }
+        },
+        "Hands": {
+            "hands": {"ru": "Руки", "en": "Hands"},
+        },
     },
     "Heavy": {
         "Primary": {
@@ -149,7 +161,10 @@ TF2_WEAPONS = {
             "c_bear_claw": {"ru": "Воинский дух", "en": "Warrior's Spirit"},
             "c_eviction_notice": {"ru": "Уведомление о выселении", "en": "Eviction Notice"},
             "c_xms_gloves": {"ru": "Праздничный удар", "en": "Holiday Punch"}
-        }
+        },
+        "Hands": {
+            "hands": {"ru": "Руки", "en": "Hands"},
+        },
     },
     "Engineer": {
         "Primary": {
@@ -172,7 +187,11 @@ TF2_WEAPONS = {
             "c_spikewrench": {"ru": "Южное гостеприимство", "en": "Southern Hospitality"},
             "c_jag": {"ru": "Острозуб", "en": "Jag"},
             "c_drg_wrenchmotron": {"ru": "Озарение", "en": "Eureka Effect"}
-        }
+        },
+        "Hands": {
+            "hands": {"ru": "Руки", "en": "Hands"},
+            "mech_hands": {"ru": "Рука робота (МвМ)", "en": "Robot Hand (MvM)"},
+        },
     },
     "Medic": {
         "Primary": {
@@ -192,7 +211,10 @@ TF2_WEAPONS = {
             "c_uberneedle": {"ru": "Вита-пила", "en": "Vita-Saw"},
             "c_amputator": {"ru": "Ампутатор", "en": "Amputator"},
             "c_hippocrates_bust": {"ru": "Священная клятва", "en": "Solemn Vow"}
-        }
+        },
+        "Hands": {
+            "hands": {"ru": "Руки", "en": "Hands"},
+        },
     },
     "Sniper": {
         "Primary": {
@@ -221,7 +243,10 @@ TF2_WEAPONS = {
             "c_wood_machete": {"ru": "Заточка дикаря", "en": "Tribalman's Shiv"},
             "c_croc_knife": {"ru": "Кустолом", "en": "Bushwacka"},
             "c_scimitar": {"ru": "Шаханшах", "en": "Shahanshah"}
-        }
+        },
+        "Hands": {
+            "hands": {"ru": "Руки", "en": "Hands"},
+        },
     },
     "Spy": {
         "Primary": {
@@ -246,13 +271,17 @@ TF2_WEAPONS = {
             "c_shogun_kunai": {"ru": "Кунай заговорщика", "en": "Conniver's Kunai"},
             "c_switchblade": {"ru": "Главный делец", "en": "Big Earner"},
             "c_xms_cold_shoulder": {"ru": "Сосулька", "en": "Spy-Cicle"}
-        }
+        },
+        "Hands": {
+            "hands": {"ru": "Руки", "en": "Hands"},
+        },
     }
 }
 
 # Специальные режимы (эффекты)
 SPECIAL_MODES = {
-    "CritHIT": "critHIT"
+    "CritHIT": "critHIT",
+    "Spray": "spray",
 }
 
 TF2_CLASSES = {
@@ -270,24 +299,25 @@ TF2_CLASSES = {
 WEAPON_TYPES = {
     "Primary": {"ru": "Основное", "en": "Primary"},
     "Secondary": {"ru": "Дополнительное", "en": "Secondary"},
-    "Melee": {"ru": "Ближний бой", "en": "Melee"}
+    "Melee": {"ru": "Ближний бой", "en": "Melee"},
+    "Hands": {"ru": "Руки", "en": "Hands"},
 }
 
 def get_weapon_name(class_name: str, weapon_type: str, weapon_key: str, language: str = "ru") -> str:
     if class_name not in TF2_WEAPONS:
         return weapon_key
-    
+
     if weapon_type not in TF2_WEAPONS[class_name]:
         return weapon_key
-    
+
     if weapon_key not in TF2_WEAPONS[class_name][weapon_type]:
         return weapon_key
-    
+
     weapon_data = TF2_WEAPONS[class_name][weapon_type][weapon_key]
-    
+
     if isinstance(weapon_data, dict):
         return weapon_data.get(language, weapon_data.get("ru", weapon_key))
-    
+
     return weapon_data
 
 def get_weapon_type_name(weapon_type: str, language: str = "ru") -> str:
@@ -296,6 +326,8 @@ def get_weapon_type_name(weapon_type: str, language: str = "ru") -> str:
 WEAPON_MDL_PATHS = {}
 for class_name, class_weapons in TF2_WEAPONS.items():
     for weapon_type, weapons in class_weapons.items():
+        if weapon_type == "Hands":
+            continue  # Hands have no MDL — they use a separate VTF-only pipeline
         for weapon_key in weapons.keys():
             if weapon_key.startswith("c_") or weapon_key.startswith("w_"):
                 WEAPON_MDL_PATHS[weapon_key] = f"models/weapons/c_models/{weapon_key}/{weapon_key}.mdl"

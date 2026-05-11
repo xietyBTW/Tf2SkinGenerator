@@ -18,8 +18,10 @@ class PreviewPanel(QWidget):
         self.styles = get_modern_styles()
         self.styles = get_modern_styles()
         self.image_path = None
-        self.vtf_path = None  # Путь к загруженному VTF файлу
-        self.image_info = {}  # Хранит информацию об изображении
+        self.vtf_path = None        # Путь к загруженному VTF файлу
+        self.image_info = {}        # Хранит информацию об изображении
+        self._gif_movie = None      # Активный QMovie (анимированный GIF)
+        self._gif_orig_size = None  # Оригинальный размер GIF-кадра
         
         # Загружаем настройки перевода
         from src.config.app_config import AppConfig
@@ -201,54 +203,102 @@ class PreviewPanel(QWidget):
             elif self.is_image_file(file_path):
                 self.load_image(file_path)
     
+    # ── GIF helpers ────────────────────────────────────────────────────────── #
+
+    def _stop_gif(self) -> None:
+        """Останавливает и удаляет текущий QMovie."""
+        if self._gif_movie is not None:
+            self._gif_movie.stop()
+            self.preview.setMovie(None)
+            self._gif_movie.deleteLater()
+            self._gif_movie = None
+        self._gif_orig_size = None
+
+    def _start_gif(self, path: str, preview_width: int) -> bool:
+        """
+        Запускает анимированный GIF в preview-виджете.
+        Возвращает True при успехе, False если формат не поддержан.
+        """
+        from PySide6.QtGui import QMovie, QImageReader
+        from PySide6.QtCore import QSize
+
+        reader = QImageReader(path)
+        orig = reader.size()
+        if not orig.isValid() or orig.width() <= 0 or orig.height() <= 0:
+            return False
+
+        movie = QMovie(path)
+        if not movie.isValid():
+            movie.deleteLater()
+            return False
+
+        self._gif_orig_size = orig
+        scaled = orig.scaled(preview_width, 500, Qt.KeepAspectRatio)
+        movie.setScaledSize(scaled)
+
+        self._gif_movie = movie
+        self.preview.setMovie(movie)
+        movie.start()
+        logger.debug(f"GIF запущен: {path} ({orig.width()}×{orig.height()})")
+        return True
+
+    # ── Image loading ───────────────────────────────────────────────────────── #
+
     def load_image(self, path):
-        """Загружает изображение для предварительного просмотра"""
+        """Загружает изображение для предварительного просмотра.
+        Анимированные GIF воспроизводятся через QMovie."""
+        self._stop_gif()
+
         self.image_path = path
-        # Очищаем путь к VTF, так как используется изображение
         self.vtf_path = None
+
         self.empty_state.hide()
         self.preview.show()
-        # Восстанавливаем стиль для изображения
+        self.preview.clear()
         self.preview.setStyleSheet(self.preview_style)
-        
-        # Принудительно обновляем геометрию виджета
         self.preview.updateGeometry()
         self.updateGeometry()
-        
-        # Используем QTimer для отложенного масштабирования после показа виджета
+
         from PySide6.QtCore import QTimer
-        def scale_image():
-            # Пробуем получить ширину preview виджета
-            preview_width = self.preview.width()
-            
-            # Если ширина еще не установлена, используем ширину родительского виджета
-            if preview_width <= 0:
-                preview_width = self.width()
-            
-            # Если и это не помогло, используем разумное значение по умолчанию
-            if preview_width <= 0:
-                preview_width = 600
-            
-            # Масштабируем изображение
-            pixmap = QPixmap(path).scaled(preview_width, 500, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            self.preview.setPixmap(pixmap)
-        
-        # Используем несколько попыток с увеличивающейся задержкой
-        QTimer.singleShot(50, scale_image)
-        QTimer.singleShot(200, scale_image)
-        
-        # Обновляем информацию
+
+        if path.lower().endswith('.gif'):
+            # ── Анимированный GIF ──────────────────────────────────────────── #
+            def try_start_gif():
+                if self._gif_movie is not None:
+                    return  # Уже запущен (повторный вызов таймера)
+                preview_width = max(self.preview.width(), self.width(), 600)
+                if not self._start_gif(path, preview_width):
+                    # Fallback: первый кадр как статичный QPixmap
+                    pixmap = QPixmap(path).scaled(
+                        preview_width, 500, Qt.KeepAspectRatio, Qt.SmoothTransformation
+                    )
+                    self.preview.setPixmap(pixmap)
+
+            QTimer.singleShot(50, try_start_gif)
+            QTimer.singleShot(200, try_start_gif)  # резерв, если ширина ещё не вычислена
+        else:
+            # ── Статичное изображение ─────────────────────────────────────── #
+            def scale_image():
+                preview_width = max(self.preview.width(), self.width(), 600)
+                pixmap = QPixmap(path).scaled(
+                    preview_width, 500, Qt.KeepAspectRatio, Qt.SmoothTransformation
+                )
+                self.preview.setPixmap(pixmap)
+
+            QTimer.singleShot(50, scale_image)
+            QTimer.singleShot(200, scale_image)
+
         self.update_info_summary()
     
     def clear_preview(self):
         """Очищает предварительный просмотр"""
+        self._stop_gif()
         self.image_path = None
         self.vtf_path = None
         self.image_info = {}
         self.preview.clear()
         self.preview.hide()
         self.empty_state.show()
-        # Обновляем информацию, но не скрываем блок
         self.update_info_summary()
     
     def get_image_path(self):
@@ -260,35 +310,49 @@ class PreviewPanel(QWidget):
         return self.vtf_path
     
     def load_vtf(self, path):
-        """Загружает VTF файл (сохраняет путь)"""
+        """Загружает VTF файл — рендерит первый кадр через VTFLib."""
         import os
         if not os.path.exists(path):
             return
-        
+
         self.vtf_path = path
-        # Очищаем путь к изображению, так как используется VTF
         self.image_path = None
-        
-        # Показываем информацию о VTF файле
+
         self.empty_state.hide()
         self.preview.show()
         self.preview.clear()
-        
-        # Отображаем текст о том, что VTF файл загружен
-        self.preview.setText(f"VTF файл загружен:\n{os.path.basename(path)}")
-        self.preview.setStyleSheet(self.preview_style + """
-            QLabel {
-                color: #ccc;
-                font-size: 14px;
-            }
-        """)
-        self.preview.setAlignment(Qt.AlignCenter)
-        
-        # Обновляем информацию
+        self.preview.setStyleSheet(self.preview_style)
+
+        # Пытаемся отрендерить VTF через VTFLib
+        rendered = False
+        try:
+            from src.services.vtflib_wrapper import VTFLib
+            rgba_bytes, vtf_w, vtf_h = VTFLib.read_vtf_as_rgba(path)
+
+            from PySide6.QtGui import QImage, QPixmap
+            qimage = QImage(rgba_bytes, vtf_w, vtf_h, vtf_w * 4, QImage.Format_RGBA8888)
+            if not qimage.isNull():
+                preview_w = max(self.preview.width(), 600)
+                pixmap = QPixmap.fromImage(qimage).scaled(
+                    preview_w, 500, Qt.KeepAspectRatio, Qt.SmoothTransformation
+                )
+                self.preview.setPixmap(pixmap)
+                rendered = True
+                logger.debug(f"VTF отображён: {os.path.basename(path)} ({vtf_w}×{vtf_h})")
+        except Exception as e:
+            logger.warning(f"Не удалось отрендерить VTF ({os.path.basename(path)}): {e}")
+
+        if not rendered:
+            # Fallback: показываем текст
+            self.preview.setText(f"VTF: {os.path.basename(path)}")
+            self.preview.setStyleSheet(self.preview_style + "QLabel { color:#ccc; font-size:14px; }")
+            self.preview.setAlignment(Qt.AlignCenter)
+
         self.update_info_summary()
     
     def display_image(self, pil_image):
         """Отображает PIL Image в превью"""
+        self._stop_gif()
         try:
             # Сохраняем PIL изображение во временный файл для последующей загрузки
             import tempfile
@@ -420,37 +484,38 @@ class PreviewPanel(QWidget):
             self.update_info_summary()
     
     def resizeEvent(self, event):
-        """Обработка изменения размера окна - перемасштабируем изображение"""
+        """Обработка изменения размера окна — перемасштабируем изображение или GIF."""
         super().resizeEvent(event)
-        # Если есть загруженное изображение, перемасштабируем его
-        if self.image_path and self.preview.isVisible():
-            # Используем QTimer для отложенного масштабирования после изменения размера
-            from PySide6.QtCore import QTimer
+        if not self.preview.isVisible():
+            return
+
+        from PySide6.QtCore import QTimer
+
+        if self._gif_movie is not None and self._gif_orig_size is not None:
+            # ── Анимированный GIF: обновляем ScaledSize ───────────────────── #
+            def resize_gif():
+                preview_width = max(self.preview.width(), self.width(), 600)
+                scaled = self._gif_orig_size.scaled(preview_width, 500, Qt.KeepAspectRatio)
+                self._gif_movie.setScaledSize(scaled)
+
+            QTimer.singleShot(50, resize_gif)
+
+        elif self.image_path:
+            # ── Статичное изображение ─────────────────────────────────────── #
             def scale_image():
-                # Пробуем получить ширину preview виджета
-                preview_width = self.preview.width()
-                
-                # Если ширина еще не установлена, используем ширину родительского виджета
-                if preview_width <= 0:
-                    preview_width = self.width()
-                
-                # Если и это не помогло, используем разумное значение по умолчанию
-                if preview_width <= 0:
-                    preview_width = 600
-                
-                if self.image_path:
-                    # Проверяем, существует ли файл (может быть временный файл)
-                    import os
-                    if os.path.exists(self.image_path):
-                        pixmap = QPixmap(self.image_path)
-                        if not pixmap.isNull():
-                            scaled_pixmap = pixmap.scaled(preview_width, 500, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-                            self.preview.setPixmap(scaled_pixmap)
-                    else:
-                        # Если файл не существует, используем текущий pixmap
-                        current_pixmap = self.preview.pixmap()
-                        if current_pixmap:
-                            scaled_pixmap = current_pixmap.scaled(preview_width, 500, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-                            self.preview.setPixmap(scaled_pixmap)
-            
+                preview_width = max(self.preview.width(), self.width(), 600)
+                import os
+                if os.path.exists(self.image_path):
+                    pixmap = QPixmap(self.image_path)
+                    if not pixmap.isNull():
+                        self.preview.setPixmap(
+                            pixmap.scaled(preview_width, 500, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                        )
+                else:
+                    current = self.preview.pixmap()
+                    if current:
+                        self.preview.setPixmap(
+                            current.scaled(preview_width, 500, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                        )
+
             QTimer.singleShot(50, scale_image)

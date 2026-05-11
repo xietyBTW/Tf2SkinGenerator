@@ -22,6 +22,7 @@ from .debug_service import DebugService
 from .smd_service import SMDService
 from .decompile_cache import get_cached_decompile, restore_from_cache, save_to_cache
 from src.data.weapons import SPECIAL_MODES, WEAPON_MDL_PATHS
+from src.data.player_hands import HAND_MODE_KEYS
 from src.shared.logging_config import get_logger
 from src.shared.constants import ToolPaths, DirectoryPaths
 from src.shared.exceptions import (
@@ -96,7 +97,7 @@ class VPKService:
             logger.info(f"Начало сборки VPK: {filename}")
             emit_progress(5, t.get('build_init', 'Initializing build...'))
 
-            is_special_mode = mode in SPECIAL_MODES.values()
+            is_special_mode = mode in SPECIAL_MODES.values() or mode in HAND_MODE_KEYS
 
             _sub_label_init = "Preparing..." if language == "en" else "Подготовка..."
             emit_sub(-1, _sub_label_init)
@@ -267,6 +268,29 @@ class VPKService:
                     vmt_to_delete = result[2]
                 else:
                     vmt_to_delete = None
+
+            elif mode in HAND_MODE_KEYS:
+                # Руки персонажей: только VTF, никакой модели/VMT
+                from src.services.hands_build_service import HandsBuildService
+                emit_sub(-1, "Processing hand textures..." if language == "en" else "Обработка текстур рук...")
+                success, error_msg = HandsBuildService.build(
+                    ctx=ctx,
+                    mode=mode,
+                    image_path=image_path,
+                    size=size,
+                    format_type=format_type,
+                    flags=flags,
+                    vtf_options=vtf_options,
+                    keep_temp_on_error=keep_temp_on_error,
+                    debug_mode=debug_mode,
+                    language=language,
+                    custom_vtf_path=custom_vtf_path,
+                    extra_texture_callback=extra_texture_callback,
+                    sub_progress_callback=emit_sub,
+                )
+                if not success:
+                    return False, error_msg
+
             else:
                 # Для обычного оружия - сначала распаковываем модель, потом текстуры по пути из QC делаем
                 # Без пути к TF2 вообще хуй че получится - нужны VPK файлы игры
