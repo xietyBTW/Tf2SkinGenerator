@@ -608,6 +608,137 @@ class TF2VPKExtractService:
             return False, str(e), False
     
     @staticmethod
+    def extract_hand_textures_with_progress(
+        textures_vpk_path: str,
+        hand_textures: List[Tuple[str, str]],
+        out_dir: str,
+        export_format: str = "VTF",
+        language: str = "en",
+        progress_callback: Optional[Callable[[int, str], None]] = None,
+        cancel_callback: Optional[Callable[[], bool]] = None,
+    ) -> Tuple[bool, str, bool]:
+        """
+        Извлекает текстуры рук персонажа из tf2_textures_dir.vpk.
+
+        Args:
+            textures_vpk_path: Путь к tf2_textures_dir.vpk
+            hand_textures:     Список (folder, vtf_name) из HAND_MODES
+            out_dir:           Папка для экспорта
+            export_format:     VTF / PNG / TGA / JPG
+            language:          Язык сообщений
+            progress_callback: callback(pct, msg)
+            cancel_callback:   callable → bool
+
+        Returns:
+            (success, message, cancelled)
+        """
+        import time
+        t = TRANSLATIONS.get(language, TRANSLATIONS["en"])
+
+        def emit(pct: int, msg: str) -> None:
+            if progress_callback:
+                progress_callback(pct, msg)
+
+        def is_cancelled() -> bool:
+            return bool(cancel_callback and cancel_callback())
+
+        emit(10, t.get("extract_init", "Initializing extraction..."))
+        time.sleep(0.05)
+
+        if is_cancelled():
+            return False, t.get("extract_cancelled", "Extraction cancelled by user"), True
+
+        if not VPK_AVAILABLE:
+            return False, t.get("vpk_library_not_available", "VPK library not available"), False
+
+        emit(20, t.get("extract_checking", "Checking VPK file..."))
+
+        if not os.path.exists(textures_vpk_path):
+            return False, t.get("textures_vpk_not_found", "tf2_textures_dir.vpk not found"), False
+
+        if is_cancelled():
+            return False, t.get("extract_cancelled", "Extraction cancelled by user"), True
+
+        ensure_directory_exists(out_dir)
+        emit(30, t.get("extract_searching", "Searching for texture..."))
+
+        try:
+            vpk_file = vpk.open(textures_vpk_path)
+        except Exception as exc:
+            return False, str(exc), False
+
+        extracted_paths: List[str] = []
+        n = max(len(hand_textures), 1)
+
+        try:
+            for idx, (folder, vtf_name) in enumerate(hand_textures):
+                if is_cancelled():
+                    return False, t.get("extract_cancelled", "Extraction cancelled by user"), True
+
+                pct = 50 + int(idx / n * 40)
+                emit(pct, t.get("extract_extracting", "Extracting texture..."))
+
+                vtf_rel_path = f"materials/models/player/{folder}/{vtf_name}.vtf"
+
+                if vtf_rel_path not in vpk_file:
+                    logger.warning(f"Текстура рук не найдена в VPK: {vtf_rel_path}")
+                    continue
+
+                vtf_filename = f"{vtf_name}.vtf"
+                try:
+                    dest_path = sanitize_path(vtf_filename, out_dir)
+                except ValueError as exc:
+                    logger.warning(f"Недопустимый путь для {vtf_filename}: {exc}")
+                    continue
+
+                with open(dest_path, "wb") as fh:
+                    fh.write(vpk_file[vtf_rel_path].read())
+                logger.info(f"Извлечена текстура рук: {vtf_rel_path} → {dest_path}")
+
+                if export_format.upper() != "VTF":
+                    emit(pct + 3, t.get("extract_converting", "Converting texture..."))
+                    converted = TF2VPKExtractService._convert_vtf_to_image(
+                        dest_path, out_dir, export_format.upper()
+                    )
+                    if converted:
+                        try:
+                            os.remove(dest_path)
+                        except Exception:
+                            pass
+                        extracted_paths.append(converted)
+                    else:
+                        extracted_paths.append(dest_path)
+                else:
+                    extracted_paths.append(dest_path)
+        finally:
+            if hasattr(vpk_file, "close"):
+                try:
+                    vpk_file.close()
+                except Exception:
+                    pass
+
+        if not extracted_paths:
+            return (
+                False,
+                t.get("texture_extract_failed", "Failed to extract texture for weapon: {weapon}").format(weapon="hands"),
+                False,
+            )
+
+        emit(100, t.get("extract_completed", "Extraction completed"))
+
+        if len(extracted_paths) == 1:
+            success_msg = t.get(
+                "texture_extracted_success", "Texture extracted successfully: {path}"
+            ).format(path=extracted_paths[0])
+        else:
+            paths_str = "\n".join(extracted_paths)
+            success_msg = t.get(
+                "texture_extracted_success", "Texture extracted successfully: {path}"
+            ).format(path=paths_str)
+
+        return True, success_msg, False
+
+    @staticmethod
     def _convert_vtf_to_image(vtf_path: str, out_dir: str, image_format: str) -> Optional[str]:
         """
         Конвертирует VTF файл в изображение (PNG, TGA, JPG) используя библиотеку vtf2img

@@ -1396,61 +1396,65 @@ class MainWindow(QMainWindow):
         ErrorHandler.show_error(self, Exception(error_message), "Ошибка экспорта модели", self.t['error'])
 
     def extract_original_texture(self) -> None:
-        """Запускает асинхронное извлечение оригинальной текстуры оружия из игры"""
+        """Запускает асинхронное извлечение оригинальной текстуры оружия/рук из игры"""
         try:
             if not hasattr(self, 'mode') or not self.mode:
                 ErrorHandler.show_warning(self, self.t['select_weapon_error'], self.t['error'])
                 return
-            
-            # Получаем weapon_key из mode
-            weapon_key = self.mode.split('_', 1)[1] if '_' in self.mode else self.mode
-            
-            # Проверяем, что это не специальный режим
+
+            # Проверяем, что это не специальный режим (spray/critHIT)
             from src.data.weapons import SPECIAL_MODES
             if self.mode in SPECIAL_MODES.values():
                 error_msg = self.t.get('extract_texture_special_mode_error', 'Cannot extract texture for special modes')
                 ErrorHandler.show_warning(self, error_msg, self.t['error'])
                 return
-            
+
+            # Определяем: режим рук или обычное оружие
+            from src.data.player_hands import HAND_MODE_KEYS, get_hand_textures
+            is_hands = self.mode in HAND_MODE_KEYS
+            hand_textures = get_hand_textures(self.mode) if is_hands else None
+            weapon_key = self.mode.split('_', 1)[1] if '_' in self.mode else self.mode
+
             # Получаем путь к TF2
             settings = self.settings_panel.get_settings()
             tf2_root_dir = settings.get('tf2_game_folder', '')
-            
+
             if not tf2_root_dir:
                 error_msg = self.t.get('tf2_path_not_specified', 'TF2 path not specified in settings')
                 ErrorHandler.show_warning(self, error_msg, self.t['error'])
                 return
-            
+
             # Получаем путь к tf2_textures_dir.vpk
             from src.services.tf2_paths import TF2Paths
             textures_vpk = TF2Paths.resolve_textures_vpk(tf2_root_dir)
-            
+
             if not textures_vpk:
                 error_msg = self.t.get('textures_vpk_not_found', 'tf2_textures_dir.vpk not found')
                 ErrorHandler.show_warning(self, error_msg, self.t['error'])
                 return
-            
+
             # Получаем папку экспорта и формат
             export_folder = settings.get('export_folder', 'export')
             from src.config.app_config import AppConfig
             config = AppConfig.load_config()
             export_format = config.get('export_image_format', 'PNG')
-            
+
             # Проверяем, не запущено ли уже извлечение
             if hasattr(self, '_extract_worker') and self._extract_worker.isRunning():
                 error_msg = self.t.get('extract_already_running', 'Extraction is already in progress. Please wait.')
                 ErrorHandler.show_warning(self, error_msg, self.t['error'])
                 return
-            
+
             # Создаем и запускаем воркер для асинхронного извлечения
             from src.services.extract_texture_worker import ExtractTextureWorker
-            
+
             self._extract_worker = ExtractTextureWorker(
                 textures_vpk_path=textures_vpk,
                 weapon_key=weapon_key,
                 export_folder=export_folder,
                 export_format=export_format,
                 language=self.language,
+                hand_textures=hand_textures,  # None для оружия, список для рук
                 parent=self
             )
             
