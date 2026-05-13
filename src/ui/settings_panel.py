@@ -578,7 +578,153 @@ class SettingsPanel(QWidget):
         for rb in (self.radio_256, self.radio_512, self.radio_1024, self.radio_2048):
             rb.setMinimumWidth(0)
             rb.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
-    
+
+    # ── Единый контроллер ограничений UI по режиму ─────────────────────────── #
+
+    def apply_mode_restrictions(self, mode) -> None:
+        """
+        Применяет ограничения UI в зависимости от текущего режима сборки.
+
+        Это единственный метод, управляющий доступностью виджетов по режиму.
+        Вызывается из MainWindow.apply_selection_auto() при каждой смене режима.
+
+        Матрица ограничений:
+          Оружие — всё доступно
+          CritHIT — формат/флаги/UV/Normal заблокированы (on_crit_hit_selected);
+                    кнопки инструментов недоступны
+          Spray   — только 256×256; только форматы с альфа; флаги недоступны;
+                    UV/Normal скрыты; кнопки инструментов недоступны
+          Hands   — UV/Normal скрыты; Извлечь модель/VMT недоступны
+        """
+        try:
+            from src.data.player_hands import HAND_MODE_KEYS
+        except ImportError:
+            HAND_MODE_KEYS = frozenset()
+
+        is_spray  = (mode == "spray")
+        is_crit   = (mode == "critHIT")
+        is_hands  = bool(mode and mode in HAND_MODE_KEYS)
+        is_normal = bool(mode and not is_spray and not is_crit and not is_hands)
+
+        lang = 'ru'
+        if self.parent and hasattr(self.parent, 'language'):
+            lang = self.parent.language
+
+        # ── 1. Разрешение ────────────────────────────────────────────────── #
+        if is_spray:
+            self.radio_256.setChecked(True)
+        for rb in (self.radio_512, self.radio_1024, self.radio_2048):
+            rb.setEnabled(not is_spray)
+        self.radio_256.setEnabled(True)  # 256 всегда кликабельна
+
+        # ── 2. Формат VTF ────────────────────────────────────────────────── #
+        _ALPHA_FORMATS = {
+            "DXT3", "DXT5", "RGBA8888", "BGRA8888", "ABGR8888", "ARGB8888",
+            "DXT1 With One Bit Alpha", "BGRA5551", "BGRA4444", "IA88", "A8",
+            "RGBA16161616F", "RGBA16161616",
+        }
+        if is_spray:
+            if self.format_combo.currentText() not in _ALPHA_FORMATS:
+                self.format_combo.setCurrentText("DXT5")
+            self.format_combo.setEnabled(False)
+            self.format_combo.setToolTip(
+                "Спрей требует формат с альфа-каналом (DXT5)"
+                if lang == 'ru' else
+                "Spray requires an alpha-capable format (DXT5)"
+            )
+        elif not is_crit:
+            # CritHIT управляется через on_crit_hit_selected — не трогаем
+            self.format_combo.setEnabled(True)
+            self.format_combo.setToolTip("")
+
+        # ── 3. Флаги VTF ─────────────────────────────────────────────────── #
+        # Spray: флаги бессмысленны → отключаем
+        # CritHIT: on_crit_hit_selected уже управляет → не трогаем
+        _flag_widgets = [
+            self.flag_clamps, self.flag_clampt,
+            self.flag_nomipmaps, self.flag_nolod, self.flag_nominmipmaps,
+        ]
+        _opt_attrs = ('option_nothumbnail', 'option_noreflectivity', 'option_gamma')
+        if is_spray:
+            for w in _flag_widgets:
+                w.setEnabled(False)
+            for attr in _opt_attrs:
+                if hasattr(self, attr):
+                    getattr(self, attr).setEnabled(False)
+            if hasattr(self, 'gamma_value_input'):
+                self.gamma_value_input.setEnabled(False)
+        elif not is_crit:
+            for w in _flag_widgets:
+                w.setEnabled(True)
+            for attr in _opt_attrs:
+                if hasattr(self, attr):
+                    getattr(self, attr).setEnabled(True)
+            if hasattr(self, 'gamma_value_input'):
+                self.gamma_value_input.setEnabled(
+                    hasattr(self, 'option_gamma') and self.option_gamma.isChecked()
+                )
+
+        # ── 4. UV Layout ─────────────────────────────────────────────────── #
+        # Видима только для обычного оружия; CritHIT управляет сам
+        if not is_crit:
+            uv_visible = is_normal
+            if hasattr(self, 'uv_layout_widget'):
+                self.uv_layout_widget.setVisible(uv_visible)
+            if hasattr(self, 'uv_layout_checkbox'):
+                self.uv_layout_checkbox.setVisible(uv_visible)
+                if not uv_visible and self.uv_layout_checkbox.isChecked():
+                    self.uv_layout_checkbox.blockSignals(True)
+                    self.uv_layout_checkbox.force_set_checked(False)
+                    self.uv_layout_checkbox.blockSignals(False)
+            if hasattr(self, 'uv_resolution_label'):
+                self.uv_resolution_label.setVisible(uv_visible)
+            if hasattr(self, 'advanced_group'):
+                self.advanced_group.content_widget.updateGeometry()
+
+        # ── 5. Normal Map ─────────────────────────────────────────────────── #
+        # Только для обычного оружия; CritHIT управляет сам
+        if hasattr(self, 'option_normal') and not is_crit:
+            self.option_normal.setEnabled(is_normal)
+            if not is_normal and self.option_normal.isChecked():
+                self.option_normal.blockSignals(True)
+                self.option_normal.setChecked(False)
+                self.option_normal.blockSignals(False)
+
+        # ── 6. Кнопки инструментов ────────────────────────────────────────── #
+
+        def _tip(spray_ru, spray_en, crit_ru, crit_en, hands_ru, hands_en):
+            if is_spray:
+                return spray_ru if lang == 'ru' else spray_en
+            if is_crit:
+                return crit_ru if lang == 'ru' else crit_en
+            if is_hands:
+                return hands_ru if lang == 'ru' else hands_en
+            return ""
+
+        # Извлечь модель — только для обычного оружия
+        self.extract_model_button.setEnabled(is_normal)
+        self.extract_model_button.setToolTip(_tip(
+            "Режим спрея: модели нет",        "Spray mode: no model",
+            "Режим CritHIT: модели нет",      "CritHIT mode: no model",
+            "Руки: извлечение модели недоступно", "Hands: model extraction unavailable",
+        ))
+
+        # Извлечь текстуру — для обычного оружия и рук
+        self.extract_texture_button.setEnabled(is_normal or is_hands)
+        self.extract_texture_button.setToolTip(_tip(
+            "Режим спрея: оригинальной текстуры нет", "Spray mode: no original texture",
+            "Режим CritHIT: оригинальной текстуры нет", "CritHIT mode: no original texture",
+            "", "",  # для рук — доступно, подсказка не нужна
+        ))
+
+        # VMT редактор — только для обычного оружия
+        self.expert_button.setEnabled(is_normal)
+        self.expert_button.setToolTip(_tip(
+            "VMT спрея создаётся автоматически", "Spray VMT is auto-generated",
+            "VMT CritHIT создаётся автоматически", "CritHIT VMT is auto-generated",
+            "VMT рук управляется игрой",          "Hands VMT is controlled by the game",
+        ))
+
     def on_crit_hit_selected(self, is_crit_hit):
         """Обработка выбора CritHIT режима"""
         # Отключаем/включаем контролы в зависимости от режима

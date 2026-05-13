@@ -214,7 +214,10 @@ class MainWindow(QMainWindow):
             self.settings_panel.option_gamma.stateChanged.connect(self.update_preview_info)
         if hasattr(self.settings_panel, 'gamma_value_input'):
             self.settings_panel.gamma_value_input.textChanged.connect(self.update_preview_info)
-    
+
+        # Применяем ограничения UI для начального состояния (режим не выбран)
+        self.settings_panel.apply_mode_restrictions(self.mode)
+
     def create_weapon_selection_panel(self) -> None:
         from PySide6.QtWidgets import QGroupBox, QVBoxLayout, QLabel, QComboBox, QPushButton, QWidget
         from src.utils.themes import get_modern_styles
@@ -528,7 +531,7 @@ class MainWindow(QMainWindow):
     
     def apply_selection_auto(self) -> None:
         """Автоматически применяет выбранное оружие"""
-        is_spray   = self.spray_checkbox.isChecked()
+        is_spray    = self.spray_checkbox.isChecked()
         is_crit_hit = self.crit_hit_checkbox.isChecked()
 
         if is_spray:
@@ -542,7 +545,11 @@ class MainWindow(QMainWindow):
             logger.debug(f"Выбрано оружие: {self.current_class} - {self.current_weapon}")
         else:
             self.mode = None
-        
+
+        # Применяем ограничения UI для текущего режима
+        if hasattr(self, 'settings_panel'):
+            self.settings_panel.apply_mode_restrictions(self.mode)
+
         # Обновляем резюме в превью
         self.update_preview_info()
     
