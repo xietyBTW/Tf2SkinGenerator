@@ -1,4 +1,5 @@
 PySide6-Essentials>=6.5.0
+PySide6-Addons>=6.5.0
 Pillow>=8.0.0
 qdarkstyle>=3.0.0
 numpy>=1.21.0

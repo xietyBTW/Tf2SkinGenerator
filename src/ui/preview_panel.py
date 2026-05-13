@@ -1,112 +1,204 @@
 """
-Панель предварительного просмотра - Минималистичный дизайн
+Панель предварительного просмотра — 2D (изображение) и 3D (модель).
 """
 
-from PySide6.QtWidgets import QGroupBox, QVBoxLayout, QLabel, QPushButton, QWidget
+from PySide6.QtWidgets import (
+    QGroupBox, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+    QWidget, QStackedWidget, QSizePolicy,
+)
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
-from PySide6.QtWidgets import QSizePolicy
 from src.utils.themes import get_modern_styles
 from src.shared.logging_config import get_logger
 
 logger = get_logger(__name__)
+
 
 class PreviewPanel(QWidget):
     def __init__(self, parent=None):
         super().__init__()
         self.parent = parent
         self.styles = get_modern_styles()
-        self.styles = get_modern_styles()
         self.image_path = None
-        self.vtf_path = None        # Путь к загруженному VTF файлу
-        self.image_info = {}        # Хранит информацию об изображении
-        self._gif_movie = None      # Активный QMovie (анимированный GIF)
-        self._gif_orig_size = None  # Оригинальный размер GIF-кадра
-        
-        # Загружаем настройки перевода
+        self.vtf_path = None
+        self.image_info = {}
+        self._gif_movie = None
+        self._gif_orig_size = None
+
+        # 3D
+        self._3d_widget = None          # Preview3DWidget (создаётся лениво)
+        self._3d_worker = None          # Preview3DWorker
+        self._3d_available = False      # Есть ли WebEngine
+        self._pending_3d_params = None  # (weapon_key, mode, misc_vpk, textures_vpk)
+
         from src.config.app_config import AppConfig
         from src.data.translations import TRANSLATIONS
         config = AppConfig.load_config()
         current_lang = config.get('language') or 'en'
         self.t = TRANSLATIONS[current_lang]
-        
-        # Включаем поддержку drag & drop
+
         self.setAcceptDrops(True)
-        
         self.init_ui()
-    
+
+    # ── UI ────────────────────────────────────────────────────────────────── #
+
     def init_ui(self):
-        """Инициализация UI"""
         layout = QVBoxLayout(self)
-        layout.setSpacing(16)
+        layout.setSpacing(12)
         layout.setContentsMargins(0, 0, 0, 0)
-        
-        # Устанавливаем размерную политику для расширения по ширине
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        
-        # Область для перетаскивания/просмотра изображения
-        self.preview_container = QWidget()
-        self.preview_container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        preview_layout = QVBoxLayout(self.preview_container)
-        preview_layout.setContentsMargins(0, 0, 0, 0)
-        preview_layout.setSpacing(12)
-        # Устанавливаем выравнивание по центру для предпросмотра
-        preview_layout.setAlignment(Qt.AlignTop | Qt.AlignHCenter)
-        
-        # Пустое состояние
-        self.empty_state = QWidget()
-        # Устанавливаем такие же размеры, как у preview виджета
-        self.empty_state.setFixedHeight(500)
-        self.empty_state.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.empty_state.setMinimumWidth(800)
-        self.empty_state.setMaximumWidth(16777215)  # Qt максимальное значение
-        # Добавляем стиль, чтобы было видно границы (как у preview)
-        self.empty_state.setStyleSheet("""
+
+        # ── Переключатель 2D / 3D ─────────────────────────────────────────── #
+        self.toggle_bar = QWidget()
+        toggle_layout = QHBoxLayout(self.toggle_bar)
+        toggle_layout.setContentsMargins(0, 0, 0, 0)
+        toggle_layout.setSpacing(4)
+        toggle_layout.addStretch()
+
+        btn_style_active = """
+            QPushButton {
+                background: #2a2a2a;
+                color: #ccc;
+                border: 1px solid #444;
+                padding: 4px 16px;
+                font-size: 11px;
+                font-weight: 600;
+                border-radius: 3px;
+            }
+        """
+        btn_style_inactive = """
+            QPushButton {
+                background: transparent;
+                color: #555;
+                border: 1px solid #2a2a2a;
+                padding: 4px 16px;
+                font-size: 11px;
+                border-radius: 3px;
+            }
+            QPushButton:hover {
+                background: rgba(255,255,255,0.04);
+                color: #888;
+                border-color: #383838;
+            }
+        """
+
+        self.btn_2d = QPushButton("2D")
+        self.btn_3d = QPushButton("3D")
+        self.btn_2d.setFixedHeight(26)
+        self.btn_3d.setFixedHeight(26)
+        self.btn_2d.setStyleSheet(btn_style_active)
+        self.btn_3d.setStyleSheet(btn_style_inactive)
+        self._btn_style_active   = btn_style_active
+        self._btn_style_inactive = btn_style_inactive
+
+        self.btn_2d.clicked.connect(self._switch_to_2d)
+        self.btn_3d.clicked.connect(self._switch_to_3d)
+
+        toggle_layout.addWidget(self.btn_2d)
+        toggle_layout.addWidget(self.btn_3d)
+
+        # Кнопка загрузки 3D модели — иконка куба, без текста
+        toggle_layout.addSpacing(12)
+        self.btn_load_3d = QPushButton()
+        self.btn_load_3d.setFixedSize(26, 26)
+        self.btn_load_3d.setToolTip("Загрузить 3D модель")
+        self.btn_load_3d.setIcon(_make_cube_icon("#666666"))
+        self.btn_load_3d.setStyleSheet("""
+            QPushButton {
+                background: transparent;
+                border: 1px solid #2a2a2a;
+                border-radius: 3px;
+                padding: 0px;
+            }
+            QPushButton:hover {
+                background: rgba(255, 255, 255, 0.05);
+                border-color: #555;
+            }
+            QPushButton:pressed {
+                background: rgba(255, 255, 255, 0.08);
+            }
+            QPushButton:disabled {
+                opacity: 0.3;
+            }
+        """)
+        self.btn_load_3d.clicked.connect(self._on_load_3d_clicked)
+        self.btn_load_3d.setVisible(False)  # только в 3D режиме
+        toggle_layout.addWidget(self.btn_load_3d)
+
+        # Кнопки всегда видны; 3D покажет заглушку если WebEngine не установлен
+        self.toggle_bar.setVisible(True)
+        layout.addWidget(self.toggle_bar)
+
+        # ── Стек страниц ─────────────────────────────────────────────────── #
+        self.view_stack = QStackedWidget()
+        self.view_stack.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+        # Страница 2D
+        self.page_2d = self._build_2d_page()
+        self.view_stack.addWidget(self.page_2d)
+
+        layout.addWidget(self.view_stack)
+
+        # ── Информация (всегда видна) ─────────────────────────────────────── #
+        self.info_summary = self._build_info_panel()
+        layout.addWidget(self.info_summary)
+
+        self.setup_drag_drop()
+        self.update_info_summary()
+
+        # Инициализируем 3D виджет (ленивая — проверяем WebEngine)
+        self._init_3d_widget()
+
+    def _build_2d_page(self) -> QWidget:
+        page = QWidget()
+        page.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        vlay = QVBoxLayout(page)
+        vlay.setContentsMargins(0, 0, 0, 0)
+        vlay.setSpacing(0)
+
+        _border_style = """
             QWidget {
                 border: 1px solid #333;
                 border-radius: 4px;
                 background-color: #1a1a1a;
             }
-        """)
+        """
+
+        # Пустое состояние
+        self.empty_state = QWidget()
+        self.empty_state.setFixedHeight(500)
+        self.empty_state.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.empty_state.setMinimumWidth(800)
+        self.empty_state.setStyleSheet(_border_style)
+
         empty_layout = QVBoxLayout(self.empty_state)
         empty_layout.setAlignment(Qt.AlignCenter)
         empty_layout.setSpacing(16)
-        
+
         self.empty_text = QLabel(self.t['drag_text'])
-        self.empty_text.setStyleSheet("""
-            color: #666;
-            font-size: 14px;
-            font-weight: 300;
-            text-align: center;
-            padding: 40px;
-        """)
+        self.empty_text.setStyleSheet(
+            "color:#666; font-size:14px; font-weight:300; text-align:center; padding:40px;"
+        )
         self.empty_text.setAlignment(Qt.AlignCenter)
         empty_layout.addWidget(self.empty_text)
-        
+
         self.select_file_button = QPushButton(self.t['select_file_btn'])
         self.select_file_button.setStyleSheet("""
             QPushButton {
-                background-color: transparent;
-                color: #888;
-                border: 1px solid #333;
-                padding: 10px 24px;
-                font-size: 13px;
-                font-weight: 500;
-                border-radius: 4px;
+                background-color: transparent; color: #888;
+                border: 1px solid #333; padding: 10px 24px;
+                font-size: 13px; font-weight: 500; border-radius: 4px;
             }
             QPushButton:hover {
-                background-color: rgba(255, 255, 255, 0.05);
-                border-color: #555;
-                color: #ccc;
+                background-color: rgba(255,255,255,0.05);
+                border-color: #555; color: #ccc;
             }
         """)
         self.select_file_button.clicked.connect(self.browse_image)
         empty_layout.addWidget(self.select_file_button, alignment=Qt.AlignCenter)
-        
-        preview_layout.addWidget(self.empty_state)
-        
-        # Предварительный просмотр изображения
-        self.preview = QLabel()
+        vlay.addWidget(self.empty_state)
+
+        # Превью изображения
         self.preview_style = """
             QLabel {
                 border: 1px solid #333;
@@ -114,99 +206,205 @@ class PreviewPanel(QWidget):
                 background-color: #1a1a1a;
             }
         """
+        self.preview = QLabel()
         self.preview.setStyleSheet(self.preview_style)
         self.preview.setAlignment(Qt.AlignCenter)
-        # Устанавливаем фиксированную высоту, ширина зависит от доступного пространства
         self.preview.setFixedHeight(500)
         self.preview.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        # Устанавливаем минимальную ширину, чтобы избежать слишком узкого изображения
         self.preview.setMinimumWidth(800)
-        # Убираем максимальную ширину, чтобы виджет мог расширяться
-        self.preview.setMaximumWidth(16777215)  # Qt максимальное значение
         self.preview.hide()
-        preview_layout.addWidget(self.preview, alignment=Qt.AlignCenter)
-        
-        # Резюме информации
-        self.info_summary = QWidget()
-        info_layout = QVBoxLayout(self.info_summary)
-        info_layout.setContentsMargins(12, 12, 12, 12)
-        info_layout.setSpacing(8)
-        
-        self.info_title = QLabel(self.t['info_title'])
-        self.info_title.setStyleSheet("""
-            font-weight: 600;
-            font-size: 13px;
-            color: #ccc;
-            padding-bottom: 8px;
-            border-bottom: 1px solid #333;
-        """)
-        info_layout.addWidget(self.info_title)
-        
-        self.info_resolution = QLabel("")
-        self.info_resolution.setStyleSheet("font-size: 12px; color: #888;")
-        info_layout.addWidget(self.info_resolution)
-        
-        self.info_format = QLabel("")
-        self.info_format.setStyleSheet("font-size: 12px; color: #888;")
-        info_layout.addWidget(self.info_format)
-        
-        self.info_flags = QLabel("")
-        self.info_flags.setStyleSheet("font-size: 12px; color: #888;")
-        info_layout.addWidget(self.info_flags)
-        
-        self.info_filename = QLabel("")
-        self.info_filename.setStyleSheet("font-size: 12px; color: #888;")
-        info_layout.addWidget(self.info_filename)
-        
-        self.info_summary.setStyleSheet("""
+        vlay.addWidget(self.preview, alignment=Qt.AlignCenter)
+
+        return page
+
+    def _build_info_panel(self) -> QWidget:
+        panel = QWidget()
+        panel.setFixedHeight(220)
+        panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        panel.setMinimumWidth(600)
+        panel.setStyleSheet("""
             QWidget {
-                background-color: rgba(255, 255, 255, 0.02);
+                background-color: rgba(255,255,255,0.02);
                 border: 1px solid #333;
                 border-radius: 4px;
             }
         """)
-        # Устанавливаем фиксированный размер для блока информации
-        # Высота примерно для 4 строк информации + заголовок + отступы
-        self.info_summary.setFixedHeight(220)
-        self.info_summary.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        # Устанавливаем минимальную ширину для блока информации
-        self.info_summary.setMinimumWidth(600)
-        # Всегда показываем блок информации (даже если нет изображения)
-        self.info_summary.show()
-        preview_layout.addWidget(self.info_summary)
-        
-        layout.addWidget(self.preview_container)
-        
-        # Настраиваем drag & drop
-        self.setup_drag_drop()
-        
-        # Инициализируем информацию при запуске
-        self.update_info_summary()
-    
-    def setup_drag_drop(self):
-        """Настраивает drag & drop"""
-        self.empty_state.setAcceptDrops(True)
-        self.preview.setAcceptDrops(True)
-    
-    def browse_image(self):
-        """Открывает диалог выбора файла (изображение или VTF)"""
-        from PySide6.QtWidgets import QFileDialog
-        file_path, _ = QFileDialog.getOpenFileName(
-            self,  # parent
-            self.t.get('open_dialog_title', 'Select file'),  # caption
-            "",  # dir
-            f"{self.t.get('images_filter', 'Images')} (*.png *.jpg *.jpeg *.bmp *.gif *.tiff *.webp);;VTF Files (*.vtf);;All Files (*.*)"  # filter
+
+        info_layout = QVBoxLayout(panel)
+        info_layout.setContentsMargins(12, 12, 12, 12)
+        info_layout.setSpacing(8)
+
+        self.info_title = QLabel(self.t['info_title'])
+        self.info_title.setStyleSheet(
+            "font-weight:600; font-size:13px; color:#ccc; "
+            "padding-bottom:8px; border-bottom:1px solid #333;"
         )
-        if file_path:
-            if self.is_vtf_file(file_path):
-                self.load_vtf(file_path)
-            elif self.is_image_file(file_path):
-                self.load_image(file_path)
-    
-    # ── GIF helpers ────────────────────────────────────────────────────────── #
+        info_layout.addWidget(self.info_title)
+
+        for attr in ('info_resolution', 'info_format', 'info_flags', 'info_filename'):
+            lbl = QLabel("")
+            lbl.setStyleSheet("font-size:12px; color:#888;")
+            setattr(self, attr, lbl)
+            info_layout.addWidget(lbl)
+
+        return panel
+
+    def _init_3d_widget(self):
+        """Создаёт 3D-виджет и добавляет его в стек.
+
+        Всегда добавляет страницу в стек — либо реальный QWebEngineView,
+        либо QLabel-заглушку с инструкцией по установке.
+        """
+        from src.ui.preview_3d_widget import Preview3DWidget, is_webengine_available
+        self._3d_available = is_webengine_available()
+
+        if not self._3d_available:
+            logger.info("WebEngine недоступен — используем заглушку 3D Preview")
+
+        # Создаём виджет в любом случае (реальный или заглушка)
+        self._3d_widget = Preview3DWidget.create(self)
+
+        qt_w = self._3d_widget.qt_widget
+        qt_w.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        qt_w.setMinimumHeight(500)
+        qt_w.setMinimumWidth(800)
+
+        self.page_3d = qt_w
+        self.view_stack.addWidget(self.page_3d)
+
+        if self._3d_available:
+            logger.info("3D Preview виджет инициализирован (WebEngine)")
+        else:
+            logger.info("3D Preview заглушка добавлена (установите PySide6-Addons)")
+
+    # ── Переключение 2D / 3D ─────────────────────────────────────────────── #
+
+    def _switch_to_2d(self):
+        self.view_stack.setCurrentIndex(0)
+        self.btn_2d.setStyleSheet(self._btn_style_active)
+        self.btn_3d.setStyleSheet(self._btn_style_inactive)
+        self.btn_load_3d.setVisible(False)
+
+    def _switch_to_3d(self):
+        if self._3d_widget is None:
+            return
+        self.view_stack.setCurrentIndex(1)
+        self.btn_2d.setStyleSheet(self._btn_style_inactive)
+        self.btn_3d.setStyleSheet(self._btn_style_active)
+        self.btn_load_3d.setVisible(True)
+
+        # Если пользователь уже загрузил свою текстуру — применяем её на модель.
+        # Задержка нужна: WebView "просыпается" после показа не мгновенно,
+        # и runJavaScript до этого момента может не дойти до JS.
+        if self.image_path and self._3d_available and self._3d_widget:
+            import os
+            path = self.image_path  # захватываем в замыкание
+            if os.path.exists(path):
+                from PySide6.QtCore import QTimer
+                QTimer.singleShot(300, lambda: self._3d_widget.update_texture_file(path))
+
+    def is_3d_mode(self) -> bool:
+        return self.view_stack.currentIndex() == 1
+
+    # ── 3D Preview — публичный API ───────────────────────────────────────── #
+
+    def set_3d_params(
+        self,
+        weapon_key: str,
+        mode: str,
+        misc_vpk_path: str,
+        textures_vpk_path: str,
+    ) -> None:
+        """
+        Сохраняет параметры для 3D загрузки без запуска воркера.
+        Вызывается из main_window при смене оружия.
+        Реальная загрузка начнётся только по кнопке «Загрузить 3D модель».
+        """
+        self._pending_3d_params = (weapon_key, mode, misc_vpk_path, textures_vpk_path)
+
+        # Сбрасываем воркер и показываем приглашение в viewer
+        self._stop_3d_worker()
+        if self._3d_widget:
+            self._3d_widget.show_loading("Нажмите «Загрузить 3D модель»")
+
+        # Разблокируем кнопку
+        self.btn_load_3d.setEnabled(True)
+
+    def _on_load_3d_clicked(self) -> None:
+        """Обработчик кнопки «Загрузить 3D модель»."""
+        if not self._pending_3d_params:
+            return
+        weapon_key, mode, misc_vpk, textures_vpk = self._pending_3d_params
+        self._start_3d_worker(weapon_key, mode, misc_vpk, textures_vpk)
+
+    def _start_3d_worker(
+        self,
+        weapon_key: str,
+        mode: str,
+        misc_vpk_path: str,
+        textures_vpk_path: str,
+    ) -> None:
+        """Запускает фоновый воркер загрузки 3D модели."""
+        if not self._3d_available or self._3d_widget is None:
+            return
+
+        self._stop_3d_worker()
+        self.btn_load_3d.setEnabled(False)
+        self._3d_widget.show_loading("Подготовка 3D модели...")
+
+        from src.services.preview_3d_worker import Preview3DWorker
+        worker = Preview3DWorker(
+            weapon_key=weapon_key,
+            mode=mode,
+            misc_vpk_path=misc_vpk_path,
+            textures_vpk_path=textures_vpk_path,
+            parent=self,
+        )
+        worker.progress.connect(self._on_3d_progress)
+        worker.ready.connect(self._on_3d_ready)
+        worker.failed.connect(self._on_3d_failed)
+        worker.start()
+        self._3d_worker = worker
+
+    def reset_3d_preview(self) -> None:
+        """Сбрасывает 3D viewer (например, при смене режима на Spray)."""
+        self._pending_3d_params = None
+        self._stop_3d_worker()
+        if self._3d_widget:
+            self._3d_widget.reset()
+        self.btn_load_3d.setEnabled(False)
+        if self.is_3d_mode():
+            self._switch_to_2d()
+
+    def update_3d_texture(self, png_path: str) -> None:
+        """Обновляет текстуру на 3D модели (когда пользователь загружает своё изображение)."""
+        if self._3d_widget and self.is_3d_mode():
+            self._3d_widget.update_texture_file(png_path)
+
+    def _stop_3d_worker(self):
+        if self._3d_worker and self._3d_worker.isRunning():
+            self._3d_worker.requestInterruption()
+            self._3d_worker.wait(3000)
+        self._3d_worker = None
+
+    def _on_3d_progress(self, text: str):
+        if self._3d_widget:
+            self._3d_widget.show_loading(text)
+
+    def _on_3d_ready(self, obj_path: str, texture_path: str):
+        self.btn_load_3d.setEnabled(True)
+        if self._3d_widget:
+            self._3d_widget.load_model_files(obj_path, texture_path)
+
+    def _on_3d_failed(self, error: str):
+        logger.warning(f"3D Preview не удался: {error}")
+        self.btn_load_3d.setEnabled(True)
+        if self._3d_widget:
+            self._3d_widget.show_error(f"Модель недоступна: {error}")
+
+    # ── GIF helpers ──────────────────────────────────────────────────────── #
 
     def _stop_gif(self) -> None:
-        """Останавливает и удаляет текущий QMovie."""
         if self._gif_movie is not None:
             self._gif_movie.stop()
             self.preview.setMovie(None)
@@ -215,16 +413,12 @@ class PreviewPanel(QWidget):
         self._gif_orig_size = None
 
     def _start_gif(self, path: str, preview_width: int) -> bool:
-        """
-        Запускает анимированный GIF в preview-виджете.
-        Возвращает True при успехе, False если формат не поддержан.
-        """
         from PySide6.QtGui import QMovie, QImageReader
         from PySide6.QtCore import QSize
 
         reader = QImageReader(path)
         orig = reader.size()
-        if not orig.isValid() or orig.width() <= 0 or orig.height() <= 0:
+        if not orig.isValid() or orig.width() <= 0:
             return False
 
         movie = QMovie(path)
@@ -233,22 +427,17 @@ class PreviewPanel(QWidget):
             return False
 
         self._gif_orig_size = orig
-        scaled = orig.scaled(preview_width, 500, Qt.KeepAspectRatio)
-        movie.setScaledSize(scaled)
-
+        movie.setScaledSize(orig.scaled(preview_width, 500, Qt.KeepAspectRatio))
         self._gif_movie = movie
         self.preview.setMovie(movie)
         movie.start()
-        logger.debug(f"GIF запущен: {path} ({orig.width()}×{orig.height()})")
         return True
 
-    # ── Image loading ───────────────────────────────────────────────────────── #
+    # ── Image loading ────────────────────────────────────────────────────── #
 
     def load_image(self, path):
-        """Загружает изображение для предварительного просмотра.
-        Анимированные GIF воспроизводятся через QMovie."""
+        """Загружает изображение (или GIF) для 2D Preview."""
         self._stop_gif()
-
         self.image_path = path
         self.vtf_path = None
 
@@ -262,36 +451,31 @@ class PreviewPanel(QWidget):
         from PySide6.QtCore import QTimer
 
         if path.lower().endswith('.gif'):
-            # ── Анимированный GIF ──────────────────────────────────────────── #
             def try_start_gif():
                 if self._gif_movie is not None:
-                    return  # Уже запущен (повторный вызов таймера)
-                preview_width = max(self.preview.width(), self.width(), 600)
-                if not self._start_gif(path, preview_width):
-                    # Fallback: первый кадр как статичный QPixmap
-                    pixmap = QPixmap(path).scaled(
-                        preview_width, 500, Qt.KeepAspectRatio, Qt.SmoothTransformation
-                    )
-                    self.preview.setPixmap(pixmap)
-
+                    return
+                w = max(self.preview.width(), self.width(), 600)
+                if not self._start_gif(path, w):
+                    pix = QPixmap(path).scaled(w, 500, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                    self.preview.setPixmap(pix)
             QTimer.singleShot(50, try_start_gif)
-            QTimer.singleShot(200, try_start_gif)  # резерв, если ширина ещё не вычислена
+            QTimer.singleShot(200, try_start_gif)
         else:
-            # ── Статичное изображение ─────────────────────────────────────── #
             def scale_image():
-                preview_width = max(self.preview.width(), self.width(), 600)
-                pixmap = QPixmap(path).scaled(
-                    preview_width, 500, Qt.KeepAspectRatio, Qt.SmoothTransformation
-                )
-                self.preview.setPixmap(pixmap)
-
+                w = max(self.preview.width(), self.width(), 600)
+                pix = QPixmap(path).scaled(w, 500, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                self.preview.setPixmap(pix)
             QTimer.singleShot(50, scale_image)
             QTimer.singleShot(200, scale_image)
 
+        # Обновляем текстуру в 3D если открыт 3D режим
+        if self.is_3d_mode() and path.lower().endswith(('.png', '.jpg', '.jpeg')):
+            from PySide6.QtCore import QTimer as T
+            T.singleShot(300, lambda: self.update_3d_texture(path))
+
         self.update_info_summary()
-    
+
     def clear_preview(self):
-        """Очищает предварительный просмотр"""
         self._stop_gif()
         self.image_path = None
         self.vtf_path = None
@@ -300,15 +484,13 @@ class PreviewPanel(QWidget):
         self.preview.hide()
         self.empty_state.show()
         self.update_info_summary()
-    
+
     def get_image_path(self):
-        """Возвращает путь к загруженному изображению"""
         return self.image_path
-    
+
     def get_vtf_path(self):
-        """Возвращает путь к загруженному VTF файлу"""
         return self.vtf_path
-    
+
     def load_vtf(self, path):
         """Загружает VTF файл — рендерит первый кадр через VTFLib."""
         import os
@@ -317,18 +499,16 @@ class PreviewPanel(QWidget):
 
         self.vtf_path = path
         self.image_path = None
-
         self.empty_state.hide()
         self.preview.show()
         self.preview.clear()
         self.preview.setStyleSheet(self.preview_style)
 
-        # Пытаемся отрендерить VTF через VTFLib
         rendered = False
+        png_for_3d = None
         try:
             from src.services.vtflib_wrapper import VTFLib
             rgba_bytes, vtf_w, vtf_h = VTFLib.read_vtf_as_rgba(path)
-
             from PySide6.QtGui import QImage, QPixmap
             qimage = QImage(rgba_bytes, vtf_w, vtf_h, vtf_w * 4, QImage.Format_RGBA8888)
             if not qimage.isNull():
@@ -338,153 +518,149 @@ class PreviewPanel(QWidget):
                 )
                 self.preview.setPixmap(pixmap)
                 rendered = True
-                logger.debug(f"VTF отображён: {os.path.basename(path)} ({vtf_w}×{vtf_h})")
+
+                # Сохраняем PNG для 3D текстуры
+                import tempfile
+                png_for_3d = tempfile.mktemp(suffix='.png')
+                from PIL import Image
+                img = Image.frombytes("RGBA", (vtf_w, vtf_h), rgba_bytes)
+                img.save(png_for_3d)
         except Exception as e:
-            logger.warning(f"Не удалось отрендерить VTF ({os.path.basename(path)}): {e}")
+            logger.warning(f"Не удалось отрендерить VTF: {e}")
 
         if not rendered:
-            # Fallback: показываем текст
             self.preview.setText(f"VTF: {os.path.basename(path)}")
-            self.preview.setStyleSheet(self.preview_style + "QLabel { color:#ccc; font-size:14px; }")
+            self.preview.setStyleSheet(
+                self.preview_style + "QLabel { color:#ccc; font-size:14px; }"
+            )
             self.preview.setAlignment(Qt.AlignCenter)
 
+        # Применяем на 3D модель
+        if png_for_3d and self._3d_available and self._3d_widget:
+            self.image_path = png_for_3d  # сохраняем для _switch_to_3d
+            if self.is_3d_mode():
+                self._3d_widget.update_texture_file(png_for_3d)
+
         self.update_info_summary()
-    
+
     def display_image(self, pil_image):
-        """Отображает PIL Image в превью"""
+        """Отображает PIL Image в превью."""
         self._stop_gif()
         try:
-            # Сохраняем PIL изображение во временный файл для последующей загрузки
             import tempfile
             temp_path = tempfile.mktemp(suffix='.png')
             pil_image.save(temp_path, 'PNG')
-            
-            # Обновляем путь к изображению (для совместимости)
             self.image_path = temp_path
-            # Очищаем путь к VTF, так как используется изображение
             self.vtf_path = None
-            
             self.preview.show()
             self.empty_state.hide()
-            
-            # Принудительно обновляем геометрию виджета
             self.preview.updateGeometry()
             self.updateGeometry()
-            
-            # Используем QTimer для отложенного масштабирования после показа виджета
+
             from PySide6.QtCore import QTimer
             def scale_image():
-                # Пробуем получить ширину preview виджета
-                preview_width = self.preview.width()
-                
-                # Если ширина еще не установлена, используем ширину родительского виджета
-                if preview_width <= 0:
-                    preview_width = self.width()
-                
-                # Если и это не помогло, используем разумное значение по умолчанию
-                if preview_width <= 0:
-                    preview_width = 600
-                
-                # Масштабируем изображение
-                pixmap = QPixmap(temp_path).scaled(preview_width, 500, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-                self.preview.setPixmap(pixmap)
-            
-            # Используем несколько попыток с увеличивающейся задержкой
+                w = max(self.preview.width(), self.width(), 600)
+                pix = QPixmap(temp_path).scaled(w, 500, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                self.preview.setPixmap(pix)
             QTimer.singleShot(50, scale_image)
             QTimer.singleShot(200, scale_image)
-            
-            # Обновляем информацию
             self.update_info_summary()
-            
         except Exception as e:
             logger.error(f"Ошибка при отображении изображения: {e}", exc_info=True)
-            # Fallback - сохраняем во временный файл
             import tempfile
             temp_path = tempfile.mktemp(suffix='.png')
             pil_image.save(temp_path, 'PNG')
             self.load_image(temp_path)
-    
+
+    # ── Info summary ─────────────────────────────────────────────────────── #
+
     def update_info_summary(self):
-        """Обновляет резюме информации"""
-        # Получаем настройки из settings_panel
         if hasattr(self.parent, 'settings_panel'):
             settings = self.parent.settings_panel.get_settings()
-            
-            # Разрешение
             size = settings.get('size', (512, 512))
             self.info_resolution.setText(f"{self.t['info_resolution']} {size[0]}x{size[1]}")
-            
-            # Формат
-            format_type = settings.get('format', 'DXT1')
-            self.info_format.setText(f"{self.t['info_format']} {format_type}")
-            
-            # Флаги
+            self.info_format.setText(f"{self.t['info_format']} {settings.get('format', 'DXT1')}")
             flags = settings.get('flags', [])
-            if flags:
-                self.info_flags.setText(f"{self.t['info_flags']} {', '.join(flags)}")
-            else:
-                self.info_flags.setText(self.t['info_flags_none'])
-            
-            # Имя файла
-            filename = settings.get('filename', '')
-            if filename:
-                self.info_filename.setText(f"{self.t['info_filename']} {filename}")
-            else:
-                self.info_filename.setText(self.t['info_filename_none'])
+            self.info_flags.setText(
+                f"{self.t['info_flags']} {', '.join(flags)}" if flags
+                else self.t['info_flags_none']
+            )
+            fn = settings.get('filename', '')
+            self.info_filename.setText(
+                f"{self.t['info_filename']} {fn}" if fn
+                else self.t['info_filename_none']
+            )
         else:
-            # Если нет настроек, показываем пустые значения
             self.info_resolution.setText(f"{self.t['info_resolution']} -")
             self.info_format.setText(f"{self.t['info_format']} -")
             self.info_flags.setText(self.t['info_flags_none'])
             self.info_filename.setText(self.t['info_filename_none'])
-    
+
+    # ── Drag & Drop ──────────────────────────────────────────────────────── #
+
+    def setup_drag_drop(self):
+        self.empty_state.setAcceptDrops(True)
+        self.preview.setAcceptDrops(True)
+
+    def browse_image(self):
+        from PySide6.QtWidgets import QFileDialog
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            self.t.get('open_dialog_title', 'Select file'),
+            "",
+            f"{self.t.get('images_filter', 'Images')} "
+            "(*.png *.jpg *.jpeg *.bmp *.gif *.tiff *.webp);;VTF Files (*.vtf);;All Files (*.*)"
+        )
+        if file_path:
+            if self.is_vtf_file(file_path):
+                self.load_vtf(file_path)
+            elif self.is_image_file(file_path):
+                self.load_image(file_path)
+
     def dragEnterEvent(self, event):
-        """Обработка события входа в область перетаскивания"""
         if event.mimeData().hasUrls():
             urls = event.mimeData().urls()
             if urls:
-                file_path = urls[0].toLocalFile()
-                if self.is_image_file(file_path) or self.is_vtf_file(file_path):
+                fp = urls[0].toLocalFile()
+                if self.is_image_file(fp) or self.is_vtf_file(fp):
                     event.accept()
                     return
         event.ignore()
-    
+
     def dropEvent(self, event):
-        """Обработка события отпускания файла"""
         urls = event.mimeData().urls()
         if urls:
-            file_path = urls[0].toLocalFile()
-            if self.is_vtf_file(file_path):
-                self.load_vtf(file_path)
+            fp = urls[0].toLocalFile()
+            if self.is_vtf_file(fp):
+                self.load_vtf(fp)
                 event.accept()
                 return
-            elif self.is_image_file(file_path):
-                self.load_image(file_path)
+            elif self.is_image_file(fp):
+                self.load_image(fp)
                 event.accept()
                 return
         event.ignore()
-    
-    def is_image_file(self, file_path):
-        """Проверяет, является ли файл изображением"""
-        image_extensions = ['.png', '.jpg', '.jpeg', '.bmp', '.gif', '.tiff', '.webp']
-        return any(file_path.lower().endswith(ext) for ext in image_extensions)
-    
-    def is_vtf_file(self, file_path):
-        """Проверяет, является ли файл VTF"""
-        return file_path.lower().endswith('.vtf')
-                
+
+    def is_image_file(self, fp):
+        return any(fp.lower().endswith(e)
+                   for e in ('.png', '.jpg', '.jpeg', '.bmp', '.gif', '.tiff', '.webp'))
+
+    def is_vtf_file(self, fp):
+        return fp.lower().endswith('.vtf')
+
+    # ── Language ─────────────────────────────────────────────────────────── #
+
     def update_language(self, t):
-        """Обновляет язык интерфейса"""
         self.t = t
         self.empty_text.setText(self.t['drag_text'])
         self.select_file_button.setText(self.t['select_file_btn'])
         self.info_title.setText(self.t['info_title'])
-        # Обновляем резюме, если оно открыто
         if self.info_summary.isVisible():
             self.update_info_summary()
-    
+
+    # ── Resize ───────────────────────────────────────────────────────────── #
+
     def resizeEvent(self, event):
-        """Обработка изменения размера окна — перемасштабируем изображение или GIF."""
         super().resizeEvent(event)
         if not self.preview.isVisible():
             return
@@ -492,30 +668,83 @@ class PreviewPanel(QWidget):
         from PySide6.QtCore import QTimer
 
         if self._gif_movie is not None and self._gif_orig_size is not None:
-            # ── Анимированный GIF: обновляем ScaledSize ───────────────────── #
             def resize_gif():
-                preview_width = max(self.preview.width(), self.width(), 600)
-                scaled = self._gif_orig_size.scaled(preview_width, 500, Qt.KeepAspectRatio)
-                self._gif_movie.setScaledSize(scaled)
-
+                w = max(self.preview.width(), self.width(), 600)
+                self._gif_movie.setScaledSize(
+                    self._gif_orig_size.scaled(w, 500, Qt.KeepAspectRatio)
+                )
             QTimer.singleShot(50, resize_gif)
 
         elif self.image_path:
-            # ── Статичное изображение ─────────────────────────────────────── #
             def scale_image():
-                preview_width = max(self.preview.width(), self.width(), 600)
                 import os
+                w = max(self.preview.width(), self.width(), 600)
                 if os.path.exists(self.image_path):
-                    pixmap = QPixmap(self.image_path)
-                    if not pixmap.isNull():
+                    pix = QPixmap(self.image_path)
+                    if not pix.isNull():
                         self.preview.setPixmap(
-                            pixmap.scaled(preview_width, 500, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                            pix.scaled(w, 500, Qt.KeepAspectRatio, Qt.SmoothTransformation)
                         )
                 else:
-                    current = self.preview.pixmap()
-                    if current:
+                    cur = self.preview.pixmap()
+                    if cur:
                         self.preview.setPixmap(
-                            current.scaled(preview_width, 500, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                            cur.scaled(w, 500, Qt.KeepAspectRatio, Qt.SmoothTransformation)
                         )
-
             QTimer.singleShot(50, scale_image)
+
+
+# ── Иконка куба для кнопки загрузки 3D ───────────────────────────────────── #
+
+def _make_cube_icon(color: str = "#666666", size: int = 16):
+    """
+    Рисует изометрический куб через QPainter и возвращает QIcon.
+    Никаких эмодзи и внешних файлов — чистый QPainter.
+    """
+    from PySide6.QtGui import QIcon, QPixmap, QPainter, QPen, QColor, QPolygonF
+    from PySide6.QtCore import Qt, QPointF
+
+    pix = QPixmap(size, size)
+    pix.fill(Qt.transparent)
+
+    p = QPainter(pix)
+    p.setRenderHint(QPainter.Antialiasing)
+
+    pen = QPen(QColor(color))
+    pen.setWidthF(1.1)
+    pen.setCapStyle(Qt.RoundCap)
+    pen.setJoinStyle(Qt.RoundJoin)
+    p.setPen(pen)
+    p.setBrush(Qt.NoBrush)
+
+    s = float(size)
+
+    # Верхняя грань (ромб)
+    top = QPolygonF([
+        QPointF(s * 0.50, s * 0.04),
+        QPointF(s * 0.94, s * 0.28),
+        QPointF(s * 0.50, s * 0.52),
+        QPointF(s * 0.06, s * 0.28),
+    ])
+    p.drawPolygon(top)
+
+    # Левая боковая грань
+    left = QPolygonF([
+        QPointF(s * 0.06, s * 0.28),
+        QPointF(s * 0.06, s * 0.72),
+        QPointF(s * 0.50, s * 0.96),
+        QPointF(s * 0.50, s * 0.52),
+    ])
+    p.drawPolygon(left)
+
+    # Правая боковая грань
+    right = QPolygonF([
+        QPointF(s * 0.94, s * 0.28),
+        QPointF(s * 0.94, s * 0.72),
+        QPointF(s * 0.50, s * 0.96),
+        QPointF(s * 0.50, s * 0.52),
+    ])
+    p.drawPolygon(right)
+
+    p.end()
+    return QIcon(pix)
