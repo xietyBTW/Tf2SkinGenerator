@@ -1,0 +1,509 @@
+"""
+Воркер для загрузки пользовательского VPK мода в 3D Preview.
+
+Шаги:
+  1. Открываем VPK пользователя.
+  2. Сканируем: MDL файлы, VMT файлы ($basetexture), VTF файлы.
+  3. Если MDL есть  → извлекаем + декомпилируем → SMD → OBJ.
+  4. Если MDL нет   → по имени VTF / $basetexture определяем ключ оружия
+                      → берём оригинальную модель из игровых VPK.
+  5. Извлекаем основную текстуру из мода (по $basetexture).
+     Игнорируем lightwarp, phongwarp, bumpmap и т.п.
+     Если текстуры в моде нет — берём из игры.
+  6. Эмитируем ready(obj_path, texture_path).
+"""
+
+import glob
+import os
+import re
+import shutil
+import tempfile
+from typing import List, Optional
+
+from PySide6.QtCore import QThread, Signal
+
+from src.shared.logging_config import get_logger
+
+logger = get_logger(__name__)
+
+# VTF-параметры которые не являются основной текстурой (basetexture ≠ это)
+_SKIP_VMT_KEYS = {
+    "$lightwarptexture", "$bumpmap", "$normalmap", "$phongwarptexture",
+    "$envmap", "$envmapmask", "$detail", "$selfillummask",
+    "$blendmodulatetexture", "$maskstexture", "$phongexponenttexture",
+    "$rimlight", "$rimlightexponent",
+}
+
+# Слова в пути VTF-файла которые говорят «это не основная текстура»
+_SKIP_VTF_KEYWORDS = (
+    "lightwarp", "phongwarp", "envmap", "cubemap", "sheen",
+    "bump", "normal", "detail", "spec", "mask", "selfillum",
+)
+
+
+# ── Утилиты ──────────────────────────────────────────────────────────────── #
+
+def _parse_basetexture_from_vmt(vmt_content: str) -> Optional[str]:
+    """
+    Ищет строку вида: "$basetexture" "путь/к/текстуре"
+    Возвращает значение (путь без кавычек) или None.
+    """
+    match = re.search(
+        r'"\$basetexture"\s+"([^"]+)"',
+        vmt_content,
+        re.IGNORECASE,
+    )
+    return match.group(1) if match else None
+
+
+def _weapon_key_from_path(path: str) -> Optional[str]:
+    """
+    Пытается извлечь ключ оружия (c_xxxx) из пути к файлу.
+    Сверяет кандидатов с таблицей WEAPON_MDL_PATHS.
+
+    Пример:
+      'materials/models/weapons/c_models/c_scattergun/c_scattergun.vtf'
+      → 'c_scattergun'
+    """
+    from src.data.weapons import WEAPON_MDL_PATHS
+
+    candidates = re.findall(r"(c_[a-z0-9_]+)", path.lower())
+    # Перебираем с конца — ключ оружия обычно в самом конце пути
+    for part in reversed(candidates):
+        if part in WEAPON_MDL_PATHS:
+            return part
+    return None
+
+
+def _is_base_vtf(vtf_path: str) -> bool:
+    """True если VTF скорее всего является основной текстурой (не служебной)."""
+    low = vtf_path.lower()
+    return not any(kw in low for kw in _SKIP_VTF_KEYWORDS)
+
+
+# ── Воркер ───────────────────────────────────────────────────────────────── #
+
+class PreviewVpkModWorker(QThread):
+    """Готовит OBJ + текстуру из пользовательского VPK мода для 3D Preview."""
+
+    ready    = Signal(str, str)   # (obj_path, texture_path)
+    failed   = Signal(str)
+    progress = Signal(str)
+
+    def __init__(
+        self,
+        user_vpk_path: str,
+        misc_vpk_path: str,
+        textures_vpk_path: str,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.user_vpk_path     = user_vpk_path
+        self.misc_vpk_path     = misc_vpk_path
+        self.textures_vpk_path = textures_vpk_path
+        self._preview_dir: Optional[str] = None
+
+    # ── Точка входа ───────────────────────────────────────────────────────── #
+
+    def run(self) -> None:
+        try:
+            self._preview_dir = tempfile.mkdtemp(prefix="tf2sg_vpkmod_")
+
+            import vpk as vpklib
+
+            self.progress.emit("Открытие VPK мода...")
+            try:
+                pak = vpklib.open(self.user_vpk_path)
+            except Exception as exc:
+                self.failed.emit(f"Не удалось открыть VPK: {exc}")
+                return
+
+            if self.isInterruptionRequested():
+                return
+
+            # ── 1. Сканируем содержимое ───────────────────────────────────── #
+            self.progress.emit("Анализ содержимого VPK...")
+
+            mdl_files: List[str] = []
+            vmt_files: List[str] = []
+            vtf_files: List[str] = []
+
+            for filepath in pak:
+                fp_low = filepath.lower()
+                if fp_low.endswith(".mdl"):
+                    mdl_files.append(filepath)
+                elif fp_low.endswith(".vmt"):
+                    vmt_files.append(filepath)
+                elif fp_low.endswith(".vtf"):
+                    vtf_files.append(filepath)
+
+            logger.info(
+                f"VPK мод «{os.path.basename(self.user_vpk_path)}»: "
+                f"{len(mdl_files)} MDL, {len(vmt_files)} VMT, {len(vtf_files)} VTF"
+            )
+
+            if self.isInterruptionRequested():
+                return
+
+            # ── 2. Парсим VMT → $basetexture ─────────────────────────────── #
+            basetexture_path: Optional[str] = None
+            for vmt_rel in vmt_files:
+                try:
+                    data = pak[vmt_rel].read()
+                    vmt_content = data.decode("utf-8", errors="replace")
+                    bt = _parse_basetexture_from_vmt(vmt_content)
+                    if bt:
+                        basetexture_path = bt
+                        logger.info(f"$basetexture из VMT «{vmt_rel}»: {bt}")
+                        break
+                except Exception:
+                    continue
+
+            # ── 3. Определяем ключ оружия ─────────────────────────────────── #
+            weapon_key: Optional[str] = None
+
+            # Приоритет: MDL → basetexture → VTF
+            for mdl_rel in mdl_files:
+                weapon_key = _weapon_key_from_path(mdl_rel)
+                if weapon_key:
+                    break
+
+            if not weapon_key and basetexture_path:
+                weapon_key = _weapon_key_from_path(basetexture_path)
+
+            if not weapon_key:
+                for vtf_rel in vtf_files:
+                    if _is_base_vtf(vtf_rel):
+                        weapon_key = _weapon_key_from_path(vtf_rel)
+                        if weapon_key:
+                            break
+
+            logger.info(f"Определён ключ оружия из VPK мода: {weapon_key!r}")
+
+            if self.isInterruptionRequested():
+                return
+
+            # ── 4. Получаем OBJ ───────────────────────────────────────────── #
+            obj_path: Optional[str] = None
+
+            if mdl_files:
+                # Декомпилируем MDL из мода
+                self.progress.emit("Декомпиляция MDL из мода...")
+                obj_path = self._decompile_mdl_from_pak(pak, mdl_files[0], weapon_key)
+
+            if not obj_path and weapon_key and self.misc_vpk_path:
+                # Нет MDL в моде — берём оригинальную TF2 модель
+                self.progress.emit("Загрузка оригинальной модели из игры...")
+                obj_path = self._load_original_model(weapon_key)
+
+            if not obj_path:
+                self.failed.emit(
+                    "Модель не найдена ни в моде, ни в игре. "
+                    "Проверьте что VPK содержит .mdl или что путь к игре настроен."
+                )
+                return
+
+            if self.isInterruptionRequested():
+                return
+
+            # ── 5. Получаем текстуру ──────────────────────────────────────── #
+            self.progress.emit("Извлечение текстуры...")
+            texture_path = self._extract_texture_from_pak(
+                pak, vtf_files, basetexture_path
+            )
+
+            # Fallback: текстура из игры
+            if not texture_path and weapon_key and self.textures_vpk_path:
+                texture_path = self._extract_game_texture(weapon_key)
+
+            self.ready.emit(obj_path, texture_path or "")
+
+        except Exception as exc:
+            logger.error(f"PreviewVpkModWorker: {exc}", exc_info=True)
+            self.failed.emit(str(exc))
+
+    # ── MDL: декомпиляция из пользовательского VPK ───────────────────────── #
+
+    def _decompile_mdl_from_pak(
+        self,
+        pak,
+        mdl_rel: str,
+        weapon_key: Optional[str],
+    ) -> Optional[str]:
+        """
+        Извлекает MDL + сопутствующие файлы (.vvd, .vtx, .phy) из VPK
+        и декомпилирует через Crowbar.
+        """
+        from src.services.model_build_service import ModelBuildService
+        from src.services.tf2_paths import TF2Paths
+
+        MDL_EXTS = (".mdl", ".vvd", ".dx90.vtx", ".vtx", ".phy",
+                    ".dx80.vtx", ".sw.vtx")
+
+        mdl_dir_in_pak = os.path.dirname(mdl_rel).replace("\\", "/").lower()
+        extract_dir    = tempfile.mkdtemp(prefix="tf2sg_mdlmod_")
+        mdl_file_local: Optional[str] = None
+
+        try:
+            for filepath in pak:
+                fp_low = filepath.lower()
+                if not any(fp_low.endswith(ext) for ext in MDL_EXTS):
+                    continue
+                fp_dir = os.path.dirname(fp_low).replace("\\", "/")
+                if fp_dir != mdl_dir_in_pak:
+                    continue
+                try:
+                    data       = pak[filepath].read()
+                    local_name = os.path.basename(filepath)
+                    local_path = os.path.join(extract_dir, local_name)
+                    with open(local_path, "wb") as f:
+                        f.write(data)
+                    if fp_low.endswith(".mdl"):
+                        mdl_file_local = local_path
+                except Exception as exc:
+                    logger.warning(f"Не удалось извлечь {filepath}: {exc}")
+
+            if not mdl_file_local:
+                logger.warning(f"MDL не извлечён из пака: {mdl_rel}")
+                return None
+
+            if self.isInterruptionRequested():
+                return None
+
+            crowbar    = TF2Paths.get_crowbar_path()
+            decomp_dir = tempfile.mkdtemp(prefix="tf2sg_decomp_mod_")
+            ModelBuildService.decompile(mdl_file_local, decomp_dir, crowbar)
+
+            smd_path = self._find_reference_smd(decomp_dir, weapon_key)
+            if not smd_path:
+                logger.warning(f"Reference SMD не найден в {decomp_dir}")
+                return None
+
+            self.progress.emit("Конвертация модели...")
+            obj_path = os.path.join(self._preview_dir, "model.obj")
+            from src.services.smd_to_obj_service import SmdToObjService
+            return obj_path if SmdToObjService.convert(smd_path, obj_path) else None
+
+        except Exception as exc:
+            logger.error(f"Ошибка декомпиляции MDL из мода: {exc}", exc_info=True)
+            return None
+        finally:
+            shutil.rmtree(extract_dir, ignore_errors=True)
+
+    # ── Оригинальная TF2 модель ───────────────────────────────────────────── #
+
+    def _load_original_model(self, weapon_key: str) -> Optional[str]:
+        """
+        Берёт оригинальную модель оружия из tf2_misc_dir.vpk,
+        декомпилирует, конвертирует в OBJ.
+        Использует кэш декомпиляции если есть.
+        """
+        if not self.misc_vpk_path:
+            logger.warning(
+                "misc_vpk_path не задан — невозможно загрузить оригинальную TF2 модель. "
+                "Укажите путь к TF2 в настройках."
+            )
+            return None
+
+        from src.data.weapons import WEAPON_MDL_PATHS
+        from src.services import decompile_cache
+        from src.services.extract_model_service import ExtractModelService
+        from src.services.model_build_service import ModelBuildService
+        from src.services.tf2_paths import TF2Paths
+        from src.services.tf2_vpk_extract_service import TF2VPKExtractService
+
+        mdl_rel = WEAPON_MDL_PATHS.get(
+            weapon_key,
+            f"models/weapons/c_models/{weapon_key}/{weapon_key}.mdl",
+        )
+
+        # Проверяем кэш
+        cached = decompile_cache.get_cached_decompile(
+            weapon_key, self.misc_vpk_path, mdl_rel
+        )
+        if cached:
+            logger.info(f"VPK мод preview: кэш декомпила для {weapon_key}")
+            smd_path = self._find_reference_smd(cached, weapon_key)
+        else:
+            # Ищем MDL в игровом VPK
+            # Формируем mode-like строку чтобы использовать _build_paths_to_try
+            fake_mode = f"scout_{weapon_key}"   # класс не важен, только weapon_key
+            paths_to_try = ExtractModelService._build_paths_to_try(
+                fake_mode, weapon_key
+            )
+
+            found_rel: Optional[str] = None
+            for path in paths_to_try:
+                if self.isInterruptionRequested():
+                    return None
+                try:
+                    if TF2VPKExtractService.check_mdl_exists(self.misc_vpk_path, path):
+                        found_rel = path
+                        break
+                except Exception:
+                    continue
+
+            if not found_rel:
+                logger.warning(f"Оригинальный MDL не найден в VPK для {weapon_key}")
+                return None
+
+            mdl_dir = tempfile.mkdtemp(prefix="tf2sg_mdl_")
+            try:
+                extracted = TF2VPKExtractService.extract_file_set(
+                    self.misc_vpk_path, found_rel, mdl_dir, None
+                )
+                mdl_file = next((f for f in extracted if f.endswith(".mdl")), None)
+                if not mdl_file:
+                    return None
+
+                if self.isInterruptionRequested():
+                    return None
+
+                self.progress.emit("Декомпиляция оригинальной модели...")
+                crowbar    = TF2Paths.get_crowbar_path()
+                decomp_dir = tempfile.mkdtemp(prefix="tf2sg_decomp_")
+                ModelBuildService.decompile(mdl_file, decomp_dir, crowbar)
+
+                decompile_cache.save_to_cache(
+                    weapon_key, self.misc_vpk_path, found_rel, decomp_dir
+                )
+                smd_path = self._find_reference_smd(decomp_dir, weapon_key)
+            finally:
+                shutil.rmtree(mdl_dir, ignore_errors=True)
+
+        if not smd_path:
+            return None
+
+        self.progress.emit("Конвертация модели...")
+        obj_path = os.path.join(self._preview_dir, "model.obj")
+        from src.services.smd_to_obj_service import SmdToObjService
+        return obj_path if SmdToObjService.convert(smd_path, obj_path) else None
+
+    # ── Текстура из пользовательского VPK ────────────────────────────────── #
+
+    def _extract_texture_from_pak(
+        self,
+        pak,
+        vtf_files: List[str],
+        basetexture_path: Optional[str],
+    ) -> Optional[str]:
+        """
+        Ищет основную текстуру в пользовательском VPK.
+
+        Приоритет:
+          1. VTF файл, имя которого совпадает с basename($basetexture).
+          2. Первый VTF файл, путь которого не содержит служебных слов.
+        """
+        vtf_data: Optional[bytes] = None
+
+        # 1. По $basetexture
+        if basetexture_path:
+            bt_stem = os.path.splitext(os.path.basename(basetexture_path))[0].lower()
+            for vtf_rel in vtf_files:
+                vtf_stem = os.path.splitext(os.path.basename(vtf_rel))[0].lower()
+                if vtf_stem == bt_stem and _is_base_vtf(vtf_rel):
+                    try:
+                        vtf_data = pak[vtf_rel].read()
+                        logger.info(f"Текстура мода (by $basetexture): {vtf_rel}")
+                        break
+                    except Exception:
+                        continue
+
+        # 2. Первый подходящий VTF
+        if not vtf_data:
+            for vtf_rel in vtf_files:
+                if not _is_base_vtf(vtf_rel):
+                    continue
+                try:
+                    vtf_data = pak[vtf_rel].read()
+                    logger.info(f"Текстура мода (первый VTF): {vtf_rel}")
+                    break
+                except Exception:
+                    continue
+
+        return self._vtf_bytes_to_png(vtf_data) if vtf_data else None
+
+    def _extract_game_texture(self, weapon_key: str) -> Optional[str]:
+        """Извлекает текстуру оружия из игровых VPK (fallback)."""
+        try:
+            import vpk as vpklib
+            search_paths = [
+                f"materials/models/workshop_partner/weapons/c_models/{weapon_key}/{weapon_key}.vtf",
+                f"materials/models/weapons/c_models/{weapon_key}/{weapon_key}.vtf",
+                f"materials/models/weapons/c_items/{weapon_key}/{weapon_key}.vtf",
+                f"materials/models/workshop/weapons/c_models/{weapon_key}/{weapon_key}.vtf",
+            ]
+            pak = vpklib.open(self.textures_vpk_path)
+            for path in search_paths:
+                try:
+                    vtf_data = pak[path].read()
+                    logger.info(f"Текстура из игры (fallback): {path}")
+                    return self._vtf_bytes_to_png(vtf_data)
+                except KeyError:
+                    continue
+        except Exception as exc:
+            logger.warning(f"Не удалось извлечь игровую текстуру: {exc}")
+        return None
+
+    # ── VTF → PNG ────────────────────────────────────────────────────────── #
+
+    def _vtf_bytes_to_png(self, vtf_data: bytes) -> Optional[str]:
+        """Конвертирует VTF байты в PNG файл (в preview_dir)."""
+        try:
+            vtf_file = os.path.join(self._preview_dir, "_tmp_mod.vtf")
+            with open(vtf_file, "wb") as f:
+                f.write(vtf_data)
+
+            from src.services.vtflib_wrapper import VTFLib
+            rgba, w, h = VTFLib.read_vtf_as_rgba(vtf_file)
+
+            from PIL import Image
+            img      = Image.frombytes("RGBA", (w, h), rgba)
+            png_path = os.path.join(self._preview_dir, "texture.png")
+            img.save(png_path)
+            os.remove(vtf_file)
+            return png_path
+        except Exception as exc:
+            logger.warning(f"VTF→PNG ошибка: {exc}")
+            return None
+
+    # ── Поиск reference SMD ───────────────────────────────────────────────── #
+
+    def _find_reference_smd(
+        self, directory: str, weapon_key: Optional[str] = None
+    ) -> Optional[str]:
+        """Находит reference SMD, исключая physics/anim файлы."""
+        _SKIP = ("physics", "phys", "anim", "idle", "pose")
+
+        def skip(p: str) -> bool:
+            return any(kw in os.path.basename(p).lower() for kw in _SKIP)
+
+        # *_reference.smd
+        refs = [
+            p for p in glob.glob(
+                os.path.join(directory, "**", "*_reference.smd"), recursive=True
+            )
+            if not skip(p)
+        ]
+        if refs:
+            return refs[0]
+
+        # SMD с именем оружия
+        if weapon_key:
+            wk_smds = [
+                p for p in glob.glob(
+                    os.path.join(directory, "**", f"*{weapon_key}*.smd"), recursive=True
+                )
+                if not skip(p)
+            ]
+            if wk_smds:
+                return wk_smds[0]
+
+        # Любой SMD не physics
+        all_smds = [
+            p for p in glob.glob(
+                os.path.join(directory, "**", "*.smd"), recursive=True
+            )
+            if not skip(p)
+        ]
+        return all_smds[0] if all_smds else None

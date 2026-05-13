@@ -27,7 +27,8 @@ class PreviewPanel(QWidget):
 
         # 3D
         self._3d_widget = None          # Preview3DWidget (создаётся лениво)
-        self._3d_worker = None          # Preview3DWorker
+        self._3d_worker = None          # Preview3DWorker (стандартный VPK)
+        self._vpk_mod_worker = None     # PreviewVpkModWorker (пользовательский VPK)
         self._3d_available = False      # Есть ли WebEngine
         self._pending_3d_params = None  # (weapon_key, mode, misc_vpk, textures_vpk)
         self._custom_smd_mode = False   # True когда режим замены модели (кастомный SMD)
@@ -125,6 +126,34 @@ class PreviewPanel(QWidget):
         self.btn_load_3d.clicked.connect(self._on_load_3d_clicked)
         self.btn_load_3d.setVisible(False)  # только в 3D режиме
         toggle_layout.addWidget(self.btn_load_3d)
+
+        # Кнопка загрузки VPK мода
+        self.btn_load_vpk_mod = QPushButton()
+        self.btn_load_vpk_mod.setFixedSize(26, 26)
+        self.btn_load_vpk_mod.setToolTip("Загрузить VPK мод для 3D Preview")
+        self.btn_load_vpk_mod.setIcon(_make_vpk_icon("#666666"))
+        self.btn_load_vpk_mod.setStyleSheet("""
+            QPushButton {
+                background: transparent;
+                border: 1px solid #2a2a2a;
+                border-radius: 3px;
+                padding: 0px;
+            }
+            QPushButton:hover {
+                background: rgba(255, 255, 255, 0.05);
+                border-color: #555;
+            }
+            QPushButton:pressed {
+                background: rgba(255, 255, 255, 0.08);
+            }
+            QPushButton:disabled {
+                opacity: 0.3;
+            }
+        """)
+        self.btn_load_vpk_mod.clicked.connect(self._on_load_vpk_mod_clicked)
+        self.btn_load_vpk_mod.setVisible(False)   # только в 3D режиме
+        self.btn_load_vpk_mod.setEnabled(False)   # включается когда настроен TF2 путь
+        toggle_layout.addWidget(self.btn_load_vpk_mod)
 
         # Кнопки всегда видны; 3D покажет заглушку если WebEngine не установлен
         self.toggle_bar.setVisible(True)
@@ -285,6 +314,7 @@ class PreviewPanel(QWidget):
         self.btn_2d.setStyleSheet(self._btn_style_active)
         self.btn_3d.setStyleSheet(self._btn_style_inactive)
         self.btn_load_3d.setVisible(False)
+        self.btn_load_vpk_mod.setVisible(False)
 
     def _switch_to_3d(self):
         if self._3d_widget is None:
@@ -293,6 +323,10 @@ class PreviewPanel(QWidget):
         self.btn_2d.setStyleSheet(self._btn_style_inactive)
         self.btn_3d.setStyleSheet(self._btn_style_active)
         self.btn_load_3d.setVisible(True)
+        self.btn_load_vpk_mod.setVisible(True)
+        # Кнопка VPK мода всегда доступна в 3D — пользователь может загрузить
+        # свой мод даже без выбранного оружия (воркер сам разберётся с путями)
+        self.btn_load_vpk_mod.setEnabled(True)
 
         # Если пользователь уже загрузил свою текстуру — применяем её на модель.
         # Задержка нужна: WebView "просыпается" после показа не мгновенно,
@@ -327,10 +361,13 @@ class PreviewPanel(QWidget):
                     "Нажмите «Загрузить 3D модель» и выберите SMD файл"
                 )
             self.btn_load_3d.setEnabled(True)
+            # VPK мод тоже доступен в режиме замены модели (для сравнения)
+            self.btn_load_vpk_mod.setEnabled(True)
         else:
             if self._3d_widget:
                 self._3d_widget.reset()
             self.btn_load_3d.setEnabled(False)
+            self.btn_load_vpk_mod.setEnabled(False)
 
     def set_3d_params(
         self,
@@ -352,8 +389,9 @@ class PreviewPanel(QWidget):
         if self._3d_widget:
             self._3d_widget.show_loading("Нажмите «Загрузить 3D модель»")
 
-        # Разблокируем кнопку
+        # Разблокируем обе кнопки (пути к игре доступны)
         self.btn_load_3d.setEnabled(True)
+        self.btn_load_vpk_mod.setEnabled(True)
 
     def _on_load_3d_clicked(self) -> None:
         """Обработчик кнопки «Загрузить 3D модель»."""
@@ -416,6 +454,92 @@ class PreviewPanel(QWidget):
         finally:
             self.btn_load_3d.setEnabled(True)
 
+    # ── VPK мод — загрузка пользовательского мода ────────────────────────── #
+
+    def enable_vpk_mod_button(self, enabled: bool = True) -> None:
+        """Разрешает или запрещает кнопку загрузки VPK мода."""
+        self.btn_load_vpk_mod.setEnabled(enabled)
+
+    def _on_load_vpk_mod_clicked(self) -> None:
+        """Обработчик кнопки «Загрузить VPK мод»."""
+        from PySide6.QtWidgets import QFileDialog
+        vpk_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Выберите VPK мод",
+            "",
+            "VPK Files (*.vpk);;All Files (*)"
+        )
+        if not vpk_path:
+            return
+        self._start_vpk_mod_worker(vpk_path)
+
+    def _start_vpk_mod_worker(self, user_vpk_path: str) -> None:
+        """Запускает фоновый воркер для разбора VPK мода."""
+        if not self._3d_available or self._3d_widget is None:
+            return
+
+        # Приоритет: пути из уже сохранённых параметров 3D (они уже проверены)
+        misc_vpk     = ""
+        textures_vpk = ""
+        if self._pending_3d_params and len(self._pending_3d_params) >= 4:
+            misc_vpk     = self._pending_3d_params[2]
+            textures_vpk = self._pending_3d_params[3]
+        elif hasattr(self, 'parent') and hasattr(self.parent, 'settings_panel'):
+            # Fallback: берём из настроек
+            try:
+                from src.services.tf2_paths import TF2Paths
+                settings     = self.parent.settings_panel.get_settings()
+                tf2_root_dir = settings.get('tf2_game_folder', '')
+                if tf2_root_dir:
+                    _, misc_vpk, _ = TF2Paths.resolve(tf2_root_dir)
+                    textures_vpk   = TF2Paths.resolve_textures_vpk(tf2_root_dir)
+            except Exception:
+                pass
+
+        # Останавливаем предыдущие воркеры
+        self._stop_3d_worker()
+        self._stop_vpk_mod_worker()
+
+        self.btn_load_vpk_mod.setEnabled(False)
+        self.btn_load_3d.setEnabled(False)
+        self._3d_widget.show_loading("Анализ VPK мода...")
+
+        from src.services.preview_vpk_mod_worker import PreviewVpkModWorker
+        worker = PreviewVpkModWorker(
+            user_vpk_path    = user_vpk_path,
+            misc_vpk_path    = misc_vpk,
+            textures_vpk_path= textures_vpk,
+            parent           = self,
+        )
+        worker.progress.connect(self._on_vpk_mod_progress)
+        worker.ready.connect(self._on_vpk_mod_ready)
+        worker.failed.connect(self._on_vpk_mod_failed)
+        worker.start()
+        self._vpk_mod_worker = worker
+
+    def _on_vpk_mod_progress(self, text: str) -> None:
+        if self._3d_widget:
+            self._3d_widget.show_loading(text)
+
+    def _on_vpk_mod_ready(self, obj_path: str, texture_path: str) -> None:
+        self.btn_load_vpk_mod.setEnabled(True)
+        self.btn_load_3d.setEnabled(bool(self._pending_3d_params or self._custom_smd_mode))
+        if self._3d_widget:
+            self._3d_widget.load_model_files(obj_path, texture_path)
+
+    def _on_vpk_mod_failed(self, error: str) -> None:
+        logger.warning(f"VPK мод 3D Preview не удался: {error}")
+        self.btn_load_vpk_mod.setEnabled(True)
+        self.btn_load_3d.setEnabled(bool(self._pending_3d_params or self._custom_smd_mode))
+        if self._3d_widget:
+            self._3d_widget.show_error(f"Ошибка: {error}")
+
+    def _stop_vpk_mod_worker(self) -> None:
+        if self._vpk_mod_worker and self._vpk_mod_worker.isRunning():
+            self._vpk_mod_worker.requestInterruption()
+            self._vpk_mod_worker.wait(3000)
+        self._vpk_mod_worker = None
+
     def _start_3d_worker(
         self,
         weapon_key: str,
@@ -450,6 +574,7 @@ class PreviewPanel(QWidget):
         self._pending_3d_params = None
         self._custom_smd_mode = False
         self._stop_3d_worker()
+        self._stop_vpk_mod_worker()
         if self._3d_widget:
             self._3d_widget.reset()
         self.btn_load_3d.setEnabled(False)
@@ -774,7 +899,7 @@ class PreviewPanel(QWidget):
             QTimer.singleShot(50, scale_image)
 
 
-# ── Иконка куба для кнопки загрузки 3D ───────────────────────────────────── #
+# ── Иконки для кнопок 3D ─────────────────────────────────────────────────── #
 
 def _make_cube_icon(color: str = "#666666", size: int = 16):
     """
@@ -825,6 +950,53 @@ def _make_cube_icon(color: str = "#666666", size: int = 16):
         QPointF(s * 0.50, s * 0.52),
     ])
     p.drawPolygon(right)
+
+    p.end()
+    return QIcon(pix)
+
+
+def _make_vpk_icon(color: str = "#666666", size: int = 16):
+    """
+    Рисует иконку архива/пакета (VPK) через QPainter — прямоугольник с крышкой
+    и горизонтальными линиями внутри (как папка с файлами).
+    Никаких эмодзи и внешних файлов — чистый QPainter.
+    """
+    from PySide6.QtGui import QIcon, QPixmap, QPainter, QPen, QColor
+    from PySide6.QtCore import Qt, QRectF, QLineF
+
+    pix = QPixmap(size, size)
+    pix.fill(Qt.transparent)
+
+    p = QPainter(pix)
+    p.setRenderHint(QPainter.Antialiasing)
+
+    pen = QPen(QColor(color))
+    pen.setWidthF(1.1)
+    pen.setCapStyle(Qt.RoundCap)
+    pen.setJoinStyle(Qt.RoundJoin)
+    p.setPen(pen)
+    p.setBrush(Qt.NoBrush)
+
+    s = float(size)
+
+    # Основной корпус (прямоугольник)
+    body = QRectF(s * 0.08, s * 0.30, s * 0.84, s * 0.64)
+    p.drawRect(body)
+
+    # Крышка (трапеция сверху — просто прямоугольник поменьше)
+    lid = QRectF(s * 0.18, s * 0.10, s * 0.64, s * 0.22)
+    p.drawRect(lid)
+
+    # Горизонтальные линии внутри (содержимое)
+    pen2 = QPen(QColor(color))
+    pen2.setWidthF(0.9)
+    p.setPen(pen2)
+
+    line_xs = s * 0.18
+    line_xe = s * 0.82
+    for frac in (0.48, 0.60, 0.72):
+        y = s * frac
+        p.drawLine(QLineF(line_xs, y, line_xe, y))
 
     p.end()
     return QIcon(pix)
