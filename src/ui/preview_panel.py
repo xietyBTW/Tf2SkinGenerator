@@ -37,6 +37,7 @@ class PreviewPanel(QWidget):
         from src.data.translations import TRANSLATIONS
         config = AppConfig.load_config()
         current_lang = config.get('language') or 'en'
+        self._lang = current_lang
         self.t = TRANSLATIONS[current_lang]
 
         self.setAcceptDrops(True)
@@ -293,6 +294,7 @@ class PreviewPanel(QWidget):
 
         # Создаём виджет в любом случае (реальный или заглушка)
         self._3d_widget = Preview3DWidget.create(self)
+        self._3d_widget.set_language(self._lang)
 
         qt_w = self._3d_widget.qt_widget
         qt_w.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
@@ -513,6 +515,7 @@ class PreviewPanel(QWidget):
         )
         worker.progress.connect(self._on_vpk_mod_progress)
         worker.ready.connect(self._on_vpk_mod_ready)
+        worker.animated.connect(self._on_3d_animated)
         worker.failed.connect(self._on_vpk_mod_failed)
         worker.start()
         self._vpk_mod_worker = worker
@@ -565,6 +568,7 @@ class PreviewPanel(QWidget):
         )
         worker.progress.connect(self._on_3d_progress)
         worker.ready.connect(self._on_3d_ready)
+        worker.animated.connect(self._on_3d_animated)
         worker.failed.connect(self._on_3d_failed)
         worker.start()
         self._3d_worker = worker
@@ -600,6 +604,15 @@ class PreviewPanel(QWidget):
         self.btn_load_3d.setEnabled(True)
         if self._3d_widget:
             self._3d_widget.load_model_files(obj_path, texture_path)
+
+    def _on_3d_animated(self, frame_paths: list, framerate: float) -> None:
+        """Запускает анимацию текстуры когда воркер нашёл многокадровый VTF."""
+        if self._3d_widget and frame_paths:
+            logger.info(
+                f"3D Preview: запуск анимации текстуры "
+                f"({len(frame_paths)} кадров @ {framerate:.1f} fps)"
+            )
+            self._3d_widget.update_animated_texture_files(frame_paths, framerate)
 
     def _on_3d_failed(self, error: str):
         logger.warning(f"3D Preview не удался: {error}")
@@ -855,13 +868,17 @@ class PreviewPanel(QWidget):
 
     # ── Language ─────────────────────────────────────────────────────────── #
 
-    def update_language(self, t):
+    def update_language(self, t, lang: str = 'en'):
         self.t = t
+        self._lang = lang
         self.empty_text.setText(self.t['drag_text'])
         self.select_file_button.setText(self.t['select_file_btn'])
         self.info_title.setText(self.t['info_title'])
         if self.info_summary.isVisible():
             self.update_info_summary()
+        # Передаём язык в 3D вьювер
+        if hasattr(self, '_3d_widget') and self._3d_widget is not None:
+            self._3d_widget.set_language(lang)
 
     # ── Resize ───────────────────────────────────────────────────────────── #
 

@@ -73,6 +73,7 @@ class _Real3DWidget:
         self._view = QWebEngineView(parent)
         self._ready = False
         self._pending: Optional[tuple] = None   # (obj_path, tex_path)
+        self._lang: str = 'en'
 
         settings = self._view.settings()
         # Разрешаем CDN из локального файла
@@ -109,12 +110,24 @@ class _Real3DWidget:
             logger.error("3D viewer HTML не загрузился")
             return
         self._ready = True
+        # Применяем язык сразу после загрузки страницы
+        self._view.page().runJavaScript(
+            f"window.setLanguage({json.dumps(self._lang)})"
+        )
         if self._pending:
             obj_path, tex_path = self._pending
             self._pending = None
             self.load_model_files(obj_path, tex_path)
 
     # ── Публичный API ────────────────────────────────────────────────────── #
+
+    def set_language(self, lang: str) -> None:
+        """Переключает язык интерфейса 3D вьювера ('ru' / 'en')."""
+        self._lang = lang
+        if self._ready:
+            self._view.page().runJavaScript(
+                f"window.setLanguage({json.dumps(lang)})"
+            )
 
     def load_model_files(self, obj_path: str, texture_path: str = "") -> None:
         """Загружает модель из OBJ файла (читает содержимое и передаёт в JS)."""
@@ -140,11 +153,35 @@ class _Real3DWidget:
         self._js_load(obj_content, tex_data_url, cx, cy, cz, scale)
 
     def update_texture_file(self, png_path: str) -> None:
-        """Обновляет текстуру на уже загруженной модели."""
+        """Обновляет текстуру на уже загруженной модели (статичная)."""
         if not self._ready or not os.path.exists(png_path):
             return
         data_url = _file_to_data_url(png_path)
         js = f"window.updateTextureFromDataUrl({json.dumps(data_url)})"
+        self._view.page().runJavaScript(js)
+
+    def update_animated_texture_files(
+        self, frame_paths: list, framerate: float
+    ) -> None:
+        """
+        Запускает анимацию текстуры на уже загруженной модели.
+
+        Args:
+            frame_paths: список путей к PNG кадрам (в порядке анимации)
+            framerate:   частота кадров (fps)
+        """
+        if not self._ready or not frame_paths:
+            return
+        valid = [p for p in frame_paths if os.path.exists(p)]
+        if not valid:
+            return
+        data_urls = [_file_to_data_url(p) for p in valid]
+        js = (
+            f"window.loadAnimatedTexture("
+            f"{json.dumps(data_urls)}, "
+            f"{framerate:.4f}"
+            f")"
+        )
         self._view.page().runJavaScript(js)
 
     def show_loading(self, text: str = "Загрузка...") -> None:
@@ -213,8 +250,10 @@ class _Fallback3DWidget:
     def setMinimumHeight(self, h): self._label.setMinimumHeight(h)
     def setMinimumWidth(self, w): self._label.setMinimumWidth(w)
 
+    def set_language(self, lang: str): pass
     def load_model_files(self, *_): pass
     def update_texture_file(self, *_): pass
+    def update_animated_texture_files(self, *_): pass
     def show_loading(self, *_): pass
     def show_error(self, text=""): pass
     def reset(self): pass

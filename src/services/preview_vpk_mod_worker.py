@@ -86,7 +86,8 @@ def _is_base_vtf(vtf_path: str) -> bool:
 class PreviewVpkModWorker(QThread):
     """Готовит OBJ + текстуру из пользовательского VPK мода для 3D Preview."""
 
-    ready    = Signal(str, str)   # (obj_path, texture_path)
+    ready    = Signal(str, str)      # (obj_path, first_frame_path)
+    animated = Signal(object, float) # ([frame_paths], framerate) — только если кадров > 1
     failed   = Signal(str)
     progress = Signal(str)
 
@@ -208,15 +209,19 @@ class PreviewVpkModWorker(QThread):
 
             # ── 5. Получаем текстуру ──────────────────────────────────────── #
             self.progress.emit("Извлечение текстуры...")
-            texture_path = self._extract_texture_from_pak(
-                pak, vtf_files, basetexture_path
+            frame_paths, framerate = self._extract_texture_frames_from_pak(
+                pak, vtf_files, basetexture_path, vmt_files
             )
 
             # Fallback: текстура из игры
-            if not texture_path and weapon_key and self.textures_vpk_path:
-                texture_path = self._extract_game_texture(weapon_key)
+            if not frame_paths and weapon_key and self.textures_vpk_path:
+                frame_paths, framerate = self._extract_game_texture_frames(weapon_key)
 
-            self.ready.emit(obj_path, texture_path or "")
+            first_tex = frame_paths[0] if frame_paths else ""
+            self.ready.emit(obj_path, first_tex)
+
+            if len(frame_paths) > 1:
+                self.animated.emit(frame_paths, framerate)
 
         except Exception as exc:
             logger.error(f"PreviewVpkModWorker: {exc}", exc_info=True)
@@ -381,22 +386,23 @@ class PreviewVpkModWorker(QThread):
 
     # ── Текстура из пользовательского VPK ────────────────────────────────── #
 
-    def _extract_texture_from_pak(
+    def _extract_texture_frames_from_pak(
         self,
         pak,
         vtf_files: List[str],
         basetexture_path: Optional[str],
-    ) -> Optional[str]:
+        vmt_files: List[str],
+    ) -> tuple:
         """
-        Ищет основную текстуру в пользовательском VPK.
+        Ищет основную текстуру в VPK мода и возвращает все кадры.
 
-        Приоритет:
-          1. VTF файл, имя которого совпадает с basename($basetexture).
-          2. Первый VTF файл, путь которого не содержит служебных слов.
+        Возвращает (frame_paths: list[str], framerate: float).
+        Приоритет выбора VTF:
+          1. Файл с именем совпадающим с basename($basetexture)
+          2. Первый VTF без служебных слов в пути
         """
         vtf_data: Optional[bytes] = None
 
-        # 1. По $basetexture
         if basetexture_path:
             bt_stem = os.path.splitext(os.path.basename(basetexture_path))[0].lower()
             for vtf_rel in vtf_files:
@@ -409,7 +415,6 @@ class PreviewVpkModWorker(QThread):
                     except Exception:
                         continue
 
-        # 2. Первый подходящий VTF
         if not vtf_data:
             for vtf_rel in vtf_files:
                 if not _is_base_vtf(vtf_rel):
@@ -421,51 +426,107 @@ class PreviewVpkModWorker(QThread):
                 except Exception:
                     continue
 
-        return self._vtf_bytes_to_png(vtf_data) if vtf_data else None
+        if not vtf_data:
+            return [], 0.0
 
-    def _extract_game_texture(self, weapon_key: str) -> Optional[str]:
-        """Извлекает текстуру оружия из игровых VPK (fallback)."""
+        # Framerate из VMT мода (если анимированная)
+        framerate = self._read_vmt_framerate_from_pak(pak, vmt_files)
+        return self._vtf_bytes_to_frame_pngs(vtf_data, framerate)
+
+    def _extract_game_texture_frames(self, weapon_key: str) -> tuple:
+        """Извлекает текстуру оружия из игровых VPK (fallback). Возвращает (frames, fps)."""
         try:
             import vpk as vpklib
-            search_paths = [
+            import re
+
+            vtf_search = [
                 f"materials/models/workshop_partner/weapons/c_models/{weapon_key}/{weapon_key}.vtf",
                 f"materials/models/weapons/c_models/{weapon_key}/{weapon_key}.vtf",
                 f"materials/models/weapons/c_items/{weapon_key}/{weapon_key}.vtf",
                 f"materials/models/workshop/weapons/c_models/{weapon_key}/{weapon_key}.vtf",
             ]
+            vmt_search = [p.replace(".vtf", ".vmt") for p in vtf_search]
+
             pak = vpklib.open(self.textures_vpk_path)
-            for path in search_paths:
+            for path in vtf_search:
                 try:
                     vtf_data = pak[path].read()
                     logger.info(f"Текстура из игры (fallback): {path}")
-                    return self._vtf_bytes_to_png(vtf_data)
+                    framerate = 15.0
+                    for vmt_path in vmt_search:
+                        try:
+                            vmt = pak[vmt_path].read().decode("utf-8", errors="replace")
+                            m = re.search(
+                                r'"animatedtextureframerate"\s+"?([0-9.]+)"?',
+                                vmt, re.IGNORECASE
+                            )
+                            if m:
+                                framerate = max(0.1, float(m.group(1)))
+                            break
+                        except KeyError:
+                            continue
+                    return self._vtf_bytes_to_frame_pngs(vtf_data, framerate)
                 except KeyError:
                     continue
         except Exception as exc:
             logger.warning(f"Не удалось извлечь игровую текстуру: {exc}")
-        return None
+        return [], 0.0
 
-    # ── VTF → PNG ────────────────────────────────────────────────────────── #
+    # ── VTF → PNG (все кадры) ─────────────────────────────────────────────── #
 
-    def _vtf_bytes_to_png(self, vtf_data: bytes) -> Optional[str]:
-        """Конвертирует VTF байты в PNG файл (в preview_dir)."""
+    def _vtf_bytes_to_frame_pngs(
+        self, vtf_data: bytes, framerate: float = 15.0
+    ) -> tuple:
+        """
+        Конвертирует VTF байты в PNG файлы (по одному на кадр).
+        Возвращает (frame_paths: list[str], framerate: float).
+        """
         try:
             vtf_file = os.path.join(self._preview_dir, "_tmp_mod.vtf")
             with open(vtf_file, "wb") as f:
                 f.write(vtf_data)
 
             from src.services.vtflib_wrapper import VTFLib
-            rgba, w, h = VTFLib.read_vtf_as_rgba(vtf_file)
-
             from PIL import Image
-            img      = Image.frombytes("RGBA", (w, h), rgba)
-            png_path = os.path.join(self._preview_dir, "texture.png")
-            img.save(png_path)
+
+            all_frames, w, h = VTFLib.read_vtf_all_frames(vtf_file)
             os.remove(vtf_file)
-            return png_path
+
+            frame_paths: list[str] = []
+            for i, rgba in enumerate(all_frames):
+                img  = Image.frombytes("RGBA", (w, h), rgba)
+                name = f"texture_{i:03d}.png" if len(all_frames) > 1 else "texture.png"
+                path = os.path.join(self._preview_dir, name)
+                img.save(path)
+                frame_paths.append(path)
+
+            if len(frame_paths) > 1:
+                logger.info(
+                    f"Анимированная текстура мода: {len(frame_paths)} кадров "
+                    f"@ {framerate:.1f} fps"
+                )
+            return frame_paths, framerate
+
         except Exception as exc:
             logger.warning(f"VTF→PNG ошибка: {exc}")
-            return None
+            return [], 0.0
+
+    def _read_vmt_framerate_from_pak(self, pak, vmt_files: List[str]) -> float:
+        """Ищет animatedtextureframerate в VMT файлах из пака мода."""
+        import re
+        for vmt_rel in vmt_files:
+            try:
+                content = pak[vmt_rel].read().decode("utf-8", errors="replace")
+                m = re.search(
+                    r'"animatedtextureframerate"\s+"?([0-9.]+)"?',
+                    content, re.IGNORECASE
+                )
+                if m:
+                    return max(0.1, float(m.group(1)))
+                break
+            except Exception:
+                continue
+        return 15.0
 
     # ── Поиск reference SMD ───────────────────────────────────────────────── #
 

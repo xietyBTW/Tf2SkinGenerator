@@ -344,7 +344,7 @@ class MainWindow(QMainWindow):
             self.settings_panel.update_language(self.t)
             
         if hasattr(self, 'preview_panel'):
-            self.preview_panel.update_language(self.t)
+            self.preview_panel.update_language(self.t, self.language)
             
         if hasattr(self, 'crit_hit_checkbox'):
             self.crit_hit_checkbox.setText(self.t['enable_crit_hit'])
