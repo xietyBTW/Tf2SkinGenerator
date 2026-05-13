@@ -91,11 +91,43 @@ class PreviewVpkModWorker(QThread):
     failed   = Signal(str)
     progress = Signal(str)
 
+    _PROGRESS = {
+        'ru': {
+            'opening':          'Открытие VPK мода...',
+            'open_error':       'Не удалось открыть VPK: {err}',
+            'scanning':         'Анализ содержимого VPK...',
+            'decompiling_mod':  'Декомпиляция MDL из мода...',
+            'loading_original': 'Загрузка оригинальной модели из игры...',
+            'extracting_tex':   'Извлечение текстуры...',
+            'converting':       'Конвертация модели...',
+            'decompiling_orig': 'Декомпиляция оригинальной модели...',
+            'not_found':        (
+                'Модель не найдена ни в моде, ни в игре. '
+                'Проверьте что VPK содержит .mdl или что путь к игре настроен.'
+            ),
+        },
+        'en': {
+            'opening':          'Opening VPK mod...',
+            'open_error':       'Failed to open VPK: {err}',
+            'scanning':         'Scanning VPK contents...',
+            'decompiling_mod':  'Decompiling MDL from mod...',
+            'loading_original': 'Loading original model from game...',
+            'extracting_tex':   'Extracting texture...',
+            'converting':       'Converting model...',
+            'decompiling_orig': 'Decompiling original model...',
+            'not_found':        (
+                'Model not found in the mod or the game. '
+                'Make sure the VPK contains a .mdl file or that the TF2 path is configured.'
+            ),
+        },
+    }
+
     def __init__(
         self,
         user_vpk_path: str,
         misc_vpk_path: str,
         textures_vpk_path: str,
+        lang: str = 'en',
         parent=None,
     ):
         super().__init__(parent)
@@ -103,6 +135,7 @@ class PreviewVpkModWorker(QThread):
         self.misc_vpk_path     = misc_vpk_path
         self.textures_vpk_path = textures_vpk_path
         self._preview_dir: Optional[str] = None
+        self._p = self._PROGRESS.get(lang, self._PROGRESS['en'])
 
     # ── Точка входа ───────────────────────────────────────────────────────── #
 
@@ -112,18 +145,18 @@ class PreviewVpkModWorker(QThread):
 
             import vpk as vpklib
 
-            self.progress.emit("Открытие VPK мода...")
+            self.progress.emit(self._p['opening'])
             try:
                 pak = vpklib.open(self.user_vpk_path)
             except Exception as exc:
-                self.failed.emit(f"Не удалось открыть VPK: {exc}")
+                self.failed.emit(self._p['open_error'].format(err=exc))
                 return
 
             if self.isInterruptionRequested():
                 return
 
             # ── 1. Сканируем содержимое ───────────────────────────────────── #
-            self.progress.emit("Анализ содержимого VPK...")
+            self.progress.emit(self._p['scanning'])
 
             mdl_files: List[str] = []
             vmt_files: List[str] = []
@@ -189,26 +222,23 @@ class PreviewVpkModWorker(QThread):
 
             if mdl_files:
                 # Декомпилируем MDL из мода
-                self.progress.emit("Декомпиляция MDL из мода...")
+                self.progress.emit(self._p['decompiling_mod'])
                 obj_path = self._decompile_mdl_from_pak(pak, mdl_files[0], weapon_key)
 
             if not obj_path and weapon_key and self.misc_vpk_path:
                 # Нет MDL в моде — берём оригинальную TF2 модель
-                self.progress.emit("Загрузка оригинальной модели из игры...")
+                self.progress.emit(self._p['loading_original'])
                 obj_path = self._load_original_model(weapon_key)
 
             if not obj_path:
-                self.failed.emit(
-                    "Модель не найдена ни в моде, ни в игре. "
-                    "Проверьте что VPK содержит .mdl или что путь к игре настроен."
-                )
+                self.failed.emit(self._p['not_found'])
                 return
 
             if self.isInterruptionRequested():
                 return
 
             # ── 5. Получаем текстуру ──────────────────────────────────────── #
-            self.progress.emit("Извлечение текстуры...")
+            self.progress.emit(self._p['extracting_tex'])
             frame_paths, framerate = self._extract_texture_frames_from_pak(
                 pak, vtf_files, basetexture_path, vmt_files
             )
@@ -284,7 +314,7 @@ class PreviewVpkModWorker(QThread):
                 logger.warning(f"Reference SMD не найден в {decomp_dir}")
                 return None
 
-            self.progress.emit("Конвертация модели...")
+            self.progress.emit(self._p['converting'])
             obj_path = os.path.join(self._preview_dir, "model.obj")
             from src.services.smd_to_obj_service import SmdToObjService
             return obj_path if SmdToObjService.convert(smd_path, obj_path) else None
@@ -364,7 +394,7 @@ class PreviewVpkModWorker(QThread):
                 if self.isInterruptionRequested():
                     return None
 
-                self.progress.emit("Декомпиляция оригинальной модели...")
+                self.progress.emit(self._p['decompiling_orig'])
                 crowbar    = TF2Paths.get_crowbar_path()
                 decomp_dir = tempfile.mkdtemp(prefix="tf2sg_decomp_")
                 ModelBuildService.decompile(mdl_file, decomp_dir, crowbar)
@@ -379,7 +409,7 @@ class PreviewVpkModWorker(QThread):
         if not smd_path:
             return None
 
-        self.progress.emit("Конвертация модели...")
+        self.progress.emit(self._p['converting'])
         obj_path = os.path.join(self._preview_dir, "model.obj")
         from src.services.smd_to_obj_service import SmdToObjService
         return obj_path if SmdToObjService.convert(smd_path, obj_path) else None

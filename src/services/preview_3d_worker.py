@@ -41,12 +41,34 @@ class Preview3DWorker(QThread):
     # Текстовый прогресс для UI
     progress = Signal(str)
 
+    _PROGRESS = {
+        'ru': {
+            'searching':   'Поиск модели...',
+            'converting':  'Конвертация модели...',
+            'texture':     'Загрузка текстуры...',
+            'extracting':  'Извлечение модели из VPK...',
+            'decompiling': 'Декомпиляция модели...',
+            'not_found':   'Модель не найдена в VPK',
+            'conv_error':  'Ошибка конвертации модели',
+        },
+        'en': {
+            'searching':   'Searching for model...',
+            'converting':  'Converting model...',
+            'texture':     'Loading texture...',
+            'extracting':  'Extracting model from VPK...',
+            'decompiling': 'Decompiling model...',
+            'not_found':   'Model not found in VPK',
+            'conv_error':  'Model conversion error',
+        },
+    }
+
     def __init__(
         self,
         weapon_key: str,
         mode: str,
         misc_vpk_path: str,
         textures_vpk_path: str,
+        lang: str = 'en',
         parent=None,
     ):
         super().__init__(parent)
@@ -55,6 +77,7 @@ class Preview3DWorker(QThread):
         self.misc_vpk_path     = misc_vpk_path
         self.textures_vpk_path = textures_vpk_path
         self._preview_dir: Optional[str] = None
+        self._p = self._PROGRESS.get(lang, self._PROGRESS['en'])
 
     # ── Точка входа ───────────────────────────────────────────────────────── #
 
@@ -63,26 +86,26 @@ class Preview3DWorker(QThread):
             self._preview_dir = tempfile.mkdtemp(prefix="tf2sg_3d_")
 
             # ── 1. SMD ────────────────────────────────────────────────────── #
-            self.progress.emit("Поиск модели...")
+            self.progress.emit(self._p['searching'])
             smd_path = self._get_reference_smd()
             if not smd_path:
-                self.failed.emit("Модель не найдена в VPK")
+                self.failed.emit(self._p['not_found'])
                 return
             if self.isInterruptionRequested():
                 return
 
             # ── 2. OBJ ────────────────────────────────────────────────────── #
-            self.progress.emit("Конвертация модели...")
+            self.progress.emit(self._p['converting'])
             obj_path = os.path.join(self._preview_dir, "model.obj")
             from src.services.smd_to_obj_service import SmdToObjService
             if not SmdToObjService.convert(smd_path, obj_path):
-                self.failed.emit("Ошибка конвертации модели")
+                self.failed.emit(self._p['conv_error'])
                 return
             if self.isInterruptionRequested():
                 return
 
             # ── 3. Текстура ───────────────────────────────────────────────── #
-            self.progress.emit("Загрузка текстуры...")
+            self.progress.emit(self._p['texture'])
             frame_paths, framerate = self._extract_texture_frames()
 
             first_tex = frame_paths[0] if frame_paths else ""
@@ -118,7 +141,7 @@ class Preview3DWorker(QThread):
         """Извлекает MDL из VPK и декомпилирует через Crowbar."""
         from src.services.extract_model_service import ExtractModelService
 
-        self.progress.emit("Извлечение модели из VPK...")
+        self.progress.emit(self._p['extracting'])
 
         paths_to_try = ExtractModelService._build_paths_to_try(
             self.mode, self.weapon_key
@@ -153,7 +176,7 @@ class Preview3DWorker(QThread):
                 shutil.rmtree(mdl_dir, ignore_errors=True)
                 return None
 
-            self.progress.emit("Декомпиляция модели...")
+            self.progress.emit(self._p['decompiling'])
             crowbar     = TF2Paths.get_crowbar_path()
             decomp_dir  = tempfile.mkdtemp(prefix="tf2sg_decomp_")
             ModelBuildService.decompile(mdl_file, decomp_dir, crowbar)

@@ -144,7 +144,27 @@ TRANSLATIONS = {
         'select_smd_file': 'Выберите SMD файл модели',
         'spray_mode': 'Режим спрея:',
         'enable_spray': 'Создать спрей (256×256, RGBA)',
-        
+
+        # 3D Preview
+        '3d_prompt_weapon':    'Выберите оружие и нажмите кнопку ▶ чтобы загрузить модель',
+        '3d_prompt_smd':       'Нажмите ▶ и выберите SMD файл',
+        '3d_preparing':        'Подготовка 3D модели...',
+        '3d_converting_smd':   'Конвертация SMD...',
+        '3d_analyzing_vpk':    'Анализ VPK мода...',
+        '3d_searching':        'Поиск модели...',
+        '3d_extracting':       'Извлечение модели из VPK...',
+        '3d_decompiling':      'Декомпиляция модели...',
+        '3d_converting':       'Конвертация модели...',
+        '3d_loading_texture':  'Загрузка текстуры...',
+        '3d_error_convert':    'Ошибка конвертации SMD',
+        '3d_error_load':       'Ошибка загрузки модели',
+        '3d_error_prefix':     'Ошибка: {error}',
+        '3d_unavailable':      'Модель недоступна: {error}',
+        '3d_select_vpk':       'Выберите VPK мод',
+        '3d_select_smd_title': 'Выберите SMD файл модели',
+        '3d_load_model_tip':   'Загрузить 3D модель',
+        '3d_load_vpk_tip':     'Загрузить VPK мод для 3D Preview',
+
         # Error messages
         'error_tf2_not_specified': 'Не указана папка TF2. Укажите её в настройках.',
         'error_weapon_not_found': 'Оружие {weapon_key} не найдено в списке путей моделей. Обновите WEAPON_MDL_PATHS в src/data/weapons.py.',
@@ -395,7 +415,27 @@ TRANSLATIONS = {
         'select_smd_file': 'Select SMD Model File',
         'spray_mode': 'Spray Mode:',
         'enable_spray': 'Create spray (256×256, RGBA)',
-        
+
+        # 3D Preview
+        '3d_prompt_weapon':    'Select a weapon and click ▶ to load the model',
+        '3d_prompt_smd':       'Click ▶ and select an SMD file',
+        '3d_preparing':        'Preparing 3D model...',
+        '3d_converting_smd':   'Converting SMD...',
+        '3d_analyzing_vpk':    'Analyzing VPK mod...',
+        '3d_searching':        'Searching for model...',
+        '3d_extracting':       'Extracting model from VPK...',
+        '3d_decompiling':      'Decompiling model...',
+        '3d_converting':       'Converting model...',
+        '3d_loading_texture':  'Loading texture...',
+        '3d_error_convert':    'SMD conversion error',
+        '3d_error_load':       'Model load error',
+        '3d_error_prefix':     'Error: {error}',
+        '3d_unavailable':      'Model unavailable: {error}',
+        '3d_select_vpk':       'Select VPK mod',
+        '3d_select_smd_title': 'Select SMD Model File',
+        '3d_load_model_tip':   'Load 3D model',
+        '3d_load_vpk_tip':     'Load VPK mod for 3D Preview',
+
         # Error messages
         'error_tf2_not_specified': 'TF2 folder not specified. Please specify it in settings.',
         'error_weapon_not_found': 'Weapon {weapon_key} not found in model paths list. Update WEAPON_MDL_PATHS in src/data/weapons.py.',
