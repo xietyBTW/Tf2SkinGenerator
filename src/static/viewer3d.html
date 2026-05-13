@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>3D Preview</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #1a1a1a;
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+
+  #canvas-container {
+    width: 100%;
+    height: 100%;
+  }
+
+  /* Статус / загрузка / ошибка */
+  #status {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    pointer-events: none;
+  }
+
+  #status-icon {
+    font-size: 40px;
+    opacity: 0.25;
+  }
+
+  #status-text {
+    color: #555;
+    font-size: 13px;
+    font-weight: 400;
+    letter-spacing: 0.03em;
+  }
+
+  #status.error #status-text { color: #c0392b; }
+  #status.error #status-icon { opacity: 0.5; }
+
+  /* Подсказка управления */
+  #hint {
+    position: absolute;
+    bottom: 14px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: #3a3a3a;
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    pointer-events: none;
+    white-space: nowrap;
+  }
+</style>
+</head>
+<body>
+
+<div id="canvas-container"></div>
+
+<div id="status">
+  <div id="status-icon">⬛</div>
+  <div id="status-text">Выберите оружие для 3D Preview</div>
+</div>
+
+<div id="hint" style="display:none;">
+  ЛКМ — вращение &nbsp;·&nbsp; Колесо — масштаб &nbsp;·&nbsp; ПКМ — панорама
+</div>
+
+<!-- Three.js from CDN -->
+<script type="importmap">
+{
+  "imports": {
+    "three":          "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/":  "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE            from 'three';
+import { OBJLoader }         from 'three/addons/loaders/OBJLoader.js';
+import { OrbitControls }     from 'three/addons/controls/OrbitControls.js';
+
+// ── Renderer ────────────────────────────────────────────────────────────── //
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.setClearColor(0x1a1a1a);
+document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+// ── Scene / Camera ───────────────────────────────────────────────────────── //
+const scene  = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(
+  45, window.innerWidth / window.innerHeight, 0.001, 1000
+);
+camera.position.set(0, 0.5, 3);
+
+// ── Controls ─────────────────────────────────────────────────────────────── //
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping  = true;
+controls.dampingFactor  = 0.07;
+controls.minDistance    = 0.1;
+controls.maxDistance    = 20;
+
+// ── Lighting ─────────────────────────────────────────────────────────────── //
+scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+const key = new THREE.DirectionalLight(0xffffff, 1.2);
+key.position.set(2, 4, 3);
+scene.add(key);
+const fill = new THREE.DirectionalLight(0xaaccff, 0.4);
+fill.position.set(-3, 1, -2);
+scene.add(fill);
+const rim = new THREE.DirectionalLight(0xffffff, 0.3);
+rim.position.set(0, -2, -3);
+scene.add(rim);
+
+// ── State ────────────────────────────────────────────────────────────────── //
+let currentModel = null;
+const status     = document.getElementById('status');
+const statusText = document.getElementById('status-text');
+const statusIcon = document.getElementById('status-icon');
+const hint       = document.getElementById('hint');
+
+// ── Helpers ──────────────────────────────────────────────────────────────── //
+function setStatus(text, isError = false) {
+  status.style.display = 'flex';
+  status.className = isError ? 'error' : '';
+  statusText.textContent = text;
+  statusIcon.textContent = isError ? '⚠' : '⬛';
+  hint.style.display = 'none';
+}
+
+function hideStatus() {
+  status.style.display = 'none';
+  hint.style.display   = 'block';
+}
+
+// Центр и масштаб вычислены в Python и переданы напрямую —
+// не зависим от Three.js bounding box который ненадёжен после загрузки.
+function applyTransform(object, cx, cy, cz, scale) {
+  object.position.set(-cx * scale, -cy * scale, -cz * scale);
+  object.scale.setScalar(scale);
+
+  // Дистанция камеры: после scale модель вписана в куб 2×2×2
+  // d = 1 / tan(FOV/2) × 1.8 даёт хороший обзор с отступом
+  const fovRad   = (camera.fov * Math.PI) / 180;
+  const distance = 1.0 / Math.tan(fovRad / 2) * 1.8;
+
+  camera.position.set(0, 0.2, distance);
+  camera.lookAt(0, 0, 0);
+  controls.target.set(0, 0, 0);
+  controls.update();
+}
+
+function applyTexture(object, tex) {
+  object.traverse(child => {
+    if (!child.isMesh) return;
+    if (tex) {
+      child.material = new THREE.MeshLambertMaterial({
+        map: tex,
+        side: THREE.DoubleSide,
+      });
+    } else {
+      child.material = new THREE.MeshLambertMaterial({
+        color: 0x888888,
+        side: THREE.DoubleSide,
+      });
+    }
+    child.material.needsUpdate = true;
+  });
+}
+
+// ── Public API (вызывается из Python через runJavaScript) ─────────────────── //
+
+/**
+ * Загружает модель из OBJ-контента (строка) и текстуры (data URL или '').
+ */
+window.loadModelFromContent = function(objContent, texDataUrl, cx, cy, cz, scale) {
+  setStatus('Загрузка...');
+  if (currentModel) {
+    scene.remove(currentModel);
+    currentModel = null;
+  }
+
+  // Blob URL для OBJ
+  const blob   = new Blob([objContent], { type: 'text/plain' });
+  const objUrl = URL.createObjectURL(blob);
+
+  // Текстура
+  let tex = null;
+  if (texDataUrl && texDataUrl.length > 0) {
+    const texLoader = new THREE.TextureLoader();
+    tex = texLoader.load(texDataUrl);
+    tex.colorSpace = THREE.SRGBColorSpace;
+  }
+
+  const loader = new OBJLoader();
+  loader.load(
+    objUrl,
+    object => {
+      URL.revokeObjectURL(objUrl);
+      scene.add(object);
+      currentModel = object;
+      applyTexture(object, tex);
+      applyTransform(object, cx, cy, cz, scale);
+      hideStatus();
+    },
+    undefined,
+    err => {
+      URL.revokeObjectURL(objUrl);
+      console.error('OBJ load error:', err);
+      setStatus('Ошибка загрузки модели', true);
+    }
+  );
+};
+
+/**
+ * Обновляет текстуру на уже загруженной модели.
+ */
+window.updateTextureFromDataUrl = function(texDataUrl) {
+  if (!currentModel) return;
+  const texLoader = new THREE.TextureLoader();
+  const tex = texLoader.load(texDataUrl);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  applyTexture(currentModel, tex);
+};
+
+/**
+ * Показывает статус загрузки.
+ */
+window.showLoading = function(text) {
+  setStatus(text || 'Загрузка...');
+};
+
+/**
+ * Показывает ошибку.
+ */
+window.showError = function(text) {
+  setStatus(text, true);
+};
+
+/**
+ * Сбрасывает viewer в начальное состояние.
+ */
+window.resetViewer = function() {
+  if (currentModel) {
+    scene.remove(currentModel);
+    currentModel = null;
+  }
+  setStatus('Выберите оружие для 3D Preview');
+};
+
+// ── Render loop ──────────────────────────────────────────────────────────── //
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+}
+animate();
+
+// ── Resize ───────────────────────────────────────────────────────────────── //
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// ── CDN error fallback ───────────────────────────────────────────────────── //
+window.addEventListener('error', e => {
+  if (e.filename && e.filename.includes('cdn.jsdelivr.net')) {
+    setStatus('Нет подключения к интернету (Three.js CDN недоступен)', true);
+  }
+});
+</script>
+</body>
+</html>

@@ -550,8 +550,54 @@ class MainWindow(QMainWindow):
         if hasattr(self, 'settings_panel'):
             self.settings_panel.apply_mode_restrictions(self.mode)
 
+        # Обновляем 3D Preview
+        self._update_3d_preview()
+
         # Обновляем резюме в превью
         self.update_preview_info()
+
+    def _update_3d_preview(self) -> None:
+        """Запускает или сбрасывает 3D Preview в зависимости от текущего режима."""
+        if not hasattr(self, 'preview_panel'):
+            return
+
+        from src.data.player_hands import HAND_MODE_KEYS
+
+        is_normal_weapon = (
+            self.mode
+            and self.mode not in ("spray", "critHIT")
+            and self.mode not in HAND_MODE_KEYS
+            and '_' in self.mode
+        )
+
+        if not is_normal_weapon:
+            # Spray / CritHIT / hands / нет выбора — сбрасываем 3D
+            self.preview_panel.reset_3d_preview()
+            return
+
+        # Нормальный режим оружия — пробуем запустить 3D preview
+        settings = self.settings_panel.get_settings()
+        tf2_root_dir = settings.get('tf2_game_folder', '')
+        if not tf2_root_dir:
+            return  # TF2 не настроен — тихо пропускаем
+
+        try:
+            from src.services.tf2_paths import TF2Paths
+            _, misc_vpk, _ = TF2Paths.resolve(tf2_root_dir)
+            textures_vpk   = TF2Paths.resolve_textures_vpk(tf2_root_dir)
+        except Exception:
+            return  # Пути недоступны
+
+        if not misc_vpk or not textures_vpk:
+            return
+
+        weapon_key = self.mode.split('_', 1)[1] if '_' in self.mode else self.mode
+        self.preview_panel.set_3d_params(
+            weapon_key=weapon_key,
+            mode=self.mode,
+            misc_vpk_path=misc_vpk,
+            textures_vpk_path=textures_vpk,
+        )
     
     def update_preview_info(self) -> None:
         """Обновляет резюме информации в превью"""
