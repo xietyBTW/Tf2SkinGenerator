@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <title>3D Preview</title>
@@ -11,15 +11,12 @@
     width: 100vw;
     height: 100vh;
     overflow: hidden;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   }
 
-  #canvas-container {
-    width: 100%;
-    height: 100%;
-  }
+  #canvas-container { width: 100%; height: 100%; }
 
-  /* Статус / загрузка / ошибка */
+  /* ── Статус (idle / loading / error) ───────────────────────────────── */
   #status {
     position: absolute;
     inset: 0;
@@ -27,36 +24,88 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 16px;
+    gap: 14px;
     pointer-events: none;
+  }
+
+  /* Spinner (только в режиме loading) */
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  #status-spinner {
+    width: 26px;
+    height: 26px;
+    border: 2px solid #2c2c2c;
+    border-top-color: #5a5a5a;
+    border-radius: 50%;
+    animation: spin 0.75s linear infinite;
+    display: none;
+    flex-shrink: 0;
   }
 
   #status-icon {
-    font-size: 40px;
-    opacity: 0.25;
+    font-size: 32px;
+    opacity: 0.18;
+    line-height: 1;
   }
 
   #status-text {
-    color: #555;
-    font-size: 13px;
+    color: #454545;
+    font-size: 12px;
     font-weight: 400;
-    letter-spacing: 0.03em;
+    letter-spacing: 0.045em;
+    text-align: center;
+    max-width: 300px;
+    line-height: 1.55;
   }
 
-  #status.error #status-text { color: #c0392b; }
-  #status.error #status-icon { opacity: 0.5; }
+  /* loading */
+  #status.loading #status-spinner { display: block; }
+  #status.loading #status-icon    { display: none;  }
+  #status.loading #status-text    { color: #505050; }
 
-  /* Подсказка управления */
+  /* error */
+  #status.error #status-text { color: #c0392b; font-size: 12px; }
+  #status.error #status-icon { opacity: 0.45; }
+
+  /* ── Подсказка управления ─────────────────────────────────────────── */
   #hint {
     position: absolute;
-    bottom: 14px;
+    bottom: 12px;
     left: 50%;
     transform: translateX(-50%);
-    color: #3a3a3a;
-    font-size: 11px;
-    letter-spacing: 0.04em;
+    color: #333;
+    font-size: 10.5px;
+    letter-spacing: 0.05em;
     pointer-events: none;
     white-space: nowrap;
+    user-select: none;
+  }
+
+  /* ── Drop-overlay (drag & drop текстуры) ─────────────────────────── */
+  #drop-overlay {
+    position: absolute;
+    inset: 6px;
+    border: 1.5px dashed #444;
+    border-radius: 6px;
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    background: rgba(0, 0, 0, 0.55);
+    pointer-events: none;
+    z-index: 20;
+  }
+  #drop-overlay.visible { display: flex; }
+
+  #drop-icon {
+    font-size: 28px;
+    opacity: 0.5;
+  }
+  #drop-text {
+    color: #666;
+    font-size: 12px;
+    letter-spacing: 0.04em;
   }
 </style>
 </head>
@@ -65,12 +114,16 @@
 <div id="canvas-container"></div>
 
 <div id="status">
+  <div id="status-spinner"></div>
   <div id="status-icon">⬛</div>
-  <div id="status-text">Выберите оружие для 3D Preview</div>
+  <div id="status-text"></div>
 </div>
 
-<div id="hint" style="display:none;">
-  ЛКМ — вращение &nbsp;·&nbsp; Колесо — масштаб &nbsp;·&nbsp; ПКМ — панорама
+<div id="hint" style="display:none;"></div>
+
+<div id="drop-overlay">
+  <div id="drop-icon">🖼</div>
+  <div id="drop-text"></div>
 </div>
 
 <!-- Three.js from CDN -->
@@ -84,11 +137,47 @@
 </script>
 
 <script type="module">
-import * as THREE            from 'three';
-import { OBJLoader }         from 'three/addons/loaders/OBJLoader.js';
-import { OrbitControls }     from 'three/addons/controls/OrbitControls.js';
+import * as THREE        from 'three';
+import { OBJLoader }     from 'three/addons/loaders/OBJLoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
-// ── Renderer ────────────────────────────────────────────────────────────── //
+// ── i18n ─────────────────────────────────────────────────────────────────── //
+const I18N = {
+  ru: {
+    select_weapon : 'Выберите оружие для 3D Preview',
+    loading       : 'Загрузка...',
+    error_model   : 'Ошибка загрузки модели',
+    no_internet   : 'Нет подключения к интернету (Three.js CDN недоступен)',
+    hint          : 'ЛКМ — вращение · Колесо — масштаб · ПКМ — панорама',
+    drop_texture  : 'Отпустите, чтобы применить текстуру',
+  },
+  en: {
+    select_weapon : 'Select a weapon for 3D Preview',
+    loading       : 'Loading...',
+    error_model   : 'Model load error',
+    no_internet   : 'No internet connection (Three.js CDN unavailable)',
+    hint          : 'LMB — rotate · Wheel — zoom · RMB — pan',
+    drop_texture  : 'Release to apply texture',
+  },
+};
+
+let _lang = 'en';
+let _t    = I18N['en'];
+
+window.setLanguage = function(lang) {
+  _lang = (lang in I18N) ? lang : 'en';
+  _t    = I18N[_lang];
+  document.getElementById('hint').textContent     = _t.hint;
+  document.getElementById('drop-text').textContent = _t.drop_texture;
+  // Обновляем текст статуса только если показан начальный экран (не loading/error)
+  if (!status.classList.contains('loading') && !status.classList.contains('error')) {
+    if (!currentModel) {
+      statusText.textContent = _t.select_weapon;
+    }
+  }
+};
+
+// ── Renderer ─────────────────────────────────────────────────────────────── //
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
 renderer.setPixelRatio(window.devicePixelRatio);
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -105,37 +194,47 @@ camera.position.set(0, 0.5, 3);
 
 // ── Controls ─────────────────────────────────────────────────────────────── //
 const controls = new OrbitControls(camera, renderer.domElement);
-controls.enableDamping  = true;
-controls.dampingFactor  = 0.07;
-controls.minDistance    = 0.1;
-controls.maxDistance    = 20;
+controls.enableDamping = true;
+controls.dampingFactor = 0.07;
+controls.minDistance   = 0.1;
+controls.maxDistance   = 20;
 
 // ── Lighting ─────────────────────────────────────────────────────────────── //
 scene.add(new THREE.AmbientLight(0xffffff, 0.5));
-const key = new THREE.DirectionalLight(0xffffff, 1.2);
+const key  = new THREE.DirectionalLight(0xffffff, 1.2);
 key.position.set(2, 4, 3);
 scene.add(key);
 const fill = new THREE.DirectionalLight(0xaaccff, 0.4);
 fill.position.set(-3, 1, -2);
 scene.add(fill);
-const rim = new THREE.DirectionalLight(0xffffff, 0.3);
+const rim  = new THREE.DirectionalLight(0xffffff, 0.3);
 rim.position.set(0, -2, -3);
 scene.add(rim);
 
 // ── State ────────────────────────────────────────────────────────────────── //
 let currentModel = null;
-const status     = document.getElementById('status');
-const statusText = document.getElementById('status-text');
-const statusIcon = document.getElementById('status-icon');
-const hint       = document.getElementById('hint');
+let _animTimer   = null;
+let _animFrames  = [];
+let _pendingAnim = null;
 
-// ── Helpers ──────────────────────────────────────────────────────────────── //
-function setStatus(text, isError = false) {
-  status.style.display = 'flex';
-  status.className = isError ? 'error' : '';
+const status      = document.getElementById('status');
+const statusText  = document.getElementById('status-text');
+const statusIcon  = document.getElementById('status-icon');
+const hint        = document.getElementById('hint');
+const dropOverlay = document.getElementById('drop-overlay');
+
+// Инициализируем тексты
+statusText.textContent          = _t.select_weapon;
+hint.textContent                = _t.hint;
+document.getElementById('drop-text').textContent = _t.drop_texture;
+
+// ── Status helpers ───────────────────────────────────────────────────────── //
+function setStatus(text, isError = false, isLoading = false) {
+  status.style.display  = 'flex';
+  status.className      = isError ? 'error' : (isLoading ? 'loading' : '');
   statusText.textContent = text;
   statusIcon.textContent = isError ? '⚠' : '⬛';
-  hint.style.display = 'none';
+  hint.style.display    = 'none';
 }
 
 function hideStatus() {
@@ -143,17 +242,31 @@ function hideStatus() {
   hint.style.display   = 'block';
 }
 
-// Центр и масштаб вычислены в Python и переданы напрямую —
-// не зависим от Three.js bounding box который ненадёжен после загрузки.
+// ── Texture animation ────────────────────────────────────────────────────── //
+function stopAnimation() {
+  if (_animTimer !== null) { clearInterval(_animTimer); _animTimer = null; }
+  _animFrames  = [];
+  _pendingAnim = null;
+}
+
+function startAnimation(textures, framerate) {
+  stopAnimation();
+  if (!textures || textures.length <= 1) return;
+  _animFrames = textures;
+  let frame   = 0;
+  const ms    = Math.max(16, Math.round(1000 / Math.max(0.1, framerate)));
+  _animTimer  = setInterval(() => {
+    if (currentModel) applyTexture(currentModel, _animFrames[frame % _animFrames.length]);
+    frame++;
+  }, ms);
+}
+
+// ── Geometry helpers ─────────────────────────────────────────────────────── //
 function applyTransform(object, cx, cy, cz, scale) {
   object.position.set(-cx * scale, -cy * scale, -cz * scale);
   object.scale.setScalar(scale);
-
-  // Дистанция камеры: после scale модель вписана в куб 2×2×2
-  // d = 1 / tan(FOV/2) × 1.8 даёт хороший обзор с отступом
   const fovRad   = (camera.fov * Math.PI) / 180;
   const distance = 1.0 / Math.tan(fovRad / 2) * 1.8;
-
   camera.position.set(0, 0.2, distance);
   camera.lookAt(0, 0, 0);
   controls.target.set(0, 0, 0);
@@ -163,47 +276,31 @@ function applyTransform(object, cx, cy, cz, scale) {
 function applyTexture(object, tex) {
   object.traverse(child => {
     if (!child.isMesh) return;
-    if (tex) {
-      child.material = new THREE.MeshLambertMaterial({
-        map: tex,
-        side: THREE.DoubleSide,
-      });
-    } else {
-      child.material = new THREE.MeshLambertMaterial({
-        color: 0x888888,
-        side: THREE.DoubleSide,
-      });
-    }
+    child.material = tex
+      ? new THREE.MeshLambertMaterial({ map: tex, side: THREE.DoubleSide })
+      : new THREE.MeshLambertMaterial({ color: 0x888888, side: THREE.DoubleSide });
     child.material.needsUpdate = true;
   });
 }
 
-// ── Public API (вызывается из Python через runJavaScript) ─────────────────── //
+// ── Public API ───────────────────────────────────────────────────────────── //
 
-/**
- * Загружает модель из OBJ-контента (строка) и текстуры (data URL или '').
- */
 window.loadModelFromContent = function(objContent, texDataUrl, cx, cy, cz, scale) {
-  setStatus('Загрузка...');
-  if (currentModel) {
-    scene.remove(currentModel);
-    currentModel = null;
-  }
+  setStatus(_t.loading, false, true);
+  stopAnimation();
+  if (currentModel) { scene.remove(currentModel); currentModel = null; }
 
-  // Blob URL для OBJ
   const blob   = new Blob([objContent], { type: 'text/plain' });
   const objUrl = URL.createObjectURL(blob);
 
-  // Текстура
   let tex = null;
   if (texDataUrl && texDataUrl.length > 0) {
-    const texLoader = new THREE.TextureLoader();
-    tex = texLoader.load(texDataUrl);
+    const tl = new THREE.TextureLoader();
+    tex = tl.load(texDataUrl);
     tex.colorSpace = THREE.SRGBColorSpace;
   }
 
-  const loader = new OBJLoader();
-  loader.load(
+  new OBJLoader().load(
     objUrl,
     object => {
       URL.revokeObjectURL(objUrl);
@@ -212,51 +309,113 @@ window.loadModelFromContent = function(objContent, texDataUrl, cx, cy, cz, scale
       applyTexture(object, tex);
       applyTransform(object, cx, cy, cz, scale);
       hideStatus();
+      if (_pendingAnim) {
+        const { frameDataUrls, framerate } = _pendingAnim;
+        _pendingAnim = null;
+        window.loadAnimatedTexture(frameDataUrls, framerate);
+      }
     },
     undefined,
     err => {
       URL.revokeObjectURL(objUrl);
       console.error('OBJ load error:', err);
-      setStatus('Ошибка загрузки модели', true);
+      setStatus(_t.error_model, true);
     }
   );
 };
 
-/**
- * Обновляет текстуру на уже загруженной модели.
- */
 window.updateTextureFromDataUrl = function(texDataUrl) {
+  stopAnimation();
   if (!currentModel) return;
-  const texLoader = new THREE.TextureLoader();
-  const tex = texLoader.load(texDataUrl);
+  const tl  = new THREE.TextureLoader();
+  const tex = tl.load(texDataUrl);
   tex.colorSpace = THREE.SRGBColorSpace;
   applyTexture(currentModel, tex);
 };
 
-/**
- * Показывает статус загрузки.
- */
-window.showLoading = function(text) {
-  setStatus(text || 'Загрузка...');
+window.loadAnimatedTexture = function(frameDataUrls, framerate) {
+  stopAnimation();
+  if (!frameDataUrls || frameDataUrls.length === 0) return;
+  if (frameDataUrls.length === 1) {
+    window.updateTextureFromDataUrl(frameDataUrls[0]);
+    return;
+  }
+  if (!currentModel) {
+    _pendingAnim = { frameDataUrls, framerate };
+    return;
+  }
+  const tl       = new THREE.TextureLoader();
+  const textures = frameDataUrls.map(url => {
+    const t = tl.load(url); t.colorSpace = THREE.SRGBColorSpace; return t;
+  });
+  applyTexture(currentModel, textures[0]);
+  startAnimation(textures, framerate);
 };
 
-/**
- * Показывает ошибку.
- */
+window.showLoading = function(text) {
+  setStatus(text || _t.loading, false, true);
+};
+
 window.showError = function(text) {
   setStatus(text, true);
 };
 
-/**
- * Сбрасывает viewer в начальное состояние.
- */
 window.resetViewer = function() {
-  if (currentModel) {
-    scene.remove(currentModel);
-    currentModel = null;
-  }
-  setStatus('Выберите оружие для 3D Preview');
+  stopAnimation();
+  if (currentModel) { scene.remove(currentModel); currentModel = null; }
+  setStatus(_t.select_weapon);
 };
+
+// ── Drag & Drop (текстура прямо в 3D) ────────────────────────────────────── //
+const IMAGE_EXTS = /\.(png|jpg|jpeg|bmp|gif|webp|tga)$/i;
+let   _dragDepth = 0;
+
+document.addEventListener('dragenter', e => {
+  const items = e.dataTransfer?.items;
+  if (!items) return;
+  // Проверяем что тащат файл-изображение
+  const hasImage = Array.from(items).some(
+    item => item.kind === 'file' && (item.type.startsWith('image/') || IMAGE_EXTS.test(item.name || ''))
+  );
+  if (!hasImage) return;
+  e.preventDefault();
+  _dragDepth++;
+  if (_dragDepth === 1) dropOverlay.classList.add('visible');
+});
+
+document.addEventListener('dragleave', () => {
+  _dragDepth = Math.max(0, _dragDepth - 1);
+  if (_dragDepth === 0) dropOverlay.classList.remove('visible');
+});
+
+document.addEventListener('dragover', e => {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'copy';
+});
+
+document.addEventListener('drop', e => {
+  e.preventDefault();
+  _dragDepth = 0;
+  dropOverlay.classList.remove('visible');
+
+  const file = e.dataTransfer?.files?.[0];
+  if (!file) return;
+  const isImage = file.type.startsWith('image/') || IMAGE_EXTS.test(file.name);
+  if (!isImage) return;
+
+  const reader = new FileReader();
+  reader.onload = evt => {
+    const dataUrl = evt.target.result;
+    stopAnimation();
+    if (currentModel) {
+      window.updateTextureFromDataUrl(dataUrl);
+    } else {
+      // Запоминаем как ожидающую статичную текстуру
+      _pendingAnim = { frameDataUrls: [dataUrl], framerate: 0 };
+    }
+  };
+  reader.readAsDataURL(file);
+});
 
 // ── Render loop ──────────────────────────────────────────────────────────── //
 function animate() {
@@ -276,7 +435,7 @@ window.addEventListener('resize', () => {
 // ── CDN error fallback ───────────────────────────────────────────────────── //
 window.addEventListener('error', e => {
   if (e.filename && e.filename.includes('cdn.jsdelivr.net')) {
-    setStatus('Нет подключения к интернету (Three.js CDN недоступен)', true);
+    setStatus(_t.no_internet, true);
   }
 });
 </script>

@@ -31,8 +31,11 @@ logger = get_logger(__name__)
 class Preview3DWorker(QThread):
     """Готовит OBJ + текстуру для 3D Preview."""
 
-    # Модель и текстура готовы (texture_path может быть пустой строкой)
+    # Модель и первый кадр текстуры готовы
     ready    = Signal(str, str)
+    # Анимированная текстура: список путей к PNG кадрам + framerate
+    # Эмитируется ПОСЛЕ ready если кадров > 1
+    animated = Signal(object, float)
     # Ошибка
     failed   = Signal(str)
     # Текстовый прогресс для UI
@@ -80,9 +83,14 @@ class Preview3DWorker(QThread):
 
             # ── 3. Текстура ───────────────────────────────────────────────── #
             self.progress.emit("Загрузка текстуры...")
-            texture_path = self._extract_texture()
+            frame_paths, framerate = self._extract_texture_frames()
 
-            self.ready.emit(obj_path, texture_path or "")
+            first_tex = frame_paths[0] if frame_paths else ""
+            self.ready.emit(obj_path, first_tex)
+
+            # Если анимированная — отправляем все кадры отдельным сигналом
+            if len(frame_paths) > 1:
+                self.animated.emit(frame_paths, framerate)
 
         except Exception as exc:
             logger.error(f"Preview3DWorker: {exc}", exc_info=True)
@@ -190,21 +198,31 @@ class Preview3DWorker(QThread):
 
     # ── Извлечение текстуры ───────────────────────────────────────────────── #
 
-    def _extract_texture(self) -> Optional[str]:
-        """Извлекает основную VTF текстуру → texture.png в preview_dir."""
+    def _extract_texture_frames(self) -> tuple:
+        """
+        Извлекает VTF текстуру из VPK.
+
+        Если VTF содержит несколько кадров (анимированная текстура) —
+        сохраняет каждый кадр отдельным PNG и читает framerate из VMT.
+
+        Returns:
+            (frame_paths: list[str], framerate: float)
+            frame_paths пустой если текстура не найдена.
+        """
         try:
             import vpk as vpklib
 
-            search_paths = [
+            vtf_search = [
+                f"materials/models/workshop_partner/weapons/c_models/{self.weapon_key}/{self.weapon_key}.vtf",
                 f"materials/models/weapons/c_models/{self.weapon_key}/{self.weapon_key}.vtf",
                 f"materials/models/weapons/c_items/{self.weapon_key}/{self.weapon_key}.vtf",
-                f"materials/models/workshop_partner/weapons/c_models/{self.weapon_key}/{self.weapon_key}.vtf",
                 f"materials/models/workshop/weapons/c_models/{self.weapon_key}/{self.weapon_key}.vtf",
             ]
+            vmt_search = [p.replace(".vtf", ".vmt") for p in vtf_search]
 
             pak = vpklib.open(self.textures_vpk_path)
             vtf_data: Optional[bytes] = None
-            for path in search_paths:
+            for path in vtf_search:
                 try:
                     vtf_data = pak[path].read()
                     logger.debug(f"3D Preview текстура: {path}")
@@ -214,22 +232,58 @@ class Preview3DWorker(QThread):
 
             if not vtf_data:
                 logger.warning(f"Текстура для {self.weapon_key} не найдена в VPK")
-                return None
+                return [], 0.0
 
+            # Сохраняем VTF во временный файл
             vtf_file = os.path.join(self._preview_dir, "_tmp.vtf")
             with open(vtf_file, "wb") as f:
                 f.write(vtf_data)
 
             from src.services.vtflib_wrapper import VTFLib
-            rgba, w, h = VTFLib.read_vtf_as_rgba(vtf_file)
-
             from PIL import Image
-            img      = Image.frombytes("RGBA", (w, h), rgba)
-            png_path = os.path.join(self._preview_dir, "texture.png")
-            img.save(png_path)
+
+            # Читаем все кадры
+            all_frames_rgba, w, h = VTFLib.read_vtf_all_frames(vtf_file)
             os.remove(vtf_file)
-            return png_path
+
+            frame_paths: list[str] = []
+            for i, rgba in enumerate(all_frames_rgba):
+                img  = Image.frombytes("RGBA", (w, h), rgba)
+                name = f"texture_{i:03d}.png" if len(all_frames_rgba) > 1 else "texture.png"
+                path = os.path.join(self._preview_dir, name)
+                img.save(path)
+                frame_paths.append(path)
+
+            # Framerate из VMT
+            framerate = 0.0
+            if len(frame_paths) > 1:
+                framerate = self._read_vmt_framerate(pak, vmt_search)
+                logger.info(
+                    f"Анимированная текстура: {len(frame_paths)} кадров "
+                    f"@ {framerate:.1f} fps для {self.weapon_key}"
+                )
+
+            return frame_paths, framerate
 
         except Exception as exc:
             logger.warning(f"Не удалось извлечь текстуру для 3D Preview: {exc}")
-            return None
+            return [], 0.0
+
+    def _read_vmt_framerate(self, pak, vmt_search: list) -> float:
+        """Ищет animatedtextureframerate в VMT файле из VPK."""
+        import re
+        DEFAULT_FPS = 15.0
+        for path in vmt_search:
+            try:
+                content = pak[path].read().decode("utf-8", errors="replace")
+                m = re.search(
+                    r'"animatedtextureframerate"\s+"?([0-9.]+)"?',
+                    content,
+                    re.IGNORECASE,
+                )
+                if m:
+                    return max(0.1, float(m.group(1)))
+                break   # VMT найден, но без framerate — используем дефолт
+            except KeyError:
+                continue
+        return DEFAULT_FPS
