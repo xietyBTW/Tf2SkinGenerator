@@ -104,7 +104,7 @@ class PreviewPanel(QWidget):
         toggle_layout.addSpacing(12)
         self.btn_load_3d = QPushButton()
         self.btn_load_3d.setFixedSize(26, 26)
-        self.btn_load_3d.setToolTip("Загрузить 3D модель")
+        self.btn_load_3d.setToolTip(self.t.get('3d_load_model_tip', 'Load 3D model'))
         self.btn_load_3d.setIcon(_make_cube_icon("#666666"))
         self.btn_load_3d.setStyleSheet("""
             QPushButton {
@@ -131,7 +131,7 @@ class PreviewPanel(QWidget):
         # Кнопка загрузки VPK мода
         self.btn_load_vpk_mod = QPushButton()
         self.btn_load_vpk_mod.setFixedSize(26, 26)
-        self.btn_load_vpk_mod.setToolTip("Загрузить VPK мод для 3D Preview")
+        self.btn_load_vpk_mod.setToolTip(self.t.get('3d_load_vpk_tip', 'Load VPK mod for 3D Preview'))
         self.btn_load_vpk_mod.setIcon(_make_vpk_icon("#666666"))
         self.btn_load_vpk_mod.setStyleSheet("""
             QPushButton {
@@ -359,9 +359,7 @@ class PreviewPanel(QWidget):
 
         if enabled:
             if self._3d_widget:
-                self._3d_widget.show_loading(
-                    "Нажмите «Загрузить 3D модель» и выберите SMD файл"
-                )
+                self._3d_widget.show_prompt(self.t.get('3d_prompt_smd', 'Click ▶ and select an SMD file'))
             self.btn_load_3d.setEnabled(True)
             # VPK мод тоже доступен в режиме замены модели (для сравнения)
             self.btn_load_vpk_mod.setEnabled(True)
@@ -389,7 +387,7 @@ class PreviewPanel(QWidget):
         # Сбрасываем воркер и показываем приглашение в viewer
         self._stop_3d_worker()
         if self._3d_widget:
-            self._3d_widget.show_loading("Нажмите «Загрузить 3D модель»")
+            self._3d_widget.show_prompt(self.t.get('3d_prompt_weapon', 'Select a weapon and click ▶ to load the model'))
 
         # Разблокируем обе кнопки (пути к игре доступны)
         self.btn_load_3d.setEnabled(True)
@@ -411,7 +409,7 @@ class PreviewPanel(QWidget):
         from PySide6.QtWidgets import QFileDialog
         smd_path, _ = QFileDialog.getOpenFileName(
             self,
-            "Выберите SMD файл модели",
+            self.t.get('3d_select_smd_title', 'Select SMD Model File'),
             "",
             "SMD Files (*.smd);;All Files (*)"
         )
@@ -433,7 +431,7 @@ class PreviewPanel(QWidget):
         from src.services.smd_to_obj_service import SmdToObjService
 
         self.btn_load_3d.setEnabled(False)
-        self._3d_widget.show_loading("Конвертация SMD...")
+        self._3d_widget.show_loading(self.t.get('3d_converting_smd', 'Converting SMD...'))
 
         try:
             temp_dir = tempfile.mkdtemp(prefix="tf2_smd_preview_")
@@ -441,7 +439,7 @@ class PreviewPanel(QWidget):
 
             ok = SmdToObjService.convert(smd_path, obj_path)
             if not ok or not os.path.exists(obj_path):
-                self._3d_widget.show_error("Ошибка конвертации SMD")
+                self._3d_widget.show_error(self.t.get('3d_error_convert', 'SMD conversion error'))
                 return
 
             # Используем текущую текстуру пользователя (если загружена)
@@ -452,7 +450,7 @@ class PreviewPanel(QWidget):
         except Exception as exc:
             logger.error(f"Ошибка загрузки кастомной SMD модели: {exc}", exc_info=True)
             if self._3d_widget:
-                self._3d_widget.show_error("Ошибка загрузки модели")
+                self._3d_widget.show_error(self.t.get('3d_error_load', 'Model load error'))
         finally:
             self.btn_load_3d.setEnabled(True)
 
@@ -467,7 +465,7 @@ class PreviewPanel(QWidget):
         from PySide6.QtWidgets import QFileDialog
         vpk_path, _ = QFileDialog.getOpenFileName(
             self,
-            "Выберите VPK мод",
+            self.t.get('3d_select_vpk', 'Select VPK mod'),
             "",
             "VPK Files (*.vpk);;All Files (*)"
         )
@@ -504,13 +502,14 @@ class PreviewPanel(QWidget):
 
         self.btn_load_vpk_mod.setEnabled(False)
         self.btn_load_3d.setEnabled(False)
-        self._3d_widget.show_loading("Анализ VPK мода...")
+        self._3d_widget.show_loading(self.t.get('3d_analyzing_vpk', 'Analyzing VPK mod...'))
 
         from src.services.preview_vpk_mod_worker import PreviewVpkModWorker
         worker = PreviewVpkModWorker(
             user_vpk_path    = user_vpk_path,
             misc_vpk_path    = misc_vpk,
             textures_vpk_path= textures_vpk,
+            lang             = getattr(self, '_lang', 'en'),
             parent           = self,
         )
         worker.progress.connect(self._on_vpk_mod_progress)
@@ -535,7 +534,7 @@ class PreviewPanel(QWidget):
         self.btn_load_vpk_mod.setEnabled(True)
         self.btn_load_3d.setEnabled(bool(self._pending_3d_params or self._custom_smd_mode))
         if self._3d_widget:
-            self._3d_widget.show_error(f"Ошибка: {error}")
+            self._3d_widget.show_error(self.t.get('3d_error_prefix', 'Error: {error}').format(error=error))
 
     def _stop_vpk_mod_worker(self) -> None:
         if self._vpk_mod_worker and self._vpk_mod_worker.isRunning():
@@ -556,7 +555,7 @@ class PreviewPanel(QWidget):
 
         self._stop_3d_worker()
         self.btn_load_3d.setEnabled(False)
-        self._3d_widget.show_loading("Подготовка 3D модели...")
+        self._3d_widget.show_loading(self.t.get('3d_preparing', 'Preparing 3D model...'))
 
         from src.services.preview_3d_worker import Preview3DWorker
         worker = Preview3DWorker(
@@ -564,6 +563,7 @@ class PreviewPanel(QWidget):
             mode=mode,
             misc_vpk_path=misc_vpk_path,
             textures_vpk_path=textures_vpk_path,
+            lang=getattr(self, '_lang', 'en'),
             parent=self,
         )
         worker.progress.connect(self._on_3d_progress)
@@ -618,7 +618,7 @@ class PreviewPanel(QWidget):
         logger.warning(f"3D Preview не удался: {error}")
         self.btn_load_3d.setEnabled(True)
         if self._3d_widget:
-            self._3d_widget.show_error(f"Модель недоступна: {error}")
+            self._3d_widget.show_error(self.t.get('3d_unavailable', 'Model unavailable: {error}').format(error=error))
 
     # ── GIF helpers ──────────────────────────────────────────────────────── #
 
@@ -876,6 +876,11 @@ class PreviewPanel(QWidget):
         self.info_title.setText(self.t['info_title'])
         if self.info_summary.isVisible():
             self.update_info_summary()
+        # Обновляем подсказки 3D кнопок
+        if hasattr(self, 'btn_load_3d'):
+            self.btn_load_3d.setToolTip(self.t.get('3d_load_model_tip', 'Load 3D model'))
+        if hasattr(self, 'btn_load_vpk_mod'):
+            self.btn_load_vpk_mod.setToolTip(self.t.get('3d_load_vpk_tip', 'Load VPK mod for 3D Preview'))
         # Передаём язык в 3D вьювер
         if hasattr(self, '_3d_widget') and self._3d_widget is not None:
             self._3d_widget.set_language(lang)

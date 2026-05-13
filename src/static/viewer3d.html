@@ -356,6 +356,10 @@ window.showLoading = function(text) {
   setStatus(text || _t.loading, false, true);
 };
 
+window.showPrompt = function(text) {
+  setStatus(text || _t.select_weapon, false, false);
+};
+
 window.showError = function(text) {
   setStatus(text, true);
 };

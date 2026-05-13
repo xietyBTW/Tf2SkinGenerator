@@ -184,7 +184,14 @@ class _Real3DWidget:
         )
         self._view.page().runJavaScript(js)
 
-    def show_loading(self, text: str = "Загрузка...") -> None:
+    def show_prompt(self, text: str = "") -> None:
+        """Показывает подсказку без спиннера (режим ожидания действия)."""
+        if self._ready:
+            self._view.page().runJavaScript(
+                f"window.showPrompt({json.dumps(text)})"
+            )
+
+    def show_loading(self, text: str = "") -> None:
         if self._ready:
             self._view.page().runJavaScript(
                 f"window.showLoading({json.dumps(text)})"
@@ -251,6 +258,7 @@ class _Fallback3DWidget:
     def setMinimumWidth(self, w): self._label.setMinimumWidth(w)
 
     def set_language(self, lang: str): pass
+    def show_prompt(self, text: str = ""): pass
     def load_model_files(self, *_): pass
     def update_texture_file(self, *_): pass
     def update_animated_texture_files(self, *_): pass
