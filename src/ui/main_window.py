@@ -528,6 +528,8 @@ class MainWindow(QMainWindow):
         if not is_enabled:
             self.selected_smd_path = None
             self.replace_model_checkbox.setText(self.t['enable_replace_model'])
+        # Обновляем 3D preview (включаем режим кастомной SMD или сбрасываем)
+        self.apply_selection_auto()
     
     def apply_selection_auto(self) -> None:
         """Автоматически применяет выбранное оружие"""
@@ -573,6 +575,12 @@ class MainWindow(QMainWindow):
         if not is_normal_weapon:
             # Spray / CritHIT / hands / нет выбора — сбрасываем 3D
             self.preview_panel.reset_3d_preview()
+            return
+
+        # Режим замены модели — кастомная SMD от пользователя
+        if (hasattr(self, 'replace_model_checkbox') and
+                self.replace_model_checkbox.isChecked()):
+            self.preview_panel.set_custom_model_mode(True)
             return
 
         # Нормальный режим оружия — пробуем запустить 3D preview

@@ -30,6 +30,7 @@ class PreviewPanel(QWidget):
         self._3d_worker = None          # Preview3DWorker
         self._3d_available = False      # Есть ли WebEngine
         self._pending_3d_params = None  # (weapon_key, mode, misc_vpk, textures_vpk)
+        self._custom_smd_mode = False   # True когда режим замены модели (кастомный SMD)
 
         from src.config.app_config import AppConfig
         from src.data.translations import TRANSLATIONS
@@ -308,6 +309,29 @@ class PreviewPanel(QWidget):
 
     # ── 3D Preview — публичный API ───────────────────────────────────────── #
 
+    def set_custom_model_mode(self, enabled: bool = True) -> None:
+        """
+        Переключает в режим кастомной SMD модели (Replace Model).
+
+        При enabled=True кнопка «Загрузить 3D модель» откроет диалог выбора
+        SMD файла пользователя вместо извлечения модели из VPK.
+        При enabled=False сбрасывает режим и отключает кнопку.
+        """
+        self._custom_smd_mode = enabled
+        self._pending_3d_params = None
+        self._stop_3d_worker()
+
+        if enabled:
+            if self._3d_widget:
+                self._3d_widget.show_loading(
+                    "Нажмите «Загрузить 3D модель» и выберите SMD файл"
+                )
+            self.btn_load_3d.setEnabled(True)
+        else:
+            if self._3d_widget:
+                self._3d_widget.reset()
+            self.btn_load_3d.setEnabled(False)
+
     def set_3d_params(
         self,
         weapon_key: str,
@@ -320,6 +344,7 @@ class PreviewPanel(QWidget):
         Вызывается из main_window при смене оружия.
         Реальная загрузка начнётся только по кнопке «Загрузить 3D модель».
         """
+        self._custom_smd_mode = False   # сбрасываем режим кастомной модели
         self._pending_3d_params = (weapon_key, mode, misc_vpk_path, textures_vpk_path)
 
         # Сбрасываем воркер и показываем приглашение в viewer
@@ -332,10 +357,64 @@ class PreviewPanel(QWidget):
 
     def _on_load_3d_clicked(self) -> None:
         """Обработчик кнопки «Загрузить 3D модель»."""
+        if self._custom_smd_mode:
+            # Режим замены модели — показываем диалог выбора SMD
+            self._load_custom_smd_via_dialog()
+            return
         if not self._pending_3d_params:
             return
         weapon_key, mode, misc_vpk, textures_vpk = self._pending_3d_params
         self._start_3d_worker(weapon_key, mode, misc_vpk, textures_vpk)
+
+    def _load_custom_smd_via_dialog(self) -> None:
+        """Показывает диалог выбора SMD и загружает кастомную модель в 3D viewer."""
+        from PySide6.QtWidgets import QFileDialog
+        smd_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Выберите SMD файл модели",
+            "",
+            "SMD Files (*.smd);;All Files (*)"
+        )
+        if not smd_path:
+            return
+        self._load_custom_smd_file(smd_path)
+
+    def _load_custom_smd_file(self, smd_path: str) -> None:
+        """
+        Конвертирует пользовательский SMD → OBJ и показывает в 3D viewer.
+
+        Конвертация быстрая (просто парсинг текста), выполняется в главном потоке.
+        Если нужна текстура — берёт текущее загруженное изображение (self.image_path).
+        """
+        if not self._3d_available or self._3d_widget is None:
+            return
+
+        import os, tempfile
+        from src.services.smd_to_obj_service import SmdToObjService
+
+        self.btn_load_3d.setEnabled(False)
+        self._3d_widget.show_loading("Конвертация SMD...")
+
+        try:
+            temp_dir = tempfile.mkdtemp(prefix="tf2_smd_preview_")
+            obj_path = os.path.join(temp_dir, "model.obj")
+
+            ok = SmdToObjService.convert(smd_path, obj_path)
+            if not ok or not os.path.exists(obj_path):
+                self._3d_widget.show_error("Ошибка конвертации SMD")
+                return
+
+            # Используем текущую текстуру пользователя (если загружена)
+            texture_path = self.image_path or ""
+
+            self._3d_widget.load_model_files(obj_path, texture_path)
+
+        except Exception as exc:
+            logger.error(f"Ошибка загрузки кастомной SMD модели: {exc}", exc_info=True)
+            if self._3d_widget:
+                self._3d_widget.show_error("Ошибка загрузки модели")
+        finally:
+            self.btn_load_3d.setEnabled(True)
 
     def _start_3d_worker(
         self,
@@ -369,6 +448,7 @@ class PreviewPanel(QWidget):
     def reset_3d_preview(self) -> None:
         """Сбрасывает 3D viewer (например, при смене режима на Spray)."""
         self._pending_3d_params = None
+        self._custom_smd_mode = False
         self._stop_3d_worker()
         if self._3d_widget:
             self._3d_widget.reset()
