@@ -167,6 +167,14 @@ TRANSLATIONS = {
         '3d_team_red_tip':     'Текстура команды RED',
         '3d_team_blu_tip':     'Текстура команды BLU',
 
+        # BLU Team Texture panel
+        'blu_team_header':    'Текстура команды BLU',
+        'blu_same_as_red':    'Такая же как RED',
+        'blu_custom_image':   'Своя текстура',
+        'blu_hue_shift':      'Авто (сдвиг оттенка)',
+        'blu_browse':         'Обзор…',
+        'blu_browse_title':   'Выберите BLU-текстуру',
+
         # Error messages
         'error_tf2_not_specified': 'Не указана папка TF2. Укажите её в настройках.',
         'error_weapon_not_found': 'Оружие {weapon_key} не найдено в списке путей моделей. Обновите WEAPON_MDL_PATHS в src/data/weapons.py.',
@@ -239,7 +247,7 @@ TRANSLATIONS = {
         'extra_texture_title': 'Дополнительная текстура',
         'extra_texture_question': 'У оружия есть дополнительный материал: "{material}".\nХотите загрузить отдельное изображение для него?\n\nЕсли нажмёте "Нет" — будет использована основная текстура.',
         'extra_texture_select': 'Выберите изображение для "{material}"',
-        
+
         # Extra Model Dialog
         'extra_model_title': 'Дополнительная часть модели',
         'extra_model_question': 'У оружия есть дополнительная часть модели: "{smd_name}".\nХотите загрузить замену SMD для неё?\n\nЕсли нажмёте "Нет", будет использована оригинальная модель из игры.',
@@ -440,6 +448,14 @@ TRANSLATIONS = {
         '3d_team_red_tip':     'RED team texture',
         '3d_team_blu_tip':     'BLU team texture',
 
+        # BLU Team Texture panel
+        'blu_team_header':    'BLU Team Texture',
+        'blu_same_as_red':    'Same as RED',
+        'blu_custom_image':   'Custom image',
+        'blu_hue_shift':      'Auto-generate (hue shift)',
+        'blu_browse':         'Browse…',
+        'blu_browse_title':   'Select BLU Texture',
+
         # Error messages
         'error_tf2_not_specified': 'TF2 folder not specified. Please specify it in settings.',
         'error_weapon_not_found': 'Weapon {weapon_key} not found in model paths list. Update WEAPON_MDL_PATHS in src/data/weapons.py.',
@@ -512,7 +528,7 @@ TRANSLATIONS = {
         'extra_texture_title': 'Additional Texture',
         'extra_texture_question': 'The weapon model has an additional material: "{material}".\nDo you want to provide a separate image for it?\n\nIf you click "No", the main texture will be used.',
         'extra_texture_select': 'Select image for "{material}"',
-        
+
         # Extra Model Dialog
         'extra_model_title': 'Additional Model Part',
         'extra_model_question': 'The weapon has an additional model part: "{smd_name}".\nDo you want to provide a replacement SMD file for it?\n\nIf you click "No", the original game model will be used.',

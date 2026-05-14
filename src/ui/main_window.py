@@ -577,17 +577,19 @@ class MainWindow(QMainWindow):
             self.preview_panel.reset_3d_preview()
             return
 
+        weapon_key = self.mode.split('_', 1)[1] if '_' in self.mode else self.mode
+
         # Режим замены модели — кастомная SMD от пользователя
         if (hasattr(self, 'replace_model_checkbox') and
                 self.replace_model_checkbox.isChecked()):
             self.preview_panel.set_custom_model_mode(True)
             return
 
-        # Нормальный режим оружия — пробуем запустить 3D preview
+        # Нормальный режим оружия — пробуем запустить 3D preview (требует TF2)
         settings = self.settings_panel.get_settings()
         tf2_root_dir = settings.get('tf2_game_folder', '')
         if not tf2_root_dir:
-            return  # TF2 не настроен — тихо пропускаем
+            return  # TF2 не настроен — 3D не запускаем
 
         try:
             from src.services.tf2_paths import TF2Paths
@@ -599,7 +601,6 @@ class MainWindow(QMainWindow):
         if not misc_vpk or not textures_vpk:
             return
 
-        weapon_key = self.mode.split('_', 1)[1] if '_' in self.mode else self.mode
         self.preview_panel.set_3d_params(
             weapon_key=weapon_key,
             mode=self.mode,
@@ -1067,7 +1068,9 @@ class MainWindow(QMainWindow):
                 replace_model_enabled=replace_model_enabled,
                 draw_uv_layout=draw_uv_layout,
                 language=self.language,
-                custom_vtf_path=custom_vtf_path
+                custom_vtf_path=custom_vtf_path,
+                blu_mode='none',
+                blu_image_path=None,
                 # Без parent=self ! Если дать parent=self, Qt станет владельцем
                 # и не удалит старый воркер при замене, и сигналы будут дублироваться.
             )
@@ -1169,10 +1172,10 @@ class MainWindow(QMainWindow):
         """
         if not hasattr(self, '_build_worker'):
             return
-        
+
         # Спрашиваем пользователя
         from PySide6.QtWidgets import QMessageBox
-        
+
         msg_title = self.t.get('extra_texture_title', 'Additional Texture')
         msg_text = self.t.get(
             'extra_texture_question',
@@ -1180,7 +1183,7 @@ class MainWindow(QMainWindow):
             'Do you want to provide a separate image for it?\n\n'
             'If you click "No", the main texture will be used for this material.'
         ).format(material=material_name)
-        
+
         reply = QMessageBox.question(
             self,
             msg_title,
@@ -1188,7 +1191,7 @@ class MainWindow(QMainWindow):
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No
         )
-        
+
         file_path = None
         if reply == QMessageBox.Yes:
             # Показываем диалог выбора файла
@@ -1196,7 +1199,7 @@ class MainWindow(QMainWindow):
                 'extra_texture_select',
                 'Select image for "{material}"'
             ).format(material=material_name)
-            
+
             file_path, _ = QFileDialog.getOpenFileName(
                 self,
                 dialog_title,
@@ -1205,7 +1208,7 @@ class MainWindow(QMainWindow):
             )
             if not file_path:
                 file_path = None
-        
+
         # Устанавливаем результат в воркере
         if hasattr(self._build_worker, 'set_extra_texture_result'):
             self._build_worker.set_extra_texture_result(file_path)
