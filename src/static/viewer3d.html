@@ -212,10 +212,12 @@ rim.position.set(0, -2, -3);
 scene.add(rim);
 
 // ── State ────────────────────────────────────────────────────────────────── //
-let currentModel = null;
-let _animTimer   = null;
-let _animFrames  = [];
-let _pendingAnim = null;
+let currentModel  = null;
+let _animTimer    = null;
+let _animFrames   = [];
+let _pendingAnim  = null;
+let _critSprite   = null;   // THREE.Sprite — CritHIT billboard
+let _isCritHitMode = false; // Режим CritHIT (персонаж + billboard)
 
 const status      = document.getElementById('status');
 const statusText  = document.getElementById('status-text');
@@ -286,9 +288,11 @@ function applyTexture(object, tex) {
 // ── Public API ───────────────────────────────────────────────────────────── //
 
 window.loadModelFromContent = function(objContent, texDataUrl, cx, cy, cz, scale) {
+  _isCritHitMode = false;
   setStatus(_t.loading, false, true);
   stopAnimation();
   if (currentModel) { scene.remove(currentModel); currentModel = null; }
+  if (_critSprite)  { scene.remove(_critSprite);  _critSprite  = null; }
 
   const blob   = new Blob([objContent], { type: 'text/plain' });
   const objUrl = URL.createObjectURL(blob);
@@ -365,9 +369,179 @@ window.showError = function(text) {
 };
 
 window.resetViewer = function() {
+  _isCritHitMode = false;
   stopAnimation();
   if (currentModel) { scene.remove(currentModel); currentModel = null; }
+  if (_critSprite)  { scene.remove(_critSprite);  _critSprite  = null; }
   setStatus(_t.select_weapon);
+};
+
+// ── CritHIT scene ────────────────────────────────────────────────────────── //
+
+// Собирает модель Солдата из BoxGeometry-примитивов.
+// Все размеры в условных единицах; солдат занимает высоту ~88 единиц (y 0..88).
+function _buildSoldierGroup() {
+  const group = new THREE.Group();
+
+  const matBody   = new THREE.MeshLambertMaterial({ color: 0x575750 }); // хаки
+  const matDark   = new THREE.MeshLambertMaterial({ color: 0x3a3830 }); // тёмный (ботинки/шлем)
+  const matHelmet = new THREE.MeshLambertMaterial({ color: 0x2e3028 }); // шлем
+
+  // [ширина, высота, глубина, центр_x, центр_y, центр_z, материал]
+  const parts = [
+    // Ботинки
+    [8, 10, 14, -5,    5,  0,  matDark],
+    [8, 10, 14,  5,    5,  0,  matDark],
+    // Ноги
+    [7, 28, 10, -5,   24,  0,  matBody],
+    [7, 28, 10,  5,   24,  0,  matBody],
+    // Торс
+    [24, 24, 14,  0,  51,  1,  matBody],
+    // Плечи
+    [ 8,  8, 11,-14,  63,  0,  matBody],
+    [ 8,  8, 11, 14,  63,  0,  matBody],
+    // Руки
+    [ 6, 28,  8,-15,  50,  0,  matBody],
+    [ 6, 28,  8, 15,  50,  0,  matBody],
+    // Шея
+    [ 6,  5,  6,  0,  68,  0,  matBody],
+    // Голова
+    [14, 12, 14,  0,  75,  0,  matBody],
+    // Шлем (поля + тулья)
+    [20,  4, 20,  0,  82,  1,  matHelmet],
+    [16,  8, 16,  0,  86,  0,  matHelmet],
+  ];
+
+  parts.forEach(([w, h, d, x, y, z, mat]) => {
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+    mesh.position.set(x, y, z);
+    group.add(mesh);
+  });
+
+  return group;
+}
+
+// Создаёт/пересоздаёт спрайт текстуры крита над головой.
+function _placeCritSprite(dataUrl, headTopWorldY) {
+  if (_critSprite) { scene.remove(_critSprite); _critSprite = null; }
+  if (!dataUrl) return;
+
+  const tl  = new THREE.TextureLoader();
+  const tex = tl.load(dataUrl, () => {
+    // Корректируем пропорции спрайта после загрузки изображения
+    const img = tex.image;
+    if (img && img.width && img.height) {
+      const aspect = img.width / img.height;
+      _critSprite.scale.set(aspect * 0.55, 0.55, 1);
+    }
+  });
+  tex.colorSpace = THREE.SRGBColorSpace;
+
+  const mat    = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false });
+  const sprite = new THREE.Sprite(mat);
+  sprite.scale.set(0.55, 0.55, 1);              // будет скорректировано после загрузки
+  sprite.position.set(0, headTopWorldY + 0.38, 0); // чуть выше макушки
+  scene.add(sprite);
+  _critSprite = sprite;
+}
+
+// Публичная функция: загружает сцену CritHIT (солдат + billboard текстуры).
+window.loadCritHitScene = function(critTexDataUrl) {
+  _isCritHitMode = true;
+  setStatus(_t.loading, false, true);
+  stopAnimation();
+
+  // Очищаем предыдущую сцену
+  if (currentModel) { scene.remove(currentModel); currentModel = null; }
+  if (_critSprite)  { scene.remove(_critSprite);  _critSprite  = null; }
+
+  // Строим солдата
+  const soldier  = _buildSoldierGroup();
+  // Солдат: y=0..88 → центр cy=44, высота=88
+  const solHeight = 88;
+  const cy        = solHeight / 2;
+  const scale     = 2.0 / solHeight;
+
+  soldier.position.set(0, -cy * scale, 0);
+  soldier.scale.setScalar(scale);
+  scene.add(soldier);
+  currentModel = soldier;
+
+  // Камера: немного выше центра, достаточно далеко чтобы видеть и фигуру, и эффект
+  const fovRad   = (camera.fov * Math.PI) / 180;
+  const distance = 1.0 / Math.tan(fovRad / 2) * 2.5;
+  camera.position.set(0, 0.4, distance);
+  camera.lookAt(0, 0.35, 0);
+  controls.target.set(0, 0.35, 0);
+  controls.update();
+
+  // Billboard над головой: макушка в мировых координатах = (solHeight - cy)*scale = 1.0
+  const headTopWorld = (solHeight - cy) * scale; // ≈ 1.0
+  _placeCritSprite(critTexDataUrl, headTopWorld);
+
+  hideStatus();
+};
+
+// Публичная функция: CritHIT сцена с пользовательской OBJ-моделью.
+// Принимает содержимое OBJ-файла + параметры центрирования (вычисленные в Python).
+window.loadCritHitSceneWithModel = function(objContent, critTexDataUrl, cx, cy, cz, scale) {
+  _isCritHitMode = true;
+  setStatus(_t.loading, false, true);
+  stopAnimation();
+
+  if (currentModel) { scene.remove(currentModel); currentModel = null; }
+  if (_critSprite)  { scene.remove(_critSprite);  _critSprite  = null; }
+
+  const blob   = new Blob([objContent], { type: 'text/plain' });
+  const objUrl = URL.createObjectURL(blob);
+
+  new OBJLoader().load(
+    objUrl,
+    object => {
+      URL.revokeObjectURL(objUrl);
+      // Нейтральный материал (силуэт)
+      object.traverse(child => {
+        if (!child.isMesh) return;
+        child.material = new THREE.MeshLambertMaterial({ color: 0x575750, side: THREE.DoubleSide });
+        child.material.needsUpdate = true;
+      });
+
+      scene.add(object);
+      currentModel = object;
+
+      // Позиционируем и масштабируем так же как обычную модель
+      object.position.set(-cx * scale, -cy * scale, -cz * scale);
+      object.scale.setScalar(scale);
+
+      // Камера (аналогично процедурному солдату)
+      const fovRad   = (camera.fov * Math.PI) / 180;
+      const distance = 1.0 / Math.tan(fovRad / 2) * 2.5;
+      camera.position.set(0, 0.4, distance);
+      camera.lookAt(0, 0.35, 0);
+      controls.target.set(0, 0.35, 0);
+      controls.update();
+
+      // Billboard: после нормализации top ≈ 1.0 (модель в диапазоне [-1, 1])
+      _placeCritSprite(critTexDataUrl, 1.0);
+
+      hideStatus();
+    },
+    undefined,
+    err => {
+      URL.revokeObjectURL(objUrl);
+      console.error('Custom model OBJ load error:', err);
+      // Fallback: строим процедурного солдата
+      window.loadCritHitScene(critTexDataUrl);
+    }
+  );
+};
+
+// Публичная функция: обновляет только текстуру CritHIT billboard.
+window.updateCritHitTexture = function(critTexDataUrl) {
+  if (!_isCritHitMode) return;
+  const solHeight    = 88;
+  const headTopWorld = (solHeight - solHeight / 2) * (2.0 / solHeight); // 1.0
+  _placeCritSprite(critTexDataUrl, headTopWorld);
 };
 
 // ── Drag & Drop (текстура прямо в 3D) ────────────────────────────────────── //
@@ -411,7 +585,10 @@ document.addEventListener('drop', e => {
   reader.onload = evt => {
     const dataUrl = evt.target.result;
     stopAnimation();
-    if (currentModel) {
+    if (_isCritHitMode) {
+      // В CritHIT режиме drag-drop обновляет billboard над головой
+      window.updateCritHitTexture(dataUrl);
+    } else if (currentModel) {
       window.updateTextureFromDataUrl(dataUrl);
     } else {
       // Запоминаем как ожидающую статичную текстуру

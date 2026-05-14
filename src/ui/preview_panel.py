@@ -32,6 +32,7 @@ class PreviewPanel(QWidget):
         self._3d_available = False      # Есть ли WebEngine
         self._pending_3d_params = None  # (weapon_key, mode, misc_vpk, textures_vpk)
         self._custom_smd_mode = False   # True когда режим замены модели (кастомный SMD)
+        self._crithit_mode = False      # True в режиме CritHIT (персонаж + billboard)
 
         # Командные раскраски (RED / BLU)
         self._red_frame_paths: list = []
@@ -207,6 +208,11 @@ class PreviewPanel(QWidget):
 
         # Кнопки всегда видны; 3D покажет заглушку если WebEngine не установлен
         self.toggle_bar.setVisible(True)
+        # Фиксируем высоту: без этого VBoxLayout отдаёт всё лишнее вертикальное
+        # пространство toggle_bar (он имеет дефолтную политику Preferred/Preferred),
+        # что создаёт большой пустой разрыв между кнопками 2D/3D и preview-блоком
+        # при увеличении высоты окна.
+        self.toggle_bar.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         layout.addWidget(self.toggle_bar)
 
         # ── Стек страниц ─────────────────────────────────────────────────── #
@@ -222,6 +228,10 @@ class PreviewPanel(QWidget):
         # ── Информация (всегда видна) ─────────────────────────────────────── #
         self.info_summary = self._build_info_panel()
         layout.addWidget(self.info_summary)
+
+        # Растяжка в конце поглощает любое лишнее вертикальное пространство,
+        # не позволяя layout-у «размазывать» его по виджетам без фиксированной высоты.
+        layout.addStretch(1)
 
         self.setup_drag_drop()
         self.update_info_summary()
@@ -375,6 +385,17 @@ class PreviewPanel(QWidget):
         self.view_stack.setCurrentIndex(1)
         self.btn_2d.setStyleSheet(self._btn_style_inactive)
         self.btn_3d.setStyleSheet(self._btn_style_active)
+
+        # В режиме CritHIT кнопки "загрузить модель" и "VPK мод" не нужны —
+        # солдат строится прямо в Three.js без VPK.
+        if self._crithit_mode:
+            self.btn_load_3d.setVisible(False)
+            self.btn_load_vpk_mod.setVisible(False)
+            if self._3d_available:
+                from PySide6.QtCore import QTimer
+                QTimer.singleShot(200, self._render_crithit_scene)
+            return
+
         self.btn_load_3d.setVisible(True)
         self.btn_load_vpk_mod.setVisible(True)
         # Кнопка VPK мода всегда доступна в 3D — пользователь может загрузить
@@ -420,6 +441,86 @@ class PreviewPanel(QWidget):
             self.btn_load_3d.setEnabled(False)
             self.btn_load_vpk_mod.setEnabled(False)
 
+    def set_crithit_mode(self) -> None:
+        """
+        Переключает 3D viewer в режим CritHIT:
+        — генерирует солдата прямо в Three.js (без VPK)
+        — показывает текстуру пользователя как billboard над головой.
+        """
+        self._crithit_mode = True
+        self._custom_smd_mode = False
+        self._pending_3d_params = None
+        self._stop_3d_worker()
+        self._stop_vpk_mod_worker()
+        self._reset_team_state()
+
+        if self._3d_widget:
+            self._3d_widget.show_prompt(
+                self.t.get('3d_prompt_crithit', 'Switch to 3D tab — the soldier will appear automatically')
+            )
+
+        # Если пользователь уже в 3D режиме — сразу рисуем сцену
+        if self.is_3d_mode() and self._3d_available:
+            self._render_crithit_scene()
+
+    def _render_crithit_scene(self) -> None:
+        """Передаёт текущее изображение в JS для отрисовки CritHIT сцены.
+
+        Если в корне проекта есть crithit_model.obj / crithit_model.smd —
+        использует его. Иначе рисует процедурного солдата из BoxGeometry.
+        """
+        if not self._3d_widget or not self._3d_available:
+            return
+        tex_path = self.image_path or ""
+        custom = self._find_crithit_custom_model()
+        if custom:
+            if custom.lower().endswith('.smd'):
+                # Конвертируем SMD → OBJ (быстро, в основном потоке)
+                import tempfile
+                from src.services.smd_to_obj_service import SmdToObjService
+                self._3d_widget.show_loading("Converting custom model...")
+                tmp = tempfile.mkdtemp(prefix="tf2_crithit_")
+                import os as _os
+                obj_path = _os.path.join(tmp, "model.obj")
+                ok = SmdToObjService.convert(custom, obj_path)
+                if ok and _os.path.exists(obj_path):
+                    self._3d_widget.load_crithit_scene_with_model(obj_path, tex_path)
+                else:
+                    logger.warning(f"SMD конвертация не удалась для {custom}, использую процедурного солдата")
+                    self._3d_widget.load_crithit_scene(tex_path)
+            else:
+                # OBJ — передаём напрямую
+                self._3d_widget.load_crithit_scene_with_model(custom, tex_path)
+        else:
+            self._3d_widget.load_crithit_scene(tex_path)
+
+    # ── Поиск кастомной модели CritHIT ──────────────────────────────────── #
+
+    @staticmethod
+    def _find_crithit_custom_model() -> str:
+        """
+        Ищет пользовательскую модель для CritHIT в корне проекта.
+
+        Поддерживаемые файлы (в порядке приоритета):
+          crithit_model.obj / crithit_model.smd / soldier_preview.obj / soldier_preview.smd
+
+        Возвращает полный путь к найденному файлу или пустую строку.
+        """
+        import os as _os
+        # Поднимаемся из src/ui/ до корня проекта
+        here = _os.path.dirname(_os.path.abspath(__file__))
+        project_root = _os.path.dirname(_os.path.dirname(here))
+        model_dir = _os.path.join(project_root, "tools", "Model")
+
+        # Ищем любой OBJ или SMD файл в папке tools/Model
+        if _os.path.isdir(model_dir):
+            for name in sorted(_os.listdir(model_dir)):
+                if name.lower().endswith(('.obj', '.smd')):
+                    path = _os.path.join(model_dir, name)
+                    logger.info(f"CritHIT: найдена модель в tools/Model: {path}")
+                    return path
+        return ""
+
     def set_3d_params(
         self,
         weapon_key: str,
@@ -433,6 +534,7 @@ class PreviewPanel(QWidget):
         Реальная загрузка начнётся только по кнопке «Загрузить 3D модель».
         """
         self._custom_smd_mode = False   # сбрасываем режим кастомной модели
+        self._crithit_mode = False      # сбрасываем CritHIT режим
         self._pending_3d_params = (weapon_key, mode, misc_vpk_path, textures_vpk_path)
 
         # Сбрасываем воркер, командные раскраски и показываем приглашение
@@ -637,6 +739,7 @@ class PreviewPanel(QWidget):
         """Сбрасывает 3D viewer (например, при смене режима на Spray)."""
         self._pending_3d_params = None
         self._custom_smd_mode = False
+        self._crithit_mode = False
         self._stop_3d_worker()
         self._stop_vpk_mod_worker()
         self._reset_team_state()
@@ -810,9 +913,15 @@ class PreviewPanel(QWidget):
             QTimer.singleShot(200, scale_image)
 
         # Обновляем текстуру в 3D если открыт 3D режим
-        if self.is_3d_mode() and path.lower().endswith(('.png', '.jpg', '.jpeg')):
-            from PySide6.QtCore import QTimer as T
-            T.singleShot(300, lambda: self.update_3d_texture(path))
+        if self.is_3d_mode():
+            if self._crithit_mode and self._3d_available and self._3d_widget:
+                # CritHIT режим: обновляем только billboard над головой солдата
+                captured = path
+                from PySide6.QtCore import QTimer as T
+                T.singleShot(300, lambda p=captured: self._3d_widget.update_crithit_texture(p))
+            elif path.lower().endswith(('.png', '.jpg', '.jpeg')):
+                from PySide6.QtCore import QTimer as T
+                T.singleShot(300, lambda: self.update_3d_texture(path))
 
         self.update_info_summary()
 
@@ -876,11 +985,14 @@ class PreviewPanel(QWidget):
             )
             self.preview.setAlignment(Qt.AlignCenter)
 
-        # Применяем на 3D модель
+        # Применяем на 3D модель или CritHIT billboard
         if png_for_3d and self._3d_available and self._3d_widget:
             self.image_path = png_for_3d  # сохраняем для _switch_to_3d
             if self.is_3d_mode():
-                self._3d_widget.update_texture_file(png_for_3d)
+                if self._crithit_mode:
+                    self._3d_widget.update_crithit_texture(png_for_3d)
+                else:
+                    self._3d_widget.update_texture_file(png_for_3d)
 
         self.update_info_summary()
 
