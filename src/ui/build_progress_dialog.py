@@ -210,9 +210,17 @@ class BuildProgressDialog(QDialog):
 
     cancel_requested = Signal()
 
-    def __init__(self, parent=None, language: str = "en"):
+    def __init__(
+        self,
+        parent=None,
+        language: str = "en",
+        title: str = "",
+        cancellable: bool = True,
+    ):
         super().__init__(parent)
         self._language = language
+        self._custom_title = title
+        self._cancellable = cancellable
         self._phrases = _PHRASES_RU if language == "ru" else _PHRASES_EN
         self._phrase_pool = list(self._phrases)
         random.shuffle(self._phrase_pool)
@@ -306,7 +314,10 @@ class BuildProgressDialog(QDialog):
         root.setSpacing(0)
 
         # -- Заголовок --
-        title_text = "СБОРКА VPK" if self._language == "ru" else "BUILD VPK"
+        if self._custom_title:
+            title_text = self._custom_title.upper()
+        else:
+            title_text = "СБОРКА VPK" if self._language == "ru" else "BUILD VPK"
         lbl = QLabel(title_text)
         lbl.setObjectName("title")
         root.addWidget(lbl)
@@ -379,6 +390,7 @@ class BuildProgressDialog(QDialog):
         self._cancel_btn.setObjectName("cancel_btn")
         self._cancel_btn.setFocusPolicy(Qt.NoFocus)
         self._cancel_btn.clicked.connect(self._on_cancel_clicked)
+        self._cancel_btn.setVisible(self._cancellable)
         btn_row.addWidget(self._cancel_btn)
         root.addLayout(btn_row)
 

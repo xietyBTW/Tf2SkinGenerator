@@ -7,7 +7,7 @@ import os
 from typing import Optional, Dict, Any, Tuple, List
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
-    QMessageBox, QFileDialog, QCheckBox, QProgressDialog, QPushButton, QDialog, QScrollArea
+    QMessageBox, QFileDialog, QCheckBox, QPushButton, QDialog, QScrollArea
 )
 from PySide6.QtCore import QUrl, Qt, QThread, Signal
 from PySide6.QtGui import QPixmap, QDesktopServices, QMouseEvent, QIcon
@@ -1299,16 +1299,15 @@ class MainWindow(QMainWindow):
             self._extract_model_worker.progress.connect(self._on_extract_model_progress)
             self._extract_model_worker.error.connect(self._on_extract_model_error)
 
-            progress_text = self.t.get('extract_model_progress_text', 'Extracting model...')
-            cancel_text = self.t.get('cancel', 'Cancel')
+            from src.ui.build_progress_dialog import BuildProgressDialog
             progress_title = self.t.get('extract_model_progress_title', 'Extract Model')
+            progress_text  = self.t.get('extract_model_progress_text', 'Extracting model...')
 
-            self._extract_model_progress_dialog = QProgressDialog(progress_text, cancel_text, 0, 100, self)
-            self._extract_model_progress_dialog.setWindowTitle(progress_title)
-            self._extract_model_progress_dialog.setWindowModality(Qt.WindowModal)
-            self._extract_model_progress_dialog.setAutoClose(False)
-            self._extract_model_progress_dialog.setAutoReset(False)
-            self._extract_model_progress_dialog.canceled.connect(self._cancel_extract_model)
+            self._extract_model_progress_dialog = BuildProgressDialog(
+                self, language=self.language, title=progress_title
+            )
+            self._extract_model_progress_dialog.setLabelText(progress_text)
+            self._extract_model_progress_dialog.cancel_requested.connect(self._cancel_extract_model)
 
             self._extract_model_worker.start()
             self._extract_model_progress_dialog.show()
@@ -1389,14 +1388,14 @@ class MainWindow(QMainWindow):
             self._export_model_worker.progress.connect(self._on_export_model_progress)
             self._export_model_worker.error.connect(self._on_export_model_error)
 
-            progress_text = self.t.get('extract_model_exporting', 'Exporting model files...')
+            from src.ui.build_progress_dialog import BuildProgressDialog
             progress_title = self.t.get('extract_model_select_title', 'Model Export')
-            self._export_model_progress_dialog = QProgressDialog(progress_text, "", 0, 100, self)
-            self._export_model_progress_dialog.setCancelButton(None)
-            self._export_model_progress_dialog.setWindowTitle(progress_title)
-            self._export_model_progress_dialog.setWindowModality(Qt.WindowModal)
-            self._export_model_progress_dialog.setAutoClose(False)
-            self._export_model_progress_dialog.setAutoReset(False)
+            progress_text  = self.t.get('extract_model_exporting', 'Exporting model files...')
+
+            self._export_model_progress_dialog = BuildProgressDialog(
+                self, language=self.language, title=progress_title, cancellable=False
+            )
+            self._export_model_progress_dialog.setLabelText(progress_text)
 
             self._export_model_worker.start()
             self._export_model_progress_dialog.show()
@@ -1422,9 +1421,6 @@ class MainWindow(QMainWindow):
 
     def _cancel_extract_model(self) -> None:
         if hasattr(self, '_extract_model_worker') and self._extract_model_worker.isRunning():
-            if hasattr(self, '_extract_model_progress_dialog'):
-                self._extract_model_progress_dialog.setLabelText(self.t.get('cancelling', 'Cancelling...'))
-                self._extract_model_progress_dialog.setCancelButton(None)
             self._extract_model_worker.requestInterruption()
 
     def _on_export_model_finished(self, success: bool, message: str) -> None:
@@ -1525,17 +1521,16 @@ class MainWindow(QMainWindow):
             self._extract_worker.error.connect(self._on_extract_error)
             
             # Создаем и показываем прогресс-диалог
-            progress_text = self.t.get('extract_progress_text', 'Extracting texture...')
-            cancel_text = self.t.get('cancel', 'Cancel')
+            from src.ui.build_progress_dialog import BuildProgressDialog
             progress_title = self.t.get('extract_progress_title', 'Extract Texture')
-            
-            self._extract_progress_dialog = QProgressDialog(progress_text, cancel_text, 0, 100, self)
-            self._extract_progress_dialog.setWindowTitle(progress_title)
-            self._extract_progress_dialog.setWindowModality(Qt.WindowModal)
-            self._extract_progress_dialog.setAutoClose(False)
-            self._extract_progress_dialog.setAutoReset(False)
-            self._extract_progress_dialog.canceled.connect(self._cancel_extract)
-            
+            progress_text  = self.t.get('extract_progress_text', 'Extracting texture...')
+
+            self._extract_progress_dialog = BuildProgressDialog(
+                self, language=self.language, title=progress_title
+            )
+            self._extract_progress_dialog.setLabelText(progress_text)
+            self._extract_progress_dialog.cancel_requested.connect(self._cancel_extract)
+
             # Запускаем воркер
             self._extract_worker.start()
             self._extract_progress_dialog.show()
@@ -1584,9 +1579,6 @@ class MainWindow(QMainWindow):
     def _cancel_extract(self) -> None:
         """Отменяет извлечение текстуры"""
         if hasattr(self, '_extract_worker') and self._extract_worker.isRunning():
-            if hasattr(self, '_extract_progress_dialog'):
-                self._extract_progress_dialog.setLabelText(self.t.get('cancelling', 'Cancelling...'))
-                self._extract_progress_dialog.setCancelButton(None)
             self._extract_worker.requestInterruption()
     
     def merge_vpk_files(self) -> None:
@@ -1666,16 +1658,15 @@ class MainWindow(QMainWindow):
             return
         
         # Создаем и показываем прогресс-диалог
-        progress_text = self.t.get('merge_vpk_progress', 'Объединение VPK файлов...')
-        cancel_text = self.t.get('cancel', 'Cancel')
-        progress_title = self.t.get('merge_vpk_title', 'Объединить моды')
-        
-        self._merge_progress_dialog = QProgressDialog(progress_text, cancel_text, 0, 100, self)
-        self._merge_progress_dialog.setWindowTitle(progress_title)
-        self._merge_progress_dialog.setWindowModality(Qt.WindowModal)
-        self._merge_progress_dialog.setAutoClose(False)
-        self._merge_progress_dialog.setAutoReset(False)
-        self._merge_progress_dialog.canceled.connect(self._cancel_merge)
+        from src.ui.build_progress_dialog import BuildProgressDialog
+        progress_title = self.t.get('merge_vpk_title', 'Merge Mods')
+        progress_text  = self.t.get('merge_vpk_progress', 'Merging VPK files...')
+
+        self._merge_progress_dialog = BuildProgressDialog(
+            self, language=self.language, title=progress_title
+        )
+        self._merge_progress_dialog.setLabelText(progress_text)
+        self._merge_progress_dialog.cancel_requested.connect(self._cancel_merge)
         
         # Выполняем объединение в отдельном потоке
         from PySide6.QtCore import QThread, Signal
@@ -1757,10 +1748,6 @@ class MainWindow(QMainWindow):
     def _cancel_merge(self) -> None:
         """Отменяет объединение VPK"""
         if hasattr(self, '_merge_worker') and self._merge_worker.isRunning():
-            if hasattr(self, '_merge_progress_dialog'):
-                self._merge_progress_dialog.setLabelText(self.t.get('cancelling', 'Cancelling...'))
-                self._merge_progress_dialog.setCancelButton(None)
-
             self._merge_worker.requestInterruption()
     
     def open_support_link(self) -> None:
