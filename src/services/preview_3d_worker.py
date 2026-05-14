@@ -33,9 +33,12 @@ class Preview3DWorker(QThread):
 
     # Модель и первый кадр текстуры готовы
     ready    = Signal(str, str)
-    # Анимированная текстура: список путей к PNG кадрам + framerate
+    # Анимированная текстура RED: список путей к PNG кадрам + framerate
     # Эмитируется ПОСЛЕ ready если кадров > 1
     animated = Signal(object, float)
+    # BLU-вариант текстуры: [frame_paths], framerate
+    # Эмитируется только если у оружия есть командная раскраска
+    blu_ready = Signal(object, float)
     # Ошибка
     failed   = Signal(str)
     # Текстовый прогресс для UI
@@ -104,7 +107,7 @@ class Preview3DWorker(QThread):
             if self.isInterruptionRequested():
                 return
 
-            # ── 3. Текстура ───────────────────────────────────────────────── #
+            # ── 3. Текстура RED ───────────────────────────────────────────── #
             self.progress.emit(self._p['texture'])
             frame_paths, framerate = self._extract_texture_frames()
 
@@ -114,6 +117,14 @@ class Preview3DWorker(QThread):
             # Если анимированная — отправляем все кадры отдельным сигналом
             if len(frame_paths) > 1:
                 self.animated.emit(frame_paths, framerate)
+
+            if self.isInterruptionRequested():
+                return
+
+            # ── 4. Текстура BLU (если есть командная раскраска) ──────────── #
+            blu_paths, blu_fps = self._extract_blu_texture_frames(framerate)
+            if blu_paths:
+                self.blu_ready.emit(blu_paths, blu_fps)
 
         except Exception as exc:
             logger.error(f"Preview3DWorker: {exc}", exc_info=True)
@@ -290,6 +301,67 @@ class Preview3DWorker(QThread):
 
         except Exception as exc:
             logger.warning(f"Не удалось извлечь текстуру для 3D Preview: {exc}")
+            return [], 0.0
+
+    def _extract_blu_texture_frames(self, red_framerate: float) -> tuple:
+        """
+        Пробует найти BLU-вариант текстуры (суффикс _blue) в VPK.
+
+        Возвращает (frame_paths: list[str], framerate: float).
+        Если BLU текстура не найдена — возвращает ([], 0.0).
+        """
+        try:
+            import vpk as vpklib
+
+            # Пути для BLU (суффикс _blue перед .vtf)
+            blu_vtf_search = [
+                f"materials/models/workshop_partner/weapons/c_models/{self.weapon_key}/{self.weapon_key}_blue.vtf",
+                f"materials/models/weapons/c_models/{self.weapon_key}/{self.weapon_key}_blue.vtf",
+                f"materials/models/weapons/c_items/{self.weapon_key}/{self.weapon_key}_blue.vtf",
+                f"materials/models/workshop/weapons/c_models/{self.weapon_key}/{self.weapon_key}_blue.vtf",
+            ]
+
+            pak = vpklib.open(self.textures_vpk_path)
+            vtf_data: Optional[bytes] = None
+            for path in blu_vtf_search:
+                try:
+                    vtf_data = pak[path].read()
+                    logger.debug(f"3D Preview BLU текстура: {path}")
+                    break
+                except KeyError:
+                    continue
+
+            if not vtf_data:
+                return [], 0.0
+
+            vtf_file = os.path.join(self._preview_dir, "_tmp_blu.vtf")
+            with open(vtf_file, "wb") as f:
+                f.write(vtf_data)
+
+            from src.services.vtflib_wrapper import VTFLib
+            from PIL import Image
+
+            all_frames_rgba, w, h = VTFLib.read_vtf_all_frames(vtf_file)
+            os.remove(vtf_file)
+
+            frame_paths: list[str] = []
+            for i, rgba in enumerate(all_frames_rgba):
+                img  = Image.frombytes("RGBA", (w, h), rgba)
+                name = f"texture_blu_{i:03d}.png" if len(all_frames_rgba) > 1 else "texture_blu.png"
+                path = os.path.join(self._preview_dir, name)
+                img.save(path)
+                frame_paths.append(path)
+
+            # Используем тот же framerate что и у RED (из VMT)
+            fps = red_framerate if len(frame_paths) > 1 else 0.0
+            logger.info(
+                f"BLU текстура найдена: {len(frame_paths)} кадров "
+                f"@ {fps:.1f} fps для {self.weapon_key}"
+            )
+            return frame_paths, fps
+
+        except Exception as exc:
+            logger.debug(f"BLU текстура не найдена для {self.weapon_key}: {exc}")
             return [], 0.0
 
     def _read_vmt_framerate(self, pak, vmt_search: list) -> float:

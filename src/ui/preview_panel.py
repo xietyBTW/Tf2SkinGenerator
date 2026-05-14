@@ -33,6 +33,12 @@ class PreviewPanel(QWidget):
         self._pending_3d_params = None  # (weapon_key, mode, misc_vpk, textures_vpk)
         self._custom_smd_mode = False   # True когда режим замены модели (кастомный SMD)
 
+        # Командные раскраски (RED / BLU)
+        self._red_frame_paths: list = []
+        self._blu_frame_paths: list = []
+        self._team_framerate: float  = 0.0
+        self._active_team: str       = 'red'   # 'red' | 'blu'
+
         from src.config.app_config import AppConfig
         from src.data.translations import TRANSLATIONS
         config = AppConfig.load_config()
@@ -155,6 +161,49 @@ class PreviewPanel(QWidget):
         self.btn_load_vpk_mod.setVisible(False)   # только в 3D режиме
         self.btn_load_vpk_mod.setEnabled(False)   # включается когда настроен TF2 путь
         toggle_layout.addWidget(self.btn_load_vpk_mod)
+
+        # ── Командные раскраски RED / BLU ─────────────────────────────────── #
+        _team_btn_style = """
+            QPushButton {
+                background: transparent;
+                border: 1px solid #2a2a2a;
+                border-radius: 13px;
+                padding: 0px;
+            }
+            QPushButton:hover  { border-color: #555; }
+            QPushButton:pressed { background: rgba(255,255,255,0.08); }
+        """
+        _team_btn_style_active = """
+            QPushButton {
+                background: rgba(255,255,255,0.07);
+                border: 1px solid #555;
+                border-radius: 13px;
+                padding: 0px;
+            }
+            QPushButton:hover { border-color: #888; }
+        """
+        self._team_btn_style        = _team_btn_style
+        self._team_btn_style_active = _team_btn_style_active
+
+        toggle_layout.addSpacing(8)
+
+        self.btn_team_red = QPushButton()
+        self.btn_team_red.setFixedSize(26, 26)
+        self.btn_team_red.setToolTip(self.t.get('3d_team_red_tip', 'RED team texture'))
+        self.btn_team_red.setIcon(_make_team_icon("#c0392b"))
+        self.btn_team_red.setStyleSheet(_team_btn_style_active)   # RED активен по умолчанию
+        self.btn_team_red.clicked.connect(self._on_team_red_clicked)
+        self.btn_team_red.setVisible(False)   # показывается только когда есть BLU текстура
+        toggle_layout.addWidget(self.btn_team_red)
+
+        self.btn_team_blu = QPushButton()
+        self.btn_team_blu.setFixedSize(26, 26)
+        self.btn_team_blu.setToolTip(self.t.get('3d_team_blu_tip', 'BLU team texture'))
+        self.btn_team_blu.setIcon(_make_team_icon("#2980b9"))
+        self.btn_team_blu.setStyleSheet(_team_btn_style)
+        self.btn_team_blu.clicked.connect(self._on_team_blu_clicked)
+        self.btn_team_blu.setVisible(False)
+        toggle_layout.addWidget(self.btn_team_blu)
 
         # Кнопки всегда видны; 3D покажет заглушку если WebEngine не установлен
         self.toggle_bar.setVisible(True)
@@ -317,6 +366,8 @@ class PreviewPanel(QWidget):
         self.btn_3d.setStyleSheet(self._btn_style_inactive)
         self.btn_load_3d.setVisible(False)
         self.btn_load_vpk_mod.setVisible(False)
+        self.btn_team_red.setVisible(False)
+        self.btn_team_blu.setVisible(False)
 
     def _switch_to_3d(self):
         if self._3d_widget is None:
@@ -384,8 +435,9 @@ class PreviewPanel(QWidget):
         self._custom_smd_mode = False   # сбрасываем режим кастомной модели
         self._pending_3d_params = (weapon_key, mode, misc_vpk_path, textures_vpk_path)
 
-        # Сбрасываем воркер и показываем приглашение в viewer
+        # Сбрасываем воркер, командные раскраски и показываем приглашение
         self._stop_3d_worker()
+        self._reset_team_state()
         if self._3d_widget:
             self._3d_widget.show_prompt(self.t.get('3d_prompt_weapon', 'Select a weapon and click ▶ to load the model'))
 
@@ -496,9 +548,10 @@ class PreviewPanel(QWidget):
             except Exception:
                 pass
 
-        # Останавливаем предыдущие воркеры
+        # Останавливаем предыдущие воркеры и сбрасываем команды
         self._stop_3d_worker()
         self._stop_vpk_mod_worker()
+        self._reset_team_state()
 
         self.btn_load_vpk_mod.setEnabled(False)
         self.btn_load_3d.setEnabled(False)
@@ -515,6 +568,7 @@ class PreviewPanel(QWidget):
         worker.progress.connect(self._on_vpk_mod_progress)
         worker.ready.connect(self._on_vpk_mod_ready)
         worker.animated.connect(self._on_3d_animated)
+        worker.blu_ready.connect(self._on_3d_blu_ready)
         worker.failed.connect(self._on_vpk_mod_failed)
         worker.start()
         self._vpk_mod_worker = worker
@@ -526,6 +580,9 @@ class PreviewPanel(QWidget):
     def _on_vpk_mod_ready(self, obj_path: str, texture_path: str) -> None:
         self.btn_load_vpk_mod.setEnabled(True)
         self.btn_load_3d.setEnabled(bool(self._pending_3d_params or self._custom_smd_mode))
+        if texture_path:
+            self._red_frame_paths = [texture_path]
+            self._active_team = 'red'
         if self._3d_widget:
             self._3d_widget.load_model_files(obj_path, texture_path)
 
@@ -554,6 +611,7 @@ class PreviewPanel(QWidget):
             return
 
         self._stop_3d_worker()
+        self._reset_team_state()
         self.btn_load_3d.setEnabled(False)
         self._3d_widget.show_loading(self.t.get('3d_preparing', 'Preparing 3D model...'))
 
@@ -569,6 +627,7 @@ class PreviewPanel(QWidget):
         worker.progress.connect(self._on_3d_progress)
         worker.ready.connect(self._on_3d_ready)
         worker.animated.connect(self._on_3d_animated)
+        worker.blu_ready.connect(self._on_3d_blu_ready)
         worker.failed.connect(self._on_3d_failed)
         worker.start()
         self._3d_worker = worker
@@ -579,6 +638,7 @@ class PreviewPanel(QWidget):
         self._custom_smd_mode = False
         self._stop_3d_worker()
         self._stop_vpk_mod_worker()
+        self._reset_team_state()
         if self._3d_widget:
             self._3d_widget.reset()
         self.btn_load_3d.setEnabled(False)
@@ -602,17 +662,80 @@ class PreviewPanel(QWidget):
 
     def _on_3d_ready(self, obj_path: str, texture_path: str):
         self.btn_load_3d.setEnabled(True)
+        # Сохраняем RED кадр (один кадр; анимированные кадры придут через _on_3d_animated)
+        if texture_path:
+            self._red_frame_paths = [texture_path]
+            self._active_team = 'red'
         if self._3d_widget:
             self._3d_widget.load_model_files(obj_path, texture_path)
 
     def _on_3d_animated(self, frame_paths: list, framerate: float) -> None:
-        """Запускает анимацию текстуры когда воркер нашёл многокадровый VTF."""
+        """Запускает анимацию RED текстуры когда воркер нашёл многокадровый VTF."""
+        if frame_paths:
+            self._red_frame_paths = frame_paths
+            self._team_framerate  = framerate
         if self._3d_widget and frame_paths:
             logger.info(
-                f"3D Preview: запуск анимации текстуры "
+                f"3D Preview: запуск анимации RED текстуры "
                 f"({len(frame_paths)} кадров @ {framerate:.1f} fps)"
             )
             self._3d_widget.update_animated_texture_files(frame_paths, framerate)
+
+    def _on_3d_blu_ready(self, frame_paths: list, framerate: float) -> None:
+        """Получены кадры BLU текстуры — сохраняем и показываем кнопки команд."""
+        if not frame_paths:
+            return
+        self._blu_frame_paths = frame_paths
+        if framerate > 0:
+            self._team_framerate = framerate
+        logger.info(
+            f"3D Preview: BLU текстура готова "
+            f"({len(frame_paths)} кадров @ {framerate:.1f} fps)"
+        )
+        # Показываем кнопки только если мы в 3D режиме
+        if self.is_3d_mode():
+            self.btn_team_red.setVisible(True)
+            self.btn_team_blu.setVisible(True)
+
+    def _reset_team_state(self) -> None:
+        """Сбрасывает данные командных раскрасок и скрывает кнопки."""
+        self._red_frame_paths = []
+        self._blu_frame_paths = []
+        self._team_framerate  = 0.0
+        self._active_team     = 'red'
+        if hasattr(self, 'btn_team_red'):
+            self.btn_team_red.setVisible(False)
+            self.btn_team_red.setStyleSheet(self._team_btn_style_active)
+        if hasattr(self, 'btn_team_blu'):
+            self.btn_team_blu.setVisible(False)
+            self.btn_team_blu.setStyleSheet(self._team_btn_style)
+
+    def _on_team_red_clicked(self) -> None:
+        """Переключается на RED раскраску."""
+        if self._active_team == 'red' or not self._3d_widget:
+            return
+        self._active_team = 'red'
+        self.btn_team_red.setStyleSheet(self._team_btn_style_active)
+        self.btn_team_blu.setStyleSheet(self._team_btn_style)
+        self._apply_team_texture(self._red_frame_paths)
+
+    def _on_team_blu_clicked(self) -> None:
+        """Переключается на BLU раскраску."""
+        if self._active_team == 'blu' or not self._3d_widget or not self._blu_frame_paths:
+            return
+        self._active_team = 'blu'
+        self.btn_team_blu.setStyleSheet(self._team_btn_style_active)
+        self.btn_team_red.setStyleSheet(self._team_btn_style)
+        self._apply_team_texture(self._blu_frame_paths)
+
+    def _apply_team_texture(self, frame_paths: list) -> None:
+        """Применяет список кадров (или один кадр) как текстуру на 3D модели."""
+        if not frame_paths or not self._3d_widget:
+            return
+        if len(frame_paths) > 1 and self._team_framerate > 0:
+            self._3d_widget.update_animated_texture_files(frame_paths, self._team_framerate)
+        else:
+            self._3d_widget.update_texture_file(frame_paths[0])
 
     def _on_3d_failed(self, error: str):
         logger.warning(f"3D Preview не удался: {error}")
@@ -881,6 +1004,10 @@ class PreviewPanel(QWidget):
             self.btn_load_3d.setToolTip(self.t.get('3d_load_model_tip', 'Load 3D model'))
         if hasattr(self, 'btn_load_vpk_mod'):
             self.btn_load_vpk_mod.setToolTip(self.t.get('3d_load_vpk_tip', 'Load VPK mod for 3D Preview'))
+        if hasattr(self, 'btn_team_red'):
+            self.btn_team_red.setToolTip(self.t.get('3d_team_red_tip', 'RED team texture'))
+        if hasattr(self, 'btn_team_blu'):
+            self.btn_team_blu.setToolTip(self.t.get('3d_team_blu_tip', 'BLU team texture'))
         # Передаём язык в 3D вьювер
         if hasattr(self, '_3d_widget') and self._3d_widget is not None:
             self._3d_widget.set_language(lang)
@@ -1019,6 +1146,35 @@ def _make_vpk_icon(color: str = "#666666", size: int = 16):
     for frac in (0.48, 0.60, 0.72):
         y = s * frac
         p.drawLine(QLineF(line_xs, y, line_xe, y))
+
+    p.end()
+    return QIcon(pix)
+
+
+def _make_team_icon(fill_color: str, size: int = 16):
+    """
+    Рисует иконку командной раскраски — заполненный круг с тонкой обводкой.
+    fill_color: '#c0392b' для RED, '#2980b9' для BLU.
+    """
+    from PySide6.QtGui import QIcon, QPixmap, QPainter, QPen, QColor
+    from PySide6.QtCore import Qt, QRectF
+
+    pix = QPixmap(size, size)
+    pix.fill(Qt.transparent)
+
+    p = QPainter(pix)
+    p.setRenderHint(QPainter.Antialiasing)
+
+    s = float(size)
+    margin = s * 0.12
+    rect = QRectF(margin, margin, s - 2 * margin, s - 2 * margin)
+
+    col = QColor(fill_color)
+    p.setBrush(col)
+    pen = QPen(col.darker(130))
+    pen.setWidthF(1.0)
+    p.setPen(pen)
+    p.drawEllipse(rect)
 
     p.end()
     return QIcon(pix)
