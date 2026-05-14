@@ -548,13 +548,15 @@ class PreviewVpkModWorker(QThread):
         try:
             import vpk as vpklib
             import re
+            from src.data.weapons import WEAPON_TEXTURE_PATHS
 
-            vtf_search = [
+            _standard = [
                 f"materials/models/workshop_partner/weapons/c_models/{weapon_key}/{weapon_key}.vtf",
                 f"materials/models/weapons/c_models/{weapon_key}/{weapon_key}.vtf",
                 f"materials/models/weapons/c_items/{weapon_key}/{weapon_key}.vtf",
                 f"materials/models/workshop/weapons/c_models/{weapon_key}/{weapon_key}.vtf",
             ]
+            vtf_search = WEAPON_TEXTURE_PATHS.get(weapon_key, []) + _standard
             vmt_search = [p.replace(".vtf", ".vmt") for p in vtf_search]
 
             pak = vpklib.open(self.textures_vpk_path)
@@ -676,13 +678,20 @@ class PreviewVpkModWorker(QThread):
         if not vtf_data and weapon_key and self.textures_vpk_path:
             try:
                 import vpk as vpklib
+                from src.data.weapons import WEAPON_TEXTURE_PATHS
                 game_pak = vpklib.open(self.textures_vpk_path)
-                blu_game_paths = [
+                # Строим BLU-варианты: нестандартные пути (stem + _blue) + стандартные
+                _extra_blu = [
+                    p.replace(".vtf", "_blue.vtf")
+                    for p in WEAPON_TEXTURE_PATHS.get(weapon_key, [])
+                ]
+                _std_blu = [
                     f"materials/models/workshop_partner/weapons/c_models/{weapon_key}/{weapon_key}_blue.vtf",
                     f"materials/models/weapons/c_models/{weapon_key}/{weapon_key}_blue.vtf",
                     f"materials/models/weapons/c_items/{weapon_key}/{weapon_key}_blue.vtf",
                     f"materials/models/workshop/weapons/c_models/{weapon_key}/{weapon_key}_blue.vtf",
                 ]
+                blu_game_paths = _extra_blu + _std_blu
                 for path in blu_game_paths:
                     try:
                         vtf_data = game_pak[path].read()

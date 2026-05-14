@@ -438,6 +438,7 @@ class PreviewPanel(QWidget):
         # Сбрасываем воркер, командные раскраски и показываем приглашение
         self._stop_3d_worker()
         self._reset_team_state()
+
         if self._3d_widget:
             self._3d_widget.show_prompt(self.t.get('3d_prompt_weapon', 'Select a weapon and click ▶ to load the model'))
 
@@ -644,7 +645,6 @@ class PreviewPanel(QWidget):
         self.btn_load_3d.setEnabled(False)
         if self.is_3d_mode():
             self._switch_to_2d()
-
     def update_3d_texture(self, png_path: str) -> None:
         """Обновляет текстуру на 3D модели (когда пользователь загружает своё изображение)."""
         if self._3d_widget and self.is_3d_mode():

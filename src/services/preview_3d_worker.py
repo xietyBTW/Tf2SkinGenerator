@@ -245,13 +245,17 @@ class Preview3DWorker(QThread):
         """
         try:
             import vpk as vpklib
+            from src.data.weapons import WEAPON_TEXTURE_PATHS
 
-            vtf_search = [
-                f"materials/models/workshop_partner/weapons/c_models/{self.weapon_key}/{self.weapon_key}.vtf",
-                f"materials/models/weapons/c_models/{self.weapon_key}/{self.weapon_key}.vtf",
-                f"materials/models/weapons/c_items/{self.weapon_key}/{self.weapon_key}.vtf",
-                f"materials/models/workshop/weapons/c_models/{self.weapon_key}/{self.weapon_key}.vtf",
+            wk = self.weapon_key
+            _standard = [
+                f"materials/models/workshop_partner/weapons/c_models/{wk}/{wk}.vtf",
+                f"materials/models/weapons/c_models/{wk}/{wk}.vtf",
+                f"materials/models/weapons/c_items/{wk}/{wk}.vtf",
+                f"materials/models/workshop/weapons/c_models/{wk}/{wk}.vtf",
             ]
+            # Нестандартные пути проверяем первыми
+            vtf_search = WEAPON_TEXTURE_PATHS.get(wk, []) + _standard
             vmt_search = [p.replace(".vtf", ".vmt") for p in vtf_search]
 
             pak = vpklib.open(self.textures_vpk_path)
@@ -312,14 +316,20 @@ class Preview3DWorker(QThread):
         """
         try:
             import vpk as vpklib
+            from src.data.weapons import WEAPON_TEXTURE_PATHS
 
-            # Пути для BLU (суффикс _blue перед .vtf)
-            blu_vtf_search = [
-                f"materials/models/workshop_partner/weapons/c_models/{self.weapon_key}/{self.weapon_key}_blue.vtf",
-                f"materials/models/weapons/c_models/{self.weapon_key}/{self.weapon_key}_blue.vtf",
-                f"materials/models/weapons/c_items/{self.weapon_key}/{self.weapon_key}_blue.vtf",
-                f"materials/models/workshop/weapons/c_models/{self.weapon_key}/{self.weapon_key}_blue.vtf",
+            wk = self.weapon_key
+            _extra_blu = [
+                p.replace(".vtf", "_blue.vtf")
+                for p in WEAPON_TEXTURE_PATHS.get(wk, [])
             ]
+            _std_blu = [
+                f"materials/models/workshop_partner/weapons/c_models/{wk}/{wk}_blue.vtf",
+                f"materials/models/weapons/c_models/{wk}/{wk}_blue.vtf",
+                f"materials/models/weapons/c_items/{wk}/{wk}_blue.vtf",
+                f"materials/models/workshop/weapons/c_models/{wk}/{wk}_blue.vtf",
+            ]
+            blu_vtf_search = _extra_blu + _std_blu
 
             pak = vpklib.open(self.textures_vpk_path)
             vtf_data: Optional[bytes] = None

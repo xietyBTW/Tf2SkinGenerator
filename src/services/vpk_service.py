@@ -75,6 +75,8 @@ class VPKService:
         extra_model_callback: Optional[Callable[[str, str], Optional[str]]] = None,
         language: str = "en",
         custom_vtf_path: str = None,
+        blu_mode: str = "none",
+        blu_image_path: Optional[str] = None,
         progress_callback: Optional[Callable[[int, str], None]] = None,
         sub_progress_callback: Optional[Callable[[int, str], None]] = None,
         cancel_callback: Optional[Callable[[], bool]] = None
@@ -125,6 +127,8 @@ class VPKService:
                     extra_model_callback=extra_model_callback,
                     language=language,
                     custom_vtf_path=custom_vtf_path,
+                    blu_mode=blu_mode,
+                    blu_image_path=blu_image_path,
                     sub_progress_callback=emit_sub,
                 )
 
@@ -174,6 +178,8 @@ class VPKService:
                         extra_model_callback=extra_model_callback,
                         language=language,
                         custom_vtf_path=custom_vtf_path,
+                        blu_mode=blu_mode,
+                        blu_image_path=blu_image_path,
                         sub_progress_callback=emit_sub,
                     )
                     build_result[0] = success
@@ -222,6 +228,8 @@ class VPKService:
         extra_model_callback=None,  # Колбэк для запроса доп. модели: callback(smd_name, weapon_key) -> Optional[str]
         language: str = "en",  # Язык для ошибок
         custom_vtf_path: str = None,  # Если юзер сам сделал VTF - используем его вместо генерации из картинки
+        blu_mode: str = "none",       # BLU-командная текстура: 'none' | 'same' | 'upload' | 'hue_shift'
+        blu_image_path: str = None,   # Путь к BLU-изображению (для 'upload' / 'hue_shift')
         sub_progress_callback: Optional[Callable[[int, str], None]] = None,
     ) -> Tuple[bool, str]:
         """
@@ -760,7 +768,53 @@ class VPKService:
                         normal_weapon_key = f"{texture_filename}_normal"
                         VMTService.update_vmt_bumpmap_path(str(vmt_path), patched_cdmaterials_path, normal_weapon_key)
                         logger.info(f"Обновлен VMT файл для добавления $bumpmap: {normal_weapon_key}")
-                    
+
+                    # ── BLU Team Texture (командная раскраска) ───────────────────────────
+                    if blu_mode and blu_mode not in ('none', ''):
+                        try:
+                            import shutil as _shutil
+                            _red_vtf_path = vtf_output_path / vtf_filename
+                            _blu_vtf_name = f"{texture_filename}_blue.vtf"
+                            _blu_vtf_path = vtf_output_path / _blu_vtf_name
+                            _blu_created  = False
+
+                            if blu_mode == 'same':
+                                if _red_vtf_path.exists():
+                                    _shutil.copy2(_red_vtf_path, _blu_vtf_path)
+                                    _blu_created = True
+                                    logger.info(f"BLU текстура скопирована из RED: {_blu_vtf_name}")
+                            elif blu_image_path and os.path.exists(blu_image_path):
+                                _blu_png_tmp = vtf_output_path / f"{texture_filename}_blue.png"
+                                VPKService._process_image(blu_image_path, str(_blu_png_tmp), size)
+                                _blu_vtf_flags, _ = VPKService._parse_vtf_flags_and_options(flags or [])
+                                _blu_opts = dict(vtf_options or {})
+                                _blu_opts.pop('normal', None)   # BLU — не normal map
+                                VPKService._create_vtf(
+                                    str(_blu_png_tmp), str(vtf_output_path),
+                                    format_type, _blu_vtf_flags, _blu_opts
+                                )
+                                if _blu_png_tmp.exists():
+                                    _blu_png_tmp.unlink()
+                                _blu_created = _blu_vtf_path.exists()
+                                if _blu_created:
+                                    logger.info(f"BLU текстура создана: {_blu_vtf_name}")
+
+                            # Создаём BLU VMT (копия RED с обновлённым $basetexture)
+                            if _blu_created and vmt_path.exists():
+                                _blu_vmt_path = vtf_output_path / f"{texture_filename}_blue.vmt"
+                                _shutil.copy2(vmt_path, _blu_vmt_path)
+                                VMTService.update_vmt_basetexture_path(
+                                    str(_blu_vmt_path),
+                                    patched_cdmaterials_path,
+                                    f"{texture_filename}_blue",
+                                )
+                                logger.info(f"BLU VMT создан: {_blu_vmt_path.name}")
+                        except Exception as _blu_exc:
+                            logger.warning(
+                                f"Не удалось создать BLU текстуру (не критично): {_blu_exc}",
+                                exc_info=True,
+                            )
+
                     # === Создаем текстуры для дополнительных материалов модели (shell, scope и т.д.) ===
                     # Это столбцы 1+ из RED строки $texturegroup
                     # Словарь для хранения путей к VTF дополнительных материалов (нужно для BLU копий)
@@ -863,20 +917,20 @@ class VPKService:
                             blu_vmt_path = vtf_output_path / blu_vmt_filename
                             
                             # Спрашиваем у пользователя отдельное изображение для BLU материала
-                            blu_image_path = None
+                            _blu_mat_img = None
                             if extra_texture_callback:
-                                blu_image_path = extra_texture_callback(blu_tex_name, weapon_key)
-                                logger.info(f"Результат extra_texture_callback для BLU '{blu_tex_name}': {blu_image_path!r}")
-                                if blu_image_path and not os.path.isfile(blu_image_path):
-                                    logger.warning(f"Файл BLU не найден: {blu_image_path}")
-                                    blu_image_path = None
-                            
-                            if blu_image_path and os.path.isfile(blu_image_path):
+                                _blu_mat_img = extra_texture_callback(blu_tex_name, weapon_key)
+                                logger.info(f"Результат extra_texture_callback для BLU '{blu_tex_name}': {_blu_mat_img!r}")
+                                if _blu_mat_img and not os.path.isfile(_blu_mat_img):
+                                    logger.warning(f"Файл BLU не найден: {_blu_mat_img}")
+                                    _blu_mat_img = None
+
+                            if _blu_mat_img and os.path.isfile(_blu_mat_img):
                                 # Пользователь дал отдельное изображение для этого BLU материала
-                                logger.info(f"Используем отдельное изображение для BLU {blu_tex_name}: {blu_image_path}")
+                                logger.info(f"Используем отдельное изображение для BLU {blu_tex_name}: {_blu_mat_img}")
                                 if custom_vtf_path:
-                                    copy_file_safe(blu_image_path, blu_vtf_path)
-                                elif TextureService.is_animated_image(blu_image_path):
+                                    copy_file_safe(_blu_mat_img, blu_vtf_path)
+                                elif TextureService.is_animated_image(_blu_mat_img):
                                     vtf_flags_blu, flags_parsed_blu = VPKService._parse_vtf_flags_and_options(flags)
                                     merged_blu = {}
                                     if vtf_options:
@@ -884,12 +938,12 @@ class VPKService:
                                     merged_blu.update(flags_parsed_blu)
                                     merged_blu.pop("normal", None)
                                     TextureService.create_animated_vtf(
-                                        blu_image_path, str(blu_vtf_path),
+                                        _blu_mat_img, str(blu_vtf_path),
                                         size, format_type, vtf_flags_blu, merged_blu
                                     )
                                 else:
                                     blu_temp_png = vtf_output_path / f"{blu_tex_name}.png"
-                                    VPKService._process_image(blu_image_path, blu_temp_png, size)
+                                    VPKService._process_image(_blu_mat_img, blu_temp_png, size)
                                     vtf_flags_blu, flags_parsed_blu = VPKService._parse_vtf_flags_and_options(flags)
                                     merged_blu = {}
                                     if vtf_options:

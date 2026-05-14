@@ -37,6 +37,8 @@ class BuildWorker(QThread):
         draw_uv_layout: bool = False,
         language: str = "en",
         custom_vtf_path: Optional[str] = None,
+        blu_mode: str = "none",
+        blu_image_path: Optional[str] = None,
         parent=None
     ):
         super().__init__(parent)
@@ -55,6 +57,8 @@ class BuildWorker(QThread):
         self.draw_uv_layout = draw_uv_layout
         self.language = language
         self.custom_vtf_path = custom_vtf_path
+        self.blu_mode = blu_mode
+        self.blu_image_path = blu_image_path
         self.parent_window = parent
 
         self._model_file_mutex = QMutex()
@@ -92,6 +96,8 @@ class BuildWorker(QThread):
                 extra_model_callback=self._request_extra_model_callback if self.replace_model_enabled else None,
                 language=self.language,
                 custom_vtf_path=self.custom_vtf_path,
+                blu_mode=self.blu_mode,
+                blu_image_path=self.blu_image_path,
                 progress_callback=self.progress.emit,
                 sub_progress_callback=self.sub_progress.emit,
                 cancel_callback=self.isInterruptionRequested

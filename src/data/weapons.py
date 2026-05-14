@@ -334,7 +334,153 @@ for class_name, class_weapons in TF2_WEAPONS.items():
             else:
                 WEAPON_MDL_PATHS[weapon_key] = f"models/weapons/c_models/{weapon_key}/{weapon_key}.mdl"
 
-# Модель в VPK лежит в папке базового топора (c_axtinguisher), а не c_axtinguisher_pyro/
+# ── Нестандартные пути MDL (папка или имя файла не совпадают с ключом оружия) ──
+
+# Axtinguisher: папка c_axtinguisher/, файл c_axtinguisher_pyro.mdl
 WEAPON_MDL_PATHS["c_axtinguisher_pyro"] = (
     "models/weapons/c_models/c_axtinguisher/c_axtinguisher_pyro.mdl"
 )
+
+# Buff Banner: папка c_battalion_buffpack/, файл c_batt_buffpack.mdl
+WEAPON_MDL_PATHS["c_batt_buffpack"] = (
+    "models/weapons/c_models/c_battalion_buffpack/c_batt_buffpack.mdl"
+)
+
+# B.A.S.E Jumper: workshop/, папка с опечаткой c_paratooper_pack
+WEAPON_MDL_PATHS["c_paratrooper_pack"] = (
+    "models/workshop/weapons/c_models/c_paratooper_pack/c_paratrooper_pack.mdl"
+)
+
+# Equalizer / Escape Plan share the c_pickaxe/ folder
+WEAPON_MDL_PATHS["c_pickaxe_s2"] = (
+    "models/weapons/c_models/c_pickaxe/c_pickaxe_s2.mdl"
+)
+
+# Half-Zatoichi (Soldier): workshop_partner/, общая папка c_shogun_katana/
+WEAPON_MDL_PATHS["c_shogun_katana_soldier"] = (
+    "models/workshop_partner/weapons/c_models/c_shogun_katana/c_shogun_katana_soldier.mdl"
+)
+
+# Fire Axe (Pyro): папка c_fireaxe_pyro/, файл c_fireaxe_pyro.mdl
+WEAPON_MDL_PATHS["c_fireaxe"] = (
+    "models/weapons/c_models/c_fireaxe_pyro/c_fireaxe_pyro.mdl"
+)
+
+# Ali Baba's Wee Booties / Bootlegger: workshop player items, не weapons
+WEAPON_MDL_PATHS["demo_booties"] = (
+    "models/workshop/player/items/demo/demo_booties/demo_booties.mdl"
+)
+WEAPON_MDL_PATHS["pegleg"] = (
+    "models/workshop/player/items/demo/pegleg/pegleg.mdl"
+)
+
+# Robo-Sandvich: папка c_sandwich/, файл c_robo_sandwich.mdl
+WEAPON_MDL_PATHS["c_robo_sandwich"] = (
+    "models/weapons/c_models/c_sandwich/c_robo_sandwich.mdl"
+)
+
+# Natascha: папка c_minigun/, файл c_minigun_natascha.mdl
+WEAPON_MDL_PATHS["c_minigun_natascha"] = (
+    "models/weapons/c_models/c_minigun/c_minigun_natascha.mdl"
+)
+
+# Vaccinator: workshop/, папка c_medigun_defense (американская орфография)
+WEAPON_MDL_PATHS["c_medigun_defence"] = (
+    "models/workshop/weapons/c_models/c_medigun_defense/c_medigun_defense.mdl"
+)
+
+# Red-Tape Recorder: w_models, не c_models
+WEAPON_MDL_PATHS["w_sd_sapper"] = (
+    "models/weapons/w_models/w_sd_sapper.mdl"
+)
+
+# ── Нестандартные пути VTF (дополнительные пути для поиска текстур) ───────────
+# Используются как приоритетный список ПЕРЕД стандартными путями.
+# Нужны когда имя/папка текстуры не совпадает с weapon_key.
+
+WEAPON_TEXTURE_PATHS: dict[str, list[str]] = {
+    # Fire Axe: текстура в c_fireaxe_pyro/
+    "c_fireaxe": [
+        "materials/models/weapons/c_models/c_fireaxe_pyro/c_fireaxe_pyro.vtf",
+    ],
+    # Axtinguisher: папка c_axtinguisher/, не c_axtinguisher_pyro/
+    "c_axtinguisher_pyro": [
+        "materials/backpack/weapons/c_models/c_axtinguisher/c_axtinguisher_pyro.vtf",
+    ],
+    # Backburner: backpack path
+    "c_backburner": [
+        "materials/backpack/weapons/c_models/c_backburner/c_backburner.vtf",
+    ],
+    # Buff Banner: имя файла c_buffpack, не c_batt_buffpack
+    "c_batt_buffpack": [
+        "materials/models/weapons/c_items/c_buffpack.vtf",
+    ],
+    # Bread Bite: имя файла c_breadmonster, не c_breadmonster_gloves
+    "c_breadmonster_gloves": [
+        "materials/models/weapons/c_items/c_breadmonster.vtf",
+    ],
+    # AWPer Hand: папка csgo_awp/, файл w_csgo_awp
+    "c_csgo_awp": [
+        "materials/models/weapons/csgo_awp/w_csgo_awp.vtf",
+    ],
+    # Bonk! Atomic Punch: имя файла c_energydrink (без подчёркивания)
+    "c_energy_drink": [
+        "materials/models/weapons/c_items/c_energydrink.vtf",
+    ],
+    # Flare Gun: имя файла c_flaregun, не c_flaregun_pyro
+    "c_flaregun_pyro": [
+        "materials/models/weapons/c_items/c_flaregun.vtf",
+    ],
+    # Vaccinator: workshop, американская орфография (defense), не defence
+    "c_medigun_defence": [
+        "materials/models/workshop/weapons/c_models/c_medigun_defense/c_medigun_defense.vtf",
+    ],
+    # Gunboats: имя файла c_rocketboots_demo, не c_rocketboots_soldier
+    "c_rocketboots_soldier": [
+        "materials/models/weapons/c_items/c_rocketboots_demo.vtf",
+    ],
+    # Half-Zatoichi (Soldier): workshop_partner, папка c_shogun_katana/
+    "c_shogun_katana_soldier": [
+        "materials/models/workshop_partner/weapons/c_models/c_shogun_katana/c_shogun_katana.vtf",
+    ],
+    # Sandman: папка v_bat/, файл v_wooden_bat
+    "c_wooden_bat": [
+        "materials/models/weapons/v_bat/v_wooden_bat.vtf",
+    ],
+    # Horseless Headless Horsemann's Headtaker: имя файла pumpkin_axe
+    "c_headtaker": [
+        "materials/models/weapons/c_items/pumpkin_axe.vtf",
+    ],
+    # Scottish Resistance: папка v_stickybomb_defender/
+    "c_scottish_resistance": [
+        "materials/models/weapons/v_stickybomb_defender/v_stickybomb_defender.vtf",
+    ],
+    # Darwin's Danger Shield: workshop player items
+    "croc_shield": [
+        "materials/models/workshop/player/items/sniper/croc_shield/croc_shield.vtf",
+    ],
+    # Jarate: workshop player items (xmas variant folder)
+    "urinejar": [
+        "materials/models/workshop/player/items/sniper/xms_sniper_commandobackpack/xms_sniper_commandobackpack.vtf",
+    ],
+    # Razorback: player/items/sniper
+    "knife_shield": [
+        "materials/models/player/items/sniper/knife_shield.vtf",
+    ],
+    # Mantreads: player/items/soldier
+    "tankerboots": [
+        "materials/models/player/items/soldier/tankerboots.vtf",
+    ],
+    # Ali Baba's Wee Booties: workshop player items
+    "demo_booties": [
+        "materials/models/workshop/player/items/demo/demo_booties/demo_booties.vtf",
+    ],
+    # Bootlegger: workshop player items
+    "pegleg": [
+        "materials/models/workshop/player/items/demo/pegleg/pegleg.vtf",
+    ],
+    # Red-Tape Recorder: w_models
+    "w_sd_sapper": [
+        "materials/models/weapons/w_models/w_sd_sapper/w_sd_sapper.vtf",
+    ],
+}
