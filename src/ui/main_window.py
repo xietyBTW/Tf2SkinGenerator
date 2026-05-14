@@ -565,6 +565,11 @@ class MainWindow(QMainWindow):
 
         from src.data.player_hands import HAND_MODE_KEYS
 
+        # CritHIT: показываем солдата с billboard-текстурой над головой
+        if self.mode == "critHIT":
+            self.preview_panel.set_crithit_mode()
+            return
+
         is_normal_weapon = (
             self.mode
             and self.mode not in ("spray", "critHIT")
@@ -573,7 +578,7 @@ class MainWindow(QMainWindow):
         )
 
         if not is_normal_weapon:
-            # Spray / CritHIT / hands / нет выбора — сбрасываем 3D
+            # Spray / hands / нет выбора — сбрасываем 3D
             self.preview_panel.reset_3d_preview()
             return
 

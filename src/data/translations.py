@@ -148,6 +148,7 @@ TRANSLATIONS = {
         # 3D Preview
         '3d_prompt_weapon':    'Выберите оружие и нажмите кнопку ▶ чтобы загрузить модель',
         '3d_prompt_smd':       'Нажмите ▶ и выберите SMD файл',
+        '3d_prompt_crithit':   'Перейдите в режим 3D — солдат появится автоматически',
         '3d_preparing':        'Подготовка 3D модели...',
         '3d_converting_smd':   'Конвертация SMD...',
         '3d_analyzing_vpk':    'Анализ VPK мода...',
@@ -429,6 +430,7 @@ TRANSLATIONS = {
         # 3D Preview
         '3d_prompt_weapon':    'Select a weapon and click ▶ to load the model',
         '3d_prompt_smd':       'Click ▶ and select an SMD file',
+        '3d_prompt_crithit':   'Switch to 3D tab — the soldier will appear automatically',
         '3d_preparing':        'Preparing 3D model...',
         '3d_converting_smd':   'Converting SMD...',
         '3d_analyzing_vpk':    'Analyzing VPK mod...',
