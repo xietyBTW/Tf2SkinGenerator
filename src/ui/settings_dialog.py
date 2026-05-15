@@ -1,280 +1,474 @@
 """
-Диалог настроек приложения
+Диалог настроек приложения — минималистичный дизайн.
 """
 
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
-    QLineEdit, QFileDialog, QComboBox, QCheckBox
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+    QLineEdit, QFileDialog, QComboBox, QCheckBox, QWidget, QFrame,
+    QScrollArea,
 )
-from PySide6.QtCore import Qt, QUrl
+from PySide6.QtCore import Qt, QUrl, QSize
 from PySide6.QtGui import QDesktopServices
 from src.config.app_config import AppConfig
-from src.utils.themes import get_modern_styles
 from src.shared.logging_config import get_logger
 
 logger = get_logger(__name__)
 
+# ── Токены дизайна ────────────────────────────────────────────────────────── #
+_BG       = "#161616"
+_SURFACE  = "#1d1d1d"
+_BORDER   = "#262626"
+_BORDER_H = "#383838"
+_TEXT     = "#c0c0c0"
+_TEXT_DIM = "#484848"
+_TEXT_SUB = "#666"
+_ACCENT   = "#cc5522"    # кнопка Save
+_FH       = 34           # высота полей/кнопок
+
+
+# ── Вспомогательные фабрики виджетов ─────────────────────────────────────── #
+
+def _section_header(text: str) -> QLabel:
+    lbl = QLabel(text)
+    lbl.setStyleSheet(
+        f"color: {_TEXT_DIM}; font-size: 10px; font-weight: 700; "
+        f"letter-spacing: 0.10em; background: transparent; border: none;"
+    )
+    return lbl
+
+
+def _divider() -> QFrame:
+    line = QFrame()
+    line.setFrameShape(QFrame.HLine)
+    line.setFixedHeight(1)
+    line.setStyleSheet(f"background: {_BORDER}; border: none;")
+    return line
+
+
+def _field_label(text: str) -> QLabel:
+    lbl = QLabel(text)
+    lbl.setStyleSheet(
+        f"color: {_TEXT_SUB}; font-size: 11.5px; background: transparent; border: none;"
+    )
+    return lbl
+
+
+_FIELD_STYLE = f"""
+    QLineEdit {{
+        background: rgba(255,255,255,0.03);
+        color: {_TEXT};
+        border: 1px solid {_BORDER};
+        border-radius: 4px;
+        padding: 0 10px;
+        font-size: 12px;
+        selection-background-color: #444;
+    }}
+    QLineEdit:hover  {{ border-color: {_BORDER_H}; }}
+    QLineEdit:focus  {{ border-color: #404040; background: rgba(255,255,255,0.045); }}
+    QLineEdit::placeholder {{ color: #383838; }}
+"""
+
+_COMBO_STYLE = f"""
+    QComboBox {{
+        background: rgba(255,255,255,0.03);
+        color: #888;
+        border: 1px solid {_BORDER};
+        border-radius: 4px;
+        padding: 0 10px;
+        font-size: 12px;
+        min-height: {_FH}px;
+        max-height: {_FH}px;
+    }}
+    QComboBox:hover {{ border-color: {_BORDER_H}; color: #aaa; }}
+    QComboBox:on    {{ border-color: #404040; background: rgba(255,255,255,0.045); color: #aaa; }}
+    QComboBox::drop-down {{ border: none; width: 26px; }}
+    QComboBox::down-arrow {{
+        image: none;
+        border-left:  4px solid transparent;
+        border-right: 4px solid transparent;
+        border-top:   5px solid #484848;
+        margin-right: 10px;
+    }}
+    QComboBox QAbstractItemView {{
+        background: #181818;
+        color: #888;
+        border: 1px solid #303030;
+        selection-background-color: #242424;
+        selection-color: #c0c0c0;
+        outline: none;
+        padding: 2px 0;
+    }}
+    QComboBox QAbstractItemView::item {{
+        min-height: 28px;
+        padding: 0 10px;
+        border: none;
+    }}
+    QComboBox QAbstractItemView::item:hover {{
+        background: #202020;
+        color: #b0b0b0;
+    }}
+"""
+
+_BROWSE_STYLE = f"""
+    QPushButton {{
+        background: rgba(255,255,255,0.03);
+        color: #555;
+        border: 1px solid {_BORDER};
+        border-radius: 4px;
+        font-size: 14px;
+        padding: 0;
+    }}
+    QPushButton:hover  {{ background: rgba(255,255,255,0.06); border-color: {_BORDER_H}; color: #888; }}
+    QPushButton:pressed {{ background: rgba(255,255,255,0.09); }}
+"""
+
+_CHECK_STYLE = f"""
+    QCheckBox {{
+        color: {_TEXT_SUB};
+        font-size: 12px;
+        spacing: 8px;
+        background: transparent;
+        border: none;
+    }}
+    QCheckBox::indicator {{
+        width: 14px; height: 14px;
+        border: 1px solid {_BORDER_H};
+        border-radius: 3px;
+        background: rgba(255,255,255,0.03);
+    }}
+    QCheckBox::indicator:checked {{
+        background: #404040;
+        border-color: #555;
+    }}
+    QCheckBox:hover {{ color: {_TEXT}; }}
+"""
+
+
+def _line_edit(placeholder: str = "") -> QLineEdit:
+    w = QLineEdit()
+    w.setPlaceholderText(placeholder)
+    w.setFixedHeight(_FH)
+    w.setStyleSheet(_FIELD_STYLE)
+    return w
+
+
+def _combo() -> QComboBox:
+    w = QComboBox()
+    w.setFixedHeight(_FH)
+    w.setFixedWidth(150)
+    w.setStyleSheet(_COMBO_STYLE)
+    return w
+
+
+def _browse_btn() -> QPushButton:
+    btn = QPushButton("···")
+    btn.setFixedSize(_FH, _FH)
+    btn.setStyleSheet(_BROWSE_STYLE)
+    btn.setCursor(Qt.PointingHandCursor)
+    return btn
+
+
+def _pref_row(label_text: str, control: QWidget) -> QHBoxLayout:
+    """Горизонтальная строка: подпись слева, контрол справа."""
+    row = QHBoxLayout()
+    row.setContentsMargins(0, 0, 0, 0)
+    row.setSpacing(12)
+    lbl = QLabel(label_text)
+    lbl.setStyleSheet(
+        f"color: {_TEXT_SUB}; font-size: 12px; background: transparent; border: none;"
+    )
+    row.addWidget(lbl)
+    row.addStretch()
+    row.addWidget(control)
+    return row
+
+
+# ── Основной класс ────────────────────────────────────────────────────────── #
+
 class SettingsDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        # Устанавливаем заголовок окна после инициализации переводов
-        # Заголовок будет обновлен в init_ui
-        self.setMinimumWidth(500)
-        self.styles = get_modern_styles()
-        self.config = AppConfig.load_config()
-        # Инициализация переводов
         from src.data.translations import TRANSLATIONS
+        self.config = AppConfig.load_config()
         current_lang = self.config.get('language') or 'en'
         self.t = TRANSLATIONS[current_lang]
-        
-        self.init_ui()
+
+        self.setWindowTitle(self.t.get('settings_title', 'Settings'))
+        self.setFixedWidth(480)
+        self.setStyleSheet(f"QDialog {{ background: {_BG}; }}")
+
+        self._init_ui()
         self.load_settings()
-    
-    def init_ui(self):
-        """Инициализация UI"""
-        layout = QVBoxLayout(self)
-        layout.setSpacing(12)
-        layout.setContentsMargins(20, 20, 20, 20)
-        
-        # Устанавливаем заголовок окна
-        self.setWindowTitle(self.t['settings_title'])
-        
-        # Заголовок
-        title_label = QLabel(self.t['settings_title'])
-        title_label.setStyleSheet("""
-            font-size: 18px;
-            font-weight: 600;
-            color: #fff;
-            padding-bottom: 16px;
-            border-bottom: 1px solid #333;
+
+    # ── Построение UI ─────────────────────────────────────────────────────── #
+
+    def _init_ui(self):
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        root.addWidget(self._build_header())
+        root.addWidget(self._build_body())
+        root.addWidget(self._build_footer())
+
+    def _build_header(self) -> QWidget:
+        w = QWidget()
+        w.setFixedHeight(52)
+        w.setStyleSheet(f"""
+            QWidget {{
+                background: {_BG};
+                border-bottom: 1px solid {_BORDER};
+            }}
         """)
-        layout.addWidget(title_label)
-        
-        # TF2 Game Folder
-        tf2_label = QLabel(self.t['tf2_folder_label'])
-        tf2_label.setStyleSheet("font-weight: 500; font-size: 13px; color: #ccc; margin-top: 4px;")
-        layout.addWidget(tf2_label)
-        
-        tf2_game_layout = QHBoxLayout()
-        self.tf2_game_path = QLineEdit()
-        self.tf2_game_path.setPlaceholderText(self.t['tf2_folder_placeholder'])
-        self.tf2_game_path.setStyleSheet(self.styles['line_edit'])
-        self.tf2_game_path.setMinimumHeight(40)
-        
-        tf2_game_browse = QPushButton(self.t['browse'])
-        tf2_game_browse.setStyleSheet(self.styles['button_secondary'])
-        tf2_game_browse.setMinimumHeight(40)
-        tf2_game_browse.clicked.connect(self.browse_tf2_game_folder)
-        
-        tf2_game_layout.addWidget(self.tf2_game_path)
-        tf2_game_layout.addWidget(tf2_game_browse)
-        layout.addLayout(tf2_game_layout)
-        
-        # Export Folder
-        export_label = QLabel(self.t.get('export_folder_label', 'Export Folder'))
-        export_label.setStyleSheet("font-weight: 500; font-size: 13px; color: #ccc; margin-top: 8px;")
-        layout.addWidget(export_label)
-        
-        export_folder_layout = QHBoxLayout()
-        self.export_folder_path = QLineEdit()
-        self.export_folder_path.setPlaceholderText(self.t.get('export_folder_placeholder', 'Select export folder'))
-        self.export_folder_path.setStyleSheet(self.styles['line_edit'])
-        self.export_folder_path.setMinimumHeight(40)
-        
-        export_folder_browse = QPushButton(self.t['browse'])
-        export_folder_browse.setStyleSheet(self.styles['button_secondary'])
-        export_folder_browse.setMinimumHeight(40)
-        export_folder_browse.clicked.connect(self.browse_export_folder)
-        
-        export_folder_layout.addWidget(self.export_folder_path)
-        export_folder_layout.addWidget(export_folder_browse)
-        layout.addLayout(export_folder_layout)
-        
-        # Формат экспорта изображения
-        export_format_label = QLabel(self.t.get('export_image_format_label', 'Export Image Format'))
-        export_format_label.setStyleSheet("font-weight: 500; font-size: 13px; color: #ccc; margin-top: 8px;")
-        layout.addWidget(export_format_label)
-        
-        self.export_format_combo = QComboBox()
-        self.export_format_combo.addItem("VTF", "VTF")
-        self.export_format_combo.addItem("PNG", "PNG")
-        self.export_format_combo.addItem("TGA", "TGA")
-        self.export_format_combo.addItem("JPG", "JPG")
-        self.export_format_combo.setStyleSheet(self.styles['combo'])
-        self.export_format_combo.setMinimumHeight(40)
-        layout.addWidget(self.export_format_combo)
-        
-        # Выбор языка
-        lang_label = QLabel(self.t['language_label'])
-        lang_label.setStyleSheet("font-weight: 500; font-size: 13px; color: #ccc; margin-top: 8px;")
-        layout.addWidget(lang_label)
-        
-        self.language_combo = QComboBox()
+        lay = QHBoxLayout(w)
+        lay.setContentsMargins(24, 0, 24, 0)
+
+        title = QLabel(self.t.get('settings_title', 'Settings'))
+        title.setStyleSheet(
+            f"color: {_TEXT}; font-size: 13px; font-weight: 600; "
+            "border: none; background: transparent;"
+        )
+        lay.addWidget(title)
+        lay.addStretch()
+        return w
+
+    def _build_body(self) -> QWidget:
+        w = QWidget()
+        w.setStyleSheet(f"background: {_BG};")
+        lay = QVBoxLayout(w)
+        lay.setContentsMargins(24, 22, 24, 22)
+        lay.setSpacing(0)
+
+        # ── Пути ─────────────────────────────────────────────────────────── #
+        lay.addWidget(_section_header(self.t.get('section_paths', 'PATHS')))
+        lay.addSpacing(12)
+
+        lay.addWidget(_field_label(self.t.get('tf2_folder_label', 'TF2 Game Folder')))
+        lay.addSpacing(5)
+        tf2_row = QHBoxLayout()
+        tf2_row.setSpacing(6)
+        self.tf2_game_path = _line_edit(self.t.get('tf2_folder_placeholder', 'Path to TF2'))
+        self._tf2_browse = _browse_btn()
+        self._tf2_browse.clicked.connect(self.browse_tf2_game_folder)
+        tf2_row.addWidget(self.tf2_game_path)
+        tf2_row.addWidget(self._tf2_browse)
+        lay.addLayout(tf2_row)
+        lay.addSpacing(12)
+
+        lay.addWidget(_field_label(self.t.get('export_folder_label', 'Export Folder')))
+        lay.addSpacing(5)
+        exp_row = QHBoxLayout()
+        exp_row.setSpacing(6)
+        self.export_folder_path = _line_edit(self.t.get('export_folder_placeholder', 'Select export folder'))
+        self._exp_browse = _browse_btn()
+        self._exp_browse.clicked.connect(self.browse_export_folder)
+        exp_row.addWidget(self.export_folder_path)
+        exp_row.addWidget(self._exp_browse)
+        lay.addLayout(exp_row)
+
+        lay.addSpacing(22)
+        lay.addWidget(_divider())
+        lay.addSpacing(22)
+
+        # ── Настройки ────────────────────────────────────────────────────── #
+        lay.addWidget(_section_header(self.t.get('section_preferences', 'PREFERENCES')))
+        lay.addSpacing(12)
+
+        self.language_combo = _combo()
         self.language_combo.addItem("Русский", "ru")
         self.language_combo.addItem("English", "en")
-        self.language_combo.setStyleSheet(self.styles['combo'])
-        self.language_combo.setMinimumHeight(40)
-        layout.addWidget(self.language_combo)
-        
-        # Выбор темы
-        theme_label = QLabel(self.t.get('theme_label', 'Theme'))
-        theme_label.setStyleSheet("font-weight: 500; font-size: 13px; color: #ccc; margin-top: 8px;")
-        layout.addWidget(theme_label)
-        
-        self.theme_combo = QComboBox()
+        lay.addLayout(_pref_row(self.t.get('language_label', 'Language'), self.language_combo))
+        lay.addSpacing(10)
+
+        self.export_format_combo = _combo()
+        for fmt in ("VTF", "PNG", "TGA", "JPG"):
+            self.export_format_combo.addItem(fmt, fmt)
+        lay.addLayout(_pref_row(
+            self.t.get('export_image_format_label', 'Export Format'),
+            self.export_format_combo,
+        ))
+        lay.addSpacing(10)
+
+        self.theme_combo = _combo()
         self.theme_combo.addItem(self.t.get('theme_dark', 'Dark'), "dark")
         self.theme_combo.addItem(self.t.get('theme_blue', 'Blue'), "blue")
-        self.theme_combo.setStyleSheet(self.styles['combo'])
-        self.theme_combo.setMinimumHeight(40)
-        layout.addWidget(self.theme_combo)
-        
-        # Кнопка поддержки
-        support_label = QLabel(self.t.get('support_header', 'Support'))
-        support_label.setStyleSheet("font-weight: 500; font-size: 13px; color: #ccc; margin-top: 8px;")
-        layout.addWidget(support_label)
-        # Ссылка на поддержку
-        support_btn = QPushButton(self.t['support'])
-        support_btn.setCursor(Qt.PointingHandCursor)
-        support_btn.setStyleSheet("text-align: left; padding: 5px; color: #aaa;")
-        support_btn.clicked.connect(self.open_support_link)
-        layout.addWidget(support_btn)
+        lay.addLayout(_pref_row(self.t.get('theme_label', 'Theme'), self.theme_combo))
 
-        # Разделитель
-        layout.addWidget(QLabel(""))
+        lay.addSpacing(22)
+        lay.addWidget(_divider())
+        lay.addSpacing(22)
 
-        # Настройки отладки
-        self.keep_temp_checkbox = QCheckBox(self.t['keep_temp_files'])
-        self.keep_temp_checkbox.setStyleSheet("color: #ccc;")
-        layout.addWidget(self.keep_temp_checkbox)
-        
-        self.debug_mode_checkbox = QCheckBox(self.t['debug_mode'])
-        self.debug_mode_checkbox.setStyleSheet("color: #ccc;")
-        layout.addWidget(self.debug_mode_checkbox)
-        
-        layout.addStretch()
-        
-        # Кнопки
-        buttons_layout = QHBoxLayout()
-        buttons_layout.addStretch()
-        
-        self.cancel_button = QPushButton(self.t['cancel'])
-        self.cancel_button.setStyleSheet(self.styles['button_secondary'])
-        self.cancel_button.setMinimumHeight(40)
+        # ── Разработчик ──────────────────────────────────────────────────── #
+        lay.addWidget(_section_header(self.t.get('section_developer', 'DEVELOPER')))
+        lay.addSpacing(12)
+
+        self.keep_temp_checkbox = QCheckBox(self.t.get('keep_temp_files', 'Keep temp files'))
+        self.keep_temp_checkbox.setStyleSheet(_CHECK_STYLE)
+        lay.addWidget(self.keep_temp_checkbox)
+        lay.addSpacing(8)
+
+        self.debug_mode_checkbox = QCheckBox(self.t.get('debug_mode', 'Debug mode'))
+        self.debug_mode_checkbox.setStyleSheet(_CHECK_STYLE)
+        lay.addWidget(self.debug_mode_checkbox)
+
+        lay.addSpacing(22)
+        lay.addWidget(_divider())
+        lay.addSpacing(18)
+
+        # ── Поддержка ────────────────────────────────────────────────────── #
+        supp_row = QHBoxLayout()
+        supp_row.setContentsMargins(0, 0, 0, 0)
+        supp_lbl = QLabel(self.t.get('support_header', 'Support'))
+        supp_lbl.setStyleSheet(
+            f"color: {_TEXT_DIM}; font-size: 11.5px; background: transparent; border: none;"
+        )
+        supp_btn = QPushButton(self.t.get('support', 'Open link'))
+        supp_btn.setCursor(Qt.PointingHandCursor)
+        supp_btn.setStyleSheet(f"""
+            QPushButton {{
+                color: #4e7baa;
+                background: transparent;
+                border: none;
+                font-size: 11.5px;
+                padding: 0;
+            }}
+            QPushButton:hover {{ color: #6a9ece; text-decoration: underline; }}
+        """)
+        supp_btn.clicked.connect(self.open_support_link)
+        supp_row.addWidget(supp_lbl)
+        supp_row.addStretch()
+        supp_row.addWidget(supp_btn)
+        lay.addLayout(supp_row)
+
+        lay.addStretch()
+        return w
+
+    def _build_footer(self) -> QWidget:
+        w = QWidget()
+        w.setFixedHeight(60)
+        w.setStyleSheet(f"""
+            QWidget {{
+                background: {_SURFACE};
+                border-top: 1px solid {_BORDER};
+            }}
+        """)
+        lay = QHBoxLayout(w)
+        lay.setContentsMargins(24, 0, 24, 0)
+        lay.setSpacing(8)
+        lay.addStretch()
+
+        self.cancel_button = QPushButton(self.t.get('cancel', 'Cancel'))
+        self.cancel_button.setFixedHeight(_FH)
+        self.cancel_button.setMinimumWidth(80)
+        self.cancel_button.setCursor(Qt.PointingHandCursor)
+        self.cancel_button.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent;
+                color: #606060;
+                border: 1px solid {_BORDER};
+                border-radius: 4px;
+                font-size: 12px;
+                padding: 0 16px;
+            }}
+            QPushButton:hover  {{ border-color: {_BORDER_H}; color: #888; }}
+            QPushButton:pressed {{ background: rgba(255,255,255,0.04); }}
+        """)
         self.cancel_button.clicked.connect(self.reject)
-        buttons_layout.addWidget(self.cancel_button)
-        
-        self.save_button = QPushButton(self.t['save'])
-        self.save_button.setStyleSheet(self.styles['button_primary'])
-        self.save_button.setMinimumHeight(40)
+        lay.addWidget(self.cancel_button)
+
+        self.save_button = QPushButton(self.t.get('save', 'Save'))
+        self.save_button.setFixedHeight(_FH)
+        self.save_button.setMinimumWidth(80)
+        self.save_button.setCursor(Qt.PointingHandCursor)
+        self.save_button.setStyleSheet(f"""
+            QPushButton {{
+                background: {_ACCENT};
+                color: #fff;
+                border: none;
+                border-radius: 4px;
+                font-size: 12px;
+                font-weight: 600;
+                padding: 0 16px;
+            }}
+            QPushButton:hover  {{ background: #d95f28; }}
+            QPushButton:pressed {{ background: #c05020; }}
+        """)
         self.save_button.clicked.connect(self.save_settings)
-        buttons_layout.addWidget(self.save_button)
-        
-        layout.addLayout(buttons_layout)
-    
+        lay.addWidget(self.save_button)
+
+        return w
+
+    # ── Логика ───────────────────────────────────────────────────────────── #
+
     def browse_tf2_game_folder(self):
-        """Выбор корневой папки TF2"""
         folder = QFileDialog.getExistingDirectory(
             self,
-            self.t['tf2_folder_placeholder'],
-            self.tf2_game_path.text() if self.tf2_game_path.text() else ""
+            self.t.get('tf2_folder_placeholder', 'Select TF2 folder'),
+            self.tf2_game_path.text() or "",
         )
         if folder:
             self.tf2_game_path.setText(folder)
-    
+
     def browse_export_folder(self):
-        """Выбор папки для экспорта"""
         folder = QFileDialog.getExistingDirectory(
             self,
             self.t.get('export_folder_placeholder', 'Select export folder'),
-            self.export_folder_path.text() if self.export_folder_path.text() else ""
+            self.export_folder_path.text() or "",
         )
         if folder:
             self.export_folder_path.setText(folder)
-    
+
     def load_settings(self):
-        """Загружает настройки из конфига"""
         tf2_path = self.config.get("tf2_game_folder", "")
         if tf2_path:
             self.tf2_game_path.setText(tf2_path)
-        
-        # Export folder
+
         export_path = self.config.get("export_folder", "export")
-        if export_path:
-            self.export_folder_path.setText(export_path)
-        
-        # Export format
-        export_format = self.config.get("export_image_format", "PNG")
-        index = self.export_format_combo.findData(export_format)
-        if index >= 0:
-            self.export_format_combo.setCurrentIndex(index)
-        
-        # Язык
-        current_lang = self.config.get('language', 'en')
-        index = self.language_combo.findData(current_lang)
-        if index >= 0:
-            self.language_combo.setCurrentIndex(index)
-        
-        # Тема
-        current_theme = self.config.get('theme', 'dark')
-        index = self.theme_combo.findData(current_theme)
-        if index >= 0:
-            self.theme_combo.setCurrentIndex(index)
-            
-        # Настройки отладки
-        self.keep_temp_checkbox.setChecked(self.config.get('keep_temp_files', False))
-        self.debug_mode_checkbox.setChecked(self.config.get('debug_mode', False))
-    
+        self.export_folder_path.setText(export_path)
+
+        idx = self.export_format_combo.findData(self.config.get("export_image_format", "PNG"))
+        if idx >= 0:
+            self.export_format_combo.setCurrentIndex(idx)
+
+        idx = self.language_combo.findData(self.config.get("language", "en"))
+        if idx >= 0:
+            self.language_combo.setCurrentIndex(idx)
+
+        idx = self.theme_combo.findData(self.config.get("theme", "dark"))
+        if idx >= 0:
+            self.theme_combo.setCurrentIndex(idx)
+
+        self.keep_temp_checkbox.setChecked(self.config.get("keep_temp_files", False))
+        self.debug_mode_checkbox.setChecked(self.config.get("debug_mode", False))
+
     def save_settings(self):
-        """Сохраняет настройки"""
-        # Сохраняем путь TF2
-        path = self.tf2_game_path.text().strip()
-        self.config['tf2_game_folder'] = path
-        
-        # Сохраняем путь export
-        export_path = self.export_folder_path.text().strip()
-        if export_path:
-            self.config['export_folder'] = export_path
-        else:
-            self.config['export_folder'] = "export"
-        
-        # Сохраняем формат экспорта
-        export_format = self.export_format_combo.currentData()
-        self.config['export_image_format'] = export_format
-        
-        # Сохраняем язык
-        selected_lang = self.language_combo.currentData()
-        self.config['language'] = selected_lang
-        
-        # Сохраняем тему
-        selected_theme = self.theme_combo.currentData()
-        self.config['theme'] = selected_theme
-        
-        # Сохраняем настройки отладки
-        self.config['keep_temp_files'] = self.keep_temp_checkbox.isChecked()
-        self.config['debug_mode'] = self.debug_mode_checkbox.isChecked()
-        
-        # Сохраняем в файл
+        self.config["tf2_game_folder"]  = self.tf2_game_path.text().strip()
+        self.config["export_folder"]    = self.export_folder_path.text().strip() or "export"
+        self.config["export_image_format"] = self.export_format_combo.currentData()
+        self.config["language"]         = self.language_combo.currentData()
+        self.config["theme"]            = self.theme_combo.currentData()
+        self.config["keep_temp_files"]  = self.keep_temp_checkbox.isChecked()
+        self.config["debug_mode"]       = self.debug_mode_checkbox.isChecked()
+
         AppConfig.save_config(self.config)
-        
-        # Применяем язык немедленно
+
+        # Применяем язык
         if hasattr(self.parent(), 'change_language_from_combo'):
             self.parent().change_language_from_combo(self.language_combo.currentIndex())
-        
-        # Применяем тему немедленно
+
+        # Применяем тему
         from src.utils.themes import apply_theme
         from PySide6.QtWidgets import QApplication
         app = QApplication.instance()
         if app:
-            apply_theme(app, selected_theme)
-            logger.info(f"Тема изменена на: {selected_theme}")
-        
-        self.accept()
-    
-    def open_support_link(self):
-        """Открывает ссылку поддержки"""
-        QDesktopServices.openUrl(QUrl("https://steamcommunity.com/tradeoffer/new/?partner=394814324&token=GNGCagXk"))
-    
-    def get_tf2_path(self):
-        """Возвращает путь к TF2"""
-        return self.tf2_game_path.text().strip()
+            apply_theme(app, self.config["theme"])
 
+        self.accept()
+
+    def open_support_link(self):
+        QDesktopServices.openUrl(
+            QUrl("https://steamcommunity.com/tradeoffer/new/?partner=394814324&token=GNGCagXk")
+        )
+
+    def get_tf2_path(self) -> str:
+        return self.tf2_game_path.text().strip()

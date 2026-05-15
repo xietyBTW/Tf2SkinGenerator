@@ -303,7 +303,6 @@ class SettingsPanel(QWidget):
             "UVLX8888"
         ])
         self.format_combo.setStyleSheet(self.styles['combo'])
-        self.format_combo.setMinimumHeight(40)
         self.format_combo.setMinimumWidth(0)
         self.format_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         main_settings_layout.addWidget(self.format_combo)

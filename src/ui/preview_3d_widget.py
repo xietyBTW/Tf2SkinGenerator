@@ -330,10 +330,46 @@ class _Fallback3DWidget:
 
 # ── Утилита ──────────────────────────────────────────────────────────────── #
 
-def _file_to_data_url(path: str, mime: str = "image/png") -> str:
-    """Читает файл и возвращает data URL (base64)."""
-    with open(path, "rb") as f:
-        data = f.read()
+def _file_to_data_url(path: str) -> str:
+    """
+    Читает файл изображения и возвращает data URL (base64).
+
+    Автоматически определяет MIME-тип по расширению.
+    Форматы без нативной поддержки в браузере (TGA, BMP и пр.)
+    конвертируются в PNG через PIL перед кодированием.
+    """
+    ext = os.path.splitext(path)[1].lower()
+
+    # Форматы с нативной поддержкой в Chromium/WebEngine
+    _NATIVE = {
+        '.png':  'image/png',
+        '.jpg':  'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.webp': 'image/webp',
+        '.gif':  'image/gif',
+    }
+
+    if ext in _NATIVE:
+        mime = _NATIVE[ext]
+        with open(path, "rb") as f:
+            data = f.read()
+    else:
+        # TGA, BMP, VTF и прочие → конвертируем в PNG через PIL
+        try:
+            from PIL import Image
+            import io
+            img = Image.open(path).convert("RGBA")
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            data = buf.getvalue()
+            mime = "image/png"
+        except Exception as exc:
+            logger.warning(f"Не удалось конвертировать {path} в PNG для 3D viewer: {exc}")
+            # Последний шанс — читаем как есть и надеемся на png
+            with open(path, "rb") as f:
+                data = f.read()
+            mime = "image/png"
+
     b64 = base64.b64encode(data).decode("ascii")
     return f"data:{mime};base64,{b64}"
 
