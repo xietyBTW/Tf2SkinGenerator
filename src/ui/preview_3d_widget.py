@@ -184,16 +184,33 @@ class _Real3DWidget:
         )
         self._view.page().runJavaScript(js)
 
-    def load_crithit_scene(self, crit_tex_path: str = "") -> None:
-        """Загружает CritHIT сцену: процедурный солдат + billboard с текстурой крита."""
+    def load_crithit_scene(self, crit_tex_path: str = "", model_tex_path: str = "") -> None:
+        """Загружает CritHIT сцену: процедурный солдат + billboard с текстурой крита.
+
+        Args:
+            crit_tex_path:  путь к PNG текстуры критического удара (billboard над головой)
+            model_tex_path: путь к текстуре самого персонажа (накладывается на боксы солдата)
+        """
         if not self._ready:
             return
-        data_url = _file_to_data_url(crit_tex_path) if crit_tex_path and os.path.exists(crit_tex_path) else ""
-        js = f"window.loadCritHitScene({json.dumps(data_url)})"
+        crit_url  = _file_to_data_url(crit_tex_path)  if crit_tex_path  and os.path.exists(crit_tex_path)  else ""
+        model_url = _file_to_data_url(model_tex_path) if model_tex_path and os.path.exists(model_tex_path) else ""
+        js = f"window.loadCritHitScene({json.dumps(crit_url)}, {json.dumps(model_url)})"
         self._view.page().runJavaScript(js)
 
-    def load_crithit_scene_with_model(self, obj_path: str, crit_tex_path: str = "") -> None:
-        """CritHIT сцена с пользовательской OBJ-моделью вместо процедурного солдата."""
+    def load_crithit_scene_with_model(
+        self,
+        obj_path: str,
+        crit_tex_path: str = "",
+        model_tex_path: str = "",
+    ) -> None:
+        """CritHIT сцена с пользовательской OBJ-моделью вместо процедурного солдата.
+
+        Args:
+            obj_path:       путь к OBJ файлу модели персонажа
+            crit_tex_path:  путь к PNG текстуры критического удара (billboard)
+            model_tex_path: путь к текстуре самого персонажа
+        """
         if not self._ready:
             return
         try:
@@ -201,17 +218,18 @@ class _Real3DWidget:
                 obj_content = f.read()
         except Exception as exc:
             logger.warning(f"Не удалось прочитать кастомную модель {obj_path}: {exc}")
-            # Fallback to procedural soldier
-            self.load_crithit_scene(crit_tex_path)
+            self.load_crithit_scene(crit_tex_path, model_tex_path)
             return
 
         cx, cy, cz, scale = _compute_obj_bounds(obj_content)
-        data_url = _file_to_data_url(crit_tex_path) if crit_tex_path and os.path.exists(crit_tex_path) else ""
+        crit_url  = _file_to_data_url(crit_tex_path)  if crit_tex_path  and os.path.exists(crit_tex_path)  else ""
+        model_url = _file_to_data_url(model_tex_path) if model_tex_path and os.path.exists(model_tex_path) else ""
         js = (
             f"window.loadCritHitSceneWithModel("
             f"{json.dumps(obj_content)}, "
-            f"{json.dumps(data_url)}, "
-            f"{cx:.6f}, {cy:.6f}, {cz:.6f}, {scale:.6f}"
+            f"{json.dumps(crit_url)}, "
+            f"{cx:.6f}, {cy:.6f}, {cz:.6f}, {scale:.6f}, "
+            f"{json.dumps(model_url)}"
             f")"
         )
         self._view.page().runJavaScript(js)
@@ -302,8 +320,8 @@ class _Fallback3DWidget:
     def load_model_files(self, *_): pass
     def update_texture_file(self, *_): pass
     def update_animated_texture_files(self, *_): pass
-    def load_crithit_scene(self, *_): pass
-    def load_crithit_scene_with_model(self, *_): pass
+    def load_crithit_scene(self, crit_tex_path: str = "", model_tex_path: str = ""): pass
+    def load_crithit_scene_with_model(self, obj_path: str, crit_tex_path: str = "", model_tex_path: str = ""): pass
     def update_crithit_texture(self, *_): pass
     def show_loading(self, *_): pass
     def show_error(self, text=""): pass
