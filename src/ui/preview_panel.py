@@ -33,6 +33,7 @@ class PreviewPanel(QWidget):
         self._pending_3d_params = None  # (weapon_key, mode, misc_vpk, textures_vpk)
         self._custom_smd_mode = False   # True когда режим замены модели (кастомный SMD)
         self._crithit_mode = False      # True в режиме CritHIT (персонаж + billboard)
+        self._crithit_class = 'soldier' # Класс персонажа для CritHIT (scout/soldier/…)
 
         # Командные раскраски (RED / BLU)
         self._red_frame_paths: list = []
@@ -466,60 +467,109 @@ class PreviewPanel(QWidget):
     def _render_crithit_scene(self) -> None:
         """Передаёт текущее изображение в JS для отрисовки CritHIT сцены.
 
-        Если в корне проекта есть crithit_model.obj / crithit_model.smd —
-        использует его. Иначе рисует процедурного солдата из BoxGeometry.
+        Ищет модель и текстуру персонажа в tools/Model/<class>/.
+        Если в папке класса пусто — строит процедурного солдата из BoxGeometry.
         """
         if not self._3d_widget or not self._3d_available:
             return
-        tex_path = self.image_path or ""
-        custom = self._find_crithit_custom_model()
-        if custom:
-            if custom.lower().endswith('.smd'):
-                # Конвертируем SMD → OBJ (быстро, в основном потоке)
+
+        crit_tex_path = self.image_path or ""
+        class_name    = getattr(self, '_crithit_class', 'soldier')
+        custom_model, model_tex_path = self._find_crithit_custom_model(class_name)
+
+        # VTF модельной текстуры конвертируем в PNG
+        if model_tex_path.lower().endswith('.vtf'):
+            model_tex_path = self._convert_model_vtf(model_tex_path)
+
+        if custom_model:
+            if custom_model.lower().endswith('.smd'):
                 import tempfile
                 from src.services.smd_to_obj_service import SmdToObjService
                 self._3d_widget.show_loading("Converting custom model...")
-                tmp = tempfile.mkdtemp(prefix="tf2_crithit_")
                 import os as _os
+                tmp = tempfile.mkdtemp(prefix="tf2_crithit_")
                 obj_path = _os.path.join(tmp, "model.obj")
-                ok = SmdToObjService.convert(custom, obj_path)
+                ok = SmdToObjService.convert(custom_model, obj_path)
                 if ok and _os.path.exists(obj_path):
-                    self._3d_widget.load_crithit_scene_with_model(obj_path, tex_path)
+                    self._3d_widget.load_crithit_scene_with_model(obj_path, crit_tex_path, model_tex_path)
                 else:
-                    logger.warning(f"SMD конвертация не удалась для {custom}, использую процедурного солдата")
-                    self._3d_widget.load_crithit_scene(tex_path)
+                    logger.warning(f"SMD конвертация не удалась для {custom_model}, использую процедурного солдата")
+                    self._3d_widget.load_crithit_scene(crit_tex_path, model_tex_path)
             else:
-                # OBJ — передаём напрямую
-                self._3d_widget.load_crithit_scene_with_model(custom, tex_path)
+                self._3d_widget.load_crithit_scene_with_model(custom_model, crit_tex_path, model_tex_path)
         else:
-            self._3d_widget.load_crithit_scene(tex_path)
+            self._3d_widget.load_crithit_scene(crit_tex_path, model_tex_path)
 
     # ── Поиск кастомной модели CritHIT ──────────────────────────────────── #
 
     @staticmethod
-    def _find_crithit_custom_model() -> str:
+    def _find_crithit_custom_model(class_name: str = 'soldier') -> tuple:
         """
-        Ищет пользовательскую модель для CritHIT в корне проекта.
+        Ищет модель и текстуру персонажа для CritHIT.
 
-        Поддерживаемые файлы (в порядке приоритета):
-          crithit_model.obj / crithit_model.smd / soldier_preview.obj / soldier_preview.smd
+        Порядок поиска:
+          1. tools/Model/<class_name>/  — папка выбранного класса
+          2. tools/Model/               — корневая папка (обратная совместимость)
 
-        Возвращает полный путь к найденному файлу или пустую строку.
+        Поддерживаемые модели:   .obj, .smd
+        Поддерживаемые текстуры: .png, .jpg, .jpeg, .bmp, .tga, .vtf, .webp
+
+        Возвращает (model_path, texture_path) — оба могут быть пустой строкой.
         """
         import os as _os
-        # Поднимаемся из src/ui/ до корня проекта
         here = _os.path.dirname(_os.path.abspath(__file__))
         project_root = _os.path.dirname(_os.path.dirname(here))
-        model_dir = _os.path.join(project_root, "tools", "Model")
+        model_root = _os.path.join(project_root, "tools", "Model")
 
-        # Ищем любой OBJ или SMD файл в папке tools/Model
-        if _os.path.isdir(model_dir):
-            for name in sorted(_os.listdir(model_dir)):
-                if name.lower().endswith(('.obj', '.smd')):
-                    path = _os.path.join(model_dir, name)
-                    logger.info(f"CritHIT: найдена модель в tools/Model: {path}")
-                    return path
-        return ""
+        MODEL_EXTS   = ('.obj', '.smd')
+        TEXTURE_EXTS = ('.png', '.jpg', '.jpeg', '.bmp', '.tga', '.vtf', '.webp')
+
+        def _scan(folder: str) -> tuple:
+            if not _os.path.isdir(folder):
+                return "", ""
+            model_path = tex_path = ""
+            for name in sorted(_os.listdir(folder)):
+                if name.startswith('.'):
+                    continue
+                lo = name.lower()
+                full = _os.path.join(folder, name)
+                if not model_path and lo.endswith(MODEL_EXTS):
+                    model_path = full
+                if not tex_path and lo.endswith(TEXTURE_EXTS):
+                    tex_path = full
+            return model_path, tex_path
+
+        # Папка класса
+        class_dir = _os.path.join(model_root, class_name.lower())
+        m, t = _scan(class_dir)
+        if m:
+            logger.info(f"CritHIT [{class_name}]: модель={m}, текстура={t or '—'}")
+            return m, t
+
+        # Корневая папка (backward compat)
+        m, t = _scan(model_root)
+        if m:
+            logger.info(f"CritHIT [root]: модель={m}, текстура={t or '—'}")
+            return m, t
+
+        return "", ""
+
+    @staticmethod
+    def _convert_model_vtf(vtf_path: str) -> str:
+        """Конвертирует VTF текстуру модели во временный PNG. Возвращает путь или ''."""
+        try:
+            import tempfile
+            from src.services.vtflib_wrapper import VTFLib
+            from PIL import Image
+            rgba_bytes, w, h = VTFLib.read_vtf_as_rgba(vtf_path)
+            img = Image.frombytes("RGBA", (w, h), rgba_bytes)
+            png_path = tempfile.mktemp(suffix='.png', prefix='tf2_model_tex_')
+            img.save(png_path)
+            logger.info(f"CritHIT: VTF→PNG модельной текстуры: {png_path}")
+            return png_path
+        except Exception as exc:
+            logger.warning(f"VTF→PNG для модельной текстуры не удался: {exc}")
+            return ""
 
     def set_3d_params(
         self,

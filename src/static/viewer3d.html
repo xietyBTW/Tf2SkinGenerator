@@ -81,6 +81,62 @@
     user-select: none;
   }
 
+  /* ── Панель ротации модели (только CritHIT) ──────────────────────── */
+  #rotate-panel {
+    position: absolute;
+    bottom: 38px;
+    left: 12px;
+    display: none;           /* показывается только в CritHIT режиме */
+    flex-direction: column;
+    gap: 4px;
+    z-index: 10;
+    user-select: none;
+  }
+
+  #rotate-panel .rot-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  #rotate-panel .rot-label {
+    color: #444;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    width: 14px;
+    text-align: center;
+    flex-shrink: 0;
+  }
+
+  #rotate-panel button {
+    background: rgba(30, 30, 30, 0.82);
+    border: 1px solid #383838;
+    border-radius: 4px;
+    color: #777;
+    font-size: 13px;
+    line-height: 1;
+    width: 26px;
+    height: 26px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.12s, border-color 0.12s, color 0.12s;
+    padding: 0;
+  }
+
+  #rotate-panel button:hover {
+    background: rgba(60, 60, 60, 0.9);
+    border-color: #555;
+    color: #bbb;
+  }
+
+  #rotate-panel button:active {
+    background: rgba(80, 80, 80, 0.95);
+    color: #ddd;
+  }
+
   /* ── Drop-overlay (drag & drop текстуры) ─────────────────────────── */
   #drop-overlay {
     position: absolute;
@@ -124,6 +180,25 @@
 <div id="drop-overlay">
   <div id="drop-icon">🖼</div>
   <div id="drop-text"></div>
+</div>
+
+<!-- Панель ротации модели (видна только в CritHIT режиме) -->
+<div id="rotate-panel">
+  <div class="rot-row">
+    <span class="rot-label">X</span>
+    <button title="Rotate X −90°" onclick="window.rotateCritModel('x',-90)">↑</button>
+    <button title="Rotate X +90°" onclick="window.rotateCritModel('x', 90)">↓</button>
+  </div>
+  <div class="rot-row">
+    <span class="rot-label">Y</span>
+    <button title="Rotate Y −90°" onclick="window.rotateCritModel('y',-90)">←</button>
+    <button title="Rotate Y +90°" onclick="window.rotateCritModel('y', 90)">→</button>
+  </div>
+  <div class="rot-row">
+    <span class="rot-label">Z</span>
+    <button title="Rotate Z −90°" onclick="window.rotateCritModel('z',-90)">↺</button>
+    <button title="Rotate Z +90°" onclick="window.rotateCritModel('z', 90)">↻</button>
+  </div>
 </div>
 
 <!-- Three.js from CDN -->
@@ -224,6 +299,7 @@ const statusText  = document.getElementById('status-text');
 const statusIcon  = document.getElementById('status-icon');
 const hint        = document.getElementById('hint');
 const dropOverlay = document.getElementById('drop-overlay');
+const rotatePanel = document.getElementById('rotate-panel');
 
 // Инициализируем тексты
 statusText.textContent          = _t.select_weapon;
@@ -289,6 +365,7 @@ function applyTexture(object, tex) {
 
 window.loadModelFromContent = function(objContent, texDataUrl, cx, cy, cz, scale) {
   _isCritHitMode = false;
+  rotatePanel.style.display = 'none';
   setStatus(_t.loading, false, true);
   stopAnimation();
   if (currentModel) { scene.remove(currentModel); currentModel = null; }
@@ -370,6 +447,7 @@ window.showError = function(text) {
 
 window.resetViewer = function() {
   _isCritHitMode = false;
+  rotatePanel.style.display = 'none';
   stopAnimation();
   if (currentModel) { scene.remove(currentModel); currentModel = null; }
   if (_critSprite)  { scene.remove(_critSprite);  _critSprite  = null; }
@@ -445,8 +523,22 @@ function _placeCritSprite(dataUrl, headTopWorldY) {
   _critSprite = sprite;
 }
 
+// Применяет текстуру ко всем мешам группы (солдат или OBJ).
+function _applyModelTexture(group, modelTexDataUrl) {
+  if (!modelTexDataUrl) return;
+  const tl  = new THREE.TextureLoader();
+  const tex = tl.load(modelTexDataUrl);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  group.traverse(child => {
+    if (!child.isMesh) return;
+    child.material = new THREE.MeshLambertMaterial({ map: tex, side: THREE.DoubleSide });
+    child.material.needsUpdate = true;
+  });
+}
+
 // Публичная функция: загружает сцену CritHIT (солдат + billboard текстуры).
-window.loadCritHitScene = function(critTexDataUrl) {
+// modelTexDataUrl — data URL текстуры самого персонажа (необязательно).
+window.loadCritHitScene = function(critTexDataUrl, modelTexDataUrl) {
   _isCritHitMode = true;
   setStatus(_t.loading, false, true);
   stopAnimation();
@@ -467,6 +559,11 @@ window.loadCritHitScene = function(critTexDataUrl) {
   scene.add(soldier);
   currentModel = soldier;
 
+  // Накладываем текстуру персонажа (если есть)
+  if (modelTexDataUrl) {
+    _applyModelTexture(soldier, modelTexDataUrl);
+  }
+
   // Камера: немного выше центра, достаточно далеко чтобы видеть и фигуру, и эффект
   const fovRad   = (camera.fov * Math.PI) / 180;
   const distance = 1.0 / Math.tan(fovRad / 2) * 2.5;
@@ -480,11 +577,13 @@ window.loadCritHitScene = function(critTexDataUrl) {
   _placeCritSprite(critTexDataUrl, headTopWorld);
 
   hideStatus();
+  rotatePanel.style.display = 'flex';
 };
 
 // Публичная функция: CritHIT сцена с пользовательской OBJ-моделью.
 // Принимает содержимое OBJ-файла + параметры центрирования (вычисленные в Python).
-window.loadCritHitSceneWithModel = function(objContent, critTexDataUrl, cx, cy, cz, scale) {
+// modelTexDataUrl — data URL текстуры самого персонажа (необязательно).
+window.loadCritHitSceneWithModel = function(objContent, critTexDataUrl, cx, cy, cz, scale, modelTexDataUrl) {
   _isCritHitMode = true;
   setStatus(_t.loading, false, true);
   stopAnimation();
@@ -499,12 +598,17 @@ window.loadCritHitSceneWithModel = function(objContent, critTexDataUrl, cx, cy, 
     objUrl,
     object => {
       URL.revokeObjectURL(objUrl);
-      // Нейтральный материал (силуэт)
-      object.traverse(child => {
-        if (!child.isMesh) return;
-        child.material = new THREE.MeshLambertMaterial({ color: 0x575750, side: THREE.DoubleSide });
-        child.material.needsUpdate = true;
-      });
+
+      // Накладываем текстуру персонажа если есть, иначе нейтральный силуэт
+      if (modelTexDataUrl) {
+        _applyModelTexture(object, modelTexDataUrl);
+      } else {
+        object.traverse(child => {
+          if (!child.isMesh) return;
+          child.material = new THREE.MeshLambertMaterial({ color: 0x575750, side: THREE.DoubleSide });
+          child.material.needsUpdate = true;
+        });
+      }
 
       scene.add(object);
       currentModel = object;
@@ -525,15 +629,26 @@ window.loadCritHitSceneWithModel = function(objContent, critTexDataUrl, cx, cy, 
       _placeCritSprite(critTexDataUrl, 1.0);
 
       hideStatus();
+      rotatePanel.style.display = 'flex';
     },
     undefined,
     err => {
       URL.revokeObjectURL(objUrl);
       console.error('Custom model OBJ load error:', err);
       // Fallback: строим процедурного солдата
-      window.loadCritHitScene(critTexDataUrl);
+      window.loadCritHitScene(critTexDataUrl, modelTexDataUrl);
     }
   );
+};
+
+// Публичная функция: поворачивает модель на 90° вокруг выбранной оси.
+// axis: 'x' | 'y' | 'z', degrees: ±90
+window.rotateCritModel = function(axis, degrees) {
+  if (!_isCritHitMode || !currentModel) return;
+  const rad = degrees * Math.PI / 180;
+  if      (axis === 'x') currentModel.rotation.x += rad;
+  else if (axis === 'y') currentModel.rotation.y += rad;
+  else if (axis === 'z') currentModel.rotation.z += rad;
 };
 
 // Публичная функция: обновляет только текстуру CritHIT billboard.
