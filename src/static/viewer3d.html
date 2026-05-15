@@ -361,6 +361,28 @@ function applyTexture(object, tex) {
   });
 }
 
+// ── Texture loader helper ─────────────────────────────────────────────────── //
+
+// Загружает текстуру из dataUrl и вызывает onLoaded(texture).
+// При ошибке логирует в консоль и НЕ вызывает onLoaded (модель остаётся
+// с текущим материалом — лучше серая, чем белый экран).
+function _loadTextureThen(dataUrl, onLoaded) {
+  const tl = new THREE.TextureLoader();
+  tl.load(
+    dataUrl,
+    tex => {
+      tex.colorSpace = THREE.SRGBColorSpace;
+      onLoaded(tex);
+    },
+    undefined,       // onProgress — не нужен
+    err => {
+      // Ошибка тихая в THREE.js — делаем её видимой для отладки
+      const preview = dataUrl ? dataUrl.slice(0, 80) + '…' : '(empty)';
+      console.warn('[3D viewer] Texture load failed:', err, 'dataUrl prefix:', preview);
+    }
+  );
+}
+
 // ── Public API ───────────────────────────────────────────────────────────── //
 
 window.loadModelFromContent = function(objContent, texDataUrl, cx, cy, cz, scale) {
@@ -374,22 +396,26 @@ window.loadModelFromContent = function(objContent, texDataUrl, cx, cy, cz, scale
   const blob   = new Blob([objContent], { type: 'text/plain' });
   const objUrl = URL.createObjectURL(blob);
 
-  let tex = null;
-  if (texDataUrl && texDataUrl.length > 0) {
-    const tl = new THREE.TextureLoader();
-    tex = tl.load(texDataUrl);
-    tex.colorSpace = THREE.SRGBColorSpace;
-  }
-
   new OBJLoader().load(
     objUrl,
     object => {
       URL.revokeObjectURL(objUrl);
       scene.add(object);
       currentModel = object;
-      applyTexture(object, tex);
+
+      // Сначала показываем модель без текстуры (нейтральный цвет)
+      applyTexture(object, null);
       applyTransform(object, cx, cy, cz, scale);
       hideStatus();
+
+      // Грузим текстуру ПОСЛЕ того как OBJ уже в сцене — исключает race condition
+      if (texDataUrl && texDataUrl.length > 0) {
+        _loadTextureThen(texDataUrl, tex => {
+          // Применяем только если модель не сменилась за время загрузки
+          if (currentModel === object) applyTexture(object, tex);
+        });
+      }
+
       if (_pendingAnim) {
         const { frameDataUrls, framerate } = _pendingAnim;
         _pendingAnim = null;
@@ -408,10 +434,10 @@ window.loadModelFromContent = function(objContent, texDataUrl, cx, cy, cz, scale
 window.updateTextureFromDataUrl = function(texDataUrl) {
   stopAnimation();
   if (!currentModel) return;
-  const tl  = new THREE.TextureLoader();
-  const tex = tl.load(texDataUrl);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  applyTexture(currentModel, tex);
+  const target = currentModel;
+  _loadTextureThen(texDataUrl, tex => {
+    if (currentModel === target) applyTexture(target, tex);
+  });
 };
 
 window.loadAnimatedTexture = function(frameDataUrls, framerate) {
@@ -425,12 +451,22 @@ window.loadAnimatedTexture = function(frameDataUrls, framerate) {
     _pendingAnim = { frameDataUrls, framerate };
     return;
   }
-  const tl       = new THREE.TextureLoader();
-  const textures = frameDataUrls.map(url => {
-    const t = tl.load(url); t.colorSpace = THREE.SRGBColorSpace; return t;
+  const target   = currentModel;
+  let   loaded   = 0;
+  const textures = new Array(frameDataUrls.length).fill(null);
+
+  frameDataUrls.forEach((url, i) => {
+    _loadTextureThen(url, tex => {
+      textures[i] = tex;
+      loaded++;
+      // Первый загруженный кадр — сразу показываем
+      if (loaded === 1 && currentModel === target) applyTexture(target, tex);
+      // Все кадры готовы — запускаем анимацию
+      if (loaded === frameDataUrls.length && currentModel === target) {
+        startAnimation(textures, framerate);
+      }
+    });
   });
-  applyTexture(currentModel, textures[0]);
-  startAnimation(textures, framerate);
 };
 
 window.showLoading = function(text) {
@@ -504,35 +540,37 @@ function _placeCritSprite(dataUrl, headTopWorldY) {
   if (_critSprite) { scene.remove(_critSprite); _critSprite = null; }
   if (!dataUrl) return;
 
-  const tl  = new THREE.TextureLoader();
-  const tex = tl.load(dataUrl, () => {
-    // Корректируем пропорции спрайта после загрузки изображения
-    const img = tex.image;
-    if (img && img.width && img.height) {
-      const aspect = img.width / img.height;
-      _critSprite.scale.set(aspect * 0.55, 0.55, 1);
-    }
-  });
-  tex.colorSpace = THREE.SRGBColorSpace;
-
-  const mat    = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false });
+  // Создаём спрайт сразу (без текстуры), чтобы позиция была заранее задана
+  const mat    = new THREE.SpriteMaterial({ transparent: true, depthTest: false });
   const sprite = new THREE.Sprite(mat);
-  sprite.scale.set(0.55, 0.55, 1);              // будет скорректировано после загрузки
-  sprite.position.set(0, headTopWorldY + 0.38, 0); // чуть выше макушки
+  sprite.scale.set(0.55, 0.55, 1);
+  sprite.position.set(0, headTopWorldY + 0.38, 0);
   scene.add(sprite);
   _critSprite = sprite;
+
+  // Загружаем текстуру через хелпер с error callback
+  _loadTextureThen(dataUrl, tex => {
+    if (_critSprite !== sprite) return;   // спрайт уже заменён
+    // Корректируем пропорции под реальный размер изображения
+    const img = tex.image;
+    if (img && img.width && img.height) {
+      sprite.scale.set((img.width / img.height) * 0.55, 0.55, 1);
+    }
+    mat.map = tex;
+    mat.needsUpdate = true;
+  });
 }
 
 // Применяет текстуру ко всем мешам группы (солдат или OBJ).
+// Загружает через _loadTextureThen — безопасный error callback и правильный colorSpace.
 function _applyModelTexture(group, modelTexDataUrl) {
   if (!modelTexDataUrl) return;
-  const tl  = new THREE.TextureLoader();
-  const tex = tl.load(modelTexDataUrl);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  group.traverse(child => {
-    if (!child.isMesh) return;
-    child.material = new THREE.MeshLambertMaterial({ map: tex, side: THREE.DoubleSide });
-    child.material.needsUpdate = true;
+  _loadTextureThen(modelTexDataUrl, tex => {
+    group.traverse(child => {
+      if (!child.isMesh) return;
+      child.material = new THREE.MeshLambertMaterial({ map: tex, side: THREE.DoubleSide });
+      child.material.needsUpdate = true;
+    });
   });
 }
 

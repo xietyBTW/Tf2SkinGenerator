@@ -84,7 +84,10 @@ TRANSLATIONS = {
         'cancel': 'Отмена',
         'advanced_title': 'Дополнительно',
         'support_header': 'Поддержка',
-        
+        'section_paths':       'ПУТИ',
+        'section_preferences': 'НАСТРОЙКИ',
+        'section_developer':   'РАЗРАБОТЧИК',
+
         # Build Progress
         'build_progress_title': 'Сборка VPK',
         'build_progress_text': 'Сборка VPK...',
@@ -161,6 +164,7 @@ TRANSLATIONS = {
         '3d_error_load':       'Ошибка загрузки модели',
         '3d_error_prefix':     'Ошибка: {error}',
         '3d_unavailable':      'Модель недоступна: {error}',
+        'settings_tooltip':    'Настройки',
         '3d_select_vpk':       'Выберите VPK мод',
         '3d_select_smd_title': 'Выберите SMD файл модели',
         '3d_load_model_tip':   'Загрузить 3D модель',
@@ -366,7 +370,10 @@ TRANSLATIONS = {
         'cancel': 'Cancel',
         'advanced_title': 'Advanced',
         'support_header': 'Support',
-        
+        'section_paths':       'PATHS',
+        'section_preferences': 'PREFERENCES',
+        'section_developer':   'DEVELOPER',
+
         # Build Progress
         'build_progress_title': 'Build VPK',
         'build_progress_text': 'Building VPK...',
@@ -443,6 +450,7 @@ TRANSLATIONS = {
         '3d_error_load':       'Model load error',
         '3d_error_prefix':     'Error: {error}',
         '3d_unavailable':      'Model unavailable: {error}',
+        'settings_tooltip':    'Settings',
         '3d_select_vpk':       'Select VPK mod',
         '3d_select_smd_title': 'Select SMD Model File',
         '3d_load_model_tip':   'Load 3D model',

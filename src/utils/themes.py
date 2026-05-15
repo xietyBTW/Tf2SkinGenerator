@@ -50,41 +50,80 @@ def apply_dark_theme(app: QApplication) -> None:
             font-weight: 400;
         }
         
-        QComboBox, QLineEdit, QTextEdit {
-            background-color: transparent;
-            border: none;
-            border-bottom: 1px solid #333333;
-            color: #ffffff;
-            font-size: 14px;
-            font-weight: 300;
-            padding: 8px 0px;
+        QLineEdit, QTextEdit {
+            background-color: rgba(255, 255, 255, 0.03);
+            border: 1px solid #2a2a2a;
+            border-radius: 4px;
+            color: #c0c0c0;
+            font-size: 12px;
+            font-weight: 400;
+            padding: 0 10px;
         }
-        
-        QComboBox:focus, QLineEdit:focus, QTextEdit:focus {
-            border-bottom: 2px solid #ff6b35;
-            background-color: rgba(255, 107, 53, 0.05);
+
+        QLineEdit:hover, QTextEdit:hover {
+            border-color: #383838;
         }
-        
-        QComboBox QAbstractItemView {
-            background-color: #1a1a1a;
-            color: #ffffff;
-            selection-background-color: #ff6b35;
-            selection-color: #0a0a0a;
-            border: 1px solid #333333;
-            border-radius: 0px;
+
+        QLineEdit:focus, QTextEdit:focus {
+            border-color: #404040;
+            background-color: rgba(255, 255, 255, 0.045);
         }
-        
+
+        QComboBox {
+            background-color: rgba(255, 255, 255, 0.03);
+            border: 1px solid #2a2a2a;
+            border-radius: 4px;
+            color: #888;
+            font-size: 12px;
+            font-weight: 400;
+            padding: 0 10px;
+            min-height: 34px;
+            max-height: 34px;
+        }
+
+        QComboBox:hover {
+            border-color: #383838;
+            color: #aaa;
+        }
+
+        QComboBox:on {
+            border-color: #404040;
+            background-color: rgba(255, 255, 255, 0.045);
+            color: #aaa;
+        }
+
         QComboBox::drop-down {
             border: none;
-            width: 20px;
+            width: 26px;
         }
-        
+
         QComboBox::down-arrow {
             image: none;
             border-left: 4px solid transparent;
             border-right: 4px solid transparent;
-            border-top: 6px solid #ffffff;
-            margin-right: 8px;
+            border-top: 5px solid #484848;
+            margin-right: 10px;
+        }
+
+        QComboBox QAbstractItemView {
+            background-color: #181818;
+            color: #888;
+            border: 1px solid #303030;
+            selection-background-color: #242424;
+            selection-color: #c0c0c0;
+            outline: none;
+            padding: 2px 0;
+        }
+
+        QComboBox QAbstractItemView::item {
+            min-height: 28px;
+            padding: 0 10px;
+            border: none;
+        }
+
+        QComboBox QAbstractItemView::item:hover {
+            background-color: #202020;
+            color: #b0b0b0;
         }
         
         QPushButton {
@@ -246,37 +285,53 @@ def get_modern_styles():
         'combo': """
             QComboBox {
                 background-color: rgba(255, 255, 255, 0.03);
-                border: 1px solid #333;
+                border: 1px solid #2a2a2a;
                 border-radius: 4px;
-                color: #fff;
-                font-size: 14px;
+                color: #888;
+                font-size: 12px;
                 font-weight: 400;
-                padding: 8px 12px;
-                min-height: 24px;
+                padding: 0 10px;
+                min-height: 34px;
+                max-height: 34px;
             }
-            QComboBox:focus {
-                border-color: #ff6b35;
-                background-color: rgba(255, 107, 53, 0.1);
+            QComboBox:hover {
+                border-color: #383838;
+                color: #aaa;
+            }
+            QComboBox:on {
+                border-color: #404040;
+                background-color: rgba(255, 255, 255, 0.045);
+                color: #aaa;
             }
             QComboBox::drop-down {
                 border: none;
-                width: 24px;
+                width: 26px;
             }
             QComboBox::down-arrow {
                 image: none;
                 border-left: 4px solid transparent;
                 border-right: 4px solid transparent;
-                border-top: 6px solid #ccc;
-                margin-right: 4px;
+                border-top: 5px solid #484848;
+                margin-right: 10px;
             }
             QComboBox QAbstractItemView {
-                background-color: #1a1a1a;
-                color: #fff;
-                selection-background-color: #ff6b35;
-                selection-color: #0a0a0a;
-                border: 1px solid #333;
-                border-radius: 4px;
-                padding: 4px;
+                background-color: #181818;
+                color: #888;
+                border: 1px solid #303030;
+                border-radius: 0px;
+                selection-background-color: #242424;
+                selection-color: #c0c0c0;
+                outline: none;
+                padding: 2px 0;
+            }
+            QComboBox QAbstractItemView::item {
+                min-height: 28px;
+                padding: 0 10px;
+                border: none;
+            }
+            QComboBox QAbstractItemView::item:hover {
+                background-color: #202020;
+                color: #b0b0b0;
             }
         """,
         
@@ -586,17 +641,54 @@ def apply_blue_theme(app: QApplication) -> None:
             background-color: transparent;
         }
         
-        QComboBox, QLineEdit, QTextEdit {
-            background-color: #1b263b;
-            border: 1px solid #415a77;
+        QLineEdit, QTextEdit {
+            background-color: rgba(255, 255, 255, 0.04);
+            border: 1px solid #2c3e55;
             border-radius: 4px;
-            color: #e0e1dd;
-            padding: 8px 12px;
+            color: #c0c8d0;
+            font-size: 12px;
+            padding: 0 10px;
         }
-        
-        QComboBox:focus, QLineEdit:focus, QTextEdit:focus {
-            border: 2px solid #4a90e2;
+
+        QLineEdit:hover, QTextEdit:hover { border-color: #3a5070; }
+        QLineEdit:focus, QTextEdit:focus { border-color: #4a90e2; background-color: rgba(74,144,226,0.06); }
+
+        QComboBox {
+            background-color: rgba(255, 255, 255, 0.04);
+            border: 1px solid #2c3e55;
+            border-radius: 4px;
+            color: #8090a0;
+            font-size: 12px;
+            font-weight: 400;
+            padding: 0 10px;
+            min-height: 34px;
+            max-height: 34px;
         }
+
+        QComboBox:hover { border-color: #3a5070; color: #a0b0c0; }
+        QComboBox:on    { border-color: #4a90e2; background-color: rgba(74,144,226,0.06); }
+
+        QComboBox::drop-down { border: none; width: 26px; }
+        QComboBox::down-arrow {
+            image: none;
+            border-left: 4px solid transparent;
+            border-right: 4px solid transparent;
+            border-top: 5px solid #4a6080;
+            margin-right: 10px;
+        }
+
+        QComboBox QAbstractItemView {
+            background-color: #1b263b;
+            color: #8090a0;
+            border: 1px solid #2c3e55;
+            selection-background-color: #243350;
+            selection-color: #c0d0e0;
+            outline: none;
+            padding: 2px 0;
+        }
+
+        QComboBox QAbstractItemView::item { min-height: 28px; padding: 0 10px; border: none; }
+        QComboBox QAbstractItemView::item:hover { background-color: #1e2e44; color: #b0c0d0; }
         
         QPushButton {
             background-color: #4a90e2;

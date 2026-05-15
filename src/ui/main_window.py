@@ -26,6 +26,7 @@ from src.utils.themes import apply_dark_theme
 from src.shared.logging_config import get_logger
 from src.ui.error_handler import ErrorHandler
 from src.shared.validators import validate_vpk_filename
+from src.services.update_checker import UpdateChecker
 
 logger = get_logger(__name__)
 
@@ -114,6 +115,9 @@ class MainWindow(QMainWindow):
         self.init_ui()
         self.setup_connections()
 
+        # Запускаем проверку обновлений в фоне (не блокирует UI)
+        self._start_update_check()
+
         # Восстанавливаем геометрию окна из конфига
         saved_geom = self.config.get('window_geometry')
         if saved_geom:
@@ -137,33 +141,37 @@ class MainWindow(QMainWindow):
         top_bar_layout.setSpacing(0)
         top_bar_layout.addStretch()
 
-        self.settings_button = QPushButton("⚙")
+        self.settings_button = QPushButton()
+        self.settings_button.setFixedSize(28, 28)
+        self.settings_button.setIcon(_make_gear_icon("#585858", 16))
+        from PySide6.QtCore import QSize as _QSize
+        self.settings_button.setIconSize(_QSize(16, 16))
         self.settings_button.setStyleSheet("""
             QPushButton {
                 background-color: transparent;
-                color: #666;
-                border: none;
-                border-radius: 3px;
-                padding: 4px 6px;
-                font-size: 14px;
-                min-width: 24px;
-                min-height: 24px;
-                max-width: 24px;
-                max-height: 24px;
+                border: 1px solid transparent;
+                border-radius: 4px;
+                padding: 0px;
             }
             QPushButton:hover {
                 background-color: rgba(255, 255, 255, 0.05);
-                color: #888;
+                border-color: #333;
             }
             QPushButton:pressed {
-                background-color: rgba(255, 255, 255, 0.1);
+                background-color: rgba(255, 255, 255, 0.09);
+                border-color: #444;
             }
         """)
-        self.settings_button.setToolTip("Настройки")
+        self.settings_button.setToolTip(self.t.get('settings_tooltip', 'Settings'))
         self.settings_button.clicked.connect(self.open_settings_dialog)
         top_bar_layout.addWidget(self.settings_button)
 
         main_vertical_layout.addWidget(top_bar)
+
+        # Баннер обновления — скрыт по умолчанию, показывается при наличии новой версии
+        self._update_banner = self._create_update_banner()
+        self._update_banner.hide()
+        main_vertical_layout.addWidget(self._update_banner)
 
         main_layout = QHBoxLayout()
         main_layout.setSpacing(20)
@@ -218,6 +226,72 @@ class MainWindow(QMainWindow):
         # Применяем ограничения UI для начального состояния (режим не выбран)
         self.settings_panel.apply_mode_restrictions(self.mode)
 
+    # ── Обновления ──────────────────────────────────────────────────────── #
+
+    def _create_update_banner(self) -> QWidget:
+        """Создаёт скрытый баннер «доступно обновление»."""
+        from PySide6.QtWidgets import QLabel
+        banner = QWidget()
+        banner.setFixedHeight(36)
+        banner.setStyleSheet("""
+            QWidget {
+                background-color: #1a1200;
+                border-bottom: 1px solid #3a2800;
+            }
+        """)
+        layout = QHBoxLayout(banner)
+        layout.setContentsMargins(16, 0, 12, 0)
+        layout.setSpacing(8)
+
+        self._update_icon_label = QLabel("↑")
+        self._update_icon_label.setStyleSheet("color: #c87820; font-size: 13px; font-weight: 700;")
+        layout.addWidget(self._update_icon_label)
+
+        self._update_text_label = QLabel()
+        self._update_text_label.setStyleSheet("color: #c0a060; font-size: 12px;")
+        self._update_text_label.setCursor(Qt.PointingHandCursor)
+        self._update_text_label.mousePressEvent = self._open_release_url
+        layout.addWidget(self._update_text_label, 1)
+
+        dismiss_btn = QPushButton("✕")
+        dismiss_btn.setFixedSize(20, 20)
+        dismiss_btn.setStyleSheet("""
+            QPushButton {
+                background: transparent;
+                border: none;
+                color: #776040;
+                font-size: 11px;
+            }
+            QPushButton:hover { color: #c0a060; }
+        """)
+        dismiss_btn.clicked.connect(self._update_banner.hide)
+        layout.addWidget(dismiss_btn)
+
+        return banner
+
+    def _start_update_check(self) -> None:
+        """Запускает фоновую проверку обновлений."""
+        self._update_checker = UpdateChecker()
+        self._update_checker.update_available.connect(self._on_update_available)
+        self._update_checker.start()
+
+    def _on_update_available(self, tag: str, url: str) -> None:
+        """Показывает баннер когда найдена новая версия."""
+        self._release_url = url
+        from src.shared.version import __version__
+        if self.language == 'ru':
+            msg = f"Доступна новая версия {tag} (сейчас {__version__}) — нажмите, чтобы открыть страницу загрузки"
+        else:
+            msg = f"New version {tag} available (current {__version__}) — click to open download page"
+        self._update_text_label.setText(msg)
+        self._update_banner.show()
+
+    def _open_release_url(self, _event=None) -> None:
+        """Открывает страницу релиза в браузере."""
+        url = getattr(self, '_release_url', '')
+        if url:
+            QDesktopServices.openUrl(QUrl(url))
+
     def create_weapon_selection_panel(self) -> None:
         from PySide6.QtWidgets import QGroupBox, QVBoxLayout, QLabel, QComboBox, QPushButton, QWidget
         from src.utils.themes import get_modern_styles
@@ -251,29 +325,26 @@ class MainWindow(QMainWindow):
         
         self.class_combo = QComboBox()
         self.class_combo.setStyleSheet(styles['combo'])
-        self.class_combo.setMinimumHeight(40)
-        
+
         for class_name, class_info in TF2_CLASSES.items():
             self.class_combo.addItem(f"{class_info['icon']} {class_name}")
-        
+
         group_layout.addWidget(self.class_combo)
-        
+
         self.type_label = QLabel(self.t['weapon_type'])
         self.type_label.setStyleSheet("font-weight: 500; font-size: 13px; color: #ccc; margin-top: 8px;")
         group_layout.addWidget(self.type_label)
-        
+
         self.weapon_type_combo = QComboBox()
         self.weapon_type_combo.setStyleSheet(styles['combo'])
-        self.weapon_type_combo.setMinimumHeight(40)
         group_layout.addWidget(self.weapon_type_combo)
-        
+
         self.weapon_label = QLabel(self.t['weapon'])
         self.weapon_label.setStyleSheet("font-weight: 500; font-size: 13px; color: #ccc; margin-top: 8px;")
         group_layout.addWidget(self.weapon_label)
-        
+
         self.weapon_combo = QComboBox()
         self.weapon_combo.setStyleSheet(styles['combo'])
-        self.weapon_combo.setMinimumHeight(40)
         group_layout.addWidget(self.weapon_combo)
         
         self.crit_hit_label = QLabel(self.t['crit_hit_mode'])
@@ -1812,4 +1883,64 @@ class MainWindow(QMainWindow):
             new_height = min(new_height, available.height())
         
         self.resize(current_width, new_height)
+
+
+# ── Иконка шестерёнки для кнопки настроек ────────────────────────────────── #
+
+def _make_gear_icon(color: str = "#585858", size: int = 16):
+    """
+    Рисует заполненную шестерёнку с 6 зубьями и центральным отверстием.
+    Стиль совпадает с остальными QPainter-иконками приложения.
+    """
+    import math
+    from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QPainterPath
+    from PySide6.QtCore import Qt, QRectF
+
+    pix = QPixmap(size, size)
+    pix.fill(Qt.transparent)
+
+    p = QPainter(pix)
+    p.setRenderHint(QPainter.Antialiasing)
+    p.setPen(Qt.NoPen)
+    p.setBrush(QColor(color))
+
+    s  = float(size)
+    cx = cy = s / 2.0
+
+    n_teeth = 6
+    r_outer = s * 0.455   # кончик зуба
+    r_base  = s * 0.305   # основание зуба
+    r_hole  = s * 0.150   # центральное отверстие
+    half_tw = 0.285        # полуширина зуба (рад)
+
+    step = 2.0 * math.pi / n_teeth
+    path = QPainterPath()
+    first = True
+
+    for i in range(n_teeth):
+        # Начинаем сверху (−π/2) для симметрии
+        center = i * step - math.pi / 2.0
+        for r, da in [
+            (r_base,  -(half_tw + 0.18)),   # вход основания
+            (r_outer, -half_tw * 0.52),     # начало зуба
+            (r_outer,  half_tw * 0.52),     # конец зуба
+            (r_base,   (half_tw + 0.18)),   # выход основания
+        ]:
+            x = cx + r * math.cos(center + da)
+            y = cy + r * math.sin(center + da)
+            if first:
+                path.moveTo(x, y)
+                first = False
+            else:
+                path.lineTo(x, y)
+
+    path.closeSubpath()
+
+    # Вырезаем центральное отверстие
+    hole = QPainterPath()
+    hole.addEllipse(QRectF(cx - r_hole, cy - r_hole, r_hole * 2, r_hole * 2))
+
+    p.drawPath(path.subtracted(hole))
+    p.end()
+    return QIcon(pix)
     
