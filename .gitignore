@@ -46,7 +46,6 @@ tools/temp/
 tools/temp_vmt_extract/
 tools/edited_vmt/
 tools/backupVMT/
-tools/Model/
 
 # ── Инструменты: сторонние бинари (скачиваются отдельно) ──────
 tools/crowbar/
