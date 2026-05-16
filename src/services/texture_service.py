@@ -258,7 +258,8 @@ class TextureService:
         logger.info(f"Передаваемый формат: {vtf_format} (исходный: {format_type})")
         logger.info(f"Опции VTFCmd: {options}")
         logger.info(f"Флаги VTF: {flags}")
-        result = subprocess.run(vtf_args, check=True, capture_output=True, text=True)
+        result = subprocess.run(vtf_args, check=True, capture_output=True, text=True,
+                                creationflags=subprocess.CREATE_NO_WINDOW)
         if result.returncode != 0:
             from src.data.translations import TRANSLATIONS
             t = TRANSLATIONS.get('en', TRANSLATIONS['en'])

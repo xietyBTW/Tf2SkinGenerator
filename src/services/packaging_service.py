@@ -37,7 +37,8 @@ class PackagingService:
         result = subprocess.run([
             str(PackagingService.get_vpk_tool()),
             "-v", str(ctx.vpkroot_dir.resolve())
-        ], cwd=str(vpkroot_parent), capture_output=True, text=True)
+        ], cwd=str(vpkroot_parent), capture_output=True, text=True,
+           creationflags=subprocess.CREATE_NO_WINDOW)
         logger.debug(f"vpk.exe завершился с кодом: {result.returncode}")
         if result.stdout:
             logger.debug(f"STDOUT: {result.stdout}")

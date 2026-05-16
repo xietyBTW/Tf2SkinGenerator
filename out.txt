@@ -1,5 +1,0 @@
-2026-05-14 14:27:40 - tf2_skin_generator - INFO - Запуск TF2 Skin Generator
-2026-05-14 14:27:40 - tf2_skin_generator.src.core.app_factory - INFO - QApplication создан
-2026-05-14 14:27:40 - tf2_skin_generator.src.core.app_factory - INFO - Применяется тема: dark
-2026-05-14 14:27:41 - tf2_skin_generator.src.ui.preview_panel - INFO - 3D Preview виджет инициализирован (WebEngine)
-2026-05-14 14:27:41 - tf2_skin_generator - INFO - Приложение успешно запущено

@@ -20,9 +20,18 @@ from src.shared.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-_HTML_PATH = os.path.normpath(
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "static", "viewer3d.html")
-)
+def _get_html_path() -> str:
+    """Возвращает путь к viewer3d.html — работает и в dev-режиме, и в frozen .exe."""
+    import sys
+    if getattr(sys, 'frozen', False):
+        # PyInstaller onedir: --add-data кладёт файлы в _internal/src/static/
+        return os.path.normpath(os.path.join(sys._MEIPASS, "src", "static", "viewer3d.html"))
+    # Dev-режим
+    return os.path.normpath(
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "static", "viewer3d.html")
+    )
+
+_HTML_PATH = _get_html_path()
 
 # Флаг доступности WebEngine — проверяется один раз при первом импорте
 _WEBENGINE_AVAILABLE: Optional[bool] = None

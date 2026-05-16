@@ -54,20 +54,26 @@ class AppFactory:
     @staticmethod
     def create_app(apply_theme: bool = True) -> QApplication:
         AppFactory.setup_working_directory()
-        
+
         app = QApplication(sys.argv)
         logger.info("QApplication создан")
-        
-        icon_path = AppFactory.get_icon_path()
-        if icon_path:
-            app.setWindowIcon(QIcon(str(icon_path)))
-            logger.debug(f"Установлена иконка приложения: {icon_path}")
+
+        if getattr(sys, 'frozen', False):
+            # В собранном .exe иконка уже встроена PyInstaller-ом —
+            # читаем её прямо из исполняемого файла, отдельный icon.ico не нужен
+            app.setWindowIcon(QIcon(sys.executable))
+            logger.debug("Иконка загружена из exe")
         else:
-            logger.warning("Иконка приложения не найдена")
-        
+            icon_path = AppFactory.get_icon_path()
+            if icon_path:
+                app.setWindowIcon(QIcon(str(icon_path)))
+                logger.debug(f"Установлена иконка приложения: {icon_path}")
+            else:
+                logger.warning("Иконка приложения не найдена")
+
         if apply_theme:
             AppFactory._apply_theme(app)
-        
+
         return app
     
     @staticmethod

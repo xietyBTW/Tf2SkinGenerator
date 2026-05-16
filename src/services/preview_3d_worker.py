@@ -154,6 +154,21 @@ class Preview3DWorker(QThread):
 
         self.progress.emit(self._p['extracting'])
 
+        # ── Диагностика: проверяем доступность VPK и инструментов ─────────── #
+        if not os.path.exists(self.misc_vpk_path):
+            logger.error(f"[3D] misc VPK не найден: {self.misc_vpk_path}")
+            self.failed.emit(f"VPK not found: {self.misc_vpk_path}")
+            return None
+
+        crowbar = TF2Paths.get_crowbar_path()
+        crowbar_abs = os.path.abspath(crowbar)
+        if not os.path.exists(crowbar_abs):
+            logger.error(f"[3D] Crowbar не найден: {crowbar_abs}")
+            self.failed.emit(f"Crowbar not found: {crowbar_abs}")
+            return None
+
+        logger.info(f"[3D] cwd={os.getcwd()} | crowbar={crowbar_abs} | vpk={self.misc_vpk_path}")
+
         paths_to_try = ExtractModelService._build_paths_to_try(
             self.mode, self.weapon_key
         )
@@ -165,12 +180,14 @@ class Preview3DWorker(QThread):
             try:
                 if TF2VPKExtractService.check_mdl_exists(self.misc_vpk_path, path):
                     found_rel = path
+                    logger.info(f"[3D] MDL найден: {path}")
                     break
-            except Exception:
+            except Exception as e:
+                logger.debug(f"[3D] check_mdl_exists ошибка для {path}: {e}")
                 continue
 
         if not found_rel:
-            logger.warning(f"MDL не найден в VPK для {self.weapon_key}")
+            logger.warning(f"[3D] MDL не найден в VPK для {self.weapon_key}. Пробовали: {paths_to_try[:3]}")
             return None
 
         try:
@@ -180,6 +197,7 @@ class Preview3DWorker(QThread):
             )
             mdl_file = next((f for f in extracted if f.endswith(".mdl")), None)
             if not mdl_file:
+                logger.error(f"[3D] MDL файл не найден после извлечения: {extracted}")
                 shutil.rmtree(mdl_dir, ignore_errors=True)
                 return None
 
@@ -188,11 +206,11 @@ class Preview3DWorker(QThread):
                 return None
 
             self.progress.emit(self._p['decompiling'])
-            crowbar     = TF2Paths.get_crowbar_path()
-            decomp_dir  = tempfile.mkdtemp(prefix="tf2sg_decomp_")
+            decomp_dir = tempfile.mkdtemp(prefix="tf2sg_decomp_")
+            logger.info(f"[3D] Запускаем Crowbar: mdl={mdl_file} → {decomp_dir}")
             ModelBuildService.decompile(mdl_file, decomp_dir, crowbar)
+            logger.info(f"[3D] Crowbar завершён успешно")
 
-            # Сохраняем в кэш, чтобы следующий раз был мгновенным
             decompile_cache.save_to_cache(
                 self.weapon_key, self.misc_vpk_path, found_rel, decomp_dir
             )
@@ -201,7 +219,8 @@ class Preview3DWorker(QThread):
             return self._find_reference_smd(decomp_dir)
 
         except Exception as exc:
-            logger.error(f"Ошибка декомпиляции для 3D Preview: {exc}", exc_info=True)
+            logger.error(f"[3D] Ошибка декомпиляции для {self.weapon_key}: {exc}", exc_info=True)
+            self.failed.emit(f"Decompile error: {exc}")
             return None
 
     def _find_reference_smd(self, directory: str) -> Optional[str]:

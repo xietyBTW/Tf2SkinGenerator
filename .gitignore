@@ -1,54 +1,74 @@
-# --- Python ---
+# ══════════════════════════════════════════════════════════════
+#  Tf2SkinGenerator — .gitignore
+#  В репозитории: исходный код, src/, tools/mod_data, конфиги-шаблоны
+#  НЕ в репозитории: сборка, бинари, IDE, временные файлы
+# ══════════════════════════════════════════════════════════════
+
+# ── Python runtime ────────────────────────────────────────────
 .venv/
 __pycache__/
 *.py[cod]
+*.pyo
+
+# ── Тесты / покрытие ──────────────────────────────────────────
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
-
-# Coverage / reports
 .coverage
+.coveragerc
 coverage.json
 htmlcov/
+mainTest.py
+run_test.bat
 
-# Logs / temp
-*.log
-*.tmp
-
-# --- IDE ---
-.vscode/
-.idea/
-
-# --- OS junk ---
-Thumbs.db
-Desktop.ini
-*.lnk
-
-# --- Build / packaging outputs (do not upload) ---
+# ── Сборка (PyInstaller / distutils) ─────────────────────────
 build/
 dist/
+*.spec
+
+# ── Скрипты сборки и установщик (не нужны пользователям) ─────
+*.bat
+*.ps1
+installer/
+
+# ── Временные выходные папки ──────────────────────────────────
 out/
 export/
 exportTest/
 
-# PyInstaller spec (build recipe) + build scripts
-*.spec
-*.bat
-*.ps1
-
-# Installer scripts / configs
-installer/
-
-# Project-local config with machine paths (commit an example instead)
+# ── Конфигурация с машинными путями ──────────────────────────
+# Коммитить только примеры: config/*.example.json
 config/*.json
 !config/*.example.json
 
-# Temporary / generated tool data
+# ── Инструменты: временные и генерируемые папки ───────────────
 tools/temp/
 tools/temp_vmt_extract/
 tools/edited_vmt/
+tools/backupVMT/
+tools/Model/
 
-# Bundled 3rd-party binaries (do not upload)
+# ── Инструменты: сторонние бинари (скачиваются отдельно) ──────
 tools/crowbar/
 tools/VPK/
 tools/VTF/
+
+# ── Логи и мусорные файлы ────────────────────────────────────
+*.log
+*.tmp
+# Только мусорные txt (тестовые артефакты)
+out.txt
+err.txt
+test_*.txt
+*_err.txt
+
+# ── IDE ───────────────────────────────────────────────────────
+.vscode/
+.idea/
+.claude/
+
+# ── OS ────────────────────────────────────────────────────────
+Thumbs.db
+Desktop.ini
+*.lnk
+.DS_Store

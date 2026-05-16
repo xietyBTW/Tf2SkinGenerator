@@ -66,7 +66,8 @@ class ModelBuildService:
             ],
             capture_output=True,
             text=True,
-            cwd=os.path.dirname(crowbar_decomp_exe)
+            cwd=os.path.dirname(crowbar_decomp_exe),
+            creationflags=subprocess.CREATE_NO_WINDOW,
         )
         
         if result.returncode != 0:
@@ -752,16 +753,18 @@ class ModelBuildService:
             cmd,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
-            cwd=os.path.dirname(studiomdl_exe)
+            cwd=os.path.dirname(studiomdl_exe),
+            creationflags=subprocess.CREATE_NO_WINDOW,
         )
-        
+
         if result.returncode != 0:
             # На ошибке — перезапускаем с захватом stdout для диагностики
             result2 = subprocess.run(
                 [c for c in cmd if c != "-quiet"],
                 capture_output=True,
                 text=True,
-                cwd=os.path.dirname(studiomdl_exe)
+                cwd=os.path.dirname(studiomdl_exe),
+                creationflags=subprocess.CREATE_NO_WINDOW,
             )
             raise RuntimeError(
                 f"Compilation failed:\n"

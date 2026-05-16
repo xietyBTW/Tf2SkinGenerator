@@ -2,6 +2,8 @@
 Панель предварительного просмотра — 2D (изображение) и 3D (модель).
 """
 
+import os
+
 from PySide6.QtWidgets import (
     QGroupBox, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QWidget, QStackedWidget, QSizePolicy,
@@ -571,6 +573,25 @@ class PreviewPanel(QWidget):
             logger.warning(f"VTF→PNG для модельной текстуры не удался: {exc}")
             return ""
 
+    def show_3d_no_tf2_message(self) -> None:
+        """
+        Показывает подсказку в 3D виджете когда TF2 не настроен.
+        Кнопка остаётся заблокированной.
+        """
+        self._pending_3d_params = None
+        self._custom_smd_mode = False
+        self._crithit_mode = False
+        self._stop_3d_worker()
+        self._reset_team_state()
+
+        if self._3d_widget:
+            self._3d_widget.show_prompt(
+                self.t.get('3d_prompt_no_tf2', 'Set TF2 folder in Settings to load original models')
+            )
+
+        self.btn_load_3d.setEnabled(False)
+        self.btn_load_vpk_mod.setEnabled(False)
+
     def set_3d_params(
         self,
         weapon_key: str,
@@ -600,13 +621,19 @@ class PreviewPanel(QWidget):
 
     def _on_load_3d_clicked(self) -> None:
         """Обработчик кнопки «Загрузить 3D модель»."""
+        logger.info(f"[BTN] load_3d clicked | custom_smd={self._custom_smd_mode} | "
+                    f"pending={self._pending_3d_params} | "
+                    f"3d_available={self._3d_available} | "
+                    f"widget={self._3d_widget}")
         if self._custom_smd_mode:
-            # Режим замены модели — показываем диалог выбора SMD
             self._load_custom_smd_via_dialog()
             return
         if not self._pending_3d_params:
+            logger.warning("[BTN] _pending_3d_params is None — кнопка нажата до выбора оружия")
             return
         weapon_key, mode, misc_vpk, textures_vpk = self._pending_3d_params
+        logger.info(f"[BTN] запуск воркера: weapon={weapon_key} mode={mode} "
+                    f"vpk_exists={os.path.exists(misc_vpk) if misc_vpk else 'NO_PATH'}")
         self._start_3d_worker(weapon_key, mode, misc_vpk, textures_vpk)
 
     def _load_custom_smd_via_dialog(self) -> None:

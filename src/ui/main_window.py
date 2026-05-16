@@ -264,7 +264,7 @@ class MainWindow(QMainWindow):
             }
             QPushButton:hover { color: #c0a060; }
         """)
-        dismiss_btn.clicked.connect(self._update_banner.hide)
+        dismiss_btn.clicked.connect(banner.hide)
         layout.addWidget(dismiss_btn)
 
         return banner
@@ -665,16 +665,19 @@ class MainWindow(QMainWindow):
         settings = self.settings_panel.get_settings()
         tf2_root_dir = settings.get('tf2_game_folder', '')
         if not tf2_root_dir:
-            return  # TF2 не настроен — 3D не запускаем
+            self.preview_panel.show_3d_no_tf2_message()
+            return
 
         try:
             from src.services.tf2_paths import TF2Paths
             _, misc_vpk, _ = TF2Paths.resolve(tf2_root_dir)
             textures_vpk   = TF2Paths.resolve_textures_vpk(tf2_root_dir)
         except Exception:
-            return  # Пути недоступны
+            self.preview_panel.show_3d_no_tf2_message()
+            return
 
         if not misc_vpk or not textures_vpk:
+            self.preview_panel.show_3d_no_tf2_message()
             return
 
         self.preview_panel.set_3d_params(
