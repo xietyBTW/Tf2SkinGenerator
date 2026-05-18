@@ -593,7 +593,7 @@ class SettingsPanel(QWidget):
                     кнопки инструментов недоступны
           Spray   — только 256×256; только форматы с альфа; флаги недоступны;
                     UV/Normal скрыты; кнопки инструментов недоступны
-          Hands   — UV/Normal скрыты; Извлечь модель/VMT недоступны
+          Hands   — UV/Normal скрыты; VMT недоступен; Извлечь модель — доступно
         """
         try:
             from src.data.player_hands import HAND_MODE_KEYS
@@ -700,12 +700,12 @@ class SettingsPanel(QWidget):
                 return hands_ru if lang == 'ru' else hands_en
             return ""
 
-        # Извлечь модель — только для обычного оружия
-        self.extract_model_button.setEnabled(is_normal)
+        # Извлечь модель — для обычного оружия и режимов рук (arm MDL существует)
+        self.extract_model_button.setEnabled(is_normal or is_hands)
         self.extract_model_button.setToolTip(_tip(
-            "Режим спрея: модели нет",        "Spray mode: no model",
-            "Режим CritHIT: модели нет",      "CritHIT mode: no model",
-            "Руки: извлечение модели недоступно", "Hands: model extraction unavailable",
+            "Режим спрея: модели нет",   "Spray mode: no model",
+            "Режим CritHIT: модели нет", "CritHIT mode: no model",
+            "", "",  # для рук — доступно, подсказка не нужна
         ))
 
         # Извлечь текстуру — для обычного оружия и рук

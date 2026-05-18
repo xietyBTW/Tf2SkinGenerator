@@ -1,5 +1,15 @@
 "UnlitGeneric"
 {
-	"$baseTexture" "effects/crit"
-	"$translucent" "1"
+	"$baseTexture" "effects\crit"
+	"$translucent" 1
+"Proxies"
+{
+	"AnimatedTexture"
+	{
+	"animatedTextureVar" "$basetexture"
+	"animatedTextureFrameNumVar" "$frame"
+	"animatedTextureFrameRate" "33"
+	}
+}
 
+}

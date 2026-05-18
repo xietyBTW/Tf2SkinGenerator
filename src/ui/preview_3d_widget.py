@@ -18,6 +18,32 @@ from typing import Optional
 
 from src.shared.logging_config import get_logger
 
+
+# ── JS → Python bridge ───────────────────────────────────────────────────── #
+
+class _JsBridge:
+    """
+    QObject-заглушка, которая создаётся только если PySide6-WebEngine доступен.
+    Регистрируется в QWebChannel как "pyBridge" — JS вызывает notifyTextureDrop().
+    """
+    # Объект создаётся динамически при первом вызове _Real3DWidget.__init__
+    pass
+
+
+def _make_js_bridge():
+    """Создаёт реальный _JsBridge на базе QObject (ленивая инициализация)."""
+    from PySide6.QtCore import QObject, Signal, Slot
+
+    class JsBridge(QObject):
+        texture_dropped = Signal(str)   # data-URL изображения
+
+        @Slot(str)
+        def notifyTextureDrop(self, data_url: str) -> None:  # noqa: N802
+            """Вызывается из JS когда пользователь перетаскивает текстуру в 3D viewer."""
+            self.texture_dropped.emit(data_url)
+
+    return JsBridge()
+
 logger = get_logger(__name__)
 
 def _get_html_path() -> str:
@@ -93,8 +119,24 @@ class _Real3DWidget:
             QWebEngineSettings.WebAttribute.LocalContentCanAccessFileUrls, True
         )
 
+        # ── QWebChannel: JS → Python bridge ──────────────────────────────── #
+        try:
+            from PySide6.QtWebChannel import QWebChannel
+            self._bridge  = _make_js_bridge()
+            self._channel = QWebChannel()
+            self._channel.registerObject("pyBridge", self._bridge)
+            self._view.page().setWebChannel(self._channel)
+        except Exception as exc:
+            logger.warning(f"QWebChannel недоступен: {exc}")
+            self._bridge  = None
+            self._channel = None
+
         self._view.setUrl(QUrl.fromLocalFile(_HTML_PATH))
         self._view.loadFinished.connect(self._on_load_finished)
+        self._view.page().javaScriptConsoleMessage = self._on_js_console
+
+    def _on_js_console(self, level, message, line, source):
+        logger.info(f"[JS] {message}")
 
     # ── Qt proxy ─────────────────────────────────────────────────────────── #
 
@@ -160,6 +202,40 @@ class _Real3DWidget:
             tex_data_url = _file_to_data_url(texture_path)
 
         self._js_load(obj_content, tex_data_url, cx, cy, cz, scale)
+
+    def set_editable_mesh_names(self, mat_names: list) -> None:
+        """
+        Задаёт список мешей, которые обновляются при drag-drop / update_texture.
+
+        Для режима рук передаём только имена пользовательских текстур (руки),
+        чтобы рукав костюма не перекрашивался при смене текстуры пользователем.
+        Вызов с пустым списком или None снимает ограничение (обновляются все меши).
+
+        Args:
+            mat_names: список строк — имена мешей (из OBJ 'g'-групп)
+        """
+        if not self._ready:
+            return
+        js = f"window.setEditableMeshNames({json.dumps(mat_names or None)})"
+        self._view.page().runJavaScript(js)
+
+    def apply_material_map(self, tex_map: dict) -> None:
+        """
+        Применяет отдельные текстуры к каждому материалу модели.
+
+        Args:
+            tex_map: {material_name: png_path} — имена материалов должны
+                     совпадать с usemtl-именами в OBJ (из SMD).
+        """
+        if not self._ready or not tex_map:
+            return
+        data_url_map = {}
+        for mat_name, png_path in tex_map.items():
+            if png_path and os.path.exists(png_path):
+                data_url_map[mat_name] = _file_to_data_url(png_path)
+        if data_url_map:
+            js = f"window.applyMaterialMap({json.dumps(data_url_map)})"
+            self._view.page().runJavaScript(js)
 
     def update_texture_file(self, png_path: str) -> None:
         """Обновляет текстуру на уже загруженной модели (статичная)."""
@@ -298,6 +374,8 @@ class _Real3DWidget:
 class _Fallback3DWidget:
     """QLabel-заглушка когда PySide6-WebEngine не установлен."""
 
+    _bridge = None   # нет JS-моста в fallback-режиме
+
     def __init__(self, parent=None):
         from PySide6.QtWidgets import QLabel
         from PySide6.QtCore import Qt
@@ -327,6 +405,8 @@ class _Fallback3DWidget:
     def set_language(self, lang: str): pass
     def show_prompt(self, text: str = ""): pass
     def load_model_files(self, *_): pass
+    def apply_material_map(self, *_): pass
+    def set_editable_mesh_names(self, *_): pass
     def update_texture_file(self, *_): pass
     def update_animated_texture_files(self, *_): pass
     def load_crithit_scene(self, crit_tex_path: str = "", model_tex_path: str = ""): pass

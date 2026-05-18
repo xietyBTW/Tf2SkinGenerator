@@ -81,61 +81,7 @@
     user-select: none;
   }
 
-  /* ── Панель ротации модели (только CritHIT) ──────────────────────── */
-  #rotate-panel {
-    position: absolute;
-    bottom: 38px;
-    left: 12px;
-    display: none;           /* показывается только в CritHIT режиме */
-    flex-direction: column;
-    gap: 4px;
-    z-index: 10;
-    user-select: none;
-  }
 
-  #rotate-panel .rot-row {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-  }
-
-  #rotate-panel .rot-label {
-    color: #444;
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 0.06em;
-    width: 14px;
-    text-align: center;
-    flex-shrink: 0;
-  }
-
-  #rotate-panel button {
-    background: rgba(30, 30, 30, 0.82);
-    border: 1px solid #383838;
-    border-radius: 4px;
-    color: #777;
-    font-size: 13px;
-    line-height: 1;
-    width: 26px;
-    height: 26px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: background 0.12s, border-color 0.12s, color 0.12s;
-    padding: 0;
-  }
-
-  #rotate-panel button:hover {
-    background: rgba(60, 60, 60, 0.9);
-    border-color: #555;
-    color: #bbb;
-  }
-
-  #rotate-panel button:active {
-    background: rgba(80, 80, 80, 0.95);
-    color: #ddd;
-  }
 
   /* ── Drop-overlay (drag & drop текстуры) ─────────────────────────── */
   #drop-overlay {
@@ -182,24 +128,9 @@
   <div id="drop-text"></div>
 </div>
 
-<!-- Панель ротации модели (видна только в CritHIT режиме) -->
-<div id="rotate-panel">
-  <div class="rot-row">
-    <span class="rot-label">X</span>
-    <button title="Rotate X −90°" onclick="window.rotateCritModel('x',-90)">↑</button>
-    <button title="Rotate X +90°" onclick="window.rotateCritModel('x', 90)">↓</button>
-  </div>
-  <div class="rot-row">
-    <span class="rot-label">Y</span>
-    <button title="Rotate Y −90°" onclick="window.rotateCritModel('y',-90)">←</button>
-    <button title="Rotate Y +90°" onclick="window.rotateCritModel('y', 90)">→</button>
-  </div>
-  <div class="rot-row">
-    <span class="rot-label">Z</span>
-    <button title="Rotate Z −90°" onclick="window.rotateCritModel('z',-90)">↺</button>
-    <button title="Rotate Z +90°" onclick="window.rotateCritModel('z', 90)">↻</button>
-  </div>
-</div>
+
+<!-- Qt WebChannel bridge (Python ↔ JS) — поставляется Qt, не CDN -->
+<script src="qrc:///qtwebchannel/qwebchannel.js"></script>
 
 <!-- Three.js from CDN -->
 <script type="importmap">
@@ -215,6 +146,24 @@
 import * as THREE        from 'three';
 import { OBJLoader }     from 'three/addons/loaders/OBJLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// ── Python bridge (QWebChannel JS → Python) ──────────────────────────────── //
+// Инициализируется асинхронно; вызовы _notifyTextureDrop() безопасны до готовности.
+let _pyBridge = null;
+(function _initBridge() {
+  try {
+    if (typeof QWebChannel !== 'undefined' && typeof qt !== 'undefined') {
+      new QWebChannel(qt.webChannelTransport, channel => {
+        _pyBridge = channel.objects.pyBridge;
+      });
+    }
+  } catch (_) { /* standalone browser — bridge недоступен */ }
+})();
+
+function _notifyTextureDrop(dataUrl) {
+  try { if (_pyBridge) _pyBridge.notifyTextureDrop(dataUrl); }
+  catch (_) { /* ignore */ }
+}
 
 // ── i18n ─────────────────────────────────────────────────────────────────── //
 const I18N = {
@@ -290,16 +239,28 @@ scene.add(rim);
 let currentModel  = null;
 let _animTimer    = null;
 let _animFrames   = [];
-let _pendingAnim  = null;
+let _pendingAnim        = null;
+let _pendingMaterialMap = null;  // {mat_name: dataUrl} — ожидает загрузки OBJ
+// null  → обновляем все меши (обычный режим)
+// Set   → обновляем только меши с именами из множества (режим рук)
+let _editableMeshNames  = null;
+
 let _critSprite   = null;   // THREE.Sprite — CritHIT billboard
 let _isCritHitMode = false; // Режим CritHIT (персонаж + billboard)
+
+// CritHIT billboard animation (GIF / animated VTF)
+let _critAnimTimer  = null;   // setInterval для анимации billboard'а
+
+// Generation counter: инкрементируется при каждом новом вызове load/reset.
+// Все async-колбэки проверяют, что их gen === _sceneGeneration,
+// прежде чем трогать сцену — это устраняет все race condition'ы.
+let _sceneGeneration = 0;
 
 const status      = document.getElementById('status');
 const statusText  = document.getElementById('status-text');
 const statusIcon  = document.getElementById('status-icon');
 const hint        = document.getElementById('hint');
 const dropOverlay = document.getElementById('drop-overlay');
-const rotatePanel = document.getElementById('rotate-panel');
 
 // Инициализируем тексты
 statusText.textContent          = _t.select_weapon;
@@ -323,8 +284,10 @@ function hideStatus() {
 // ── Texture animation ────────────────────────────────────────────────────── //
 function stopAnimation() {
   if (_animTimer !== null) { clearInterval(_animTimer); _animTimer = null; }
-  _animFrames  = [];
-  _pendingAnim = null;
+  _animFrames         = [];
+  _pendingAnim        = null;
+  _pendingMaterialMap = null;
+  if (_critAnimTimer !== null) { clearInterval(_critAnimTimer); _critAnimTimer = null; }
 }
 
 function startAnimation(textures, framerate) {
@@ -354,9 +317,13 @@ function applyTransform(object, cx, cy, cz, scale) {
 function applyTexture(object, tex) {
   object.traverse(child => {
     if (!child.isMesh) return;
+    // Preserve the material name so applyMaterialMap can still match by name
+    const prevMatName = child.material && !Array.isArray(child.material)
+      ? child.material.name : '';
     child.material = tex
       ? new THREE.MeshLambertMaterial({ map: tex, side: THREE.DoubleSide })
       : new THREE.MeshLambertMaterial({ color: 0x888888, side: THREE.DoubleSide });
+    if (prevMatName) child.material.name = prevMatName;
     child.material.needsUpdate = true;
   });
 }
@@ -372,6 +339,8 @@ function _loadTextureThen(dataUrl, onLoaded) {
     dataUrl,
     tex => {
       tex.colorSpace = THREE.SRGBColorSpace;
+      tex.wrapS = THREE.RepeatWrapping;
+      tex.wrapT = THREE.RepeatWrapping;
       onLoaded(tex);
     },
     undefined,       // onProgress — не нужен
@@ -383,11 +352,259 @@ function _loadTextureThen(dataUrl, onLoaded) {
   );
 }
 
+// ── GIF animated texture support ─────────────────────────────────────────── //
+//
+// Подход: декодируем кадры GIF встроенным LZW-декодером (без CDN).
+// Почему не <img> → canvas: Chrome/Qt WebEngine замораживает анимацию GIF
+// для off-screen элементов, поэтому ctx.drawImage(img) всегда даёт первый кадр.
+// Декодирование в JS даёт нам массив PNG data-URL → скармливаем в loadAnimatedTexture.
+
+// Анимирует CritHIT billboard массивом уже загруженных Three.js текстур.
+function _animateCritSprite(textures, fps) {
+  if (_critAnimTimer !== null) { clearInterval(_critAnimTimer); _critAnimTimer = null; }
+  if (!textures || textures.length <= 1) return;
+  let frame = 1;   // кадр 0 уже применён снаружи
+  const ms  = Math.max(16, Math.round(1000 / Math.max(0.1, fps)));
+  _critAnimTimer = setInterval(() => {
+    if (!_critSprite) { clearInterval(_critAnimTimer); _critAnimTimer = null; return; }
+    _critSprite.material.map = textures[frame % textures.length];
+    _critSprite.material.needsUpdate = true;
+    frame++;
+  }, ms);
+}
+
+// ── Inline GIF decoder (без внешних зависимостей) ────────────────────────── //
+//
+// GIF89a/GIF87a: LZW-декомпрессия, Global/Local Color Table, transparency,
+// interlacing, disposal methods 0-3.
+// Возвращает { dataUrls: string[], fps: number } или null при ошибке.
+
+// LZW-декомпрессор для GIF.
+function _gifLzwDecode(data, minCS, maxPx) {
+  const cc = 1 << minCS;           // clear code
+  const ec = cc + 1;               // end-of-info code
+  let codeSize = minCS + 1;
+  let mask     = (1 << codeSize) - 1;
+  let next     = ec + 1;
+
+  // Начальная таблица: каждый пиксельный индекс — массив из одного байта
+  let tbl = [];
+  for (let i = 0; i < cc; i++) tbl[i] = Uint8Array.of(i);
+
+  const out    = new Uint8Array(maxPx);
+  let outPos   = 0;
+  let bitBuf   = 0, bitCnt = 0, dataPos = 0;
+
+  function readCode() {
+    while (bitCnt < codeSize && dataPos < data.length) {
+      bitBuf |= data[dataPos++] << bitCnt;
+      bitCnt += 8;
+    }
+    const c = bitBuf & mask;
+    bitBuf >>>= codeSize;
+    bitCnt  -= codeSize;
+    return c;
+  }
+
+  let prev = null;
+  while (outPos < maxPx) {
+    const code = readCode();
+
+    if (code === cc) {                              // CLEAR: сброс
+      codeSize = minCS + 1;
+      mask     = (1 << codeSize) - 1;
+      next     = ec + 1;
+      tbl      = [];
+      for (let i = 0; i < cc; i++) tbl[i] = Uint8Array.of(i);
+      prev = null;
+      continue;
+    }
+    if (code === ec) break;                         // END
+
+    let entry;
+    if (code < next) {
+      entry = tbl[code];
+    } else if (code === next && prev !== null) {    // специальный случай LZW
+      entry = new Uint8Array(prev.length + 1);
+      entry.set(prev);
+      entry[prev.length] = prev[0];
+    } else { break; }                              // битый поток
+
+    for (let i = 0; i < entry.length && outPos < maxPx; i++) out[outPos++] = entry[i];
+
+    if (prev !== null && next < 4096) {
+      const ne = new Uint8Array(prev.length + 1);
+      ne.set(prev);
+      ne[prev.length] = entry[0];
+      tbl[next] = ne;
+      next++;
+      if (next === (1 << codeSize) && codeSize < 12) { codeSize++; mask = (1 << codeSize) - 1; }
+    }
+    prev = entry;
+  }
+  return out.subarray(0, outPos);
+}
+
+// Деинтерлейсинг GIF (4 прохода: строки 0,8,16…; 4,12…; 2,6…; 1,3,5…).
+function _gifDeinterlace(rgba, w, h) {
+  const out = new Uint8ClampedArray(rgba.length);
+  let src = 0;
+  for (const [start, step] of [[0,8],[4,8],[2,4],[1,2]]) {
+    for (let r = start; r < h; r += step, src++) {
+      out.set(rgba.subarray(src * w * 4, (src + 1) * w * 4), r * w * 4);
+    }
+  }
+  return out;
+}
+
+// Основной парсер GIF. Sync, возвращает { dataUrls, fps } или null.
+function _parseGif(buf) {
+  const d = new Uint8Array(buf);
+  let p = 6;  // пропускаем заголовок "GIF89a" / "GIF87a"
+
+  // Logical Screen Descriptor
+  const W  = d[p] | (d[p+1] << 8); p += 2;
+  const H  = d[p] | (d[p+1] << 8); p += 2;
+  const pk = d[p++];
+  p += 2;  // background color index + pixel aspect ratio
+
+  let gct = null;
+  if (pk >> 7) { const n = 3 << ((pk & 7) + 1); gct = d.slice(p, p + n); p += n; }
+
+  // Canvas для компоузинга кадров
+  const cv = document.createElement('canvas');
+  cv.width  = W;  cv.height = H;
+  const cx  = cv.getContext('2d');
+
+  const dataUrls = [], delays = [], frameDisposals = [];
+  let disposal = 0, delay = 10, transpIdx = -1, savedData = null;
+
+  function readSubBlocks() {
+    const parts = [];
+    let len;
+    while ((len = d[p++]) !== 0) { parts.push(d.subarray(p, p + len)); p += len; }
+    const total = parts.reduce((s, c) => s + c.length, 0);
+    const flat  = new Uint8Array(total);
+    let   off   = 0;
+    for (const c of parts) { flat.set(c, off); off += c.length; }
+    return flat;
+  }
+  function skipSubBlocks() { let l; while ((l = d[p++]) !== 0) p += l; }
+
+  while (p < d.length) {
+    const b = d[p++];
+    if (b === 0x3B) break;   // Trailer
+
+    if (b === 0x21) {        // Extension introducer
+      const lbl = d[p++];
+      if (lbl === 0xF9 && d[p] === 4) {        // Graphic Control Extension
+        p++;                                    // block size = 4
+        const gce = d[p++];
+        disposal  = (gce >> 3) & 7;
+        delay     = d[p] | (d[p+1] << 8); p += 2;
+        const ti  = d[p++];
+        transpIdx = (gce & 1) ? ti : -1;
+        p++;                                    // block terminator
+      } else { skipSubBlocks(); }
+
+    } else if (b === 0x2C) { // Image Descriptor
+      const left = d[p] | (d[p+1]<<8); p+=2;
+      const top  = d[p] | (d[p+1]<<8); p+=2;
+      const fw   = d[p] | (d[p+1]<<8); p+=2;
+      const fh   = d[p] | (d[p+1]<<8); p+=2;
+      const ipk  = d[p++];
+
+      let ct = gct;
+      if (ipk >> 7) { const n = 3 << ((ipk & 7) + 1); ct = d.slice(p, p + n); p += n; }
+
+      const minCS = d[p++];
+      const compressed = readSubBlocks();
+      const pixels     = _gifLzwDecode(compressed, minCS, fw * fh);
+
+      // Индексы → RGBA
+      const rgba = new Uint8ClampedArray(fw * fh * 4);
+      for (let i = 0; i < fw * fh; i++) {
+        const ci = pixels[i];
+        if (ci !== transpIdx && ct) {
+          rgba[i*4]   = ct[ci*3];
+          rgba[i*4+1] = ct[ci*3+1];
+          rgba[i*4+2] = ct[ci*3+2];
+          rgba[i*4+3] = 255;
+        }
+        // transpIdx → alpha=0 (уже 0 по умолчанию)
+      }
+
+      const patch = ((ipk >> 6) & 1) ? _gifDeinterlace(rgba, fw, fh) : rgba;
+
+      // Disposal предыдущего кадра
+      if (frameDisposals.length > 0) {
+        const pd = frameDisposals[frameDisposals.length - 1];
+        if (pd === 2) { cx.clearRect(0, 0, W, H); }
+        else if (pd === 3 && savedData) { cx.putImageData(savedData, 0, 0); savedData = null; }
+      }
+      // Сохраняем для disposal=3 ЭТОГО кадра (нужно до его отрисовки)
+      if (disposal === 3) savedData = cx.getImageData(0, 0, W, H);
+
+      cx.putImageData(new ImageData(patch, fw, fh), left, top);
+      dataUrls.push(cv.toDataURL('image/png'));
+      delays.push((delay || 10) * 10);       // сентисекунды → мс
+      frameDisposals.push(disposal);
+
+      disposal = 0; delay = 10; transpIdx = -1;
+    }
+  }
+
+  if (!dataUrls.length) return null;
+  const avgDelay = delays.reduce((a, b) => a + b, 0) / delays.length;
+  return { dataUrls, fps: 1000 / Math.max(avgDelay, 20) };
+}
+
+// Публичная точка входа (async для совместимости с drop-handler'ом).
+async function _decodeGifFrames(arrayBuffer) {
+  try { return _parseGif(arrayBuffer); }
+  catch (e) { console.warn('[3D] GIF decode error:', e); return null; }
+}
+
+// Загружает декодированные кадры GIF как текстуры и анимирует CritHIT billboard.
+function _animateCritHitGif(dataUrls, fps) {
+  if (_critAnimTimer !== null) { clearInterval(_critAnimTimer); _critAnimTimer = null; }
+  if (!dataUrls || !dataUrls.length) return;
+
+  // Создаём спрайт если его ещё нет
+  if (!_critSprite) {
+    const mat    = new THREE.SpriteMaterial({ transparent: true, depthTest: false });
+    const sprite = new THREE.Sprite(mat);
+    sprite.scale.set(0.55, 0.55, 1);
+    sprite.position.set(0, 1.38, 0);   // headTopWorld(1.0) + 0.38
+    scene.add(sprite);
+    _critSprite = sprite;
+  }
+
+  const sprite   = _critSprite;
+  const textures = new Array(dataUrls.length).fill(null);
+  let   loaded   = 0;
+
+  dataUrls.forEach((url, i) => {
+    _loadTextureThen(url, tex => {
+      textures[i] = tex;
+      loaded++;
+      if (loaded === 1 && _critSprite === sprite) {
+        sprite.material.map = tex;
+        sprite.material.needsUpdate = true;
+      }
+      if (loaded === dataUrls.length && _critSprite === sprite) {
+        _animateCritSprite(textures, fps);
+      }
+    });
+  });
+}
+
 // ── Public API ───────────────────────────────────────────────────────────── //
 
 window.loadModelFromContent = function(objContent, texDataUrl, cx, cy, cz, scale) {
-  _isCritHitMode = false;
-  rotatePanel.style.display = 'none';
+  const gen = ++_sceneGeneration;   // все предыдущие async-колбэки теперь устарели
+  _isCritHitMode    = false;
+  _editableMeshNames = null;   // сбрасываем при каждой новой модели
   setStatus(_t.loading, false, true);
   stopAnimation();
   if (currentModel) { scene.remove(currentModel); currentModel = null; }
@@ -400,6 +617,7 @@ window.loadModelFromContent = function(objContent, texDataUrl, cx, cy, cz, scale
     objUrl,
     object => {
       URL.revokeObjectURL(objUrl);
+      if (_sceneGeneration !== gen) return;   // запрос устарел — более новый уже в очереди
       scene.add(object);
       currentModel = object;
 
@@ -407,6 +625,18 @@ window.loadModelFromContent = function(objContent, texDataUrl, cx, cy, cz, scale
       applyTexture(object, null);
       applyTransform(object, cx, cy, cz, scale);
       hideStatus();
+
+      // Диагностика: логируем все меши и имена материалов
+      let _meshLog = '[OBJ meshes] total children=' + object.children.length + ' | ';
+      object.traverse(child => {
+        if (child.isMesh) {
+          const mn = child.material ? (Array.isArray(child.material)
+            ? child.material.map(m => m.name).join(',')
+            : child.material.name) : 'null';
+          _meshLog += 'mesh="' + child.name + '" mat="' + mn + '" | ';
+        }
+      });
+      console.log(_meshLog);
 
       // Грузим текстуру ПОСЛЕ того как OBJ уже в сцене — исключает race condition
       if (texDataUrl && texDataUrl.length > 0) {
@@ -421,6 +651,12 @@ window.loadModelFromContent = function(objContent, texDataUrl, cx, cy, cz, scale
         _pendingAnim = null;
         window.loadAnimatedTexture(frameDataUrls, framerate);
       }
+
+      if (_pendingMaterialMap) {
+        const map = _pendingMaterialMap;
+        _pendingMaterialMap = null;
+        window.applyMaterialMap(map);
+      }
     },
     undefined,
     err => {
@@ -431,12 +667,60 @@ window.loadModelFromContent = function(objContent, texDataUrl, cx, cy, cz, scale
   );
 };
 
+// Задаёт список имён мешей, которые получают текстуру при обновлении.
+// names: массив строк (совпадают с 'g'-именами в OBJ) или null — обновлять все.
+window.setEditableMeshNames = function(names) {
+  _editableMeshNames = names ? new Set(names) : null;
+};
+
 window.updateTextureFromDataUrl = function(texDataUrl) {
   stopAnimation();
   if (!currentModel) return;
   const target = currentModel;
   _loadTextureThen(texDataUrl, tex => {
-    if (currentModel === target) applyTexture(target, tex);
+    if (currentModel !== target) return;
+    if (_editableMeshNames) {
+      // Режим рук: обновляем только редактируемые меши, остальные не трогаем
+      target.traverse(child => {
+        if (!child.isMesh || !_editableMeshNames.has(child.name)) return;
+        const prevName = child.material && !Array.isArray(child.material)
+          ? child.material.name : '';
+        child.material = new THREE.MeshLambertMaterial({ map: tex, side: THREE.DoubleSide });
+        if (prevName) child.material.name = prevName;
+        child.material.needsUpdate = true;
+      });
+    } else {
+      applyTexture(target, tex);
+    }
+  });
+};
+
+// Применяет отдельные текстуры к каждому материалу по имени.
+// texMapJson: {mat_name: dataUrl, ...}
+// Имена должны совпадать с usemtl в OBJ (child.material.name).
+window.applyMaterialMap = function(texMapJson) {
+  if (!currentModel) {
+    // Модель ещё не загрузилась — сохраняем до момента готовности
+    _pendingMaterialMap = texMapJson;
+    return;
+  }
+  const target = currentModel;
+  Object.entries(texMapJson).forEach(([matName, dataUrl]) => {
+    if (!dataUrl) return;
+    _loadTextureThen(dataUrl, tex => {
+      if (currentModel !== target) return;
+      target.traverse(child => {
+        if (!child.isMesh) return;
+        // Match by mesh name (from OBJ 'g' group) or by material name
+        const matNameMatch = child.material && !Array.isArray(child.material)
+          ? child.material.name === matName : false;
+        if (child.name === matName || matNameMatch) {
+          child.material = new THREE.MeshLambertMaterial({ map: tex, side: THREE.DoubleSide });
+          child.material.name = matName;
+          child.material.needsUpdate = true;
+        }
+      });
+    });
   });
 };
 
@@ -482,8 +766,9 @@ window.showError = function(text) {
 };
 
 window.resetViewer = function() {
-  _isCritHitMode = false;
-  rotatePanel.style.display = 'none';
+  ++_sceneGeneration;
+  _isCritHitMode    = false;
+  _editableMeshNames = null;
   stopAnimation();
   if (currentModel) { scene.remove(currentModel); currentModel = null; }
   if (_critSprite)  { scene.remove(_critSprite);  _critSprite  = null; }
@@ -549,13 +834,9 @@ function _placeCritSprite(dataUrl, headTopWorldY) {
   _critSprite = sprite;
 
   // Загружаем текстуру через хелпер с error callback
+  // Масштаб всегда 1:1 — crit.vtf в игре 256×256 (квадратная)
   _loadTextureThen(dataUrl, tex => {
     if (_critSprite !== sprite) return;   // спрайт уже заменён
-    // Корректируем пропорции под реальный размер изображения
-    const img = tex.image;
-    if (img && img.width && img.height) {
-      sprite.scale.set((img.width / img.height) * 0.55, 0.55, 1);
-    }
     mat.map = tex;
     mat.needsUpdate = true;
   });
@@ -577,6 +858,7 @@ function _applyModelTexture(group, modelTexDataUrl) {
 // Публичная функция: загружает сцену CritHIT (солдат + billboard текстуры).
 // modelTexDataUrl — data URL текстуры самого персонажа (необязательно).
 window.loadCritHitScene = function(critTexDataUrl, modelTexDataUrl) {
+  ++_sceneGeneration;   // отменяет любой параллельный loadCritHitSceneWithModel
   _isCritHitMode = true;
   setStatus(_t.loading, false, true);
   stopAnimation();
@@ -615,13 +897,13 @@ window.loadCritHitScene = function(critTexDataUrl, modelTexDataUrl) {
   _placeCritSprite(critTexDataUrl, headTopWorld);
 
   hideStatus();
-  rotatePanel.style.display = 'flex';
 };
 
 // Публичная функция: CritHIT сцена с пользовательской OBJ-моделью.
 // Принимает содержимое OBJ-файла + параметры центрирования (вычисленные в Python).
 // modelTexDataUrl — data URL текстуры самого персонажа (необязательно).
 window.loadCritHitSceneWithModel = function(objContent, critTexDataUrl, cx, cy, cz, scale, modelTexDataUrl) {
+  const gen = ++_sceneGeneration;   // все предыдущие async-колбэки теперь устарели
   _isCritHitMode = true;
   setStatus(_t.loading, false, true);
   stopAnimation();
@@ -636,6 +918,9 @@ window.loadCritHitSceneWithModel = function(objContent, critTexDataUrl, cx, cy, 
     objUrl,
     object => {
       URL.revokeObjectURL(objUrl);
+
+      // Запрос устарел (пользователь переключился на другой режим)
+      if (_sceneGeneration !== gen) return;
 
       // Накладываем текстуру персонажа если есть, иначе нейтральный силуэт
       if (modelTexDataUrl) {
@@ -667,27 +952,19 @@ window.loadCritHitSceneWithModel = function(objContent, critTexDataUrl, cx, cy, 
       _placeCritSprite(critTexDataUrl, 1.0);
 
       hideStatus();
-      rotatePanel.style.display = 'flex';
-    },
+        },
     undefined,
     err => {
       URL.revokeObjectURL(objUrl);
       console.error('Custom model OBJ load error:', err);
-      // Fallback: строим процедурного солдата
-      window.loadCritHitScene(critTexDataUrl, modelTexDataUrl);
+      // Fallback: строим процедурного солдата (только если запрос ещё актуален)
+      if (_sceneGeneration === gen) {
+        window.loadCritHitScene(critTexDataUrl, modelTexDataUrl);
+      }
     }
   );
 };
 
-// Публичная функция: поворачивает модель на 90° вокруг выбранной оси.
-// axis: 'x' | 'y' | 'z', degrees: ±90
-window.rotateCritModel = function(axis, degrees) {
-  if (!_isCritHitMode || !currentModel) return;
-  const rad = degrees * Math.PI / 180;
-  if      (axis === 'x') currentModel.rotation.x += rad;
-  else if (axis === 'y') currentModel.rotation.y += rad;
-  else if (axis === 'z') currentModel.rotation.z += rad;
-};
 
 // Публичная функция: обновляет только текстуру CritHIT billboard.
 window.updateCritHitTexture = function(critTexDataUrl) {
@@ -734,21 +1011,57 @@ document.addEventListener('drop', e => {
   const isImage = file.type.startsWith('image/') || IMAGE_EXTS.test(file.name);
   if (!isImage) return;
 
-  const reader = new FileReader();
-  reader.onload = evt => {
-    const dataUrl = evt.target.result;
-    stopAnimation();
-    if (_isCritHitMode) {
-      // В CritHIT режиме drag-drop обновляет billboard над головой
-      window.updateCritHitTexture(dataUrl);
-    } else if (currentModel) {
-      window.updateTextureFromDataUrl(dataUrl);
-    } else {
-      // Запоминаем как ожидающую статичную текстуру
-      _pendingAnim = { frameDataUrls: [dataUrl], framerate: 0 };
-    }
-  };
-  reader.readAsDataURL(file);
+  const isGif = file.type === 'image/gif' || /\.gif$/i.test(file.name);
+
+  if (isGif) {
+    // GIF: читаем как ArrayBuffer → декодируем кадры встроенным декодером
+    const bufReader = new FileReader();
+    bufReader.onload = async evt => {
+      const gifBuffer = evt.target.result;
+      stopAnimation();
+
+      const decoded = await _decodeGifFrames(gifBuffer);
+
+      if (decoded && decoded.dataUrls.length > 0) {
+        if (_isCritHitMode) {
+          _animateCritHitGif(decoded.dataUrls, decoded.fps);
+        } else if (currentModel) {
+          window.loadAnimatedTexture(decoded.dataUrls, decoded.fps);
+        }
+      } else {
+        // Fallback: показываем первый кадр как статичную текстуру
+        const urlReader = new FileReader();
+        urlReader.onload = e2 => {
+          if (_isCritHitMode)  window.updateCritHitTexture(e2.target.result);
+          else if (currentModel) window.updateTextureFromDataUrl(e2.target.result);
+        };
+        urlReader.readAsDataURL(file);
+      }
+
+      // Уведомляем Python с оригинальным GIF (data URL) — 2D превью покажет анимацию
+      const gifReader = new FileReader();
+      gifReader.onload = e => _notifyTextureDrop(e.target.result);
+      gifReader.readAsDataURL(new Blob([gifBuffer], { type: 'image/gif' }));
+    };
+    bufReader.readAsArrayBuffer(file);
+  } else {
+    // Статичное изображение — прежнее поведение
+    const reader = new FileReader();
+    reader.onload = evt => {
+      const dataUrl = evt.target.result;
+      stopAnimation();
+      if (_isCritHitMode) {
+        window.updateCritHitTexture(dataUrl);
+      } else if (currentModel) {
+        window.updateTextureFromDataUrl(dataUrl);
+      } else {
+        _pendingAnim = { frameDataUrls: [dataUrl], framerate: 0 };
+      }
+      // Уведомляем Python: обновить 2D превью
+      _notifyTextureDrop(dataUrl);
+    };
+    reader.readAsDataURL(file);
+  }
 });
 
 // ── Render loop ──────────────────────────────────────────────────────────── //

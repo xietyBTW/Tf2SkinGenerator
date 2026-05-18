@@ -23,6 +23,7 @@ HAND_MODES: Dict[str, dict] = {
     "scout_hands": {
         "ru": "Руки",
         "en": "Hands",
+        "arm_model": "c_scout_arms",   # MDL ключ для 3D Preview
         "textures": [
             ("scout", "scout_hands"),
         ],
@@ -30,6 +31,7 @@ HAND_MODES: Dict[str, dict] = {
     "soldier_hands": {
         "ru": "Руки",
         "en": "Hands",
+        "arm_model": "c_soldier_arms",
         "textures": [
             ("soldier", "soldier_hands"),
         ],
@@ -37,6 +39,7 @@ HAND_MODES: Dict[str, dict] = {
     "pyro_hands": {
         "ru": "Руки",
         "en": "Hands",
+        "arm_model": "c_pyro_arms",
         "textures": [
             ("pyro", "pyro_hands_red"),
         ],
@@ -44,6 +47,7 @@ HAND_MODES: Dict[str, dict] = {
     "demoman_hands": {
         "ru": "Руки",
         "en": "Hands",
+        "arm_model": "c_demo_arms",
         "textures": [
             ("demo", "demoman_hands"),
         ],
@@ -51,6 +55,7 @@ HAND_MODES: Dict[str, dict] = {
     "heavy_hands": {
         "ru": "Руки",
         "en": "Hands",
+        "arm_model": "c_heavy_arms",
         "textures": [
             ("hvyweapon", "hvyweapon_hands"),
         ],
@@ -58,6 +63,7 @@ HAND_MODES: Dict[str, dict] = {
     "engineer_hands": {
         "ru": "Руки",
         "en": "Hands",
+        "arm_model": "c_engineer_arms",
         # handl = левая рука, handr_red = правая (красная)
         "textures": [
             ("engineer", "engineer_handl"),
@@ -67,6 +73,7 @@ HAND_MODES: Dict[str, dict] = {
     "engineer_mech_hands": {
         "ru": "Рука робота (МвМ)",
         "en": "Robot Hand (MvM)",
+        "arm_model": "c_engineer_gunslinger",   # MDL робо-руки (Gunslinger)
         # Механическая рука инженера для режима MvM
         "textures": [
             ("engineer", "engineer_mech_hand"),
@@ -76,6 +83,7 @@ HAND_MODES: Dict[str, dict] = {
     "medic_hands": {
         "ru": "Руки",
         "en": "Hands",
+        "arm_model": "c_medic_arms",
         "textures": [
             ("medic", "medic_hands_red"),
             ("medic", "medic_hands_blue"),
@@ -84,6 +92,7 @@ HAND_MODES: Dict[str, dict] = {
     "sniper_hands": {
         "ru": "Руки",
         "en": "Hands",
+        "arm_model": "c_sniper_arms",
         "textures": [
             ("sniper", "sniper_handl_red"),
         ],
@@ -91,6 +100,7 @@ HAND_MODES: Dict[str, dict] = {
     "spy_hands": {
         "ru": "Руки",
         "en": "Hands",
+        "arm_model": "c_spy_arms",
         "textures": [
             ("spy", "spy_hands_red"),
             ("spy", "spy_hands_blue"),

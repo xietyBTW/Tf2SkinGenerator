@@ -156,6 +156,9 @@ class VTFLib:
         cls._dll.vlImageGetFrameCount.restype = vlUInt
         cls._dll.vlImageGetFrameCount.argtypes = []
 
+        cls._dll.vlImageGetFlags.restype = vlUInt
+        cls._dll.vlImageGetFlags.argtypes = []
+
         return cls._dll
 
     @classmethod
@@ -327,7 +330,18 @@ class VTFLib:
             height      = int(dll.vlImageGetHeight())
             frame_count = int(dll.vlImageGetFrameCount())
             src_format  = int(dll.vlImageGetFormat())
+            vtf_flags   = int(dll.vlImageGetFlags())
             dest_size   = width * height * 4
+
+            _fmt_name = {v: k for k, v in vars(VTFImageFormat).items() if not k.startswith('_')}.get(src_format, str(src_format))
+            _flag_names = [k for k, v in vars(VTFImageFlags).items()
+                           if not k.startswith('_') and (vtf_flags & v)]
+            logger.info(
+                f"VTF '{os.path.basename(vtf_path)}': "
+                f"{width}x{height} {frame_count}fr  "
+                f"format={_fmt_name}({src_format})  "
+                f"flags={_flag_names}"
+            )
 
             frames: list[bytes] = []
             for fi in range(frame_count):

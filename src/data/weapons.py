@@ -394,6 +394,24 @@ WEAPON_MDL_PATHS["w_sd_sapper"] = (
     "models/weapons/w_models/w_sd_sapper.mdl"
 )
 
+# ── Модели рук (c_class_arms) ─────────────────────────────────────────────────
+_ARM_CLASSES = [
+    "c_scout_arms",
+    "c_soldier_arms",
+    "c_pyro_arms",
+    "c_demo_arms",
+    "c_heavy_arms",
+    "c_engineer_arms",
+    "c_engineer_gunslinger",   # робо-рука инженера (MvM / Gunslinger)
+    "c_medic_arms",
+    "c_sniper_arms",
+    "c_spy_arms",
+]
+for _arm in _ARM_CLASSES:
+    # Руки хранятся по плоскому пути (без подпапки), а не c_models/{arm}/{arm}.mdl.
+    # Это обеспечивает совпадение ключа кэша при повторных запусках.
+    WEAPON_MDL_PATHS[_arm] = f"models/weapons/c_models/{_arm}.mdl"
+
 # ── Нестандартные пути VTF (дополнительные пути для поиска текстур) ───────────
 # Используются как приоритетный список ПЕРЕД стандартными путями.
 # Нужны когда имя/папка текстуры не совпадает с weapon_key.
@@ -482,5 +500,34 @@ WEAPON_TEXTURE_PATHS: dict[str, list[str]] = {
     # Red-Tape Recorder: w_models
     "w_sd_sapper": [
         "materials/models/weapons/w_models/w_sd_sapper/w_sd_sapper.vtf",
+    ],
+    # ── Текстуры рук (materials/models/player/…) ──────────────────────────────
+    "c_scout_arms": [
+        "materials/models/player/scout/scout_hands.vtf",
+    ],
+    "c_soldier_arms": [
+        "materials/models/player/soldier/soldier_hands.vtf",
+    ],
+    "c_pyro_arms": [
+        "materials/models/player/pyro/pyro_hands_red.vtf",
+    ],
+    "c_demo_arms": [
+        "materials/models/player/demo/demoman_hands.vtf",
+    ],
+    "c_heavy_arms": [
+        "materials/models/player/hvyweapon/hvyweapon_hands.vtf",
+    ],
+    "c_engineer_arms": [
+        "materials/models/player/engineer/engineer_handl.vtf",
+        "materials/models/player/engineer/engineer_handr_red.vtf",
+    ],
+    "c_medic_arms": [
+        "materials/models/player/medic/medic_hands_red.vtf",
+    ],
+    "c_sniper_arms": [
+        "materials/models/player/sniper/sniper_handl_red.vtf",
+    ],
+    "c_spy_arms": [
+        "materials/models/player/spy/spy_hands_red.vtf",
     ],
 }

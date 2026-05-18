@@ -366,6 +366,15 @@ class PreviewPanel(QWidget):
         self.page_3d = qt_w
         self.view_stack.addWidget(self.page_3d)
 
+        # Подключаем JS→Python bridge (если WebEngine + QWebChannel доступны)
+        bridge = getattr(self._3d_widget, '_bridge', None)
+        if bridge is not None:
+            try:
+                bridge.texture_dropped.connect(self._on_3d_texture_dropped)
+                logger.info("3D viewer bridge подключён: texture_dropped → _on_3d_texture_dropped")
+            except Exception as exc:
+                logger.warning(f"Не удалось подключить 3D bridge: {exc}")
+
         if self._3d_available:
             logger.info("3D Preview виджет инициализирован (WebEngine)")
         else:
@@ -413,7 +422,7 @@ class PreviewPanel(QWidget):
             path = self.image_path  # захватываем в замыкание
             if os.path.exists(path):
                 from PySide6.QtCore import QTimer
-                QTimer.singleShot(300, lambda: self._3d_widget.update_texture_file(path))
+                QTimer.singleShot(300, lambda: self._apply_image_to_3d(path))
 
     def is_3d_mode(self) -> bool:
         return self.view_stack.currentIndex() == 1
@@ -807,6 +816,7 @@ class PreviewPanel(QWidget):
         worker.progress.connect(self._on_3d_progress)
         worker.ready.connect(self._on_3d_ready)
         worker.animated.connect(self._on_3d_animated)
+        worker.multi_material.connect(self._on_3d_multi_material)
         worker.blu_ready.connect(self._on_3d_blu_ready)
         worker.failed.connect(self._on_3d_failed)
         worker.start()
@@ -830,6 +840,113 @@ class PreviewPanel(QWidget):
         if self._3d_widget and self.is_3d_mode():
             self._3d_widget.update_texture_file(png_path)
 
+    def _apply_image_to_3d(self, path: str) -> None:
+        """Применяет изображение к 3D модели с учётом типа файла.
+
+        Для GIF — декодирует кадры и запускает анимацию.
+        Для статичных форматов — вызывает update_texture_file как обычно.
+        """
+        if not self._3d_widget or not self._3d_available:
+            return
+        if not os.path.exists(path):
+            return
+        if path.lower().endswith('.gif'):
+            self._apply_gif_to_3d(path)
+        else:
+            self._3d_widget.update_texture_file(path)
+
+    def _apply_gif_to_3d(self, gif_path: str) -> None:
+        """Декодирует GIF по кадрам через PIL и запускает анимацию в 3D viewer.
+
+        Кадры кэшируются в self._3d_gif_cache чтобы повторные переключения
+        2D↔3D не декодировали файл заново.
+        """
+        cache = getattr(self, '_3d_gif_cache', {})
+
+        # Проверяем кэш
+        if gif_path in cache:
+            frame_paths, fps = cache[gif_path]
+            if frame_paths and all(os.path.exists(p) for p in frame_paths):
+                logger.info(f"GIF→3D: из кэша {len(frame_paths)} кадров @ {fps:.1f} fps")
+                self._3d_widget.update_animated_texture_files(frame_paths, fps)
+                return
+            # Кэш устарел (временные файлы удалены) — декодируем заново
+            del cache[gif_path]
+
+        try:
+            from PIL import Image
+            import tempfile
+
+            gif = Image.open(gif_path)
+            n_frames = getattr(gif, 'n_frames', 1)
+
+            if n_frames <= 1:
+                # Одиночный кадр — просто статичная текстура
+                self._3d_widget.update_texture_file(gif_path)
+                return
+
+            duration = gif.info.get('duration', 100) or 100
+            fps = 1000.0 / duration
+
+            frame_paths = []
+            for i in range(n_frames):
+                gif.seek(i)
+                tmp = tempfile.mktemp(suffix='.png', prefix=f'tf2_gif{i}_')
+                gif.convert('RGBA').save(tmp)
+                frame_paths.append(tmp)
+
+            cache[gif_path] = (frame_paths, fps)
+            self._3d_gif_cache = cache
+
+            logger.info(f"GIF→3D: декодировано {n_frames} кадров @ {fps:.1f} fps")
+            self._3d_widget.update_animated_texture_files(frame_paths, fps)
+
+        except Exception as exc:
+            logger.warning(f"_apply_gif_to_3d: {exc}")
+            # Fallback: статичная текстура (первый кадр через _file_to_data_url)
+            self._3d_widget.update_texture_file(gif_path)
+
+    def _on_3d_texture_dropped(self, data_url: str) -> None:
+        """Вызывается когда пользователь перетаскивает текстуру прямо в 3D viewer.
+
+        Сохраняет data-URL во временный файл и обновляет 2D превью.
+        """
+        if not data_url:
+            return
+        try:
+            import base64 as _b64
+            import tempfile
+
+            # Парсим data URL: data:<mime>;base64,<data>
+            if ',' not in data_url:
+                return
+            header, b64data = data_url.split(',', 1)
+            mime = 'image/png'
+            if ':' in header and ';' in header:
+                mime = header.split(':')[1].split(';')[0]
+
+            ext_map = {
+                'image/png': '.png', 'image/jpeg': '.jpg', 'image/jpg': '.jpg',
+                'image/gif': '.gif', 'image/webp': '.webp', 'image/bmp': '.bmp',
+            }
+            ext = ext_map.get(mime, '.png')
+
+            img_bytes = _b64.b64decode(b64data)
+            tmp_path = tempfile.mktemp(suffix=ext, prefix='tf2_3ddrop_')
+            with open(tmp_path, 'wb') as f:
+                f.write(img_bytes)
+
+            logger.info(f"3D texture drop: сохранено во {tmp_path} ({len(img_bytes)} байт)")
+
+            # Обновляем 2D превью (load_image обновит image_path, нужный для Build VPK)
+            # Флаг _from_3d_drop предотвращает рекурсивный обратный вызов updateTexture→3D
+            self._from_3d_drop = True
+            self.load_image(tmp_path)
+            self._from_3d_drop = False
+
+        except Exception as exc:
+            logger.warning(f"_on_3d_texture_dropped: ошибка при сохранении: {exc}")
+
     def _stop_3d_worker(self):
         if self._3d_worker and self._3d_worker.isRunning():
             self._3d_worker.requestInterruption()
@@ -848,6 +965,43 @@ class PreviewPanel(QWidget):
             self._active_team = 'red'
         if self._3d_widget:
             self._3d_widget.load_model_files(obj_path, texture_path)
+
+    def _on_3d_multi_material(self, tex_map: dict) -> None:
+        """Применяет текстуры для каждого материала мульти-материальной модели."""
+        if not (self._3d_widget and tex_map):
+            return
+        self._3d_widget.apply_material_map(tex_map)
+
+        # В режиме рук сообщаем вьюверу, какие меши редактирует пользователь,
+        # чтобы drag-drop / обновление текстуры затрагивало только руки (не рукав).
+        if self._pending_3d_params:
+            mode = self._pending_3d_params[1]
+            from src.data.player_hands import HAND_MODES, HAND_MODE_KEYS
+            if mode in HAND_MODE_KEYS:
+                textures_list = HAND_MODES.get(mode, {}).get("textures", [])
+                # VTF-имена из player_hands — в lowercase; имена мешей в OBJ берутся
+                # из SMD-материалов и могут иметь другой регистр (engineer_handL).
+                # Сравниваем через lowercase, но передаём реальные имена мешей из tex_map.
+                hand_vtf_lower = {vtf_name.lower() for (_, vtf_name) in textures_list}
+
+                # Суффиксы overlay/sheen мешей: в TF2 это та же геометрия рук,
+                # дублированная для эффектов киллстрика. Если базовое имя
+                # (hvyweapon_hands) редактируемо, то и sheen-меш (hvyweapon_hands_sheen)
+                # тоже должен обновляться при drag-drop.
+                _OVERLAY_SUFFIXES = ("_sheen2", "_sheen", "_overlay", "_fresnel")
+
+                def _is_editable(mat: str) -> bool:
+                    m = mat.lower()
+                    if m in hand_vtf_lower:
+                        return True
+                    for suf in _OVERLAY_SUFFIXES:
+                        if m.endswith(suf) and m[: -len(suf)] in hand_vtf_lower:
+                            return True
+                    return False
+
+                editable_mats = [mat for mat in tex_map.keys() if _is_editable(mat)]
+                if editable_mats:
+                    self._3d_widget.set_editable_mesh_names(editable_mats)
 
     def _on_3d_animated(self, frame_paths: list, framerate: float) -> None:
         """Запускает анимацию RED текстуры когда воркер нашёл многокадровый VTF."""
@@ -990,7 +1144,8 @@ class PreviewPanel(QWidget):
             QTimer.singleShot(200, scale_image)
 
         # Обновляем текстуру в 3D если открыт 3D режим
-        if self.is_3d_mode():
+        # _from_3d_drop=True означает что drag источник — сам 3D вьювер, обновлять не нужно
+        if self.is_3d_mode() and not getattr(self, '_from_3d_drop', False):
             if self._crithit_mode and self._3d_available and self._3d_widget:
                 # CritHIT режим: обновляем только billboard над головой солдата
                 captured = path

@@ -39,6 +39,9 @@ class Preview3DWorker(QThread):
     # BLU-вариант текстуры: [frame_paths], framerate
     # Эмитируется только если у оружия есть командная раскраска
     blu_ready = Signal(object, float)
+    # Несколько текстур для мульти-материальных моделей: {mat_name: png_path}
+    # Эмитируется вместо animated когда модель имеет > 1 материал
+    multi_material = Signal(object)
     # Ошибка
     failed   = Signal(str)
     # Текстовый прогресс для UI
@@ -101,30 +104,53 @@ class Preview3DWorker(QThread):
             self.progress.emit(self._p['converting'])
             obj_path = os.path.join(self._preview_dir, "model.obj")
             from src.services.smd_to_obj_service import SmdToObjService
-            if not SmdToObjService.convert(smd_path, obj_path):
+            from src.data.player_hands import HAND_MODE_KEYS, HAND_MODES
+
+            # Ищем bodygroup SMDs в той же папке (например c_righthand_bodygroup.smd)
+            bodygroup_smds = self._find_bodygroup_smds(smd_path)
+            if bodygroup_smds:
+                logger.info(
+                    f"[3D] Найдены bodygroup SMD: "
+                    f"{[os.path.basename(b) for b in bodygroup_smds]}"
+                )
+
+            ok, mat_names = SmdToObjService.convert(
+                smd_path, obj_path,
+                extra_smd_paths=bodygroup_smds
+            )
+            if not ok:
                 self.failed.emit(self._p['conv_error'])
                 return
             if self.isInterruptionRequested():
                 return
 
-            # ── 3. Текстура RED ───────────────────────────────────────────── #
+            # ── 3. Текстура ───────────────────────────────────────────────── #
             self.progress.emit(self._p['texture'])
-            frame_paths, framerate = self._extract_texture_frames()
 
-            first_tex = frame_paths[0] if frame_paths else ""
-            self.ready.emit(obj_path, first_tex)
+            if self.mode in HAND_MODE_KEYS and mat_names:
+                # Режим рук: мульти-материал — каждый меш получает свою текстуру
+                tex_map = self._extract_multi_textures(mat_names)
+                self.ready.emit(obj_path, "")          # модель без единой текстуры
+                if tex_map:
+                    self.multi_material.emit(tex_map)  # {mat_name: png_path}
+                # BLU/анимация для рук не нужны
+            else:
+                # Обычное оружие: одна текстура (возможно анимированная)
+                frame_paths, framerate = self._extract_texture_frames()
 
-            # Если анимированная — отправляем все кадры отдельным сигналом
-            if len(frame_paths) > 1:
-                self.animated.emit(frame_paths, framerate)
+                first_tex = frame_paths[0] if frame_paths else ""
+                self.ready.emit(obj_path, first_tex)
 
-            if self.isInterruptionRequested():
-                return
+                if len(frame_paths) > 1:
+                    self.animated.emit(frame_paths, framerate)
 
-            # ── 4. Текстура BLU (если есть командная раскраска) ──────────── #
-            blu_paths, blu_fps = self._extract_blu_texture_frames(framerate)
-            if blu_paths:
-                self.blu_ready.emit(blu_paths, blu_fps)
+                if self.isInterruptionRequested():
+                    return
+
+                # ── 4. Текстура BLU (если есть командная раскраска) ──────── #
+                blu_paths, blu_fps = self._extract_blu_texture_frames(framerate)
+                if blu_paths:
+                    self.blu_ready.emit(blu_paths, blu_fps)
 
         except Exception as exc:
             logger.error(f"Preview3DWorker: {exc}", exc_info=True)
@@ -248,6 +274,164 @@ class Preview3DWorker(QThread):
         all_smds = [p for p in glob.glob(os.path.join(directory, "*.smd"))
                     if not skip(p)]
         return all_smds[0] if all_smds else None
+
+    def _find_bodygroup_smds(self, reference_smd_path: str) -> list:
+        """
+        Ищет *_bodygroup.smd файлы в той же папке что и reference SMD.
+
+        Source Engine хранит опциональную геометрию (бодигруппы) в отдельных
+        SMD файлах рядом с reference SMD. Пример: c_righthand_bodygroup.smd
+        внутри c_pyro_arms — правая рука, которая включается при нужном оружии.
+
+        Returns:
+            Список путей к найденным _bodygroup.smd файлам.
+        """
+        directory = os.path.dirname(reference_smd_path)
+        pattern   = os.path.join(directory, "*_bodygroup.smd")
+        return sorted(glob.glob(pattern))
+
+    @staticmethod
+    def _scan_smd_mat_names(smd_paths: list) -> set:
+        """
+        Быстрое сканирование имён материалов из нескольких SMD файлов.
+
+        Читает только имена материалов (без парсинга вершин) — в 10-30 раз
+        быстрее чем полный _parse_triangles_by_mat.
+
+        Returns:
+            Множество всех имён материалов из всех SMD файлов.
+        """
+        import re
+        result: set = set()
+        for path in smd_paths:
+            if not os.path.exists(path):
+                continue
+            try:
+                with open(path, "r", encoding="utf-8", errors="replace") as f:
+                    content = f.read()
+                m = re.search(r"\btriangles\b(.*?)\bend\b", content,
+                              re.DOTALL | re.IGNORECASE)
+                if not m:
+                    continue
+                lines = [ln.strip() for ln in m.group(1).splitlines() if ln.strip()]
+                # Каждые 4 строки: имя_материала, вершина1, вершина2, вершина3
+                result.update(lines[i] for i in range(0, len(lines), 4))
+            except Exception:
+                pass
+        return result
+
+    # ── Извлечение нескольких текстур (мульти-материал) ──────────────────── #
+
+    def _extract_multi_textures(self, mat_names: list) -> dict:
+        """
+        Для каждого имени материала из SMD ищет VTF в VPK и сохраняет как PNG.
+
+        Returns:
+            {mat_name: png_path} — только для найденных текстур.
+        """
+        result: dict = {}
+        try:
+            import vpk as vpklib
+            from PIL import Image
+            from src.services.vtflib_wrapper import VTFLib
+            from src.data.player_hands import HAND_MODE_KEYS, HAND_MODES
+
+            pak = vpklib.open(self.textures_vpk_path)
+
+            # Для моделей рук определяем папку (materials/models/player/{folder}/)
+            # Все материалы SMD текстурируем — _find_vtf_for_mat ищет сначала
+            # в папке игрока, что покрывает и руки, и рукав костюма.
+            arm_folder: Optional[str] = None
+            if self.mode in HAND_MODE_KEYS:
+                textures_list = HAND_MODES.get(self.mode, {}).get("textures", [])
+                if textures_list:
+                    arm_folder = textures_list[0][0]
+
+            for mat_name in mat_names:
+                vtf_data = self._find_vtf_for_mat(pak, mat_name, arm_folder)
+                if not vtf_data:
+                    logger.warning(f"[3D] Текстура для материала '{mat_name}' не найдена")
+                    continue
+
+                tmp_vtf = os.path.join(self._preview_dir, f"_tmp_{mat_name}.vtf")
+                with open(tmp_vtf, "wb") as f:
+                    f.write(vtf_data)
+
+                all_frames = None
+                try:
+                    all_frames, w, h = VTFLib.read_vtf_all_frames(tmp_vtf)
+                except Exception as vtf_exc:
+                    logger.warning(
+                        f"[3D] VTFLib не смог декодировать '{mat_name}': {vtf_exc}"
+                    )
+                finally:
+                    try:
+                        os.remove(tmp_vtf)
+                    except OSError:
+                        pass
+
+                if not all_frames:
+                    continue
+
+                img = Image.frombytes("RGBA", (w, h), all_frames[0])
+                png_path = os.path.join(self._preview_dir, f"{mat_name}.png")
+                img.save(png_path)
+                result[mat_name] = png_path
+                logger.debug(f"[3D] Материал '{mat_name}' → {os.path.basename(png_path)}")
+
+        except Exception as exc:
+            logger.warning(f"[3D] Ошибка извлечения мульти-текстур: {exc}", exc_info=True)
+
+        return result
+
+    def _find_vtf_for_mat(
+        self, pak, mat_name: str, arm_folder: Optional[str]
+    ) -> Optional[bytes]:
+        """Ищет VTF-данные для имени материала из SMD."""
+        paths: list = []
+        mat_lower = mat_name.lower()
+
+        # Приоритет: папка рук игрока (materials/models/player/{folder}/)
+        # Пробуем оба варианта: оригинальный регистр и lowercase,
+        # т.к. SMD может использовать mixed-case (engineer_handL), а VTF в VPK
+        # хранится в lowercase (engineer_handl).
+        if arm_folder:
+            paths.append(f"materials/models/player/{arm_folder}/{mat_name}.vtf")
+            if mat_lower != mat_name:
+                paths.append(f"materials/models/player/{arm_folder}/{mat_lower}.vtf")
+
+            # Fallback для sheen/overlay мешей: в TF2 эти материалы содержат
+            # ту же геометрию рук, что и базовый материал, но рендерятся с
+            # эффектом киллстрика. VTF для sheen в VPK нет — используем базовый.
+            # Например: hvyweapon_hands_sheen → hvyweapon_hands.vtf
+            _OVERLAY_SUFFIXES = ("_sheen2", "_sheen", "_overlay", "_fresnel")
+            for suf in _OVERLAY_SUFFIXES:
+                if mat_lower.endswith(suf):
+                    base = mat_name[: -len(suf)]
+                    base_lower = base.lower()
+                    paths.append(
+                        f"materials/models/player/{arm_folder}/{base}.vtf"
+                    )
+                    if base_lower != base:
+                        paths.append(
+                            f"materials/models/player/{arm_folder}/{base_lower}.vtf"
+                        )
+                    break
+
+        # Стандартные пути оружий
+        paths += [
+            f"materials/models/workshop_partner/weapons/c_models/{mat_name}/{mat_name}.vtf",
+            f"materials/models/weapons/c_models/{mat_name}/{mat_name}.vtf",
+            f"materials/models/weapons/c_items/{mat_name}.vtf",
+            f"materials/models/workshop/weapons/c_models/{mat_name}/{mat_name}.vtf",
+        ]
+
+        for path in paths:
+            try:
+                return pak[path].read()
+            except KeyError:
+                continue
+        return None
 
     # ── Извлечение текстуры ───────────────────────────────────────────────── #
 

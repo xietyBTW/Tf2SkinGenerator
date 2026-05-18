@@ -30,64 +30,101 @@ class SmdToObjService:
     """Конвертирует SMD файл в OBJ + MTL для Three.js."""
 
     @staticmethod
-    def convert(smd_path: str, obj_path: str) -> bool:
+    def convert(
+        smd_path: str,
+        obj_path: str,
+        include_mats: Optional[set] = None,
+        extra_smd_paths: Optional[list] = None,
+    ) -> Tuple[bool, List[str]]:
         """
-        Конвертирует SMD → OBJ + MTL.
+        Конвертирует SMD → OBJ + MTL с поддержкой нескольких материалов.
 
-        MTL файл создаётся рядом с OBJ и ссылается на «texture.png»
-        (ожидается в той же папке).
+        MTL файл создаётся рядом с OBJ.
+        При одном материале — ссылается на «texture.png».
+        При нескольких — каждый материал ссылается на «{mat_name}.png».
 
         Args:
-            smd_path: Путь к входному .smd файлу
-            obj_path:  Путь к выходному .obj файлу
+            smd_path:     Путь к входному .smd файлу
+            obj_path:     Путь к выходному .obj файлу
+            include_mats: Если задан — оставляем только эти материалы.
+                          Используется для моделей рук, чтобы исключить костюм
+                          и оставить только нужные меши.
 
         Returns:
-            True при успешной конвертации.
+            (success, material_names) где material_names — список уникальных
+            имён материалов в том порядке, в котором они встречаются в SMD.
         """
         try:
-            triangles = SmdToObjService._parse_triangles(smd_path)
-            if not triangles:
+            triangles_by_mat = SmdToObjService._parse_triangles_by_mat(smd_path)
+
+            # Merge extra SMDs (bodygroups, etc.) into the same triangle dict
+            for extra in (extra_smd_paths or []):
+                if not os.path.exists(extra):
+                    logger.warning(f"SMD→OBJ: extra SMD не найден: {extra}")
+                    continue
+                extra_tris = SmdToObjService._parse_triangles_by_mat(extra)
+                for mat, tris in extra_tris.items():
+                    if mat not in triangles_by_mat:
+                        triangles_by_mat[mat] = []
+                    triangles_by_mat[mat].extend(tris)
+                logger.info(
+                    f"SMD→OBJ: merged bodygroup '{os.path.basename(extra)}' "
+                    f"({sum(len(v) for v in extra_tris.values())} треугольников)"
+                )
+
+            if include_mats is not None:
+                triangles_by_mat = {
+                    k: v for k, v in triangles_by_mat.items() if k in include_mats
+                }
+            if not triangles_by_mat:
                 logger.warning(f"SMD→OBJ: нет треугольников в {smd_path}")
-                return False
+                return False, []
 
             obj_dir  = os.path.dirname(obj_path)
             obj_stem = os.path.splitext(os.path.basename(obj_path))[0]
             mtl_name = f"{obj_stem}.mtl"
             mtl_path = os.path.join(obj_dir, mtl_name)
 
-            # ── MTL ───────────────────────────────────────────────────────── #
-            with open(mtl_path, "w", encoding="utf-8") as f:
-                f.write("newmtl weapon\n")
-                f.write("Ka 1.0 1.0 1.0\n")
-                f.write("Kd 1.0 1.0 1.0\n")
-                f.write("Ks 0.1 0.1 0.1\n")
-                f.write("Ns 32.0\n")
-                f.write("map_Kd texture.png\n")
+            mat_names = list(triangles_by_mat.keys())
+            multi     = len(mat_names) > 1
 
-            # ── OBJ ───────────────────────────────────────────────────────── #
+            # ── MTL ──────────────────────────────────────────────────────── #
+            with open(mtl_path, "w", encoding="utf-8") as f:
+                for mat in mat_names:
+                    tex_file = f"{mat}.png" if multi else "texture.png"
+                    f.write(f"newmtl {mat}\n")
+                    f.write("Ka 1.0 1.0 1.0\n")
+                    f.write("Kd 1.0 1.0 1.0\n")
+                    f.write("Ks 0.1 0.1 0.1\n")
+                    f.write("Ns 32.0\n")
+                    f.write(f"map_Kd {tex_file}\n\n")
+
+            # ── OBJ ──────────────────────────────────────────────────────── #
             positions : List[Tuple[float, float, float]] = []
             uvs       : List[Tuple[float, float]]        = []
             normals   : List[Tuple[float, float, float]] = []
-            # Каждый face — tuple из 9 int (v/vt/vn для трёх вершин)
-            faces: List[Tuple] = []
+            faces_by_mat: Dict[str, List[Tuple]] = {}
 
-            for tri in triangles:
-                face_idx = []
-                for vert in tri:
-                    v_i  = len(positions) + 1
-                    vt_i = len(uvs)       + 1
-                    vn_i = len(normals)   + 1
+            for mat, triangles in triangles_by_mat.items():
+                faces: List[Tuple] = []
+                for tri in triangles:
+                    face_idx = []
+                    for vert in tri:
+                        v_i  = len(positions) + 1
+                        vt_i = len(uvs)       + 1
+                        vn_i = len(normals)   + 1
 
-                    # Координаты: Source Z-up → Three.js Y-up: (x,y,z) → (x, z, -y)
-                    x, y, z = vert["pos"]
-                    positions.append((x, z, -y))
-                    nx, ny, nz = vert["nrm"]
-                    normals.append((nx, nz, -ny))
-                    # UV: не флипаем — Three.js сам делает flipY при загрузке текстуры
-                    uvs.append(vert["uv"])
+                        # Координаты: Source Z-up → Three.js Y-up: (x,y,z) → (x, z, -y)
+                        x, y, z = vert["pos"]
+                        positions.append((x, z, -y))
+                        nx, ny, nz = vert["nrm"]
+                        normals.append((nx, nz, -ny))
+                        # UV: не флипаем — Three.js сам делает flipY
+                        uvs.append(vert["uv"])
 
-                    face_idx.extend([v_i, vt_i, vn_i])
-                faces.append(tuple(face_idx))
+                        face_idx.extend([v_i, vt_i, vn_i])
+                    faces.append(tuple(face_idx))
+                faces_by_mat[mat] = faces
 
             with open(obj_path, "w", encoding="utf-8") as f:
                 f.write(f"# Converted from {os.path.basename(smd_path)}\n")
@@ -105,40 +142,50 @@ class SmdToObjService:
                     f.write(f"vn {n[0]:.6f} {n[1]:.6f} {n[2]:.6f}\n")
                 f.write("\n")
 
-                f.write("usemtl weapon\n")
-                for face in faces:
-                    v1, t1, n1, v2, t2, n2, v3, t3, n3 = face
-                    f.write(
-                        f"f {v1}/{t1}/{n1} {v2}/{t2}/{n2} {v3}/{t3}/{n3}\n"
-                    )
+                for mat, faces in faces_by_mat.items():
+                    f.write(f"g {mat}\n")
+                    f.write(f"usemtl {mat}\n")
+                    for face in faces:
+                        v1, t1, n1, v2, t2, n2, v3, t3, n3 = face
+                        f.write(
+                            f"f {v1}/{t1}/{n1} {v2}/{t2}/{n2} {v3}/{t3}/{n3}\n"
+                        )
+                    f.write("\n")
 
+            total = sum(len(v) for v in triangles_by_mat.values())
             logger.info(
-                f"SMD→OBJ: {len(triangles)} треугольников → {os.path.basename(obj_path)}"
+                f"SMD→OBJ: {total} треугольников, "
+                f"{len(mat_names)} матер. → {os.path.basename(obj_path)}"
             )
-            return True
+            return True, mat_names
 
         except Exception as exc:
             logger.error(f"Ошибка SMD→OBJ ({smd_path}): {exc}", exc_info=True)
-            return False
+            return False, []
 
     # ── Внутренние методы ─────────────────────────────────────────────────── #
 
     @staticmethod
-    def _parse_triangles(smd_path: str) -> List[List[dict]]:
-        """Парсит секцию triangles SMD файла."""
+    def _parse_triangles_by_mat(smd_path: str) -> Dict[str, List[List[dict]]]:
+        """
+        Парсит секцию triangles SMD файла.
+
+        Returns:
+            OrderedDict: {material_name: [triangles]} в порядке первого появления.
+        """
         with open(smd_path, "r", encoding="utf-8", errors="replace") as f:
             content = f.read()
 
         m = re.search(r"\btriangles\b(.*?)\bend\b", content, re.DOTALL | re.IGNORECASE)
         if not m:
-            return []
+            return {}
 
         lines = [ln.strip() for ln in m.group(1).splitlines() if ln.strip()]
-        triangles: List[List[dict]] = []
+        result: Dict[str, List[List[dict]]] = {}
         i = 0
 
         while i < len(lines):
-            # Имя материала (пропускаем — у нас одна MTL запись «weapon»)
+            mat_name = lines[i]
             i += 1
 
             verts: List[dict] = []
@@ -151,9 +198,23 @@ class SmdToObjService:
                 i += 1
 
             if len(verts) == 3:
-                triangles.append(verts)
+                if mat_name not in result:
+                    result[mat_name] = []
+                result[mat_name].append(verts)
 
-        return triangles
+        logger.info(
+            f"SMD материалы ({os.path.basename(smd_path)}): {list(result.keys())}"
+        )
+        # UV диагностика
+        for mat, tris in result.items():
+            us = [v["uv"][0] for tri in tris for v in tri]
+            vs = [v["uv"][1] for tri in tris for v in tri]
+            if us and vs:
+                logger.info(
+                    f"  UV[{mat}]: U=[{min(us):.3f}..{max(us):.3f}]  "
+                    f"V=[{min(vs):.3f}..{max(vs):.3f}]"
+                )
+        return result
 
     @staticmethod
     def _parse_vertex(line: str) -> Optional[dict]:

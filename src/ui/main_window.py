@@ -520,8 +520,12 @@ class MainWindow(QMainWindow):
     def on_weapon_changed(self, weapon_text: str) -> None:
         """Обработка изменения оружия"""
         if weapon_text and '(' in weapon_text:
-            # Извлекаем ключ оружия из скобок
-            weapon_key = weapon_text.split('(')[1].rstrip(')')
+            # Извлекаем ключ оружия из ПОСЛЕДНИХ скобок.
+            # Формат: "{weapon_name} ({weapon_key})"
+            # Если имя содержит скобки (напр. "Robot Hand (MvM) (mech_hands)"),
+            # split('(')[1] вернёт "MvM) " — ошибка.
+            # split('(')[-1] всегда берёт последнюю группу → "mech_hands)" → "mech_hands".
+            weapon_key = weapon_text.split('(')[-1].rstrip(')').strip()
             self.current_weapon = weapon_key
             # Автоматически применяем выбор
             self.apply_selection_auto()
@@ -634,34 +638,42 @@ class MainWindow(QMainWindow):
         if not hasattr(self, 'preview_panel'):
             return
 
-        from src.data.player_hands import HAND_MODE_KEYS
+        from src.data.player_hands import HAND_MODE_KEYS, HAND_MODES
 
         # CritHIT: показываем солдата с billboard-текстурой над головой
         if self.mode == "critHIT":
             self.preview_panel.set_crithit_mode()
             return
 
+        is_hand_mode = self.mode in HAND_MODE_KEYS
         is_normal_weapon = (
             self.mode
             and self.mode not in ("spray", "critHIT")
-            and self.mode not in HAND_MODE_KEYS
+            and not is_hand_mode
             and '_' in self.mode
         )
 
-        if not is_normal_weapon:
-            # Spray / hands / нет выбора — сбрасываем 3D
+        if is_hand_mode:
+            # Руки персонажа — используем arm_model как weapon_key
+            arm_key = HAND_MODES.get(self.mode, {}).get("arm_model", "")
+            if not arm_key:
+                self.preview_panel.reset_3d_preview()
+                return
+            weapon_key = arm_key
+        elif is_normal_weapon:
+            weapon_key = self.mode.split('_', 1)[1] if '_' in self.mode else self.mode
+
+            # Режим замены модели — кастомная SMD от пользователя
+            if (hasattr(self, 'replace_model_checkbox') and
+                    self.replace_model_checkbox.isChecked()):
+                self.preview_panel.set_custom_model_mode(True)
+                return
+        else:
+            # Spray / нет выбора — сбрасываем 3D
             self.preview_panel.reset_3d_preview()
             return
 
-        weapon_key = self.mode.split('_', 1)[1] if '_' in self.mode else self.mode
-
-        # Режим замены модели — кастомная SMD от пользователя
-        if (hasattr(self, 'replace_model_checkbox') and
-                self.replace_model_checkbox.isChecked()):
-            self.preview_panel.set_custom_model_mode(True)
-            return
-
-        # Нормальный режим оружия — пробуем запустить 3D preview (требует TF2)
+        # Нормальный режим оружия или руки — пробуем запустить 3D preview (требует TF2)
         settings = self.settings_panel.get_settings()
         tf2_root_dir = settings.get('tf2_game_folder', '')
         if not tf2_root_dir:
@@ -1351,7 +1363,17 @@ class MainWindow(QMainWindow):
                 ErrorHandler.show_warning(self, error_msg, self.t['error'])
                 return
 
-            weapon_key = self.mode.split('_', 1)[1] if '_' in self.mode else self.mode
+            # Для режимов рук weapon_key — это ключ arm-модели (например "c_pyro_arms"),
+            # а не суффикс mode-строки (который дал бы бессмысленное "hands").
+            from src.data.player_hands import HAND_MODE_KEYS, HAND_MODES
+            if self.mode in HAND_MODE_KEYS:
+                weapon_key = HAND_MODES[self.mode].get("arm_model", "")
+                if not weapon_key:
+                    ErrorHandler.show_warning(self, self.t.get('extract_model_special_mode_error', 'Cannot extract model for this mode'), self.t['error'])
+                    return
+            else:
+                weapon_key = self.mode.split('_', 1)[1] if '_' in self.mode else self.mode
+
             settings = self.settings_panel.get_settings()
             tf2_root_dir = settings.get('tf2_game_folder', '')
             if not tf2_root_dir:
