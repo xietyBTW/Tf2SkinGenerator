@@ -99,7 +99,7 @@ class VPKService:
             logger.info(f"Начало сборки VPK: {filename}")
             emit_progress(5, t.get('build_init', 'Initializing build...'))
 
-            is_special_mode = mode in SPECIAL_MODES.values() or mode in HAND_MODE_KEYS
+            is_special_mode = mode in SPECIAL_MODES.values()
 
             _sub_label_init = "Preparing..." if language == "en" else "Подготовка..."
             emit_sub(-1, _sub_label_init)
@@ -256,7 +256,16 @@ class VPKService:
             if flags is None:
                 flags = []
             
-            weapon_key = mode.split('_', 1)[1] if '_' in mode else mode
+            # Для режимов рук weapon_key — это ключ arm-модели (например "c_scout_arms"),
+            # а не суффикс mode-строки (который дал бы бессмысленное "hands").
+            if mode in HAND_MODE_KEYS:
+                from src.data.player_hands import HAND_MODES as _HAND_MODES
+                _arm_key = _HAND_MODES.get(mode, {}).get('arm_model', '')
+                if not _arm_key:
+                    return False, f"No arm_model defined for hand mode: {mode}"
+                weapon_key = _arm_key
+            else:
+                weapon_key = mode.split('_', 1)[1] if '_' in mode else mode
             
             # Запоминаем какой VMT надо будет удалить после сборки (если юзер его редактировал через редактор)
             vmt_to_delete = None
@@ -277,30 +286,12 @@ class VPKService:
                 else:
                     vmt_to_delete = None
 
-            elif mode in HAND_MODE_KEYS:
-                # Руки персонажей: только VTF, никакой модели/VMT
-                from src.services.hands_build_service import HandsBuildService
-                emit_sub(-1, "Processing hand textures..." if language == "en" else "Обработка текстур рук...")
-                success, error_msg = HandsBuildService.build(
-                    ctx=ctx,
-                    mode=mode,
-                    image_path=image_path,
-                    size=size,
-                    format_type=format_type,
-                    flags=flags,
-                    vtf_options=vtf_options,
-                    keep_temp_on_error=keep_temp_on_error,
-                    debug_mode=debug_mode,
-                    language=language,
-                    custom_vtf_path=custom_vtf_path,
-                    extra_texture_callback=extra_texture_callback,
-                    sub_progress_callback=emit_sub,
-                )
-                if not success:
-                    return False, error_msg
-
             else:
-                # Для обычного оружия - сначала распаковываем модель, потом текстуры по пути из QC делаем
+                # Для обычного оружия и рук — декомпиляция + патч QC + компиляция.
+                # Для рук замена SMD-модели не поддерживается.
+                if mode in HAND_MODE_KEYS:
+                    replace_model_enabled = False
+
                 # Без пути к TF2 вообще хуй че получится - нужны VPK файлы игры
                 if not tf2_root_dir:
                     logger.error("Путь к TF2 не указан")
@@ -904,9 +895,52 @@ class VPKService:
                                 logger.warning(f"Нет соответствующей RED текстуры для BLU столбца {col_idx}: {blu_tex_name}")
                                 continue
                             
-                            # Если BLU имя совпадает с RED - пропускаем (текстура одна и та же)
+                            # Если BLU имя совпадает с RED — это "общая" (neutral) текстура,
+                            # одинаковая для обеих команд (например, pyro_hands_red, sniper_handL_red).
+                            # Она НЕ попала в extra_materials (исключена из-за blu_names_set),
+                            # но MDL ВСЁ РАВНО её использует — нужно создать VTF/VMT.
                             if blu_tex_name == red_tex_name:
-                                logger.debug(f"BLU текстура совпадает с RED, пропускаем: {blu_tex_name}")
+                                # Если это основная текстура — уже создана выше, пропускаем.
+                                if blu_tex_name == texture_filename:
+                                    logger.debug(f"Общая текстура совпадает с основной, пропускаем: {blu_tex_name}")
+                                    continue
+                                # Создаём VTF как копию основной (если ещё не существует)
+                                shared_vtf_path = vtf_output_path / f"{blu_tex_name}.vtf"
+                                if not shared_vtf_path.exists():
+                                    # Сначала пробуем получить от пользователя через callback
+                                    _shared_img = None
+                                    if extra_texture_callback:
+                                        _shared_img = extra_texture_callback(blu_tex_name, weapon_key)
+                                        if _shared_img and not os.path.isfile(_shared_img):
+                                            _shared_img = None
+                                    if _shared_img:
+                                        shared_temp_png = vtf_output_path / f"{blu_tex_name}.png"
+                                        VPKService._process_image(_shared_img, shared_temp_png, size)
+                                        _sh_flags, _ = VPKService._parse_vtf_flags_and_options(flags)
+                                        _sh_opts = dict(vtf_options or {})
+                                        _sh_opts.pop("normal", None)
+                                        VPKService._create_vtf(str(shared_temp_png), str(vtf_output_path), format_type, _sh_flags, _sh_opts)
+                                        if shared_temp_png.exists():
+                                            shared_temp_png.unlink()
+                                    else:
+                                        # Копируем из основной VTF
+                                        _main_vtf = vtf_output_path / vtf_filename
+                                        if _main_vtf.exists():
+                                            copy_file_safe(_main_vtf, shared_vtf_path)
+                                            logger.info(f"Создан VTF для общей текстуры: {blu_tex_name}.vtf")
+                                        else:
+                                            logger.warning(f"Основной VTF не найден для копирования: {_main_vtf}")
+                                # Создаём VMT (если ещё не существует)
+                                shared_vmt_path = vtf_output_path / f"{blu_tex_name}.vmt"
+                                if not shared_vmt_path.exists():
+                                    if vmt_path.exists():
+                                        copy_file_safe(vmt_path, shared_vmt_path)
+                                        VMTService.update_vmt_basetexture_path(str(shared_vmt_path), patched_cdmaterials_path, blu_tex_name)
+                                    else:
+                                        VMTService.create_vmt_template_from_cdmaterials(str(shared_vmt_path), patched_cdmaterials_path, blu_tex_name)
+                                    logger.info(f"Создан VMT для общей текстуры: {blu_tex_name}.vmt")
+                                if animated_fps:
+                                    VMTService.enable_animated_basetexture(str(shared_vmt_path), animated_fps)
                                 continue
                             
                             logger.info(f"Создаем текстуры для BLU команды: {blu_tex_name} (RED: {red_tex_name})")
@@ -994,9 +1028,40 @@ class VPKService:
                                 VMTService.update_vmt_bumpmap_path(str(blu_vmt_path), patched_cdmaterials_path, blu_normal_key)
                                 logger.info(f"Обновлен VMT $bumpmap для BLU: {blu_normal_key}")
                     
+                    # ── Зеркальные VMT по оригинальному пути (для режимов рук) ────────────
+                    # Проблема: модели оружий шпиона (Dead Ringer, Invis Watch и т.д.)
+                    # ссылаются на текстуры по оригинальному пути materials/models/player/spy/,
+                    # а не по пропатченному console\models\player\spy\. Из-за этого левая
+                    # рука шпиона (slot 1 = spy_hands_blue) игнорирует мод.
+                    # Аналогично могут быть устроены другие оружия других классов.
+                    #
+                    # Фикс: для режимов рук дополнительно создаём VMT-файлы по ОРИГИНАЛЬНОМУ
+                    # пути из $cdmaterials (до патча). VMT указывает на те же VTF что и уже
+                    # созданный мод (по console\ пути), т.е. VTF-файлы не дублируются.
+                    from src.data.player_hands import HAND_MODE_KEYS as _HAND_MODE_KEYS
+                    if mode in _HAND_MODE_KEYS and original_cdmaterials_path:
+                        orig_mat_rel = "materials/" + original_cdmaterials_path.replace('\\', '/').strip().rstrip('/')
+                        orig_vtf_dir = ctx.vpkroot_dir
+                        for _part in orig_mat_rel.rstrip('/').split('/'):
+                            orig_vtf_dir = orig_vtf_dir / _part
+
+                        if orig_vtf_dir != vtf_output_path:
+                            ensure_directory_exists(orig_vtf_dir)
+                            # Для каждого VMT в console\ пути создаём зеркало по оригинальному пути.
+                            # Содержимое зеркального VMT = копия console\ VMT:
+                            # $basetexture в нём уже ссылается на console\ VTF — это ОК,
+                            # Source Engine найдёт VTF по этому абсолютному пути в мод-VPK.
+                            for _vmt_src in vtf_output_path.glob("*.vmt"):
+                                _vmt_mirror = orig_vtf_dir / _vmt_src.name
+                                if not _vmt_mirror.exists():
+                                    copy_file_safe(_vmt_src, _vmt_mirror)
+                                    logger.info(f"Зеркальный VMT по оригинальному пути: {_vmt_mirror.name}")
+                        else:
+                            logger.debug("Оригинальный и пропатченный пути совпадают, зеркало не нужно")
+
                     if debug_mode:
                         DebugService.save_patched_stage(ctx, ctx.decompile_dir)
-                    
+
                     # Ждём завершения компиляции (шла параллельно с текстурами)
                     _compile_thread.join()
                     if _compile_exc[0] is not None:
