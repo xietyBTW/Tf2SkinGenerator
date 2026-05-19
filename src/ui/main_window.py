@@ -181,6 +181,7 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(left_panel, 1)
 
         self.preview_panel = PreviewPanel(self)
+
         main_layout.addWidget(self.preview_panel, 2)
 
         self.settings_panel = SettingsPanel(self)
@@ -698,7 +699,9 @@ class MainWindow(QMainWindow):
             misc_vpk_path=misc_vpk,
             textures_vpk_path=textures_vpk,
         )
-    
+
+    # ── Hand texture slot selector ────────────────────────────────────── #
+
     def update_preview_info(self) -> None:
         """Обновляет резюме информации в превью"""
         if hasattr(self, 'preview_panel'):
@@ -911,6 +914,7 @@ class MainWindow(QMainWindow):
         urls = event.mimeData().urls()
         if urls:
             path = urls[0].toLocalFile()
+            # Remember which texture slot this image belongs to
             self.preview_panel.load_image(path)
 
     def expert_mode_triggered(self) -> None:
@@ -1258,8 +1262,6 @@ class MainWindow(QMainWindow):
     def _on_request_extra_texture(self, material_name: str, weapon_key: str) -> None:
         """
         Обрабатывает запрос дополнительного изображения для материала модели.
-        Показывает диалог: хочет ли пользователь загрузить отдельное изображение
-        для дополнительного материала (shell, scope и т.д.)
         """
         if not hasattr(self, '_build_worker'):
             return

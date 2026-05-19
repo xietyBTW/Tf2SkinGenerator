@@ -107,7 +107,7 @@ class _Real3DWidget:
 
         self._view = QWebEngineView(parent)
         self._ready = False
-        self._pending: Optional[tuple] = None   # (obj_path, tex_path)
+        self._pending: Optional[tuple] = None          # (obj_path, tex_path)
         self._lang: str = 'en'
 
         settings = self._view.settings()

@@ -17,6 +17,7 @@ logger = get_logger(__name__)
 
 
 class PreviewPanel(QWidget):
+
     def __init__(self, parent=None):
         super().__init__()
         self.parent = parent
@@ -373,7 +374,7 @@ class PreviewPanel(QWidget):
                 bridge.texture_dropped.connect(self._on_3d_texture_dropped)
                 logger.info("3D viewer bridge подключён: texture_dropped → _on_3d_texture_dropped")
             except Exception as exc:
-                logger.warning(f"Не удалось подключить 3D bridge: {exc}")
+                logger.warning(f"Не удалось подключить 3D bridge (texture_dropped): {exc}")
 
         if self._3d_available:
             logger.info("3D Preview виджет инициализирован (WebEngine)")
@@ -835,6 +836,7 @@ class PreviewPanel(QWidget):
         self.btn_load_3d.setEnabled(False)
         if self.is_3d_mode():
             self._switch_to_2d()
+
     def update_3d_texture(self, png_path: str) -> None:
         """Обновляет текстуру на 3D модели (когда пользователь загружает своё изображение)."""
         if self._3d_widget and self.is_3d_mode():

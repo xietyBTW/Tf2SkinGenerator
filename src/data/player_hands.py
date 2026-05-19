@@ -69,16 +69,21 @@ HAND_MODES: Dict[str, dict] = {
             ("engineer", "engineer_handl"),
             ("engineer", "engineer_handr_red"),
         ],
+        "extra_labels": {
+            "engineer_handr_red": {"ru": "Правая рука (RED)", "en": "Right hand (RED)"},
+        },
     },
     "engineer_mech_hands": {
         "ru": "Рука робота (МвМ)",
         "en": "Robot Hand (MvM)",
-        "arm_model": "c_engineer_gunslinger",   # MDL робо-руки (Gunslinger)
-        # Механическая рука инженера для режима MvM
+        "arm_model": "c_engineer_gunslinger",
         "textures": [
             ("engineer", "engineer_mech_hand"),
             ("engineer", "engineer_mech_hand_blue"),
         ],
+        "extra_labels": {
+            "engineer_mech_hand_blue": {"ru": "BLU версия", "en": "BLU version"},
+        },
     },
     "medic_hands": {
         "ru": "Руки",
@@ -88,6 +93,9 @@ HAND_MODES: Dict[str, dict] = {
             ("medic", "medic_hands_red"),
             ("medic", "medic_hands_blue"),
         ],
+        "extra_labels": {
+            "medic_hands_blue": {"ru": "BLU команда", "en": "BLU team"},
+        },
     },
     "sniper_hands": {
         "ru": "Руки",
@@ -105,6 +113,9 @@ HAND_MODES: Dict[str, dict] = {
             ("spy", "spy_hands_red"),
             ("spy", "spy_hands_blue"),
         ],
+        "extra_labels": {
+            "spy_hands_blue": {"ru": "Левая рука (BLU)", "en": "Left hand (BLU)"},
+        },
     },
 }
 
@@ -126,3 +137,18 @@ def get_hand_textures(mode_key: str) -> List[Tuple[str, str]]:
     if not mode:
         return []
     return mode.get("textures", [])
+
+
+def get_extra_textures(mode_key: str) -> List[Tuple[str, str]]:
+    """Возвращает только дополнительные текстуры (index 1+) как список (folder, vtf_name)."""
+    return get_hand_textures(mode_key)[1:]
+
+
+def get_extra_texture_label(mode_key: str, vtf_name: str, language: str = "en") -> str:
+    """Возвращает человекочитаемое название дополнительной текстуры."""
+    mode = HAND_MODES.get(mode_key, {})
+    labels = mode.get("extra_labels", {})
+    entry = labels.get(vtf_name, {})
+    return entry.get(language) or entry.get("en") or vtf_name
+
+

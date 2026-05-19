@@ -483,27 +483,27 @@ class TF2VPKExtractService:
         
         try:
             vpk_file = vpk.open(textures_vpk_path)
-            
+
             # Пробуем найти VTF файл по каждому пути
             for search_path in search_paths:
                 for vtf_filename in vtf_candidates:
                     vtf_rel_path = f"{search_path}/{vtf_filename}"
-                    
+
                     # Проверяем, существует ли файл в VPK
                     if vtf_rel_path in vpk_file:
                         vpk_entry = vpk_file[vtf_rel_path]
-                        
+
                         # Определяем путь для сохранения VTF
                         try:
                             extracted_file_path = sanitize_path(vtf_filename, out_dir)
                         except ValueError as e:
                             logger.warning(f"Недопустимый путь для сохранения VTF: {vtf_filename}: {e}")
                             return None
-                        
+
                         # Извлекаем файл
                         with open(extracted_file_path, 'wb') as f:
                             f.write(vpk_entry.read())
-                        
+
                         logger.info(f"Извлечена текстура: {vtf_rel_path} -> {extracted_file_path}")
                         # Закрываем VPK файл если есть метод close
                         if hasattr(vpk_file, 'close'):
@@ -511,7 +511,7 @@ class TF2VPKExtractService:
                                 vpk_file.close()
                             except:
                                 pass
-                        
+
                         # Конвертируем VTF в выбранный формат, если нужно
                         if export_format.upper() != "VTF":
                             converted_path = TF2VPKExtractService._convert_vtf_to_image(
@@ -526,9 +526,9 @@ class TF2VPKExtractService:
                                 except:
                                     pass
                                 return converted_path
-                        
+
                         return extracted_file_path
-            
+
             # Закрываем VPK файл если есть метод close
             if hasattr(vpk_file, 'close'):
                 try:
@@ -537,11 +537,24 @@ class TF2VPKExtractService:
                     pass
             logger.warning(f"Текстура не найдена для оружия {weapon_key}")
             return None
-            
+
         except Exception as e:
             logger.error(f"Ошибка при извлечении текстуры: {e}", exc_info=True)
             return None
     
+    @staticmethod
+    def _scan_dir_for_vtf(vpk_file, dir_path: str) -> List[Tuple[str, str]]:
+        """Возвращает список (rel_path, filename) для всех .vtf файлов
+        непосредственно в dir_path внутри VPK (без рекурсии в подпапки)."""
+        prefix = dir_path.rstrip('/') + '/'
+        results = []
+        for path in vpk_file:
+            if path.startswith(prefix) and path.lower().endswith('.vtf'):
+                remainder = path[len(prefix):]
+                if '/' not in remainder:   # только прямые потомки папки
+                    results.append((path, remainder))
+        return results
+
     @staticmethod
     def extract_texture_with_progress(
         textures_vpk_path: str,
@@ -553,53 +566,53 @@ class TF2VPKExtractService:
         cancel_callback: Optional[Callable[[], bool]] = None
     ) -> Tuple[bool, str, bool]:
         t = TRANSLATIONS.get(language, TRANSLATIONS['en'])
-        
+
         def emit_progress(value: int, message: str) -> None:
             if progress_callback:
                 progress_callback(value, message)
-        
+
         def is_cancelled() -> bool:
             return bool(cancel_callback and cancel_callback())
-        
+
         emit_progress(10, t.get('extract_init', 'Initializing extraction...'))
         time.sleep(0.1)
-        
+
         if is_cancelled():
             return False, t.get('extract_cancelled', 'Extraction cancelled by user'), True
-        
+
         if not VPK_AVAILABLE:
             return False, t.get('vpk_library_not_available', 'VPK library not available'), False
-        
+
         emit_progress(20, t.get('extract_checking', 'Checking VPK file...'))
         time.sleep(0.1)
-        
+
         if not os.path.exists(textures_vpk_path):
             return False, t.get('textures_vpk_not_found', 'tf2_textures_dir.vpk not found'), False
-        
+
         if is_cancelled():
             return False, t.get('extract_cancelled', 'Extraction cancelled by user'), True
-        
+
         ensure_directory_exists(out_dir)
         emit_progress(30, t.get('extract_searching', 'Searching for texture...'))
         time.sleep(0.1)
-        
+
         search_paths = [
             f"materials/models/workshop_partner/weapons/c_models/{weapon_key}",
             f"materials/models/workshop/weapons/c_models/{weapon_key}",
             f"materials/models/weapons/c_models/{weapon_key}",
             f"materials/models/weapons/c_items/{weapon_key}",
         ]
-        
+
         vtf_candidates = [
             f"{weapon_key}.vtf",
             f"c_{weapon_key}.vtf" if not weapon_key.startswith('c_') else None,
         ]
         vtf_candidates = [name for name in vtf_candidates if name]
-        
+
         try:
             emit_progress(50, t.get('extract_extracting', 'Extracting texture...'))
             vpk_file = vpk.open(textures_vpk_path)
-            
+
             for search_path in search_paths:
                 if is_cancelled():
                     if hasattr(vpk_file, 'close'):
@@ -626,13 +639,13 @@ class TF2VPKExtractService:
                             return False, t.get('extract_error', 'Extraction error'), False
                         with open(extracted_file_path, 'wb') as f:
                             f.write(vpk_entry.read())
-                        
+
                         if hasattr(vpk_file, 'close'):
                             try:
                                 vpk_file.close()
                             except:
                                 pass
-                        
+
                         if export_format.upper() != "VTF":
                             emit_progress(80, t.get('extract_converting', 'Converting texture...'))
                             time.sleep(0.1)
@@ -652,17 +665,17 @@ class TF2VPKExtractService:
                             error_msg = t.get('texture_extract_failed', 'Failed to extract texture').format(weapon=weapon_key)
                             emit_progress(0, t.get('extract_error', 'Extraction error'))
                             return False, error_msg, False
-                        
+
                         success_msg = t.get('texture_extracted_success', 'Texture extracted successfully: {path}').format(path=extracted_file_path)
                         emit_progress(100, t.get('extract_completed', 'Extraction completed'))
                         return True, success_msg, False
-            
+
             if hasattr(vpk_file, 'close'):
                 try:
                     vpk_file.close()
                 except:
                     pass
-            
+
             error_msg = t.get('texture_extract_failed', 'Failed to extract texture').format(weapon=weapon_key)
             emit_progress(0, t.get('extract_error', 'Extraction error'))
             return False, error_msg, False
@@ -682,7 +695,11 @@ class TF2VPKExtractService:
         cancel_callback: Optional[Callable[[], bool]] = None,
     ) -> Tuple[bool, str, bool]:
         """
-        Извлекает текстуры рук персонажа из tf2_textures_dir.vpk.
+        Извлекает ВСЕ текстуры рук персонажа из tf2_textures_dir.vpk.
+
+        Определяет папки персонажа по списку hand_textures, затем сканирует
+        каждую папку materials/models/player/{folder}/ целиком и извлекает
+        все найденные .vtf файлы (не только перечисленные явно).
 
         Args:
             textures_vpk_path: Путь к tf2_textures_dir.vpk
@@ -731,36 +748,68 @@ class TF2VPKExtractService:
         except Exception as exc:
             return False, str(exc), False
 
+        # ── Собираем уникальные папки персонажа ───────────────────────────── #
+        # Порядок сохраняем через list + seen-set
+        seen_folders: set = set()
+        player_dirs: List[str] = []
+        for folder, _vtf_name in hand_textures:
+            vpk_dir = f"materials/models/player/{folder}"
+            if vpk_dir not in seen_folders:
+                seen_folders.add(vpk_dir)
+                player_dirs.append(vpk_dir)
+
+        # ── Собираем полный список всех .vtf из этих папок ───────────────── #
+        emit(40, t.get("extract_searching", "Searching for texture..."))
+        all_vtfs: List[Tuple[str, str]] = []  # (rel_path, filename)
+        seen_files: set = set()
+
+        for vpk_dir in player_dirs:
+            dir_vtfs = TF2VPKExtractService._scan_dir_for_vtf(vpk_file, vpk_dir)
+            for rel_path, filename in dir_vtfs:
+                if filename not in seen_files:
+                    seen_files.add(filename)
+                    all_vtfs.append((rel_path, filename))
+
+        if not all_vtfs:
+            if hasattr(vpk_file, "close"):
+                try:
+                    vpk_file.close()
+                except Exception:
+                    pass
+            return (
+                False,
+                t.get("texture_extract_failed", "Failed to extract texture for weapon: {weapon}").format(weapon="hands"),
+                False,
+            )
+
+        # ── Извлекаем и конвертируем все найденные файлы ─────────────────── #
         extracted_paths: List[str] = []
-        n = max(len(hand_textures), 1)
+        n = max(len(all_vtfs), 1)
 
         try:
-            for idx, (folder, vtf_name) in enumerate(hand_textures):
+            for idx, (rel_path, filename) in enumerate(all_vtfs):
                 if is_cancelled():
                     return False, t.get("extract_cancelled", "Extraction cancelled by user"), True
 
                 pct = 50 + int(idx / n * 40)
-                emit(pct, t.get("extract_extracting", "Extracting texture..."))
+                emit(pct, t.get("extract_extracting", "Extracting texture...") + f"  {filename}")
 
-                vtf_rel_path = f"materials/models/player/{folder}/{vtf_name}.vtf"
-
-                if vtf_rel_path not in vpk_file:
-                    logger.warning(f"Текстура рук не найдена в VPK: {vtf_rel_path}")
-                    continue
-
-                vtf_filename = f"{vtf_name}.vtf"
                 try:
-                    dest_path = sanitize_path(vtf_filename, out_dir)
+                    dest_path = sanitize_path(filename, out_dir)
                 except ValueError as exc:
-                    logger.warning(f"Недопустимый путь для {vtf_filename}: {exc}")
+                    logger.warning(f"Недопустимый путь для {filename}: {exc}")
                     continue
 
-                with open(dest_path, "wb") as fh:
-                    fh.write(vpk_file[vtf_rel_path].read())
-                logger.info(f"Извлечена текстура рук: {vtf_rel_path} → {dest_path}")
+                try:
+                    with open(dest_path, "wb") as fh:
+                        fh.write(vpk_file[rel_path].read())
+                    logger.info(f"Извлечена текстура рук: {rel_path} → {dest_path}")
+                except Exception as exc:
+                    logger.warning(f"Ошибка записи {dest_path}: {exc}")
+                    continue
 
                 if export_format.upper() != "VTF":
-                    emit(pct + 3, t.get("extract_converting", "Converting texture..."))
+                    emit(pct + 1, t.get("extract_converting", "Converting texture..."))
                     converted = TF2VPKExtractService._convert_vtf_to_image(
                         dest_path, out_dir, export_format.upper()
                     )
