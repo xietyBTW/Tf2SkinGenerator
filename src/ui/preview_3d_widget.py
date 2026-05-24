@@ -35,12 +35,18 @@ def _make_js_bridge():
     from PySide6.QtCore import QObject, Signal, Slot
 
     class JsBridge(QObject):
-        texture_dropped = Signal(str)   # data-URL изображения
+        texture_dropped  = Signal(str)  # data-URL изображения (дроп на пустое место)
+        per_mesh_applied = Signal()     # дроп на конкретный меш (per-mesh drag)
 
         @Slot(str)
         def notifyTextureDrop(self, data_url: str) -> None:  # noqa: N802
             """Вызывается из JS когда пользователь перетаскивает текстуру в 3D viewer."""
             self.texture_dropped.emit(data_url)
+
+        @Slot()
+        def notifyPerMeshApplied(self) -> None:  # noqa: N802
+            """Вызывается из JS когда текстура применена к конкретному мешу (per-mesh drag)."""
+            self.per_mesh_applied.emit()
 
     return JsBridge()
 

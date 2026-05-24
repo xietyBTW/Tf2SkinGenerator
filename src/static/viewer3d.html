@@ -177,12 +177,12 @@
 <!-- Qt WebChannel bridge (Python ↔ JS) — поставляется Qt, не CDN -->
 <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
 
-<!-- Three.js from CDN -->
+<!-- Three.js (локальные файлы; CDN как запасной вариант) -->
 <script type="importmap">
 {
   "imports": {
-    "three":          "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-    "three/addons/":  "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    "three":          "./js/three.module.js",
+    "three/addons/":  "./js/addons/"
   }
 }
 </script>
@@ -207,6 +207,11 @@ let _pyBridge = null;
 
 function _notifyTextureDrop(dataUrl) {
   try { if (_pyBridge) _pyBridge.notifyTextureDrop(dataUrl); }
+  catch (_) { /* ignore */ }
+}
+
+function _notifyPerMeshApplied() {
+  try { if (_pyBridge) _pyBridge.notifyPerMeshApplied(); }
   catch (_) { /* ignore */ }
 }
 
@@ -1052,10 +1057,65 @@ window.updateCritHitTexture = function(critTexDataUrl) {
 const IMAGE_EXTS = /\.(png|jpg|jpeg|bmp|gif|webp|tga)$/i;
 let   _dragDepth = 0;
 
+// ── Per-mesh raycasting ───────────────────────────────────────────────────── //
+const _raycaster    = new THREE.Raycaster();
+const _dropNDC      = new THREE.Vector2();   // NDC-координаты в момент drop
+let   _dragHoverMesh    = null;              // меш, подсвеченный при наведении
+let   _dragHoverOrigMat = null;              // его оригинальный материал
+
+function _ndcFromEvent(e) {
+  const rect = renderer.domElement.getBoundingClientRect();
+  return new THREE.Vector2(
+    ((e.clientX - rect.left) / rect.width)  * 2 - 1,
+    -((e.clientY - rect.top)  / rect.height) * 2 + 1
+  );
+}
+
+function _hitMeshAt(ndc) {
+  if (!currentModel || _isCritHitMode) return null;
+  _raycaster.setFromCamera(ndc, camera);
+  const hits = _raycaster.intersectObject(currentModel, true);
+  return hits.length > 0 ? hits[0].object : null;
+}
+
+// Подсвечивает меш при перетаскивании над ним
+function _setDragHover(mesh) {
+  if (_dragHoverMesh === mesh) return;
+  _clearDragHover();
+  if (!mesh || Array.isArray(mesh.material)) return;
+  _dragHoverMesh    = mesh;
+  _dragHoverOrigMat = mesh.material;
+  const hl = mesh.material.clone();
+  hl.emissive          = new THREE.Color(0.35, 0.25, 0.0);
+  hl.emissiveIntensity = 1;
+  mesh.material        = hl;
+  mesh.material.needsUpdate = true;
+}
+
+// Снимает подсветку
+function _clearDragHover() {
+  if (_dragHoverMesh && _dragHoverOrigMat) {
+    _dragHoverMesh.material = _dragHoverOrigMat;
+    _dragHoverMesh.material.needsUpdate = true;
+  }
+  _dragHoverMesh    = null;
+  _dragHoverOrigMat = null;
+}
+
+// Применяет текстуру к конкретному мешу (сохраняет имя материала).
+// Также уведомляет Python: per-mesh режим активен — не делать глобальный ре-аплай.
+function _applyTexToMesh(mesh, tex) {
+  const prevName = mesh.material && !Array.isArray(mesh.material)
+    ? mesh.material.name : '';
+  mesh.material = new THREE.MeshLambertMaterial({ map: tex, side: THREE.DoubleSide });
+  if (prevName) mesh.material.name = prevName;
+  mesh.material.needsUpdate = true;
+  _notifyPerMeshApplied();
+}
+
 document.addEventListener('dragenter', e => {
   const items = e.dataTransfer?.items;
   if (!items) return;
-  // Проверяем что тащат файл-изображение
   const hasImage = Array.from(items).some(
     item => item.kind === 'file' && (item.type.startsWith('image/') || IMAGE_EXTS.test(item.name || ''))
   );
@@ -1067,18 +1127,27 @@ document.addEventListener('dragenter', e => {
 
 document.addEventListener('dragleave', () => {
   _dragDepth = Math.max(0, _dragDepth - 1);
-  if (_dragDepth === 0) dropOverlay.classList.remove('visible');
+  if (_dragDepth === 0) {
+    dropOverlay.classList.remove('visible');
+    _clearDragHover();
+  }
 });
 
 document.addEventListener('dragover', e => {
   e.preventDefault();
   e.dataTransfer.dropEffect = 'copy';
+  // Подсвечиваем меш под курсором во время перетаскивания
+  if (_dragDepth > 0) _setDragHover(_hitMeshAt(_ndcFromEvent(e)));
 });
 
 document.addEventListener('drop', e => {
   e.preventDefault();
   _dragDepth = 0;
   dropOverlay.classList.remove('visible');
+
+  // Фиксируем целевой меш ДО асинхронного чтения файла
+  const hitMesh = _hitMeshAt(_ndcFromEvent(e));
+  _clearDragHover();
 
   const file = e.dataTransfer?.files?.[0];
   if (!file) return;
@@ -1088,7 +1157,7 @@ document.addEventListener('drop', e => {
   const isGif = file.type === 'image/gif' || /\.gif$/i.test(file.name);
 
   if (isGif) {
-    // GIF: читаем как ArrayBuffer → декодируем кадры встроенным декодером
+    // GIF: анимация всегда на все меши (per-mesh GIF не поддерживается)
     const bufReader = new FileReader();
     bufReader.onload = async evt => {
       const gifBuffer = evt.target.result;
@@ -1103,7 +1172,7 @@ document.addEventListener('drop', e => {
           window.loadAnimatedTexture(decoded.dataUrls, decoded.fps);
         }
       } else {
-        // Fallback: показываем первый кадр как статичную текстуру
+        // Fallback: первый кадр как статичная текстура
         const urlReader = new FileReader();
         urlReader.onload = e2 => {
           if (_isCritHitMode)  window.updateCritHitTexture(e2.target.result);
@@ -1112,14 +1181,14 @@ document.addEventListener('drop', e => {
         urlReader.readAsDataURL(file);
       }
 
-      // Уведомляем Python с оригинальным GIF (data URL) — 2D превью покажет анимацию
+      // Уведомляем Python для 2D превью
       const gifReader = new FileReader();
       gifReader.onload = e => _notifyTextureDrop(e.target.result);
       gifReader.readAsDataURL(new Blob([gifBuffer], { type: 'image/gif' }));
     };
     bufReader.readAsArrayBuffer(file);
   } else {
-    // Статичное изображение — прежнее поведение
+    // Статичное изображение — применяем к конкретному мешу или ко всем
     const reader = new FileReader();
     reader.onload = evt => {
       const dataUrl = evt.target.result;
@@ -1127,11 +1196,17 @@ document.addEventListener('drop', e => {
       if (_isCritHitMode) {
         window.updateCritHitTexture(dataUrl);
       } else if (currentModel) {
-        window.updateTextureFromDataUrl(dataUrl);
+        if (hitMesh) {
+          // Дроп на конкретный меш — применяем только к нему
+          _loadTextureThen(dataUrl, tex => _applyTexToMesh(hitMesh, tex));
+        } else {
+          // Дроп на пустое место — применяем ко всей модели
+          window.updateTextureFromDataUrl(dataUrl);
+        }
       } else {
         _pendingAnim = { frameDataUrls: [dataUrl], framerate: 0 };
       }
-      // Уведомляем Python: обновить 2D превью
+      // Уведомляем Python для 2D превью (поведение не меняется)
       _notifyTextureDrop(dataUrl);
     };
     reader.readAsDataURL(file);

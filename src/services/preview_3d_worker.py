@@ -83,6 +83,7 @@ class Preview3DWorker(QThread):
         self.misc_vpk_path     = misc_vpk_path
         self.textures_vpk_path = textures_vpk_path
         self._preview_dir: Optional[str] = None
+        self._hat_decomp_dir: Optional[str] = None  # папка с QC/SMD шапки после декомпиляции
         self._p = self._PROGRESS.get(lang, self._PROGRESS['en'])
 
     # ── Точка входа ───────────────────────────────────────────────────────── #
@@ -97,6 +98,8 @@ class Preview3DWorker(QThread):
             if not smd_path:
                 self.failed.emit(self._p['not_found'])
                 return
+            if self.mode == "hat":
+                self._hat_decomp_dir = os.path.dirname(smd_path)
             if self.isInterruptionRequested():
                 return
 
@@ -114,9 +117,13 @@ class Preview3DWorker(QThread):
                     f"{[os.path.basename(b) for b in bodygroup_smds]}"
                 )
 
+            from src.data.player_characters import PLAYER_BODY_MODE_KEYS as _PBK
+            # Персонажи TF2 компилируются с $upaxis Y — SMD уже Y-up, конвертацию Z→Y не делаем
+            _source_zup = self.mode not in _PBK
             ok, mat_names = SmdToObjService.convert(
                 smd_path, obj_path,
-                extra_smd_paths=bodygroup_smds
+                extra_smd_paths=bodygroup_smds,
+                source_zup=_source_zup,
             )
             if not ok:
                 self.failed.emit(self._p['conv_error'])
@@ -127,13 +134,44 @@ class Preview3DWorker(QThread):
             # ── 3. Текстура ───────────────────────────────────────────────── #
             self.progress.emit(self._p['texture'])
 
-            if self.mode in HAND_MODE_KEYS and mat_names:
-                # Режим рук: мульти-материал — каждый меш получает свою текстуру
+            from src.data.player_characters import PLAYER_BODY_MODE_KEYS
+            is_multi_tex_mode = self.mode in HAND_MODE_KEYS or self.mode in PLAYER_BODY_MODE_KEYS
+            if is_multi_tex_mode and mat_names:
+                # Режим рук / скина персонажа: мульти-материал — каждый меш получает свою текстуру
                 tex_map = self._extract_multi_textures(mat_names)
-                self.ready.emit(obj_path, "")          # модель без единой текстуры
+                self.ready.emit(obj_path, "")
                 if tex_map:
-                    self.multi_material.emit(tex_map)  # {mat_name: png_path}
-                # BLU/анимация для рук не нужны
+                    self.multi_material.emit(tex_map)
+
+            elif self.mode == "hat":
+                # ── Шапки: QC → VMT → $baseTexture → VTF ─────────────────── #
+                _qc_dir = self._hat_decomp_dir
+                if not _qc_dir:
+                    from src.services import decompile_cache as _dc
+                    _cached_qc = _dc.find_cached_qc_for_weapon(self.weapon_key)
+                    if _cached_qc:
+                        _qc_dir = os.path.dirname(_cached_qc)
+
+                hat_tex_map: dict = {}
+                if _qc_dir and mat_names:
+                    try:
+                        hat_tex_map = self._extract_hat_textures_via_qc_vmt(
+                            _qc_dir, mat_names
+                        )
+                    except Exception as exc:
+                        logger.warning(f"[3D] Ошибка QC→VMT→VTF: {exc}")
+
+                if hat_tex_map:
+                    first_tex = next(iter(hat_tex_map.values()))
+                    self.ready.emit(obj_path, first_tex)
+                    if len(hat_tex_map) > 1:
+                        self.multi_material.emit(hat_tex_map)
+                else:
+                    # Fallback: угадываем VTF по имени MDL
+                    logger.debug("[3D] QC→VMT не дал результата, используем fallback")
+                    frame_paths, _ = self._extract_hat_texture_frames()
+                    self.ready.emit(obj_path, frame_paths[0] if frame_paths else "")
+
             else:
                 # Обычное оружие: одна текстура (возможно анимированная)
                 frame_paths, framerate = self._extract_texture_frames()
@@ -160,10 +198,14 @@ class Preview3DWorker(QThread):
 
     def _get_reference_smd(self) -> Optional[str]:
         """Возвращает reference SMD из кэша или после декомпиляции."""
-        mdl_rel = WEAPON_MDL_PATHS.get(
-            self.weapon_key,
-            f"models/weapons/c_models/{self.weapon_key}/{self.weapon_key}.mdl",
-        )
+        if self.mode == "hat":
+            # weapon_key IS the full MDL path for hats
+            mdl_rel = self.weapon_key
+        else:
+            mdl_rel = WEAPON_MDL_PATHS.get(
+                self.weapon_key,
+                f"models/weapons/c_models/{self.weapon_key}/{self.weapon_key}.mdl",
+            )
 
         cached = decompile_cache.get_cached_decompile(
             self.weapon_key, self.misc_vpk_path, mdl_rel
@@ -195,9 +237,12 @@ class Preview3DWorker(QThread):
 
         logger.info(f"[3D] cwd={os.getcwd()} | crowbar={crowbar_abs} | vpk={self.misc_vpk_path}")
 
-        paths_to_try = ExtractModelService._build_paths_to_try(
-            self.mode, self.weapon_key
-        )
+        if self.mode == "hat":
+            paths_to_try = self._build_hat_paths(mdl_rel_hint)
+        else:
+            paths_to_try = ExtractModelService._build_paths_to_try(
+                self.mode, self.weapon_key
+            )
 
         found_rel: Optional[str] = None
         for path in paths_to_try:
@@ -249,6 +294,67 @@ class Preview3DWorker(QThread):
             self.failed.emit(f"Decompile error: {exc}")
             return None
 
+    def _build_hat_paths(self, mdl_rel: str) -> list:
+        """Строит список кандидатов путей MDL для шапок в VPK.
+
+        Обрабатывает:
+        - %s-плейсхолдер → раскрывает во все 9 классов TF2
+        - workshop / workshop_partner варианты
+        - суффиксы класса (_heavy → _scout, _soldier и т.д.)
+        """
+        import re as _re
+        _TF2_CLASSES = ["heavy", "scout", "soldier", "pyro",
+                        "demoman", "engineer", "medic", "sniper", "spy"]
+        norm = mdl_rel.replace("\\", "/").lower()
+
+        # ── 1. Раскрываем %s → все классы ─────────────────────────────────
+        if "%s" in norm:
+            base_set: list = []
+            for cls in _TF2_CLASSES:
+                try:
+                    v = norm % cls
+                except (TypeError, ValueError):
+                    v = norm.replace("%s", cls)
+                if v not in base_set:
+                    base_set.append(v)
+        else:
+            base_set = [norm]
+
+        # ── 2. Workshop/workshop_partner варианты ──────────────────────────
+        paths: list = []
+        for c in base_set:
+            paths.append(c)
+            for src, dsts in [
+                ("models/player/items",
+                 ["models/workshop_partner/player/items", "models/workshop/player/items"]),
+                ("models/workshop/player/items",
+                 ["models/workshop_partner/player/items", "models/player/items"]),
+                ("models/workshop_partner/player/items",
+                 ["models/workshop/player/items", "models/player/items"]),
+            ]:
+                if src in c:
+                    for dst in dsts:
+                        v = c.replace(src, dst)
+                        if v not in paths:
+                            paths.append(v)
+                    break
+
+        # ── 3. Суффиксы класса (_heavy → другие классы) ───────────────────
+        cls_pat = _re.compile(
+            r'_(heavy|scout|soldier|pyro|demoman|engineer|medic|sniper|spy)(\.mdl)$'
+        )
+        extra: list = []
+        for c in list(paths):
+            m = cls_pat.search(c)
+            if m:
+                for cls in _TF2_CLASSES:
+                    variant = cls_pat.sub(f'_{cls}\\2', c)
+                    if variant not in paths and variant not in extra:
+                        extra.append(variant)
+        paths += extra
+
+        return paths
+
     def _find_reference_smd(self, directory: str) -> Optional[str]:
         """Находит reference SMD (исключая physics/anim) в директории."""
         _SKIP = ("physics", "phys", "anim", "idle", "pose")
@@ -262,7 +368,30 @@ class Preview3DWorker(QThread):
         if refs:
             return refs[0]
 
-        # SMD с weapon_key в имени
+        # Для моделей игроков (weapon_key = "player_scout" и т.д.)
+        # Crowbar создаёт файлы вида scout_morphs_low.smd.
+        # Извлекаем короткое имя класса: "player_scout" → "scout".
+        from src.data.player_characters import PLAYER_BODY_MODE_KEYS
+        if self.mode in PLAYER_BODY_MODE_KEYS and self.weapon_key.startswith("player_"):
+            class_short = self.weapon_key[len("player_"):]  # "scout", "soldier", …
+
+            # Приоритет: *{class}_morphs_low.smd → именно так называет Crowbar тело персонажа
+            morphs_smds = [
+                p for p in glob.glob(os.path.join(directory, f"*{class_short}*_morphs_low.smd"))
+                if not skip(p)
+            ]
+            if morphs_smds:
+                return morphs_smds[0]
+
+            # Fallback: любой SMD с именем класса (не physics/anim)
+            class_smds = [
+                p for p in glob.glob(os.path.join(directory, f"*{class_short}*.smd"))
+                if not skip(p)
+            ]
+            if class_smds:
+                return class_smds[0]
+
+        # SMD с weapon_key в имени (оружия и руки)
         wk_smds = [
             p for p in glob.glob(os.path.join(directory, f"*{self.weapon_key}*.smd"))
             if not skip(p)
@@ -338,14 +467,17 @@ class Preview3DWorker(QThread):
 
             pak = vpklib.open(self.textures_vpk_path)
 
-            # Для моделей рук определяем папку (materials/models/player/{folder}/)
+            # Для моделей рук / скинов персонажа определяем папку (materials/models/player/{folder}/)
             # Все материалы SMD текстурируем — _find_vtf_for_mat ищет сначала
             # в папке игрока, что покрывает и руки, и рукав костюма.
+            from src.data.player_characters import PLAYER_BODY_MODE_KEYS, PLAYER_CHARACTERS
             arm_folder: Optional[str] = None
             if self.mode in HAND_MODE_KEYS:
                 textures_list = HAND_MODES.get(self.mode, {}).get("textures", [])
                 if textures_list:
                     arm_folder = textures_list[0][0]
+            elif self.mode in PLAYER_BODY_MODE_KEYS:
+                arm_folder = PLAYER_CHARACTERS.get(self.mode, {}).get("folder", "")
 
             for mat_name in mat_names:
                 vtf_data = self._find_vtf_for_mat(pak, mat_name, arm_folder)
@@ -400,6 +532,26 @@ class Preview3DWorker(QThread):
             if mat_lower != mat_name:
                 paths.append(f"materials/models/player/{arm_folder}/{mat_lower}.vtf")
 
+            # Fallback для головных текстур персонажей (кроме Шпиона):
+            # SMD ссылается на {class}_head_red или {class}_head_blue,
+            # но реальный VTF называется {class}_head.vtf (без командного суффикса).
+            # Например: scout_head_red → scout_head.vtf
+            #            demoman_head_red → demoman_head.vtf
+            #            heavy_head_red  → heavy_head.vtf
+            _TEAM_SUFFIXES = ("_red", "_blue")
+            for suf in _TEAM_SUFFIXES:
+                if mat_lower.endswith(suf):
+                    base_no_team = mat_name[: -len(suf)]
+                    base_no_team_lower = base_no_team.lower()
+                    paths.append(
+                        f"materials/models/player/{arm_folder}/{base_no_team}.vtf"
+                    )
+                    if base_no_team_lower != base_no_team:
+                        paths.append(
+                            f"materials/models/player/{arm_folder}/{base_no_team_lower}.vtf"
+                        )
+                    break
+
             # Fallback для sheen/overlay мешей: в TF2 эти материалы содержат
             # ту же геометрию рук, что и базовый материал, но рендерятся с
             # эффектом киллстрика. VTF для sheen в VPK нет — используем базовый.
@@ -433,7 +585,366 @@ class Preview3DWorker(QThread):
                 continue
         return None
 
+    # ── QC-парсинг текстур шапок ──────────────────────────────────────────── #
+
+    @staticmethod
+    def _parse_qc_texture_info(qc_path: str) -> tuple:
+        """
+        Разбирает QC-файл и извлекает пути материалов и имена текстур.
+
+        Пример QC:
+            $cdmaterials "models/player/items/all_class/"
+            $texturegroup "skinfamilies"
+            {
+                { "fwk_engineer_blueprints"  "fwk_engineer_blueprints_blue" }
+                ...
+            }
+
+        Returns:
+            (cdmaterials: list[str], skin0_textures: list[str])
+            cdmaterials    — список путей $cdmaterials без leading/trailing слешей
+            skin0_textures — список имён текстур из первого скин-семейства
+        """
+        import re
+        try:
+            with open(qc_path, encoding="utf-8", errors="replace") as f:
+                content = f.read()
+        except Exception:
+            return [], []
+
+        cdmaterials = [
+            m.replace("\\", "/").strip("/")
+            for m in re.findall(r'\$cdmaterials\s+"([^"]+)"', content, re.IGNORECASE)
+        ]
+
+        skin0_textures: list = []
+        tg = re.search(
+            r'\$texturegroup\s+"skinfamilies"\s*\{',
+            content, re.IGNORECASE,
+        )
+        if tg:
+            rest = content[tg.end():]
+            first_family = re.search(r'\{([^}]+)\}', rest)
+            if first_family:
+                skin0_textures = re.findall(r'"([^"]+)"', first_family.group(1))
+
+        return cdmaterials, skin0_textures
+
+    # ── VMT-поиск: QC → VMT → $baseTexture → VTF ────────────────────────── #
+
+    _WORKSHOP_SWAPS = [
+        ("materials/models/player/items",
+         "materials/models/workshop_partner/player/items"),
+        ("materials/models/player/items",
+         "materials/models/workshop/player/items"),
+        ("materials/models/workshop_partner/player/items",
+         "materials/models/player/items"),
+        ("materials/models/workshop/player/items",
+         "materials/models/player/items"),
+    ]
+
+    @staticmethod
+    def _find_vmt_content_in_vpk(pak, cdmaterials: list, mat_name: str) -> Optional[tuple]:
+        """
+        Ищет VMT-файл для имени материала в открытом VPK.
+
+        Проверяет все комбинации cdmaterials × workshop-вариантов.
+        Пропускает VMT, в контенте или пути которых есть «backpack»
+        (это иконки инвентаря, не модельные текстуры).
+
+        Returns:
+            (vmt_path, vmt_content_str) или None.
+        """
+        swaps = Preview3DWorker._WORKSHOP_SWAPS
+        candidates: list = []
+        for cdmat in cdmaterials:
+            base_dir = f"materials/{cdmat}"
+            candidates.append(f"{base_dir}/{mat_name}.vmt")
+            for src, dst in swaps:
+                if base_dir.startswith(src):
+                    alt = base_dir.replace(src, dst, 1)
+                    candidates.append(f"{alt}/{mat_name}.vmt")
+
+        for path in candidates:
+            try:
+                raw = pak[path].read()
+            except KeyError:
+                continue
+            try:
+                content = raw.decode("utf-8", errors="replace")
+            except Exception:
+                continue
+            if "backpack" in path.lower() or "backpack" in content.lower():
+                logger.debug(f"[3D] Пропускаем backpack VMT: {path}")
+                continue
+            return path, content
+        return None
+
+    @staticmethod
+    def _parse_basetexture_from_vmt(vmt_content: str) -> Optional[str]:
+        """Извлекает значение $baseTexture из VMT-контента.
+
+        Обрабатывает все встречающиеся форматы:
+            $baseTexture      "path/to/texture"   ← ключ без кавычек
+            "$basetexture"    "path/to/texture"   ← ключ в кавычках (TF2 workshop VMT)
+            $baseTexture      path/to/texture      ← значение без кавычек
+        """
+        import re
+        # Ключ с кавычками или без, значение с кавычками
+        m = re.search(
+            r'"?\$baseTexture"?\s+"([^"]+)"',
+            vmt_content, re.IGNORECASE,
+        )
+        if m:
+            return m.group(1).replace("\\", "/").lower()
+        # Значение без кавычек
+        m = re.search(
+            r'"?\$baseTexture"?\s+([^\s"{}]+)',
+            vmt_content, re.IGNORECASE,
+        )
+        return m.group(1).replace("\\", "/").lower() if m else None
+
+    @staticmethod
+    def _find_vtf_for_basetexture(pak, basetexture: str) -> Optional[bytes]:
+        """
+        Находит VTF-файл в открытом VPK по значению $baseTexture.
+
+        $baseTexture в VMT — путь относительно materials/ (без расширения).
+        """
+        path = basetexture.replace("\\", "/").lower().strip("/")
+        if not path.startswith("materials/"):
+            path = "materials/" + path
+        if not path.endswith(".vtf"):
+            path += ".vtf"
+        try:
+            return pak[path].read()
+        except KeyError:
+            return None
+
+    def _vtf_data_to_png(self, vtf_data: bytes, name: str) -> Optional[str]:
+        """
+        Сохраняет VTF-байты как PNG в preview_dir.
+        Возвращает путь к PNG или None при ошибке.
+        """
+        vtf_file = os.path.join(self._preview_dir, f"_tmp_{name}.vtf")
+        with open(vtf_file, "wb") as f:
+            f.write(vtf_data)
+        try:
+            from src.services.vtflib_wrapper import VTFLib
+            from PIL import Image
+            all_frames, w, h = VTFLib.read_vtf_all_frames(vtf_file)
+            if not all_frames:
+                return None
+            img = Image.frombytes("RGBA", (w, h), all_frames[0])
+            png_path = os.path.join(self._preview_dir, f"{name}.png")
+            img.save(png_path)
+            return png_path
+        except Exception as exc:
+            logger.warning(f"[3D] VTFLib ошибка для {name}: {exc}")
+            return None
+        finally:
+            try:
+                os.remove(vtf_file)
+            except OSError:
+                pass
+
+    def _extract_hat_textures_via_qc_vmt(
+        self, decomp_dir: str, mat_names: list
+    ) -> dict:
+        """
+        Главный метод извлечения текстур шапки через цепочку QC → VMT → VTF.
+
+        1. Читает QC из decomp_dir, получает $cdmaterials пути.
+        2. Открывает ОБА VPK (misc + textures) сразу, т.к. VMT и VTF
+           могут быть в РАЗНЫХ архивах:
+           – VMT → tf2_misc_dir.vpk
+           – VTF → tf2_textures_dir.vpk
+        3. Для каждого имени материала из SMD ищет VMT в любом из пакетов,
+           пропускает VMT с «backpack», читает $baseTexture → ищет VTF → PNG.
+
+        Returns:
+            {mat_name: png_path}  (пустой dict если ничего не нашлось)
+        """
+        import vpk as vpklib
+
+        qc_files = glob.glob(os.path.join(decomp_dir, "*.qc"))
+        if not qc_files:
+            logger.warning(f"[3D] QC не найден в {decomp_dir}")
+            return {}
+
+        cdmaterials, _ = self._parse_qc_texture_info(qc_files[0])
+        if not cdmaterials:
+            logger.warning(f"[3D] $cdmaterials не найден в QC: {qc_files[0]}")
+            return {}
+
+        logger.info(f"[3D] Hat QC: cdmaterials={cdmaterials}, materials={mat_names}")
+
+        # Открываем оба VPK сразу — VMT обычно в misc, VTF в textures
+        paks: list = []
+        for vpk_path in [self.misc_vpk_path, self.textures_vpk_path]:
+            if not vpk_path or not os.path.exists(vpk_path):
+                continue
+            try:
+                paks.append(vpklib.open(vpk_path))
+            except Exception as exc:
+                logger.debug(f"[3D] Ошибка открытия VPK {vpk_path}: {exc}")
+
+        if not paks:
+            logger.warning("[3D] Не удалось открыть ни один VPK")
+            return {}
+
+        result: dict = {}
+        for mat_name in mat_names:
+            mat_lower = mat_name.lower()
+
+            # ── Ищем VMT в любом из открытых VPK ─────────────────────── #
+            vmt_info = None
+            for pak in paks:
+                vmt_info = self._find_vmt_content_in_vpk(pak, cdmaterials, mat_lower)
+                if vmt_info:
+                    break
+
+            if not vmt_info:
+                logger.info(
+                    f"[3D] VMT не найден: mat='{mat_lower}', cdmaterials={cdmaterials}"
+                )
+                continue
+
+            vmt_path, vmt_content = vmt_info
+            basetexture = self._parse_basetexture_from_vmt(vmt_content)
+            if not basetexture:
+                logger.warning(f"[3D] $baseTexture не найден в VMT: {vmt_path}")
+                continue
+
+            # ── Ищем VTF в любом из открытых VPK ─────────────────────── #
+            vtf_data = None
+            for pak in paks:
+                vtf_data = self._find_vtf_for_basetexture(pak, basetexture)
+                if vtf_data:
+                    break
+
+            if not vtf_data:
+                logger.warning(
+                    f"[3D] VTF не найден: $baseTexture={basetexture} "
+                    f"(VMT={vmt_path})"
+                )
+                continue
+
+            png_path = self._vtf_data_to_png(vtf_data, f"hat_{mat_lower}")
+            if png_path:
+                result[mat_lower] = png_path
+                logger.info(
+                    f"[3D] Шапка '{mat_lower}': VMT={vmt_path} → {basetexture}"
+                )
+
+        return result
+
     # ── Извлечение текстуры ───────────────────────────────────────────────── #
+
+    def _extract_hat_texture_frames(self) -> tuple:
+        """
+        Fallback-метод: угадывает VTF-путь напрямую по имени MDL.
+
+        Используется только если основной QC→VMT→VTF путь не дал результата.
+        MDL-имя → имя материала (например hat_heavy.mdl → hat_heavy.vtf).
+
+        Returns:
+            (frame_paths: list[str], framerate: float)
+        """
+        try:
+            import vpk as vpklib
+
+            _TF2_CLASSES = ["heavy", "scout", "soldier", "pyro",
+                            "demoman", "engineer", "medic", "sniper", "spy"]
+            mdl = self.weapon_key.replace("\\", "/").lower()
+
+            # Если путь содержит %s — раскрываем во все классы
+            if "%s" in mdl:
+                mdl_candidates = []
+                for cls in _TF2_CLASSES:
+                    try:
+                        v = mdl % cls
+                    except (TypeError, ValueError):
+                        v = mdl.replace("%s", cls)
+                    if v not in mdl_candidates:
+                        mdl_candidates.append(v)
+            else:
+                mdl_candidates = [mdl]
+
+            # Строим список VTF-путей из всех MDL-кандидатов
+            _WORKSHOP_SWAPS = [
+                ("materials/models/player/items",
+                 "materials/models/workshop_partner/player/items"),
+                ("materials/models/player/items",
+                 "materials/models/workshop/player/items"),
+                ("materials/models/workshop_partner/player/items",
+                 "materials/models/player/items"),
+                ("materials/models/workshop/player/items",
+                 "materials/models/player/items"),
+            ]
+            vtf_paths: list = []
+            for mdl_c in mdl_candidates:
+                base_no_ext = mdl_c[:-4] if mdl_c.endswith(".mdl") else mdl_c
+                mat_base = "materials/" + base_no_ext
+                v0 = mat_base + ".vtf"
+                if v0 not in vtf_paths:
+                    vtf_paths.append(v0)
+                for src, dst in _WORKSHOP_SWAPS:
+                    if src in mat_base:
+                        v = mat_base.replace(src, dst) + ".vtf"
+                        if v not in vtf_paths:
+                            vtf_paths.append(v)
+
+            # Ищем в текстурах VPK, затем в misc VPK
+            vtf_data: Optional[bytes] = None
+            for vpk_path in [self.textures_vpk_path, self.misc_vpk_path]:
+                if not vpk_path or not os.path.exists(vpk_path):
+                    continue
+                try:
+                    pak = vpklib.open(vpk_path)
+                    for path in vtf_paths:
+                        try:
+                            vtf_data = pak[path].read()
+                            logger.debug(f"[3D] Hat texture: {path}")
+                            break
+                        except KeyError:
+                            continue
+                    if vtf_data:
+                        break
+                except Exception as exc:
+                    logger.debug(f"[3D] Ошибка открытия VPK {vpk_path}: {exc}")
+
+            if not vtf_data:
+                shown = vtf_paths[:4]
+                logger.warning(
+                    f"[3D] Текстура шапки не найдена (weapon_key={self.weapon_key}). "
+                    f"Проверено путей: {len(vtf_paths)}, первые: {shown}"
+                )
+                return [], 0.0
+
+            vtf_file = os.path.join(self._preview_dir, "_tmp_hat.vtf")
+            with open(vtf_file, "wb") as f:
+                f.write(vtf_data)
+
+            from src.services.vtflib_wrapper import VTFLib
+            from PIL import Image
+
+            all_frames_rgba, w, h = VTFLib.read_vtf_all_frames(vtf_file)
+            os.remove(vtf_file)
+
+            frame_paths: list = []
+            for i, rgba in enumerate(all_frames_rgba):
+                img = Image.frombytes("RGBA", (w, h), rgba)
+                name = f"hat_tex_{i:03d}.png" if len(all_frames_rgba) > 1 else "hat_tex.png"
+                path = os.path.join(self._preview_dir, name)
+                img.save(path)
+                frame_paths.append(path)
+
+            return frame_paths, 0.0
+
+        except Exception as exc:
+            logger.warning(f"[3D] Не удалось извлечь текстуру шапки: {exc}")
+            return [], 0.0
 
     def _extract_texture_frames(self) -> tuple:
         """
@@ -446,6 +957,9 @@ class Preview3DWorker(QThread):
             (frame_paths: list[str], framerate: float)
             frame_paths пустой если текстура не найдена.
         """
+        if self.mode == "hat":
+            return self._extract_hat_texture_frames()
+
         try:
             import vpk as vpklib
             from src.data.weapons import WEAPON_TEXTURE_PATHS

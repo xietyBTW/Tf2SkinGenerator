@@ -278,9 +278,10 @@ def validate_build_params(
     ]
     if format_type not in valid_formats:
         return t['error_format_invalid'].format(format=format_type, formats=', '.join(valid_formats))
-    # Только специальные режимы (спрей, крит и т.д.) не требуют TF2.
-    # Режимы рук теперь используют полный пайплайн декомпил→компил, как оружие.
-    _no_tf2_needed = mode in SPECIAL_MODES.values()
+    # Только специальные режимы (спрей, крит и т.д.) и скины персонажей не требуют TF2.
+    # Режимы рук используют полный пайплайн декомпил→компил, как оружие.
+    from src.data.player_characters import PLAYER_BODY_MODE_KEYS as _PBK
+    _no_tf2_needed = mode in SPECIAL_MODES.values() or mode in _PBK
     if not _no_tf2_needed:
         if not tf2_root_dir or not isinstance(tf2_root_dir, str):
             return t['error_tf2_required']

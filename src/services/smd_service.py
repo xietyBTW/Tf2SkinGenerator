@@ -276,6 +276,46 @@ class SMDService:
 
         return None
 
+    @staticmethod
+    def extract_unique_materials(smd_path: str) -> set:
+        """
+        Извлекает уникальные имена материалов/текстур из SMD файла.
+
+        В секции triangles каждый треугольник начинается со строки с названием
+        материала, за которой следуют ровно 3 строки вершин (начинаются с цифры
+        или '-'). Метод собирает все уникальные названия материалов.
+
+        Args:
+            smd_path: Путь к SMD файлу.
+
+        Returns:
+            Множество (set) уникальных имён материалов.
+        """
+        materials: set = set()
+        if not os.path.exists(smd_path):
+            return materials
+
+        in_triangles = False
+        with open(smd_path, 'r', encoding='utf-8', errors='replace') as f:
+            for line in f:
+                s = line.strip()
+                if not s:
+                    continue
+                if not in_triangles:
+                    if s == 'triangles':
+                        in_triangles = True
+                    continue
+                if s == 'end':
+                    break
+                first = s[0]
+                # Строки вершин начинаются с цифры или '-'
+                if first.isdigit() or first == '-':
+                    continue
+                # Всё остальное — имя материала
+                materials.add(s)
+
+        return materials
+
 
 # ---------------------------------------------------------------------------
 # Backward-compat aliases (используются тестами)

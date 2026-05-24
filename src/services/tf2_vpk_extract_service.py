@@ -693,22 +693,26 @@ class TF2VPKExtractService:
         language: str = "en",
         progress_callback: Optional[Callable[[int, str], None]] = None,
         cancel_callback: Optional[Callable[[], bool]] = None,
+        use_explicit_list: bool = False,
     ) -> Tuple[bool, str, bool]:
         """
-        Извлекает ВСЕ текстуры рук персонажа из tf2_textures_dir.vpk.
+        Извлекает текстуры персонажа из tf2_textures_dir.vpk.
 
-        Определяет папки персонажа по списку hand_textures, затем сканирует
-        каждую папку materials/models/player/{folder}/ целиком и извлекает
-        все найденные .vtf файлы (не только перечисленные явно).
+        Два режима:
+          • use_explicit_list=False (по умолч.) — сканирует папки, извлекает ВСЁ
+            (используется для обычных рук, где нужны все текстуры из папки).
+          • use_explicit_list=True — извлекает только файлы из списка hand_textures
+            (используется для тел персонажей после диалога выбора).
 
         Args:
-            textures_vpk_path: Путь к tf2_textures_dir.vpk
-            hand_textures:     Список (folder, vtf_name) из HAND_MODES
-            out_dir:           Папка для экспорта
-            export_format:     VTF / PNG / TGA / JPG
-            language:          Язык сообщений
-            progress_callback: callback(pct, msg)
-            cancel_callback:   callable → bool
+            textures_vpk_path:  Путь к tf2_textures_dir.vpk
+            hand_textures:      Список (folder, vtf_name)
+            out_dir:            Папка для экспорта
+            export_format:      VTF / PNG / TGA / JPG
+            language:           Язык сообщений
+            progress_callback:  callback(pct, msg)
+            cancel_callback:    callable → bool
+            use_explicit_list:  True → извлекать только явно перечисленные файлы
 
         Returns:
             (success, message, cancelled)
@@ -748,27 +752,35 @@ class TF2VPKExtractService:
         except Exception as exc:
             return False, str(exc), False
 
-        # ── Собираем уникальные папки персонажа ───────────────────────────── #
-        # Порядок сохраняем через list + seen-set
-        seen_folders: set = set()
-        player_dirs: List[str] = []
-        for folder, _vtf_name in hand_textures:
-            vpk_dir = f"materials/models/player/{folder}"
-            if vpk_dir not in seen_folders:
-                seen_folders.add(vpk_dir)
-                player_dirs.append(vpk_dir)
-
-        # ── Собираем полный список всех .vtf из этих папок ───────────────── #
         emit(40, t.get("extract_searching", "Searching for texture..."))
         all_vtfs: List[Tuple[str, str]] = []  # (rel_path, filename)
-        seen_files: set = set()
 
-        for vpk_dir in player_dirs:
-            dir_vtfs = TF2VPKExtractService._scan_dir_for_vtf(vpk_file, vpk_dir)
-            for rel_path, filename in dir_vtfs:
-                if filename not in seen_files:
-                    seen_files.add(filename)
+        if use_explicit_list:
+            # ── Режим явного списка: извлекаем только выбранные файлы ────── #
+            for folder, vtf_name in hand_textures:
+                rel_path = f"materials/models/player/{folder}/{vtf_name}.vtf"
+                filename  = f"{vtf_name}.vtf"
+                if rel_path in vpk_file:
                     all_vtfs.append((rel_path, filename))
+                else:
+                    logger.warning(f"[extract] Не найдена в VPK: {rel_path}")
+        else:
+            # ── Режим сканирования папок: извлекаем всё из папок ─────────── #
+            seen_folders: set = set()
+            player_dirs: List[str] = []
+            for folder, _vtf_name in hand_textures:
+                vpk_dir = f"materials/models/player/{folder}"
+                if vpk_dir not in seen_folders:
+                    seen_folders.add(vpk_dir)
+                    player_dirs.append(vpk_dir)
+
+            seen_files: set = set()
+            for vpk_dir in player_dirs:
+                dir_vtfs = TF2VPKExtractService._scan_dir_for_vtf(vpk_file, vpk_dir)
+                for rel_path, filename in dir_vtfs:
+                    if filename not in seen_files:
+                        seen_files.add(filename)
+                        all_vtfs.append((rel_path, filename))
 
         if not all_vtfs:
             if hasattr(vpk_file, "close"):
@@ -776,9 +788,10 @@ class TF2VPKExtractService:
                     vpk_file.close()
                 except Exception:
                     pass
+            _weapon_name = hand_textures[0][1] if hand_textures else "unknown"
             return (
                 False,
-                t.get("texture_extract_failed", "Failed to extract texture for weapon: {weapon}").format(weapon="hands"),
+                t.get("texture_extract_failed", "Failed to extract texture for weapon: {weapon}").format(weapon=_weapon_name),
                 False,
             )
 
@@ -831,9 +844,10 @@ class TF2VPKExtractService:
                     pass
 
         if not extracted_paths:
+            _weapon_name2 = hand_textures[0][1] if hand_textures else "unknown"
             return (
                 False,
-                t.get("texture_extract_failed", "Failed to extract texture for weapon: {weapon}").format(weapon="hands"),
+                t.get("texture_extract_failed", "Failed to extract texture for weapon: {weapon}").format(weapon=_weapon_name2),
                 False,
             )
 

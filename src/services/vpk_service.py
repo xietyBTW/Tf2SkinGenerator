@@ -23,6 +23,7 @@ from .smd_service import SMDService
 from .decompile_cache import get_cached_decompile, restore_from_cache, save_to_cache
 from src.data.weapons import SPECIAL_MODES, WEAPON_MDL_PATHS
 from src.data.player_hands import HAND_MODE_KEYS
+from src.data.player_characters import PLAYER_BODY_MODE_KEYS
 from src.shared.logging_config import get_logger
 from src.shared.constants import ToolPaths, DirectoryPaths
 from src.shared.exceptions import (
@@ -68,15 +69,20 @@ class VPKService:
         keep_temp_on_error: bool = False,
         debug_mode: bool = False,
         replace_model_enabled: bool = False,
+        model_ready_path: Optional[str] = None,
         draw_uv_layout: bool = False,
         replace_model_path: str = None,
         model_file_callback: Optional[Callable[[], Optional[str]]] = None,
         extra_texture_callback: Optional[Callable[[str, str], Optional[str]]] = None,
         extra_model_callback: Optional[Callable[[str, str], Optional[str]]] = None,
+        texture_mismatch_callback: Optional[Callable[[str], bool]] = None,
         language: str = "en",
         custom_vtf_path: str = None,
         blu_mode: str = "none",
         blu_image_path: Optional[str] = None,
+        custom_vpk_source_path: Optional[str] = None,
+        hat_mdl_path: Optional[str] = None,
+        hat_apply_game_paints: bool = True,
         progress_callback: Optional[Callable[[int, str], None]] = None,
         sub_progress_callback: Optional[Callable[[int, str], None]] = None,
         cancel_callback: Optional[Callable[[], bool]] = None
@@ -99,6 +105,33 @@ class VPKService:
             logger.info(f"Начало сборки VPK: {filename}")
             emit_progress(5, t.get('build_init', 'Initializing build...'))
 
+            # ── Кастомный мод (пользователь загрузил готовый VPK) ───────── #
+            if mode == "custom":
+                from src.services.custom_vpk_service import CustomVPKService
+                if not custom_vpk_source_path:
+                    return False, t.get('error_no_custom_vpk', 'No custom VPK file loaded.'), False
+
+                emit_progress(10, t.get('build_extracting', 'Extracting model...'))
+                success, message = CustomVPKService.build_custom_mod(
+                    custom_vpk_source_path=custom_vpk_source_path,
+                    image_path=image_path,
+                    size=size,
+                    format_type=format_type,
+                    flags=flags,
+                    vtf_options=vtf_options,
+                    export_folder=export_folder,
+                    filename=filename,
+                    extra_texture_callback=extra_texture_callback,
+                    language=language,
+                    sub_progress_callback=emit_sub,
+                    custom_vtf_path=custom_vtf_path,
+                    hat_mdl_path=hat_mdl_path,
+                )
+                emit_progress(100 if success else 0,
+                              t.get('build_completed', 'Build completed') if success
+                              else t.get('build_error_status', 'Build error'))
+                return success, message, False
+
             is_special_mode = mode in SPECIAL_MODES.values()
 
             _sub_label_init = "Preparing..." if language == "en" else "Подготовка..."
@@ -120,16 +153,20 @@ class VPKService:
                     keep_temp_on_error=keep_temp_on_error,
                     debug_mode=debug_mode,
                     replace_model_enabled=replace_model_enabled,
+                    model_ready_path=model_ready_path,
                     draw_uv_layout=draw_uv_layout,
                     replace_model_path=replace_model_path,
                     model_file_callback=model_file_callback if replace_model_enabled else None,
                     extra_texture_callback=extra_texture_callback,
                     extra_model_callback=extra_model_callback,
+                    texture_mismatch_callback=texture_mismatch_callback,
                     language=language,
                     custom_vtf_path=custom_vtf_path,
                     blu_mode=blu_mode,
                     blu_image_path=blu_image_path,
                     sub_progress_callback=emit_sub,
+                    hat_mdl_path=hat_mdl_path,
+                    hat_apply_game_paints=hat_apply_game_paints,
                 )
 
                 if not is_cancelled():
@@ -171,16 +208,20 @@ class VPKService:
                         keep_temp_on_error=keep_temp_on_error,
                         debug_mode=debug_mode,
                         replace_model_enabled=replace_model_enabled,
+                        model_ready_path=model_ready_path,
                         draw_uv_layout=draw_uv_layout,
                         replace_model_path=replace_model_path,
                         model_file_callback=model_file_callback if replace_model_enabled else None,
                         extra_texture_callback=extra_texture_callback,
                         extra_model_callback=extra_model_callback,
+                        texture_mismatch_callback=texture_mismatch_callback,
                         language=language,
                         custom_vtf_path=custom_vtf_path,
                         blu_mode=blu_mode,
                         blu_image_path=blu_image_path,
                         sub_progress_callback=emit_sub,
+                        hat_mdl_path=hat_mdl_path,
+                        hat_apply_game_paints=hat_apply_game_paints,
                     )
                     build_result[0] = success
                     build_result[1] = message
@@ -220,12 +261,16 @@ class VPKService:
         keep_temp_on_error: bool = False,
         debug_mode: bool = False,
         replace_model_enabled: bool = False,
+        model_ready_path: Optional[str] = None,
         draw_uv_layout: bool = False,
         parent_window=None,  # Окно для диалогов (если нужно показать что-то юзеру)
         replace_model_path: str = None,  # Путь к модели для замены (для тестов, обычно None)
         model_file_callback=None,  # Колбэк для запроса файла из UI потока (потому что Qt не любит мультипоточность)
-        extra_texture_callback=None,  # Колбэк для запроса доп. текстуры: callback(material_name, weapon_key) -> Optional[str]
+        extra_texture_callback=None,  # Колбэк для запроса одной доп. текстуры: callback(material_name, weapon_key) -> Optional[str]
         extra_model_callback=None,  # Колбэк для запроса доп. модели: callback(smd_name, weapon_key) -> Optional[str]
+        texture_mismatch_callback=None,  # Колбэк для предупреждения о несовпадении текстур: callback(msg) -> bool
+        hat_mdl_path: Optional[str] = None,  # Прямой MDL-путь для шапок (обходит WEAPON_MDL_PATHS)
+        hat_apply_game_paints: bool = True,  # True = сохранить краски игры, False = убрать прокси красок из VMT
         language: str = "en",  # Язык для ошибок
         custom_vtf_path: str = None,  # Если юзер сам сделал VTF - используем его вместо генерации из картинки
         blu_mode: str = "none",       # BLU-командная текстура: 'none' | 'same' | 'upload' | 'hue_shift'
@@ -258,12 +303,20 @@ class VPKService:
             
             # Для режимов рук weapon_key — это ключ arm-модели (например "c_scout_arms"),
             # а не суффикс mode-строки (который дал бы бессмысленное "hands").
-            if mode in HAND_MODE_KEYS:
+            # Для режимов скина персонажа weapon_key — это ключ MDL модели (например "player_scout").
+            if mode == "hat" and hat_mdl_path:
+                # Шапка: weapon_key берём из стема MDL-пути
+                weapon_key = Path(hat_mdl_path).stem
+                logger.info(f"[HAT] hat_mdl_path={hat_mdl_path!r}  →  weapon_key={weapon_key!r}")
+            elif mode in HAND_MODE_KEYS:
                 from src.data.player_hands import HAND_MODES as _HAND_MODES
                 _arm_key = _HAND_MODES.get(mode, {}).get('arm_model', '')
                 if not _arm_key:
                     return False, f"No arm_model defined for hand mode: {mode}"
                 weapon_key = _arm_key
+            elif mode in PLAYER_BODY_MODE_KEYS:
+                from src.data.player_characters import PLAYER_CHARACTERS as _PC
+                weapon_key = _PC.get(mode, {}).get('mdl_key', mode)
             else:
                 weapon_key = mode.split('_', 1)[1] if '_' in mode else mode
             
@@ -285,6 +338,27 @@ class VPKService:
                     vmt_to_delete = result[2]
                 else:
                     vmt_to_delete = None
+
+            elif mode in PLAYER_BODY_MODE_KEYS:
+                # Скин персонажа — VTF-only пайплайн (без декомпиляции и компиляции MDL)
+                from src.services.player_skin_build_service import PlayerSkinBuildService
+                success, msg = PlayerSkinBuildService.build(
+                    ctx=ctx,
+                    mode=mode,
+                    image_path=image_path,
+                    size=size,
+                    format_type=format_type,
+                    flags=flags,
+                    vtf_options=vtf_options,
+                    keep_temp_on_error=keep_temp_on_error,
+                    debug_mode=debug_mode,
+                    language=language,
+                    custom_vtf_path=custom_vtf_path,
+                    extra_texture_callback=extra_texture_callback,
+                    sub_progress_callback=emit_sub,
+                )
+                if not success:
+                    return False, msg
 
             else:
                 # Для обычного оружия и рук — декомпиляция + патч QC + компиляция.
@@ -310,61 +384,107 @@ class VPKService:
                     ctx.cleanup(on_error=True, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
                     return False, str(e)
                 
-                if weapon_key not in WEAPON_MDL_PATHS:
-                    ctx.cleanup(on_error=True, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
-                    return False, t['error_weapon_not_found'].format(weapon_key=weapon_key)
-                
-                # Тут начинается веселье - TF2 хранит модели в разных местах, и мы не знаем где именно
-                # Поэтому пробуем все возможные варианты, начиная с самых вероятных:
-                # workshop_partner -> workshop -> weapons/c_models -> weapons/c_items -> player/items
-                # И для каждого пути пробуем с папкой и без (потому что Valve любит делать по-разному, хуй знает почему)
-                
-                base_path_from_config = WEAPON_MDL_PATHS[weapon_key]
-                
-                paths_to_try = []
-                
-                # Сначала пробуем workshop_partner - там обычно все новое лежит
-                workshop_partner_path_with_folder = base_path_from_config.replace("models/weapons/", "models/workshop_partner/weapons/")
-                paths_to_try.append(workshop_partner_path_with_folder)
-                
-                # А может без папки? (Valve любит делать по-разному, потому что им похую на консистентность)
-                if f"/{weapon_key}/{weapon_key}.mdl" in workshop_partner_path_with_folder:
-                    workshop_partner_path_no_folder = workshop_partner_path_with_folder.replace(f"/{weapon_key}/{weapon_key}.mdl", f"/{weapon_key}.mdl")
-                    paths_to_try.append(workshop_partner_path_no_folder)
-                
-                # Потом workshop
-                workshop_path_with_folder = base_path_from_config.replace("models/weapons/", "models/workshop/weapons/")
-                paths_to_try.append(workshop_path_with_folder)
-                
-                if f"/{weapon_key}/{weapon_key}.mdl" in workshop_path_with_folder:
-                    workshop_path_no_folder = workshop_path_with_folder.replace(f"/{weapon_key}/{weapon_key}.mdl", f"/{weapon_key}.mdl")
-                    paths_to_try.append(workshop_path_no_folder)
-                
-                # Стандартное место
-                paths_to_try.append(base_path_from_config)
-                
-                if f"/{weapon_key}/{weapon_key}.mdl" in base_path_from_config:
-                    fallback_path_no_folder = base_path_from_config.replace(f"/{weapon_key}/{weapon_key}.mdl", f"/{weapon_key}.mdl")
-                    paths_to_try.append(fallback_path_no_folder)
-                
-                # Может в c_items? (еще одно место где может лежать хуйня)
-                c_items_path_with_folder = base_path_from_config.replace("models/weapons/c_models/", "models/weapons/c_items/")
-                paths_to_try.append(c_items_path_with_folder)
-                
-                if f"/{weapon_key}/{weapon_key}.mdl" in c_items_path_with_folder:
-                    c_items_path_no_folder = c_items_path_with_folder.replace(f"/{weapon_key}/{weapon_key}.mdl", f"/{weapon_key}.mdl")
-                    paths_to_try.append(c_items_path_no_folder)
-                
-                # Последний шанс - в папках классов (тут обычно старье валяется, но проверить надо)
-                if '_' in mode:
-                    class_name_lower = mode.split('_', 1)[0]
+                # ── Строим список путей для поиска MDL ───────────────────────────── #
+                if mode == "hat" and hat_mdl_path:
+                    # Шапка: MDL-путь из items_game.txt
+                    # Может содержать %s — плейсхолдер для имени класса
+                    # (напр. all_domination_%s.mdl → all_domination_heavy.mdl)
+                    _norm = hat_mdl_path.replace("\\", "/")
+                    _TF2_CLASSES = [
+                        "heavy", "scout", "soldier", "pyro",
+                        "demoman", "engineer", "medic", "sniper", "spy",
+                    ]
                     
-                    player_items_path_with_folder = f"models/player/items/{class_name_lower}/{weapon_key}/{weapon_key}.mdl"
-                    paths_to_try.append(player_items_path_with_folder)
+                    # 1. Раскрываем %s → все варианты классов
+                    base_candidates = []
+                    if "%s" in _norm:
+                        for cls in _TF2_CLASSES:
+                            try:
+                                base_candidates.append(_norm % cls)
+                            except (TypeError, ValueError):
+                                base_candidates.append(_norm.replace("%s", cls))
+                    else:
+                        base_candidates.append(_norm)
                     
-                    player_items_path_no_folder = f"models/player/items/{class_name_lower}/{weapon_key}.mdl"
-                    paths_to_try.append(player_items_path_no_folder)
-                
+                    # 2. Для каждого базового пути добавляем workshop-варианты
+                    paths_to_try = []
+                    for c in base_candidates:
+                        paths_to_try.append(c)
+                        if "models/player/items" in c and "workshop" not in c:
+                            paths_to_try.append(c.replace("models/player/items",
+                                                          "models/workshop_partner/player/items"))
+                            paths_to_try.append(c.replace("models/player/items",
+                                                          "models/workshop/player/items"))
+                        elif "models/workshop/player/items" in c:
+                            paths_to_try.append(c.replace("models/workshop/player/items",
+                                                          "models/workshop_partner/player/items"))
+                            paths_to_try.append(c.replace("models/workshop/player/items",
+                                                          "models/player/items"))
+                        elif "models/workshop_partner/player/items" in c:
+                            paths_to_try.append(c.replace("models/workshop_partner/player/items",
+                                                          "models/workshop/player/items"))
+                            paths_to_try.append(c.replace("models/workshop_partner/player/items",
+                                                          "models/player/items"))
+                    
+                    # 3. Убираем дубли, сохраняем порядок
+                    seen_paths = set()
+                    paths_to_try = [p for p in paths_to_try if not (p in seen_paths or seen_paths.add(p))]
+                else:
+                    if weapon_key not in WEAPON_MDL_PATHS:
+                        ctx.cleanup(on_error=True, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
+                        return False, t['error_weapon_not_found'].format(weapon_key=weapon_key)
+
+                    # Тут начинается веселье - TF2 хранит модели в разных местах, и мы не знаем где именно
+                    # Поэтому пробуем все возможные варианты, начиная с самых вероятных:
+                    # workshop_partner -> workshop -> weapons/c_models -> weapons/c_items -> player/items
+                    # И для каждого пути пробуем с папкой и без (потому что Valve любит делать по-разному, хуй знает почему)
+
+                    base_path_from_config = WEAPON_MDL_PATHS[weapon_key]
+
+                    paths_to_try = []
+
+                    # Сначала пробуем workshop_partner - там обычно все новое лежит
+                    workshop_partner_path_with_folder = base_path_from_config.replace("models/weapons/", "models/workshop_partner/weapons/")
+                    paths_to_try.append(workshop_partner_path_with_folder)
+
+                    # А может без папки? (Valve любит делать по-разному, потому что им похую на консистентность)
+                    if f"/{weapon_key}/{weapon_key}.mdl" in workshop_partner_path_with_folder:
+                        workshop_partner_path_no_folder = workshop_partner_path_with_folder.replace(f"/{weapon_key}/{weapon_key}.mdl", f"/{weapon_key}.mdl")
+                        paths_to_try.append(workshop_partner_path_no_folder)
+
+                    # Потом workshop
+                    workshop_path_with_folder = base_path_from_config.replace("models/weapons/", "models/workshop/weapons/")
+                    paths_to_try.append(workshop_path_with_folder)
+
+                    if f"/{weapon_key}/{weapon_key}.mdl" in workshop_path_with_folder:
+                        workshop_path_no_folder = workshop_path_with_folder.replace(f"/{weapon_key}/{weapon_key}.mdl", f"/{weapon_key}.mdl")
+                        paths_to_try.append(workshop_path_no_folder)
+
+                    # Стандартное место
+                    paths_to_try.append(base_path_from_config)
+
+                    if f"/{weapon_key}/{weapon_key}.mdl" in base_path_from_config:
+                        fallback_path_no_folder = base_path_from_config.replace(f"/{weapon_key}/{weapon_key}.mdl", f"/{weapon_key}.mdl")
+                        paths_to_try.append(fallback_path_no_folder)
+
+                    # Может в c_items? (еще одно место где может лежать хуйня)
+                    c_items_path_with_folder = base_path_from_config.replace("models/weapons/c_models/", "models/weapons/c_items/")
+                    paths_to_try.append(c_items_path_with_folder)
+
+                    if f"/{weapon_key}/{weapon_key}.mdl" in c_items_path_with_folder:
+                        c_items_path_no_folder = c_items_path_with_folder.replace(f"/{weapon_key}/{weapon_key}.mdl", f"/{weapon_key}.mdl")
+                        paths_to_try.append(c_items_path_no_folder)
+
+                    # Последний шанс - в папках классов (тут обычно старье валяется, но проверить надо)
+                    if '_' in mode:
+                        class_name_lower = mode.split('_', 1)[0]
+
+                        player_items_path_with_folder = f"models/player/items/{class_name_lower}/{weapon_key}/{weapon_key}.mdl"
+                        paths_to_try.append(player_items_path_with_folder)
+
+                        player_items_path_no_folder = f"models/player/items/{class_name_lower}/{weapon_key}.mdl"
+                        paths_to_try.append(player_items_path_no_folder)
+
                 crowbar_exe = TF2Paths.get_crowbar_path()
                 
                 try:
@@ -395,6 +515,12 @@ class VPKService:
                         logger.error(f"Модель не найдена для {weapon_key}. Проверенные пути: {len(paths_to_try)}")
                         ctx.cleanup(on_error=True, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
                         return False, error_msg
+                    
+                    # Для шапок с %s-плейсхолдером: обновляем weapon_key на реальный стем
+                    # (all_domination_%s → all_domination_heavy), иначе кэш и имена файлов сломаются
+                    if mode == "hat" and hat_mdl_path and "%s" in hat_mdl_path:
+                        weapon_key = Path(found_mdl_path).stem
+                        logger.info(f"Hat weapon_key обновлён: {weapon_key}")
 
                     # === Кэш декомпила — проверяем ДО extraction ===
                     # Ключ: weapon_key + vpk_path + mdl_rel_path + mtime(vpk).
@@ -452,9 +578,10 @@ class VPKService:
                         save_to_cache(weapon_key, tf2_misc_vpk, found_mdl_path, ctx.decompile_dir)
                     
                     # Заменяем модель, если включен режим замены
+                    # Пропускаем если model_ready_path задан — пользователь уже указал готовый файл
                     # Диалог выбора файла показываем здесь, после декомпиляции (чтобы знать куда копировать)
                     replace_model_smd_path = None
-                    if replace_model_enabled:
+                    if replace_model_enabled and not model_ready_path:
                         # Если передан путь модели напрямую (для тестового режима), используем его
                         if replace_model_path and os.path.exists(replace_model_path):
                             replace_model_smd_path = replace_model_path
@@ -488,19 +615,20 @@ class VPKService:
                     
                     if replace_model_smd_path and os.path.exists(replace_model_smd_path):
                         try:
-                            # Находим reference SMD файл в декомпилированной директории (это оригинальная модель из игры)
-                            logger.debug(f"Ищем reference SMD файл для weapon_key: {weapon_key} в {ctx.decompile_dir}")
-                            original_smd_path = SMDService.find_reference_smd(str(ctx.decompile_dir), weapon_key)
-                            
-                            if original_smd_path:
-                                # Проверяем, что найденный файл действительно соответствует weapon_key
-                                # Иначе можем загрузить не то оружие и все сломается (например, scattergun вместо bat)
-                                file_name = os.path.basename(original_smd_path)
-                                if weapon_key.lower() not in file_name.lower():
-                                    logger.error(f"Найденный SMD файл {file_name} не соответствует weapon_key {weapon_key}!")
-                                    logger.warning("Пропускаем замену модели, чтобы избежать загрузки неправильного оружия")
-                                    original_smd_path = None
-                            
+                            # Ищем основной reference-SMD через QC-директивы ($body/studio).
+                            # Это надёжнее поиска по имени файла, т.к. Crowbar может назвать SMD
+                            # иначе чем weapon_key (особенно для шапок).
+                            _smd_files_in_decompile = [f for f in os.listdir(ctx.decompile_dir) if f.endswith('.smd')] if ctx.decompile_dir.exists() else []
+                            logger.info(f"[REPLACE] weapon_key={weapon_key!r}  decompile SMDs={_smd_files_in_decompile}")
+
+                            original_smd_path = ModelBuildService.extract_main_body_smd(qc_path, weapon_key)
+
+                            # Запасной вариант: поиск по имени файла (старый метод)
+                            if not original_smd_path:
+                                original_smd_path = SMDService.find_reference_smd(str(ctx.decompile_dir), weapon_key)
+                                if original_smd_path:
+                                    logger.info(f"[REPLACE] SMD найден по имени файла (fallback): {original_smd_path}")
+
                             if original_smd_path:
                                 logger.info(f"Заменяем модель: {replace_model_smd_path} -> {original_smd_path}")
                                 emit_sub(-1, "Replacing model..." if language == "en" else "Замена модели...")
@@ -568,6 +696,23 @@ class VPKService:
                     if not texture_filename:
                         ctx.cleanup(on_error=True, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
                         return False, t['error_texturegroup_not_extracted'].format(qc_path=qc_path)
+
+                    if mode == "hat":
+                        logger.info(
+                            f"[HAT BUILD NAMES]  qc={qc_path!r}\n"
+                            f"  weapon_key          = {weapon_key!r}\n"
+                            f"  texture_filename    = {texture_filename!r}\n"
+                            f"  cdmaterials_path    = {original_cdmaterials_path!r}\n"
+                            f"  replace_smd_path    = {replace_model_smd_path!r}"
+                        )
+                        # Показываем пользователю оригинальные имена из игры (не имена файла-замены)
+                        _repl_name = os.path.basename(replace_model_smd_path) if replace_model_smd_path else None
+                        if _repl_name:
+                            emit_sub(-1,
+                                f"Original game names: model={weapon_key}, texture={texture_filename}"
+                                if language == "en" else
+                                f"Оригинальные имена из игры: модель={weapon_key}, текстура={texture_filename}"
+                            )
                     
                     # Извлекаем полную структуру $texturegroup для поддержки:
                     # 1. BLU команды (отдельная строка/row в texturegroup)
@@ -580,7 +725,7 @@ class VPKService:
                         logger.info(f"Найдена BLU команда: {blu_row}")
                     if extra_materials:
                         logger.info(f"Найдены дополнительные материалы модели: {extra_materials}")
-                    
+
                     # Пропатчиваем QC файл: добавляем console\ к $cdmaterials (чтобы текстуры загружались из консольных команд),
                     # удаляем $lod (они нам не нужны, только мусорят)
                     ModelBuildService.patch_qc_file(qc_path, weapon_key, original_cdmaterials_path)
@@ -619,19 +764,175 @@ class VPKService:
                         else:
                             raise
                     
-                    # Компиляция и создание текстур независимы — запускаем studiomdl в фоне
-                    # параллельно с тем, как главный поток занимается VTF/VMT
-                    _compile_exc: list = [None]
-                    def _do_compile() -> None:
+                    # ── Проверка текстур в пользовательском SMD (режим «Модель уже готова») ──
+                    if (model_ready_path and os.path.exists(model_ready_path)
+                            and model_ready_path.lower().endswith('.smd')):
                         try:
-                            emit_sub(-1, "Compiling model..." if language == "en" else "Компиляция модели...")
-                            ModelBuildService.compile(qc_path, ctx.compile_dir, studiomdl_exe, tf_dir)
-                            if debug_mode:
-                                DebugService.save_compiled_stage(ctx, ctx.compile_dir)
-                        except Exception as _e:
-                            _compile_exc[0] = _e
-                    _compile_thread = threading.Thread(target=_do_compile, daemon=True)
-                    _compile_thread.start()
+                            user_materials = SMDService.extract_unique_materials(model_ready_path)
+                            if user_materials:
+                                # Ищем оригинальный reference SMD для сравнения
+                                original_smd_for_check = ModelBuildService.extract_main_body_smd(qc_path, weapon_key)
+                                if not original_smd_for_check:
+                                    original_smd_for_check = SMDService.find_reference_smd(str(ctx.decompile_dir), weapon_key)
+
+                                if original_smd_for_check:
+                                    original_materials = SMDService.extract_unique_materials(original_smd_for_check)
+                                    if original_materials and user_materials != original_materials:
+                                        # Есть расхождение — формируем сообщение
+                                        missing_in_user = original_materials - user_materials
+                                        extra_in_user = user_materials - original_materials
+
+                                        lines = []
+                                        if language == "ru":
+                                            lines.append("Текстуры в вашем SMD файле не совпадают с оригинальной моделью.\n")
+                                            if missing_in_user:
+                                                lines.append("Отсутствуют (есть в оригинале, нет у вас):")
+                                                for m in sorted(missing_in_user):
+                                                    lines.append(f"  • {m}")
+                                            if extra_in_user:
+                                                lines.append("Лишние (есть у вас, нет в оригинале):")
+                                                for m in sorted(extra_in_user):
+                                                    lines.append(f"  • {m}")
+                                            lines.append("\nПродолжить сборку с этими текстурами?")
+                                        else:
+                                            lines.append("Textures in your SMD file do not match the original model.\n")
+                                            if missing_in_user:
+                                                lines.append("Missing (in original, not in yours):")
+                                                for m in sorted(missing_in_user):
+                                                    lines.append(f"  • {m}")
+                                            if extra_in_user:
+                                                lines.append("Extra (in yours, not in original):")
+                                                for m in sorted(extra_in_user):
+                                                    lines.append(f"  • {m}")
+                                            lines.append("\nContinue building with these textures?")
+
+                                        warning_msg = "\n".join(lines)
+                                        logger.warning(f"[MODEL READY] Несовпадение текстур SMD:\n{warning_msg}")
+
+                                        if texture_mismatch_callback:
+                                            should_continue = texture_mismatch_callback(warning_msg)
+                                            if not should_continue:
+                                                logger.info("[MODEL READY] Пользователь отменил сборку из-за несовпадения текстур")
+                                                ctx.cleanup(on_error=False, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
+                                                cancel_msg = (
+                                                    "Сборка отменена: несовпадение текстур в SMD файле."
+                                                    if language == "ru" else
+                                                    "Build cancelled: texture mismatch in SMD file."
+                                                )
+                                                return False, cancel_msg
+                                    elif original_materials:
+                                        logger.info(f"[MODEL READY] Текстуры SMD совпадают с оригиналом: {user_materials}")
+                        except Exception as _tex_check_err:
+                            logger.warning(f"[MODEL READY] Ошибка проверки текстур SMD: {_tex_check_err}", exc_info=True)
+                            # Не блокируем сборку из-за ошибки проверки
+
+                    # ── «Модель уже готова» — копируем pre-compiled файлы минуя studiomdl ──
+                    if model_ready_path and os.path.exists(model_ready_path):
+                        if model_ready_path.lower().endswith('.smd'):
+                            # ── SMD файл: заменяем reference SMD и компилируем через studiomdl ──
+                            emit_sub(-1, "Replacing model SMD..." if language == "en" else "Замена SMD модели...")
+                            try:
+                                # Ищем оригинальный reference SMD
+                                original_smd_path = ModelBuildService.extract_main_body_smd(qc_path, weapon_key)
+                                if not original_smd_path:
+                                    original_smd_path = SMDService.find_reference_smd(str(ctx.decompile_dir), weapon_key)
+
+                                if original_smd_path:
+                                    logger.info(f"[MODEL READY SMD] Копируем {model_ready_path} → {original_smd_path}")
+                                    copy_file_safe(model_ready_path, original_smd_path)
+                                else:
+                                    logger.warning(
+                                        f"[MODEL READY SMD] Не найден reference SMD для {weapon_key}, "
+                                        f"копируем в decompile_dir как {weapon_key}_reference.smd"
+                                    )
+                                    fallback_path = str(ctx.decompile_dir / f"{weapon_key}_reference.smd")
+                                    copy_file_safe(model_ready_path, fallback_path)
+                            except Exception as _e:
+                                logger.error(f"Ошибка замены SMD модели: {_e}", exc_info=True)
+
+                            # Компилируем через studiomdl (как обычная сборка)
+                            _compile_exc: list = [None]
+                            def _do_compile() -> None:
+                                try:
+                                    emit_sub(-1, "Compiling model..." if language == "en" else "Компиляция модели...")
+                                    ModelBuildService.compile(qc_path, ctx.compile_dir, studiomdl_exe, tf_dir)
+                                    if debug_mode:
+                                        DebugService.save_compiled_stage(ctx, ctx.compile_dir)
+                                except Exception as _e:
+                                    _compile_exc[0] = _e
+                            _compile_thread = threading.Thread(target=_do_compile, daemon=True)
+                            _compile_thread.start()
+                        else:
+                            # ── MDL файл: копируем pre-compiled файлы минуя studiomdl ──
+                            emit_sub(-1, "Copying ready model..." if language == "en" else "Копирование готовой модели...")
+                            try:
+                                ready_dir   = os.path.dirname(model_ready_path)
+                                ready_stem  = os.path.splitext(os.path.basename(model_ready_path))[0]
+                                model_exts  = ('.mdl', '.vvd', '.vtx', '.phy', '.dx80.vtx', '.dx90.vtx', '.sw.vtx')
+                                # Целевое имя: $modelname из QC (совпадает с weapon_key).
+                                # Запрещено падать обратно на ready_stem (имя пользовательского файла) —
+                                # это приводит к тому, что все файлы мода переименовываются в имя
+                                # загруженной модели вместо оригинального имени шапки/оружия.
+                                qc_modelname = ModelBuildService.extract_modelname_path(qc_path)
+                                if qc_modelname:
+                                    target_stem = os.path.splitext(os.path.basename(qc_modelname))[0]
+                                else:
+                                    # Fallback на weapon_key (оригинальное имя из игры), а не на ready_stem
+                                    target_stem = weapon_key
+                                    logger.warning(
+                                        f"[MODEL READY] $modelname не найден в QC, используем weapon_key={weapon_key!r} "
+                                        f"вместо ready_stem={ready_stem!r}"
+                                    )
+                                logger.info(
+                                    f"[MODEL READY] ready_stem={ready_stem!r} → target_stem={target_stem!r}"
+                                )
+                                ensure_directory_exists(ctx.compile_dir)
+                                copied = 0
+                                for fname in os.listdir(ready_dir):
+                                    base, ext = os.path.splitext(fname)
+                                    # Простые расширения (os.path.splitext возвращает с точкой: '.mdl')
+                                    if base == ready_stem and ext.lower() in ('.mdl', '.vvd', '.phy'):
+                                        dst_name = target_stem + ext
+                                        copy_file_safe(
+                                            os.path.join(ready_dir, fname),
+                                            str(ctx.compile_dir / dst_name)
+                                        )
+                                        copied += 1
+                                    elif fname.startswith(ready_stem) and any(fname.endswith(e) for e in model_exts):
+                                        # Составные расширения: .dx90.vtx, .sw.vtx и т.п.
+                                        suffix  = fname[len(ready_stem):]
+                                        dst_name = target_stem + suffix
+                                        copy_file_safe(
+                                            os.path.join(ready_dir, fname),
+                                            str(ctx.compile_dir / dst_name)
+                                        )
+                                        copied += 1
+                                if copied == 0:
+                                    logger.warning(
+                                        f"Не найдено ни одного файла модели рядом с {model_ready_path}. "
+                                        "Попробуем всё равно продолжить."
+                                    )
+                                logger.info(f"Готовая модель: скопировано {copied} файлов в {ctx.compile_dir}")
+                            except Exception as _e:
+                                logger.error(f"Ошибка копирования готовой модели: {_e}", exc_info=True)
+                            # Имитируем завершённый compile_thread (ничего не компилировали)
+                            _compile_exc: list = [None]
+                            _compile_thread = threading.Thread(target=lambda: None, daemon=True)
+                            _compile_thread.start()
+                    else:
+                        # Компиляция и создание текстур независимы — запускаем studiomdl в фоне
+                        # параллельно с тем, как главный поток занимается VTF/VMT
+                        _compile_exc: list = [None]
+                        def _do_compile() -> None:
+                            try:
+                                emit_sub(-1, "Compiling model..." if language == "en" else "Компиляция модели...")
+                                ModelBuildService.compile(qc_path, ctx.compile_dir, studiomdl_exe, tf_dir)
+                                if debug_mode:
+                                    DebugService.save_compiled_stage(ctx, ctx.compile_dir)
+                            except Exception as _e:
+                                _compile_exc[0] = _e
+                        _compile_thread = threading.Thread(target=_do_compile, daemon=True)
+                        _compile_thread.start()
 
                     is_normal_map = False
                     animated_fps = None
@@ -750,6 +1051,11 @@ class VPKService:
                         VMTService.create_vmt_template_from_cdmaterials(str(vmt_path), patched_cdmaterials_path, texture_filename)
                         logger.info(f"Создан VMT файл из шаблона: {vmt_path}")
 
+                    # Для шапок: если пользователь не хочет красок из игры — удаляем прокси красок
+                    if mode == "hat" and not hat_apply_game_paints:
+                        VMTService.remove_paint_proxies(str(vmt_path))
+                        logger.info(f"Удалены прокси красок из VMT файла шапки: {vmt_path}")
+
                     if animated_fps:
                         VMTService.enable_animated_basetexture(str(vmt_path), animated_fps)
                     
@@ -819,14 +1125,11 @@ class VPKService:
                         extra_vtf_path = vtf_output_path / extra_vtf_filename
                         extra_vmt_path = vtf_output_path / extra_vmt_filename
                         
-                        # Спрашиваем у пользователя отдельное изображение для этого материала
-                        extra_image_path = None
-                        if extra_texture_callback:
-                            extra_image_path = extra_texture_callback(extra_mat_name, weapon_key)
-                            logger.info(f"Результат extra_texture_callback для '{extra_mat_name}': {extra_image_path!r}")
-                            if extra_image_path and not os.path.isfile(extra_image_path):
-                                logger.warning(f"Файл не найден: {extra_image_path}")
-                                extra_image_path = None
+                        # Спрашиваем пользователя — нужна ли отдельная текстура для этого материала
+                        extra_image_path = extra_texture_callback(extra_mat_name, weapon_key) if extra_texture_callback else None
+                        if extra_image_path and not os.path.isfile(extra_image_path):
+                            logger.warning(f"Файл не найден: {extra_image_path}")
+                            extra_image_path = None
                         
                         if extra_image_path and os.path.isfile(extra_image_path):
                             # Пользователь предоставил отдельное изображение для этого материала
@@ -908,11 +1211,9 @@ class VPKService:
                                 shared_vtf_path = vtf_output_path / f"{blu_tex_name}.vtf"
                                 if not shared_vtf_path.exists():
                                     # Сначала пробуем получить от пользователя через callback
-                                    _shared_img = None
-                                    if extra_texture_callback:
-                                        _shared_img = extra_texture_callback(blu_tex_name, weapon_key)
-                                        if _shared_img and not os.path.isfile(_shared_img):
-                                            _shared_img = None
+                                    _shared_img = extra_texture_callback(blu_tex_name, weapon_key) if extra_texture_callback else None
+                                    if _shared_img and not os.path.isfile(_shared_img):
+                                        _shared_img = None
                                     if _shared_img:
                                         shared_temp_png = vtf_output_path / f"{blu_tex_name}.png"
                                         VPKService._process_image(_shared_img, shared_temp_png, size)
@@ -951,13 +1252,9 @@ class VPKService:
                             blu_vmt_path = vtf_output_path / blu_vmt_filename
                             
                             # Спрашиваем у пользователя отдельное изображение для BLU материала
-                            _blu_mat_img = None
-                            if extra_texture_callback:
-                                _blu_mat_img = extra_texture_callback(blu_tex_name, weapon_key)
-                                logger.info(f"Результат extra_texture_callback для BLU '{blu_tex_name}': {_blu_mat_img!r}")
-                                if _blu_mat_img and not os.path.isfile(_blu_mat_img):
-                                    logger.warning(f"Файл BLU не найден: {_blu_mat_img}")
-                                    _blu_mat_img = None
+                            _blu_mat_img = extra_texture_callback(blu_tex_name, weapon_key) if extra_texture_callback else None
+                            if _blu_mat_img and not os.path.isfile(_blu_mat_img):
+                                _blu_mat_img = None
 
                             if _blu_mat_img and os.path.isfile(_blu_mat_img):
                                 # Пользователь дал отдельное изображение для этого BLU материала
@@ -1086,6 +1383,15 @@ class VPKService:
             
             # Собираем VPK файл (финальный этап - упаковываем все в один файл)
             emit_sub(-1, "Packing VPK..." if language == "en" else "Упаковка VPK...")
+            # Логируем все файлы в VPK root (для отладки, чтобы видеть какие файлы идут в мод)
+            if ctx.vpkroot_dir.exists():
+                vpkroot_files = []
+                for _root, _dirs, _files in os.walk(ctx.vpkroot_dir):
+                    for _f in _files:
+                        rel = os.path.relpath(os.path.join(_root, _f), ctx.vpkroot_dir).replace('\\', '/')
+                        vpkroot_files.append(rel)
+                logger.info(f"[VPK CONTENTS] Files going into VPK ({len(vpkroot_files)} total):\n" +
+                            "\n".join(f"  {f}" for f in vpkroot_files))
             vpk_path = VPKService._create_vpk_file(ctx, filename, export_folder, language)
             
             # Если использовали отредактированный VMT - удаляем его после сборки (чтобы не засорять папку)

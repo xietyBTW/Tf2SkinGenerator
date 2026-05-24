@@ -7,7 +7,8 @@ import os
 from typing import Optional, Dict, Any, Tuple, List
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
-    QMessageBox, QFileDialog, QCheckBox, QPushButton, QDialog, QScrollArea
+    QMessageBox, QFileDialog, QCheckBox, QPushButton, QDialog, QScrollArea,
+    QFrame,
 )
 from PySide6.QtCore import QUrl, Qt, QThread, Signal
 from PySide6.QtGui import QPixmap, QDesktopServices, QMouseEvent, QIcon
@@ -293,15 +294,19 @@ class MainWindow(QMainWindow):
         if url:
             QDesktopServices.openUrl(QUrl(url))
 
-    def create_weapon_selection_panel(self) -> None:
-        from PySide6.QtWidgets import QGroupBox, QVBoxLayout, QLabel, QComboBox, QPushButton, QWidget
+    def create_weapon_selection_panel(self) -> QWidget:
+        from PySide6.QtWidgets import (
+            QGroupBox, QVBoxLayout, QLabel, QComboBox,
+            QPushButton, QWidget, QStackedWidget,
+        )
         from src.utils.themes import get_modern_styles
-        
+        from src.ui.hats_panel import HatsPanel
+
         container = QWidget()
         layout = QVBoxLayout(container)
-        layout.setSpacing(16)
+        layout.setSpacing(10)
         layout.setContentsMargins(0, 0, 0, 0)
-        
+
         self.step_1_label = QLabel(self.t['step_1_selection'])
         self.step_1_label.setStyleSheet("""
             font-size: 12px;
@@ -309,27 +314,102 @@ class MainWindow(QMainWindow):
             color: #888;
             text-transform: uppercase;
             letter-spacing: 1px;
-            padding-bottom: 8px;
+            padding-bottom: 4px;
         """)
         layout.addWidget(self.step_1_label)
-        
+
+        # ── Таб-бар: WEAPONS / HATS ───────────────────────────────────────── #
+        self._tab_bar = QWidget()
+        self._tab_bar.setStyleSheet("background: transparent;")
+        tab_row = QHBoxLayout(self._tab_bar)
+        tab_row.setContentsMargins(0, 0, 0, 0)
+        tab_row.setSpacing(0)
+
+        def _tab_btn_style(active: bool) -> str:
+            accent = self._get_accent_color()
+            if active:
+                return f"""
+                    QPushButton {{
+                        background: transparent;
+                        border: none;
+                        border-bottom: 2px solid {accent};
+                        color: {accent};
+                        font-size: 11px;
+                        font-weight: 700;
+                        letter-spacing: 2px;
+                        padding: 6px 14px 4px 14px;
+                        text-transform: uppercase;
+                    }}
+                """
+            return """
+                QPushButton {
+                    background: transparent;
+                    border: none;
+                    border-bottom: 2px solid transparent;
+                    color: #444;
+                    font-size: 11px;
+                    font-weight: 500;
+                    letter-spacing: 2px;
+                    padding: 6px 14px 4px 14px;
+                    text-transform: uppercase;
+                }
+                QPushButton:hover {
+                    color: #777;
+                    border-bottom-color: #333;
+                }
+            """
+
+        self._tab_weapons_btn = QPushButton(
+            self.t.get('tab_weapons', 'Weapons') if self.language == 'ru' else 'Weapons'
+        )
+        self._tab_weapons_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._tab_weapons_btn.setStyleSheet(_tab_btn_style(True))
+        self._tab_weapons_btn.clicked.connect(lambda: self._switch_tab(0))
+
+        self._tab_hats_btn = QPushButton(
+            self.t.get('tab_hats', 'Шапки') if self.language == 'ru' else 'Hats'
+        )
+        self._tab_hats_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._tab_hats_btn.setStyleSheet(_tab_btn_style(False))
+        self._tab_hats_btn.clicked.connect(lambda: self._switch_tab(1))
+
+        tab_row.addWidget(self._tab_weapons_btn)
+        tab_row.addWidget(self._tab_hats_btn)
+        tab_row.addStretch()
+
+        # Разделитель под таб-баром
+        tab_sep = QFrame()
+        tab_sep.setFrameShape(QFrame.Shape.HLine)
+        tab_sep.setStyleSheet("background: #1a1a1a; border: none; max-height: 1px;")
+
+        layout.addWidget(self._tab_bar)
+        layout.addWidget(tab_sep)
+
+        # ── QStackedWidget: страница 0 = оружие, страница 1 = шапки ─────── #
+        self._left_stack = QStackedWidget()
+        self._left_stack.setStyleSheet("background: transparent;")
+
+        # ── Страница 0: оружие ────────────────────────────────────────────── #
+        weapons_page = QWidget()
+        weapons_layout = QVBoxLayout(weapons_page)
+        weapons_layout.setSpacing(16)
+        weapons_layout.setContentsMargins(0, 8, 0, 0)
+
         self.weapon_selection_group = QGroupBox(self.t['weapon_selection'])
         styles = get_modern_styles()
         self.weapon_selection_group.setStyleSheet(styles['groupbox'])
-        
+
         group_layout = QVBoxLayout(self.weapon_selection_group)
         group_layout.setSpacing(12)
-        
+
         self.class_label = QLabel(self.t['class'])
         self.class_label.setStyleSheet("font-weight: 500; font-size: 13px; color: #ccc; margin-top: 4px;")
         group_layout.addWidget(self.class_label)
-        
+
         self.class_combo = QComboBox()
         self.class_combo.setStyleSheet(styles['combo'])
-
         for class_name, class_info in TF2_CLASSES.items():
             self.class_combo.addItem(f"{class_info['icon']} {class_name}")
-
         group_layout.addWidget(self.class_combo)
 
         self.type_label = QLabel(self.t['weapon_type'])
@@ -347,21 +427,13 @@ class MainWindow(QMainWindow):
         self.weapon_combo = QComboBox()
         self.weapon_combo.setStyleSheet(styles['combo'])
         group_layout.addWidget(self.weapon_combo)
-        
+
         self.crit_hit_label = QLabel(self.t['crit_hit_mode'])
         self.crit_hit_label.setStyleSheet("font-weight: 500; font-size: 13px; color: #ccc; margin-top: 16px;")
         group_layout.addWidget(self.crit_hit_label)
-        
+
         self.crit_hit_checkbox = ExclusiveCheckBox(self.t['enable_crit_hit'])
         group_layout.addWidget(self.crit_hit_checkbox)
-
-        self.replace_model_label = QLabel(self.t['replace_model'])
-        self.replace_model_label.setStyleSheet("font-weight: 500; font-size: 13px; color: #ccc; margin-top: 16px;")
-        group_layout.addWidget(self.replace_model_label)
-
-        self.replace_model_checkbox = ExclusiveCheckBox(self.t['enable_replace_model'])
-        self.replace_model_checkbox.setStyleSheet("color: #ccc;")
-        group_layout.addWidget(self.replace_model_checkbox)
 
         self.spray_label = QLabel(self.t.get('spray_mode', 'Spray Mode:'))
         self.spray_label.setStyleSheet("font-weight: 500; font-size: 13px; color: #ccc; margin-top: 16px;")
@@ -371,28 +443,231 @@ class MainWindow(QMainWindow):
         self.spray_checkbox.setStyleSheet("color: #ccc;")
         group_layout.addWidget(self.spray_checkbox)
 
-        # Все три режима взаимоисключающие друг с другом
-        self.crit_hit_checkbox.set_exclusive_with([self.replace_model_checkbox, self.spray_checkbox])
-        self.replace_model_checkbox.set_exclusive_with([self.crit_hit_checkbox, self.spray_checkbox])
-        self.spray_checkbox.set_exclusive_with([self.crit_hit_checkbox, self.replace_model_checkbox])
-        
-        self.selected_smd_path = None
-        
+        self.crit_hit_checkbox.set_exclusive_with([self.spray_checkbox])
+        self.spray_checkbox.set_exclusive_with([self.crit_hit_checkbox])
+
         group_layout.addStretch()
-        
-        layout.addWidget(self.weapon_selection_group)
-        layout.addStretch()
-        
+        weapons_layout.addWidget(self.weapon_selection_group)
+        weapons_layout.addStretch()
+
+        # ── Страница 1: шапки ─────────────────────────────────────────────── #
+        hats_page = QWidget()
+        hats_page_layout = QVBoxLayout(hats_page)
+        hats_page_layout.setContentsMargins(0, 8, 0, 0)
+        hats_page_layout.setSpacing(0)
+
+        self.hats_panel = HatsPanel(hats_page, language=self.language)
+        self.hats_panel.hat_selected.connect(self._on_hat_selected)
+        self.hats_panel.hat_deselected.connect(self._on_hat_deselected)
+        hats_page_layout.addWidget(self.hats_panel)
+
+        self._left_stack.addWidget(weapons_page)   # index 0
+        self._left_stack.addWidget(hats_page)      # index 1
+
+        layout.addWidget(self._left_stack, 1)
+
+        self.selected_smd_path = None
+        self._custom_vpk_path: Optional[str] = None
+        self._hat_mdl_path: Optional[str] = None
+        self._hat_display_name: str = ""
+        self._current_tab = 0  # 0=weapons, 1=hats
+
         return container
-    
+
+    def _get_accent_color(self) -> str:
+        try:
+            from src.config.app_config import AppConfig
+            return "#4a90e2" if AppConfig.load_config().get("theme") == "blue" else "#ff6b35"
+        except Exception:
+            return "#ff6b35"
+
+    def _switch_tab(self, index: int) -> None:
+        """Переключает вкладку Weapons / Hats."""
+        self._current_tab = index
+        self._left_stack.setCurrentIndex(index)
+
+        # Стиль активной/неактивной кнопки
+        accent = self._get_accent_color()
+
+        active_style = f"""
+            QPushButton {{
+                background: transparent;
+                border: none;
+                border-bottom: 2px solid {accent};
+                color: {accent};
+                font-size: 11px;
+                font-weight: 700;
+                letter-spacing: 2px;
+                padding: 6px 14px 4px 14px;
+                text-transform: uppercase;
+            }}
+        """
+        inactive_style = """
+            QPushButton {
+                background: transparent;
+                border: none;
+                border-bottom: 2px solid transparent;
+                color: #444;
+                font-size: 11px;
+                font-weight: 500;
+                letter-spacing: 2px;
+                padding: 6px 14px 4px 14px;
+                text-transform: uppercase;
+            }
+            QPushButton:hover { color: #777; border-bottom-color: #333; }
+        """
+
+        self._tab_weapons_btn.setStyleSheet(active_style if index == 0 else inactive_style)
+        self._tab_hats_btn.setStyleSheet(active_style if index == 1 else inactive_style)
+
+        if index == 1:
+            # Загружаем шапки если ещё не загружены
+            from src.config.app_config import AppConfig
+            tf2_root = AppConfig.load_config().get("tf2_game_folder", "")
+            self.hats_panel.load_hats(tf2_root)
+            # Сбрасываем weapons mode
+            self.mode = None
+            self._hat_mdl_path = None
+            if hasattr(self, 'settings_panel'):
+                self.settings_panel.apply_mode_restrictions(None)
+        else:
+            # Возвращаемся к оружию — сбрасываем hat mode
+            self._hat_mdl_path = None
+            self._hat_display_name = ""
+            self.apply_selection_auto()
+
+    def _on_hat_selected(self, mdl_path: str, display_name: str) -> None:
+        """Пользователь выбрал шапку из списка."""
+        self._hat_mdl_path = mdl_path
+        self._hat_display_name = display_name
+        self.mode = "hat"
+        logger.info(f"Выбрана шапка: {display_name} → {mdl_path}")
+        if hasattr(self, 'settings_panel'):
+            self.settings_panel.apply_mode_restrictions(self.mode)
+        # Обновляем 3D preview и сводку
+        self._update_hat_3d_preview()
+        self.update_preview_info()
+
+    def _on_hat_deselected(self) -> None:
+        self._hat_mdl_path = None
+        self._hat_display_name = ""
+        self.mode = None
+        if hasattr(self, 'settings_panel'):
+            self.settings_panel.apply_mode_restrictions(None)
+        if hasattr(self, 'preview_panel'):
+            self.preview_panel.reset_3d_preview()
+        self.update_preview_info()
+
+    def _update_hat_3d_preview(self) -> None:
+        """Обновляет 3D Preview при выборе шапки."""
+        if not hasattr(self, 'preview_panel'):
+            return
+
+        hat_mdl = getattr(self, '_hat_mdl_path', None)
+        if not hat_mdl:
+            self.preview_panel.reset_3d_preview()
+            return
+
+        settings = self.settings_panel.get_settings()
+        tf2_root_dir = settings.get('tf2_game_folder', '')
+        if not tf2_root_dir:
+            self.preview_panel.show_3d_no_tf2_message()
+            return
+
+        try:
+            from src.services.tf2_paths import TF2Paths
+            _, misc_vpk, _ = TF2Paths.resolve(tf2_root_dir)
+            textures_vpk = TF2Paths.resolve_textures_vpk(tf2_root_dir)
+        except Exception:
+            self.preview_panel.show_3d_no_tf2_message()
+            return
+
+        if not misc_vpk:
+            self.preview_panel.show_3d_no_tf2_message()
+            return
+
+        self.preview_panel.set_3d_params(
+            weapon_key=hat_mdl,
+            mode="hat",
+            misc_vpk_path=misc_vpk,
+            textures_vpk_path=textures_vpk or "",
+        )
+
+    def _on_hat_extract_3d(self, mdl_path: str, hat_name: str) -> None:
+        """Запускает извлечение + декомпиляцию 3D-модели выбранной шапки."""
+        from pathlib import Path as _Path
+        from src.config.app_config import AppConfig
+        from src.services.hat_extract_worker import HatExtractWorker
+        from PySide6.QtWidgets import QProgressDialog
+        from PySide6.QtCore import Qt as _Qt
+
+        tf2_root = AppConfig.load_config().get("tf2_game_folder", "")
+        if not tf2_root:
+            QMessageBox.warning(self, "TF2 path", "Set TF2 path in Settings first.")
+            return
+
+        export_folder = AppConfig.load_config().get("export_folder", "export")
+        output_base = str(_Path(export_folder) / "hats")
+
+        # Прогресс-диалог
+        dlg = QProgressDialog("Extracting hat model…", None, 0, 0, self)
+        dlg.setWindowTitle(f"Extract — {hat_name}")
+        dlg.setMinimumWidth(360)
+        dlg.setWindowModality(_Qt.WindowModality.WindowModal)
+        dlg.setCancelButton(None)
+        dlg.show()
+
+        worker = HatExtractWorker(
+            hat_mdl_path=mdl_path,
+            hat_name=hat_name,
+            tf2_root_dir=tf2_root,
+            output_base_dir=output_base,
+        )
+        # Сохраняем ссылку чтобы не был уничтожен GC
+        self._hat_extract_worker = worker
+
+        worker.progress.connect(lambda msg: dlg.setLabelText(msg))
+        worker.finished.connect(lambda out_dir: self._on_hat_extract_finished(dlg, out_dir, hat_name))
+        worker.error.connect(lambda err: self._on_hat_extract_error(dlg, err))
+        worker.start()
+
+    def _on_hat_extract_finished(self, dlg, out_dir: str, hat_name: str) -> None:
+        """Вызывается когда извлечение завершено успешно."""
+        from PySide6.QtGui import QDesktopServices
+        from PySide6.QtCore import QUrl
+        dlg.close()
+        result = QMessageBox.information(
+            self,
+            "Extracted!",
+            f"<b>{hat_name}</b> model extracted successfully.<br><br>"
+            f"<code>{out_dir}</code><br><br>"
+            "Open the folder?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if result == QMessageBox.StandardButton.Yes:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(out_dir))
+
+    def _on_hat_extract_error(self, dlg, error_msg: str) -> None:
+        """Вызывается при ошибке извлечения."""
+        dlg.close()
+        QMessageBox.critical(self, "Extract Error", f"Failed to extract model:\n\n{error_msg}")
+
     def setup_connections(self) -> None:
         """Настраивает соединения сигналов"""
         self.class_combo.currentTextChanged.connect(self.on_class_changed)
         self.weapon_type_combo.currentTextChanged.connect(self.on_weapon_type_changed)
         self.weapon_combo.currentTextChanged.connect(self.on_weapon_changed)
         self.crit_hit_checkbox.stateChanged.connect(self._on_crit_hit_state_changed)
-        self.replace_model_checkbox.stateChanged.connect(self._on_replace_model_state_changed)
         self.spray_checkbox.stateChanged.connect(self._on_spray_state_changed)
+
+        # Подключаем сигналы опций сборки из settings_panel
+        if hasattr(self, 'settings_panel'):
+            self.settings_panel.replace_model_toggled.connect(self.on_replace_model_changed)
+            self.settings_panel.model_ready_toggled.connect(self._on_model_ready_toggled)
+
+        # Когда пользователь загрузил VPK мод в 3D — автоматически переключаем на Custom
+        if hasattr(self, 'preview_panel'):
+            self.preview_panel.vpk_mod_loaded.connect(self._on_vpk_mod_loaded)
 
         # Инициализируем первый класс
         self.on_class_changed(self.class_combo.currentText())
@@ -424,54 +699,85 @@ class MainWindow(QMainWindow):
         if hasattr(self, 'crit_hit_label'):
             self.crit_hit_label.setText(self.t['crit_hit_mode'])
         
-        if hasattr(self, 'replace_model_checkbox'):
-            self.replace_model_checkbox.setText(self.t['enable_replace_model'])
-
-        if hasattr(self, 'replace_model_label'):
-            self.replace_model_label.setText(self.t['replace_model'])
-
         if hasattr(self, 'spray_label'):
             self.spray_label.setText(self.t.get('spray_mode', 'Spray Mode:'))
 
         if hasattr(self, 'spray_checkbox'):
             self.spray_checkbox.setText(self.t.get('enable_spray', 'Create spray (256×256, RGBA)'))
 
+        if hasattr(self, '_tab_weapons_btn'):
+            self._tab_weapons_btn.setText(
+                self.t.get('tab_weapons', 'Weapons') if self.language == 'ru' else 'Weapons'
+            )
+        if hasattr(self, '_tab_hats_btn'):
+            self._tab_hats_btn.setText(
+                self.t.get('tab_hats', 'Шапки') if self.language == 'ru' else 'Hats'
+            )
+        if hasattr(self, 'hats_panel'):
+            self.hats_panel.update_language(self.language)
+
         # Обновляем списки оружий с учетом нового языка
         if hasattr(self, 'weapon_type_combo') and self.current_class:
-            # Сохраняем текущий выбор
-            current_type_text = self.weapon_type_combo.currentText()
-            
             # Обновляем типы оружия
             self.weapon_type_combo.clear()
             if self.current_class in TF2_WEAPONS:
                 for weapon_type in TF2_WEAPONS[self.current_class].keys():
                     type_name = get_weapon_type_name(weapon_type, self.language)
                     self.weapon_type_combo.addItem(type_name)
-            
+            # "Custom Mod" — всегда последний фиксированный пункт
+            self.weapon_type_combo.addItem(
+                get_weapon_type_name("Custom", self.language)
+            )
+
             # Восстанавливаем выбор и обновляем список оружий
             if self.weapon_type_combo.count() > 0:
-                # Пытаемся найти соответствующий тип
-                for i in range(self.weapon_type_combo.count()):
-                    if self.weapon_type_combo.itemText(i) == current_type_text or i == 0:
-                        self.weapon_type_combo.setCurrentIndex(i)
-                        self.on_weapon_type_changed(self.weapon_type_combo.currentText())
-                        break
+                # Используем ключ current_weapon_type для точного поиска (не текст, который изменился)
+                idx = self._find_weapon_type_index(self.current_weapon_type) if self.current_weapon_type else -1
+                if idx == -1:
+                    idx = self._find_weapon_type_index("Primary")
+                if idx == -1:
+                    idx = 0
+                self.weapon_type_combo.setCurrentIndex(idx)
+                self.on_weapon_type_changed(self.weapon_type_combo.currentText())
     
+    def _find_weapon_type_index(self, type_key: str) -> int:
+        """Возвращает индекс в weapon_type_combo для заданного ключа типа оружия, или -1."""
+        target = get_weapon_type_name(type_key, self.language)
+        for i in range(self.weapon_type_combo.count()):
+            if self.weapon_type_combo.itemText(i) == target:
+                return i
+        return -1
+
     def on_class_changed(self, class_text: str) -> None:
         """Обработка изменения класса"""
         # Извлекаем имя класса из текста с иконкой
         class_name = class_text.split(' ', 1)[1] if ' ' in class_text else class_text
         self.current_class = class_name
-        
+
+        # Сохраняем текущий тип оружия; при первом запуске (None) → выбираем "Primary"
+        saved_key = self.current_weapon_type or "Primary"
+
         # Обновляем типы оружия
+        self.weapon_type_combo.blockSignals(True)
         self.weapon_type_combo.clear()
         if class_name in TF2_WEAPONS:
             for weapon_type in TF2_WEAPONS[class_name].keys():
                 type_name = get_weapon_type_name(weapon_type, self.language)
                 self.weapon_type_combo.addItem(type_name)
-        
-        # Обновляем оружие для первого типа
+        # "Custom Mod" — всегда последний фиксированный пункт
+        self.weapon_type_combo.addItem(
+            get_weapon_type_name("Custom", self.language)
+        )
+        self.weapon_type_combo.blockSignals(False)
+
         if self.weapon_type_combo.count() > 0:
+            # Пробуем восстановить сохранённый тип; если недоступен — берём "Primary"
+            idx = self._find_weapon_type_index(saved_key)
+            if idx == -1:
+                idx = self._find_weapon_type_index("Primary")
+            if idx == -1:
+                idx = 0
+            self.weapon_type_combo.setCurrentIndex(idx)
             self.on_weapon_type_changed(self.weapon_type_combo.currentText())
     
     def on_weapon_type_changed(self, type_text: str) -> None:
@@ -487,32 +793,39 @@ class MainWindow(QMainWindow):
         if weapon_type and self.current_class:
             self.current_weapon_type = weapon_type
 
-            # Скрываем CritHIT и Replace Model для режима рук — они там неприменимы
-            self._set_hands_mode_ui(weapon_type == "Hands")
+            is_custom = (weapon_type == "Custom")
+            self._set_hands_mode_ui(weapon_type in ("Hands", "PlayerSkin", "Custom"))
 
-            # Обновляем список оружия
-            self.weapon_combo.clear()
-            if self.current_class in TF2_WEAPONS and weapon_type in TF2_WEAPONS[self.current_class]:
-                for weapon_key in TF2_WEAPONS[self.current_class][weapon_type].keys():
-                    weapon_name = get_weapon_name(self.current_class, weapon_type, weapon_key, self.language)
-                    self.weapon_combo.addItem(f"{weapon_name} ({weapon_key})")
+            # В custom режиме комбо оружий не нужен
+            self.weapon_combo.setVisible(not is_custom)
+            self.weapon_label.setVisible(not is_custom)
+
+            if not is_custom:
+                # Обновляем список оружия
+                self.weapon_combo.clear()
+                if self.current_class in TF2_WEAPONS and weapon_type in TF2_WEAPONS[self.current_class]:
+                    for weapon_key in TF2_WEAPONS[self.current_class][weapon_type].keys():
+                        weapon_name = get_weapon_name(self.current_class, weapon_type, weapon_key, self.language)
+                        self.weapon_combo.addItem(f"{weapon_name} ({weapon_key})")
+
+            self.apply_selection_auto()
 
     def _set_hands_mode_ui(self, is_hands: bool) -> None:
-        """Скрывает/показывает секции CritHIT, Replace Model и Spray при выборе режима рук."""
-        # При входе в режим рук — снимаем чекбоксы, чтобы они не висели в фоне
+        """Скрывает/показывает секции CritHIT и Spray при выборе режима рук."""
+        # При входе в режим рук — снимаем чекбоксы и сбрасываем build-options
         if is_hands:
-            for cb in (self.crit_hit_checkbox, self.replace_model_checkbox, self.spray_checkbox):
+            for cb in (self.crit_hit_checkbox, self.spray_checkbox):
                 cb.blockSignals(True)
                 cb.setChecked(False)
                 cb.blockSignals(False)
-            # Сбрасываем связанное состояние замены модели
+            # Сбрасываем опции в меню шестерёнки (замена модели / готовая модель)
+            if hasattr(self, 'settings_panel'):
+                self.settings_panel.reset_build_options(emit=True)
             self.selected_smd_path = None
 
         for widget in (
             self.crit_hit_label,
             self.crit_hit_checkbox,
-            self.replace_model_label,
-            self.replace_model_checkbox,
             self.spray_label,
             self.spray_checkbox,
         ):
@@ -537,43 +850,33 @@ class MainWindow(QMainWindow):
 
         # Если CritHIT включается — отключаем остальные взаимоисключающие режимы
         if is_checked:
-            for cb in (self.replace_model_checkbox, self.spray_checkbox):
-                cb.blockSignals(True)
-                cb.setChecked(False)
-                cb.blockSignals(False)
+            self.spray_checkbox.blockSignals(True)
+            self.spray_checkbox.setChecked(False)
+            self.spray_checkbox.blockSignals(False)
+            # Сбрасываем опции замены/готовой модели в меню шестерёнки
+            if hasattr(self, 'settings_panel'):
+                self.settings_panel.reset_build_options(emit=True)
 
         # Вызываем основной обработчик
         self.on_crit_hit_changed(is_checked)
     
     def _on_replace_model_state_changed(self, state: int) -> None:
-        """Обработчик изменения состояния чекбокса замены модели"""
-        is_checked = (state == Qt.Checked)
+        """(оставлен для совместимости — логика переехала в settings_panel)"""
+        pass
 
-        # Если замена модели включается — отключаем остальные взаимоисключающие режимы
-        if is_checked:
-            for cb in (self.crit_hit_checkbox, self.spray_checkbox):
-                cb.blockSignals(True)
-                cb.setChecked(False)
-                cb.blockSignals(False)
-            # Восстанавливаем доступность элементов управления оружием
-            self.class_combo.setEnabled(True)
-            self.weapon_type_combo.setEnabled(True)
-            self.weapon_combo.setEnabled(True)
-
-        # Вызываем основной обработчик
-        self.on_replace_model_changed(is_checked)
-    
     def _on_spray_state_changed(self, state: int) -> None:
         """Обработчик изменения состояния чекбокса Spray"""
         is_checked = (state == Qt.Checked)
 
         # Если спрей включается — отключаем остальные взаимоисключающие режимы
         if is_checked:
-            for cb in (self.crit_hit_checkbox, self.replace_model_checkbox):
-                cb.blockSignals(True)
-                cb.setChecked(False)
-                cb.blockSignals(False)
+            self.crit_hit_checkbox.blockSignals(True)
+            self.crit_hit_checkbox.setChecked(False)
+            self.crit_hit_checkbox.blockSignals(False)
             self.selected_smd_path = None
+            # Сбрасываем опции замены/готовой модели в меню шестерёнки
+            if hasattr(self, 'settings_panel'):
+                self.settings_panel.reset_build_options(emit=True)
             # Восстанавливаем комбобоксы (CritHIT их блокировал)
             self.class_combo.setEnabled(True)
             self.weapon_type_combo.setEnabled(True)
@@ -599,16 +902,34 @@ class MainWindow(QMainWindow):
         self.apply_selection_auto()
     
     def on_replace_model_changed(self, is_enabled: bool) -> None:
-        """Обработка изменения состояния замены модели"""
-        # Просто сохраняем состояние чекбокса, диалог будет показан при сборке
+        """Обработка изменения состояния замены модели (вызывается из settings_panel.replace_model_toggled)"""
         if not is_enabled:
             self.selected_smd_path = None
-            self.replace_model_checkbox.setText(self.t['enable_replace_model'])
-        # Обновляем 3D preview (включаем режим кастомной SMD или сбрасываем)
         self.apply_selection_auto()
+
+    def _on_model_ready_toggled(self, is_enabled: bool) -> None:
+        """Обработка изменения состояния 'Модель уже готова'"""
+        if not is_enabled:
+            self.selected_smd_path = None
+        self.apply_selection_auto()
+
+    def _on_vpk_mod_loaded(self, vpk_path: str) -> None:
+        """Вызывается когда пользователь загрузил VPK мод в 3D превью."""
+        self._custom_vpk_path = vpk_path
+        # Переключаем weapon_type_combo на "Custom Mod"
+        target = get_weapon_type_name("Custom", self.language)
+        for i in range(self.weapon_type_combo.count()):
+            if self.weapon_type_combo.itemText(i) == target:
+                self.weapon_type_combo.setCurrentIndex(i)
+                break
+        logger.info(f"Кастомный VPK мод загружен: {vpk_path}")
     
     def apply_selection_auto(self) -> None:
         """Автоматически применяет выбранное оружие"""
+        # Если активна вкладка шапок — mode управляется через _on_hat_selected
+        if getattr(self, '_current_tab', 0) == 1:
+            return
+
         is_spray    = self.spray_checkbox.isChecked()
         is_crit_hit = self.crit_hit_checkbox.isChecked()
 
@@ -618,6 +939,8 @@ class MainWindow(QMainWindow):
         elif is_crit_hit:
             self.mode = "critHIT"
             logger.info("Выбран CritHIT режим")
+        elif self.current_weapon_type == "Custom":
+            self.mode = "custom" if getattr(self, '_custom_vpk_path', None) else None
         elif self.current_class and self.current_weapon:
             self.mode = f"{self.current_class.lower()}_{self.current_weapon}"
             logger.debug(f"Выбрано оружие: {self.current_class} - {self.current_weapon}")
@@ -640,6 +963,7 @@ class MainWindow(QMainWindow):
             return
 
         from src.data.player_hands import HAND_MODE_KEYS, HAND_MODES
+        from src.data.player_characters import PLAYER_BODY_MODE_KEYS, PLAYER_CHARACTERS
 
         # CritHIT: показываем солдата с billboard-текстурой над головой
         if self.mode == "critHIT":
@@ -647,10 +971,12 @@ class MainWindow(QMainWindow):
             return
 
         is_hand_mode = self.mode in HAND_MODE_KEYS
+        is_player_body = self.mode in PLAYER_BODY_MODE_KEYS
         is_normal_weapon = (
             self.mode
             and self.mode not in ("spray", "critHIT")
             and not is_hand_mode
+            and not is_player_body
             and '_' in self.mode
         )
 
@@ -661,12 +987,21 @@ class MainWindow(QMainWindow):
                 self.preview_panel.reset_3d_preview()
                 return
             weapon_key = arm_key
+        elif is_player_body:
+            # Тело персонажа — используем mdl_key из PLAYER_CHARACTERS
+            mdl_key = PLAYER_CHARACTERS.get(self.mode, {}).get("mdl_key", "")
+            if not mdl_key:
+                self.preview_panel.reset_3d_preview()
+                return
+            weapon_key = mdl_key
         elif is_normal_weapon:
             weapon_key = self.mode.split('_', 1)[1] if '_' in self.mode else self.mode
 
-            # Режим замены модели — кастомная SMD от пользователя
-            if (hasattr(self, 'replace_model_checkbox') and
-                    self.replace_model_checkbox.isChecked()):
+            # Режим замены модели или готовой модели — кастомная SMD/MDL от пользователя
+            if hasattr(self, 'settings_panel') and (
+                self.settings_panel.is_replace_model_checked() or
+                self.settings_panel.is_model_ready_checked()
+            ):
                 self.preview_panel.set_custom_model_mode(True)
                 return
         else:
@@ -1060,7 +1395,6 @@ class MainWindow(QMainWindow):
 
             # Спрей поддерживает максимум 256×256 — предупреждаем и принудительно уменьшаем
             if self.mode == "spray" and (size[0] > 256 or size[1] > 256):
-                from PySide6.QtWidgets import QMessageBox
                 if self.language == 'ru':
                     msg = (f"Спрей поддерживает максимум 256×256.\n"
                            f"Выбранное разрешение {size[0]}×{size[1]} будет уменьшено до 256×256.\n\n"
@@ -1095,29 +1429,86 @@ class MainWindow(QMainWindow):
             # Проверяем, используется ли VTF файл из preview_panel
             custom_vtf_path = self.preview_panel.get_vtf_path()
             from_path = None
+
             if not custom_vtf_path:
                 from_path = self.preview_panel.get_image_path()
-                if not from_path:
+                # В custom режиме изображение необязательно (остальные текстуры берутся из мода)
+                if not from_path and self.mode != "custom":
                     ErrorHandler.show_warning(self, self.t['load_image_error'], self.t['error'])
                     return
             
-            # Получаем флаг замены модели (True если включен, диалог будет показан при сборке)
-            replace_model_enabled = False
-            if (hasattr(self, 'replace_model_checkbox') and 
-                self.replace_model_checkbox.isChecked()):
-                replace_model_enabled = True
-            
-            # Проверяем взаимоисключение режимов (на случай, если что-то пошло не так)
-            is_crit_hit = (hasattr(self, 'crit_hit_checkbox') and 
-                          self.crit_hit_checkbox.isChecked())
-            if is_crit_hit and replace_model_enabled:
-                # Если оба режима включены, отключаем замену модели
-                logger.warning("Обнаружено одновременное включение CritHIT и замены модели. Отключаем замену модели.")
-                self.replace_model_checkbox.blockSignals(True)
-                self.replace_model_checkbox.setChecked(False)
-                self.replace_model_checkbox.blockSignals(False)
+            # Читаем опции замены/готовой модели из меню шестерёнки
+            replace_model_enabled = (
+                hasattr(self, 'settings_panel') and
+                self.settings_panel.is_replace_model_checked()
+            )
+            model_ready_enabled = (
+                hasattr(self, 'settings_panel') and
+                self.settings_panel.is_model_ready_checked()
+            )
+
+            # Взаимоисключение с CritHIT — сбрасываем оба флага если активен CritHIT
+            is_crit_hit = (hasattr(self, 'crit_hit_checkbox') and
+                           self.crit_hit_checkbox.isChecked())
+            if is_crit_hit and (replace_model_enabled or model_ready_enabled):
+                logger.warning("CritHIT + model options conflict — resetting model options.")
+                if hasattr(self, 'settings_panel'):
+                    self.settings_panel.reset_build_options(emit=False)
                 replace_model_enabled = False
-            
+                model_ready_enabled   = False
+
+            # Если "Замена модели" — запрашиваем путь к SMD файлу ДО запуска воркера
+            # (чтобы диалог не появился позади модального диалога прогресса сборки)
+            replace_model_smd_path: Optional[str] = None
+            if replace_model_enabled and not model_ready_enabled:
+                smd_file, _ = QFileDialog.getOpenFileName(
+                    self,
+                    self.t.get(
+                        'replace_model_select_title',
+                        'Select SMD file for model replacement'
+                    ),
+                    "",
+                    "SMD Files (*.smd);;All Files (*)"
+                )
+                if not smd_file:
+                    return  # Пользователь отменил
+                replace_model_smd_path = smd_file
+
+            # Если "Модель уже готова" — запрашиваем путь к .mdl файлу ДО запуска воркера
+            model_ready_path: Optional[str] = None
+            if model_ready_enabled:
+                mdl_file, _ = QFileDialog.getOpenFileName(
+                    self,
+                    self.t.get(
+                        'model_ready_select_title',
+                        'Select pre-compiled model file (.mdl)'
+                    ),
+                    "",
+                    "Model Files (*.mdl *.smd);;MDL Files (*.mdl);;SMD Files (*.smd);;All Files (*)"
+                )
+                if not mdl_file:
+                    return  # Пользователь отменил
+                model_ready_path = mdl_file
+
+            # Для шапок — спрашиваем, нужны ли краски из игры
+            hat_apply_game_paints = True
+            if self.mode == "hat":
+                paints_title = self.t.get('hat_game_paints_title', 'Game Paints')
+                paints_question = self.t.get(
+                    'hat_game_paints_question',
+                    'Do you want game paints to apply to your texture?\n\n'
+                    'If "Yes" — the VMT file will be loaded with original paint settings.\n'
+                    'If "No" — paints will be disabled, your texture will display without game coloring.'
+                )
+                reply = QMessageBox.question(
+                    self,
+                    paints_title,
+                    paints_question,
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.Yes,
+                )
+                hat_apply_game_paints = (reply == QMessageBox.Yes)
+
             # Проверяем, не запущена ли уже сборка
             if hasattr(self, '_build_worker') and self._build_worker.isRunning():
                 ErrorHandler.show_warning(
@@ -1140,6 +1531,8 @@ class MainWindow(QMainWindow):
                         self._build_worker.request_model_file.disconnect()
                     if hasattr(self._build_worker, 'request_extra_model'):
                         self._build_worker.request_extra_model.disconnect()
+                    if hasattr(self._build_worker, 'texture_mismatch_warning'):
+                        self._build_worker.texture_mismatch_warning.disconnect()
                 except Exception:
                     pass  # Игнорируем если уже отключено
                 self._build_worker.deleteLater()
@@ -1161,11 +1554,16 @@ class MainWindow(QMainWindow):
                 keep_temp_on_error=settings.get('keep_temp_on_error', False),
                 debug_mode=settings.get('debug_mode', False),
                 replace_model_enabled=replace_model_enabled,
+                replace_model_path=replace_model_smd_path,
+                model_ready_path=model_ready_path,
                 draw_uv_layout=draw_uv_layout,
                 language=self.language,
                 custom_vtf_path=custom_vtf_path,
                 blu_mode='none',
                 blu_image_path=None,
+                custom_vpk_source_path=getattr(self, '_custom_vpk_path', None),
+                hat_mdl_path=getattr(self, '_hat_mdl_path', None),
+                hat_apply_game_paints=hat_apply_game_paints,
                 # Без parent=self ! Если дать parent=self, Qt станет владельцем
                 # и не удалит старый воркер при замене, и сигналы будут дублироваться.
             )
@@ -1176,9 +1574,12 @@ class MainWindow(QMainWindow):
             self._build_worker.sub_progress.connect(self._on_build_sub_progress)
             self._build_worker.error.connect(self._on_build_error)
             self._build_worker.request_extra_texture.connect(self._on_request_extra_texture)
-            if replace_model_enabled:
-                self._build_worker.request_model_file.connect(self._on_request_model_file)
+            # Запрос доп. частей модели (shell, scope и т.п.) остаётся через callback
+            if replace_model_enabled and not model_ready_path:
                 self._build_worker.request_extra_model.connect(self._on_request_extra_model)
+            # Предупреждение о несовпадении текстур в SMD (режим «Модель уже готова»)
+            if model_ready_enabled:
+                self._build_worker.texture_mismatch_warning.connect(self._on_texture_mismatch_warning)
             
             # Создаем и показываем кастомный прогресс-диалог
             from src.ui.build_progress_dialog import BuildProgressDialog
@@ -1269,13 +1670,26 @@ class MainWindow(QMainWindow):
         # Спрашиваем пользователя
         from PySide6.QtWidgets import QMessageBox
 
-        msg_title = self.t.get('extra_texture_title', 'Additional Texture')
-        msg_text = self.t.get(
-            'extra_texture_question',
-            'The weapon model has an additional material: "{material}".\n'
-            'Do you want to provide a separate image for it?\n\n'
-            'If you click "No", the main texture will be used for this material.'
-        ).format(material=material_name)
+        # Для скинов персонажей используем человекочитаемое название текстуры
+        from src.data.player_characters import PLAYER_BODY_MODE_KEYS, get_player_body_extra_label
+        lang = getattr(self, 'language', 'en')
+        if weapon_key in PLAYER_BODY_MODE_KEYS:
+            display_name = get_player_body_extra_label(weapon_key, material_name, lang)
+            msg_title = self.t.get('extra_texture_title', 'Additional Texture')
+            msg_text = self.t.get(
+                'extra_player_texture_question',
+                'Apply your skin to the "{material}" texture as well?\n\n'
+                'If you click "No", the main texture will be copied for this slot.'
+            ).format(material=display_name)
+        else:
+            display_name = material_name
+            msg_title = self.t.get('extra_texture_title', 'Additional Texture')
+            msg_text = self.t.get(
+                'extra_texture_question',
+                'The weapon model has an additional material: "{material}".\n'
+                'Do you want to provide a separate image for it?\n\n'
+                'If you click "No", the main texture will be used for this material.'
+            ).format(material=display_name)
 
         reply = QMessageBox.question(
             self,
@@ -1291,7 +1705,7 @@ class MainWindow(QMainWindow):
             dialog_title = self.t.get(
                 'extra_texture_select',
                 'Select image for "{material}"'
-            ).format(material=material_name)
+            ).format(material=display_name)
 
             file_path, _ = QFileDialog.getOpenFileName(
                 self,
@@ -1352,6 +1766,39 @@ class MainWindow(QMainWindow):
         if hasattr(self._build_worker, 'set_extra_model_result'):
             self._build_worker.set_extra_model_result(file_path)
 
+    def _on_texture_mismatch_warning(self, warning_message: str) -> None:
+        """
+        Обрабатывает предупреждение о несовпадении текстур в пользовательском SMD.
+        Показывает диалог с подробностями, позволяет продолжить или отменить сборку.
+        """
+        if not hasattr(self, '_build_worker'):
+            return
+
+        from PySide6.QtWidgets import QMessageBox
+
+        title = self.t.get('texture_mismatch_title', 'Texture Mismatch Warning')
+
+        msg_box = QMessageBox(self)
+        msg_box.setIcon(QMessageBox.Warning)
+        msg_box.setWindowTitle(title)
+        msg_box.setText(warning_message)
+
+        btn_continue = msg_box.addButton(
+            self.t.get('texture_mismatch_continue', 'Continue anyway'),
+            QMessageBox.AcceptRole
+        )
+        btn_cancel = msg_box.addButton(
+            self.t.get('texture_mismatch_cancel', 'Cancel build'),
+            QMessageBox.RejectRole
+        )
+        msg_box.setDefaultButton(btn_cancel)
+        msg_box.exec()
+
+        decision = 'continue' if msg_box.clickedButton() == btn_continue else 'cancel'
+
+        if hasattr(self._build_worker, 'set_texture_mismatch_result'):
+            self._build_worker.set_texture_mismatch_result(decision)
+
 
     def extract_original_model(self) -> None:
         try:
@@ -1366,12 +1813,23 @@ class MainWindow(QMainWindow):
                 return
 
             # Для режимов рук weapon_key — это ключ arm-модели (например "c_pyro_arms"),
-            # а не суффикс mode-строки (который дал бы бессмысленное "hands").
+            # для скинов персонажа — это ключ MDL модели (например "player_scout").
             from src.data.player_hands import HAND_MODE_KEYS, HAND_MODES
+            from src.data.player_characters import PLAYER_BODY_MODE_KEYS, PLAYER_CHARACTERS
             if self.mode in HAND_MODE_KEYS:
                 weapon_key = HAND_MODES[self.mode].get("arm_model", "")
                 if not weapon_key:
                     ErrorHandler.show_warning(self, self.t.get('extract_model_special_mode_error', 'Cannot extract model for this mode'), self.t['error'])
+                    return
+            elif self.mode in PLAYER_BODY_MODE_KEYS:
+                weapon_key = PLAYER_CHARACTERS[self.mode].get("mdl_key", "")
+                if not weapon_key:
+                    ErrorHandler.show_warning(self, self.t.get('extract_model_special_mode_error', 'Cannot extract model for this mode'), self.t['error'])
+                    return
+            elif self.mode == "hat":
+                weapon_key = getattr(self, '_hat_mdl_path', None)
+                if not weapon_key:
+                    ErrorHandler.show_warning(self, self.t.get('select_weapon_error', 'Select a hat first'), self.t['error'])
                     return
             else:
                 weapon_key = self.mode.split('_', 1)[1] if '_' in self.mode else self.mode
@@ -1572,11 +2030,81 @@ class MainWindow(QMainWindow):
                 ErrorHandler.show_warning(self, error_msg, self.t['error'])
                 return
 
-            # Определяем: режим рук или обычное оружие
+            # Определяем: режим рук, скина персонажа, шапки или обычное оружие
             from src.data.player_hands import HAND_MODE_KEYS, get_hand_textures
+            from src.data.player_characters import PLAYER_BODY_MODE_KEYS, get_player_body_textures
             is_hands = self.mode in HAND_MODE_KEYS
-            hand_textures = get_hand_textures(self.mode) if is_hands else None
-            weapon_key = self.mode.split('_', 1)[1] if '_' in self.mode else self.mode
+            is_player_body = self.mode in PLAYER_BODY_MODE_KEYS
+            is_hat = (self.mode == "hat")
+            if is_hands:
+                hand_textures = get_hand_textures(self.mode)
+            elif is_player_body:
+                hand_textures = None   # будет заполнено после диалога
+            elif is_hat:
+                # Для шапок строим hand_textures из пути MDL
+                hat_mdl = getattr(self, '_hat_mdl_path', '').replace('\\', '/').lower()
+                if not hat_mdl:
+                    ErrorHandler.show_warning(self, self.t.get('select_weapon_error', 'Select a hat first'), self.t['error'])
+                    return
+                
+                import posixpath as _pp
+                hand_textures = []
+
+                # ── Приоритет: QC-файл из кэша декомпиляции ─────────────────
+                # Если пользователь уже открывал 3D Preview для этой шапки,
+                # Crowbar уже создал QC-файл, в котором прописаны точные имена
+                # текстур ($texturegroup "skinfamilies"). Используем их вместо
+                # угадывания по имени MDL.
+                from src.services import decompile_cache
+                from src.services.preview_3d_worker import Preview3DWorker
+                _qc_path = decompile_cache.find_cached_qc_for_weapon(hat_mdl)
+                if _qc_path:
+                    _cdmaterials, _skin0_textures = Preview3DWorker._parse_qc_texture_info(_qc_path)
+                    _PLAYER_PREFIX = "materials/models/player/"
+                    for _cdmat in _cdmaterials:
+                        _full = f"materials/{_cdmat}"
+                        if _full.startswith(_PLAYER_PREFIX):
+                            _folder = _full[len(_PLAYER_PREFIX):].strip("/")
+                        else:
+                            _folder = _cdmat.strip("/")
+                        for _tex in _skin0_textures:
+                            if (_folder, _tex) not in hand_textures:
+                                hand_textures.append((_folder, _tex))
+
+                # ── Fallback: угадываем путь по имени MDL ────────────────────
+                if not hand_textures:
+                    _TF2_CLASSES = [
+                        "heavy", "scout", "soldier", "pyro",
+                        "demoman", "engineer", "medic", "sniper", "spy",
+                    ]
+                    if "%s" in hat_mdl:
+                        hat_mdl_variants = []
+                        for cls in _TF2_CLASSES:
+                            try:
+                                hat_mdl_variants.append(hat_mdl % cls)
+                            except (TypeError, ValueError):
+                                hat_mdl_variants.append(hat_mdl.replace("%s", cls))
+                    else:
+                        hat_mdl_variants = [hat_mdl]
+
+                    for variant in hat_mdl_variants:
+                        base_no_ext = variant[:-4] if variant.endswith('.mdl') else variant
+                        if '/player/' in base_no_ext:
+                            idx = base_no_ext.index('/player/') + len('/player/')
+                            rel = base_no_ext[idx:]
+                            folder   = _pp.dirname(rel)
+                            vtf_name = _pp.basename(rel)
+                        else:
+                            folder   = ''
+                            vtf_name = _pp.basename(base_no_ext)
+                        if (folder, vtf_name) not in hand_textures:
+                            hand_textures.append((folder, vtf_name))
+            else:
+                hand_textures = None
+            if is_hat:
+                weapon_key = hand_textures[0][1] if hand_textures else "hat"
+            else:
+                weapon_key = self.mode.split('_', 1)[1] if '_' in self.mode else self.mode
 
             # Получаем путь к TF2
             settings = self.settings_panel.get_settings()
@@ -1595,6 +2123,22 @@ class MainWindow(QMainWindow):
                 error_msg = self.t.get('textures_vpk_not_found', 'tf2_textures_dir.vpk not found')
                 ErrorHandler.show_warning(self, error_msg, self.t['error'])
                 return
+
+            # Для персонажей — показываем диалог выбора текстур (нужен textures_vpk)
+            if is_player_body:
+                from src.ui.texture_select_dialog import TextureSelectDialog
+                from PySide6.QtWidgets import QDialog as _QDialog
+                dlg = TextureSelectDialog(
+                    mode=self.mode,
+                    textures_vpk_path=textures_vpk,
+                    language=self.language,
+                    parent=self,
+                )
+                if dlg.exec() != _QDialog.DialogCode.Accepted:
+                    return
+                hand_textures = dlg.get_selected_textures()
+                if not hand_textures:
+                    return
 
             # Получаем папку экспорта и формат
             export_folder = settings.get('export_folder', 'export')
@@ -1617,7 +2161,8 @@ class MainWindow(QMainWindow):
                 export_folder=export_folder,
                 export_format=export_format,
                 language=self.language,
-                hand_textures=hand_textures,  # None для оружия, список для рук
+                hand_textures=hand_textures,                        # None для оружия, список для рук/тел/шапок
+                use_explicit_list=is_player_body or is_hat,        # для тел и шапок — только выбранные файлы
                 parent=self
             )
             

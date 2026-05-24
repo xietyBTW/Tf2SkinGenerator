@@ -12,9 +12,13 @@ UV:
     Three.js TextureLoader по умолчанию делает flipY сам — ещё один флип сломает UV.
 
 Система координат:
-    Source Engine: правая система, Z-up (x=вправо, y=вперёд, z=вверх)
-    Three.js OBJ:  правая система, Y-up (x=вправо, y=вверх, z=к зрителю)
-    Конвертация позиции/нормали: (x, y, z) → (x, z, -y)
+    Оружия (Z-up): правая система, Z-up (x=вправо, y=вперёд, z=вверх)
+    Персонажи (Y-up): SMD уже в Y-up — $upaxis Y в QC, Crowbar экспортирует как есть.
+    Three.js OBJ: правая система, Y-up (x=вправо, y=вверх, z=к зрителю)
+
+    Конвертация Z-up → Y-up: (x, y, z) → (x, z, -y)   [оружия]
+    Конвертация Y-up → Y-up: (x, y, z) → (x, y, -z)   [персонажи, зеркало Z для
+                                                          корректной ориентации]
 """
 
 import os
@@ -35,6 +39,7 @@ class SmdToObjService:
         obj_path: str,
         include_mats: Optional[set] = None,
         extra_smd_paths: Optional[list] = None,
+        source_zup: bool = True,
     ) -> Tuple[bool, List[str]]:
         """
         Конвертирует SMD → OBJ + MTL с поддержкой нескольких материалов.
@@ -49,6 +54,9 @@ class SmdToObjService:
             include_mats: Если задан — оставляем только эти материалы.
                           Используется для моделей рук, чтобы исключить костюм
                           и оставить только нужные меши.
+            source_zup:   True (по умолчанию) — применять конвертацию Z-up→Y-up
+                          для оружий и рук. False — для персонажей ($upaxis Y),
+                          SMD уже в Y-up и только зеркалим Z для Three.js.
 
         Returns:
             (success, material_names) где material_names — список уникальных
@@ -114,11 +122,17 @@ class SmdToObjService:
                         vt_i = len(uvs)       + 1
                         vn_i = len(normals)   + 1
 
-                        # Координаты: Source Z-up → Three.js Y-up: (x,y,z) → (x, z, -y)
                         x, y, z = vert["pos"]
-                        positions.append((x, z, -y))
                         nx, ny, nz = vert["nrm"]
-                        normals.append((nx, nz, -ny))
+                        if source_zup:
+                            # Оружия/руки: Source Z-up → Three.js Y-up: (x,y,z) → (x, z, -y)
+                            positions.append((x, z, -y))
+                            normals.append((nx, nz, -ny))
+                        else:
+                            # Персонажи ($upaxis Y): SMD уже Y-up, только зеркалим Z
+                            # чтобы персонаж смотрел на зрителя: (x,y,z) → (x, y, -z)
+                            positions.append((x, y, -z))
+                            normals.append((nx, ny, -nz))
                         # UV: не флипаем — Three.js сам делает flipY
                         uvs.append(vert["uv"])
 

@@ -249,6 +249,10 @@ TRANSLATIONS = {
         'select_vtf_file': 'Выберите VTF файл',
         'success': 'Успех',
         
+        # Hat Game Paints Dialog
+        'hat_game_paints_title': 'Краски из игры',
+        'hat_game_paints_question': 'Хотите ли вы чтобы краски из игры применялись к вашей текстуре?\n\nЕсли "Да" — VMT файл будет загружен с оригинальными настройками красок.\nЕсли "Нет" — краски будут отключены, ваша текстура будет отображаться без окраски игрой.',
+
         # Extra Texture Dialog
         'extra_texture_title': 'Дополнительная текстура',
         'extra_texture_question': 'У оружия есть дополнительный материал: "{material}".\nХотите загрузить отдельное изображение для него?\n\nЕсли нажмёте "Нет" — будет использована основная текстура.',
@@ -258,6 +262,11 @@ TRANSLATIONS = {
         'extra_model_title': 'Дополнительная часть модели',
         'extra_model_question': 'У оружия есть дополнительная часть модели: "{smd_name}".\nХотите загрузить замену SMD для неё?\n\nЕсли нажмёте "Нет", будет использована оригинальная модель из игры.',
         'extra_model_select': 'Выберите SMD файл для "{smd_name}"',
+
+        # Texture Mismatch Warning
+        'texture_mismatch_title': 'Несовпадение текстур',
+        'texture_mismatch_continue': 'Продолжить всё равно',
+        'texture_mismatch_cancel': 'Отменить сборку',
         
         # Merge VPK
         'merge_vpk': 'Сборка в один',
@@ -536,6 +545,10 @@ TRANSLATIONS = {
         'select_vtf_file': 'Select VTF file',
         'success': 'Success',
         
+        # Hat Game Paints Dialog
+        'hat_game_paints_title': 'Game Paints',
+        'hat_game_paints_question': 'Do you want game paints to apply to your texture?\n\nIf "Yes" — the VMT file will be loaded with original paint settings.\nIf "No" — paints will be disabled, your texture will display without game coloring.',
+
         # Extra Texture Dialog
         'extra_texture_title': 'Additional Texture',
         'extra_texture_question': 'The weapon model has an additional material: "{material}".\nDo you want to provide a separate image for it?\n\nIf you click "No", the main texture will be used.',
@@ -545,6 +558,11 @@ TRANSLATIONS = {
         'extra_model_title': 'Additional Model Part',
         'extra_model_question': 'The weapon has an additional model part: "{smd_name}".\nDo you want to provide a replacement SMD file for it?\n\nIf you click "No", the original game model will be used.',
         'extra_model_select': 'Select SMD file for "{smd_name}"',
+
+        # Texture Mismatch Warning
+        'texture_mismatch_title': 'Texture Mismatch Warning',
+        'texture_mismatch_continue': 'Continue anyway',
+        'texture_mismatch_cancel': 'Cancel build',
         
         # Merge VPK
         'merge_vpk': 'Merge into One',

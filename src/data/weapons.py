@@ -1,5 +1,8 @@
 TF2_WEAPONS = {
     "Scout": {
+        "PlayerSkin": {
+            "body": {"ru": "Скин персонажа", "en": "Player Skin"},
+        },
         "Primary": {
             "c_scattergun": {"ru": "Стандартное Обрез", "en": "Scattergun"},
             "c_double_barrel": {"ru": "Неумолимая сила", "en": "Force-A-Nature"},
@@ -35,6 +38,9 @@ TF2_WEAPONS = {
         },
     },
     "Soldier": {
+        "PlayerSkin": {
+            "body": {"ru": "Скин персонажа", "en": "Player Skin"},
+        },
         "Primary": {
             "c_rocketlauncher": {"ru": "Стандартное Ракетомёт", "en": "Rocket Launcher"},
             "c_bet_rocketlauncher": {"ru": "Прародитель", "en": "Original"},
@@ -69,6 +75,9 @@ TF2_WEAPONS = {
         },
     },
     "Pyro": {
+        "PlayerSkin": {
+            "body": {"ru": "Скин персонажа", "en": "Player Skin"},
+        },
         "Primary": {
             "c_flamethrower": {"ru": "Стандартное Огнемёт", "en": "Flamethrower"},
             "c_rainblower": {"ru": "Радужигатель", "en": "Rainblower"},
@@ -104,6 +113,9 @@ TF2_WEAPONS = {
         },
     },
     "Demoman": {
+        "PlayerSkin": {
+            "body": {"ru": "Скин персонажа", "en": "Player Skin"},
+        },
         "Primary": {
             "c_grenadelauncher": {"ru": "Стандартное Гранатомёт", "en": "Grenade Launcher"},
             "c_lochnload": {"ru": "Подкидыш", "en": "Loch-N-Load"},
@@ -135,6 +147,9 @@ TF2_WEAPONS = {
         },
     },
     "Heavy": {
+        "PlayerSkin": {
+            "body": {"ru": "Скин персонажа", "en": "Player Skin"},
+        },
         "Primary": {
             "c_minigun": {"ru": "Стандартное Пулемёт", "en": "Minigun"},
             "c_iron_curtain": {"ru": "Железный занавес", "en": "Iron Curtain"},
@@ -167,6 +182,9 @@ TF2_WEAPONS = {
         },
     },
     "Engineer": {
+        "PlayerSkin": {
+            "body": {"ru": "Скин персонажа", "en": "Player Skin"},
+        },
         "Primary": {
             "c_shotgun": {"ru": "Стандартный Дробовик", "en": "Shotgun"},
             "c_drg_pomson": {"ru": "Самосуд", "en": "Pomson 6000"},
@@ -194,6 +212,9 @@ TF2_WEAPONS = {
         },
     },
     "Medic": {
+        "PlayerSkin": {
+            "body": {"ru": "Скин персонажа", "en": "Player Skin"},
+        },
         "Primary": {
             "c_syringegun": {"ru": "Стандартное Шприцемёт", "en": "Syringe Gun"},
             "c_leechgun": {"ru": "Кровопийца", "en": "Blutsauger"},
@@ -217,6 +238,9 @@ TF2_WEAPONS = {
         },
     },
     "Sniper": {
+        "PlayerSkin": {
+            "body": {"ru": "Скин персонажа", "en": "Player Skin"},
+        },
         "Primary": {
             "c_sniperrifle": {"ru": "Стандартная Снайперская винтовка", "en": "Sniper Rifle"},
             "c_csgo_awp": {"ru": "Слонобой", "en": "AWPer Hand"},
@@ -249,6 +273,9 @@ TF2_WEAPONS = {
         },
     },
     "Spy": {
+        "PlayerSkin": {
+            "body": {"ru": "Скин персонажа", "en": "Player Skin"},
+        },
         "Primary": {
             "c_revolver": {"ru": "Стандартный Револьвер", "en": "Revolver"},
             "c_snub_nose": {"ru": "Грандиозный убийца", "en": "Enforcer"},
@@ -297,10 +324,12 @@ TF2_CLASSES = {
 }
 
 WEAPON_TYPES = {
+    "PlayerSkin": {"ru": "Скин персонажа", "en": "Player Skin"},
     "Primary": {"ru": "Основное", "en": "Primary"},
     "Secondary": {"ru": "Дополнительное", "en": "Secondary"},
     "Melee": {"ru": "Ближний бой", "en": "Melee"},
     "Hands": {"ru": "Руки", "en": "Hands"},
+    "Custom": {"ru": "Кастомный мод", "en": "Custom Mod"},
 }
 
 def get_weapon_name(class_name: str, weapon_type: str, weapon_key: str, language: str = "ru") -> str:
@@ -326,8 +355,8 @@ def get_weapon_type_name(weapon_type: str, language: str = "ru") -> str:
 WEAPON_MDL_PATHS = {}
 for class_name, class_weapons in TF2_WEAPONS.items():
     for weapon_type, weapons in class_weapons.items():
-        if weapon_type == "Hands":
-            continue  # Hands have no MDL — they use a separate VTF-only pipeline
+        if weapon_type in ("Hands", "PlayerSkin"):
+            continue  # Hands and PlayerSkin have no MDL in the build pipeline
         for weapon_key in weapons.keys():
             if weapon_key.startswith("c_") or weapon_key.startswith("w_"):
                 WEAPON_MDL_PATHS[weapon_key] = f"models/weapons/c_models/{weapon_key}/{weapon_key}.mdl"
@@ -411,6 +440,18 @@ for _arm in _ARM_CLASSES:
     # Руки хранятся по плоскому пути (без подпапки), а не c_models/{arm}/{arm}.mdl.
     # Это обеспечивает совпадение ключа кэша при повторных запусках.
     WEAPON_MDL_PATHS[_arm] = f"models/weapons/c_models/{_arm}.mdl"
+
+# ── Модели тел персонажей (models/player/) ────────────────────────────────────
+# Используются для 3D Preview; в pipeline сборки VPK не задействованы.
+WEAPON_MDL_PATHS["player_scout"]    = "models/player/scout.mdl"
+WEAPON_MDL_PATHS["player_soldier"]  = "models/player/soldier.mdl"
+WEAPON_MDL_PATHS["player_pyro"]     = "models/player/pyro.mdl"
+WEAPON_MDL_PATHS["player_demo"]     = "models/player/demo.mdl"
+WEAPON_MDL_PATHS["player_heavy"]    = "models/player/heavy.mdl"
+WEAPON_MDL_PATHS["player_engineer"] = "models/player/engineer.mdl"
+WEAPON_MDL_PATHS["player_medic"]    = "models/player/medic.mdl"
+WEAPON_MDL_PATHS["player_sniper"]   = "models/player/sniper.mdl"
+WEAPON_MDL_PATHS["player_spy"]      = "models/player/spy.mdl"
 
 # ── Нестандартные пути VTF (дополнительные пути для поиска текстур) ───────────
 # Используются как приоритетный список ПЕРЕД стандартными путями.
@@ -501,6 +542,16 @@ WEAPON_TEXTURE_PATHS: dict[str, list[str]] = {
     "w_sd_sapper": [
         "materials/models/weapons/w_models/w_sd_sapper/w_sd_sapper.vtf",
     ],
+    # ── Текстуры тела персонажа (materials/models/player/…) ─────────────────────
+    "player_scout":    ["materials/models/player/scout/scout_red.vtf"],
+    "player_soldier":  ["materials/models/player/soldier/soldier_red.vtf"],
+    "player_pyro":     ["materials/models/player/pyro/pyro_red.vtf"],
+    "player_demo":     ["materials/models/player/demo/demoman_red.vtf"],
+    "player_heavy":    ["materials/models/player/hvyweapon/hvyweapon_red.vtf"],
+    "player_engineer": ["materials/models/player/engineer/engineer_red.vtf"],
+    "player_medic":    ["materials/models/player/medic/medic_red.vtf"],
+    "player_sniper":   ["materials/models/player/sniper/sniper_red.vtf"],
+    "player_spy":      ["materials/models/player/spy/spy_red.vtf"],
     # ── Текстуры рук (materials/models/player/…) ──────────────────────────────
     "c_scout_arms": [
         "materials/models/player/scout/scout_hands.vtf",

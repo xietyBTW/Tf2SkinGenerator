@@ -6,9 +6,9 @@ import os
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QComboBox,
     QPushButton, QLineEdit, QRadioButton, QCheckBox, QButtonGroup,
-    QWidget, QSizePolicy, QFileDialog,
+    QWidget, QSizePolicy, QFileDialog, QFrame, QApplication,
 )
-from PySide6.QtCore import Qt, Signal, QTimer
+from PySide6.QtCore import Qt, Signal, QTimer, QEvent, QPoint, QRect
 from PySide6.QtGui import QDoubleValidator, QMouseEvent
 from src.data.translations import TRANSLATIONS
 from src.utils.themes import get_modern_styles
@@ -160,7 +160,261 @@ class CollapsibleGroup(QWidget):
     def addLayout(self, layout):
         self.content_layout.addLayout(layout)
 
+_BUILD_OPTS_BTN_IDLE = """
+    QPushButton {
+        background-color: rgba(0, 0, 0, 0.28);
+        border: none;
+        border-radius: 3px;
+        padding: 0px;
+        min-width: 0px;
+    }
+    QPushButton:hover {
+        background-color: rgba(255, 255, 255, 0.12);
+    }
+    QPushButton:pressed {
+        background-color: rgba(0, 0, 0, 0.45);
+    }
+"""
+
+_BUILD_OPTS_BTN_ACTIVE = """
+    QPushButton {
+        background-color: rgba(255, 107, 53, 0.22);
+        border: 1px solid rgba(255, 107, 53, 0.55);
+        border-radius: 3px;
+        padding: 0px;
+        min-width: 0px;
+    }
+    QPushButton:hover {
+        background-color: rgba(255, 107, 53, 0.32);
+        border-color: rgba(255, 107, 53, 0.80);
+    }
+    QPushButton:pressed {
+        background-color: rgba(255, 107, 53, 0.15);
+    }
+"""
+
+
+def _make_build_opts_icon(color: str = "#c0c0c0", size: int = 11):
+    """Рисует шестерёнку для кнопки опций сборки (аналог _make_gear_icon из main_window)."""
+    import math
+    from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QPainterPath
+    from PySide6.QtCore import Qt, QRectF
+
+    pix = QPixmap(size, size)
+    pix.fill(Qt.transparent)
+    p = QPainter(pix)
+    p.setRenderHint(QPainter.Antialiasing)
+    p.setPen(Qt.NoPen)
+    p.setBrush(QColor(color))
+
+    s = float(size)
+    cx = cy = s / 2.0
+    n_teeth = 6
+    r_outer = s * 0.455
+    r_base  = s * 0.305
+    r_hole  = s * 0.150
+    half_tw = 0.285
+    step    = 2.0 * math.pi / n_teeth
+
+    path  = QPainterPath()
+    first = True
+    for i in range(n_teeth):
+        center = i * step - math.pi / 2.0
+        for r, da in [
+            (r_base,  -(half_tw + 0.18)),
+            (r_outer, -half_tw * 0.52),
+            (r_outer,  half_tw * 0.52),
+            (r_base,   (half_tw + 0.18)),
+        ]:
+            x = cx + r * math.cos(center + da)
+            y = cy + r * math.sin(center + da)
+            if first:
+                path.moveTo(x, y); first = False
+            else:
+                path.lineTo(x, y)
+    path.closeSubpath()
+
+    hole = QPainterPath()
+    hole.addEllipse(QRectF(cx - r_hole, cy - r_hole, r_hole * 2, r_hole * 2))
+    p.drawPath(path.subtracted(hole))
+    p.end()
+    return QIcon(pix)
+
+
+class _BuildOptsPopup(QFrame):
+    """
+    Всплывающий виджет с опциями сборки.
+    Закрывается по клику в любое место ВНЕ виджета через eventFilter на QApplication.
+    Остаётся открытым при взаимодействии с чекбоксами внутри.
+    Создаётся ОДИН РАЗ и переиспользуется (toggle show/hide).
+    """
+
+    def __init__(self, panel: "SettingsPanel") -> None:
+        # Qt.Tool | Qt.FramelessWindowHint — без рамки, без taskbar
+        super().__init__(panel.window(), Qt.Tool | Qt.FramelessWindowHint)
+        self._panel = panel
+        self.setObjectName("buildOptsFrame")
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setStyleSheet("""
+            QFrame#buildOptsFrame {
+                background-color: #161616;
+                border: 1px solid #2e2e2e;
+                border-radius: 6px;
+            }
+            QCheckBox {
+                color: #ccc;
+                font-size: 13px;
+                spacing: 8px;
+                padding: 3px 0px;
+                background: transparent;
+            }
+            QCheckBox:hover { color: #fff; }
+            QCheckBox::indicator {
+                width: 15px; height: 15px;
+                border: 1px solid #444;
+                border-radius: 3px;
+                background: #1e1e1e;
+            }
+            QCheckBox::indicator:checked {
+                background: #ff6b35;
+                border-color: #ff6b35;
+            }
+            QCheckBox::indicator:hover { border-color: #666; }
+            QLabel#optsTitle {
+                color: #555;
+                font-size: 11px;
+                font-weight: 600;
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(6)
+
+        # Заголовок
+        lbl = QLabel(panel.t.get('build_options_title', 'Build options'))
+        lbl.setObjectName("optsTitle")
+        layout.addWidget(lbl)
+
+        # Разделитель
+        sep = QFrame()
+        sep.setFrameShape(QFrame.HLine)
+        sep.setStyleSheet("QFrame { color: #2a2a2a; margin: 2px 0px 4px 0px; }")
+        layout.addWidget(sep)
+
+        # Чекбокс: замена модели
+        self._cb_replace = QCheckBox(
+            panel.t.get('enable_replace_model', 'Enable model replacement')
+        )
+        self._cb_replace.stateChanged.connect(self._on_replace)
+        layout.addWidget(self._cb_replace)
+
+        # Чекбокс: модель уже готова
+        self._cb_ready = QCheckBox(
+            panel.t.get('model_already_ready', 'Model is already ready')
+        )
+        self._cb_ready.stateChanged.connect(self._on_ready)
+        layout.addWidget(self._cb_ready)
+
+        self.adjustSize()
+
+    def sync_from_panel(self) -> None:
+        """Синхронизирует состояние чекбоксов из панели (без эмиссии сигналов)."""
+        self._cb_replace.blockSignals(True)
+        self._cb_ready.blockSignals(True)
+        self._cb_replace.setChecked(self._panel._replace_model_checked)
+        self._cb_ready.setChecked(self._panel._model_ready_checked)
+        self._cb_replace.blockSignals(False)
+        self._cb_ready.blockSignals(False)
+
+    def showEvent(self, event) -> None:
+        # Устанавливаем eventFilter чтобы ловить клики вне попапа
+        QApplication.instance().installEventFilter(self)
+        super().showEvent(event)
+
+    def hideEvent(self, event) -> None:
+        # Синхронизируем фактическое состояние чекбоксов в панель перед закрытием
+        self._panel._replace_model_checked = self._cb_replace.isChecked()
+        self._panel._model_ready_checked   = self._cb_ready.isChecked()
+        self._panel._refresh_build_opts_btn()
+        QApplication.instance().removeEventFilter(self)
+        super().hideEvent(event)
+
+    def eventFilter(self, watched, event) -> bool:
+        t = event.type()
+        # Фильтруем MouseButtonRelease (а не Press), чтобы чекбокс внутри попапа
+        # успел обработать полный цикл нажатие→отпускание и эмитировать stateChanged
+        # до того, как попап скроется.  Скрытие делаем отложенным (singleShot 0)
+        # по той же причине: событие должно дойти до чекбокса раньше hide().
+        if t == QEvent.MouseButtonRelease:
+            try:
+                gpos = event.globalPosition().toPoint()
+            except AttributeError:
+                gpos = event.globalPos()
+            widget_under = QApplication.widgetAt(gpos)
+            inside_popup = (
+                widget_under is not None and
+                (widget_under is self or self.isAncestorOf(widget_under))
+            )
+            if not inside_popup:
+                btn = self._panel.build_opts_btn
+                btn_global = btn.mapToGlobal(QPoint(0, 0))
+                btn_rect = QRect(btn_global, btn.size())
+                if not btn_rect.contains(gpos):
+                    # Отложенное скрытие — даём чекбоксу завершить обработку события
+                    QTimer.singleShot(0, self.hide)
+        elif t == QEvent.Wheel:
+            # Скролл страницы сдвигает кнопку, а попап остаётся — закрываем
+            self.hide()
+        elif t == QEvent.Move and watched is self._panel.window():
+            # Окно приложения переместили — попап остался бы висеть на старом месте
+            self.hide()
+        return False  # не перехватываем событие
+
+    def _on_replace(self, state: int) -> None:
+        val = (state == Qt.Checked)
+        self._panel._replace_model_checked = val
+        self._panel._refresh_build_opts_btn()
+        self._panel.replace_model_toggled.emit(val)
+
+    def _on_ready(self, state: int) -> None:
+        val = (state == Qt.Checked)
+        self._panel._model_ready_checked = val
+        self._panel._refresh_build_opts_btn()
+        self._panel.model_ready_toggled.emit(val)
+
+
+class _BuildButtonContainer(QWidget):
+    """Контейнер кнопки 'Build VPK' с маленькой кнопкой настроек в правом верхнем углу."""
+
+    _BTN_W = 26
+    _BTN_H = 18
+    _MARGIN = 5
+
+    def __init__(self, main_btn: "QPushButton", opts_btn: "QPushButton", parent=None):
+        super().__init__(parent)
+        self._main = main_btn
+        self._opts = opts_btn
+        main_btn.setParent(self)
+        opts_btn.setParent(self)
+        opts_btn.raise_()
+        self.setSizePolicy(main_btn.sizePolicy())
+        self.setMinimumHeight(main_btn.minimumHeight())
+        self.setMinimumWidth(0)
+
+    def resizeEvent(self, event):
+        self._main.setGeometry(0, 0, self.width(), self.height())
+        self._opts.setGeometry(self.width() - self._BTN_W, 0, self._BTN_W, self._BTN_H)
+        super().resizeEvent(event)
+
+    def sizeHint(self):
+        return self._main.sizeHint()
+
+
 class SettingsPanel(QWidget):
+    replace_model_toggled = Signal(bool)
+    model_ready_toggled   = Signal(bool)
+
     def __init__(self, parent=None):
         super().__init__()
         self.parent = parent
@@ -172,6 +426,10 @@ class SettingsPanel(QWidget):
             config = AppConfig.load_config()
             current_lang = config.get('language') or 'en'
             self.t = TRANSLATIONS[current_lang]
+
+        # Состояние опций сборки (перенесено из левой панели в меню шестерёнки)
+        self._replace_model_checked: bool = False
+        self._model_ready_checked: bool   = False
         
         # Пресеты
         self.presets = {
@@ -332,13 +590,25 @@ class SettingsPanel(QWidget):
         self.filename_error.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         main_settings_layout.addWidget(self.filename_error)
         
-        # Primary CTA - Собрать VPK
+        # Primary CTA - Собрать VPK с маленькой кнопкой настроек в правом верхнем углу
         self.button = QPushButton(self.t['build'])
         self.button.setStyleSheet(self.styles['button_primary'])
         self.button.setMinimumHeight(48)
         self.button.setMinimumWidth(0)
         self.button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        main_settings_layout.addWidget(self.button)
+
+        self.build_opts_btn = QPushButton()
+        self.build_opts_btn.setIcon(_make_build_opts_icon("#b0b0b0", 11))
+        from PySide6.QtCore import QSize as _QSize
+        self.build_opts_btn.setIconSize(_QSize(11, 11))
+        self.build_opts_btn.setStyleSheet(_BUILD_OPTS_BTN_IDLE)
+        self.build_opts_btn.setToolTip(
+            self.t.get('build_options_tooltip', 'Build options')
+        )
+        self.build_opts_btn.clicked.connect(self._show_build_options_menu)
+
+        self._btn_container = _BuildButtonContainer(self.button, self.build_opts_btn)
+        main_settings_layout.addWidget(self._btn_container)
 
         self.extract_model_button = QPushButton(
             self.t.get('extract_model', 'Extract Original Model (SMD)')
@@ -578,6 +848,83 @@ class SettingsPanel(QWidget):
             rb.setMinimumWidth(0)
             rb.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
 
+    # ── Build-options gear menu ──────────────────────────────────────────────── #
+
+    def _show_build_options_menu(self) -> None:
+        """Открывает/скрывает всплывающий виджет с опциями сборки."""
+        # Создаём попап один раз и переиспользуем
+        if not hasattr(self, '_build_popup') or self._build_popup is None:
+            self._build_popup = _BuildOptsPopup(self)
+
+        if self._build_popup.isVisible():
+            self._build_popup.hide()
+            return
+
+        # Позиционируем: правый край попапа совпадает с правым краем кнопки шестерёнки
+        btn_global_br = self.build_opts_btn.mapToGlobal(
+            QPoint(self.build_opts_btn.width(), self.build_opts_btn.height())
+        )
+        popup_w = self._build_popup.sizeHint().width()
+        popup_x = btn_global_br.x() - popup_w
+        popup_y = btn_global_br.y() + 4
+        self._build_popup.move(popup_x, popup_y)
+        self._build_popup.show()
+
+    def _refresh_build_opts_btn(self) -> None:
+        """Обновляет стиль и иконку: акцент — если хотя бы одна опция активна."""
+        active = self._replace_model_checked or self._model_ready_checked
+        self.build_opts_btn.setStyleSheet(
+            _BUILD_OPTS_BTN_ACTIVE if active else _BUILD_OPTS_BTN_IDLE
+        )
+        icon_color = "#ff6b35" if active else "#b0b0b0"
+        self.build_opts_btn.setIcon(_make_build_opts_icon(icon_color, 11))
+
+    # ── Публичный API для чтения/установки состояния ──────────────────────── #
+
+    def is_replace_model_checked(self) -> bool:
+        # Читаем напрямую из чекбокса попапа — это надёжнее кэшированного флага,
+        # который мог не обновиться если stateChanged не успел сработать.
+        if hasattr(self, '_build_popup') and self._build_popup is not None:
+            return self._build_popup._cb_replace.isChecked()
+        return self._replace_model_checked
+
+    def is_model_ready_checked(self) -> bool:
+        if hasattr(self, '_build_popup') and self._build_popup is not None:
+            return self._build_popup._cb_ready.isChecked()
+        return self._model_ready_checked
+
+    def set_replace_model_checked(self, value: bool, *, emit: bool = False) -> None:
+        self._replace_model_checked = value
+        self._refresh_build_opts_btn()
+        if hasattr(self, '_build_popup') and self._build_popup is not None:
+            self._build_popup.sync_from_panel()
+        if emit:
+            self.replace_model_toggled.emit(value)
+
+    def set_model_ready_checked(self, value: bool, *, emit: bool = False) -> None:
+        self._model_ready_checked = value
+        self._refresh_build_opts_btn()
+        if hasattr(self, '_build_popup') and self._build_popup is not None:
+            self._build_popup.sync_from_panel()
+        if emit:
+            self.model_ready_toggled.emit(value)
+
+    # Сброс обоих опций (например, при переключении в режим рук)
+    def reset_build_options(self, *, emit: bool = False) -> None:
+        changed_replace = self._replace_model_checked
+        changed_ready   = self._model_ready_checked
+        self._replace_model_checked = False
+        self._model_ready_checked   = False
+        self._refresh_build_opts_btn()
+        # Синхронизируем чекбоксы в попапе, если он уже создан
+        if hasattr(self, '_build_popup') and self._build_popup is not None:
+            self._build_popup.sync_from_panel()
+        if emit:
+            if changed_replace:
+                self.replace_model_toggled.emit(False)
+            if changed_ready:
+                self.model_ready_toggled.emit(False)
+
     # ── Единый контроллер ограничений UI по режиму ─────────────────────────── #
 
     def apply_mode_restrictions(self, mode) -> None:
@@ -599,11 +946,16 @@ class SettingsPanel(QWidget):
             from src.data.player_hands import HAND_MODE_KEYS
         except ImportError:
             HAND_MODE_KEYS = frozenset()
+        try:
+            from src.data.player_characters import PLAYER_BODY_MODE_KEYS
+        except ImportError:
+            PLAYER_BODY_MODE_KEYS = frozenset()
 
-        is_spray  = (mode == "spray")
-        is_crit   = (mode == "critHIT")
-        is_hands  = bool(mode and mode in HAND_MODE_KEYS)
-        is_normal = bool(mode and not is_spray and not is_crit and not is_hands)
+        is_spray       = (mode == "spray")
+        is_crit        = (mode == "critHIT")
+        is_hands       = bool(mode and mode in HAND_MODE_KEYS)
+        is_player_body = bool(mode and mode in PLAYER_BODY_MODE_KEYS)
+        is_normal = bool(mode and not is_spray and not is_crit and not is_hands and not is_player_body)
 
         lang = 'ru'
         if self.parent and hasattr(self.parent, 'language'):
@@ -664,7 +1016,7 @@ class SettingsPanel(QWidget):
                 )
 
         # ── 4. UV Layout ─────────────────────────────────────────────────── #
-        # Видима только для обычного оружия; CritHIT управляет сам
+        # Видима только для обычного оружия; CritHIT, руки и скины персонажей скрывают
         if not is_crit:
             uv_visible = is_normal
             if hasattr(self, 'uv_layout_widget'):
@@ -696,24 +1048,24 @@ class SettingsPanel(QWidget):
                 return spray_ru if lang == 'ru' else spray_en
             if is_crit:
                 return crit_ru if lang == 'ru' else crit_en
-            if is_hands:
+            if is_hands or is_player_body:
                 return hands_ru if lang == 'ru' else hands_en
             return ""
 
-        # Извлечь модель — для обычного оружия и режимов рук (arm MDL существует)
-        self.extract_model_button.setEnabled(is_normal or is_hands)
+        # Извлечь модель — для обычного оружия, рук и скинов персонажей (MDL существует)
+        self.extract_model_button.setEnabled(is_normal or is_hands or is_player_body)
         self.extract_model_button.setToolTip(_tip(
             "Режим спрея: модели нет",   "Spray mode: no model",
             "Режим CritHIT: модели нет", "CritHIT mode: no model",
-            "", "",  # для рук — доступно, подсказка не нужна
+            "", "",  # для рук и скинов — доступно, подсказка не нужна
         ))
 
-        # Извлечь текстуру — для обычного оружия и рук
-        self.extract_texture_button.setEnabled(is_normal or is_hands)
+        # Извлечь текстуру — для обычного оружия, рук и скинов персонажей
+        self.extract_texture_button.setEnabled(is_normal or is_hands or is_player_body)
         self.extract_texture_button.setToolTip(_tip(
             "Режим спрея: оригинальной текстуры нет", "Spray mode: no original texture",
             "Режим CritHIT: оригинальной текстуры нет", "CritHIT mode: no original texture",
-            "", "",  # для рук — доступно, подсказка не нужна
+            "", "",  # для рук и скинов — доступно, подсказка не нужна
         ))
 
         # VMT редактор — только для обычного оружия
@@ -1063,6 +1415,10 @@ class SettingsPanel(QWidget):
         # Обновляем тексты
         self.expert_button.setText(self.t.get('open_editor', 'Открыть редактор'))
         self.button.setText(self.t.get('build', 'Собрать VPK'))
+        if hasattr(self, 'build_opts_btn'):
+            self.build_opts_btn.setToolTip(
+                self.t.get('build_options_tooltip', 'Build options')
+            )
         if hasattr(self, 'extract_model_button'):
             self.extract_model_button.setText(self.t.get('extract_model', 'Extract Original Model (SMD)'))
         self.filename_input.setPlaceholderText(self.t.get('placeholder', 'Имя VPK'))

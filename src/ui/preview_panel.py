@@ -3,6 +3,7 @@
 """
 
 import os
+from typing import Optional
 
 from PySide6.QtWidgets import (
     QGroupBox, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
@@ -17,6 +18,9 @@ logger = get_logger(__name__)
 
 
 class PreviewPanel(QWidget):
+
+    from PySide6.QtCore import Signal
+    vpk_mod_loaded = Signal(str)   # путь к загруженному VPK моду
 
     def __init__(self, parent=None):
         super().__init__()
@@ -37,6 +41,12 @@ class PreviewPanel(QWidget):
         self._custom_smd_mode = False   # True когда режим замены модели (кастомный SMD)
         self._crithit_mode = False      # True в режиме CritHIT (персонаж + billboard)
         self._crithit_class = 'soldier' # Класс персонажа для CritHIT (scout/soldier/…)
+
+        # Per-mesh drag tracking: если True — пользователь перетащил текстуру
+        # на конкретный меш, и при переключении 2D→3D не нужен глобальный ре-аплай.
+        # Сбрасывается при смене image_path или загрузке новой модели.
+        self._3d_per_mesh_active     = False
+        self._3d_per_mesh_base_image = None  # image_path в момент per-mesh drag
 
         # Командные раскраски (RED / BLU)
         self._red_frame_paths: list = []
@@ -375,6 +385,11 @@ class PreviewPanel(QWidget):
                 logger.info("3D viewer bridge подключён: texture_dropped → _on_3d_texture_dropped")
             except Exception as exc:
                 logger.warning(f"Не удалось подключить 3D bridge (texture_dropped): {exc}")
+            try:
+                bridge.per_mesh_applied.connect(self._on_3d_per_mesh_applied)
+                logger.info("3D viewer bridge подключён: per_mesh_applied → _on_3d_per_mesh_applied")
+            except Exception as exc:
+                logger.warning(f"Не удалось подключить 3D bridge (per_mesh_applied): {exc}")
 
         if self._3d_available:
             logger.info("3D Preview виджет инициализирован (WebEngine)")
@@ -418,7 +433,16 @@ class PreviewPanel(QWidget):
         # Если пользователь уже загрузил свою текстуру — применяем её на модель.
         # Задержка нужна: WebView "просыпается" после показа не мгновенно,
         # и runJavaScript до этого момента может не дойти до JS.
-        if self.image_path and self._3d_available and self._3d_widget:
+        #
+        # НО: если пользователь делал per-mesh drag (текстура на конкретный меш)
+        # и текстура с тех пор не менялась — не делаем глобальный ре-аплай,
+        # иначе потеряем per-mesh настройку.
+        _skip_reapply = (
+            self._3d_per_mesh_active
+            and self.image_path is not None
+            and self.image_path == self._3d_per_mesh_base_image
+        )
+        if self.image_path and self._3d_available and self._3d_widget and not _skip_reapply:
             import os
             path = self.image_path  # захватываем в замыкание
             if os.path.exists(path):
@@ -702,6 +726,10 @@ class PreviewPanel(QWidget):
         """Разрешает или запрещает кнопку загрузки VPK мода."""
         self.btn_load_vpk_mod.setEnabled(enabled)
 
+    def get_loaded_vpk_mod_path(self) -> Optional[str]:
+        """Возвращает путь к загруженному VPK моду, или None если не загружен."""
+        return getattr(self, '_loaded_vpk_mod_path', None)
+
     def _on_load_vpk_mod_clicked(self) -> None:
         """Обработчик кнопки «Загрузить VPK мод»."""
         from PySide6.QtWidgets import QFileDialog
@@ -713,6 +741,8 @@ class PreviewPanel(QWidget):
         )
         if not vpk_path:
             return
+        self._loaded_vpk_mod_path = vpk_path
+        self.vpk_mod_loaded.emit(vpk_path)
         self._start_vpk_mod_worker(vpk_path)
 
     def _start_vpk_mod_worker(self, user_vpk_path: str) -> None:
@@ -908,6 +938,19 @@ class PreviewPanel(QWidget):
             # Fallback: статичная текстура (первый кадр через _file_to_data_url)
             self._3d_widget.update_texture_file(gif_path)
 
+    def _on_3d_per_mesh_applied(self) -> None:
+        """Вызывается когда пользователь перетащил текстуру на конкретный меш в 3D.
+
+        Сохраняем флаг: при следующем переключении 2D→3D НЕ делаем глобальный
+        ре-аплай (чтобы не перезатереть per-mesh настройку).
+        Флаг сбрасывается если пользователь загружает другую текстуру в 2D.
+        """
+        self._3d_per_mesh_active     = True
+        self._3d_per_mesh_base_image = self.image_path
+        logger.debug(
+            f"[3D] per-mesh drag: base_image={self._3d_per_mesh_base_image}"
+        )
+
     def _on_3d_texture_dropped(self, data_url: str) -> None:
         """Вызывается когда пользователь перетаскивает текстуру прямо в 3D viewer.
 
@@ -961,6 +1004,9 @@ class PreviewPanel(QWidget):
 
     def _on_3d_ready(self, obj_path: str, texture_path: str):
         self.btn_load_3d.setEnabled(True)
+        # Новая модель загружена → per-mesh состояние устарело
+        self._3d_per_mesh_active     = False
+        self._3d_per_mesh_base_image = None
         # Сохраняем RED кадр (один кадр; анимированные кадры придут через _on_3d_animated)
         if texture_path:
             self._red_frame_paths = [texture_path]
@@ -1115,6 +1161,10 @@ class PreviewPanel(QWidget):
     def load_image(self, path):
         """Загружает изображение (или GIF) для 2D Preview."""
         self._stop_gif()
+        # Если пользователь загрузил другую текстуру — per-mesh состояние устарело
+        if path != self._3d_per_mesh_base_image:
+            self._3d_per_mesh_active     = False
+            self._3d_per_mesh_base_image = None
         self.image_path = path
         self.vtf_path = None
 

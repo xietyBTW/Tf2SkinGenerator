@@ -585,6 +585,76 @@ class ModelBuildService:
 
     
     @staticmethod
+    def extract_main_body_smd(qc_path: str, weapon_key: str) -> Optional[str]:
+        """
+        Возвращает абсолютный путь к основному reference-SMD, который QC передаёт компилятору.
+
+        Читает директивы $body / studio из QC файла напрямую — это надёжнее поиска по
+        имени файла (weapon_key), т.к. Crowbar может назвать SMD иначе чем мы ожидаем.
+
+        Алгоритм выбора «основного» SMD (в порядке убывания приоритета):
+          1. Первый studio-ссылка сразу после $body (однострочный формат).
+          2. Первый studio-ссылка, содержащий weapon_key + "_reference".
+          3. Первый studio-ссылка, содержащий weapon_key.
+          4. Первый studio-ссылка с "_reference" в имени.
+          5. Самый первый studio-ссылка в файле.
+
+        Args:
+            qc_path:    Путь к QC файлу (может быть не пропатчен).
+            weapon_key: Ключ оружия / шапки (используется для приоритизации).
+
+        Returns:
+            Абсолютный путь к SMD-файлу или None если не найдено.
+        """
+        if not os.path.exists(qc_path):
+            return None
+
+        with open(qc_path, 'r', encoding='utf-8', errors='replace') as f:
+            content = f.read()
+
+        qc_dir = os.path.dirname(qc_path)
+        wk_low = weapon_key.lower()
+
+        # Все ссылки studio "*.smd" в порядке появления
+        all_refs: List[str] = re.findall(r'studio\s+"([^"]+\.smd)"', content, re.IGNORECASE)
+        if not all_refs:
+            return None
+
+        def _abs(ref: str) -> Optional[str]:
+            p = os.path.join(qc_dir, ref)
+            return p if os.path.exists(p) else None
+
+        # Приоритет 1: $body … "ref.smd"  (строчный формат без bodygroup)
+        body_inline = re.search(r'^\s*\$body\b[^"\n]*"([^"]+\.smd)"', content, re.IGNORECASE | re.MULTILINE)
+        if body_inline:
+            p = _abs(body_inline.group(1))
+            if p:
+                logger.debug(f"[MAIN BODY SMD] via $body inline: {p}")
+                return p
+
+        # Приоритет 2-5: перебираем все studio-ссылки
+        found_wk_ref = found_wk = found_ref = found_first = None
+        for ref in all_refs:
+            base = os.path.splitext(os.path.basename(ref))[0].lower()
+            if found_wk_ref is None and wk_low in base and 'reference' in base:
+                found_wk_ref = ref
+            if found_wk is None and wk_low in base:
+                found_wk = ref
+            if found_ref is None and 'reference' in base:
+                found_ref = ref
+            if found_first is None:
+                found_first = ref
+
+        for candidate in (found_wk_ref, found_wk, found_ref, found_first):
+            if candidate:
+                p = _abs(candidate)
+                if p:
+                    logger.debug(f"[MAIN BODY SMD] candidate={candidate!r} → {p}")
+                    return p
+
+        return None
+
+    @staticmethod
     def patch_qc_file(qc_path: str, weapon_key: str, cdmaterials_path: Optional[str] = None) -> None:
         """
         Пропатчивает QC файл после декомпиляции.

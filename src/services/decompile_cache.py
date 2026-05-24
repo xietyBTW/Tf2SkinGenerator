@@ -196,6 +196,47 @@ def restore_from_cache(cache_dir: str, target_dir: str) -> str:
     raise RuntimeError(f"QC file not found after restoring from cache in {target_dir}")
 
 
+def find_cached_qc_for_weapon(weapon_key: str) -> Optional[str]:
+    """
+    Ищет в кэше декомпиляции QC-файл для любого варианта weapon_key
+    (не требует знать точный vpk_path или mdl_rel_path).
+
+    Используется, например, при извлечении текстуры шапки — чтобы
+    узнать реальное имя текстуры из $texturegroup, а не угадывать его
+    по имени MDL-файла.
+
+    Returns:
+        Полный путь к QC-файлу или None если кэша нет.
+    """
+    try:
+        cache_dir = get_cache_dir()
+        for entry in cache_dir.iterdir():
+            if not entry.is_dir():
+                continue
+            meta_file = _meta_path(entry)
+            if not meta_file.exists():
+                continue
+            try:
+                with open(meta_file, "r", encoding="utf-8") as f:
+                    meta = json.load(f)
+            except Exception:
+                continue
+            if meta.get("weapon_key") != weapon_key:
+                continue
+            if meta.get("version") != _CACHE_VERSION:
+                continue
+            qc_name = meta.get("qc_filename")
+            if not qc_name:
+                continue
+            qc_path = entry / qc_name
+            if qc_path.exists():
+                logger.debug(f"QC найден в кэше для {weapon_key}: {qc_path}")
+                return str(qc_path)
+    except Exception as e:
+        logger.warning(f"Ошибка поиска QC в кэше для {weapon_key}: {e}")
+    return None
+
+
 def clear_cache(weapon_key: Optional[str] = None) -> int:
     """
     Очищает кэш.

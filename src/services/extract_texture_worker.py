@@ -33,33 +33,38 @@ class ExtractTextureWorker(QThread):
         export_format: str = "PNG",
         language: str = "en",
         hand_textures: Optional[List[Tuple[str, str]]] = None,
+        use_explicit_list: bool = False,
         parent=None,
     ):
         """
         Args:
-            textures_vpk_path: Путь к tf2_textures_dir.vpk
-            weapon_key:        Ключ оружия (например, c_scattergun) — используется
-                               только при hand_textures=None
-            export_folder:     Папка для экспорта
-            export_format:     Формат экспорта (VTF, PNG, TGA, JPG)
-            language:          Язык для сообщений
-            hand_textures:     Если задан — список (folder, vtf_name) для рук;
-                               тогда weapon_key игнорируется
-            parent:            Родительский объект Qt
+            textures_vpk_path:  Путь к tf2_textures_dir.vpk
+            weapon_key:         Ключ оружия (например, c_scattergun) — используется
+                                только при hand_textures=None
+            export_folder:      Папка для экспорта
+            export_format:      Формат экспорта (VTF, PNG, TGA, JPG)
+            language:           Язык для сообщений
+            hand_textures:      Если задан — список (folder, vtf_name) для рук;
+                                тогда weapon_key игнорируется
+            use_explicit_list:  True → извлекать только явно перечисленные файлы
+                                из hand_textures (не сканировать папки целиком).
+                                Используется при экспорте тел персонажей с диалогом.
+            parent:             Родительский объект Qt
         """
         super().__init__(parent)
-        self.textures_vpk_path = textures_vpk_path
-        self.weapon_key = weapon_key
-        self.export_folder = export_folder
-        self.export_format = export_format
-        self.language = language
-        self.hand_textures = hand_textures
+        self.textures_vpk_path  = textures_vpk_path
+        self.weapon_key         = weapon_key
+        self.export_folder      = export_folder
+        self.export_format      = export_format
+        self.language           = language
+        self.hand_textures      = hand_textures
+        self.use_explicit_list  = use_explicit_list
 
     def run(self) -> None:
         """Выполняет извлечение текстуры в фоновом потоке."""
         try:
             if self.hand_textures is not None:
-                # ── Режим рук ──────────────────────────────────────────────── #
+                # ── Режим рук / тел персонажей ─────────────────────────────── #
                 success, message, cancelled = TF2VPKExtractService.extract_hand_textures_with_progress(
                     self.textures_vpk_path,
                     self.hand_textures,
@@ -68,6 +73,7 @@ class ExtractTextureWorker(QThread):
                     language=self.language,
                     progress_callback=self.progress.emit,
                     cancel_callback=self.isInterruptionRequested,
+                    use_explicit_list=self.use_explicit_list,
                 )
             else:
                 # ── Режим оружия ───────────────────────────────────────────── #

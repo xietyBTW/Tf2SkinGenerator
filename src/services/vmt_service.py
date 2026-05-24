@@ -400,6 +400,164 @@ class VMTService:
             f.write(new_content)
     
     @staticmethod
+    def remove_paint_proxies(vmt_path: str) -> None:
+        """
+        Removes game paint (tint color) proxies from a hat VMT file so that
+        the user's texture displays without TF2 paint coloring.
+
+        Removes:
+          - $blendtintbybasealpha, $blendtintcoloroverbase, $colortint_base,
+            $colortint_tmp parameter lines
+          - ItemTintColor proxy block
+          - SelectFirstIfNonZero proxy block
+          - Multiply proxy block that references $color2
+
+        Adds:
+          - Equals proxy: maps $yellow → $color2
+        """
+        if not os.path.exists(vmt_path):
+            return
+
+        with open(vmt_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+
+        # Remove paint-related parameter lines
+        for param in (
+            r'\$blendtintbybasealpha',
+            r'\$blendtintcoloroverbase',
+            r'\$colortint_base',
+            r'\$colortint_tmp',
+        ):
+            content = re.sub(
+                r'[ \t]*"?' + param + r'"?\s+"[^"\n]*"[ \t]*\r?\n',
+                '',
+                content,
+                flags=re.IGNORECASE,
+            )
+
+        # Remove paint proxy blocks
+        content = VMTService._remove_named_vmt_block(content, 'ItemTintColor')
+        content = VMTService._remove_named_vmt_block(content, 'SelectFirstIfNonZero')
+        content = VMTService._remove_named_vmt_block(
+            content, 'Multiply',
+            condition=lambda body: bool(re.search(r'\$color2', body, re.IGNORECASE)),
+        )
+
+        # Add Equals proxy inside the Proxies block
+        content = VMTService._insert_equals_proxy(content)
+
+        # Collapse 3+ consecutive blank lines down to at most 2
+        content = re.sub(r'\n{3,}', '\n\n', content)
+
+        with open(vmt_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+
+    @staticmethod
+    def _remove_named_vmt_block(content: str, name: str, condition=None) -> str:
+        """
+        Remove the first matching named proxy block from VMT content.
+        Handles both 'Name\\n{' and 'Name {' styles.
+        If condition is provided, only removes the block when condition(block_body) is True.
+        """
+        header_re = re.compile(
+            r'^[ \t]*"?' + re.escape(name) + r'"?[ \t]*\r?\n',
+            re.IGNORECASE | re.MULTILINE,
+        )
+
+        m = header_re.search(content)
+        if not m:
+            return content
+
+        # Find the next '{' after the header line; everything between must be whitespace
+        next_brace = content.find('{', m.end())
+        if next_brace == -1:
+            return content
+
+        between = content[m.end():next_brace]
+        if between.strip():
+            return content
+
+        # Count braces to find the matching '}'
+        depth = 0
+        end = None
+        for i in range(next_brace, len(content)):
+            if content[i] == '{':
+                depth += 1
+            elif content[i] == '}':
+                depth -= 1
+                if depth == 0:
+                    end = i
+                    break
+
+        if end is None:
+            return content
+
+        block_body = content[next_brace:end + 1]
+
+        if condition is not None and not condition(block_body):
+            return content
+
+        remove_end = end + 1
+        if remove_end < len(content) and content[remove_end] in ('\n', '\r'):
+            remove_end += 1
+
+        return content[:m.start()] + content[remove_end:]
+
+    @staticmethod
+    def _insert_equals_proxy(content: str) -> str:
+        """
+        Insert an Equals proxy ($yellow → $color2) before the closing brace
+        of the Proxies block.  Does nothing if Equals is already present or
+        if there is no Proxies block.
+        """
+        if re.search(r'"?Equals"?\s*[\r\n]', content, re.IGNORECASE):
+            return content
+
+        proxies_re = re.compile(r'(?im)^[ \t]*"?Proxies"?[ \t]*\r?\n')
+        m = proxies_re.search(content)
+        if not m:
+            return content
+
+        next_brace = content.find('{', m.end())
+        if next_brace == -1:
+            return content
+
+        between = content[m.end():next_brace]
+        if between.strip():
+            return content
+
+        # Find matching closing brace
+        depth = 0
+        end = None
+        for i in range(next_brace, len(content)):
+            if content[i] == '{':
+                depth += 1
+            elif content[i] == '}':
+                depth -= 1
+                if depth == 0:
+                    end = i
+                    break
+
+        if end is None:
+            return content
+
+        # Detect indentation from existing proxy names inside the block
+        block_interior = content[next_brace + 1:end]
+        indent_match = re.search(r'^([ \t]+)\S', block_interior, re.MULTILINE)
+        proxy_indent = indent_match.group(1) if indent_match else '\t\t'
+        inner_indent = proxy_indent + '\t'
+
+        equals_block = (
+            f'\n{proxy_indent}"Equals"\n'
+            f'{proxy_indent}{{\n'
+            f'{inner_indent}"srcVar1" "$yellow"\n'
+            f'{inner_indent}"resultVar" "$color2"\n'
+            f'{proxy_indent}}}'
+        )
+
+        return content[:end] + equals_block + '\n' + content[end:]
+
+    @staticmethod
     def _create_template(mode: str, class_name: str = "", weapon_type: str = "") -> str:
         """Создает шаблон VMT (базовый шаблон, если нет оригинального из игры)"""
         if mode in SPECIAL_MODES.values():

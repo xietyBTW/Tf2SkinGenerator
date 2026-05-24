@@ -17,8 +17,9 @@ class BuildWorker(QThread):
     sub_progress = Signal(int, str)   # (pct 0-100 или -1=indeterminate, label)
     error = Signal(str)
     request_model_file = Signal()
-    request_extra_texture = Signal(str, str)  # (material_name, weapon_key) - запрос доп. текстуры
+    request_extra_texture = Signal(str, str)  # (material_name, weapon_key) — запрос одной доп. текстуры
     request_extra_model = Signal(str, str)    # (smd_name, weapon_key) - запрос доп. модели (shell и т.д.)
+    texture_mismatch_warning = Signal(str)    # (warning_message) — предупреждение о несовпадении текстур
 
     def __init__(
         self,
@@ -34,11 +35,16 @@ class BuildWorker(QThread):
         keep_temp_on_error: bool = False,
         debug_mode: bool = False,
         replace_model_enabled: bool = False,
+        replace_model_path: Optional[str] = None,
+        model_ready_path: Optional[str] = None,
         draw_uv_layout: bool = False,
         language: str = "en",
         custom_vtf_path: Optional[str] = None,
         blu_mode: str = "none",
         blu_image_path: Optional[str] = None,
+        custom_vpk_source_path: Optional[str] = None,
+        hat_mdl_path: Optional[str] = None,
+        hat_apply_game_paints: bool = True,
         parent=None
     ):
         super().__init__(parent)
@@ -54,11 +60,16 @@ class BuildWorker(QThread):
         self.keep_temp_on_error = keep_temp_on_error
         self.debug_mode = debug_mode
         self.replace_model_enabled = replace_model_enabled
+        self.replace_model_path = replace_model_path
+        self.model_ready_path = model_ready_path
         self.draw_uv_layout = draw_uv_layout
         self.language = language
         self.custom_vtf_path = custom_vtf_path
         self.blu_mode = blu_mode
         self.blu_image_path = blu_image_path
+        self.custom_vpk_source_path = custom_vpk_source_path
+        self.hat_mdl_path = hat_mdl_path
+        self.hat_apply_game_paints = hat_apply_game_paints
         self.parent_window = parent
 
         self._model_file_mutex = QMutex()
@@ -73,12 +84,18 @@ class BuildWorker(QThread):
         self._extra_model_condition = QWaitCondition()
         self._extra_model_result = _SENTINEL
 
+        self._texture_mismatch_mutex = QMutex()
+        self._texture_mismatch_condition = QWaitCondition()
+        self._texture_mismatch_result = _SENTINEL  # True = continue, False/None = cancel
+
     def run(self) -> None:
         try:
             t = TRANSLATIONS.get(self.language, TRANSLATIONS['en'])
             success, message, cancelled = VPKService.build_with_progress(
+                custom_vpk_source_path=self.custom_vpk_source_path,
                 image_path=self.image_path,
                 mode=self.mode,
+                hat_mdl_path=self.hat_mdl_path,
                 filename=self.filename,
                 size=self.size,
                 format_type=self.format_type,
@@ -89,15 +106,18 @@ class BuildWorker(QThread):
                 keep_temp_on_error=self.keep_temp_on_error,
                 debug_mode=self.debug_mode,
                 replace_model_enabled=self.replace_model_enabled,
+                model_ready_path=self.model_ready_path,
                 draw_uv_layout=self.draw_uv_layout,
-                replace_model_path=None,
-                model_file_callback=self._request_model_file_callback if self.replace_model_enabled else None,
+                replace_model_path=self.replace_model_path,
+                model_file_callback=self._request_model_file_callback if (self.replace_model_enabled and not self.replace_model_path) else None,
                 extra_texture_callback=self._request_extra_texture_callback,
                 extra_model_callback=self._request_extra_model_callback if self.replace_model_enabled else None,
+                texture_mismatch_callback=self._texture_mismatch_callback if self.model_ready_path else None,
                 language=self.language,
                 custom_vtf_path=self.custom_vtf_path,
                 blu_mode=self.blu_mode,
                 blu_image_path=self.blu_image_path,
+                hat_apply_game_paints=self.hat_apply_game_paints,
                 progress_callback=self.progress.emit,
                 sub_progress_callback=self.sub_progress.emit,
                 cancel_callback=self.isInterruptionRequested
@@ -240,3 +260,27 @@ class BuildWorker(QThread):
         self._extra_model_result = file_path
         self._extra_model_condition.wakeAll()
         self._extra_model_mutex.unlock()
+
+    def _texture_mismatch_callback(self, warning_message: str) -> bool:
+        """Показывает предупреждение о несовпадении текстур, ожидает решения пользователя."""
+        logger.debug(f"Запрос подтверждения: несовпадение текстур")
+        result = self._emit_and_wait(
+            self._texture_mismatch_mutex,
+            self._texture_mismatch_condition,
+            '_texture_mismatch_result',
+            self.texture_mismatch_warning,
+            warning_message
+        )
+        # result: 'continue' = продолжить, всё остальное = отменить
+        should_continue = (result == 'continue')
+        logger.debug(f"Решение пользователя по несовпадению текстур: {result} → continue={should_continue}")
+        return should_continue
+
+    def set_texture_mismatch_result(self, decision: str) -> None:
+        """Устанавливает решение пользователя: 'continue' или 'cancel'."""
+        logger.debug(f"set_texture_mismatch_result вызван: {decision}")
+        self._texture_mismatch_mutex.lock()
+        self._texture_mismatch_result = decision
+        self._texture_mismatch_condition.wakeAll()
+        self._texture_mismatch_mutex.unlock()
+

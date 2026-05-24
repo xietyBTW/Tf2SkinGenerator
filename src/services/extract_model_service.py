@@ -39,6 +39,68 @@ class ExtractModelService:
         raise RuntimeError("Не удалось подобрать уникальное имя файла экспорта")
 
     @staticmethod
+    def _build_hat_paths(mdl_rel: str) -> list:
+        """Строит список кандидатов MDL-путей для шапок.
+
+        Обрабатывает:
+        - %s-плейсхолдер → раскрывает во все 9 классов TF2
+        - workshop / workshop_partner варианты
+        - суффиксы класса (_heavy → _scout и т.д.)
+        """
+        import re as _re
+        _TF2_CLASSES = ["heavy", "scout", "soldier", "pyro",
+                        "demoman", "engineer", "medic", "sniper", "spy"]
+        norm = mdl_rel.replace("\\", "/").lower()
+
+        # 1. Раскрываем %s → все классы
+        if "%s" in norm:
+            base_set: list = []
+            for cls in _TF2_CLASSES:
+                try:
+                    v = norm % cls
+                except (TypeError, ValueError):
+                    v = norm.replace("%s", cls)
+                if v not in base_set:
+                    base_set.append(v)
+        else:
+            base_set = [norm]
+
+        # 2. Workshop/workshop_partner варианты
+        paths: list = []
+        for c in base_set:
+            paths.append(c)
+            for src, dsts in [
+                ("models/player/items",
+                 ["models/workshop_partner/player/items", "models/workshop/player/items"]),
+                ("models/workshop/player/items",
+                 ["models/workshop_partner/player/items", "models/player/items"]),
+                ("models/workshop_partner/player/items",
+                 ["models/workshop/player/items", "models/player/items"]),
+            ]:
+                if src in c:
+                    for dst in dsts:
+                        v = c.replace(src, dst)
+                        if v not in paths:
+                            paths.append(v)
+                    break
+
+        # 3. Суффиксы класса (_heavy → другие классы)
+        cls_pat = _re.compile(
+            r'_(heavy|scout|soldier|pyro|demoman|engineer|medic|sniper|spy)(\.mdl)$'
+        )
+        extra: list = []
+        for c in list(paths):
+            m = cls_pat.search(c)
+            if m:
+                for cls in _TF2_CLASSES:
+                    variant = cls_pat.sub(f'_{cls}\\2', c)
+                    if variant not in paths and variant not in extra:
+                        extra.append(variant)
+        paths += extra
+
+        return paths
+
+    @staticmethod
     def _build_paths_to_try(mode: str, weapon_key: str) -> list[str]:
         base_path_from_config = WEAPON_MDL_PATHS[weapon_key]
         paths_to_try = []
@@ -126,7 +188,9 @@ class ExtractModelService:
             if not tf2_root_dir:
                 return False, t.get("tf2_path_not_specified", "TF2 path not specified in settings"), False, None
 
-            if weapon_key not in WEAPON_MDL_PATHS:
+            is_hat_mode = (mode == "hat")
+
+            if not is_hat_mode and weapon_key not in WEAPON_MDL_PATHS:
                 return (
                     False,
                     t.get("error_weapon_not_found", "Weapon not found").format(weapon_key=weapon_key),
@@ -141,7 +205,10 @@ class ExtractModelService:
             emit_progress(15, "extract_model_checking", "Проверка файлов игры...")
             _, tf2_misc_vpk, _ = TF2Paths.resolve(tf2_root_dir)
 
-            paths_to_try = ExtractModelService._build_paths_to_try(mode, weapon_key)
+            if is_hat_mode:
+                paths_to_try = ExtractModelService._build_hat_paths(weapon_key)
+            else:
+                paths_to_try = ExtractModelService._build_paths_to_try(mode, weapon_key)
             found_mdl_path = None
             last_error = None
             for idx, mdl_rel_path in enumerate(paths_to_try):
