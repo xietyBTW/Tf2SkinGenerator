@@ -1253,38 +1253,196 @@ class MainWindow(QMainWindow):
             self.preview_panel.load_image(path)
 
     def expert_mode_triggered(self) -> None:
-        """Открывает редактор VMT для выбранного оружия"""
+        """Открывает редактор VMT для выбранного оружия/шапки."""
         if not hasattr(self, 'mode') or not self.mode:
-            ErrorHandler.show_warning(self, "Сначала выберите оружие!", self.t['error'])
+            ErrorHandler.show_warning(
+                self,
+                self.t.get('select_weapon_error', 'Select a weapon first'),
+                self.t['error'],
+            )
             return
-        
-        # Получаем weapon_key из mode
-        weapon_key = self.mode.split('_', 1)[1] if '_' in self.mode else self.mode
 
+        # ── Режимы без VMT — блокируем ───────────────────────────────────── #
+        from src.data.weapons import SPECIAL_MODES
+        _NO_VMT_MODES = set(SPECIAL_MODES.values()) | {"custom"}
+        if self.mode in _NO_VMT_MODES:
+            ErrorHandler.show_warning(
+                self,
+                self.t.get(
+                    'vmt_editor_not_available',
+                    'VMT editor is not available for this mode.',
+                ),
+                self.t['error'],
+            )
+            return
+
+        # ── Определяем weapon_key и display_name для каждого режима ─────── #
+        from src.data.player_hands import HAND_MODE_KEYS, HAND_MODES
+        from src.data.player_characters import PLAYER_BODY_MODE_KEYS, PLAYER_CHARACTERS
         from src.services.edited_vmt_service import EditedVMTService
+
+        if self.mode == "hat":
+            hat_mdl = getattr(self, '_hat_mdl_path', None)
+            if not hat_mdl:
+                ErrorHandler.show_warning(
+                    self,
+                    self.t.get('select_weapon_error', 'Select a hat first'),
+                    self.t['error'],
+                )
+                return
+            # Ключ для кэша — нормализованный MDL путь
+            weapon_key   = hat_mdl.replace("\\", "/").lower()
+            display_name = getattr(self, '_hat_display_name', weapon_key)
+
+        elif self.mode in HAND_MODE_KEYS:
+            arm_model = HAND_MODES.get(self.mode, {}).get("arm_model", "")
+            if not arm_model:
+                ErrorHandler.show_warning(
+                    self,
+                    self.t.get('vmt_editor_not_available', 'VMT editor is not available for this mode.'),
+                    self.t['error'],
+                )
+                return
+            weapon_key   = arm_model
+            display_name = arm_model
+
+        elif self.mode in PLAYER_BODY_MODE_KEYS:
+            mdl_key = PLAYER_CHARACTERS.get(self.mode, {}).get("mdl_key", "")
+            if not mdl_key:
+                ErrorHandler.show_warning(
+                    self,
+                    self.t.get('vmt_editor_not_available', 'VMT editor is not available for this mode.'),
+                    self.t['error'],
+                )
+                return
+            weapon_key   = mdl_key
+            display_name = mdl_key
+
+        else:
+            # Обычное оружие: mode = "scout_c_scattergun" → "c_scattergun"
+            weapon_key   = self.mode.split('_', 1)[1] if '_' in self.mode else self.mode
+            display_name = weapon_key
+
+        # ── Открываем сохранённый VMT (если есть) ────────────────────────── #
         edited_vmt_path = EditedVMTService.get_edited_vmt(weapon_key)
         if edited_vmt_path and os.path.exists(edited_vmt_path):
-            self.open_vmt_editor(edited_vmt_path, weapon_key)
+            self.open_vmt_editor(edited_vmt_path, weapon_key, display_name)
             return
-        
-        # Извлекаем оригинальный VMT из игры
-        settings = self.settings_panel.get_settings()
+
+        # ── Нет сохранённого — нужен путь к TF2 для извлечения ──────────── #
+        settings     = self.settings_panel.get_settings()
         tf2_root_dir = settings.get('tf2_game_folder', '')
-        
+
         if not tf2_root_dir:
-            ErrorHandler.show_warning(self, "Не указан путь к игре TF2 в настройках!", self.t['error'])
+            ErrorHandler.show_warning(
+                self,
+                self.t.get('tf2_path_not_specified', 'TF2 path not specified in settings'),
+                self.t['error'],
+            )
             return
-        
-        # Извлекаем оригинальный VMT из игры
-        vmt_path = self.extract_original_vmt_from_game(weapon_key, tf2_root_dir)
-        
+
+        # ── Извлекаем VMT из VPK ─────────────────────────────────────────── #
+        if self.mode == "hat":
+            vmt_path = self._extract_hat_vmt_from_game(weapon_key, tf2_root_dir)
+        else:
+            vmt_path = self.extract_original_vmt_from_game(weapon_key, tf2_root_dir)
+
         if not vmt_path:
-            error_msg = f"Не удалось извлечь оригинальный VMT файл для оружия {weapon_key}.\nПроверьте путь к игре TF2 в настройках."
-            ErrorHandler.show_warning(self, error_msg, self.t['error'])
+            ErrorHandler.show_warning(
+                self,
+                self.t.get(
+                    'vmt_extract_failed',
+                    'Could not extract original VMT for: {key}\nCheck TF2 path in settings.',
+                ).format(key=display_name),
+                self.t['error'],
+            )
             return
-        
-        # Открываем редактор с извлеченным VMT
-        self.open_vmt_editor(vmt_path, weapon_key)
+
+        self.open_vmt_editor(vmt_path, weapon_key, display_name)
+
+    def _extract_hat_vmt_from_game(self, hat_mdl: str, tf2_root_dir: str) -> Optional[str]:
+        """
+        Извлекает VMT для шапки через цепочку QC → cdmaterials → VPK.
+        Переиспользует ту же логику что и 3D Preview.
+        """
+        from src.services.tf2_paths import TF2Paths
+        from src.services.preview_3d_worker import Preview3DWorker
+        from src.services import decompile_cache
+        import glob, tempfile
+
+        # ── 1. Ищем QC в кэше декомпиляции ──────────────────────────────── #
+        try:
+            _, misc_vpk, _ = TF2Paths.resolve(tf2_root_dir)
+        except Exception:
+            return None
+
+        qc_path = decompile_cache.find_cached_qc_for_weapon(hat_mdl)
+        if not qc_path:
+            # Нет кэша — пробуем без декомпиляции (быстро, не всегда работает)
+            return None
+
+        cdmaterials, skin0_textures = Preview3DWorker._parse_qc_texture_info(qc_path)
+        if not cdmaterials:
+            return None
+
+        # Имя материала: из $texturegroup или имя файла MDL без расширения и класса
+        mat_names = list(skin0_textures) if skin0_textures else []
+        if not mat_names:
+            import re as _re
+            stem = os.path.splitext(os.path.basename(hat_mdl))[0]
+            stem = _re.sub(
+                r'_(heavy|scout|soldier|pyro|demoman|engineer|medic|sniper|spy)$',
+                '', stem, flags=_re.IGNORECASE,
+            )
+            mat_names = [stem]
+
+        # ── 2. Открываем оба VPK и ищем VMT ─────────────────────────────── #
+        import vpk as vpklib
+        textures_vpk = TF2Paths.resolve_textures_vpk(tf2_root_dir)
+        paks: list = []
+        for vp in [misc_vpk, textures_vpk]:
+            if vp and os.path.exists(vp):
+                try:
+                    paks.append(vpklib.open(vp))
+                except Exception:
+                    pass
+
+        if not paks:
+            return None
+
+        vmt_content: Optional[str] = None
+        vmt_filename: str = "hat.vmt"
+
+        for mat_name in mat_names:
+            for pak in paks:
+                info = Preview3DWorker._find_vmt_content_in_vpk(pak, cdmaterials, mat_name.lower())
+                if info:
+                    _path, _raw = info
+                    vmt_content  = _raw
+                    vmt_filename = os.path.basename(_path)
+                    break
+            if vmt_content:
+                break
+
+        for pak in paks:
+            try:
+                pak.close()
+            except Exception:
+                pass
+
+        if not vmt_content:
+            return None
+
+        # ── 3. Сохраняем во временный файл ───────────────────────────────── #
+        temp_dir = os.path.join("tools", "temp_vmt_extract")
+        os.makedirs(temp_dir, exist_ok=True)
+        out_path = os.path.join(temp_dir, vmt_filename)
+        try:
+            with open(out_path, "w", encoding="utf-8") as f:
+                f.write(vmt_content)
+            return out_path
+        except OSError:
+            return None
     
     def extract_original_vmt_from_game(self, weapon_key: str, tf2_root_dir: str) -> Optional[str]:
         """
@@ -1367,9 +1525,9 @@ class MainWindow(QMainWindow):
         
         return None
 
-    def open_vmt_editor(self, path: str, weapon_key: str = "") -> None:
+    def open_vmt_editor(self, path: str, weapon_key: str = "", display_name: str = "") -> None:
         """Открывает редактор VMT файла"""
-        dialog = VMTEditorDialog(self, path, weapon_key, self.t)
+        dialog = VMTEditorDialog(self, path, weapon_key, self.t, display_name=display_name)
         dialog.exec()
 
     def build_vpk(self):
@@ -2036,73 +2194,80 @@ class MainWindow(QMainWindow):
             is_hands = self.mode in HAND_MODE_KEYS
             is_player_body = self.mode in PLAYER_BODY_MODE_KEYS
             is_hat = (self.mode == "hat")
+
+            # ── Шапки: отдельный воркер, та же цепочка что и в 3D Preview ── #
+            if is_hat:
+                hat_mdl = getattr(self, '_hat_mdl_path', '')
+                if not hat_mdl:
+                    ErrorHandler.show_warning(
+                        self, self.t.get('select_weapon_error', 'Select a hat first'), self.t['error']
+                    )
+                    return
+
+                settings = self.settings_panel.get_settings()
+                tf2_root_dir = settings.get('tf2_game_folder', '')
+                if not tf2_root_dir:
+                    ErrorHandler.show_warning(
+                        self, self.t.get('tf2_path_not_specified', 'TF2 path not specified'), self.t['error']
+                    )
+                    return
+
+                export_folder = settings.get('export_folder', 'export')
+                from src.config.app_config import AppConfig
+                export_format = AppConfig.load_config().get('export_image_format', 'PNG')
+
+                if hasattr(self, '_extract_worker') and self._extract_worker.isRunning():
+                    ErrorHandler.show_warning(
+                        self,
+                        self.t.get('extract_already_running', 'Extraction is already in progress.'),
+                        self.t['error']
+                    )
+                    return
+
+                from src.services.hat_texture_extract_worker import HatTextureExtractWorker
+                self._extract_worker = HatTextureExtractWorker(
+                    hat_mdl_path=hat_mdl,
+                    tf2_root_dir=tf2_root_dir,
+                    export_folder=export_folder,
+                    export_format=export_format,
+                    language=self.language,
+                    parent=self,
+                )
+                self._extract_worker.finished.connect(self._on_extract_finished)
+                self._extract_worker.progress.connect(self._on_extract_progress)
+                self._extract_worker.error.connect(self._on_extract_error)
+
+                from src.ui.build_progress_dialog import BuildProgressDialog
+                self._extract_progress_dialog = BuildProgressDialog(
+                    self, language=self.language,
+                    title=self.t.get('extract_progress_title', 'Extract Texture'),
+                )
+                self._extract_progress_dialog.setLabelText(
+                    self.t.get('extract_progress_text', 'Extracting texture...')
+                )
+                self._extract_progress_dialog.cancel_requested.connect(self._cancel_extract)
+
+                self._extract_worker.start()
+                self._extract_progress_dialog.show()
+                if hasattr(self.settings_panel, 'extract_texture_button'):
+                    self.settings_panel.extract_texture_button.setEnabled(False)
+                return  # ← ранний выход; остальное — для оружия/рук/тел
+
+            # ── Оружие / руки / скины персонажей ────────────────────────── #
             if is_hands:
                 hand_textures = get_hand_textures(self.mode)
             elif is_player_body:
                 hand_textures = None   # будет заполнено после диалога
-            elif is_hat:
-                # Для шапок строим hand_textures из пути MDL
-                hat_mdl = getattr(self, '_hat_mdl_path', '').replace('\\', '/').lower()
-                if not hat_mdl:
-                    ErrorHandler.show_warning(self, self.t.get('select_weapon_error', 'Select a hat first'), self.t['error'])
-                    return
-                
-                import posixpath as _pp
-                hand_textures = []
-
-                # ── Приоритет: QC-файл из кэша декомпиляции ─────────────────
-                # Если пользователь уже открывал 3D Preview для этой шапки,
-                # Crowbar уже создал QC-файл, в котором прописаны точные имена
-                # текстур ($texturegroup "skinfamilies"). Используем их вместо
-                # угадывания по имени MDL.
-                from src.services import decompile_cache
-                from src.services.preview_3d_worker import Preview3DWorker
-                _qc_path = decompile_cache.find_cached_qc_for_weapon(hat_mdl)
-                if _qc_path:
-                    _cdmaterials, _skin0_textures = Preview3DWorker._parse_qc_texture_info(_qc_path)
-                    _PLAYER_PREFIX = "materials/models/player/"
-                    for _cdmat in _cdmaterials:
-                        _full = f"materials/{_cdmat}"
-                        if _full.startswith(_PLAYER_PREFIX):
-                            _folder = _full[len(_PLAYER_PREFIX):].strip("/")
-                        else:
-                            _folder = _cdmat.strip("/")
-                        for _tex in _skin0_textures:
-                            if (_folder, _tex) not in hand_textures:
-                                hand_textures.append((_folder, _tex))
-
-                # ── Fallback: угадываем путь по имени MDL ────────────────────
-                if not hand_textures:
-                    _TF2_CLASSES = [
-                        "heavy", "scout", "soldier", "pyro",
-                        "demoman", "engineer", "medic", "sniper", "spy",
-                    ]
-                    if "%s" in hat_mdl:
-                        hat_mdl_variants = []
-                        for cls in _TF2_CLASSES:
-                            try:
-                                hat_mdl_variants.append(hat_mdl % cls)
-                            except (TypeError, ValueError):
-                                hat_mdl_variants.append(hat_mdl.replace("%s", cls))
-                    else:
-                        hat_mdl_variants = [hat_mdl]
-
-                    for variant in hat_mdl_variants:
-                        base_no_ext = variant[:-4] if variant.endswith('.mdl') else variant
-                        if '/player/' in base_no_ext:
-                            idx = base_no_ext.index('/player/') + len('/player/')
-                            rel = base_no_ext[idx:]
-                            folder   = _pp.dirname(rel)
-                            vtf_name = _pp.basename(rel)
-                        else:
-                            folder   = ''
-                            vtf_name = _pp.basename(base_no_ext)
-                        if (folder, vtf_name) not in hand_textures:
-                            hand_textures.append((folder, vtf_name))
             else:
                 hand_textures = None
-            if is_hat:
-                weapon_key = hand_textures[0][1] if hand_textures else "hat"
+
+            # Для рук используем arm_model как weapon_key — именно под ним
+            # хранится QC в кэше декомпила. Простой split даёт "hands" вместо "c_scout_arms".
+            if is_hands:
+                from src.data.player_hands import HAND_MODES as _HAND_MODES
+                weapon_key = _HAND_MODES.get(self.mode, {}).get("arm_model", "") or (
+                    self.mode.split('_', 1)[1] if '_' in self.mode else self.mode
+                )
             else:
                 weapon_key = self.mode.split('_', 1)[1] if '_' in self.mode else self.mode
 
@@ -2161,8 +2326,8 @@ class MainWindow(QMainWindow):
                 export_folder=export_folder,
                 export_format=export_format,
                 language=self.language,
-                hand_textures=hand_textures,                        # None для оружия, список для рук/тел/шапок
-                use_explicit_list=is_player_body or is_hat,        # для тел и шапок — только выбранные файлы
+                hand_textures=hand_textures,
+                use_explicit_list=is_player_body or is_hands,
                 parent=self
             )
             

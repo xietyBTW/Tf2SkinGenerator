@@ -34,6 +34,7 @@ class ExtractTextureWorker(QThread):
         language: str = "en",
         hand_textures: Optional[List[Tuple[str, str]]] = None,
         use_explicit_list: bool = False,
+        misc_vpk_path: Optional[str] = None,
         parent=None,
     ):
         """
@@ -59,6 +60,7 @@ class ExtractTextureWorker(QThread):
         self.language           = language
         self.hand_textures      = hand_textures
         self.use_explicit_list  = use_explicit_list
+        self.misc_vpk_path      = misc_vpk_path
 
     def run(self) -> None:
         """Выполняет извлечение текстуры в фоновом потоке."""
@@ -74,6 +76,8 @@ class ExtractTextureWorker(QThread):
                     progress_callback=self.progress.emit,
                     cancel_callback=self.isInterruptionRequested,
                     use_explicit_list=self.use_explicit_list,
+                    misc_vpk_path=self.misc_vpk_path,
+                    arm_model_key=self.weapon_key,
                 )
             else:
                 # ── Режим оружия ───────────────────────────────────────────── #

@@ -720,7 +720,65 @@ class VPKService:
                     tg_structure = ModelBuildService.extract_texturegroup_structure(qc_path)
                     blu_row = tg_structure.get('blu_row', [])
                     extra_materials = tg_structure.get('extra_materials', [])
-                    
+
+                    # ── Для режимов рук: фильтруем $texturegroup до актуальных текстур рук ─────────
+                    # Проблема: QC руки инженера (c_engineer_arms) в column 0 содержит "engineer_red"
+                    # (текстуру ТЕЛА), а не текстуру руки. Аналогично у медика — "medic_red".
+                    # Без фильтрации пользовательское изображение заменяет всё тело персонажа,
+                    # а не только руки, потому что именно column 0 получает изображение пользователя.
+                    #
+                    # Решение: для hand-режимов сравниваем текстуры из QC со списком рук
+                    # из player_hands.py и оставляем только совпадающие (+ их BLU-варианты).
+                    if mode in HAND_MODE_KEYS:
+                        from src.data.player_hands import get_hand_textures as _ght_hands
+                        _h_list = _ght_hands(mode)  # [(folder, vtf_name), ...]
+                        _h_names_lc = {n.lower() for _, n in _h_list}
+
+                        _red_row_full = tg_structure.get('red_row', [])
+                        _blu_row_full = tg_structure.get('blu_row', [])
+
+                        # Позиции в red_row, где стоят настоящие текстуры рук
+                        _hand_idx = [i for i, t in enumerate(_red_row_full)
+                                     if t.lower() in _h_names_lc]
+
+                        # Переопределяем texture_filename если column 0 — текстура тела
+                        if texture_filename.lower() not in _h_names_lc:
+                            if _hand_idx:
+                                texture_filename = _red_row_full[_hand_idx[0]]
+                            elif _h_list:
+                                texture_filename = _h_list[0][1]
+                            logger.info(
+                                f"[HANDS] texture_filename → {texture_filename!r} "
+                                f"(body texture excluded from mod)"
+                            )
+
+                        # blu_row: BLU-варианты строго на позициях hand-текстур в red_row.
+                        # Если BLU-текстура на этой позиции совпадает с RED — это нейтральная
+                        # (общая) текстура; она будет создана через путь extra_materials/main, не BLU.
+                        # Важно: вычисляем РАНЬШЕ extra_materials, чтобы избежать дублирования.
+                        _filtered_blu: list = []
+                        for _hi in _hand_idx:
+                            if _hi < len(_blu_row_full):
+                                _b = _blu_row_full[_hi]
+                                _r = _red_row_full[_hi]
+                                if _b.lower() != _r.lower():
+                                    _filtered_blu.append(_b)
+                        blu_row = _filtered_blu
+                        _filtered_blu_lc = {t.lower() for t in _filtered_blu}
+
+                        # extra_materials: hand-текстуры из red_row, кроме основной
+                        # и кроме тех, что уже попали в blu_row (иначе создадутся дважды).
+                        extra_materials = [
+                            _red_row_full[i] for i in _hand_idx
+                            if _red_row_full[i].lower() != texture_filename.lower()
+                            and _red_row_full[i].lower() not in _filtered_blu_lc
+                        ]
+
+                        logger.info(
+                            f"[HANDS] texture_filename={texture_filename!r}, "
+                            f"extra_materials={extra_materials}, blu_row={blu_row}"
+                        )
+
                     if blu_row:
                         logger.info(f"Найдена BLU команда: {blu_row}")
                     if extra_materials:
