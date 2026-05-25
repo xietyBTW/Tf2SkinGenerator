@@ -269,7 +269,7 @@ class VMTService:
         def update_framerate(text: str) -> str:
             return re.sub(
                 r'(?im)^(\s*"?animatedtextureframerate"?\s+)"?\d+(\.\d+)?"?\s*$',
-                r'\g<1>' + str(fps_int),
+                r'\g<1>"' + str(fps_int) + '"',
                 text,
             )
 
@@ -322,7 +322,14 @@ class VMTService:
 
                 if end is not None:
                     block = content[brace_pos:end + 1]
-                    if re.search(r'(?i)\banimatedtexture\b', block):
+                    # Check if there's already an AnimatedTexture proxy specifically for $basetexture.
+                    # Some VMTs (e.g. Hypno-Eyes) have a default AnimatedTexture proxy for $detail —
+                    # that's a different variable and must not block us from adding our own for $basetexture.
+                    has_basetexture_anim = bool(re.search(
+                        r'(?si)"?AnimatedTexture"?\s*\{[^}]*"?animatedtexturevar"?\s+"?\$basetexture"?',
+                        block,
+                    ))
+                    if has_basetexture_anim:
                         patched_block = update_framerate(block)
                         content = content[:brace_pos] + patched_block + content[end + 1:]
                     else:
@@ -333,11 +340,11 @@ class VMTService:
                         insert_at = brace_line_end + 1
                         inside_indent = proxies_indent + '\t'
                         insertion = (
-                            inside_indent + 'animatedtexture\n'
+                            inside_indent + '"AnimatedTexture"\n'
                             + inside_indent + '{\n'
-                            + inside_indent + '\tanimatedtexturevar "$basetexture"\n'
-                            + inside_indent + '\tanimatedtextureframenumvar "$frame"\n'
-                            + inside_indent + '\tanimatedtextureframerate ' + str(fps_int) + '\n'
+                            + inside_indent + '\t"animatedtexturevar" "$basetexture"\n'
+                            + inside_indent + '\t"animatedtextureframenumvar" "$frame"\n'
+                            + inside_indent + '\t"animatedtextureframerate" "' + str(fps_int) + '"\n'
                             + inside_indent + '}\n'
                         )
                         content = content[:insert_at] + insertion + content[insert_at:]

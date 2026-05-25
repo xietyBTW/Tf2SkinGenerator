@@ -1131,10 +1131,11 @@ class VPKService:
                             logger.warning(f"Файл не найден: {extra_image_path}")
                             extra_image_path = None
                         
+                        extra_animated_fps = None
                         if extra_image_path and os.path.isfile(extra_image_path):
                             # Пользователь предоставил отдельное изображение для этого материала
                             logger.info(f"Используем отдельное изображение для {extra_mat_name}: {extra_image_path}")
-                            
+
                             if custom_vtf_path:
                                 # Пользователь использует VTF - копируем
                                 copy_file_safe(extra_image_path, extra_vtf_path)
@@ -1144,7 +1145,7 @@ class VPKService:
                                 if vtf_options:
                                     merged_extra.update(vtf_options)
                                 merged_extra.update(flags_parsed_extra)
-                                TextureService.create_animated_vtf(
+                                extra_animated_fps = TextureService.create_animated_vtf(
                                     extra_image_path, str(extra_vtf_path),
                                     size, format_type, vtf_flags_extra, merged_extra
                                 )
@@ -1180,8 +1181,15 @@ class VPKService:
                             VMTService.create_vmt_template_from_cdmaterials(str(extra_vmt_path), patched_cdmaterials_path, extra_mat_name)
                             logger.info(f"Создан VMT из шаблона для доп. материала: {extra_vmt_filename}")
                         
-                        if animated_fps:
-                            VMTService.enable_animated_basetexture(str(extra_vmt_path), animated_fps)
+                        # Если пользователь загрузил свою extra-текстуру — используем её FPS.
+                        # Если extra_image не было (скопирована основная VTF) — используем FPS основной.
+                        # Если extra_image статична — не анимируем extra VMT вообще.
+                        if extra_image_path and os.path.isfile(extra_image_path):
+                            _extra_fps = extra_animated_fps
+                        else:
+                            _extra_fps = animated_fps
+                        if _extra_fps:
+                            VMTService.enable_animated_basetexture(str(extra_vmt_path), _extra_fps)
                     
                     # === Создаем текстуры для BLU команды ===
                     # BLU - это отдельная строка (row 1) в $texturegroup
