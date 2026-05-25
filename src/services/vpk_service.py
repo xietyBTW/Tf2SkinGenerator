@@ -1356,6 +1356,32 @@ class VPKService:
                         else:
                             logger.debug("Оригинальный и пропатченный пути совпадают, зеркало не нужно")
 
+                    # ── Зеркальные VMT для all-class шапок ───────────────────────────────
+                    # Проблема: у all-class шапок каждый класс имеет свою модель (%s-плейсхолдер).
+                    # Инструмент компилирует модель только одного класса (первый найденный в VPK)
+                    # с пропатченным $cdmaterials (console\ путь). Модели остальных восьми классов
+                    # берутся из базового VPK игры и ссылаются на ОРИГИНАЛЬНЫЙ путь текстур.
+                    # Из-за этого только один класс видит новую текстуру.
+                    #
+                    # Фикс: создаём зеркальные VMT по оригинальному пути из $cdmaterials.
+                    # Зеркальные VMT ссылаются на те же VTF (по console\ пути) — дублировать их не нужно.
+                    # Так все классы, использующие оригинальные модели, тоже найдут кастомную текстуру.
+                    if mode == "hat" and hat_mdl_path and "%s" in hat_mdl_path and original_cdmaterials_path:
+                        _hat_orig_rel = "materials/" + original_cdmaterials_path.replace('\\', '/').strip().rstrip('/')
+                        _hat_orig_dir = ctx.vpkroot_dir
+                        for _part in _hat_orig_rel.rstrip('/').split('/'):
+                            _hat_orig_dir = _hat_orig_dir / _part
+
+                        if _hat_orig_dir != vtf_output_path:
+                            ensure_directory_exists(_hat_orig_dir)
+                            for _vmt_src in vtf_output_path.glob("*.vmt"):
+                                _vmt_mirror = _hat_orig_dir / _vmt_src.name
+                                if not _vmt_mirror.exists():
+                                    copy_file_safe(_vmt_src, _vmt_mirror)
+                                    logger.info(f"Зеркальный VMT для all-class шапки: {_vmt_mirror.name}")
+                        else:
+                            logger.debug("Пути для шапки совпадают, зеркало не нужно")
+
                     if debug_mode:
                         DebugService.save_patched_stage(ctx, ctx.decompile_dir)
 

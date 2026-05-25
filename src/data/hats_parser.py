@@ -327,14 +327,7 @@ def _parse_items_game(filepath: str,
         mdl_path = _flat_value(block, "model_player")
 
         # TF2 использует %s как плейсхолдер для имени класса (напр. ghostly_gibus_%s.mdl).
-        # Подставляем реальное имя класса из used_by_classes, иначе "heavy" по умолчанию.
-        if mdl_path and "%s" in mdl_path:
-            classes_tmp = _extract_classes(block)
-            substitute = classes_tmp[0] if classes_tmp else "heavy"
-            try:
-                mdl_path = mdl_path % substitute
-            except (TypeError, ValueError):
-                mdl_path = mdl_path.replace("%s", substitute)
+        # Сохраняем %s как есть — vpk_service раскрывает его в пути для каждого класса при сборке.
 
         if not mdl_path:
             mdl_path = _extract_per_class_model(block)
