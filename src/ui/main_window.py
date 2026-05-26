@@ -544,6 +544,9 @@ class MainWindow(QMainWindow):
         logger.info(f"Выбрана шапка: {display_name} → {mdl_path}")
         if hasattr(self, 'settings_panel'):
             self.settings_panel.apply_mode_restrictions(self.mode)
+        # Сбрасываем 2D панель — чтобы текстура предыдущей шапки не оставалась
+        if hasattr(self, 'preview_panel'):
+            self.preview_panel.update_extra_slots('', mode='hat')
         # Обновляем 3D preview и сводку
         self._update_hat_3d_preview()
         self.update_preview_info()
@@ -954,6 +957,9 @@ class MainWindow(QMainWindow):
         # Обновляем 3D Preview
         self._update_3d_preview()
 
+        # Обновляем карточки доп. текстурных слотов в 2D превью
+        self._update_extra_slots()
+
         # Обновляем резюме в превью
         self.update_preview_info()
 
@@ -1035,173 +1041,36 @@ class MainWindow(QMainWindow):
             textures_vpk_path=textures_vpk,
         )
 
+    def _update_extra_slots(self) -> None:
+        """Обновляет карточки доп. текстурных слотов в 2D превью при смене оружия."""
+        if not hasattr(self, 'preview_panel'):
+            return
+
+        from src.data.player_hands import HAND_MODE_KEYS, HAND_MODES
+
+        mode = getattr(self, 'mode', None) or ''
+
+        if not mode or mode in ('spray', 'critHIT', 'custom'):
+            # Для этих режимов доп. слоты не нужны
+            self.preview_panel.update_extra_slots('', mode='')
+            return
+
+        is_hand_mode = mode in HAND_MODE_KEYS
+        if is_hand_mode:
+            arm_key = HAND_MODES.get(mode, {}).get('arm_model', '')
+            self.preview_panel.update_extra_slots(arm_key, mode=mode)
+        elif '_' in mode:
+            weapon_key = mode.split('_', 1)[1]
+            self.preview_panel.update_extra_slots(weapon_key, mode=mode)
+        else:
+            self.preview_panel.update_extra_slots('', mode='')
+
     # ── Hand texture slot selector ────────────────────────────────────── #
 
     def update_preview_info(self) -> None:
         """Обновляет резюме информации в превью"""
         if hasattr(self, 'preview_panel'):
             self.preview_panel.update_info_summary()
-    
-    def create_weapon_folders(self) -> None:
-        """Создает папки для всех оружий TF2, если они не существуют"""
-        base_path = os.path.join("tools", "mod_data")
-        
-        for class_name, weapons in TF2_WEAPONS.items():
-            for weapon_type, weapon_dict in weapons.items():
-                for weapon_key, weapon_name in weapon_dict.items():
-                    mode_key = f"{class_name.lower()}_{weapon_key}"
-                    weapon_path = os.path.join(base_path, mode_key, "root")
-                    
-                    try:
-                        # Создаем правильную структуру vgui/replay/thumbnails
-                        vgui_path = os.path.join(weapon_path, "materials", "vgui", "replay", "thumbnails", "models", "workshop_partner", "weapons", "c_models", weapon_key)
-                        
-                        # Создаем папки по частям
-                        path_parts = ["materials", "vgui", "replay", "thumbnails", "models", "workshop_partner", "weapons", "c_models", weapon_key]
-                        current_path = weapon_path
-                        
-                        for part in path_parts:
-                            current_path = os.path.join(current_path, part)
-                            os.makedirs(current_path, exist_ok=True)
-                        
-                        # Создаем VMT файл если его нет
-                        vmt_path = os.path.join(vgui_path, f"{weapon_key}.vmt")
-                        if not os.path.exists(vmt_path):
-                            try:
-                                mode_key = f"{class_name.lower()}_{weapon_key}"
-                                self.create_vmt_template(vmt_path, mode_key, class_name, weapon_type)
-                            except (OSError, IOError) as e:
-                                # Игнорируем ошибки создания файлов для оружия с очень длинными именами
-                                if "No such file or directory" in str(e) or "path too long" in str(e).lower():
-                                    logger.warning(f"Пропуск создания VMT для {weapon_key} (слишком длинный путь)")
-                                else:
-                                    logger.error(f"Ошибка создания VMT для {weapon_key}: {e}", exc_info=True)
-                        
-                        # Создаем VTF файл если его нет
-                        vtf_path = os.path.join(vgui_path, f"c_{weapon_key}.vtf")
-                        if not os.path.exists(vtf_path):
-                            try:
-                                # Создаем пустой VTF файл (будет заменен при генерации)
-                                with open(vtf_path, 'wb') as f:
-                                    f.write(b'')
-                            except (OSError, IOError) as e:
-                                # Игнорируем ошибки создания файлов для оружия с очень длинными именами
-                                if "No such file or directory" in str(e) or "path too long" in str(e).lower():
-                                    logger.warning(f"Пропуск создания VTF для {weapon_key} (слишком длинный путь)")
-                                else:
-                                    logger.error(f"Ошибка создания VTF для {weapon_key}: {e}", exc_info=True)
-                                
-                    except Exception as e:
-                        logger.error(f"Ошибка создания папок для {weapon_key}: {e}", exc_info=True)
-                        continue
-    
-
-    def create_vmt_template(self, vmt_path: str, weapon: str, class_name: str, weapon_type: str) -> None:
-        """Создает VMT шаблон для оружия"""
-        try:
-            # Проверяем, является ли это специальным режимом
-            if weapon in SPECIAL_MODES.values():
-                if weapon == "critHIT":
-                    # Для CritHIT используем простой шаблон
-                    vmt_content = f'''"UnlitGeneric"
-{{
-\t"$basetexture" "effects/{weapon}"
-\t"$additive" "1"
-\t"$translucent" "1"
-}}'''
-                else:
-                    # Для других специальных режимов
-                    vmt_content = f'''"UnlitGeneric"
-{{
-\t"$basetexture" "effects/{weapon}"
-\t"$additive" "1"
-\t"$translucent" "1"
-}}'''
-            else:
-                # Для обычного оружия - всегда используем VGUI структуру
-                # Извлекаем имя оружия из режима (убираем префикс класса)
-                weapon_name = weapon.split('_', 1)[1] if '_' in weapon else weapon
-                texture_path = f"vgui/replay/thumbnails/models/workshop_partner/weapons/c_models/{weapon_name}"
-                
-                # Полный шаблон VMT с Proxies
-                vmt_content = f'''"VertexLitGeneric"
-{{
-\t"$basetexture" "{texture_path}"
-\t
-\t"$phong" "1"
-\t"$phongexponent" "25"
-\t"$phongboost" "2.5"\t
-\t
-\t"$phongfresnelranges"\t"[.25 .5 20]"
-\t"$halflambert" "1"
-
-\t"$basemapalphaphongmask" "1"
-\t
-\t// Rim lighting parameters
-\t"$rimlight" "1"\t\t\t\t\t\t
-\t"$rimlightexponent" "4"\t\t
-\t"$rimlightboost" "2"
-
-\t"$glowcolor" "1"
-
-\t// Cloaking
-\t"$cloakPassEnabled" "1"
-\t"$sheenPassEnabled" "1"
-
-\t"$sheenmap" \t\t"cubemaps/cubemap_sheen001"
-\t"$sheenmapmask" \t\t"Effects/AnimatedSheen/animatedsheen0"
-\t"$sheenmaptint" \t\t"[ 1 1 1 ]"
-\t"$sheenmapmaskframe" \t"0"
-\t"$sheenindex" \t\t"0"
-
-\t"$yellow" "0"
-
-\t"Proxies"
-\t{{
-\t\t"AnimatedWeaponSheen"
-\t\t{{
-\t\t\t"animatedtexturevar" \t\t"$sheenmapmask"
-\t\t\t"animatedtextureframenumvar" \t"$sheenmapmaskframe"
-\t\t\t"animatedtextureframerate" \t\t"40"
-\t\t}}
-\t\t"invis"
-\t\t{{
-\t\t}}
-\t\t"ModelGlowColor"
-\t\t{{
-\t\t\t"resultVar" "$glowcolor"
-\t\t}}
-\t\t"Equals"
-\t\t{{
-\t\t\t"srcVar1"  "$glowcolor"
-\t\t\t"resultVar" "$selfillumtint"
-\t\t}}
-\t\t"Equals"
-\t\t{{
-\t\t\t"srcVar1"  "$glowcolor"
-\t\t\t"resultVar" "$color2"
-\t\t}}
-\t\t"YellowLevel"
-\t\t{{
-\t\t\t"resultVar" "$yellow"
-\t\t}}
-\t\t"Multiply"
-\t\t{{
-\t\t\t"srcVar1" "$color2"
-\t\t\t"srcVar2" "$yellow"
-\t\t\t"resultVar" "$color2"
-\t\t}}
-\t}}
-}}
-
-// made on Tf2SkinGenerator https://steamcommunity.com/id/sosatihackeri - Developer(xiety)'''
-            
-            # Записываем VMT файл
-            with open(vmt_path, 'w', encoding='utf-8') as f:
-                f.write(vmt_content)
-                
-        except Exception as e:
-            logger.error(f"Ошибка при создании VMT файла: {e}", exc_info=True)
     
     def get_weapon_paths(self, mode: str) -> Tuple[str, str, str, str]:
         """Возвращает пути для конкретного оружия"""
@@ -1699,6 +1568,13 @@ class MainWindow(QMainWindow):
             # Создаем и запускаем воркер для асинхронной сборки
             from src.services.build_worker import BuildWorker
             
+            # Если пользователь загрузил BLU-текстуру в 2D панели — используем её
+            # автоматически, без лишних вопросов.
+            _blu_image = None
+            if hasattr(self, 'preview_panel'):
+                _blu_image = self.preview_panel.get_blu_image_path()
+            _blu_mode = 'upload' if _blu_image else 'none'
+
             self._build_worker = BuildWorker(
                 image_path=from_path,
                 mode=self.mode,
@@ -1717,8 +1593,8 @@ class MainWindow(QMainWindow):
                 draw_uv_layout=draw_uv_layout,
                 language=self.language,
                 custom_vtf_path=custom_vtf_path,
-                blu_mode='none',
-                blu_image_path=None,
+                blu_mode=_blu_mode,
+                blu_image_path=_blu_image,
                 custom_vpk_source_path=getattr(self, '_custom_vpk_path', None),
                 hat_mdl_path=getattr(self, '_hat_mdl_path', None),
                 hat_apply_game_paints=hat_apply_game_paints,
@@ -1821,11 +1697,36 @@ class MainWindow(QMainWindow):
     def _on_request_extra_texture(self, material_name: str, weapon_key: str) -> None:
         """
         Обрабатывает запрос дополнительного изображения для материала модели.
+
+        Сначала проверяет, загружено ли уже изображение для этого слота через
+        карточку доп. слота в 2D превью (drag-drop или Browse). Если да — использует его
+        без диалога. Иначе — показывает стандартный диалог выбора файла.
         """
         if not hasattr(self, '_build_worker'):
             return
 
-        # Спрашиваем пользователя
+        # ── Проверяем pre-loaded путь из карточки слота ───────────────────────
+        pre_loaded: Optional[str] = None
+        if hasattr(self, 'preview_panel'):
+            slot_paths = self.preview_panel.get_slot_image_paths()
+            # Ищем по exact match или по нечувствительному к регистру совпадению
+            pre_loaded = slot_paths.get(material_name)
+            if pre_loaded is None:
+                mat_lc = material_name.lower()
+                for key, path in slot_paths.items():
+                    if key.lower() == mat_lc:
+                        pre_loaded = path
+                        break
+
+        if pre_loaded and os.path.exists(pre_loaded):
+            logger.info(
+                f"_on_request_extra_texture: used pre-loaded path for '{material_name}': {pre_loaded}"
+            )
+            if hasattr(self._build_worker, 'set_extra_texture_result'):
+                self._build_worker.set_extra_texture_result(pre_loaded)
+            return
+
+        # ── Стандартный диалог ────────────────────────────────────────────────
         from PySide6.QtWidgets import QMessageBox
 
         # Для скинов персонажей используем человекочитаемое название текстуры

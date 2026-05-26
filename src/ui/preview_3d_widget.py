@@ -35,13 +35,14 @@ def _make_js_bridge():
     from PySide6.QtCore import QObject, Signal, Slot
 
     class JsBridge(QObject):
-        texture_dropped  = Signal(str)  # data-URL изображения (дроп на пустое место)
+        # data-URL + имя материала (пустая строка = дроп на пустое место)
+        texture_dropped  = Signal(str, str)
         per_mesh_applied = Signal()     # дроп на конкретный меш (per-mesh drag)
 
-        @Slot(str)
-        def notifyTextureDrop(self, data_url: str) -> None:  # noqa: N802
+        @Slot(str, str)
+        def notifyTextureDrop(self, data_url: str, material_name: str = '') -> None:  # noqa: N802
             """Вызывается из JS когда пользователь перетаскивает текстуру в 3D viewer."""
-            self.texture_dropped.emit(data_url)
+            self.texture_dropped.emit(data_url, material_name)
 
         @Slot()
         def notifyPerMeshApplied(self) -> None:  # noqa: N802
@@ -252,7 +253,7 @@ class _Real3DWidget:
         self._view.page().runJavaScript(js)
 
     def update_animated_texture_files(
-        self, frame_paths: list, framerate: float
+        self, frame_paths: list, framerate: float, mat_name: str = ''
     ) -> None:
         """
         Запускает анимацию текстуры на уже загруженной модели.
@@ -260,6 +261,8 @@ class _Real3DWidget:
         Args:
             frame_paths: список путей к PNG кадрам (в порядке анимации)
             framerate:   частота кадров (fps)
+            mat_name:    имя материала/меша для per-mesh анимации (опционально).
+                         Если задан — анимируется только этот меш.
         """
         if not self._ready or not frame_paths:
             return
@@ -267,10 +270,12 @@ class _Real3DWidget:
         if not valid:
             return
         data_urls = [_file_to_data_url(p) for p in valid]
+        mat_arg = f", {json.dumps(mat_name)}" if mat_name else ""
         js = (
             f"window.loadAnimatedTexture("
             f"{json.dumps(data_urls)}, "
             f"{framerate:.4f}"
+            f"{mat_arg}"
             f")"
         )
         self._view.page().runJavaScript(js)
@@ -414,7 +419,7 @@ class _Fallback3DWidget:
     def apply_material_map(self, *_): pass
     def set_editable_mesh_names(self, *_): pass
     def update_texture_file(self, *_): pass
-    def update_animated_texture_files(self, *_): pass
+    def update_animated_texture_files(self, frame_paths=None, framerate=0.0, mat_name=''): pass
     def load_crithit_scene(self, crit_tex_path: str = "", model_tex_path: str = ""): pass
     def load_crithit_scene_with_model(self, obj_path: str, crit_tex_path: str = "", model_tex_path: str = ""): pass
     def update_crithit_texture(self, *_): pass

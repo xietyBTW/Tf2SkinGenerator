@@ -205,8 +205,8 @@ let _pyBridge = null;
   } catch (_) { /* standalone browser — bridge недоступен */ }
 })();
 
-function _notifyTextureDrop(dataUrl) {
-  try { if (_pyBridge) _pyBridge.notifyTextureDrop(dataUrl); }
+function _notifyTextureDrop(dataUrl, materialName) {
+  try { if (_pyBridge) _pyBridge.notifyTextureDrop(dataUrl, materialName || ''); }
   catch (_) { /* ignore */ }
 }
 
@@ -323,6 +323,12 @@ let _pendingMaterialMap = null;  // {mat_name: dataUrl} — ожидает за�
 // null  → обновляем все меши (обычный режим)
 // Set   → обновляем только меши с именами из множества (режим рук)
 let _editableMeshNames  = null;
+// null  → анимация применяется согласно _editableMeshNames (или ко всем)
+// Set   → анимируются только эти конкретные меши/материалы (per-mesh GIF)
+let _animMeshNames      = null;
+// Счётчик поколения анимации — инкрементируется при каждом stopAnimation().
+// Используется для отмены устаревших async _loadTextureThen-коллбэков.
+let _animGeneration     = 0;
 
 let _critSprite   = null;   // THREE.Sprite — CritHIT billboard
 let _isCritHitMode = false; // Режим CritHIT (персонаж + billboard)
@@ -364,19 +370,50 @@ function hideStatus() {
 function stopAnimation() {
   if (_animTimer !== null) { clearInterval(_animTimer); _animTimer = null; }
   _animFrames         = [];
+  _animMeshNames      = null;
   _pendingAnim        = null;
   _pendingMaterialMap = null;
   if (_critAnimTimer !== null) { clearInterval(_critAnimTimer); _critAnimTimer = null; }
+  ++_animGeneration;   // делаем все незавершённые _loadTextureThen-коллбэки устаревшими
 }
 
-function startAnimation(textures, framerate) {
+// Применяет текстуру к одному мешу, всегда создавая новый материал.
+// In-place (map=tex) ненадёжен для материалов, созданных без map —
+// Three.js не перекомпилирует шейдер даже при needsUpdate=true.
+function _updateMeshTex(child, tex) {
+  const prevName = (child.material && !Array.isArray(child.material))
+    ? (child.material.name || '') : '';
+  child.material = new THREE.MeshLambertMaterial({ map: tex, side: THREE.DoubleSide });
+  if (prevName) child.material.name = prevName;
+}
+
+// Обходит модель и применяет текстуру только к мешам из filter (Set имён).
+// Если filter = null — применяет ко всем.
+function _applyTexFiltered(object, tex, filter) {
+  object.traverse(child => {
+    if (!child.isMesh) return;
+    if (filter) {
+      const mn = child.material && !Array.isArray(child.material) ? child.material.name : '';
+      if (!filter.has(child.name) && !filter.has(mn)) return;
+    }
+    _updateMeshTex(child, tex);
+  });
+}
+
+// meshFilter: Set имён мешей/материалов для анимации; null = использовать _editableMeshNames или все.
+function startAnimation(textures, framerate, meshFilter) {
   stopAnimation();
   if (!textures || textures.length <= 1) return;
-  _animFrames = textures;
-  let frame   = 0;
-  const ms    = Math.max(16, Math.round(1000 / Math.max(0.1, framerate)));
-  _animTimer  = setInterval(() => {
-    if (currentModel) applyTexture(currentModel, _animFrames[frame % _animFrames.length]);
+  _animFrames    = textures;
+  _animMeshNames = meshFilter || null;
+  let frame      = 0;
+  const ms       = Math.max(16, Math.round(1000 / Math.max(0.1, framerate)));
+  _animTimer     = setInterval(() => {
+    if (!currentModel) { frame++; return; }
+    const tex    = _animFrames[frame % _animFrames.length];
+    // Приоритет: per-mesh фильтр → _editableMeshNames → все меши
+    const filter = _animMeshNames || _editableMeshNames;
+    _applyTexFiltered(currentModel, tex, filter);
     frame++;
   }, ms);
 }
@@ -726,9 +763,9 @@ window.loadModelFromContent = function(objContent, texDataUrl, cx, cy, cz, scale
       }
 
       if (_pendingAnim) {
-        const { frameDataUrls, framerate } = _pendingAnim;
+        const { frameDataUrls, framerate, matName } = _pendingAnim;
         _pendingAnim = null;
-        window.loadAnimatedTexture(frameDataUrls, framerate);
+        window.loadAnimatedTexture(frameDataUrls, framerate, matName);
       }
 
       if (_pendingMaterialMap) {
@@ -755,9 +792,11 @@ window.setEditableMeshNames = function(names) {
 window.updateTextureFromDataUrl = function(texDataUrl) {
   stopAnimation();
   if (!currentModel) return;
-  const target = currentModel;
+  const target  = currentModel;
+  const animGen = _animGeneration;   // зафиксировали поколение после stopAnimation
   _loadTextureThen(texDataUrl, tex => {
-    if (currentModel !== target) return;
+    if (_animGeneration !== animGen) return;   // за время загрузки запустили анимацию — отменяем
+    if (currentModel !== target)     return;
     if (_editableMeshNames) {
       // Режим рук: обновляем только редактируемые меши, остальные не трогаем
       target.traverse(child => {
@@ -783,11 +822,25 @@ window.applyMaterialMap = function(texMapJson) {
     _pendingMaterialMap = texMapJson;
     return;
   }
+
+  // Если идёт анимация и хотя бы один из целевых материалов анимирован — останавливаем.
+  // Это предотвращает перезапись статичной текстуры pending-коллбэками старой анимации.
+  if (_animTimer !== null) {
+    const matNames = Object.keys(texMapJson);
+    const affectsAnimated = !_animMeshNames   // глобальная анимация — затрагивает все меши
+      || matNames.some(m => _animMeshNames.has(m));
+    if (affectsAnimated) stopAnimation();
+  }
+
   const target = currentModel;
+  const gen    = _animGeneration;   // фиксируем поколение после возможного stopAnimation
+
   Object.entries(texMapJson).forEach(([matName, dataUrl]) => {
     if (!dataUrl) return;
     _loadTextureThen(dataUrl, tex => {
-      if (currentModel !== target) return;
+      if (currentModel !== target)  return;
+      if (_animGeneration !== gen)  return;   // анимация перезапустилась — не перезаписываем
+      let matched = false;
       target.traverse(child => {
         if (!child.isMesh) return;
         // Match by mesh name (from OBJ 'g' group) or by material name
@@ -796,22 +849,47 @@ window.applyMaterialMap = function(texMapJson) {
         if (child.name === matName || matNameMatch) {
           child.material = new THREE.MeshLambertMaterial({ map: tex, side: THREE.DoubleSide });
           child.material.name = matName;
-          child.material.needsUpdate = true;
+          matched = true;
         }
       });
+      if (!matched) {
+        console.warn('[3D viewer] applyMaterialMap: меш не найден для материала:', matName);
+      }
     });
   });
 };
 
-window.loadAnimatedTexture = function(frameDataUrls, framerate) {
+// matName (опционально): имя меша/материала, к которому применяется анимация.
+// Если не задан — используется _editableMeshNames (или все меши).
+window.loadAnimatedTexture = function(frameDataUrls, framerate, matName) {
   stopAnimation();
   if (!frameDataUrls || frameDataUrls.length === 0) return;
+
+  // Захватываем поколение ДО любых async операций.
+  // Если за время загрузки вызовут stopAnimation() — _animGeneration изменится
+  // и устаревшие коллбэки сами себя отменят.
+  const animGen    = _animGeneration;
+
+  // Строим фильтр из matName (если задан)
+  const meshFilter = matName ? new Set([matName]) : null;
+
   if (frameDataUrls.length === 1) {
-    window.updateTextureFromDataUrl(frameDataUrls[0]);
+    // Одиночный кадр — применяем как статичную текстуру
+    const filter = meshFilter || _editableMeshNames;
+    if (filter && currentModel) {
+      const snapModel = currentModel;
+      _loadTextureThen(frameDataUrls[0], tex => {
+        if (_animGeneration !== animGen) return;   // устарело
+        if (currentModel !== snapModel)  return;
+        _applyTexFiltered(snapModel, tex, filter);
+      });
+    } else {
+      window.updateTextureFromDataUrl(frameDataUrls[0]);
+    }
     return;
   }
   if (!currentModel) {
-    _pendingAnim = { frameDataUrls, framerate };
+    _pendingAnim = { frameDataUrls, framerate, matName };
     return;
   }
   const target   = currentModel;
@@ -820,13 +898,20 @@ window.loadAnimatedTexture = function(frameDataUrls, framerate) {
 
   frameDataUrls.forEach((url, i) => {
     _loadTextureThen(url, tex => {
+      // Отменяем коллбэк если пришёл новый stopAnimation() после нашего старта
+      if (_animGeneration !== animGen) return;
+      if (currentModel !== target)     return;
       textures[i] = tex;
       loaded++;
-      // Первый загруженный кадр — сразу показываем
-      if (loaded === 1 && currentModel === target) applyTexture(target, tex);
+      // Первый загруженный кадр — сразу показываем (с фильтром)
+      if (loaded === 1) {
+        const filter = meshFilter || _editableMeshNames;
+        if (filter) _applyTexFiltered(target, tex, filter);
+        else        applyTexture(target, tex);
+      }
       // Все кадры готовы — запускаем анимацию
-      if (loaded === frameDataUrls.length && currentModel === target) {
-        startAnimation(textures, framerate);
+      if (loaded === frameDataUrls.length) {
+        startAnimation(textures, framerate, meshFilter);
       }
     });
   });
@@ -1157,11 +1242,13 @@ document.addEventListener('drop', e => {
   const isGif = file.type === 'image/gif' || /\.gif$/i.test(file.name);
 
   if (isGif) {
-    // GIF: анимация всегда на все меши (per-mesh GIF не поддерживается)
+    // GIF: если дроп на конкретный меш — анимируем только его; иначе — все редактируемые
     const bufReader = new FileReader();
     bufReader.onload = async evt => {
       const gifBuffer = evt.target.result;
-      stopAnimation();
+
+      // Останавливаем глобальную анимацию только при глобальном дропе
+      if (!hitMesh) stopAnimation();
 
       const decoded = await _decodeGifFrames(gifBuffer);
 
@@ -1169,21 +1256,33 @@ document.addEventListener('drop', e => {
         if (_isCritHitMode) {
           _animateCritHitGif(decoded.dataUrls, decoded.fps);
         } else if (currentModel) {
-          window.loadAnimatedTexture(decoded.dataUrls, decoded.fps);
+          // Передаём имя меша — анимация будет только на нём (или на всех если нет меша)
+          window.loadAnimatedTexture(
+            decoded.dataUrls, decoded.fps,
+            hitMesh ? hitMesh.name : null
+          );
         }
       } else {
         // Fallback: первый кадр как статичная текстура
         const urlReader = new FileReader();
         urlReader.onload = e2 => {
-          if (_isCritHitMode)  window.updateCritHitTexture(e2.target.result);
-          else if (currentModel) window.updateTextureFromDataUrl(e2.target.result);
+          if (_isCritHitMode) {
+            window.updateCritHitTexture(e2.target.result);
+          } else if (currentModel) {
+            if (hitMesh) _loadTextureThen(e2.target.result, tex => _applyTexToMesh(hitMesh, tex));
+            else         window.updateTextureFromDataUrl(e2.target.result);
+          }
         };
         urlReader.readAsDataURL(file);
       }
 
       // Уведомляем Python для 2D превью
+      // Используем hitMesh.name если материал — массив (multi-material mesh)
+      const gifMatName = hitMesh
+        ? (Array.isArray(hitMesh.material) ? hitMesh.name : (hitMesh.material.name || hitMesh.name))
+        : '';
       const gifReader = new FileReader();
-      gifReader.onload = e => _notifyTextureDrop(e.target.result);
+      gifReader.onload = e => _notifyTextureDrop(e.target.result, gifMatName);
       gifReader.readAsDataURL(new Blob([gifBuffer], { type: 'image/gif' }));
     };
     bufReader.readAsArrayBuffer(file);
@@ -1192,22 +1291,34 @@ document.addEventListener('drop', e => {
     const reader = new FileReader();
     reader.onload = evt => {
       const dataUrl = evt.target.result;
-      stopAnimation();
       if (_isCritHitMode) {
+        stopAnimation();
         window.updateCritHitTexture(dataUrl);
       } else if (currentModel) {
         if (hitMesh) {
-          // Дроп на конкретный меш — применяем только к нему
+          // Дроп на конкретный меш — применяем только к нему.
+          // Анимацию останавливаем только если этот меш сам анимированный.
+          const mn = hitMesh.material && !Array.isArray(hitMesh.material)
+            ? hitMesh.material.name : '';
+          const isMeshAnimated = _animMeshNames
+            ? (_animMeshNames.has(hitMesh.name) || _animMeshNames.has(mn))
+            : false;
+          if (isMeshAnimated) stopAnimation();
           _loadTextureThen(dataUrl, tex => _applyTexToMesh(hitMesh, tex));
         } else {
-          // Дроп на пустое место — применяем ко всей модели
+          // Дроп на пустое место — применяем ко всей модели, останавливаем анимацию
+          stopAnimation();
           window.updateTextureFromDataUrl(dataUrl);
         }
       } else {
-        _pendingAnim = { frameDataUrls: [dataUrl], framerate: 0 };
+        _pendingAnim = { frameDataUrls: [dataUrl], framerate: 0, matName: null };
       }
-      // Уведомляем Python для 2D превью (поведение не меняется)
-      _notifyTextureDrop(dataUrl);
+      // Уведомляем Python для 2D превью — передаём имя материала если был hit-тест
+      // Для multi-material mesh используем имя меша вместо имени материала
+      const staticMatName = hitMesh
+        ? (Array.isArray(hitMesh.material) ? hitMesh.name : (hitMesh.material.name || hitMesh.name))
+        : '';
+      _notifyTextureDrop(dataUrl, staticMatName);
     };
     reader.readAsDataURL(file);
   }

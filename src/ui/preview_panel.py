@@ -7,9 +7,9 @@ from typing import Optional
 
 from PySide6.QtWidgets import (
     QGroupBox, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QWidget, QStackedWidget, QSizePolicy,
+    QWidget, QStackedWidget, QSizePolicy, QScrollArea, QFileDialog, QFrame,
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QPixmap
 from src.utils.themes import get_modern_styles
 from src.shared.logging_config import get_logger
@@ -17,9 +17,153 @@ from src.shared.logging_config import get_logger
 logger = get_logger(__name__)
 
 
+# ── Extra texture slot card ───────────────────────────────────────────────── #
+
+class _ExtraSlotCard(QWidget):
+    """Full-height texture slot card — replaces the main 2D preview in multi-texture mode.
+
+    Fixed height matches the main preview (500 px). Width is flexible so cards
+    share the available horizontal space equally.
+    """
+
+    image_changed = Signal(str, str)   # material_name, image_path
+
+    _STYLE_BORDER     = "border: 1px solid #333; border-radius: 4px; background: #1a1a1a;"
+    _STYLE_BORDER_HLT = "border: 1px solid #555; border-radius: 4px; background: #222;"
+
+    CARD_HEIGHT = 500   # matches the main preview QLabel height
+
+    def __init__(self, material_name: str, parent=None):
+        super().__init__(parent)
+        self.material_name  = material_name
+        self._image_path: Optional[str] = None
+
+        self.setFixedSize(380, self.CARD_HEIGHT)
+        self.setAcceptDrops(True)
+        self.setCursor(Qt.PointingHandCursor)
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(4, 4, 4, 4)
+        lay.setSpacing(4)
+
+        # Image preview area (fills most of the card height)
+        self._lbl_preview = QLabel()
+        self._lbl_preview.setFixedSize(372, 448)   # card 380 - 4px margins×2; height = 500 - 52
+        self._lbl_preview.setAlignment(Qt.AlignCenter)
+        self._lbl_preview.setStyleSheet(self._STYLE_BORDER)
+        lay.addWidget(self._lbl_preview)
+
+        # Material name label
+        lbl_name = QLabel(material_name)
+        lbl_name.setStyleSheet("color:#888; font-size:11px;")
+        lbl_name.setAlignment(Qt.AlignCenter)
+        lbl_name.setWordWrap(True)
+        lbl_name.setFixedHeight(18)
+        lay.addWidget(lbl_name)
+
+        # Browse button
+        self._btn = QPushButton("Browse…")
+        self._btn.setFixedHeight(24)
+        self._btn.setStyleSheet("""
+            QPushButton {
+                background: transparent; color: #666;
+                border: 1px solid #333; border-radius: 3px; font-size: 11px;
+            }
+            QPushButton:hover { color: #aaa; border-color: #555; }
+        """)
+        self._btn.clicked.connect(self._browse)
+        lay.addWidget(self._btn)
+
+        self._show_placeholder()
+
+    # ── public API ──────────────────────────────────────────────────────────── #
+
+    def set_image(self, path: str) -> None:
+        """Sets the card texture from a file path."""
+        self._image_path = path or None
+        if not path or not os.path.exists(path):
+            self._show_placeholder()
+            return
+        pix = QPixmap(path)
+        if pix.isNull():
+            self._show_placeholder()
+            return
+        self._pix_source = pix   # keep original for resize
+        self._refresh_pixmap()
+        self._lbl_preview.setText('')
+        self._lbl_preview.setStyleSheet(self._STYLE_BORDER)
+
+    def _refresh_pixmap(self) -> None:
+        """Re-scales the stored pixmap to the fixed preview label size."""
+        pix = getattr(self, '_pix_source', None)
+        if pix is None or pix.isNull():
+            return
+        w = self._lbl_preview.width()
+        h = self._lbl_preview.height()
+        if w <= 0 or h <= 0:
+            return
+        self._lbl_preview.setPixmap(pix.scaled(w, h, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        # Prevent sizeHint from growing after setPixmap
+        self._lbl_preview.setMaximumSize(w, h)
+
+    def get_image(self) -> Optional[str]:
+        return self._image_path
+
+    # ── internals ───────────────────────────────────────────────────────────── #
+
+    def _show_placeholder(self):
+        self._lbl_preview.setPixmap(QPixmap())
+        self._lbl_preview.setText("Drop texture here\nor click Browse")
+        self._lbl_preview.setStyleSheet("color:#444; font-size:10px; " + self._STYLE_BORDER)
+
+    def _browse(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            f"Select texture for {self.material_name}",
+            "",
+            "Images (*.png *.jpg *.jpeg *.bmp *.gif *.tiff *.webp);;VTF Files (*.vtf);;All Files (*)"
+        )
+        if path:
+            self.set_image(path)
+            self.image_changed.emit(self.material_name, path)
+
+    # ── drag-drop ───────────────────────────────────────────────────────────── #
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            fp = event.mimeData().urls()[0].toLocalFile() if event.mimeData().urls() else ''
+            if any(fp.lower().endswith(e) for e in
+                   ('.png', '.jpg', '.jpeg', '.bmp', '.gif', '.tiff', '.webp', '.vtf')):
+                self._lbl_preview.setStyleSheet(self._STYLE_BORDER_HLT)
+                event.accept()
+                return
+        event.ignore()
+
+    def dragLeaveEvent(self, event):
+        if self._image_path:
+            self._lbl_preview.setStyleSheet(self._STYLE_BORDER)
+        else:
+            self._show_placeholder()
+
+    def dropEvent(self, event):
+        urls = event.mimeData().urls()
+        if urls:
+            fp = urls[0].toLocalFile()
+            if os.path.exists(fp):
+                self.set_image(fp)
+                self.image_changed.emit(self.material_name, fp)
+                event.accept()
+                return
+        event.ignore()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._browse()
+        super().mousePressEvent(event)
+
+
 class PreviewPanel(QWidget):
 
-    from PySide6.QtCore import Signal
     vpk_mod_loaded = Signal(str)   # путь к загруженному VPK моду
 
     def __init__(self, parent=None):
@@ -28,7 +172,6 @@ class PreviewPanel(QWidget):
         self.styles = get_modern_styles()
         self.image_path = None
         self.vtf_path = None
-        self.image_info = {}
         self._gif_movie = None
         self._gif_orig_size = None
 
@@ -53,6 +196,8 @@ class PreviewPanel(QWidget):
         self._blu_frame_paths: list = []
         self._team_framerate: float  = 0.0
         self._active_team: str       = 'red'   # 'red' | 'blu'
+        # Пользовательские текстуры для каждой команды: {team: {mat_name: path}}
+        self._team_2d_paths: dict    = {'red': {}, 'blu': {}}
 
         from src.config.app_config import AppConfig
         from src.data.translations import TRANSLATIONS
@@ -60,6 +205,14 @@ class PreviewPanel(QWidget):
         current_lang = config.get('language') or 'en'
         self._lang = current_lang
         self.t = TRANSLATIONS[current_lang]
+
+        # Extra texture slots (multi-material weapons / hands)
+        self._extra_slot_paths:   dict = {}   # {material_name: image_path}
+        self._known_extra_slots:  list = []   # [material_name, ...]  — extra only (not main)
+        self._extra_slot_widgets: dict = {}   # {material_name: _ExtraSlotCard}
+        self._main_material_name: str  = ''   # name of the "main" material slot
+        self._card_mode:          bool = False  # True when cards replace the main preview
+        self._main_card: Optional[_ExtraSlotCard] = None  # card for the main texture
 
         self.setAcceptDrops(True)
         self.init_ui()
@@ -110,16 +263,17 @@ class PreviewPanel(QWidget):
         self.btn_3d = QPushButton("3D")
         self.btn_2d.setFixedHeight(26)
         self.btn_3d.setFixedHeight(26)
-        self.btn_2d.setStyleSheet(btn_style_active)
-        self.btn_3d.setStyleSheet(btn_style_inactive)
+        # 3D идёт первым и является режимом по умолчанию
+        self.btn_3d.setStyleSheet(btn_style_active)
+        self.btn_2d.setStyleSheet(btn_style_inactive)
         self._btn_style_active   = btn_style_active
         self._btn_style_inactive = btn_style_inactive
 
         self.btn_2d.clicked.connect(self._switch_to_2d)
         self.btn_3d.clicked.connect(self._switch_to_3d)
 
-        toggle_layout.addWidget(self.btn_2d)
         toggle_layout.addWidget(self.btn_3d)
+        toggle_layout.addWidget(self.btn_2d)
 
         # Кнопка загрузки 3D модели — иконка куба, без текста
         toggle_layout.addSpacing(12)
@@ -253,6 +407,11 @@ class PreviewPanel(QWidget):
         # Инициализируем 3D виджет (ленивая — проверяем WebEngine)
         self._init_3d_widget()
 
+        # Начинаем в 3D режиме (3D кнопка идёт первой)
+        self.view_stack.setCurrentIndex(1)
+        self.btn_load_3d.setVisible(True)
+        self.btn_load_vpk_mod.setVisible(True)
+
     def _build_2d_page(self) -> QWidget:
         page = QWidget()
         page.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
@@ -318,6 +477,29 @@ class PreviewPanel(QWidget):
         self.preview.setMinimumWidth(800)
         self.preview.hide()
         vlay.addWidget(self.preview, alignment=Qt.AlignCenter)
+
+        # ── Extra texture slots bar ────────────────────────────────────────── #
+        # Shown below the main preview when the weapon has multiple texture slots.
+        # Each slot is represented by an _ExtraSlotCard widget.
+        slots_scroll = QScrollArea()
+        slots_scroll.setWidgetResizable(True)
+        slots_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        slots_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        slots_scroll.setFrameShape(QFrame.NoFrame)
+        slots_scroll.setStyleSheet("background: transparent;")
+        slots_scroll.setFixedHeight(508)   # same as preview (500) + scroll bar headroom
+
+        self._extra_slots_bar = QWidget()
+        self._extra_slots_bar.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self._extra_slots_bar_layout = QHBoxLayout(self._extra_slots_bar)
+        self._extra_slots_bar_layout.setContentsMargins(0, 4, 0, 4)
+        self._extra_slots_bar_layout.setSpacing(8)
+        self._extra_slots_bar_layout.addStretch()
+
+        slots_scroll.setWidget(self._extra_slots_bar)
+        self._extra_slots_scroll = slots_scroll
+        self._extra_slots_scroll.hide()
+        vlay.addWidget(self._extra_slots_scroll)
 
         return page
 
@@ -404,8 +586,10 @@ class PreviewPanel(QWidget):
         self.btn_3d.setStyleSheet(self._btn_style_inactive)
         self.btn_load_3d.setVisible(False)
         self.btn_load_vpk_mod.setVisible(False)
-        self.btn_team_red.setVisible(False)
-        self.btn_team_blu.setVisible(False)
+        # Кнопки команд остаются видны в 2D, если есть BLU данные
+        has_blu = bool(self._blu_frame_paths or self._team_2d_paths.get('blu'))
+        self.btn_team_red.setVisible(has_blu)
+        self.btn_team_blu.setVisible(has_blu)
 
     def _switch_to_3d(self):
         if self._3d_widget is None:
@@ -429,6 +613,10 @@ class PreviewPanel(QWidget):
         # Кнопка VPK мода всегда доступна в 3D — пользователь может загрузить
         # свой мод даже без выбранного оружия (воркер сам разберётся с путями)
         self.btn_load_vpk_mod.setEnabled(True)
+        # Показываем/скрываем кнопки команд в зависимости от наличия BLU данных
+        has_blu = bool(self._blu_frame_paths or self._team_2d_paths.get('blu'))
+        self.btn_team_red.setVisible(has_blu)
+        self.btn_team_blu.setVisible(has_blu)
 
         # Если пользователь уже загрузил свою текстуру — применяем её на модель.
         # Задержка нужна: WebView "просыпается" после показа не мгновенно,
@@ -442,11 +630,26 @@ class PreviewPanel(QWidget):
             and self.image_path is not None
             and self.image_path == self._3d_per_mesh_base_image
         )
-        if self.image_path and self._3d_available and self._3d_widget and not _skip_reapply:
-            import os
-            path = self.image_path  # захватываем в замыкание
+
+        if not self._3d_available or not self._3d_widget:
+            return
+
+        from PySide6.QtCore import QTimer
+
+        if self._card_mode and self._main_material_name:
+            # Мульти-материальная модель: применяем каждую текстуру только к своему мешу.
+            # НЕ используем _apply_image_to_3d — он применит всё ко всей модели.
+            tex_map: dict = {}
+            if self.image_path and os.path.exists(self.image_path):
+                tex_map[self._main_material_name] = self.image_path
+            for mat_name, mat_path in self._extra_slot_paths.items():
+                if mat_path and os.path.exists(mat_path):
+                    tex_map[mat_name] = mat_path
+            if tex_map:
+                QTimer.singleShot(300, lambda m=tex_map: self._3d_widget.apply_material_map(m))
+        elif self.image_path and not _skip_reapply:
+            path = self.image_path
             if os.path.exists(path):
-                from PySide6.QtCore import QTimer
                 QTimer.singleShot(300, lambda: self._apply_image_to_3d(path))
 
     def is_3d_mode(self) -> bool:
@@ -861,11 +1064,13 @@ class PreviewPanel(QWidget):
         self._stop_3d_worker()
         self._stop_vpk_mod_worker()
         self._reset_team_state()
+        # Сбрасываем доп. слоты
+        self._extra_slot_paths = {}
+        self.set_extra_slots([])
         if self._3d_widget:
             self._3d_widget.reset()
         self.btn_load_3d.setEnabled(False)
-        if self.is_3d_mode():
-            self._switch_to_2d()
+        # Не переключаем в 2D принудительно — 3D покажет промпт «выберите оружие»
 
     def update_3d_texture(self, png_path: str) -> None:
         """Обновляет текстуру на 3D модели (когда пользователь загружает своё изображение)."""
@@ -887,12 +1092,18 @@ class PreviewPanel(QWidget):
         else:
             self._3d_widget.update_texture_file(path)
 
-    def _apply_gif_to_3d(self, gif_path: str) -> None:
+    def _apply_gif_to_3d(self, gif_path: str, mat_name: str = '') -> None:
         """Декодирует GIF по кадрам через PIL и запускает анимацию в 3D viewer.
+
+        mat_name (опционально): имя материала для per-mesh анимации.
+        Если не задан — анимация применяется ко всем редактируемым мешам.
 
         Кадры кэшируются в self._3d_gif_cache чтобы повторные переключения
         2D↔3D не декодировали файл заново.
         """
+        if not self._3d_widget or not self._3d_available:
+            return
+
         cache = getattr(self, '_3d_gif_cache', {})
 
         # Проверяем кэш
@@ -900,7 +1111,10 @@ class PreviewPanel(QWidget):
             frame_paths, fps = cache[gif_path]
             if frame_paths and all(os.path.exists(p) for p in frame_paths):
                 logger.info(f"GIF→3D: из кэша {len(frame_paths)} кадров @ {fps:.1f} fps")
-                self._3d_widget.update_animated_texture_files(frame_paths, fps)
+                if mat_name:
+                    self._3d_widget.update_animated_texture_files(frame_paths, fps, mat_name)
+                else:
+                    self._3d_widget.update_animated_texture_files(frame_paths, fps)
                 return
             # Кэш устарел (временные файлы удалены) — декодируем заново
             del cache[gif_path]
@@ -914,7 +1128,10 @@ class PreviewPanel(QWidget):
 
             if n_frames <= 1:
                 # Одиночный кадр — просто статичная текстура
-                self._3d_widget.update_texture_file(gif_path)
+                if mat_name:
+                    self._3d_widget.apply_material_map({mat_name: gif_path})
+                else:
+                    self._3d_widget.update_texture_file(gif_path)
                 return
 
             duration = gif.info.get('duration', 100) or 100
@@ -931,12 +1148,18 @@ class PreviewPanel(QWidget):
             self._3d_gif_cache = cache
 
             logger.info(f"GIF→3D: декодировано {n_frames} кадров @ {fps:.1f} fps")
-            self._3d_widget.update_animated_texture_files(frame_paths, fps)
+            if mat_name:
+                self._3d_widget.update_animated_texture_files(frame_paths, fps, mat_name)
+            else:
+                self._3d_widget.update_animated_texture_files(frame_paths, fps)
 
         except Exception as exc:
             logger.warning(f"_apply_gif_to_3d: {exc}")
-            # Fallback: статичная текстура (первый кадр через _file_to_data_url)
-            self._3d_widget.update_texture_file(gif_path)
+            # Fallback: статичная текстура
+            if mat_name:
+                self._3d_widget.apply_material_map({mat_name: gif_path})
+            else:
+                self._3d_widget.update_texture_file(gif_path)
 
     def _on_3d_per_mesh_applied(self) -> None:
         """Вызывается когда пользователь перетащил текстуру на конкретный меш в 3D.
@@ -951,10 +1174,189 @@ class PreviewPanel(QWidget):
             f"[3D] per-mesh drag: base_image={self._3d_per_mesh_base_image}"
         )
 
-    def _on_3d_texture_dropped(self, data_url: str) -> None:
+    # ── Extra texture slots — public API ────────────────────────────────────── #
+
+    def set_extra_slots(self, names: list) -> None:
+        """Переключает 2D превью в режим карточек (multi-texture) или обратно.
+
+        names — список ВСЕХ материальных слотов: первый = главный (linked to image_path),
+        остальные = дополнительные. Пустой список или список из 1 элемента → возврат к
+        одиночному режиму (стандартное большое превью).
+        """
+        # Очищаем старые виджеты
+        layout = self._extra_slots_bar_layout
+        while layout.count():
+            item = layout.takeAt(0)
+            w = item.widget()
+            if w:
+                w.deleteLater()
+        self._extra_slot_widgets.clear()
+        self._main_card = None
+
+        if len(names) < 2:
+            # ── Одиночный режим ──────────────────────────────────────────────── #
+            self._card_mode = False
+            self._known_extra_slots = []
+            self._extra_slots_scroll.hide()
+            # Восстанавливаем большое превью (если изображение загружено)
+            if self.image_path and os.path.exists(self.image_path):
+                self.empty_state.hide()
+                self.preview.show()
+            else:
+                self.preview.hide()
+                self.empty_state.show()
+            return
+
+        # ── Режим карточек ───────────────────────────────────────────────────── #
+        self._card_mode = True
+        main_name  = names[0]
+        extra_names = names[1:]
+        self._main_material_name = main_name
+        self._known_extra_slots  = list(extra_names)
+
+        # Главная карточка (первая в списке)
+        main_card = _ExtraSlotCard(main_name, parent=self._extra_slots_bar)
+        if self.image_path and os.path.exists(self.image_path):
+            main_card.set_image(self.image_path)
+        main_card.image_changed.connect(self._on_main_card_image)
+        layout.addWidget(main_card)
+        self._main_card = main_card
+
+        # Дополнительные карточки
+        for name in extra_names:
+            card = _ExtraSlotCard(name, parent=self._extra_slots_bar)
+            if name in self._extra_slot_paths:
+                card.set_image(self._extra_slot_paths[name])
+            card.image_changed.connect(self._on_slot_card_image)
+            layout.addWidget(card)
+            self._extra_slot_widgets[name] = card
+
+        layout.addStretch()
+
+        # Скрываем большое превью, показываем карточки
+        self.empty_state.hide()
+        self.preview.hide()
+        self._extra_slots_scroll.show()
+
+    def _on_main_card_image(self, material_name: str, path: str) -> None:
+        """Вызывается когда пользователь устанавливает изображение в главной карточке."""
+        # Обновляем image_path (нужен для Build VPK и для 3D texture update)
+        self._stop_gif()
+        if path != self._3d_per_mesh_base_image:
+            self._3d_per_mesh_active     = False
+            self._3d_per_mesh_base_image = None
+        self.image_path = path
+        self.vtf_path   = None
+        # Сохраняем под текущей командой
+        self._team_2d_paths.setdefault(self._active_team, {})[material_name] = path
+        logger.info(f"Main card '{material_name}' [{self._active_team}] → {path!r}")
+        self.update_info_summary()
+        # Обновляем текстуру в 3D если открыт 3D режим
+        if self.is_3d_mode() and self._3d_widget:
+            from PySide6.QtCore import QTimer
+            T = QTimer
+            if not self._crithit_mode:
+                if self._card_mode and self._main_material_name:
+                    # Мульти-материальная модель: обновляем ТОЛЬКО меш главного материала
+                    mat_name = self._main_material_name
+                    if path.lower().endswith('.gif'):
+                        T.singleShot(300, lambda p=path, m=mat_name: self._apply_gif_to_3d(p, m))
+                    else:
+                        T.singleShot(300, lambda p=path, m=mat_name: self._3d_widget.apply_material_map({m: p}))
+                elif path.lower().endswith('.gif'):
+                    T.singleShot(300, lambda p=path: self._apply_gif_to_3d(p))
+                else:
+                    T.singleShot(300, lambda p=path: self.update_3d_texture(p))
+            else:
+                T.singleShot(300, lambda p=path: self._3d_widget.update_crithit_texture(p))
+
+    def _on_slot_card_image(self, material_name: str, path: str) -> None:
+        """Вызывается когда пользователь устанавливает текстуру в карточке доп. слота."""
+        self._extra_slot_paths[material_name] = path
+        # Сохраняем под текущей командой
+        self._team_2d_paths.setdefault(self._active_team, {})[material_name] = path
+        logger.info(f"Extra slot '{material_name}' [{self._active_team}] → {path!r}")
+        # Обновляем только меш этого материала в 3D (если 3D открыт)
+        if self.is_3d_mode() and self._3d_widget and path and os.path.exists(path):
+            from PySide6.QtCore import QTimer
+            mat = material_name
+            if path.lower().endswith('.gif'):
+                QTimer.singleShot(300, lambda p=path, m=mat: self._apply_gif_to_3d(p, m))
+            else:
+                QTimer.singleShot(300, lambda p=path, m=mat: self._3d_widget.apply_material_map({m: p}))
+
+    def get_slot_image_paths(self) -> dict:
+        """Возвращает {material_name: image_path} для всех заполненных доп. слотов."""
+        return {k: v for k, v in self._extra_slot_paths.items() if v}
+
+    def update_extra_slots(self, weapon_key: str, mode: str = '') -> None:
+        """Определяет доп. текстурные слоты для текущего оружия/режима и показывает карточки.
+
+        Вызывается из main_window при смене оружия.
+        Для рук — данные берутся из HAND_MODES.
+        Для остальных — ищет QC в decompile cache.
+        Если данных нет — сбрасывает слоты (они заполнятся из _on_3d_multi_material когда загрузится 3D).
+        """
+        from src.data.player_hands import HAND_MODE_KEYS, HAND_MODES
+
+        # Сбрасываем всё состояние предыдущего оружия/шапки
+        self._main_material_name = ''
+        self.image_path          = None
+        self.vtf_path            = None
+        self._3d_gif_cache       = {}
+        self._team_2d_paths      = {'red': {}, 'blu': {}}
+
+        if mode in HAND_MODE_KEYS:
+            textures = HAND_MODES.get(mode, {}).get('textures', [])
+            # Передаём ВСЕ имена текстур: первая = главная, остальные = доп. слоты.
+            # Если текстура одна — переходим в одиночный режим (no cards).
+            all_vtf = [vtf_name for _, vtf_name in textures]
+            # Чистим пути слотов которые больше не нужны
+            self._extra_slot_paths = {
+                k: v for k, v in self._extra_slot_paths.items() if k in all_vtf[1:]
+            }
+            self.set_extra_slots(all_vtf)
+        else:
+            # Для остальных оружий пробуем decompile cache
+            all_names: list = []
+            try:
+                import json
+                from src.services.model_build_service import ModelBuildService
+                cache_root = os.path.join(
+                    os.path.expanduser('~'), '.tf2skingen_cache', 'decompiled'
+                )
+                if os.path.isdir(cache_root):
+                    for entry in os.scandir(cache_root):
+                        if not entry.is_dir():
+                            continue
+                        meta_path = os.path.join(entry.path, '_cache_meta.json')
+                        if not os.path.exists(meta_path):
+                            continue
+                        with open(meta_path, 'r', encoding='utf-8') as fh:
+                            meta = json.load(fh)
+                        if meta.get('weapon_key') != weapon_key:
+                            continue
+                        qc_file = meta.get('qc_filename', '')
+                        qc_path = os.path.join(entry.path, qc_file)
+                        if os.path.exists(qc_path):
+                            tg = ModelBuildService.extract_texturegroup_structure(qc_path)
+                            red_row = tg.get('red_row', [])
+                            if len(red_row) >= 1:
+                                all_names = red_row   # first = main, rest = extras
+                        break
+            except Exception as _e:
+                logger.debug(f"update_extra_slots cache lookup: {_e}")
+
+            self._extra_slot_paths = {
+                k: v for k, v in self._extra_slot_paths.items() if k in all_names[1:]
+            }
+            self.set_extra_slots(all_names)
+
+    def _on_3d_texture_dropped(self, data_url: str, material_name: str = '') -> None:
         """Вызывается когда пользователь перетаскивает текстуру прямо в 3D viewer.
 
-        Сохраняет data-URL во временный файл и обновляет 2D превью.
+        Если material_name совпадает с известным доп. слотом — обновляет его карточку.
+        Иначе — сохраняет во временный файл и обновляет главное 2D превью.
         """
         if not data_url:
             return
@@ -981,13 +1383,45 @@ class PreviewPanel(QWidget):
             with open(tmp_path, 'wb') as f:
                 f.write(img_bytes)
 
-            logger.info(f"3D texture drop: сохранено во {tmp_path} ({len(img_bytes)} байт)")
+            logger.info(
+                f"3D texture drop: сохранено во {tmp_path} ({len(img_bytes)} байт), "
+                f"material={material_name!r}"
+            )
 
-            # Обновляем 2D превью (load_image обновит image_path, нужный для Build VPK)
-            # Флаг _from_3d_drop предотвращает рекурсивный обратный вызов updateTexture→3D
-            self._from_3d_drop = True
-            self.load_image(tmp_path)
-            self._from_3d_drop = False
+            # Маршрутизация: доп. слот, главный слот или глобальное превью?
+            _norm = material_name.lower() if material_name else ''
+            _extra_lc = {n.lower(): n for n in self._known_extra_slots}
+            _main_lc  = self._main_material_name.lower()
+
+            # Проверяем прямое совпадение с доп. слотом
+            routed_extra = None
+            if _norm and _norm in _extra_lc:
+                routed_extra = _extra_lc[_norm]
+            elif _norm:
+                # Суффиксное совпадение: меш "mat_sheen" → слот "mat"
+                # ТОЛЬКО _norm.startswith(lc_key), чтобы sheen/overlay мешей доп. слота
+                # корректно маршрутизировались к своему слоту.
+                # НЕ используем lc_key.startswith(_norm) — это ошибочно маршрутизирует
+                # главный материал к доп. слоту, если имя главного является префиксом
+                # имени доп. слота (напр. "weapon" → "weapon_extra").
+                for lc_key, orig_key in _extra_lc.items():
+                    if _norm.startswith(lc_key):
+                        routed_extra = orig_key
+                        break
+
+            if routed_extra is not None:
+                # Обновляем карточку доп. слота
+                card = self._extra_slot_widgets.get(routed_extra)
+                if card:
+                    card.set_image(tmp_path)
+                self._extra_slot_paths[routed_extra] = tmp_path
+                logger.info(f"3D drop routed to extra slot: {routed_extra!r}")
+            else:
+                # Главный слот или глобальный дроп → обновляем главную карточку / большое превью.
+                # Обе ситуации одинаковы: load_image правильно роутит по _card_mode.
+                self._from_3d_drop = True
+                self.load_image(tmp_path)
+                self._from_3d_drop = False
 
         except Exception as exc:
             logger.warning(f"_on_3d_texture_dropped: ошибка при сохранении: {exc}")
@@ -1019,6 +1453,26 @@ class PreviewPanel(QWidget):
         if not (self._3d_widget and tex_map):
             return
         self._3d_widget.apply_material_map(tex_map)
+
+        # Обновляем слоты доп. текстур на основе материалов модели.
+        # Первый материал считается «главным» (тот, который linked to image_path),
+        # остальные — дополнительными слотами для карточек в 2D.
+        mat_keys = list(tex_map.keys())
+        # Список материалов, которые сейчас отображаются в карточках
+        _current_all = (
+            [self._main_material_name] + self._known_extra_slots
+            if self._card_mode else []
+        )
+        if len(mat_keys) > 1:
+            # Обновляем всегда если список материалов изменился (смена оружия).
+            # set_extra_slots сохранит уже загруженные пути для совпадающих имён.
+            if mat_keys != _current_all:
+                self.set_extra_slots(mat_keys)
+        elif mat_keys:
+            # Одиночный материал: обновляем имя и, если были карточки — убираем их
+            self._main_material_name = mat_keys[0]
+            if self._card_mode:
+                self.set_extra_slots(mat_keys)   # сбросит card_mode (len < 2)
 
         # В режиме рук сообщаем вьюверу, какие меши редактирует пользователь,
         # чтобы drag-drop / обновление текстуры затрагивало только руки (не рукав).
@@ -1074,10 +1528,9 @@ class PreviewPanel(QWidget):
             f"3D Preview: BLU текстура готова "
             f"({len(frame_paths)} кадров @ {framerate:.1f} fps)"
         )
-        # Показываем кнопки только если мы в 3D режиме
-        if self.is_3d_mode():
-            self.btn_team_red.setVisible(True)
-            self.btn_team_blu.setVisible(True)
+        # Показываем кнопки команд в любом режиме (2D и 3D)
+        self.btn_team_red.setVisible(True)
+        self.btn_team_blu.setVisible(True)
 
     def _reset_team_state(self) -> None:
         """Сбрасывает данные командных раскрасок и скрывает кнопки."""
@@ -1093,22 +1546,26 @@ class PreviewPanel(QWidget):
             self.btn_team_blu.setStyleSheet(self._team_btn_style)
 
     def _on_team_red_clicked(self) -> None:
-        """Переключается на RED раскраску."""
-        if self._active_team == 'red' or not self._3d_widget:
+        """Переключается на RED раскраску в 2D и 3D."""
+        if self._active_team == 'red':
             return
         self._active_team = 'red'
         self.btn_team_red.setStyleSheet(self._team_btn_style_active)
         self.btn_team_blu.setStyleSheet(self._team_btn_style)
-        self._apply_team_texture(self._red_frame_paths)
+        self._apply_team_2d('red')
+        if self._3d_widget:
+            self._apply_active_team_to_3d('red')
 
     def _on_team_blu_clicked(self) -> None:
-        """Переключается на BLU раскраску."""
-        if self._active_team == 'blu' or not self._3d_widget or not self._blu_frame_paths:
+        """Переключается на BLU раскраску в 2D и 3D."""
+        if self._active_team == 'blu':
             return
         self._active_team = 'blu'
         self.btn_team_blu.setStyleSheet(self._team_btn_style_active)
         self.btn_team_red.setStyleSheet(self._team_btn_style)
-        self._apply_team_texture(self._blu_frame_paths)
+        self._apply_team_2d('blu')
+        if self._3d_widget:
+            self._apply_active_team_to_3d('blu')
 
     def _apply_team_texture(self, frame_paths: list) -> None:
         """Применяет список кадров (или один кадр) как текстуру на 3D модели."""
@@ -1118,6 +1575,116 @@ class PreviewPanel(QWidget):
             self._3d_widget.update_animated_texture_files(frame_paths, self._team_framerate)
         else:
             self._3d_widget.update_texture_file(frame_paths[0])
+
+    def _apply_team_2d(self, team: str) -> None:
+        """Обновляет 2D карточки / большое превью чтобы показать текстуры нужной команды.
+
+        Берёт пути из self._team_2d_paths[team]. Если путей нет — очищает карточки.
+        Также обновляет self.image_path и self._extra_slot_paths.
+        """
+        team_paths = self._team_2d_paths.get(team, {})
+
+        if self._card_mode:
+            # ── Режим карточек ──────────────────────────────────────────────── #
+            main_path = team_paths.get(self._main_material_name)
+            self.image_path = main_path if (main_path and os.path.exists(main_path)) else None
+            if self._main_card is not None:
+                self._main_card.set_image(main_path or '')
+
+            new_extra_paths: dict = {}
+            for mat_name, card in self._extra_slot_widgets.items():
+                path = team_paths.get(mat_name)
+                if path and os.path.exists(path):
+                    card.set_image(path)
+                    new_extra_paths[mat_name] = path
+                else:
+                    card.set_image('')
+            self._extra_slot_paths = new_extra_paths
+        else:
+            # ── Одиночный режим: большое превью ─────────────────────────────── #
+            key  = self._main_material_name or '__single__'
+            path = team_paths.get(key)
+            self._stop_gif()
+            if path and os.path.exists(path):
+                self.image_path = path
+                self.empty_state.hide()
+                self.preview.show()
+                self.preview.clear()
+                if path.lower().endswith('.gif'):
+                    from PySide6.QtCore import QTimer
+                    QTimer.singleShot(50, lambda p=path: self._start_gif(
+                        p, max(self.preview.width(), self.width(), 600)
+                    ))
+                else:
+                    from PySide6.QtCore import QTimer
+                    def _scale(p=path):
+                        w = max(self.preview.width(), self.width(), 600)
+                        pix = QPixmap(p).scaled(w, 500, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                        self.preview.setPixmap(pix)
+                    QTimer.singleShot(50, _scale)
+            else:
+                self.image_path = None
+                self.preview.hide()
+                self.preview.clear()
+                self.empty_state.show()
+
+        self.vtf_path = None
+        self.update_info_summary()
+        logger.debug(f"[team] _apply_team_2d({team}): image_path={self.image_path!r}")
+
+    def _apply_active_team_to_3d(self, team: str) -> None:
+        """Применяет текстуру команды к 3D: пользовательскую если загружена, иначе VPK.
+
+        Вызывается при переключении команд (RED/BLU).
+        """
+        if not self._3d_widget:
+            return
+
+        team_paths = self._team_2d_paths.get(team, {})
+        vpk_frames = self._red_frame_paths if team == 'red' else self._blu_frame_paths
+
+        if self._card_mode and self._main_material_name:
+            # Мульти-материальная модель: строим per-material карту из текстур команды
+            tex_map: dict = {}
+            main_path = team_paths.get(self._main_material_name)
+            if main_path and os.path.exists(main_path):
+                tex_map[self._main_material_name] = main_path
+            for mat_name in self._known_extra_slots:
+                mat_path = team_paths.get(mat_name)
+                if mat_path and os.path.exists(mat_path):
+                    tex_map[mat_name] = mat_path
+            if tex_map:
+                self._3d_widget.apply_material_map(tex_map)
+            else:
+                self._apply_team_texture(vpk_frames)
+        else:
+            # Одиночный режим
+            key  = self._main_material_name or '__single__'
+            path = team_paths.get(key)
+            if path and os.path.exists(path):
+                from PySide6.QtCore import QTimer
+                QTimer.singleShot(50, lambda p=path: self._apply_image_to_3d(p))
+            else:
+                self._apply_team_texture(vpk_frames)
+
+    def get_blu_image_path(self) -> Optional[str]:
+        """Возвращает путь к пользовательской BLU-текстуре (главный слот) или None.
+
+        Используется при сборке мода: если есть — BLU вариант создаётся автоматически.
+        """
+        blu_paths = self._team_2d_paths.get('blu', {})
+        if not blu_paths:
+            return None
+        # Предпочитаем главный материал
+        key = self._main_material_name or '__single__'
+        p = blu_paths.get(key)
+        if p and os.path.exists(p):
+            return p
+        # Fallback: первый доступный путь
+        for p in blu_paths.values():
+            if p and os.path.exists(p):
+                return p
+        return None
 
     def _on_3d_failed(self, error: str):
         logger.warning(f"3D Preview не удался: {error}")
@@ -1159,64 +1726,82 @@ class PreviewPanel(QWidget):
     # ── Image loading ────────────────────────────────────────────────────── #
 
     def load_image(self, path):
-        """Загружает изображение (или GIF) для 2D Preview."""
+        """Загружает изображение (или GIF) для 2D Preview.
+
+        В card_mode обновляет главную карточку вместо большого QLabel.
+        """
         self._stop_gif()
         # Если пользователь загрузил другую текстуру — per-mesh состояние устарело
         if path != self._3d_per_mesh_base_image:
             self._3d_per_mesh_active     = False
             self._3d_per_mesh_base_image = None
         self.image_path = path
-        self.vtf_path = None
-
-        self.empty_state.hide()
-        self.preview.show()
-        self.preview.clear()
-        self.preview.setStyleSheet(self.preview_style)
-        self.preview.updateGeometry()
-        self.updateGeometry()
+        self.vtf_path   = None
+        # Сохраняем под текущей командой для последующего переключения RED/BLU
+        _team_key = self._main_material_name or '__single__'
+        self._team_2d_paths.setdefault(self._active_team, {})[_team_key] = path
 
         from PySide6.QtCore import QTimer
 
-        if path.lower().endswith('.gif'):
-            def try_start_gif():
-                if self._gif_movie is not None:
-                    return
-                w = max(self.preview.width(), self.width(), 600)
-                if not self._start_gif(path, w):
+        if self._card_mode and self._main_card is not None:
+            # ── Режим карточек: обновляем главную карточку ───────────────────── #
+            self._main_card.set_image(path)
+        else:
+            # ── Обычный режим: большое превью ────────────────────────────────── #
+            self.empty_state.hide()
+            self.preview.show()
+            self.preview.clear()
+            self.preview.setStyleSheet(self.preview_style)
+            self.preview.updateGeometry()
+            self.updateGeometry()
+
+            if path.lower().endswith('.gif'):
+                def try_start_gif():
+                    if self._gif_movie is not None:
+                        return
+                    w = max(self.preview.width(), self.width(), 600)
+                    if not self._start_gif(path, w):
+                        pix = QPixmap(path).scaled(w, 500, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                        self.preview.setPixmap(pix)
+                QTimer.singleShot(50, try_start_gif)
+                QTimer.singleShot(200, try_start_gif)
+            else:
+                def scale_image():
+                    w = max(self.preview.width(), self.width(), 600)
                     pix = QPixmap(path).scaled(w, 500, Qt.KeepAspectRatio, Qt.SmoothTransformation)
                     self.preview.setPixmap(pix)
-            QTimer.singleShot(50, try_start_gif)
-            QTimer.singleShot(200, try_start_gif)
-        else:
-            def scale_image():
-                w = max(self.preview.width(), self.width(), 600)
-                pix = QPixmap(path).scaled(w, 500, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-                self.preview.setPixmap(pix)
-            QTimer.singleShot(50, scale_image)
-            QTimer.singleShot(200, scale_image)
+                QTimer.singleShot(50, scale_image)
+                QTimer.singleShot(200, scale_image)
 
         # Обновляем текстуру в 3D если открыт 3D режим
         # _from_3d_drop=True означает что drag источник — сам 3D вьювер, обновлять не нужно
-        if self.is_3d_mode() and not getattr(self, '_from_3d_drop', False):
-            if self._crithit_mode and self._3d_available and self._3d_widget:
-                # CritHIT режим: обновляем только billboard над головой солдата
-                captured = path
-                from PySide6.QtCore import QTimer as T
-                T.singleShot(300, lambda p=captured: self._3d_widget.update_crithit_texture(p))
+        if self.is_3d_mode() and self._3d_available and self._3d_widget \
+                and not getattr(self, '_from_3d_drop', False):
+            if self._crithit_mode:
+                QTimer.singleShot(300, lambda p=path: self._3d_widget.update_crithit_texture(p))
+            elif self._card_mode and self._main_material_name:
+                # В card_mode обновляем только главный меш, не всю модель
+                mat_name = self._main_material_name
+                if path.lower().endswith('.gif'):
+                    QTimer.singleShot(300, lambda p=path, m=mat_name: self._apply_gif_to_3d(p, m))
+                elif path.lower().endswith(('.png', '.jpg', '.jpeg')):
+                    QTimer.singleShot(300, lambda p=path, m=mat_name: self._3d_widget.apply_material_map({m: p}))
             elif path.lower().endswith(('.png', '.jpg', '.jpeg')):
-                from PySide6.QtCore import QTimer as T
-                T.singleShot(300, lambda: self.update_3d_texture(path))
+                QTimer.singleShot(300, lambda p=path: self.update_3d_texture(p))
 
         self.update_info_summary()
 
     def clear_preview(self):
         self._stop_gif()
         self.image_path = None
-        self.vtf_path = None
-        self.image_info = {}
-        self.preview.clear()
-        self.preview.hide()
-        self.empty_state.show()
+        self.vtf_path   = None
+        if self._card_mode and self._main_card is not None:
+            # В режиме карточек очищаем только главную карточку
+            self._main_card.set_image('')
+        else:
+            self.preview.clear()
+            self.preview.hide()
+            self.empty_state.show()
         self.update_info_summary()
 
     def get_image_path(self):
@@ -1227,16 +1812,11 @@ class PreviewPanel(QWidget):
 
     def load_vtf(self, path):
         """Загружает VTF файл — рендерит первый кадр через VTFLib."""
-        import os
         if not os.path.exists(path):
             return
 
         self.vtf_path = path
         self.image_path = None
-        self.empty_state.hide()
-        self.preview.show()
-        self.preview.clear()
-        self.preview.setStyleSheet(self.preview_style)
 
         rendered = False
         png_for_3d = None
@@ -1246,68 +1826,55 @@ class PreviewPanel(QWidget):
             from PySide6.QtGui import QImage, QPixmap
             qimage = QImage(rgba_bytes, vtf_w, vtf_h, vtf_w * 4, QImage.Format_RGBA8888)
             if not qimage.isNull():
-                preview_w = max(self.preview.width(), 600)
-                pixmap = QPixmap.fromImage(qimage).scaled(
-                    preview_w, 500, Qt.KeepAspectRatio, Qt.SmoothTransformation
-                )
-                self.preview.setPixmap(pixmap)
                 rendered = True
 
-                # Сохраняем PNG для 3D текстуры
+                # Сохраняем PNG (нужен для 3D и для карточек)
                 import tempfile
                 png_for_3d = tempfile.mktemp(suffix='.png')
                 from PIL import Image
                 img = Image.frombytes("RGBA", (vtf_w, vtf_h), rgba_bytes)
                 img.save(png_for_3d)
+                self.image_path = png_for_3d   # карточки / 3D используют PNG
+
+                if self._card_mode and self._main_card is not None:
+                    # Режим карточек: обновляем главную карточку
+                    self._main_card.set_image(png_for_3d)
+                else:
+                    # Обычный режим: большое превью
+                    self.empty_state.hide()
+                    self.preview.show()
+                    self.preview.clear()
+                    self.preview.setStyleSheet(self.preview_style)
+                    preview_w = max(self.preview.width(), 600)
+                    pixmap = QPixmap.fromImage(qimage).scaled(
+                        preview_w, 500, Qt.KeepAspectRatio, Qt.SmoothTransformation
+                    )
+                    self.preview.setPixmap(pixmap)
         except Exception as e:
             logger.warning(f"Не удалось отрендерить VTF: {e}")
 
         if not rendered:
-            self.preview.setText(f"VTF: {os.path.basename(path)}")
-            self.preview.setStyleSheet(
-                self.preview_style + "QLabel { color:#ccc; font-size:14px; }"
-            )
-            self.preview.setAlignment(Qt.AlignCenter)
+            if not (self._card_mode and self._main_card is not None):
+                self.empty_state.hide()
+                self.preview.show()
+                self.preview.clear()
+                self.preview.setStyleSheet(self.preview_style)
+                self.preview.setText(f"VTF: {os.path.basename(path)}")
+                self.preview.setStyleSheet(
+                    self.preview_style + "QLabel { color:#ccc; font-size:14px; }"
+                )
+                self.preview.setAlignment(Qt.AlignCenter)
 
         # Применяем на 3D модель или CritHIT billboard
-        if png_for_3d and self._3d_available and self._3d_widget:
-            self.image_path = png_for_3d  # сохраняем для _switch_to_3d
-            if self.is_3d_mode():
-                if self._crithit_mode:
-                    self._3d_widget.update_crithit_texture(png_for_3d)
-                else:
-                    self._3d_widget.update_texture_file(png_for_3d)
+        if png_for_3d and self._3d_available and self._3d_widget and self.is_3d_mode():
+            if self._crithit_mode:
+                self._3d_widget.update_crithit_texture(png_for_3d)
+            elif self._card_mode and self._main_material_name:
+                self._3d_widget.apply_material_map({self._main_material_name: png_for_3d})
+            else:
+                self._3d_widget.update_texture_file(png_for_3d)
 
         self.update_info_summary()
-
-    def display_image(self, pil_image):
-        """Отображает PIL Image в превью."""
-        self._stop_gif()
-        try:
-            import tempfile
-            temp_path = tempfile.mktemp(suffix='.png')
-            pil_image.save(temp_path, 'PNG')
-            self.image_path = temp_path
-            self.vtf_path = None
-            self.preview.show()
-            self.empty_state.hide()
-            self.preview.updateGeometry()
-            self.updateGeometry()
-
-            from PySide6.QtCore import QTimer
-            def scale_image():
-                w = max(self.preview.width(), self.width(), 600)
-                pix = QPixmap(temp_path).scaled(w, 500, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-                self.preview.setPixmap(pix)
-            QTimer.singleShot(50, scale_image)
-            QTimer.singleShot(200, scale_image)
-            self.update_info_summary()
-        except Exception as e:
-            logger.error(f"Ошибка при отображении изображения: {e}", exc_info=True)
-            import tempfile
-            temp_path = tempfile.mktemp(suffix='.png')
-            pil_image.save(temp_path, 'PNG')
-            self.load_image(temp_path)
 
     # ── Info summary ─────────────────────────────────────────────────────── #
 

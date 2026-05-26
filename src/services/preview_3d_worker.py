@@ -83,7 +83,8 @@ class Preview3DWorker(QThread):
         self.misc_vpk_path     = misc_vpk_path
         self.textures_vpk_path = textures_vpk_path
         self._preview_dir: Optional[str] = None
-        self._hat_decomp_dir: Optional[str] = None  # папка с QC/SMD шапки после декомпиляции
+        self._decomp_dir:  Optional[str] = None  # папка с декомпилированными QC/SMD
+        self._hat_decomp_dir: Optional[str] = None  # алиас для режима hat
         self._p = self._PROGRESS.get(lang, self._PROGRESS['en'])
 
     # ── Точка входа ───────────────────────────────────────────────────────── #
@@ -98,8 +99,10 @@ class Preview3DWorker(QThread):
             if not smd_path:
                 self.failed.emit(self._p['not_found'])
                 return
+            # Сохраняем папку декомпиляции: нужна для QC-парсинга BLU текстур
+            self._decomp_dir = os.path.dirname(smd_path)
             if self.mode == "hat":
-                self._hat_decomp_dir = os.path.dirname(smd_path)
+                self._hat_decomp_dir = self._decomp_dir
             if self.isInterruptionRequested():
                 return
 
@@ -172,6 +175,15 @@ class Preview3DWorker(QThread):
                     frame_paths, _ = self._extract_hat_texture_frames()
                     self.ready.emit(obj_path, frame_paths[0] if frame_paths else "")
 
+                if self.isInterruptionRequested():
+                    return
+
+                # ── BLU для шапки (через QC skinfamilies skin 1) ─────────── #
+                if _qc_dir:
+                    blu_paths, blu_fps = self._extract_blu_via_qc(_qc_dir, 0.0)
+                    if blu_paths:
+                        self.blu_ready.emit(blu_paths, blu_fps)
+
             else:
                 # Обычное оружие: одна текстура (возможно анимированная)
                 frame_paths, framerate = self._extract_texture_frames()
@@ -185,8 +197,15 @@ class Preview3DWorker(QThread):
                 if self.isInterruptionRequested():
                     return
 
-                # ── 4. Текстура BLU (если есть командная раскраска) ──────── #
-                blu_paths, blu_fps = self._extract_blu_texture_frames(framerate)
+                # ── Текстура BLU: сначала QC skinfamilies, потом прямой поиск ─── #
+                blu_paths, blu_fps = [], 0.0
+                if self._decomp_dir:
+                    blu_paths, blu_fps = self._extract_blu_via_qc(
+                        self._decomp_dir, framerate
+                    )
+                # Fallback: прямой поиск {wk}_blue.vtf (для обратной совместимости)
+                if not blu_paths:
+                    blu_paths, blu_fps = self._extract_blu_texture_frames(framerate)
                 if blu_paths:
                     self.blu_ready.emit(blu_paths, blu_fps)
 
@@ -629,6 +648,202 @@ class Preview3DWorker(QThread):
                 skin0_textures = re.findall(r'"([^"]+)"', first_family.group(1))
 
         return cdmaterials, skin0_textures
+
+    @staticmethod
+    def _parse_qc_all_skin_families(qc_path: str) -> tuple:
+        """
+        Разбирает QC-файл и возвращает все семейства скинов из $texturegroup.
+
+        Пример QC:
+            $texturegroup "skinfamilies"
+            {
+                { "c_scattergun"      }   ← skin 0 = RED
+                { "c_scattergun_blue" }   ← skin 1 = BLU
+            }
+
+        Returns:
+            (cdmaterials: list[str], skin_families: list[list[str]])
+            skin_families[0] = список текстур RED (skin 0)
+            skin_families[1] = список текстур BLU (skin 1) — если есть
+        """
+        import re
+        try:
+            with open(qc_path, encoding="utf-8", errors="replace") as f:
+                content = f.read()
+        except Exception:
+            return [], []
+
+        cdmaterials = [
+            m.replace("\\", "/").strip("/")
+            for m in re.findall(r'\$cdmaterials\s+"([^"]+)"', content, re.IGNORECASE)
+        ]
+
+        skin_families: list = []
+        tg = re.search(
+            r'\$texturegroup\s+"skinfamilies"\s*\{',
+            content, re.IGNORECASE,
+        )
+        if not tg:
+            return cdmaterials, skin_families
+
+        # Находим закрывающую скобку всего texturegroup-блока (учитываем вложенность)
+        depth = 1
+        pos = tg.end()
+        outer_end = pos
+        while pos < len(content) and depth > 0:
+            if content[pos] == '{':
+                depth += 1
+            elif content[pos] == '}':
+                depth -= 1
+                if depth == 0:
+                    outer_end = pos
+                    break
+            pos += 1
+
+        tg_content = content[tg.end():outer_end]
+        # Каждый { ... } внутри — одно семейство скинов
+        for m in re.finditer(r'\{([^}]+)\}', tg_content):
+            family = re.findall(r'"([^"]+)"', m.group(1))
+            if family:
+                skin_families.append(family)
+
+        return cdmaterials, skin_families
+
+    def _extract_blu_via_qc(self, decomp_dir: str, red_framerate: float) -> tuple:
+        """
+        Извлекает BLU-вариант текстуры используя QC $texturegroup skinfamilies.
+
+        Читает QC из decomp_dir, парсит skin family 1 (BLU),
+        ищет соответствующие VTF в VPK (сначала прямой путь, затем через VMT).
+
+        Returns:
+            (frame_paths: list[str], framerate: float)
+            Пустой список если BLU варианта нет.
+        """
+        qc_files = glob.glob(os.path.join(decomp_dir, "*.qc"))
+        if not qc_files:
+            logger.debug(f"[3D] _extract_blu_via_qc: QC не найден в {decomp_dir}")
+            return [], 0.0
+
+        cdmaterials, skin_families = self._parse_qc_all_skin_families(qc_files[0])
+        if len(skin_families) < 2:
+            logger.debug(
+                f"[3D] _extract_blu_via_qc: skin families={len(skin_families)} "
+                f"→ нет BLU варианта в QC"
+            )
+            return [], 0.0
+
+        blu_tex_names = skin_families[1]   # skin 1 = BLU
+        if not blu_tex_names:
+            return [], 0.0
+
+        logger.info(
+            f"[3D] QC BLU skin family: cdmaterials={cdmaterials}, "
+            f"tex_names={blu_tex_names}"
+        )
+
+        try:
+            import vpk as vpklib
+            from src.services.vtflib_wrapper import VTFLib
+            from PIL import Image
+
+            paks: list = []
+            for vpk_path in [self.textures_vpk_path, self.misc_vpk_path]:
+                if vpk_path and os.path.exists(vpk_path):
+                    try:
+                        paks.append(vpklib.open(vpk_path))
+                    except Exception as exc:
+                        logger.debug(f"[3D] Ошибка открытия VPK {vpk_path}: {exc}")
+            if not paks:
+                return [], 0.0
+
+            for tex_name in blu_tex_names:
+                tex_lower = tex_name.lower()
+                vtf_data: Optional[bytes] = None
+
+                # ── Метод 1: прямой путь materials/{cdmat}/{name}.vtf ─────── #
+                for cdmat in cdmaterials:
+                    vtf_candidate = f"materials/{cdmat}/{tex_lower}.vtf"
+                    for pak in paks:
+                        try:
+                            vtf_data = pak[vtf_candidate].read()
+                            logger.debug(f"[3D] BLU прямой VTF: {vtf_candidate}")
+                            break
+                        except KeyError:
+                            continue
+                    if vtf_data:
+                        break
+
+                # ── Метод 2: VMT → $baseTexture → VTF ────────────────────── #
+                if not vtf_data and cdmaterials:
+                    for pak in paks:
+                        vmt_info = self._find_vmt_content_in_vpk(
+                            pak, cdmaterials, tex_lower
+                        )
+                        if vmt_info:
+                            _, vmt_content = vmt_info
+                            basetexture = self._parse_basetexture_from_vmt(vmt_content)
+                            if basetexture:
+                                for pak2 in paks:
+                                    vtf_data = self._find_vtf_for_basetexture(
+                                        pak2, basetexture
+                                    )
+                                    if vtf_data:
+                                        logger.debug(
+                                            f"[3D] BLU через VMT: {basetexture}"
+                                        )
+                                        break
+                            break
+
+                if not vtf_data:
+                    logger.debug(
+                        f"[3D] BLU VTF не найден для '{tex_lower}' "
+                        f"(cdmaterials={cdmaterials})"
+                    )
+                    continue
+
+                # ── Декодируем все кадры из VTF ───────────────────────────── #
+                vtf_file = os.path.join(self._preview_dir, "_tmp_blu_qc.vtf")
+                with open(vtf_file, "wb") as f:
+                    f.write(vtf_data)
+                try:
+                    all_frames_rgba, w, h = VTFLib.read_vtf_all_frames(vtf_file)
+                except Exception as exc:
+                    logger.warning(f"[3D] BLU VTF decode failed: {exc}")
+                    all_frames_rgba = []
+                    w = h = 0
+                finally:
+                    try:
+                        os.remove(vtf_file)
+                    except OSError:
+                        pass
+
+                if not all_frames_rgba:
+                    continue
+
+                frame_paths: list = []
+                for i, rgba in enumerate(all_frames_rgba):
+                    img  = Image.frombytes("RGBA", (w, h), rgba)
+                    name = (
+                        f"texture_blu_{i:03d}.png"
+                        if len(all_frames_rgba) > 1
+                        else "texture_blu.png"
+                    )
+                    path = os.path.join(self._preview_dir, name)
+                    img.save(path)
+                    frame_paths.append(path)
+
+                fps = red_framerate if len(frame_paths) > 1 else 0.0
+                logger.info(
+                    f"[3D] BLU via QC: {len(frame_paths)} frame(s) "
+                    f"@ {fps:.1f} fps для {self.weapon_key}"
+                )
+                return frame_paths, fps
+
+        except Exception as exc:
+            logger.warning(f"[3D] _extract_blu_via_qc: {exc}", exc_info=True)
+
+        return [], 0.0
 
     # ── VMT-поиск: QC → VMT → $baseTexture → VTF ────────────────────────── #
 
