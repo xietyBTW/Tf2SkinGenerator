@@ -7,7 +7,36 @@ from src.data.weapons import SPECIAL_MODES
 
 class VMTService:
     """Сервис для работы с VMT файлами (материалы Source Engine, хуйня с путями и шаблонами)"""
-    
+
+    # ── Внутренние хелперы ───────────────────────────────────────────────── #
+
+    @staticmethod
+    def _find_block_end(content: str, brace_pos: int) -> int | None:
+        """
+        Находит позицию закрывающей фигурной скобки блока, начинающегося с brace_pos.
+        Учитывает вложенность. Возвращает индекс '}' или None если не найдено.
+        """
+        depth = 0
+        for i in range(brace_pos, len(content)):
+            if content[i] == '{':
+                depth += 1
+            elif content[i] == '}':
+                depth -= 1
+                if depth == 0:
+                    return i
+        return None
+
+    @staticmethod
+    def _normalize_cdmaterials(path: str) -> str:
+        """
+        Нормализует путь из $cdmaterials: обратные слеши → прямые, убирает пробелы,
+        trailing-слеш и префикс 'materials/' (если есть).
+        """
+        normalized = path.replace('\\', '/').strip().rstrip('/')
+        if normalized.startswith('materials/'):
+            normalized = normalized[len('materials/'):]
+        return normalized
+
     @staticmethod
     def cdmaterials_path_to_materials_path(cdmaterials_path: str) -> Tuple[str, str]:
         """
@@ -25,12 +54,7 @@ class VMTService:
             materials_path: Путь для материалов (например, "materials/vgui/replay/thumbnails/models/workshop_partner/weapons/c_models")
             filename_prefix: Префикс имени файла (часть пути после weapons/, например "c_models" или "v_machete")
         """
-        # Нормализуем путь (заменяем обратные слеши на прямые, убираем пробелы - QC может использовать оба формата)
-        normalized = cdmaterials_path.replace('\\', '/').strip().rstrip('/')
-        
-        # Убираем начальный "materials/" если есть (на всякий случай, обычно его нет в QC)
-        if normalized.startswith('materials/'):
-            normalized = normalized[len('materials/'):]
+        normalized = VMTService._normalize_cdmaterials(cdmaterials_path)
         
         # Добавляем "materials/" в начало (нужно для структуры VPK)
         materials_path = f"materials/{normalized}"
@@ -154,13 +178,7 @@ class VMTService:
         Returns:
             Путь для $baseTexture (например, "vgui/replay/thumbnails/models/workshop_partner/weapons/c_models/c_claymore")
         """
-        # Нормализуем путь: заменяем обратные слеши на прямые (для VMT нужны прямые слеши, не обратные)
-        # Убираем пробелы и лишние слеши в конце
-        normalized_path = cdmaterials_path.replace('\\', '/').strip().rstrip('/')
-        
-        # Убираем начальный "materials/" если есть (в QC файлах обычно его нет, но на всякий случай проверяем)
-        if normalized_path.startswith('materials/'):
-            normalized_path = normalized_path[len('materials/'):]
+        normalized_path = VMTService._normalize_cdmaterials(cdmaterials_path)
         
         # Формируем путь для $baseTexture: путь из $cdmaterials + имя файла
         # Если путь не заканчивается на слеш - добавляем его (чтобы правильно соединить с именем файла)
@@ -308,17 +326,7 @@ class VMTService:
                     brace_pos = content.find('{', proxies_key.end())
 
             if brace_pos != -1:
-                depth = 0
-                end = None
-                for i in range(brace_pos, len(content)):
-                    ch = content[i]
-                    if ch == '{':
-                        depth += 1
-                    elif ch == '}':
-                        depth -= 1
-                        if depth == 0:
-                            end = i
-                            break
+                end = VMTService._find_block_end(content, brace_pos)
 
                 if end is not None:
                     block = content[brace_pos:end + 1]
@@ -485,16 +493,7 @@ class VMTService:
             return content
 
         # Count braces to find the matching '}'
-        depth = 0
-        end = None
-        for i in range(next_brace, len(content)):
-            if content[i] == '{':
-                depth += 1
-            elif content[i] == '}':
-                depth -= 1
-                if depth == 0:
-                    end = i
-                    break
+        end = VMTService._find_block_end(content, next_brace)
 
         if end is None:
             return content
@@ -534,16 +533,7 @@ class VMTService:
             return content
 
         # Find matching closing brace
-        depth = 0
-        end = None
-        for i in range(next_brace, len(content)):
-            if content[i] == '{':
-                depth += 1
-            elif content[i] == '}':
-                depth -= 1
-                if depth == 0:
-                    end = i
-                    break
+        end = VMTService._find_block_end(content, next_brace)
 
         if end is None:
             return content

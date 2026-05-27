@@ -638,15 +638,23 @@ class PreviewPanel(QWidget):
 
         if self._card_mode and self._main_material_name:
             # Мульти-материальная модель: применяем каждую текстуру только к своему мешу.
-            # НЕ используем _apply_image_to_3d — он применит всё ко всей модели.
-            tex_map: dict = {}
+            # GIF обрабатывается через _apply_gif_to_3d (покадрово),
+            # статичные форматы — через apply_material_map.
+            all_slots: dict = {}
             if self.image_path and os.path.exists(self.image_path):
-                tex_map[self._main_material_name] = self.image_path
+                all_slots[self._main_material_name] = self.image_path
             for mat_name, mat_path in self._extra_slot_paths.items():
                 if mat_path and os.path.exists(mat_path):
-                    tex_map[mat_name] = mat_path
-            if tex_map:
-                QTimer.singleShot(300, lambda m=tex_map: self._3d_widget.apply_material_map(m))
+                    all_slots[mat_name] = mat_path
+
+            static_map: dict = {}
+            for mat_name, mat_path in all_slots.items():
+                if mat_path.lower().endswith('.gif'):
+                    QTimer.singleShot(300, lambda p=mat_path, m=mat_name: self._apply_gif_to_3d(p, m))
+                else:
+                    static_map[mat_name] = mat_path
+            if static_map:
+                QTimer.singleShot(300, lambda m=static_map: self._3d_widget.apply_material_map(m))
         elif self.image_path and not _skip_reapply:
             path = self.image_path
             if os.path.exists(path):
@@ -1072,10 +1080,10 @@ class PreviewPanel(QWidget):
         self.btn_load_3d.setEnabled(False)
         # Не переключаем в 2D принудительно — 3D покажет промпт «выберите оружие»
 
-    def update_3d_texture(self, png_path: str) -> None:
-        """Обновляет текстуру на 3D модели (когда пользователь загружает своё изображение)."""
+    def update_3d_texture(self, path: str) -> None:
+        """Обновляет текстуру на 3D модели. GIF анимируется покадрово, статичные — напрямую."""
         if self._3d_widget and self.is_3d_mode():
-            self._3d_widget.update_texture_file(png_path)
+            self._apply_image_to_3d(path)
 
     def _apply_image_to_3d(self, path: str) -> None:
         """Применяет изображение к 3D модели с учётом типа файла.
@@ -1786,6 +1794,8 @@ class PreviewPanel(QWidget):
                     QTimer.singleShot(300, lambda p=path, m=mat_name: self._apply_gif_to_3d(p, m))
                 elif path.lower().endswith(('.png', '.jpg', '.jpeg')):
                     QTimer.singleShot(300, lambda p=path, m=mat_name: self._3d_widget.apply_material_map({m: p}))
+            elif path.lower().endswith('.gif'):
+                QTimer.singleShot(300, lambda p=path: self._apply_gif_to_3d(p))
             elif path.lower().endswith(('.png', '.jpg', '.jpeg')):
                 QTimer.singleShot(300, lambda p=path: self.update_3d_texture(p))
 

@@ -11,6 +11,14 @@ logger = get_logger(__name__)
 
 
 class TextureService:
+    # Маппинг читаемых имён форматов → внутренние идентификаторы.
+    # Используется и VTFLib-путём (_map_format_to_vtflib) и VTFCmd-путём (create_vtf).
+    _FORMAT_ALIASES: dict = {
+        "RGB888 Bluescreen":    "RGB888_BLUESCREEN",
+        "BGR888 Bluescreen":    "BGR888_BLUESCREEN",
+        "DXT1 With One Bit Alpha": "DXT1_ONEBITALPHA",
+    }
+
     @staticmethod
     def get_vtf_tool() -> Path:
         return ToolPaths.get_vtf_tool()
@@ -69,12 +77,7 @@ class TextureService:
 
     @staticmethod
     def _map_format_to_vtflib(format_type: str, has_alpha: bool) -> int:
-        format_mapping = {
-            "RGB888 Bluescreen": "RGB888_BLUESCREEN",
-            "BGR888 Bluescreen": "BGR888_BLUESCREEN",
-            "DXT1 With One Bit Alpha": "DXT1_ONEBITALPHA",
-        }
-        vtf_format = format_mapping.get(format_type, format_type).upper()
+        vtf_format = TextureService._FORMAT_ALIASES.get(format_type, format_type).upper()
 
         if vtf_format == "DXT1" and has_alpha:
             return VTFImageFormat.DXT5
@@ -182,12 +185,7 @@ class TextureService:
     def create_vtf(png_path: str, output_path: str, format_type: str, flags: List[str], options: dict = None) -> None:
         if options is None:
             options = {}
-        format_mapping = {
-            "RGB888 Bluescreen": "RGB888_BLUESCREEN",
-            "BGR888 Bluescreen": "BGR888_BLUESCREEN",
-            "DXT1 With One Bit Alpha": "DXT1_ONEBITALPHA"
-        }
-        vtf_format = format_mapping.get(format_type, format_type)
+        vtf_format = TextureService._FORMAT_ALIASES.get(format_type, format_type)
         has_alpha = False
         try:
             with Image.open(png_path) as img:

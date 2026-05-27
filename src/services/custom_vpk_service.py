@@ -7,12 +7,10 @@
 import os
 import re
 import shutil
-import subprocess
 import tempfile
 from pathlib import Path
 from typing import Dict, List, Optional, Callable, Tuple
 
-from src.shared.constants import ToolPaths
 from src.shared.file_utils import ensure_directory_exists
 from src.shared.logging_config import get_logger
 
@@ -362,30 +360,13 @@ class CustomVPKService:
 
             # ── 5. Перепаковка ─────────────────────────────────────────── #
             emit(-1, "Packing VPK..." if language == "en" else "Упаковка VPK...")
-            vpk_tool = str(ToolPaths.get_vpk_tool())
-            result = subprocess.run(
-                [vpk_tool, "-v", str(vpkroot_dir.resolve())],
-                cwd=str(temp_root),
-                capture_output=True, text=True,
-                creationflags=subprocess.CREATE_NO_WINDOW,
+            from src.services.packaging_service import PackagingService
+            final = PackagingService.pack_directory(
+                vpkroot_dir=vpkroot_dir,
+                filename=filename,
+                export_folder=export_folder,
+                language=language,
             )
-            if result.returncode != 0:
-                logger.error(f"vpk.exe ошибка: {result.stderr}")
-                return False, f"VPK repack failed:\n{result.stderr or result.stdout}"
-
-            # vpk.exe создаёт "vpkroot.vpk" рядом с папкой vpkroot
-            packed = temp_root / "vpkroot.vpk"
-            if not packed.exists():
-                candidates = list(temp_root.glob("*.vpk"))
-                if not candidates:
-                    return False, "VPK file not found after repacking"
-                packed = candidates[0]
-
-            ensure_directory_exists(Path(export_folder))
-            final = Path(export_folder) / filename
-            if final.exists():
-                final.unlink()
-            shutil.move(str(packed), str(final))
 
             msg = t.get('vpk_success', 'VPK successfully created: {path}').format(path=str(final))
             logger.info(msg)

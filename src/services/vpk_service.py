@@ -341,8 +341,8 @@ class VPKService:
 
             elif mode in PLAYER_BODY_MODE_KEYS:
                 # Скин персонажа — VTF-only пайплайн (без декомпиляции и компиляции MDL)
-                from src.services.player_skin_build_service import PlayerSkinBuildService
-                success, msg = PlayerSkinBuildService.build(
+                from src.services.player_texture_build_service import PlayerTextureBuildService
+                success, msg = PlayerTextureBuildService.build_player_skin(
                     ctx=ctx,
                     mode=mode,
                     image_path=image_path,

@@ -304,69 +304,19 @@ class MergeVPKService:
         filename: str,
         export_folder: str = "export",
         language: str = "en",
-        should_cancel: Optional[Callable[[], bool]] = None
+        should_cancel: Optional[Callable[[], bool]] = None,
     ) -> Optional[str]:
         """
-        Создает VPK файл из директории vpkroot
-        
-        Args:
-            vpkroot_dir: Директория с содержимым для упаковки
-            filename: Имя выходного файла
-            export_folder: Папка для экспорта
-            language: Язык для сообщений об ошибках
-            
-        Returns:
-            Путь к созданному VPK файлу или None при ошибке
+        Создаёт VPK файл из директории vpkroot.
+        Делегирует в PackagingService.pack_directory — единственное место вызова vpk.exe.
         """
-        from src.data.translations import TRANSLATIONS
-        t = TRANSLATIONS.get(language, TRANSLATIONS['en'])
-        
-        # vpk.exe создает файл с именем папки, т.е. vpkroot.vpk
-        # Файл создается в директории vpkroot_dir (в родительской папке)
-        vpkroot_parent = vpkroot_dir.parent
-        temp_vpk_path = vpkroot_parent / "vpkroot.vpk"
-        
-        # Удаляем существующий VPK если есть
-        if temp_vpk_path.exists():
-            temp_vpk_path.unlink()
-        
-        # Создаем VPK
         if should_cancel and should_cancel():
             return None
 
-        logger.info("Запуск vpk.exe для создания объединенного VPK...")
-        result = subprocess.run([
-            str(ToolPaths.get_vpk_tool()),
-            "-v", str(vpkroot_dir.resolve())
-        ], cwd=str(vpkroot_parent), capture_output=True, text=True,
-           creationflags=subprocess.CREATE_NO_WINDOW)
-        
-        logger.debug(f"vpk.exe завершился с кодом: {result.returncode}")
-        if result.stdout:
-            logger.debug(f"STDOUT: {result.stdout}")
-        if result.stderr:
-            logger.debug(f"STDERR: {result.stderr}")
-        
-        if result.returncode != 0:
-            error_msg = t.get('error_vpk_creation_failed', 'VPK creation failed').format(
-                stdout=result.stdout,
-                stderr=result.stderr
-            )
-            logger.error(f"Ошибка создания VPK: {error_msg}")
-            raise VPKCreationError(result.stdout, result.stderr)
-        
-        if not temp_vpk_path.exists():
-            error_msg = t.get('error_vpkroot_not_found', 'VPK file not found after creation').format(path=vpkroot_parent)
-            logger.error(error_msg)
-            raise FileNotFoundError(temp_vpk_path, error_msg)
-        
-        # Перемещаем в export
-        export_folder_path = Path(export_folder)
-        ensure_directory_exists(export_folder_path)
-        final_output = export_folder_path / filename
-        if final_output.exists():
-            final_output.unlink()
-        shutil.move(str(temp_vpk_path), str(final_output))
-        
-        logger.info(f"Объединенный VPK успешно создан: {final_output}")
-        return str(final_output)
+        from src.services.packaging_service import PackagingService
+        return PackagingService.pack_directory(
+            vpkroot_dir=vpkroot_dir,
+            filename=filename,
+            export_folder=export_folder,
+            language=language,
+        )
