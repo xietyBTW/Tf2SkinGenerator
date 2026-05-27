@@ -544,9 +544,10 @@ class MainWindow(QMainWindow):
         logger.info(f"Выбрана шапка: {display_name} → {mdl_path}")
         if hasattr(self, 'settings_panel'):
             self.settings_panel.apply_mode_restrictions(self.mode)
-        # Сбрасываем 2D панель — чтобы текстура предыдущей шапки не оставалась
+        # Сбрасываем 2D панель — чтобы текстура предыдущей шапки не оставалась.
+        # Передаём mdl_path как weapon_key чтобы смена шапки всегда вызывала сброс.
         if hasattr(self, 'preview_panel'):
-            self.preview_panel.update_extra_slots('', mode='hat')
+            self.preview_panel.update_extra_slots(mdl_path, mode='hat')
         # Обновляем 3D preview и сводку
         self._update_hat_3d_preview()
         self.update_preview_info()

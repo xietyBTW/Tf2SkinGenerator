@@ -42,6 +42,9 @@ class Preview3DWorker(QThread):
     # Несколько текстур для мульти-материальных моделей: {mat_name: png_path}
     # Эмитируется вместо animated когда модель имеет > 1 материал
     multi_material = Signal(object)
+    # BLU-вариант мульти-материальных текстур: {mat_name: png_path}
+    # Эмитируется для персонажей когда у каждого меша есть своя BLU-текстура
+    blu_multi_material = Signal(object)
     # Ошибка
     failed   = Signal(str)
     # Текстовый прогресс для UI
@@ -145,6 +148,26 @@ class Preview3DWorker(QThread):
                 self.ready.emit(obj_path, "")
                 if tex_map:
                     self.multi_material.emit(tex_map)
+                # BLU detection для персонажей:
+                # Для многоматериальных моделей — строим полную карту {mat: blu_png}.
+                # Если не удалось — пробуем одиночный BLU (старый путь как fallback).
+                if self._decomp_dir and mat_names:
+                    try:
+                        blu_map = self._extract_blu_multi_textures_via_qc(mat_names)
+                        if blu_map:
+                            self.blu_multi_material.emit(blu_map)
+                            logger.info(
+                                f"[3D] BLU multi-tex: {len(blu_map)} материалов"
+                            )
+                        else:
+                            # Fallback: ищем единственный BLU VTF через QC
+                            blu_paths, blu_fps = self._extract_blu_via_qc(
+                                self._decomp_dir, 0.0
+                            )
+                            if blu_paths:
+                                self.blu_ready.emit(blu_paths, blu_fps)
+                    except Exception as _exc:
+                        logger.debug(f"[3D] BLU detection (multi-tex): {_exc}")
 
             elif self.mode == "hat":
                 # ── Шапки: QC → VMT → $baseTexture → VTF ─────────────────── #
@@ -532,6 +555,136 @@ class Preview3DWorker(QThread):
 
         except Exception as exc:
             logger.warning(f"[3D] Ошибка извлечения мульти-текстур: {exc}", exc_info=True)
+
+        return result
+
+    def _extract_blu_multi_textures_via_qc(self, mat_names: list) -> dict:
+        """
+        Для каждого материала из SMD ищет BLU-вариант через QC skinfamilies.
+
+        Логика:
+          1. Читает QC из _decomp_dir, парсит skin_families[0] (RED) и [1] (BLU).
+          2. Для каждого mat_name ищет совпадение в skin_families[0] по индексу.
+          3. Берёт соответствующее имя из skin_families[1] и ищет VTF в VPK.
+          4. Декодирует VTF → PNG.
+
+        Returns:
+            {mat_name: png_path} — только для найденных BLU текстур.
+            Пустой dict если BLU варианта нет.
+        """
+        if not self._decomp_dir or not mat_names:
+            return {}
+
+        import glob
+        qc_files = glob.glob(os.path.join(self._decomp_dir, "*.qc"))
+        if not qc_files:
+            return {}
+
+        cdmaterials, skin_families = self._parse_qc_all_skin_families(qc_files[0])
+        if len(skin_families) < 2 or not cdmaterials:
+            logger.debug(
+                f"[3D] _extract_blu_multi_textures_via_qc: "
+                f"skin families={len(skin_families)} → нет BLU варианта"
+            )
+            return {}
+
+        red_family = [t.lower() for t in skin_families[0]]
+        blu_family = skin_families[1]
+
+        result: dict = {}
+        try:
+            import vpk as vpklib
+            from src.services.vtflib_wrapper import VTFLib
+            from PIL import Image
+
+            paks: list = []
+            for vpk_path in [self.textures_vpk_path, self.misc_vpk_path]:
+                if vpk_path and os.path.exists(vpk_path):
+                    try:
+                        paks.append(vpklib.open(vpk_path))
+                    except Exception as exc:
+                        logger.debug(f"[3D] Ошибка открытия VPK {vpk_path}: {exc}")
+            if not paks:
+                return {}
+
+            from src.data.player_characters import PLAYER_CHARACTERS
+            arm_folder: Optional[str] = PLAYER_CHARACTERS.get(self.mode, {}).get("folder", "")
+
+            for mat_name in mat_names:
+                # Ищем mat_name в RED skin family (case-insensitive)
+                mat_lower = mat_name.lower()
+                try:
+                    idx = red_family.index(mat_lower)
+                except ValueError:
+                    # Попытка частичного совпадения (конец строки)
+                    idx = next(
+                        (i for i, r in enumerate(red_family) if mat_lower.endswith(r) or r.endswith(mat_lower)),
+                        -1
+                    )
+
+                if idx < 0 or idx >= len(blu_family):
+                    logger.debug(f"[3D] BLU multi: mat '{mat_name}' не найден в RED family")
+                    continue
+
+                blu_tex_name = blu_family[idx]
+                blu_lower = blu_tex_name.lower()
+                vtf_data: Optional[bytes] = None
+
+                # Поиск VTF в VPK
+                for cdmat in cdmaterials:
+                    vtf_candidate = f"materials/{cdmat}/{blu_lower}.vtf"
+                    for pak in paks:
+                        try:
+                            vtf_data = pak[vtf_candidate].read()
+                            logger.debug(f"[3D] BLU multi VTF: {vtf_candidate}")
+                            break
+                        except KeyError:
+                            continue
+                    if vtf_data:
+                        break
+
+                # Fallback через arm_folder
+                if not vtf_data and arm_folder:
+                    candidate = f"materials/models/player/{arm_folder}/{blu_lower}.vtf"
+                    for pak in paks:
+                        try:
+                            vtf_data = pak[candidate].read()
+                            logger.debug(f"[3D] BLU multi VTF (arm_folder): {candidate}")
+                            break
+                        except KeyError:
+                            continue
+
+                if not vtf_data:
+                    logger.debug(f"[3D] BLU multi: VTF не найден для '{blu_tex_name}'")
+                    continue
+
+                # Декодируем VTF → PNG
+                tmp_vtf = os.path.join(self._preview_dir, f"_tmp_blu_{mat_name}.vtf")
+                with open(tmp_vtf, "wb") as f:
+                    f.write(vtf_data)
+                try:
+                    all_frames, w, h = VTFLib.read_vtf_all_frames(tmp_vtf)
+                except Exception as exc:
+                    logger.warning(f"[3D] BLU multi VTF decode '{mat_name}': {exc}")
+                    all_frames = []
+                    w = h = 0
+                finally:
+                    try:
+                        os.remove(tmp_vtf)
+                    except OSError:
+                        pass
+
+                if not all_frames:
+                    continue
+
+                img = Image.frombytes("RGBA", (w, h), all_frames[0])
+                png_path = os.path.join(self._preview_dir, f"blu_{mat_name}.png")
+                img.save(png_path)
+                result[mat_name] = png_path
+                logger.debug(f"[3D] BLU multi: '{mat_name}' → {os.path.basename(png_path)}")
+
+        except Exception as exc:
+            logger.warning(f"[3D] _extract_blu_multi_textures_via_qc: {exc}", exc_info=True)
 
         return result
 
