@@ -189,8 +189,10 @@ class ExtractModelService:
                 return False, t.get("tf2_path_not_specified", "TF2 path not specified in settings"), False, None
 
             is_hat_mode = (mode == "hat")
+            # Для персонажей weapon_key = полный MDL путь (напр. "models/player/spy.mdl")
+            is_player_body = weapon_key.startswith("models/player/") and weapon_key.endswith(".mdl")
 
-            if not is_hat_mode and weapon_key not in WEAPON_MDL_PATHS:
+            if not is_hat_mode and not is_player_body and weapon_key not in WEAPON_MDL_PATHS:
                 return (
                     False,
                     t.get("error_weapon_not_found", "Weapon not found").format(weapon_key=weapon_key),
@@ -207,6 +209,9 @@ class ExtractModelService:
 
             if is_hat_mode:
                 paths_to_try = ExtractModelService._build_hat_paths(weapon_key)
+            elif is_player_body:
+                # Прямой MDL путь — как у шапок
+                paths_to_try = [weapon_key]
             else:
                 paths_to_try = ExtractModelService._build_paths_to_try(mode, weapon_key)
             found_mdl_path = None

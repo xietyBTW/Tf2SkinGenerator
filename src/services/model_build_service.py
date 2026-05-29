@@ -118,20 +118,50 @@ class ModelBuildService:
         with open(qc_path, 'r', encoding='utf-8') as f:
             lines = f.readlines()
         
-        # Ищем первую непустую $cdmaterials (пустые пропускаем нахер)
+        # Ищем первую непустую $cdmaterials без относительных переходов (..)
+        # Пути вида "console\..\..\effects" — это системные папки движка (глаза, эффекты),
+        # а не папки скинов модели. Их пропускаем — нам нужен путь к текстурам тела.
         for line in lines:
             stripped = line.strip()
             if re.match(r'\$cdmaterials\s+', stripped, re.IGNORECASE):
-                # Вытаскиваем путь из строки (формат: $cdmaterials "path" или $cdmaterials "")
                 path_match = re.search(r'\$cdmaterials\s*"([^"]*)"', line, re.IGNORECASE)
                 if path_match:
                     path = path_match.group(1)
-                    # Если путь не пустой - это то что нам нужно
-                    if path.strip():
+                    if path.strip() and '..' not in path:
                         return path
-        
+
         return None
     
+    @staticmethod
+    def extract_all_cdmaterials_paths_from_qc(qc_path: str) -> list:
+        """
+        Возвращает ВСЕ непустые пути $cdmaterials из QC файла в порядке появления.
+
+        Crowbar добавляет префикс ``console\\`` и иногда включает пути вида
+        ``console\\..\\..\\effects`` (для частиц — не текстуры). Эта функция
+        возвращает сырые значения; нормализацию (стрип console/, пропуск ..)
+        делает потребитель.
+
+        Args:
+            qc_path: Путь к QC файлу
+
+        Returns:
+            Список непустых путей из всех $cdmaterials (может быть пустым).
+        """
+        if not os.path.exists(qc_path):
+            return []
+
+        result = []
+        with open(qc_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                if re.match(r'\s*\$cdmaterials\s+', line, re.IGNORECASE):
+                    m = re.search(r'\$cdmaterials\s*"([^"]*)"', line, re.IGNORECASE)
+                    if m:
+                        path = m.group(1).strip()
+                        if path:
+                            result.append(path)
+        return result
+
     @staticmethod
     def extract_modelname_path(qc_path: str) -> Optional[str]:
         """
@@ -399,22 +429,20 @@ class ModelBuildService:
         # В TF2 BLU обычно идет сразу после RED
         blu_row_raw = base_rows[1] if len(base_rows) > 1 else []
         
-        # Дедублируем BLU строку — некоторые QC файлы содержат дублирующиеся записи
-        # Например: ['c_flaregun_blue', 'c_flaregun_shell_blue', 'c_flaregun_blue', 'c_flaregun_shell_blue']
-        seen = set()
-        blu_row_deduped = []
-        for name in blu_row_raw:
-            if name not in seen:
-                seen.add(name)
-                blu_row_deduped.append(name)
-        result['blu_row'] = blu_row_deduped
-        
+        # НЕ дедуплицируем BLU строку — сохраняем column alignment с RED строкой.
+        # Важно для моделей персонажей (medic, scout…) где Valve повторяет текстуры
+        # в нескольких колонках для нужд шейдеров (eyeball, invulnfx и т.п.):
+        #   RED col5=medic_blue, BLU col5=medic_blue → shared → обработается автоматически.
+        # Дублирующиеся VTF не создаются дважды благодаря exists()-проверкам в цикле BLU.
+        result['blu_row'] = blu_row_raw
+
         # extra_materials = столбцы RED строки начиная с col 1, НО без тех что уже есть в BLU строке.
         # Проблема: Valve иногда пишет ВСЕ скины в одну RED строку:
         #   { "c_flaregun" "c_flaregun_shell" "c_flaregun_blue" "c_flaregun_shell_blue" }
         # В этом случае "c_flaregun_blue" и "c_flaregun_shell_blue" — это BLU варианты, а не extra_materials.
         # Они обрабатываются в BLU loop, поэтому из extra_materials их нужно исключить.
-        blu_names_set = set(blu_row_deduped)
+        # Используем set() из уникальных имён BLU строки для фильтрации.
+        blu_names_set = set(blu_row_raw)
         extra_raw = base_rows[0][1:] if len(base_rows[0]) > 1 else []
         result['extra_materials'] = [m for m in extra_raw if m not in blu_names_set]
         

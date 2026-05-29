@@ -977,13 +977,16 @@ class MainWindow(QMainWindow):
             self.preview_panel.set_crithit_mode()
             return
 
+        from src.data.player_characters import SPY_MASK_MODE_KEY, SPY_MDL_PATH
         is_hand_mode = self.mode in HAND_MODE_KEYS
         is_player_body = self.mode in PLAYER_BODY_MODE_KEYS
+        is_spy_masks = (self.mode == SPY_MASK_MODE_KEY)
         is_normal_weapon = (
             self.mode
             and self.mode not in ("spray", "critHIT")
             and not is_hand_mode
             and not is_player_body
+            and not is_spy_masks
             and '_' in self.mode
         )
 
@@ -995,12 +998,15 @@ class MainWindow(QMainWindow):
                 return
             weapon_key = arm_key
         elif is_player_body:
-            # Тело персонажа — используем mdl_key из PLAYER_CHARACTERS
-            mdl_key = PLAYER_CHARACTERS.get(self.mode, {}).get("mdl_key", "")
-            if not mdl_key:
+            # Тело персонажа — передаём полный mdl_path как weapon_key (как у шапок)
+            mdl_path = PLAYER_CHARACTERS.get(self.mode, {}).get("mdl_path", "")
+            if not mdl_path:
                 self.preview_panel.reset_3d_preview()
                 return
-            weapon_key = mdl_key
+            weapon_key = mdl_path
+        elif is_spy_masks:
+            # Маски маскировки шпиона — используем тот же MDL что и у скина шпиона
+            weapon_key = SPY_MDL_PATH
         elif is_normal_weapon:
             weapon_key = self.mode.split('_', 1)[1] if '_' in self.mode else self.mode
 
@@ -1035,6 +1041,10 @@ class MainWindow(QMainWindow):
             self.preview_panel.show_3d_no_tf2_message()
             return
 
+        # Включаем/выключаем режим масок шпиона
+        from src.data.player_characters import SPY_MASK_MODE_KEY as _SMK
+        self.preview_panel.set_spy_mask_mode(self.mode == _SMK)
+
         self.preview_panel.set_3d_params(
             weapon_key=weapon_key,
             mode=self.mode,
@@ -1048,12 +1058,17 @@ class MainWindow(QMainWindow):
             return
 
         from src.data.player_hands import HAND_MODE_KEYS, HAND_MODES
+        from src.data.player_characters import SPY_MASK_MODE_KEY as _SMK2, SPY_MASK_VTF_NAMES
 
         mode = getattr(self, 'mode', None) or ''
 
         if not mode or mode in ('spray', 'critHIT', 'custom'):
-            # Для этих режимов доп. слоты не нужны
             self.preview_panel.update_extra_slots('', mode='')
+            return
+
+        if mode == _SMK2:
+            # Маски шпиона: передаём список имён масок как material_names
+            self.preview_panel.update_extra_slots_spy_masks(SPY_MASK_VTF_NAMES)
             return
 
         is_hand_mode = mode in HAND_MODE_KEYS
@@ -1459,11 +1474,24 @@ class MainWindow(QMainWindow):
             from_path = None
 
             if not custom_vtf_path:
-                from_path = self.preview_panel.get_image_path()
-                # В custom режиме изображение необязательно (остальные текстуры берутся из мода)
-                if not from_path and self.mode != "custom":
-                    ErrorHandler.show_warning(self, self.t['load_image_error'], self.t['error'])
-                    return
+                from src.shared.constants import EXTRA_TEX_USE_GAME_ORIGINAL
+                from src.data.player_characters import SPY_MASK_MODE_KEY as _SPY_MASK_MODE
+                if self.mode == _SPY_MASK_MODE:
+                    # Маски маскировки: нет «главной» текстуры — все маски через callback.
+                    # Передаём sentinel как placeholder, vpk_service обработает маски отдельно.
+                    from_path = EXTRA_TEX_USE_GAME_ORIGINAL
+                else:
+                    # get_red_image_path() не делает fallback на BLU — возвращает
+                    # None если RED не загружен.
+                    from_path = self.preview_panel.get_red_image_path()
+                    # В custom режиме изображение необязательно
+                    if not from_path and self.mode != "custom":
+                        _blu_check = self.preview_panel.get_blu_image_path()
+                        if _blu_check:
+                            from_path = EXTRA_TEX_USE_GAME_ORIGINAL
+                        else:
+                            ErrorHandler.show_warning(self, self.t['load_image_error'], self.t['error'])
+                            return
             
             # Читаем опции замены/готовой модели из меню шестерёнки
             replace_model_enabled = (
@@ -1537,6 +1565,10 @@ class MainWindow(QMainWindow):
                 )
                 hat_apply_game_paints = (reply == QMessageBox.Yes)
 
+            # Сбрасываем запомненный выбор «применить ко всем» — каждая новая
+            # сборка начинается без предыдущих предпочтений пользователя.
+            self._extra_texture_apply_all: Optional[str] = None
+
             # Проверяем, не запущена ли уже сборка
             if hasattr(self, '_build_worker') and self._build_worker.isRunning():
                 ErrorHandler.show_warning(
@@ -1568,7 +1600,7 @@ class MainWindow(QMainWindow):
             
             # Создаем и запускаем воркер для асинхронной сборки
             from src.services.build_worker import BuildWorker
-            
+
             # Если пользователь загрузил BLU-текстуру в 2D панели — используем её
             # автоматически, без лишних вопросов.
             _blu_image = None
@@ -1701,49 +1733,86 @@ class MainWindow(QMainWindow):
 
         Сначала проверяет, загружено ли уже изображение для этого слота через
         карточку доп. слота в 2D превью (drag-drop или Browse). Если да — использует его
-        без диалога. Иначе — показывает стандартный диалог выбора файла.
+        без диалога. Иначе — показывает диалог с тремя вариантами:
+          • «Загрузить свою» — выбрать файл изображения
+          • «Использовать обычную» — взять текстуру прямо из игры (не добавлять в мод)
+          • «Использовать основную» — скопировать основную текстуру для этого слота
+
+        Галочка «Применить ко всем» запоминает выбор и применяет его ко всем
+        последующим вопросам без повторных диалогов.
         """
         if not hasattr(self, '_build_worker'):
             return
 
-        # ── Проверяем pre-loaded путь из карточки слота ───────────────────────
+        from src.shared.constants import EXTRA_TEX_USE_GAME_ORIGINAL
+
+        # ── Проверяем уже загруженную текстуру из 2D-карточек ────────────────
+        # get_uploaded_texture_for_mat проверяет оба словаря (_textures['red'] и
+        # _textures['blu']) и делает обратный поиск через _vpk_blu_name_map для
+        # случая когда build спрашивает BLU-имя ('medic_head_blue'), а карточка
+        # хранит под RED-ключом ('medic_head_red') в _textures['blu'].
         pre_loaded: Optional[str] = None
         if hasattr(self, 'preview_panel'):
-            slot_paths = self.preview_panel.get_slot_image_paths()
-            # Ищем по exact match или по нечувствительному к регистру совпадению
-            pre_loaded = slot_paths.get(material_name)
-            if pre_loaded is None:
-                mat_lc = material_name.lower()
-                for key, path in slot_paths.items():
-                    if key.lower() == mat_lc:
-                        pre_loaded = path
-                        break
+            pre_loaded = self.preview_panel.get_uploaded_texture_for_mat(material_name)
+            if pre_loaded:
+                logger.info(
+                    f"extra_texture: уже загружена '{material_name}': {pre_loaded}"
+                )
 
-        if pre_loaded and os.path.exists(pre_loaded):
-            logger.info(
-                f"_on_request_extra_texture: used pre-loaded path for '{material_name}': {pre_loaded}"
-            )
+        if pre_loaded:
             if hasattr(self._build_worker, 'set_extra_texture_result'):
                 self._build_worker.set_extra_texture_result(pre_loaded)
             return
 
-        # ── Стандартный диалог ────────────────────────────────────────────────
-        from PySide6.QtWidgets import QMessageBox
+        # ── Диалог должен появляться поверх окна прогресса ───────────────────
+        _dialog_parent = (
+            self._progress_dialog
+            if hasattr(self, '_progress_dialog') and self._progress_dialog
+            else self
+        )
 
-        # Для скинов персонажей используем человекочитаемое название текстуры
+        # ── Человекочитаемое имя материала ────────────────────────────────────
         from src.data.player_characters import PLAYER_BODY_MODE_KEYS, get_player_body_extra_label
         lang = getattr(self, 'language', 'en')
+        is_ru = (lang == 'ru')
+
         if weapon_key in PLAYER_BODY_MODE_KEYS:
             display_name = get_player_body_extra_label(weapon_key, material_name, lang)
-            msg_title = self.t.get('extra_texture_title', 'Additional Texture')
+        else:
+            display_name = material_name
+
+        msg_title = self.t.get('extra_texture_title', 'Additional Texture')
+
+        # ── Apply-to-all: если уже есть запомненный выбор — применяем сразу ──
+        _apply_all = getattr(self, '_extra_texture_apply_all', None)
+        if _apply_all == 'game':
+            logger.info(f"Apply-to-all (game): пропускаем '{material_name}'")
+            if hasattr(self._build_worker, 'set_extra_texture_result'):
+                self._build_worker.set_extra_texture_result(EXTRA_TEX_USE_GAME_ORIGINAL)
+            return
+        elif _apply_all == 'main':
+            logger.info(f"Apply-to-all (main): '{material_name}' → основная текстура")
+            if hasattr(self._build_worker, 'set_extra_texture_result'):
+                self._build_worker.set_extra_texture_result(None)
+            return
+        elif _apply_all == 'custom':
+            # Пропускаем вопрос — сразу открываем файловый диалог
+            logger.info(f"Apply-to-all (custom): сразу выбираем файл для '{material_name}'")
+            file_path = self._pick_extra_texture_file(_dialog_parent, display_name)
+            if hasattr(self._build_worker, 'set_extra_texture_result'):
+                self._build_worker.set_extra_texture_result(file_path)
+            return
+
+        # ── Строим диалог с тремя кнопками и галочкой ────────────────────────
+        from PySide6.QtWidgets import QMessageBox, QCheckBox as _QCheckBox
+
+        if weapon_key in PLAYER_BODY_MODE_KEYS:
             msg_text = self.t.get(
                 'extra_player_texture_question',
                 'Apply your skin to the "{material}" texture as well?\n\n'
                 'If you click "No", the main texture will be copied for this slot.'
             ).format(material=display_name)
         else:
-            display_name = material_name
-            msg_title = self.t.get('extra_texture_title', 'Additional Texture')
             msg_text = self.t.get(
                 'extra_texture_question',
                 'The weapon model has an additional material: "{material}".\n'
@@ -1751,34 +1820,71 @@ class MainWindow(QMainWindow):
                 'If you click "No", the main texture will be used for this material.'
             ).format(material=display_name)
 
-        reply = QMessageBox.question(
-            self,
-            msg_title,
-            msg_text,
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
+        msg_box = QMessageBox(_dialog_parent)
+        msg_box.setWindowTitle(msg_title)
+        msg_box.setText(msg_text)
+        msg_box.setIcon(QMessageBox.Question)
+
+        btn_custom = msg_box.addButton(
+            self.t.get('extra_tex_btn_upload', 'Загрузить свою' if is_ru else 'Upload mine'),
+            QMessageBox.AcceptRole,
         )
+        btn_game = msg_box.addButton(
+            self.t.get('extra_tex_btn_game', 'Использовать обычную' if is_ru else 'Use game original'),
+            QMessageBox.ActionRole,
+        )
+        btn_main = msg_box.addButton(
+            self.t.get('extra_tex_btn_main', 'Использовать основную' if is_ru else 'Use main texture'),
+            QMessageBox.RejectRole,
+        )
+        msg_box.setDefaultButton(btn_main)
 
-        file_path = None
-        if reply == QMessageBox.Yes:
-            # Показываем диалог выбора файла
-            dialog_title = self.t.get(
-                'extra_texture_select',
-                'Select image for "{material}"'
-            ).format(material=display_name)
+        apply_all_cb = _QCheckBox(
+            self.t.get('extra_tex_apply_all', 'Применить ко всем оставшимся' if is_ru else 'Apply to all remaining')
+        )
+        msg_box.setCheckBox(apply_all_cb)
 
-            file_path, _ = QFileDialog.getOpenFileName(
-                self,
-                dialog_title,
-                "",
-                self.t.get('images_filter', 'Images') + " (*.png *.jpg *.jpeg *.bmp *.gif *.tga *.vtf);;All Files (*)"
-            )
-            if not file_path:
-                file_path = None
+        msg_box.exec()
 
-        # Устанавливаем результат в воркере
+        clicked = msg_box.clickedButton()
+        apply_to_all = apply_all_cb.isChecked()
+
+        if clicked is btn_custom:
+            choice = 'custom'
+        elif clicked is btn_game:
+            choice = 'game'
+        else:
+            choice = 'main'
+
+        if apply_to_all:
+            self._extra_texture_apply_all = choice
+            logger.info(f"Apply-to-all установлен: '{choice}'")
+
+        # ── Выполняем выбранное действие ──────────────────────────────────────
+        if choice == 'custom':
+            file_path = self._pick_extra_texture_file(_dialog_parent, display_name)
+        elif choice == 'game':
+            file_path = EXTRA_TEX_USE_GAME_ORIGINAL
+        else:
+            file_path = None
+
         if hasattr(self._build_worker, 'set_extra_texture_result'):
             self._build_worker.set_extra_texture_result(file_path)
+
+    def _pick_extra_texture_file(self, parent, display_name: str) -> Optional[str]:
+        """Открывает диалог выбора файла изображения для дополнительной текстуры."""
+        dialog_title = self.t.get(
+            'extra_texture_select',
+            'Select image for "{material}"'
+        ).format(material=display_name)
+
+        file_path, _ = QFileDialog.getOpenFileName(
+            parent,
+            dialog_title,
+            "",
+            self.t.get('images_filter', 'Images') + " (*.png *.jpg *.jpeg *.bmp *.gif *.tga *.vtf);;All Files (*)"
+        )
+        return file_path if file_path else None
 
     def _on_request_extra_model(self, smd_name: str, weapon_key: str) -> None:
         """
@@ -1882,7 +1988,8 @@ class MainWindow(QMainWindow):
                     ErrorHandler.show_warning(self, self.t.get('extract_model_special_mode_error', 'Cannot extract model for this mode'), self.t['error'])
                     return
             elif self.mode in PLAYER_BODY_MODE_KEYS:
-                weapon_key = PLAYER_CHARACTERS[self.mode].get("mdl_key", "")
+                # Для персонажей weapon_key = полный MDL путь (как в 3D preview)
+                weapon_key = PLAYER_CHARACTERS[self.mode].get("mdl_path", "")
                 if not weapon_key:
                     ErrorHandler.show_warning(self, self.t.get('extract_model_special_mode_error', 'Cannot extract model for this mode'), self.t['error'])
                     return

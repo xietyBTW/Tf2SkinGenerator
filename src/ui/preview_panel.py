@@ -41,6 +41,30 @@ logger = get_logger(__name__)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# QScrollArea с горизонтальной прокруткой колесом мыши
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class _HWheelScrollArea(QScrollArea):
+    """
+    QScrollArea, где колесо мыши прокручивает контент горизонтально.
+
+    Используется для полосы карточек текстур: вертикального скролла там нет,
+    поэтому любой поворот колеса перенаправляется на горизонтальный скроллбар.
+    """
+
+    def wheelEvent(self, event) -> None:
+        h_bar = self.horizontalScrollBar()
+        # angleDelta().y() — стандартный вертикальный поворот колеса (шаг = 120)
+        # Умножаем на коэффициент чтобы один «клик» давал ~60px прокрутки
+        delta = event.angleDelta().y()
+        if delta != 0:
+            h_bar.setValue(h_bar.value() - delta // 2)
+            event.accept()
+        else:
+            super().wheelEvent(event)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Карточка одного текстурного слота (2D, drag-drop)
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -54,7 +78,7 @@ class _ExtraSlotCard(QWidget):
 
     CARD_H = 500
 
-    def __init__(self, material_name: str, parent=None):
+    def __init__(self, material_name: str, display_name: str = '', parent=None):
         super().__init__(parent)
         self.material_name = material_name
         self._image_path: Optional[str] = None
@@ -74,7 +98,31 @@ class _ExtraSlotCard(QWidget):
         self._lbl.setStyleSheet(self._STYLE_IDLE)
         lay.addWidget(self._lbl)
 
-        name_lbl = QLabel(material_name)
+        # ── Кнопка × — оверлей в правом верхнем углу изображения ──────────── #
+        self._clear_btn = QPushButton("×", self._lbl)
+        self._clear_btn.setFixedSize(22, 22)
+        self._clear_btn.setStyleSheet("""
+            QPushButton {
+                background: rgba(0,0,0,160);
+                color: #aaa;
+                border: 1px solid #555;
+                border-radius: 3px;
+                font-size: 15px;
+                font-weight: bold;
+                padding: 0;
+            }
+            QPushButton:hover {
+                background: rgba(180,40,40,210);
+                color: #fff;
+                border-color: #a00;
+            }
+        """)
+        self._clear_btn.move(self._lbl.width() - 26, 4)
+        self._clear_btn.hide()
+        self._clear_btn.setCursor(Qt.ArrowCursor)
+        self._clear_btn.clicked.connect(self._clear_image)
+
+        name_lbl = QLabel(display_name or material_name)
         name_lbl.setStyleSheet("color:#888; font-size:11px;")
         name_lbl.setAlignment(Qt.AlignCenter)
         name_lbl.setWordWrap(True)
@@ -98,7 +146,7 @@ class _ExtraSlotCard(QWidget):
     def set_image(self, path: str) -> None:
         self._image_path = path or None
         if not path or not os.path.exists(path):
-            self._pix_source = None   # без этого _refresh мог восстановить старый кадр
+            self._pix_source = None
             self._show_placeholder()
             return
         pix = QPixmap(path)
@@ -107,11 +155,10 @@ class _ExtraSlotCard(QWidget):
             self._show_placeholder()
             return
         self._pix_source = pix
-        # setStyleSheet до setPixmap — чтобы стиль применился до отрисовки
-        # НЕ вызываем setText('') после _refresh: в Qt setText() переключает label
-        # обратно в текстовый режим и стирает только что установленный pixmap!
         self._lbl.setStyleSheet(self._STYLE_IDLE)
         self._refresh()
+        self._clear_btn.show()
+        self._clear_btn.raise_()   # поверх pixmap
 
     def get_image(self) -> Optional[str]:
         return self._image_path
@@ -134,10 +181,11 @@ class _ExtraSlotCard(QWidget):
             self._lbl.setMaximumSize(w, h)
 
     def _show_placeholder(self) -> None:
-        # clear() — канонический Qt-способ сбросить и текст и pixmap
         self._lbl.clear()
         self._lbl.setText("Drop texture here\nor click Browse")
         self._lbl.setStyleSheet("color:#444; font-size:10px; " + self._STYLE_IDLE)
+        if hasattr(self, '_clear_btn'):
+            self._clear_btn.hide()
 
     def _browse(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -149,6 +197,11 @@ class _ExtraSlotCard(QWidget):
         if path:
             self.set_image(path)
             self.image_changed.emit(self.material_name, path)
+
+    def _clear_image(self) -> None:
+        """Пользователь нажал ×  — сбрасываем текстуру и сигнализируем."""
+        self.reset()
+        self.image_changed.emit(self.material_name, '')
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
@@ -181,6 +234,21 @@ class _ExtraSlotCard(QWidget):
         if event.button() == Qt.LeftButton:
             self._browse()
         super().mousePressEvent(event)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Утилиты
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _team_priority(active_team: str) -> list:
+    """Возвращает порядок проверки команд для поиска текстуры.
+
+    Активная команда идёт первой — позволяет начать сборку с любой загруженной
+    текстуры (RED или BLU), а не только с RED.
+    """
+    if active_team == 'blu':
+        return ['blu', 'red']
+    return ['red', 'blu']
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -233,6 +301,8 @@ class PreviewPanel(QWidget):
         self._custom_smd_mode: bool = False
         self._crithit_mode: bool = False
         self._crithit_class: str = 'soldier'
+        self._spy_mask_mode: bool = False      # режим масок маскировки шпиона
+        self._active_spy_mask: Optional[str] = None  # активный класс (cls_key)
 
         # ── Per-mesh drag tracking ─────────────────────────────────────────── #
         # True если пользователь перетащил текстуру на конкретный меш в 3D.
@@ -248,6 +318,8 @@ class PreviewPanel(QWidget):
         # используются для восстановления командных текстур (т.к. _red/_blu_frames = [])
         self._vpk_red_tex_map: dict = {}
         self._vpk_blu_tex_map: dict = {}
+        # Маппинг {red_mat_name: blu_display_name} для лейблов карточек BLU команды
+        self._vpk_blu_name_map: dict = {}
 
         # ── GIF кэш {gif_path: (frame_paths, fps)} ───────────────────────── #
         self._gif_cache: Dict[str, tuple] = {}
@@ -306,6 +378,33 @@ class PreviewPanel(QWidget):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(4)
         lay.addStretch()
+
+        # ── Кнопки выбора маски шпиона — СЛЕВА от 3D/2D ─────────────────── #
+        self._mask_btn_style_off = """
+            QPushButton { background:transparent; color:#666; border:1px solid #2a2a2a;
+                border-radius:3px; font-size:9px; font-weight:bold; padding:0; }
+            QPushButton:hover { color:#aaa; border-color:#555; }
+        """
+        self._mask_btn_style_on = """
+            QPushButton { background:rgba(180,130,30,0.18); color:#e8b84b;
+                border:1px solid #8a6a20; border-radius:3px;
+                font-size:9px; font-weight:bold; padding:0; }
+            QPushButton:hover { border-color:#c9993a; }
+        """
+        self._spy_mask_buttons: list = []
+        from src.data.player_characters import SPY_DISGUISE_MASKS as _SDM
+        for _cls_key, _vtf, _en, _ru, _lbl in _SDM:
+            _name = _ru if self._lang == 'ru' else _en
+            _mb = QPushButton(_lbl)
+            _mb.setFixedSize(24, 22)
+            _mb.setStyleSheet(self._mask_btn_style_off)
+            _mb.setToolTip(_name)
+            _mb.setVisible(False)
+            _mb.clicked.connect(lambda checked=False, k=_cls_key: self._switch_spy_mask(k))
+            lay.addWidget(_mb)
+            self._spy_mask_buttons.append((_cls_key, _mb))
+
+        lay.addSpacing(8)
 
         # Стили кнопок 2D/3D
         self._btn_style_active = """
@@ -388,6 +487,8 @@ class PreviewPanel(QWidget):
         self.btn_blu.clicked.connect(lambda: self._switch_team('blu'))
         lay.addWidget(self.btn_blu)
 
+        self._active_spy_mask: Optional[str] = None   # активный класс маски
+
         return bar
 
     def _build_2d_page(self) -> QWidget:
@@ -438,7 +539,8 @@ class PreviewPanel(QWidget):
         vlay.addWidget(self.preview)
 
         # Полоса карточек (многоматериальный режим)
-        scroll = QScrollArea()
+        # Используем _HWheelScrollArea: колесо мыши прокручивает карточки горизонтально
+        scroll = _HWheelScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -558,20 +660,12 @@ class PreviewPanel(QWidget):
         if skip or not self._3d_available or not self._3d_widget:
             return
 
+        # Восстанавливаем текстуры: VPK-оригиналы + пользовательские поверх.
+        # Используем _restore_team_textures_3d — она строит полную карту и
+        # правильно обрабатывает очищенные (×) слоты, возвращая им VPK-оригинал.
         from PySide6.QtCore import QTimer
-
         if self._card_mode and self._material_names:
-            # Мульти-материал: применяем каждую текстуру к своему мешу
-            tex_map = self._build_tex_map()
-            if tex_map:
-                static: dict = {}
-                for mat, path in tex_map.items():
-                    if path.lower().endswith('.gif'):
-                        QTimer.singleShot(300, lambda p=path, m=mat: self._apply_gif_to_3d(p, m))
-                    else:
-                        static[mat] = path
-                if static:
-                    QTimer.singleShot(300, lambda m=static: self._3d_widget.apply_material_map(m))
+            QTimer.singleShot(300, lambda: self._restore_team_textures_3d(self._active_team))
         elif self.image_path and os.path.exists(self.image_path):
             path = self.image_path
             QTimer.singleShot(300, lambda p=path: self._apply_image_to_3d(p))
@@ -584,9 +678,124 @@ class PreviewPanel(QWidget):
         # - найдены BLU VPK-кадры (оружие/шапка с командной текстурой)
         # - есть пользовательские текстуры для BLU команды
         # - модель многоматериальная (персонажи — всегда имеют командные варианты)
+        # В режиме spy_masks скрываем RED/BLU — там своя панель масок
+        if self._spy_mask_mode:
+            self.btn_red.setVisible(False)
+            self.btn_blu.setVisible(False)
+            return
         has_blu = bool(self._blu_frames or self._textures.get('blu') or self._card_mode)
         self.btn_red.setVisible(has_blu)
         self.btn_blu.setVisible(has_blu)
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # Маски маскировки шпиона
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    def set_spy_mask_mode(self, enabled: bool) -> None:
+        """Включает/выключает режим масок шпиона (показывает кнопки классов)."""
+        self._spy_mask_mode = enabled
+        for _cls_key, _btn in self._spy_mask_buttons:
+            _btn.setVisible(enabled)
+        if enabled and self._active_spy_mask is None:
+            # По умолчанию активируем первую маску (Scout)
+            from src.data.player_characters import SPY_DISGUISE_MASKS
+            if SPY_DISGUISE_MASKS:
+                self._switch_spy_mask(SPY_DISGUISE_MASKS[0][0])
+        elif not enabled:
+            self._active_spy_mask = None
+
+    def _switch_spy_mask(self, cls_key: str) -> None:
+        """Переключает активную маску шпиона в 3D и 2D."""
+        from src.data.player_characters import SPY_DISGUISE_MASKS
+        self._active_spy_mask = cls_key
+
+        # Обновляем стили кнопок
+        for _key, _btn in self._spy_mask_buttons:
+            _btn.setStyleSheet(
+                self._mask_btn_style_on if _key == cls_key else self._mask_btn_style_off
+            )
+
+        # Находим vtf_name для этого класса
+        vtf_name = next((m[1] for m in SPY_DISGUISE_MASKS if m[0] == cls_key), None)
+        if not vtf_name:
+            return
+
+        # Прокручиваем 2D стрип к карточке этой маски
+        if self._card_mode and vtf_name in self._card_widgets:
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(50, lambda w=self._card_widgets[vtf_name]:
+                              self._cards_scroll.ensureWidgetVisible(w))
+
+        if not (self._3d_widget and self._3d_available):
+            return
+
+        # Если пользователь загрузил свою текстуру — используем её
+        user_tex = self._textures.get('red', {}).get(vtf_name)
+        if user_tex and os.path.exists(user_tex):
+            from PySide6.QtCore import QTimer
+            # Маска в SMD называется "mask_spy" — применяем к этому слоту
+            QTimer.singleShot(100, lambda p=user_tex:
+                              self._3d_widget.apply_material_map({'mask_spy': p}))
+            return
+
+        # Нет пользовательской текстуры — извлекаем из VPK в фоне
+        from PySide6.QtCore import QThread, Signal as _Signal
+
+        class _MaskExtractWorker(QThread):
+            done = _Signal(str)  # png_path
+
+            def __init__(self, vtf_name, misc_vpk, textures_vpk, preview_dir):
+                super().__init__()
+                self._vtf = vtf_name
+                self._misc = misc_vpk
+                self._tex = textures_vpk
+                self._dir = preview_dir
+
+            def run(self):
+                try:
+                    import vpk as vpklib
+                    from src.services.vtflib_wrapper import VTFLib
+                    from PIL import Image
+                    vtf_path_in_vpk = f"materials/models/player/spy/{self._vtf}.vtf"
+                    vtf_data = None
+                    for vp in [self._tex, self._misc]:
+                        if not vp or not os.path.exists(vp):
+                            continue
+                        try:
+                            pak = vpklib.open(vp)
+                            vtf_data = pak[vtf_path_in_vpk].read()
+                            break
+                        except (KeyError, Exception):
+                            continue
+                    if not vtf_data:
+                        return
+                    tmp = os.path.join(self._dir, f"_tmp_{self._vtf}.vtf")
+                    with open(tmp, "wb") as f:
+                        f.write(vtf_data)
+                    frames, w, h = VTFLib.read_vtf_all_frames(tmp)
+                    os.remove(tmp)
+                    if frames:
+                        img = Image.frombytes("RGBA", (w, h), frames[0])
+                        out = os.path.join(self._dir, f"{self._vtf}.png")
+                        img.save(out)
+                        self.done.emit(out)
+                except Exception:
+                    pass
+
+        # Сохраняем воркер чтобы не был удалён GC
+        w = _MaskExtractWorker(
+            vtf_name,
+            getattr(self, '_current_misc_vpk', None),
+            getattr(self, '_current_textures_vpk', None),
+            os.path.join('tools', 'temp', 'spy_mask_preview'),
+        )
+        os.makedirs(os.path.join('tools', 'temp', 'spy_mask_preview'), exist_ok=True)
+        w.done.connect(lambda png: self._3d_widget.apply_material_map({'mask_spy': png}))
+        w.start()
+        # Храним ссылку
+        if not hasattr(self, '_mask_workers'):
+            self._mask_workers = []
+        self._mask_workers.append(w)
 
     # ═══════════════════════════════════════════════════════════════════════════
     # Команды RED / BLU
@@ -636,41 +845,40 @@ class PreviewPanel(QWidget):
         self.update_info_summary()
 
     def _restore_team_textures_3d(self, team: str) -> None:
-        """Применяет текстуры команды к 3D модели."""
+        """Применяет текстуры команды к 3D модели.
+
+        Строит полную карту: VPK-оригиналы для всех слотов + пользовательские
+        текстуры поверх. Это гарантирует что очищенные (×) слоты корректно
+        возвращаются к игровому оригиналу, а не остаются с кастомной текстурой.
+        """
         from PySide6.QtCore import QTimer
         paths = self._textures.get(team, {})
         vpk_frames = self._red_frames if team == 'red' else self._blu_frames
+        vpk_map = self._vpk_red_tex_map if team == 'red' else self._vpk_blu_tex_map
 
         if self._card_mode and self._material_names:
-            # Мульти-материал: строим per-material карту из пользовательских текстур
-            tex_map: dict = {}
+            # Начинаем с VPK-оригиналов (база для всех слотов)
+            full_map: dict = dict(vpk_map) if vpk_map else {}
+
+            # Поверх накладываем пользовательские текстуры (только загруженные)
             for mat in self._material_names:
                 p = paths.get(mat)
                 if p and os.path.exists(p):
-                    tex_map[mat] = p
+                    full_map[mat] = p
+                elif mat in full_map:
+                    pass   # Слот очищен — оставляем VPK-оригинал из базы
 
-            if tex_map:
-                # Есть пользовательские текстуры — применяем их
+            if full_map:
                 static: dict = {}
-                for mat, p in tex_map.items():
+                for mat, p in full_map.items():
                     if p.lower().endswith('.gif'):
                         QTimer.singleShot(50, lambda _p=p, _m=mat: self._apply_gif_to_3d(_p, _m))
                     else:
                         static[mat] = p
                 if static:
                     QTimer.singleShot(50, lambda m=static: self._3d_widget.apply_material_map(m))
-            elif team == 'red' and self._vpk_red_tex_map:
-                # RED без пользовательских текстур: восстанавливаем исходный VPK tex_map
-                # (_red_frames пуст для персонажей — их текстура хранится здесь)
-                restore = dict(self._vpk_red_tex_map)
-                QTimer.singleShot(50, lambda m=restore: self._3d_widget.apply_material_map(m))
-            elif team == 'blu' and self._vpk_blu_tex_map:
-                # BLU без пользовательских текстур: восстанавливаем BLU VPK tex_map
-                # (многоматериальные персонажи — _blu_frames пуст, текстуры здесь)
-                restore = dict(self._vpk_blu_tex_map)
-                QTimer.singleShot(50, lambda m=restore: self._3d_widget.apply_material_map(m))
             else:
-                # Fallback: применяем VPK кадры (для одиночных текстур)
+                # VPK-карта пустая (оружие/шапка без мульти-материала) → кадры
                 self._apply_vpk_frames(vpk_frames)
         else:
             key = self._material_names[0] if self._material_names else '__single__'
@@ -709,6 +917,9 @@ class PreviewPanel(QWidget):
         self._pending_3d_params = new_params
         self._custom_smd_mode = False
         self._crithit_mode = False
+        # Сохраняем VPK пути — нужны для _switch_spy_mask
+        self._current_misc_vpk = misc_vpk_path
+        self._current_textures_vpk = textures_vpk_path
 
         self._stop_worker('_3d_worker')
         self._reset_team_vpk_state()
@@ -932,20 +1143,39 @@ class PreviewPanel(QWidget):
         self.btn_red.setVisible(True)
         self.btn_blu.setVisible(True)
 
-    def _on_3d_blu_multi_material(self, tex_map: dict) -> None:
+    def _on_3d_blu_multi_material(self, payload) -> None:
         """Воркер нашёл BLU текстуры для многоматериальной модели (персонажи).
 
-        Сохраняем BLU VPK tex_map для последующего восстановления 3D при переключении
-        на BLU команду. Не применяем сразу — пользователь пока на RED.
+        payload — кортеж (tex_map, name_map):
+            tex_map:  {red_mat_name: blu_png_path}
+            name_map: {red_mat_name: blu_display_name}
+
+        Сохраняем для восстановления 3D при переключении на BLU.
+        Не применяем сразу — пользователь пока на RED.
         """
-        if not tex_map:
+        if not payload:
             return
-        self._vpk_blu_tex_map = dict(tex_map)
-        logger.debug(f"[Panel] BLU multi-material: {len(tex_map)} материалов")
-        # Кнопки уже должны быть видны благодаря _update_team_btn_visibility в
-        # _on_3d_multi_material, но на всякий случай гарантируем их видимость
-        self.btn_red.setVisible(True)
-        self.btn_blu.setVisible(True)
+        if isinstance(payload, tuple) and len(payload) == 2:
+            tex_map, name_map = payload
+        else:
+            tex_map, name_map = payload, {}
+
+        # Маппинг имён обновляем всегда — он нужен для лейблов карточек
+        # даже если BLU VTF-текстуры не были найдены в VPK.
+        if name_map:
+            self._vpk_blu_name_map = dict(name_map)
+
+        if tex_map:
+            self._vpk_blu_tex_map = dict(tex_map)
+
+        logger.debug(
+            f"[Panel] BLU multi-material: {len(tex_map)} текстур, "
+            f"{len(name_map)} имён"
+        )
+        # Кнопки RED/BLU показываем если есть хотя бы имена или текстуры
+        if name_map or tex_map:
+            self.btn_red.setVisible(True)
+            self.btn_blu.setVisible(True)
 
     def _on_3d_multi_material(self, tex_map: dict) -> None:
         """Модель многоматериальная — применяем и создаём карточки."""
@@ -1049,6 +1279,82 @@ class PreviewPanel(QWidget):
             # Сбрасываем до одного слота. Карточки появятся через _on_3d_multi_material
             self._set_material_slots([])
 
+    def update_extra_slots_spy_masks(self, mask_vtf_names: list) -> None:
+        """Настраивает карточки для режима масок шпиона.
+
+        Создаёт 9 карточек — по одной на маску каждого класса.
+        Имена карточек соответствуют именам VTF файлов (mask_scout и т.д.).
+        """
+        from src.data.player_characters import SPY_DISGUISE_MASKS
+        weapon_key = '__spy_masks__'
+        mode = 'spy_masks'
+
+        if weapon_key == self._weapon_key and mode == self._weapon_mode:
+            return
+
+        self._weapon_key = weapon_key
+        self._weapon_mode = mode
+
+        # Сброс состояния
+        self._textures = {'red': {}, 'blu': {}}
+        self._material_names = []
+        self._has_blu = False
+        self._active_team = 'red'
+        self.image_path = None
+        self.vtf_path = None
+        self._gif_cache = {}
+        self._per_mesh_active = False
+        self._per_mesh_base_image = None
+        self.btn_red.setVisible(False)
+        self.btn_blu.setVisible(False)
+        self._stop_gif()
+
+        # Имена с красивыми подписями (class name как display_name)
+        display_map = {m[1]: (m[3] if self._lang == 'ru' else m[2]) for m in SPY_DISGUISE_MASKS}
+        names_with_display = [(n, display_map.get(n, n)) for n in mask_vtf_names]
+
+        # Создаём карточки через _set_material_slots_with_display
+        self._set_material_slots_with_display(names_with_display)
+
+    def _set_material_slots_with_display(self, names_display: list) -> None:
+        """Показывает карточки для пар (mat_name, display_name).
+        Используется для масок шпиона где display_name = имя класса.
+        """
+        # Очищаем
+        lay = self._cards_layout
+        while lay.count():
+            item = lay.takeAt(0)
+            w = item.widget()
+            if w:
+                w.deleteLater()
+        self._card_widgets.clear()
+        self._main_card = None
+
+        if not names_display:
+            self._card_mode = False
+            self._material_names = []
+            self._cards_scroll.hide()
+            self.preview.hide()
+            self.empty_state.show()
+            return
+
+        self._card_mode = True
+        self._material_names = [n for n, _ in names_display]
+
+        for mat_name, disp_name in names_display:
+            card = _ExtraSlotCard(mat_name, display_name=disp_name, parent=self._cards_bar)
+            saved = self._textures['red'].get(mat_name)
+            if saved and os.path.exists(saved):
+                card.set_image(saved)
+            card.image_changed.connect(self._on_extra_card_changed)
+            lay.addWidget(card)
+            self._card_widgets[mat_name] = card
+
+        lay.addStretch()
+        self.empty_state.hide()
+        self.preview.hide()
+        self._cards_scroll.show()
+
     def _set_material_slots(self, names: List[str]) -> None:
         """Показывает карточки для списка материалов (или большое превью если < 2)."""
         # Очищаем старые виджеты
@@ -1078,8 +1384,16 @@ class PreviewPanel(QWidget):
         self._card_mode = True
         self._material_names = list(names)
 
+        # Для BLU команды лейбл карточки показывает BLU-имя текстуры (из QC skinfamilies),
+        # а не RED-имя из SMD. Так пользователь видит реальное имя заменяемой текстуры.
+        def _display(mat_name: str) -> str:
+            if self._active_team == 'blu' and self._vpk_blu_name_map:
+                return self._vpk_blu_name_map.get(mat_name, mat_name)
+            return mat_name
+
         main_name = names[0]
-        main_card = _ExtraSlotCard(main_name, parent=self._cards_bar)
+        main_card = _ExtraSlotCard(main_name, display_name=_display(main_name),
+                                   parent=self._cards_bar)
         # Восстанавливаем уже загруженную текстуру (если была)
         saved = self._textures[self._active_team].get(main_name)
         if saved and os.path.exists(saved):
@@ -1091,7 +1405,8 @@ class PreviewPanel(QWidget):
         self._main_card = main_card
 
         for name in names[1:]:
-            card = _ExtraSlotCard(name, parent=self._cards_bar)
+            card = _ExtraSlotCard(name, display_name=_display(name),
+                                  parent=self._cards_bar)
             saved = self._textures[self._active_team].get(name)
             if saved and os.path.exists(saved):
                 card.set_image(saved)
@@ -1106,40 +1421,92 @@ class PreviewPanel(QWidget):
         self._cards_scroll.show()
 
     def _on_main_card_changed(self, mat_name: str, path: str) -> None:
-        """Пользователь сменил текстуру в главной карточке."""
+        """Пользователь сменил или сбросил текстуру в главной карточке."""
         self._stop_gif()
-        if path != self._per_mesh_base_image:
-            self._per_mesh_active = False
-            self._per_mesh_base_image = None
-        self.image_path = path
+        self._per_mesh_active = False
+        self._per_mesh_base_image = None
         self.vtf_path = None
-        self._textures.setdefault(self._active_team, {})[mat_name] = path
-        self.update_info_summary()
 
-        if self.is_3d_mode() and self._3d_widget and not self._crithit_mode:
-            from PySide6.QtCore import QTimer
-            if path.lower().endswith('.gif'):
-                QTimer.singleShot(300, lambda p=path, m=mat_name: self._apply_gif_to_3d(p, m))
-            else:
-                QTimer.singleShot(300, lambda p=path, m=mat_name: self._3d_widget.apply_material_map({m: p}))
-        elif self.is_3d_mode() and self._crithit_mode and self._3d_widget:
-            from PySide6.QtCore import QTimer
-            QTimer.singleShot(300, lambda p=path: self._3d_widget.update_crithit_texture(p))
+        if path:
+            # Загрузка новой текстуры
+            self.image_path = path
+            self._textures.setdefault(self._active_team, {})[mat_name] = path
+            self.update_info_summary()
+            if self.is_3d_mode() and self._3d_widget and not self._crithit_mode:
+                from PySide6.QtCore import QTimer
+                if path.lower().endswith('.gif'):
+                    QTimer.singleShot(300, lambda p=path, m=mat_name: self._apply_gif_to_3d(p, m))
+                else:
+                    QTimer.singleShot(300, lambda p=path, m=mat_name: self._3d_widget.apply_material_map({m: p}))
+            elif self.is_3d_mode() and self._crithit_mode and self._3d_widget:
+                from PySide6.QtCore import QTimer
+                QTimer.singleShot(300, lambda p=path: self._3d_widget.update_crithit_texture(p))
+        else:
+            # Сброс текстуры (нажат ×) — удаляем и восстанавливаем оригинал в 3D.
+            # Вызываем restore независимо от текущего режима (2D или 3D) — иначе
+            # при переключении обратно в 3D старая текстура остаётся на модели.
+            self.image_path = None
+            self._textures.get(self._active_team, {}).pop(mat_name, None)
+            self.update_info_summary()
+            if self._3d_widget and self._3d_available:
+                from PySide6.QtCore import QTimer
+                QTimer.singleShot(300, lambda: self._restore_team_textures_3d(self._active_team))
 
     def _on_extra_card_changed(self, mat_name: str, path: str) -> None:
-        """Пользователь сменил текстуру в карточке доп. слота."""
-        self._textures.setdefault(self._active_team, {})[mat_name] = path
-        if self.is_3d_mode() and self._3d_widget and path and os.path.exists(path):
-            from PySide6.QtCore import QTimer
-            if path.lower().endswith('.gif'):
-                QTimer.singleShot(300, lambda p=path, m=mat_name: self._apply_gif_to_3d(p, m))
-            else:
-                QTimer.singleShot(300, lambda p=path, m=mat_name: self._3d_widget.apply_material_map({m: p}))
+        """Пользователь сменил или сбросил текстуру в карточке доп. слота."""
+        if path:
+            self._textures.setdefault(self._active_team, {})[mat_name] = path
+            if self.is_3d_mode() and self._3d_widget:
+                from PySide6.QtCore import QTimer
+                if path.lower().endswith('.gif'):
+                    QTimer.singleShot(300, lambda p=path, m=mat_name: self._apply_gif_to_3d(p, m))
+                else:
+                    QTimer.singleShot(300, lambda p=path, m=mat_name: self._3d_widget.apply_material_map({m: p}))
+        else:
+            # Сброс — удаляем и восстанавливаем оригинал в 3D.
+            self._textures.get(self._active_team, {}).pop(mat_name, None)
+            if self._3d_widget and self._3d_available:
+                from PySide6.QtCore import QTimer
+                QTimer.singleShot(300, lambda: self._restore_team_textures_3d(self._active_team))
 
     def get_slot_image_paths(self) -> dict:
-        """Возвращает {material_name: path} для всех заполненных слотов (всегда RED для сборки)."""
-        red = self._textures.get('red', {})
-        return {k: v for k, v in red.items() if v and os.path.exists(v)}
+        """Возвращает {material_name: path} для всех заполненных слотов.
+
+        Для каждого слота берётся первая найденная текстура в порядке:
+          активная команда → RED → BLU.
+        Позволяет начать сборку с любой загруженной текстуры.
+        """
+        result: dict = {}
+        for team in _team_priority(self._active_team):
+            for k, v in self._textures.get(team, {}).items():
+                if k not in result and v and os.path.exists(v):
+                    result[k] = v
+        return result
+
+    def get_slot_status(self) -> tuple:
+        """Возвращает (loaded: dict, missing: list) по всем известным слотам.
+
+        loaded  — {mat_name: path} для каждого слота у которого есть текстура
+                  (из любой команды, активная имеет приоритет).
+        missing — список mat_name из _material_names у которых нет текстуры.
+
+        Если режим одиночного слота (не card_mode), missing = [] потому что
+        наличие main-текстуры уже проверяется через get_image_path().
+        """
+        loaded = self.get_slot_image_paths()
+
+        # Учитываем также image_path для главного слота (браузер без drag-drop)
+        if self._material_names:
+            key0 = self._material_names[0]
+            if key0 not in loaded and self.image_path and os.path.exists(self.image_path):
+                loaded[key0] = self.image_path
+
+        # Только в card_mode имеет смысл проверять полноту слотов
+        if not self._card_mode or len(self._material_names) < 2:
+            return loaded, []
+
+        missing = [n for n in self._material_names if n not in loaded]
+        return loaded, missing
 
     def _build_tex_map(self) -> dict:
         """Строит {mat: path} для всех слотов текущей команды (только существующие файлы)."""
@@ -1264,18 +1631,87 @@ class PreviewPanel(QWidget):
         self.update_info_summary()
 
     def get_image_path(self) -> Optional[str]:
-        """Возвращает путь к главной текстуре (всегда RED для сборки)."""
+        """Возвращает путь к главной текстуре для сборки.
+
+        Порядок приоритета:
+          1. Активная команда (та, что выбрана пользователем)
+          2. RED команда
+          3. BLU команда
+          4. image_path (fallback если команды ещё не переключались)
+        Это позволяет начать сборку с любой загруженной текстуры.
+        """
         key = self._material_names[0] if self._material_names else '__single__'
-        p = self._textures.get('red', {}).get(key)
-        if p and os.path.exists(p):
-            return p
-        # Fallback: image_path (если пользователь ещё не переключал команды)
+        for team in _team_priority(self._active_team):
+            p = self._textures.get(team, {}).get(key)
+            if p and os.path.exists(p):
+                return p
         if self.image_path and os.path.exists(self.image_path):
             return self.image_path
         return None
 
     def get_vtf_path(self) -> Optional[str]:
         return self.vtf_path
+
+    def get_red_image_path(self) -> Optional[str]:
+        """Возвращает путь к RED текстуре для сборки.
+
+        НЕ делает fallback на BLU — чтобы не подставлять BLU-текстуру как
+        основную (RED) в BuildWorker.
+
+        self.image_path используется как fallback только когда активна RED
+        команда: в BLU-режиме он уже содержит BLU-текстуру (обновляется в
+        _restore_team_textures_2d при переключении команды).
+
+        Возвращает None если RED не загружена → build_vpk поставит sentinel
+        и покажет диалог выбора.
+        """
+        key = self._material_names[0] if self._material_names else '__single__'
+        p = self._textures.get('red', {}).get(key)
+        if p and os.path.exists(p):
+            return p
+        # image_path как fallback только в RED-режиме (в BLU он содержит BLU-текстуру)
+        if self._active_team != 'blu' and self.image_path and os.path.exists(self.image_path):
+            return self.image_path
+        return None
+
+    def get_uploaded_texture_for_mat(self, mat_name: str) -> Optional[str]:
+        """Возвращает путь к уже загруженной пользователем текстуре для данного
+        материала, или None если не загружена.
+
+        Логика (важно — не смешиваем RED и BLU):
+
+        1. Если mat_name — RED-имя (ключ в _vpk_blu_name_map, напр. 'medic_head_red'):
+           → смотрим ТОЛЬКО в _textures['red']. Не fallback-аем на BLU.
+           Это гарантирует, что build спросит диалог когда RED не загружена,
+           а не молча подставит BLU-текстуру.
+
+        2. Если mat_name — BLU-имя (значение в _vpk_blu_name_map, напр. 'medic_head_blue'):
+           → обратный поиск: BLU-имя → RED-ключ → _textures['blu'][RED-ключ].
+           (Карточки хранят BLU-текстуры под RED-ключами.)
+
+        3. Иначе (оружие/шапка без явного маппинга, руки):
+           → прямой поиск в обеих командах.
+        """
+        if self._vpk_blu_name_map:
+            # Случай 1: RED-имя → только _textures['red']
+            if mat_name in self._vpk_blu_name_map:
+                p = self._textures.get('red', {}).get(mat_name)
+                return p if (p and os.path.exists(p)) else None
+
+            # Случай 2: BLU-имя → обратный поиск
+            for red_key, blu_name in self._vpk_blu_name_map.items():
+                if blu_name == mat_name:
+                    p = self._textures.get('blu', {}).get(red_key)
+                    return p if (p and os.path.exists(p)) else None
+
+        # Случай 3: нет маппинга (_vpk_blu_name_map пуст — 3D не загружалась).
+        # Смотрим только в RED, чтобы не подставить BLU-текстуру в RED-слот.
+        # BLU-текстуры хранятся под теми же ключами, что и RED (напр. 'medic_red'),
+        # и self.image_path тоже может быть BLU (если пользователь переключился на BLU).
+        # Поэтому здесь никаких fallback на BLU или image_path — только RED.
+        # Если RED не загружена → None → покажется диалог.
+        p = self._textures.get('red', {}).get(mat_name)
+        return p if (p and os.path.exists(p)) else None
 
     def get_blu_image_path(self) -> Optional[str]:
         """Возвращает путь к пользовательской BLU текстуре (главный слот) или None."""
@@ -1405,6 +1841,25 @@ class PreviewPanel(QWidget):
             tmp = tempfile.mktemp(suffix=ext, prefix='tf2_3ddrop_')
             with open(tmp, 'wb') as f:
                 f.write(img_bytes)
+
+            # ── Режим масок шпиона: роутим к АКТИВНОМУ классу маски ────────── #
+            # В 3D всегда один материал "mask_spy" (имя из spy_mask.smd),
+            # но нам нужно направить текстуру в слот текущего активного класса.
+            if self._spy_mask_mode and self._active_spy_mask:
+                from src.data.player_characters import SPY_DISGUISE_MASKS
+                vtf_name = next(
+                    (m[1] for m in SPY_DISGUISE_MASKS if m[0] == self._active_spy_mask),
+                    None
+                )
+                if vtf_name:
+                    card = self._card_widgets.get(vtf_name)
+                    if card:
+                        card.set_image(tmp)
+                        card.image_changed.emit(vtf_name, tmp)
+                    else:
+                        self._textures.setdefault('red', {})[vtf_name] = tmp
+                        self._on_extra_card_changed(vtf_name, tmp)
+                return
 
             _norm = material_name.lower() if material_name else ''
             _extra_lc = {n.lower(): n for n in (
@@ -1605,6 +2060,7 @@ class PreviewPanel(QWidget):
         self._team_framerate = 0.0
         self._vpk_red_tex_map = {}
         self._vpk_blu_tex_map = {}
+        self._vpk_blu_name_map = {}
         self._active_team = 'red'   # сброс синхронизируем со стилями кнопок
         if hasattr(self, 'btn_red'):
             self.btn_red.setVisible(False)

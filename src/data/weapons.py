@@ -274,7 +274,8 @@ TF2_WEAPONS = {
     },
     "Spy": {
         "PlayerSkin": {
-            "body": {"ru": "Скин персонажа", "en": "Player Skin"},
+            "body":  {"ru": "Скин персонажа",    "en": "Player Skin"},
+            "masks": {"ru": "Маски маскировки", "en": "Disguise Masks"},
         },
         "Primary": {
             "c_revolver": {"ru": "Стандартный Револьвер", "en": "Revolver"},

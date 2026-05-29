@@ -347,9 +347,14 @@ class CustomVPKService:
                 _replace(image_path, first)
 
             # Остальные текстуры — спрашиваем последовательно через callback
+            from src.shared.constants import EXTRA_TEX_USE_GAME_ORIGINAL
             remaining = all_textures[1:]
             for tex in remaining:
                 user_img = extra_texture_callback(tex['name'], "custom") if extra_texture_callback else None
+                # «Использовать обычную» — оставляем оригинальный VTF без изменений
+                if user_img == EXTRA_TEX_USE_GAME_ORIGINAL:
+                    logger.info(f"Custom VPK: пропускаем текстуру (использовать из мода): {tex['name']}")
+                    continue
                 if user_img and os.path.isfile(user_img):
                     emit(-1,
                          f"Converting {tex['name']}..."

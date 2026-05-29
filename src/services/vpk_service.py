@@ -23,9 +23,15 @@ from .smd_service import SMDService
 from .decompile_cache import get_cached_decompile, restore_from_cache, save_to_cache
 from src.data.weapons import SPECIAL_MODES, WEAPON_MDL_PATHS
 from src.data.player_hands import HAND_MODE_KEYS
-from src.data.player_characters import PLAYER_BODY_MODE_KEYS
+from src.data.player_characters import (
+    PLAYER_BODY_MODE_KEYS,
+    SPY_MASK_MODE_KEY,
+    SPY_MDL_PATH,
+    SPY_DISGUISE_MASKS,
+    SPY_MASK_VTF_NAMES,
+)
 from src.shared.logging_config import get_logger
-from src.shared.constants import ToolPaths, DirectoryPaths
+from src.shared.constants import ToolPaths, DirectoryPaths, EXTRA_TEX_USE_GAME_ORIGINAL
 from src.shared.exceptions import (
     TF2PathNotSpecifiedError,
     ModelNotFoundError,
@@ -316,7 +322,11 @@ class VPKService:
                 weapon_key = _arm_key
             elif mode in PLAYER_BODY_MODE_KEYS:
                 from src.data.player_characters import PLAYER_CHARACTERS as _PC
-                weapon_key = _PC.get(mode, {}).get('mdl_key', mode)
+                _mdl_path = _PC.get(mode, {}).get('mdl_path', '')
+                weapon_key = Path(_mdl_path).stem if _mdl_path else mode
+            elif mode == SPY_MASK_MODE_KEY:
+                # Маски маскировки: используем тот же MDL что и для скина шпиона
+                weapon_key = Path(SPY_MDL_PATH).stem  # = 'spy'
             else:
                 weapon_key = mode.split('_', 1)[1] if '_' in mode else mode
             
@@ -325,6 +335,30 @@ class VPKService:
             
             ctx = BuildContext.create(mode, weapon_key, debug_mode=debug_mode)
             
+            # ── Маски маскировки шпиона ──────────────────────────────────────── #
+            # Не нужен MDL, QC-патчинг или компиляция.
+            # Просто кладём mask_*.vtf/vmt по оригинальному пути игры:
+            #   materials/models/player/spy/mask_*.vtf
+            # Это прямой override, как у SPECIAL_MODES.
+            if mode == SPY_MASK_MODE_KEY:
+                result = VPKService._build_spy_masks_vpk(
+                    ctx=ctx,
+                    image_path=image_path,
+                    size=size,
+                    format_type=format_type,
+                    flags=flags or [],
+                    vtf_options=vtf_options,
+                    filename=filename,
+                    export_folder=export_folder,
+                    language=language,
+                    extra_texture_callback=extra_texture_callback,
+                    tf2_root_dir=tf2_root_dir,
+                    keep_temp_on_error=keep_temp_on_error,
+                    debug_mode=debug_mode,
+                    t=t,
+                )
+                return result
+
             # Для critHIT и прочих спец режимов - просто текстуры, без всей этой возни с моделями
             if mode in SPECIAL_MODES.values():
                 result = BuildService.build_special_mode_vpk(
@@ -338,27 +372,6 @@ class VPKService:
                     vmt_to_delete = result[2]
                 else:
                     vmt_to_delete = None
-
-            elif mode in PLAYER_BODY_MODE_KEYS:
-                # Скин персонажа — VTF-only пайплайн (без декомпиляции и компиляции MDL)
-                from src.services.player_texture_build_service import PlayerTextureBuildService
-                success, msg = PlayerTextureBuildService.build_player_skin(
-                    ctx=ctx,
-                    mode=mode,
-                    image_path=image_path,
-                    size=size,
-                    format_type=format_type,
-                    flags=flags,
-                    vtf_options=vtf_options,
-                    keep_temp_on_error=keep_temp_on_error,
-                    debug_mode=debug_mode,
-                    language=language,
-                    custom_vtf_path=custom_vtf_path,
-                    extra_texture_callback=extra_texture_callback,
-                    sub_progress_callback=emit_sub,
-                )
-                if not success:
-                    return False, msg
 
             else:
                 # Для обычного оружия и рук — декомпиляция + патч QC + компиляция.
@@ -429,6 +442,18 @@ class VPKService:
                     # 3. Убираем дубли, сохраняем порядок
                     seen_paths = set()
                     paths_to_try = [p for p in paths_to_try if not (p in seen_paths or seen_paths.add(p))]
+                elif mode in PLAYER_BODY_MODE_KEYS or mode == SPY_MASK_MODE_KEY:
+                    # Тело персонажа / маски шпиона: прямой путь к MDL
+                    if mode == SPY_MASK_MODE_KEY:
+                        _char_mdl = SPY_MDL_PATH
+                    else:
+                        from src.data.player_characters import PLAYER_CHARACTERS as _PC
+                        _char_mdl = _PC.get(mode, {}).get('mdl_path', '')
+                    if not _char_mdl:
+                        ctx.cleanup(on_error=True, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
+                        return False, f"No mdl_path defined for character mode: {mode}"
+                    paths_to_try = [_char_mdl]
+
                 else:
                     if weapon_key not in WEAPON_MDL_PATHS:
                         ctx.cleanup(on_error=True, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
@@ -686,7 +711,9 @@ class VPKService:
                     
                     # Извлекаем путь из $cdmaterials в QC файле (до патчинга, потому что потом мы его изменим)
                     original_cdmaterials_path = ModelBuildService.extract_cdmaterials_path_from_qc(qc_path)
-                    
+                    # Все $cdmaterials пути (для поиска оригинальных VTF в VPK игры)
+                    original_cdmaterials_paths = ModelBuildService.extract_all_cdmaterials_paths_from_qc(qc_path)
+
                     if not original_cdmaterials_path:
                         ctx.cleanup(on_error=True, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
                         return False, t['error_cdmaterials_not_extracted'].format(qc_path=qc_path)
@@ -994,13 +1021,43 @@ class VPKService:
 
                     is_normal_map = False
                     animated_fps = None
+
+                    # spy_masks обрабатывается РАНЬШЕ (до MDL pipeline) через
+                    # _build_spy_masks_vpk — сюда попасть не должен.
+
+                    # RED не загружен — сначала спрашиваем пользователя
+                    # через существующий extra_texture_callback (стандартный диалог).
+                    # Если callback вернул EXTRA_TEX_USE_GAME_ORIGINAL или None —
+                    # извлекаем оригинал из игрового VPK.
+                    if image_path == EXTRA_TEX_USE_GAME_ORIGINAL:
+                        if extra_texture_callback:
+                            image_path = extra_texture_callback(texture_filename, weapon_key)
+                            logger.info(f"Callback для основной RED текстуры: {image_path!r}")
+
+                        if image_path == EXTRA_TEX_USE_GAME_ORIGINAL or not image_path:
+                            # Пользователь выбрал «из игры» или ничего — берём оригинал
+                            _tex_vpk_early = TF2Paths.resolve_textures_vpk(tf2_root_dir)
+                            _orig_red = VPKService._get_original_vtf_bytes(
+                                texture_filename, original_cdmaterials_paths,
+                                _tex_vpk_early, tf2_misc_vpk
+                            )
+                            ensure_directory_exists(vtf_output_path)
+                            vtf_file_path = vtf_output_path / vtf_filename
+                            if _orig_red:
+                                with open(vtf_file_path, "wb") as _f:
+                                    _f.write(_orig_red)
+                                logger.info(f"Оригинальная RED VTF из игры: {vtf_filename}")
+                            else:
+                                logger.warning(f"Не найден оригинальный RED VTF: '{texture_filename}'")
+                            image_path = None  # VTF уже на месте, не передаём дальше
+
                     if custom_vtf_path:
                         # Если юзер сам сделал VTF - просто копируем его, не генерируем из картинки
                         vtf_file_path = vtf_output_path / vtf_filename
                         ensure_directory_exists(vtf_output_path)
                         copy_file_safe(custom_vtf_path, vtf_file_path)
                         logger.info(f"Использован пользовательский VTF файл: {custom_vtf_path} -> {vtf_file_path}")
-                    else:
+                    elif image_path:
                         # Разделяем флаги на опции VTFCmd и флаги VTF (потому что они передаются по-разному)
                         vtf_flags, flags_parsed_options = VPKService._parse_vtf_flags_and_options(flags)
                         
@@ -1185,10 +1242,28 @@ class VPKService:
                         
                         # Спрашиваем пользователя — нужна ли отдельная текстура для этого материала
                         extra_image_path = extra_texture_callback(extra_mat_name, weapon_key) if extra_texture_callback else None
+                        # «Использовать обычную» — берём VTF прямо из игрового VPK
+                        if extra_image_path == EXTRA_TEX_USE_GAME_ORIGINAL:
+                            logger.info(f"Извлекаем оригинал из игры для: {extra_mat_name}")
+                            _game_vtf = VPKService._get_original_vtf_bytes(
+                                extra_mat_name, original_cdmaterials_paths,
+                                tf2_textures_vpk, tf2_misc_vpk
+                            )
+                            if _game_vtf:
+                                with open(extra_vtf_path, "wb") as _f:
+                                    _f.write(_game_vtf)
+                                logger.info(f"VTF из игры скопирован: {extra_mat_name}.vtf")
+                            else:
+                                # Fallback: копируем основную текстуру
+                                red_vtf_path = vtf_output_path / vtf_filename
+                                if red_vtf_path.exists():
+                                    copy_file_safe(red_vtf_path, extra_vtf_path)
+                            extra_image_path = None  # VTF уже на месте, пропускаем if-блок ниже
+
                         if extra_image_path and not os.path.isfile(extra_image_path):
                             logger.warning(f"Файл не найден: {extra_image_path}")
                             extra_image_path = None
-                        
+
                         extra_animated_fps = None
                         if extra_image_path and os.path.isfile(extra_image_path):
                             # Пользователь предоставил отдельное изображение для этого материала
@@ -1220,13 +1295,13 @@ class VPKService:
                                 if extra_temp_png.exists():
                                     extra_temp_png.unlink()
                         else:
-                            # Пользователь не предоставил изображение - копируем основную текстуру
-                            red_vtf_path = vtf_output_path / vtf_filename
-                            if red_vtf_path.exists():
-                                copy_file_safe(red_vtf_path, extra_vtf_path)
-                                logger.info(f"Скопирована основная текстура для доп. материала: {vtf_filename} -> {extra_vtf_filename}")
-                            else:
-                                logger.warning(f"Основной VTF не найден для копирования: {red_vtf_path}")
+                            # Пользователь не предоставил изображение.
+                            # В мод попадает ТОЛЬКО то, что пользователь явно загрузил
+                            # или выбрал «использовать из игры». Всё остальное движок
+                            # найдёт через другие $cdmaterials пути — не добавляем.
+                            if not extra_vtf_path.exists():
+                                logger.debug(f"Доп. материал пропускается (нет изображения): {extra_mat_name}")
+                                continue
                         
                         extra_materials_vtf_paths[extra_mat_name] = extra_vtf_path
                         
@@ -1259,45 +1334,94 @@ class VPKService:
                         for col_idx, blu_tex_name in enumerate(blu_row):
                             # Находим соответствующее RED имя для этого столбца
                             red_tex_name = red_row[col_idx] if col_idx < len(red_row) else None
-                            
+
                             if not red_tex_name:
-                                logger.warning(f"Нет соответствующей RED текстуры для BLU столбца {col_idx}: {blu_tex_name}")
-                                continue
-                            
-                            # Если BLU имя совпадает с RED — это "общая" (neutral) текстура,
-                            # одинаковая для обеих команд (например, pyro_hands_red, sniper_handL_red).
-                            # Она НЕ попала в extra_materials (исключена из-за blu_names_set),
-                            # но MDL ВСЁ РАВНО её использует — нужно создать VTF/VMT.
-                            if blu_tex_name == red_tex_name:
-                                # Если это основная текстура — уже создана выше, пропускаем.
-                                if blu_tex_name == texture_filename:
-                                    logger.debug(f"Общая текстура совпадает с основной, пропускаем: {blu_tex_name}")
-                                    continue
-                                # Создаём VTF как копию основной (если ещё не существует)
-                                shared_vtf_path = vtf_output_path / f"{blu_tex_name}.vtf"
-                                if not shared_vtf_path.exists():
-                                    # Сначала пробуем получить от пользователя через callback
-                                    _shared_img = extra_texture_callback(blu_tex_name, weapon_key) if extra_texture_callback else None
-                                    if _shared_img and not os.path.isfile(_shared_img):
-                                        _shared_img = None
-                                    if _shared_img:
-                                        shared_temp_png = vtf_output_path / f"{blu_tex_name}.png"
-                                        VPKService._process_image(_shared_img, shared_temp_png, size)
-                                        _sh_flags, _ = VPKService._parse_vtf_flags_and_options(flags)
-                                        _sh_opts = dict(vtf_options or {})
-                                        _sh_opts.pop("normal", None)
-                                        VPKService._create_vtf(str(shared_temp_png), str(vtf_output_path), format_type, _sh_flags, _sh_opts)
-                                        if shared_temp_png.exists():
-                                            shared_temp_png.unlink()
-                                    else:
-                                        # Копируем из основной VTF
+                                # Скин-вариант (австралий, gold) имеет БОЛЬШЕ материалов, чем обычный.
+                                # Например: normal { c_scattergun }, australian { c_scattergun, c_scattergun_gold }.
+                                # c_scattergun_gold нет в RED-строке, но нам всё равно нужно его включить в мод.
+                                # Спрашиваем пользователя и создаём текстуру (или копируем основную).
+                                logger.info(
+                                    f"Дополнительный материал варианта (нет RED аналога): {blu_tex_name} (col {col_idx})"
+                                )
+                                _variant_vtf_path = vtf_output_path / f"{blu_tex_name}.vtf"
+                                _variant_vmt_path = vtf_output_path / f"{blu_tex_name}.vmt"
+
+                                if not _variant_vtf_path.exists():
+                                    _variant_img = extra_texture_callback(blu_tex_name, weapon_key) if extra_texture_callback else None
+                                    if _variant_img == EXTRA_TEX_USE_GAME_ORIGINAL:
+                                        logger.info(f"Извлекаем оригинал варианта из игры: {blu_tex_name}")
+                                        _game_vtf = VPKService._get_original_vtf_bytes(
+                                            blu_tex_name, original_cdmaterials_paths,
+                                            tf2_textures_vpk, tf2_misc_vpk
+                                        )
+                                        if _game_vtf:
+                                            with open(_variant_vtf_path, "wb") as _f:
+                                                _f.write(_game_vtf)
+                                        else:
+                                            _main_vtf = vtf_output_path / vtf_filename
+                                            if _main_vtf.exists():
+                                                copy_file_safe(_main_vtf, _variant_vtf_path)
+                                        _variant_img = None  # VTF на месте, пропускаем блок ниже
+                                    if _variant_img and not os.path.isfile(_variant_img):
+                                        _variant_img = None
+                                    if _variant_img:
+                                        _vf, _vfp = VPKService._parse_vtf_flags_and_options(flags)
+                                        _vo = {}
+                                        if vtf_options:
+                                            _vo.update(vtf_options)
+                                        _vo.update(_vfp)
+                                        _vo.pop("normal", None)
+                                        if custom_vtf_path:
+                                            copy_file_safe(_variant_img, _variant_vtf_path)
+                                        elif TextureService.is_animated_image(_variant_img):
+                                            TextureService.create_animated_vtf(
+                                                _variant_img, str(_variant_vtf_path),
+                                                size, format_type, _vf, _vo
+                                            )
+                                        else:
+                                            _tmp_png = vtf_output_path / f"{blu_tex_name}.png"
+                                            VPKService._process_image(_variant_img, _tmp_png, size)
+                                            VPKService._create_vtf(str(_tmp_png), str(vtf_output_path), format_type, _vf, _vo)
+                                            if _tmp_png.exists():
+                                                _tmp_png.unlink()
+                                        logger.info(f"Создан VTF варианта (отд. изображение): {blu_tex_name}.vtf")
+                                    elif not _variant_vtf_path.exists():
+                                        # Пользователь отказался или нет callback — копируем основную
                                         _main_vtf = vtf_output_path / vtf_filename
                                         if _main_vtf.exists():
-                                            copy_file_safe(_main_vtf, shared_vtf_path)
-                                            logger.info(f"Создан VTF для общей текстуры: {blu_tex_name}.vtf")
+                                            copy_file_safe(_main_vtf, _variant_vtf_path)
+                                            logger.info(f"Создан VTF варианта (копия основной): {blu_tex_name}.vtf")
                                         else:
-                                            logger.warning(f"Основной VTF не найден для копирования: {_main_vtf}")
-                                # Создаём VMT (если ещё не существует)
+                                            logger.warning(f"Основной VTF не найден для варианта: {_main_vtf}")
+
+                                if not _variant_vmt_path.exists():
+                                    if vmt_path.exists():
+                                        copy_file_safe(vmt_path, _variant_vmt_path)
+                                        VMTService.update_vmt_basetexture_path(
+                                            str(_variant_vmt_path), patched_cdmaterials_path, blu_tex_name
+                                        )
+                                    else:
+                                        VMTService.create_vmt_template_from_cdmaterials(
+                                            str(_variant_vmt_path), patched_cdmaterials_path, blu_tex_name
+                                        )
+                                    logger.info(f"Создан VMT варианта: {blu_tex_name}.vmt")
+                                    if animated_fps:
+                                        VMTService.enable_animated_basetexture(str(_variant_vmt_path), animated_fps)
+                                continue
+                            
+                            # Если BLU имя совпадает с RED — shared/нейтральная текстура.
+                            # В мод НЕ добавляем: движок найдёт через другие $cdmaterials пути.
+                            # Исключение: если VTF уже существует (создан ранее пользователем или
+                            # через callback «из игры») — только создаём VMT для него.
+                            if blu_tex_name == red_tex_name:
+                                if blu_tex_name == texture_filename:
+                                    continue
+                                shared_vtf_path = vtf_output_path / f"{blu_tex_name}.vtf"
+                                if not shared_vtf_path.exists():
+                                    # Текстура не нужна в моде — пропускаем
+                                    logger.debug(f"Shared texture пропускается: {blu_tex_name}")
+                                    continue
+                                # VTF уже есть (явно создан ранее) → только VMT
                                 shared_vmt_path = vtf_output_path / f"{blu_tex_name}.vmt"
                                 if not shared_vmt_path.exists():
                                     if vmt_path.exists():
@@ -1319,6 +1443,24 @@ class VPKService:
                             
                             # Спрашиваем у пользователя отдельное изображение для BLU материала
                             _blu_mat_img = extra_texture_callback(blu_tex_name, weapon_key) if extra_texture_callback else None
+                            if _blu_mat_img == EXTRA_TEX_USE_GAME_ORIGINAL:
+                                _game_vtf = VPKService._get_original_vtf_bytes(
+                                    blu_tex_name, original_cdmaterials_paths, tf2_textures_vpk, tf2_misc_vpk
+                                )
+                                if _game_vtf:
+                                    with open(blu_vtf_path, "wb") as _f:
+                                        _f.write(_game_vtf)
+                                    logger.info(f"Извлечён VTF из игры для BLU текстуры: {blu_tex_name}.vtf")
+                                else:
+                                    if col_idx == 0:
+                                        _red_src = vtf_output_path / f"{red_tex_name}.vtf"
+                                    else:
+                                        _red_src = extra_materials_vtf_paths.get(
+                                            red_tex_name, vtf_output_path / f"{red_tex_name}.vtf"
+                                        )
+                                    if _red_src.exists():
+                                        copy_file_safe(_red_src, blu_vtf_path)
+                                _blu_mat_img = None
                             if _blu_mat_img and not os.path.isfile(_blu_mat_img):
                                 _blu_mat_img = None
 
@@ -1350,20 +1492,12 @@ class VPKService:
                                     VPKService._create_vtf(str(blu_temp_png), str(vtf_output_path), format_type, vtf_flags_blu, merged_blu)
                                     if blu_temp_png.exists():
                                         blu_temp_png.unlink()
-                            else:
-                                # Пользователь отказался — копируем VTF из соответствующего RED материала
-                                # Ищем RED VTF: может быть основная текстура или extra_materials VTF
-                                if col_idx == 0:
-                                    red_vtf_src = vtf_output_path / f"{red_tex_name}.vtf"
-                                else:
-                                    red_vtf_src = extra_materials_vtf_paths.get(red_tex_name,
-                                                  vtf_output_path / f"{red_tex_name}.vtf")
-                                if red_vtf_src.exists():
-                                    copy_file_safe(red_vtf_src, blu_vtf_path)
-                                    logger.info(f"Скопирован VTF для BLU: {red_tex_name}.vtf -> {blu_vtf_filename}")
-                                else:
-                                    logger.warning(f"RED VTF не найден для BLU копии: {red_vtf_src}")
-                            
+                            elif not blu_vtf_path.exists():
+                                # Пользователь не предоставил изображение для BLU —
+                                # не включаем в мод, движок найдёт оригинал сам.
+                                logger.debug(f"BLU текстура пропускается (нет изображения): {blu_tex_name}")
+                                continue
+
                             # Создаем VMT для BLU (копируем RED VMT и обновляем $basetexture)
                             red_vmt_src = vtf_output_path / f"{red_tex_name}.vmt"
                             if red_vmt_src.exists():
@@ -1568,6 +1702,116 @@ class VPKService:
         )
     
     @staticmethod
+    def _build_spy_masks_vpk(
+        ctx,
+        image_path,
+        size,
+        format_type,
+        flags,
+        vtf_options,
+        filename,
+        export_folder,
+        language,
+        extra_texture_callback,
+        tf2_root_dir,
+        keep_temp_on_error,
+        debug_mode,
+        t,
+    ):
+        """
+        Строит VPK-мод с кастомными масками маскировки шпиона.
+
+        В отличие от player skin, здесь НЕТ деcompile/patch/compile — только
+        VTF+VMT файлы по оригинальному пути materials/models/player/spy/.
+        Это гарантирует что body-текстуры шпиона остаются из игры.
+        """
+        try:
+            is_ru = (language == 'ru')
+            # Папка для текстур масок внутри vpkroot
+            masks_dir = ctx.vpkroot_dir / "materials" / "models" / "player" / "spy"
+            ensure_directory_exists(masks_dir)
+
+            tf2_textures_vpk = TF2Paths.resolve_textures_vpk(tf2_root_dir)
+            try:
+                _, tf2_misc_vpk_path, _ = TF2Paths.resolve(tf2_root_dir)
+            except Exception:
+                tf2_misc_vpk_path = None
+
+            # Оригинальный cdmaterials — нужен для VMT $basetexture
+            spy_cdmat = "models/player/spy"
+
+            any_created = False
+
+            for cls_key, vtf_name, name_en, name_ru, btn in SPY_DISGUISE_MASKS:
+                display = name_ru if is_ru else name_en
+                mask_vtf_path = masks_dir / f"{vtf_name}.vtf"
+                mask_vmt_path = masks_dir / f"{vtf_name}.vmt"
+
+                # Спрашиваем пользователя через стандартный callback
+                mask_img = extra_texture_callback(vtf_name, "spy") if extra_texture_callback else None
+
+                if mask_img == EXTRA_TEX_USE_GAME_ORIGINAL:
+                    # Берём оригинал из VPK
+                    orig = VPKService._get_original_vtf_bytes(
+                        vtf_name, [spy_cdmat],
+                        tf2_textures_vpk, tf2_misc_vpk_path, log_not_found=False
+                    )
+                    if orig:
+                        with open(mask_vtf_path, "wb") as f:
+                            f.write(orig)
+                        logger.info(f"Маска из VPK: {vtf_name}.vtf")
+                    else:
+                        logger.debug(f"Маска не найдена в VPK, пропускаем: {vtf_name}")
+                        continue
+                elif mask_img and os.path.isfile(mask_img):
+                    # Конвертируем изображение пользователя.
+                    # ВАЖНО: имя PNG должно совпадать с именем VTF (без _tmp),
+                    # иначе VTFCmd создаст файл с неправильным именем.
+                    tmp_png = masks_dir / f"{vtf_name}.png"
+                    VPKService._process_image(mask_img, tmp_png, size)
+                    vtf_flags, opts = VPKService._parse_vtf_flags_and_options(flags)
+                    merged = dict(vtf_options or {})
+                    merged.update(opts)
+                    merged.pop("normal", None)
+                    VPKService._create_vtf(str(tmp_png), str(masks_dir), format_type, vtf_flags, merged)
+                    if tmp_png.exists():
+                        tmp_png.unlink()
+                    logger.info(f"Создан VTF маски: {vtf_name}.vtf")
+                else:
+                    # Пользователь пропустил — не включаем
+                    logger.debug(f"Маска пропущена: {vtf_name}")
+                    continue
+
+                # VMT — простой VertexLitGeneric по оригинальному пути
+                if mask_vtf_path.exists():
+                    vmt_content = (
+                        '"VertexLitGeneric"\n'
+                        '{\n'
+                        f'\t"$basetexture" "{spy_cdmat}/{vtf_name}"\n'
+                        '}\n'
+                    )
+                    with open(mask_vmt_path, 'w', encoding='utf-8') as f:
+                        f.write(vmt_content)
+                    logger.info(f"Создан VMT маски: {vtf_name}.vmt")
+                    any_created = True
+
+            if not any_created:
+                ctx.cleanup(on_error=True, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
+                return False, t.get('error_no_textures', 'No mask textures were provided.')
+
+            # Пакуем VPK
+            vpk_path = VPKService._create_vpk_file(ctx, filename, export_folder, language)
+            ctx.cleanup(on_error=False, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
+            logger.info(f"VPK масок шпиона готов: {vpk_path}")
+            return True, vpk_path
+
+        except Exception as exc:
+            logger.error(f"_build_spy_masks_vpk: {exc}", exc_info=True)
+            if ctx:
+                ctx.cleanup(on_error=True, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
+            return False, str(exc)
+
+    @staticmethod
     def _validate_build_params(
         image_path: str,
         mode: str,
@@ -1589,6 +1833,104 @@ class VPKService:
             custom_vtf_path
         )
     
+    @staticmethod
+    def _get_original_vtf_bytes(
+        mat_name: str,
+        cdmaterials_paths,          # str | list[str] | None
+        textures_vpk: Optional[str],
+        misc_vpk: Optional[str],
+        log_not_found: bool = True,
+    ) -> Optional[bytes]:
+        """
+        Извлекает оригинальный VTF из игровых VPK-файлов.
+
+        Crowbar добавляет префикс ``console\\`` ко всем $cdmaterials путям.
+        В реальных VPK этого префикса нет, поэтому мы его снимаем.
+        Пути вида ``console\\..\\..\\effects`` (для частиц) пропускаются.
+
+        Args:
+            mat_name:          Имя материала (без расширения).
+            cdmaterials_paths: Один путь или список путей из $cdmaterials QC.
+                               Crowbar-префикс ``console/`` снимается автоматически.
+            textures_vpk:      Путь к tf2_textures_dir.vpk.
+            misc_vpk:          Путь к tf2_misc_dir.vpk.
+
+        Returns:
+            Байты VTF или None если не найдено.
+        """
+        try:
+            import vpk as vpklib
+
+            mat_lower = mat_name.lower()
+
+            # Нормализуем cdmaterials_paths в список
+            if cdmaterials_paths is None:
+                raw_paths: list = []
+            elif isinstance(cdmaterials_paths, str):
+                raw_paths = [cdmaterials_paths]
+            else:
+                raw_paths = list(cdmaterials_paths)
+
+            def _normalize(raw: str) -> Optional[str]:
+                """Снять console/ prefix, пропустить пути с '..'."""
+                p = raw.strip("/\\").replace("\\", "/")
+                # Crowbar добавляет "console/" — снимаем
+                if p.lower().startswith("console/"):
+                    p = p[len("console/"):]
+                # Пути типа "../../effects" — не текстурные, пропускаем
+                if ".." in p:
+                    return None
+                return p.rstrip("/")
+
+            candidates: list = []
+
+            # Кандидаты из QC ($cdmaterials), все строки
+            seen_cdmat = set()
+            for raw in raw_paths:
+                cdmat = _normalize(raw)
+                if cdmat and cdmat not in seen_cdmat:
+                    seen_cdmat.add(cdmat)
+                    candidates.append(f"materials/{cdmat}/{mat_lower}.vtf")
+
+            # Стандартные fallback-пути для оружий и персонажей
+            candidates += [
+                f"materials/models/weapons/c_models/{mat_lower}/{mat_lower}.vtf",
+                f"materials/models/weapons/c_items/{mat_lower}.vtf",
+                f"materials/models/workshop_partner/weapons/c_models/{mat_lower}/{mat_lower}.vtf",
+                f"materials/models/workshop/weapons/c_models/{mat_lower}/{mat_lower}.vtf",
+                f"materials/models/player/{mat_lower}/{mat_lower}.vtf",
+            ]
+
+            for vpk_path in filter(None, [textures_vpk, misc_vpk]):
+                if not os.path.exists(vpk_path):
+                    continue
+                try:
+                    pak = vpklib.open(vpk_path)
+                    for vtf_path in candidates:
+                        try:
+                            data = pak[vtf_path].read()
+                            logger.debug(f"Оригинальный VTF из игры: {vtf_path}")
+                            return data
+                        except KeyError:
+                            continue
+                except Exception as _e:
+                    logger.debug(f"VPK ошибка при поиске оригинала {mat_name}: {_e}")
+
+            if log_not_found:
+                logger.warning(
+                    f"Оригинальный VTF не найден в игре для '{mat_name}' "
+                    f"(cdmaterials={cdmaterials_paths})"
+                )
+            else:
+                logger.debug(
+                    f"Shared texture не в основном cdmaterials, пропускаем: '{mat_name}'"
+                )
+            return None
+
+        except Exception as exc:
+            logger.warning(f"_get_original_vtf_bytes: {exc}")
+            return None
+
     @staticmethod
     def _process_image(input_path: str, output_path: str, size: Tuple[int, int]) -> None:
         return TextureService.process_image(input_path, output_path, size)

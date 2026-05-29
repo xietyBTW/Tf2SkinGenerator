@@ -220,10 +220,14 @@ def validate_build_params(
     if not custom_vtf_path:
         if not image_path or not isinstance(image_path, str):
             return t['error_image_not_specified']
-        if not os.path.exists(image_path):
-            return t['error_image_not_found'].format(path=image_path)
-        if not os.path.isfile(image_path):
-            return t['error_image_not_file'].format(path=image_path)
+        # Sentinel EXTRA_TEX_USE_GAME_ORIGINAL — не файл, а команда использовать
+        # оригинал из игры. Пропускаем проверку существования файла.
+        from src.shared.constants import EXTRA_TEX_USE_GAME_ORIGINAL
+        if image_path != EXTRA_TEX_USE_GAME_ORIGINAL:
+            if not os.path.exists(image_path):
+                return t['error_image_not_found'].format(path=image_path)
+            if not os.path.isfile(image_path):
+                return t['error_image_not_file'].format(path=image_path)
     else:
         if not os.path.exists(custom_vtf_path):
             error_template = t.get('error_custom_vtf_not_found')
@@ -278,10 +282,9 @@ def validate_build_params(
     ]
     if format_type not in valid_formats:
         return t['error_format_invalid'].format(format=format_type, formats=', '.join(valid_formats))
-    # Только специальные режимы (спрей, крит и т.д.) и скины персонажей не требуют TF2.
-    # Режимы рук используют полный пайплайн декомпил→компил, как оружие.
-    from src.data.player_characters import PLAYER_BODY_MODE_KEYS as _PBK
-    _no_tf2_needed = mode in SPECIAL_MODES.values() or mode in _PBK
+    # Только специальные режимы (спрей, крит и т.д.) не требуют TF2.
+    # Персонажи, руки и оружия — полный pipeline через VPK + Crowbar.
+    _no_tf2_needed = mode in SPECIAL_MODES.values()
     if not _no_tf2_needed:
         if not tf2_root_dir or not isinstance(tf2_root_dir, str):
             return t['error_tf2_required']
