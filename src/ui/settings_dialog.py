@@ -3,7 +3,7 @@
 """
 
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+    QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QLineEdit, QFileDialog, QComboBox, QCheckBox, QWidget, QFrame,
     QScrollArea,
 )
@@ -11,6 +11,7 @@ from PySide6.QtCore import Qt, QUrl, QSize
 from PySide6.QtGui import QDesktopServices
 from src.config.app_config import AppConfig
 from src.shared.logging_config import get_logger
+from src.ui.styled_dialog import StyledDialog
 
 logger = get_logger(__name__)
 
@@ -122,6 +123,11 @@ _BROWSE_STYLE = f"""
     QPushButton:pressed {{ background: rgba(255,255,255,0.09); }}
 """
 
+import os as _os
+_CHECKMARK_SVG = _os.path.join(
+    _os.path.dirname(__file__), "resources", "checkmark.svg"
+).replace("\\", "/")
+
 _CHECK_STYLE = f"""
     QCheckBox {{
         color: {_TEXT_SUB};
@@ -131,14 +137,19 @@ _CHECK_STYLE = f"""
         border: none;
     }}
     QCheckBox::indicator {{
-        width: 14px; height: 14px;
+        width: 16px; height: 16px;
         border: 1px solid {_BORDER_H};
         border-radius: 3px;
         background: rgba(255,255,255,0.03);
     }}
+    QCheckBox::indicator:hover {{
+        border-color: #505050;
+        background: rgba(255,255,255,0.05);
+    }}
     QCheckBox::indicator:checked {{
-        background: #404040;
-        border-color: #555;
+        background: rgba(255,255,255,0.06);
+        border-color: #707070;
+        image: url("{_CHECKMARK_SVG}");
     }}
     QCheckBox:hover {{ color: {_TEXT}; }}
 """
@@ -185,17 +196,15 @@ def _pref_row(label_text: str, control: QWidget) -> QHBoxLayout:
 
 # ── Основной класс ────────────────────────────────────────────────────────── #
 
-class SettingsDialog(QDialog):
+class SettingsDialog(StyledDialog):
     def __init__(self, parent=None):
-        super().__init__(parent)
         from src.data.translations import TRANSLATIONS
         self.config = AppConfig.load_config()
         current_lang = self.config.get('language') or 'en'
         self.t = TRANSLATIONS[current_lang]
 
-        self.setWindowTitle(self.t.get('settings_title', 'Settings'))
-        self.setFixedWidth(480)
-        self.setStyleSheet(f"QDialog {{ background: {_BG}; }}")
+        title = self.t.get('settings_title', 'Settings')
+        super().__init__(parent, title=title, width=480)
 
         self._init_ui()
         self.load_settings()
@@ -207,34 +216,15 @@ class SettingsDialog(QDialog):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        root.addWidget(self._build_header())
+        # Хедер от StyledDialog (безрамочный + перетаскивание + кнопка ×)
+        root.addWidget(self.make_header(self.t.get('settings_title', 'Settings')))
         root.addWidget(self._build_body())
         root.addWidget(self._build_footer())
 
-    def _build_header(self) -> QWidget:
-        w = QWidget()
-        w.setFixedHeight(52)
-        w.setStyleSheet(f"""
-            QWidget {{
-                background: {_BG};
-                border-bottom: 1px solid {_BORDER};
-            }}
-        """)
-        lay = QHBoxLayout(w)
-        lay.setContentsMargins(24, 0, 24, 0)
-
-        title = QLabel(self.t.get('settings_title', 'Settings'))
-        title.setStyleSheet(
-            f"color: {_TEXT}; font-size: 13px; font-weight: 600; "
-            "border: none; background: transparent;"
-        )
-        lay.addWidget(title)
-        lay.addStretch()
-        return w
-
     def _build_body(self) -> QWidget:
+        c = self._c   # цвета из StyledDialog (учитывает тему dark/blue)
         w = QWidget()
-        w.setStyleSheet(f"background: {_BG};")
+        w.setStyleSheet(f"background: {c['bg']};")
         lay = QVBoxLayout(w)
         lay.setContentsMargins(24, 22, 24, 22)
         lay.setSpacing(0)
@@ -344,59 +334,11 @@ class SettingsDialog(QDialog):
         return w
 
     def _build_footer(self) -> QWidget:
-        w = QWidget()
-        w.setFixedHeight(60)
-        w.setStyleSheet(f"""
-            QWidget {{
-                background: {_SURFACE};
-                border-top: 1px solid {_BORDER};
-            }}
-        """)
-        lay = QHBoxLayout(w)
-        lay.setContentsMargins(24, 0, 24, 0)
-        lay.setSpacing(8)
-        lay.addStretch()
-
         self.cancel_button = QPushButton(self.t.get('cancel', 'Cancel'))
-        self.cancel_button.setFixedHeight(_FH)
-        self.cancel_button.setMinimumWidth(80)
-        self.cancel_button.setCursor(Qt.PointingHandCursor)
-        self.cancel_button.setStyleSheet(f"""
-            QPushButton {{
-                background: transparent;
-                color: #606060;
-                border: 1px solid {_BORDER};
-                border-radius: 4px;
-                font-size: 12px;
-                padding: 0 16px;
-            }}
-            QPushButton:hover  {{ border-color: {_BORDER_H}; color: #888; }}
-            QPushButton:pressed {{ background: rgba(255,255,255,0.04); }}
-        """)
+        self.save_button   = QPushButton(self.t.get('save', 'Save'))
         self.cancel_button.clicked.connect(self.reject)
-        lay.addWidget(self.cancel_button)
-
-        self.save_button = QPushButton(self.t.get('save', 'Save'))
-        self.save_button.setFixedHeight(_FH)
-        self.save_button.setMinimumWidth(80)
-        self.save_button.setCursor(Qt.PointingHandCursor)
-        self.save_button.setStyleSheet(f"""
-            QPushButton {{
-                background: {_ACCENT};
-                color: #fff;
-                border: none;
-                border-radius: 4px;
-                font-size: 12px;
-                font-weight: 600;
-                padding: 0 16px;
-            }}
-            QPushButton:hover  {{ background: #d95f28; }}
-            QPushButton:pressed {{ background: #c05020; }}
-        """)
         self.save_button.clicked.connect(self.save_settings)
-        lay.addWidget(self.save_button)
-
-        return w
+        return self.make_footer([self.cancel_button, self.save_button])
 
     # ── Логика ───────────────────────────────────────────────────────────── #
 

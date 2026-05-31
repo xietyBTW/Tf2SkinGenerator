@@ -1608,6 +1608,24 @@ class MainWindow(QMainWindow):
                 _blu_image = self.preview_panel.get_blu_image_path()
             _blu_mode = 'upload' if _blu_image else 'none'
 
+            # Собираем все загруженные пользователем текстуры из 2D карточек.
+            # Некоторые материалы (c_arrow, sniper_lens и т.п.) есть в 3D модели
+            # но НЕ в QC skinfamilies → extra_texture_callback их не покрывает.
+            # Передаём эти текстуры напрямую чтобы они попали в VPK.
+            _panel_extra_textures: dict = {}
+            if hasattr(self, 'preview_panel'):
+                _panel_extra_textures = dict(
+                    self.preview_panel.get_slot_image_paths()
+                )
+                # Убираем главную текстуру (col 0) — она уже в from_path
+                main_key = (
+                    self.preview_panel._material_names[0]
+                    if self.preview_panel._material_names
+                    else None
+                )
+                if main_key and main_key in _panel_extra_textures:
+                    _panel_extra_textures.pop(main_key)
+
             self._build_worker = BuildWorker(
                 image_path=from_path,
                 mode=self.mode,
@@ -1631,6 +1649,7 @@ class MainWindow(QMainWindow):
                 custom_vpk_source_path=getattr(self, '_custom_vpk_path', None),
                 hat_mdl_path=getattr(self, '_hat_mdl_path', None),
                 hat_apply_game_paints=hat_apply_game_paints,
+                panel_extra_textures=_panel_extra_textures,
                 # Без parent=self ! Если дать parent=self, Qt станет владельцем
                 # и не удалит старый воркер при замене, и сигналы будут дублироваться.
             )
@@ -2406,6 +2425,82 @@ class MainWindow(QMainWindow):
         if hasattr(self, '_extract_worker') and self._extract_worker.isRunning():
             self._extract_worker.requestInterruption()
     
+    def _ask_merge_filename(self) -> Optional[str]:
+        """Стилизованный диалог ввода имени выходного VPK файла."""
+        from src.ui.styled_dialog import StyledDialog
+        from PySide6.QtWidgets import QVBoxLayout, QLabel, QLineEdit, QPushButton
+        from src.shared.validators import validate_vpk_filename
+
+        is_ru = self.language == 'ru'
+        dlg = StyledDialog(self,
+                           title=self.t.get('merge_vpk_title', 'Merge Mods'),
+                           width=420)
+        c = dlg._c
+        root = QVBoxLayout(dlg)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        root.addWidget(dlg.make_header(
+            self.t.get('merge_vpk_title', 'Merge Mods'),
+            subtitle=self.t.get('enter_output_filename', 'Enter output file name'),
+        ))
+
+        body = QVBoxLayout()
+        body.setContentsMargins(20, 20, 20, 16)
+        body.setSpacing(8)
+
+        hint = QLabel(self.t.get('enter_output_filename', 'Output file name:'))
+        hint.setStyleSheet(f"color:{c['text_sub']}; font-size:11px;")
+        body.addWidget(hint)
+
+        edit = QLineEdit("merged_mod")
+        edit.setFixedHeight(34)
+        edit.selectAll()
+        edit.setStyleSheet(f"""
+            QLineEdit {{
+                background: rgba(255,255,255,0.04); color: {c['text']};
+                border: 1px solid {c['border']}; border-radius: 4px;
+                padding: 0 10px; font-size: 13px;
+            }}
+            QLineEdit:focus {{ border-color: {c['border_h']}; }}
+        """)
+        body.addWidget(edit)
+
+        err_lbl = QLabel("")
+        err_lbl.setStyleSheet(f"color:#c04040; font-size:10px;")
+        body.addWidget(err_lbl)
+
+        root.addLayout(body)
+        root.addWidget(dlg.divider())
+
+        ok_btn = QPushButton("OK")
+        cancel_btn = QPushButton(self.t.get('cancel', 'Cancel'))
+
+        def _try_accept():
+            name = edit.text().strip()
+            if not name:
+                err_lbl.setText("Введите имя файла" if is_ru else "Enter file name")
+                return
+            if not name.endswith('.vpk'):
+                name += '.vpk'
+            valid, msg = validate_vpk_filename(name)
+            if not valid:
+                err_lbl.setText(msg)
+                return
+            dlg._result_name = name
+            dlg.accept()
+
+        edit.returnPressed.connect(_try_accept)
+        ok_btn.clicked.connect(_try_accept)
+        cancel_btn.clicked.connect(dlg.reject)
+
+        root.addWidget(dlg.make_footer([cancel_btn, ok_btn]))
+
+        dlg._result_name = None
+        if dlg.exec():
+            return dlg._result_name
+        return None
+
     def merge_vpk_files(self) -> None:
         """Открывает диалог объединения VPK файлов"""
         from src.ui.merge_vpk_dialog import MergeVPKDialog
@@ -2423,27 +2518,11 @@ class MainWindow(QMainWindow):
             ErrorHandler.show_warning(self, self.t.get('no_vpk_files_selected', 'No VPK files selected'), self.t['error'])
             return
         
-        # Запрашиваем имя выходного файла
-        from PySide6.QtWidgets import QInputDialog
-        filename, ok = QInputDialog.getText(
-            self,
-            self.t.get('merge_vpk_title', 'Объединить моды'),
-            self.t.get('enter_output_filename', 'Введите имя выходного файла:'),
-            text="merged_mod.vpk"
-        )
-        
-        if not ok or not filename:
+        # Запрашиваем имя выходного файла — стилизованный диалог
+        filename = self._ask_merge_filename()
+        if not filename:
             return
-        
-        # Валидация имени файла
-        if not filename.endswith('.vpk'):
-            filename += '.vpk'
-        
-        is_valid, error_msg = validate_vpk_filename(filename)
-        if not is_valid:
-            ErrorHandler.show_warning(self, error_msg, self.t['error'])
-            return
-        
+
         # Получаем настройки
         settings = self.settings_panel.get_settings()
         export_folder = settings.get('export_folder', 'export')

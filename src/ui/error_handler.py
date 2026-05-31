@@ -1,9 +1,11 @@
 """
-Централизованный обработчик ошибок для UI
+Централизованный обработчик ошибок для UI.
+Все диалоги используют StyledDialog вместо системного QMessageBox.
 """
 
 from typing import Optional, TYPE_CHECKING, Union
-from PySide6.QtWidgets import QMessageBox, QWidget
+from PySide6.QtWidgets import QMessageBox, QWidget, QVBoxLayout, QLabel, QPushButton
+from PySide6.QtCore import Qt
 from src.shared.logging_config import get_logger
 from src.shared.exceptions import ErrorPayload
 from src.shared.error_classifier import classify
@@ -14,8 +16,48 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
+def _simple_dialog(parent, title: str, message: str,
+                   buttons: list, icon: str = "") -> str:
+    """
+    Показывает простой стилизованный диалог с одной кнопкой или несколькими.
+
+    Returns:
+        Текст нажатой кнопки.
+    """
+    from src.ui.styled_dialog import StyledDialog
+
+    dlg = StyledDialog(parent, title=title, width=440)
+    c = dlg._c
+    root = QVBoxLayout(dlg)
+    root.setContentsMargins(0, 0, 0, 0)
+    root.setSpacing(0)
+
+    root.addWidget(dlg.make_header(title))
+
+    body = QVBoxLayout()
+    body.setContentsMargins(20, 16, 20, 16)
+    msg_lbl = QLabel(message)
+    msg_lbl.setWordWrap(True)
+    msg_lbl.setStyleSheet(f"color: {c['text']}; font-size: 12px; line-height: 1.5;")
+    body.addWidget(msg_lbl)
+    root.addLayout(body)
+    root.addWidget(dlg.divider())
+
+    result = [buttons[-1]]   # дефолт — последняя (primary)
+
+    btns = []
+    for label in buttons:
+        btn = QPushButton(label)
+        btn.clicked.connect(lambda _, l=label, d=dlg: (result.__setitem__(0, l), d.accept()))
+        btns.append(btn)
+
+    root.addWidget(dlg.make_footer(btns))
+    dlg.exec()
+    return result[0]
+
+
 class ErrorHandler:
-    """Централизованный обработчик ошибок для UI компонентов"""
+    """Централизованный обработчик ошибок для UI компонентов."""
 
     @staticmethod
     def show_error(
@@ -25,20 +67,8 @@ class ErrorHandler:
         title: Optional[str] = None,
         language: str = "ru",
     ) -> None:
-        """
-        Показывает ошибку с понятным объяснением для пользователя
-        и разворачиваемыми техническими деталями.
-
-        Args:
-            parent:   Родительский виджет для диалога.
-            error:    Исключение, ErrorPayload или строка с описанием ошибки.
-            context:  Дополнительный контекст (используется в логе и тех. деталях).
-            title:    Заголовок окна (если None — используется «Ошибка» / «Error»).
-            language: Язык интерфейса ('ru' или 'en').
-        """
         from src.ui.error_dialog import ErrorDialog
 
-        # ── Извлекаем техническое сообщение ──────────────────────────────
         if isinstance(error, ErrorPayload):
             raw_msg = error.to_text()
             error_type = error.code
@@ -49,13 +79,11 @@ class ErrorHandler:
             raw_msg = str(error)
             error_type = "Error"
 
-        # ── Лог ──────────────────────────────────────────────────────────
         logger.error(
             f"Ошибка в UI{': ' + context if context else ''}: {error_type}: {raw_msg}",
             exc_info=True,
         )
 
-        # ── Технические детали для раздела «Развернуть» ───────────────────
         parts = []
         if context:
             parts.append(context)
@@ -65,11 +93,9 @@ class ErrorHandler:
             parts.append(raw_msg)
         technical_details = "\n\n".join(parts)
 
-        # ── Классификация → понятный заголовок + описание ─────────────────
         full_lookup = f"{context} {raw_msg}"
         friendly_title, friendly_desc = classify(full_lookup, language)
 
-        # ── Диалог ───────────────────────────────────────────────────────
         try:
             ErrorDialog.show(
                 parent,
@@ -80,7 +106,11 @@ class ErrorHandler:
             )
         except Exception as _dlg_err:
             logger.error(f"Не удалось показать ErrorDialog: {_dlg_err}", exc_info=True)
-            QMessageBox.critical(parent, title or ("Ошибка" if language == "ru" else "Error"), technical_details)
+            QMessageBox.critical(
+                parent,
+                title or ("Ошибка" if language == "ru" else "Error"),
+                technical_details,
+            )
 
     @staticmethod
     def show_warning(
@@ -89,9 +119,11 @@ class ErrorHandler:
         title: Optional[str] = None,
     ) -> None:
         logger.warning(f"Предупреждение в UI: {message}")
-        if title is None:
-            title = "Предупреждение"
-        QMessageBox.warning(parent, title, message)
+        t = title or "Предупреждение"
+        try:
+            _simple_dialog(parent, t, message, ["OK"])
+        except Exception:
+            QMessageBox.warning(parent, t, message)
 
     @staticmethod
     def show_info(
@@ -100,9 +132,11 @@ class ErrorHandler:
         title: Optional[str] = None,
     ) -> None:
         logger.info(f"Информация для пользователя: {message}")
-        if title is None:
-            title = "Информация"
-        QMessageBox.information(parent, title, message)
+        t = title or "Информация"
+        try:
+            _simple_dialog(parent, t, message, ["OK"])
+        except Exception:
+            QMessageBox.information(parent, t, message)
 
     @staticmethod
     def show_question(
@@ -110,9 +144,12 @@ class ErrorHandler:
         message: str,
         title: Optional[str] = None,
     ) -> bool:
-        if title is None:
-            title = "Вопрос"
-        reply = QMessageBox.question(
-            parent, title, message, QMessageBox.Yes | QMessageBox.No
-        )
-        return reply == QMessageBox.Yes
+        t = title or "Вопрос"
+        try:
+            clicked = _simple_dialog(parent, t, message, ["Отмена", "Да"])
+            return clicked == "Да"
+        except Exception:
+            reply = QMessageBox.question(
+                parent, t, message, QMessageBox.Yes | QMessageBox.No
+            )
+            return reply == QMessageBox.Yes

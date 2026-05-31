@@ -1,233 +1,194 @@
 """
-Диалог выбора VPK модов для объединения
+Диалог выбора VPK модов для объединения — стиль StyledDialog.
 """
 
 import os
 from pathlib import Path
 from typing import List
+
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QCheckBox,
-    QPushButton, QScrollArea, QWidget, QMessageBox
+    QVBoxLayout, QHBoxLayout, QLabel, QCheckBox,
+    QPushButton, QScrollArea, QWidget,
 )
 from PySide6.QtCore import Qt
+
 from src.data.translations import TRANSLATIONS
 from src.config.app_config import AppConfig
 from src.shared.logging_config import get_logger
+from src.ui.styled_dialog import StyledDialog
 
 logger = get_logger(__name__)
 
 
-class MergeVPKDialog(QDialog):
-    """Диалог для выбора VPK файлов для объединения"""
-    
+class MergeVPKDialog(StyledDialog):
+    """Диалог для выбора VPK файлов для объединения."""
+
     def __init__(self, parent=None):
-        super().__init__(parent)
-        self.selected_vpk_files = []
-        
-        # Получаем язык из родителя или конфига
         if parent and hasattr(parent, 't'):
             self.t = parent.t
         else:
             config = AppConfig.load_config()
-            current_lang = config.get('language') or 'en'
-            self.t = TRANSLATIONS[current_lang]
-        
-        self.init_ui()
+            lang = config.get('language') or 'en'
+            self.t = TRANSLATIONS[lang]
+
+        title = self.t.get('merge_vpk_title', 'Merge Mods')
+        super().__init__(parent, title=title, width=500)
+
+        self.selected_vpk_files = []
+        self.checkboxes: list = []
+        self.vpk_files_list: list = []
+
+        self._build_ui()
         self.load_vpk_files()
-    
-    def init_ui(self):
-        """Инициализация интерфейса"""
-        self.setWindowTitle(self.t.get('merge_vpk_title', 'Объединить моды'))
-        self.setMinimumSize(500, 400)
-        
-        layout = QVBoxLayout(self)
-        layout.setSpacing(12)
-        layout.setContentsMargins(16, 16, 16, 16)
-        
-        # Заголовок
-        title_label = QLabel(self.t.get('merge_vpk_description', 'Выберите моды для объединения:'))
-        title_label.setStyleSheet("font-size: 14px; font-weight: 500; color: #ccc;")
-        layout.addWidget(title_label)
-        
-        # Область прокрутки с чекбоксами
-        scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setStyleSheet("""
-            QScrollArea {
-                border: 1px solid #333;
+
+    def _build_ui(self):
+        c = self._c
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        # ── Хедер ─────────────────────────────────────────────────────── #
+        desc = self.t.get('merge_vpk_description', 'Select mods to merge into one VPK')
+        root.addWidget(self.make_header(
+            self.t.get('merge_vpk_title', 'Merge Mods'),
+            subtitle=desc,
+        ))
+
+        # ── Список VPK с прокруткой ───────────────────────────────────── #
+        body = QVBoxLayout()
+        body.setContentsMargins(20, 16, 20, 12)
+        body.setSpacing(10)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setMinimumHeight(220)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setStyleSheet(f"""
+            QScrollArea {{
+                border: 1px solid {c['border']};
                 border-radius: 4px;
-                background-color: #1a1a1a;
-            }
+                background: rgba(255,255,255,0.02);
+            }}
+            QScrollBar:vertical {{
+                background: transparent; width: 4px; margin: 0;
+            }}
+            QScrollBar::handle:vertical {{
+                background: {c['border_h']}; border-radius: 2px; min-height: 20px;
+            }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
         """)
-        
-        scroll_widget = QWidget()
-        scroll_layout = QVBoxLayout(scroll_widget)
-        scroll_layout.setSpacing(8)
-        scroll_layout.setContentsMargins(12, 12, 12, 12)
-        
-        self.checkboxes = []
-        self.vpk_files_list = []
-        
-        # Контейнер для чекбоксов будет заполнен в load_vpk_files
-        self.scroll_content = scroll_widget
-        scroll_area.setWidget(scroll_widget)
-        layout.addWidget(scroll_area)
-        
-        # Кнопки
-        buttons_layout = QHBoxLayout()
-        buttons_layout.addStretch()
-        
-        # Кнопка "Выбрать все"
-        self.select_all_btn = QPushButton(self.t.get('select_all', 'Выбрать все'))
-        self.select_all_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #2a2a2a;
-                color: #ccc;
-                border: 1px solid #444;
-                border-radius: 4px;
-                padding: 8px 16px;
-                font-size: 13px;
-            }
-            QPushButton:hover {
-                background-color: #333;
-            }
-        """)
-        self.select_all_btn.clicked.connect(self.select_all)
-        buttons_layout.addWidget(self.select_all_btn)
-        
-        # Кнопка "Снять все"
-        self.deselect_all_btn = QPushButton(self.t.get('deselect_all', 'Снять все'))
-        self.deselect_all_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #2a2a2a;
-                color: #ccc;
-                border: 1px solid #444;
-                border-radius: 4px;
-                padding: 8px 16px;
-                font-size: 13px;
-            }
-            QPushButton:hover {
-                background-color: #333;
-            }
-        """)
-        self.deselect_all_btn.clicked.connect(self.deselect_all)
-        buttons_layout.addWidget(self.deselect_all_btn)
-        
-        # Кнопка "Отмена"
-        cancel_btn = QPushButton(self.t.get('cancel', 'Отмена'))
-        cancel_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #2a2a2a;
-                color: #ccc;
-                border: 1px solid #444;
-                border-radius: 4px;
-                padding: 8px 16px;
-                font-size: 13px;
-            }
-            QPushButton:hover {
-                background-color: #333;
-            }
-        """)
-        cancel_btn.clicked.connect(self.reject)
-        buttons_layout.addWidget(cancel_btn)
-        
-        # Кнопка "Объединить"
-        self.merge_btn = QPushButton(self.t.get('merge', 'Объединить'))
-        self.merge_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #4a9eff;
-                color: white;
-                border: none;
-                border-radius: 4px;
-                padding: 8px 16px;
-                font-size: 13px;
-                font-weight: 500;
-            }
-            QPushButton:hover {
-                background-color: #5aaeff;
-            }
-            QPushButton:disabled {
-                background-color: #2a2a2a;
-                color: #666;
-            }
-        """)
-        self.merge_btn.clicked.connect(self.accept)
-        self.merge_btn.setEnabled(False)
-        buttons_layout.addWidget(self.merge_btn)
-        
-        layout.addLayout(buttons_layout)
-    
-    def load_vpk_files(self):
-        """Загружает список VPK файлов из папки export"""
-        # Получаем путь к папке export из конфига
-        config = AppConfig.load_config()
-        export_folder = config.get('export_folder', 'export')
-        export_path = Path(export_folder)
-        
-        if not export_path.exists():
-            # Если папка не существует, показываем сообщение
-            no_files_label = QLabel(self.t.get('no_vpk_files', 'В папке export нет VPK файлов'))
-            no_files_label.setStyleSheet("color: #888; padding: 20px;")
-            self.scroll_content.layout().addWidget(no_files_label)
-            return
-        
-        # Ищем все VPK файлы
-        vpk_files = list(export_path.glob("*.vpk"))
-        
-        if not vpk_files:
-            no_files_label = QLabel(self.t.get('no_vpk_files', 'В папке export нет VPK файлов'))
-            no_files_label.setStyleSheet("color: #888; padding: 20px;")
-            self.scroll_content.layout().addWidget(no_files_label)
-            return
-        
-        # Сортируем файлы по имени
-        vpk_files.sort(key=lambda x: x.name.lower())
-        
-        # Создаем чекбоксы для каждого файла
-        for vpk_file in vpk_files:
-            checkbox = QCheckBox(vpk_file.name)
-            checkbox.setStyleSheet("""
-                QCheckBox {
-                    color: #ccc;
-                    font-size: 13px;
-                    padding: 4px;
-                }
-                QCheckBox::indicator {
-                    width: 18px;
-                    height: 18px;
-                }
+
+        self.scroll_content = QWidget()
+        self._scroll_layout = QVBoxLayout(self.scroll_content)
+        self._scroll_layout.setSpacing(4)
+        self._scroll_layout.setContentsMargins(12, 10, 12, 10)
+        scroll.setWidget(self.scroll_content)
+        body.addWidget(scroll, 1)
+
+        # Select all / none
+        sel_row = QHBoxLayout()
+        sel_row.setSpacing(8)
+        self.select_all_btn  = QPushButton(self.t.get('select_all', 'Select all'))
+        self.deselect_all_btn = QPushButton(self.t.get('deselect_all', 'Select none'))
+        for btn in (self.select_all_btn, self.deselect_all_btn):
+            btn.setFixedHeight(28)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: transparent; color: {c['text_sub']};
+                    border: 1px solid {c['border']}; border-radius: 3px;
+                    font-size: 11px; padding: 0 10px;
+                }}
+                QPushButton:hover {{
+                    color: {c['text']}; border-color: {c['border_h']};
+                }}
             """)
-            checkbox.stateChanged.connect(self.on_checkbox_changed)
-            self.checkboxes.append(checkbox)
+        sel_row.addWidget(self.select_all_btn)
+        sel_row.addWidget(self.deselect_all_btn)
+        sel_row.addStretch()
+        body.addLayout(sel_row)
+
+        root.addLayout(body)
+
+        # ── Футер ─────────────────────────────────────────────────────── #
+        root.addWidget(self.divider())
+
+        self.cancel_btn = QPushButton(self.t.get('cancel', 'Cancel'))
+        self.merge_btn  = QPushButton(self.t.get('merge', 'Merge'))
+        self.merge_btn.setEnabled(False)
+        root.addWidget(self.make_footer([self.cancel_btn, self.merge_btn]))
+
+        # ── Сигналы ───────────────────────────────────────────────────── #
+        self.select_all_btn.clicked.connect(self.select_all)
+        self.deselect_all_btn.clicked.connect(self.deselect_all)
+        self.cancel_btn.clicked.connect(self.reject)
+        self.merge_btn.clicked.connect(self.accept)
+
+        self.resize(500, 460)
+
+    def load_vpk_files(self):
+        config = AppConfig.load_config()
+        export_path = Path(config.get('export_folder', 'export'))
+        c = self._c
+
+        if not export_path.exists():
+            self._no_files_msg()
+            return
+
+        vpk_files = sorted(export_path.glob("*.vpk"), key=lambda x: x.name.lower())
+        if not vpk_files:
+            self._no_files_msg()
+            return
+
+        for vpk_file in vpk_files:
+            cb = QCheckBox(vpk_file.name)
+            cb.setStyleSheet(f"""
+                QCheckBox {{
+                    color: {c['text']};
+                    font-size: 12px;
+                    padding: 4px 2px;
+                    spacing: 10px;
+                }}
+                QCheckBox::indicator {{
+                    width: 15px; height: 15px;
+                    border: 1px solid {c['border_h']};
+                    border-radius: 3px;
+                    background: rgba(255,255,255,0.03);
+                }}
+                QCheckBox::indicator:checked {{
+                    background: {c['accent']};
+                    border-color: {c['accent']};
+                }}
+                QCheckBox:hover {{ color: {c['text']}; }}
+            """)
+            cb.stateChanged.connect(self._on_checkbox_changed)
+            self.checkboxes.append(cb)
             self.vpk_files_list.append(vpk_file)
-            self.scroll_content.layout().addWidget(checkbox)
-        
-        # Добавляем растяжку в конец
-        self.scroll_content.layout().addStretch()
-    
-    def on_checkbox_changed(self):
-        """Обработчик изменения состояния чекбокса"""
-        # Проверяем, есть ли хотя бы один выбранный чекбокс
-        has_selection = any(cb.isChecked() for cb in self.checkboxes)
-        self.merge_btn.setEnabled(has_selection)
-    
+            self._scroll_layout.addWidget(cb)
+
+        self._scroll_layout.addStretch()
+
+    def _no_files_msg(self):
+        c = self._c
+        lbl = QLabel(self.t.get('no_vpk_files', 'No VPK files found in export folder'))
+        lbl.setStyleSheet(f"color: {c['text_sub']}; font-size: 12px; padding: 20px;")
+        lbl.setAlignment(Qt.AlignCenter)
+        self._scroll_layout.addWidget(lbl)
+
+    def _on_checkbox_changed(self):
+        self.merge_btn.setEnabled(any(cb.isChecked() for cb in self.checkboxes))
+
     def select_all(self):
-        """Выбирает все чекбоксы"""
-        for checkbox in self.checkboxes:
-            checkbox.setChecked(True)
-    
+        for cb in self.checkboxes:
+            cb.setChecked(True)
+
     def deselect_all(self):
-        """Снимает выбор со всех чекбоксов"""
-        for checkbox in self.checkboxes:
-            checkbox.setChecked(False)
-    
+        for cb in self.checkboxes:
+            cb.setChecked(False)
+
     def get_selected_files(self) -> List[Path]:
-        """Возвращает список выбранных VPK файлов"""
-        selected = []
-        for i, checkbox in enumerate(self.checkboxes):
-            if checkbox.isChecked():
-                selected.append(self.vpk_files_list[i])
-        return selected
-
-
-
+        return [
+            self.vpk_files_list[i]
+            for i, cb in enumerate(self.checkboxes)
+            if cb.isChecked()
+        ]

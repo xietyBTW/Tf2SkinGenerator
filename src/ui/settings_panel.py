@@ -162,34 +162,35 @@ class CollapsibleGroup(QWidget):
 
 _BUILD_OPTS_BTN_IDLE = """
     QPushButton {
-        background-color: rgba(0, 0, 0, 0.28);
-        border: none;
+        background-color: rgba(255, 255, 255, 0.06);
+        border: 1px solid rgba(255, 255, 255, 0.14);
         border-radius: 3px;
         padding: 0px;
         min-width: 0px;
     }
     QPushButton:hover {
-        background-color: rgba(255, 255, 255, 0.12);
+        background-color: rgba(255, 255, 255, 0.14);
+        border-color: rgba(255, 255, 255, 0.28);
     }
     QPushButton:pressed {
-        background-color: rgba(0, 0, 0, 0.45);
+        background-color: rgba(0, 0, 0, 0.20);
     }
 """
 
 _BUILD_OPTS_BTN_ACTIVE = """
     QPushButton {
-        background-color: rgba(255, 107, 53, 0.22);
-        border: 1px solid rgba(255, 107, 53, 0.55);
+        background-color: rgba(255, 255, 255, 0.22);
+        border: 1px solid rgba(255, 255, 255, 0.60);
         border-radius: 3px;
         padding: 0px;
         min-width: 0px;
     }
     QPushButton:hover {
-        background-color: rgba(255, 107, 53, 0.32);
-        border-color: rgba(255, 107, 53, 0.80);
+        background-color: rgba(255, 255, 255, 0.35);
+        border-color: rgba(255, 255, 255, 0.90);
     }
     QPushButton:pressed {
-        background-color: rgba(255, 107, 53, 0.15);
+        background-color: rgba(255, 255, 255, 0.12);
     }
 """
 
@@ -598,7 +599,7 @@ class SettingsPanel(QWidget):
         self.button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
         self.build_opts_btn = QPushButton()
-        self.build_opts_btn.setIcon(_make_build_opts_icon("#b0b0b0", 11))
+        self.build_opts_btn.setIcon(_make_build_opts_icon("#d0d0d0", 11))
         from PySide6.QtCore import QSize as _QSize
         self.build_opts_btn.setIconSize(_QSize(11, 11))
         self.build_opts_btn.setStyleSheet(_BUILD_OPTS_BTN_IDLE)
@@ -876,7 +877,7 @@ class SettingsPanel(QWidget):
         self.build_opts_btn.setStyleSheet(
             _BUILD_OPTS_BTN_ACTIVE if active else _BUILD_OPTS_BTN_IDLE
         )
-        icon_color = "#ff6b35" if active else "#b0b0b0"
+        icon_color = "#ffffff" if active else "#d0d0d0"
         self.build_opts_btn.setIcon(_make_build_opts_icon(icon_color, 11))
 
     # ── Публичный API для чтения/установки состояния ──────────────────────── #

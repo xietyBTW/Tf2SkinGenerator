@@ -89,6 +89,7 @@ class VPKService:
         custom_vpk_source_path: Optional[str] = None,
         hat_mdl_path: Optional[str] = None,
         hat_apply_game_paints: bool = True,
+        panel_extra_textures: Optional[dict] = None,
         progress_callback: Optional[Callable[[int, str], None]] = None,
         sub_progress_callback: Optional[Callable[[int, str], None]] = None,
         cancel_callback: Optional[Callable[[], bool]] = None
@@ -173,6 +174,7 @@ class VPKService:
                     sub_progress_callback=emit_sub,
                     hat_mdl_path=hat_mdl_path,
                     hat_apply_game_paints=hat_apply_game_paints,
+                    panel_extra_textures=panel_extra_textures,
                 )
 
                 if not is_cancelled():
@@ -228,6 +230,7 @@ class VPKService:
                         sub_progress_callback=emit_sub,
                         hat_mdl_path=hat_mdl_path,
                         hat_apply_game_paints=hat_apply_game_paints,
+                        panel_extra_textures=panel_extra_textures,
                     )
                     build_result[0] = success
                     build_result[1] = message
@@ -282,9 +285,10 @@ class VPKService:
         blu_mode: str = "none",       # BLU-командная текстура: 'none' | 'same' | 'upload' | 'hue_shift'
         blu_image_path: str = None,   # Путь к BLU-изображению (для 'upload' / 'hue_shift')
         sub_progress_callback: Optional[Callable[[int, str], None]] = None,
+        panel_extra_textures: Optional[dict] = None,  # {mat_name: img_path} из 2D панели
     ) -> Tuple[bool, str]:
         """
-        Главная функция - делает из картинки VPK файл. 
+        Главная функция - делает из картинки VPK файл.
         Если что-то пойдет не так - вернет False и описание проблемы.
         Вся эта хуйня с моделями, текстурами и VPK - тут.
         """
@@ -1410,18 +1414,63 @@ class VPKService:
                                 continue
                             
                             # Если BLU имя совпадает с RED — shared/нейтральная текстура.
-                            # В мод НЕ добавляем: движок найдёт через другие $cdmaterials пути.
-                            # Исключение: если VTF уже существует (создан ранее пользователем или
-                            # через callback «из игры») — только создаём VMT для него.
+                            #
+                            # Два типа:
+                            #   1. СИСТЕМНЫЕ (eyeball, invulnfx, _invun, _zombie) — пропускаем.
+                            #      Движок найдёт сам через другой $cdmaterials (effects/).
+                            #   2. НАСТОЯЩИЕ СКИНОВЫЕ (sniper_lens, c_arrow и т.п.) — спрашиваем
+                            #      пользователя через extra_texture_callback, как для extra_materials.
                             if blu_tex_name == red_tex_name:
                                 if blu_tex_name == texture_filename:
                                     continue
+
+                                _n = blu_tex_name.lower()
+                                _is_system_tex = (
+                                    'eyeball'  in _n or
+                                    'invulnfx' in _n or
+                                    '_invun'   in _n or   # sniper_red_invun
+                                    '_invuln'  in _n or   # sniper_lens_invuln
+                                    '_zombie'  in _n
+                                )
+
                                 shared_vtf_path = vtf_output_path / f"{blu_tex_name}.vtf"
                                 if not shared_vtf_path.exists():
-                                    # Текстура не нужна в моде — пропускаем
-                                    logger.debug(f"Shared texture пропускается: {blu_tex_name}")
-                                    continue
-                                # VTF уже есть (явно создан ранее) → только VMT
+                                    if _is_system_tex:
+                                        # Системная — тихо пропускаем, движок обработает
+                                        logger.debug(f"Системная shared texture пропускается: {blu_tex_name}")
+                                        continue
+
+                                    # Скиновая shared текстура — спрашиваем пользователя
+                                    _shared_img = extra_texture_callback(blu_tex_name, weapon_key) if extra_texture_callback else None
+                                    if _shared_img == EXTRA_TEX_USE_GAME_ORIGINAL:
+                                        _game_vtf = VPKService._get_original_vtf_bytes(
+                                            blu_tex_name, original_cdmaterials_paths,
+                                            tf2_textures_vpk, tf2_misc_vpk, log_not_found=False
+                                        )
+                                        if _game_vtf:
+                                            with open(shared_vtf_path, "wb") as _f:
+                                                _f.write(_game_vtf)
+                                            logger.info(f"Shared VTF из игры: {blu_tex_name}.vtf")
+                                        else:
+                                            logger.debug(f"Shared VTF не найден в игре, пропуск: {blu_tex_name}")
+                                            continue
+                                    elif _shared_img and os.path.isfile(_shared_img):
+                                        _sh_flags, _sh_opts = VPKService._parse_vtf_flags_and_options(flags)
+                                        _sh_merged = dict(vtf_options or {})
+                                        _sh_merged.update(_sh_opts)
+                                        _sh_merged.pop("normal", None)
+                                        _sh_png = vtf_output_path / f"{blu_tex_name}.png"
+                                        VPKService._process_image(_shared_img, _sh_png, size)
+                                        VPKService._create_vtf(str(_sh_png), str(vtf_output_path), format_type, _sh_flags, _sh_merged)
+                                        if _sh_png.exists():
+                                            _sh_png.unlink()
+                                        logger.info(f"Создан shared VTF: {blu_tex_name}.vtf")
+                                    else:
+                                        # Пользователь пропустил — не включаем
+                                        logger.debug(f"Shared texture пропущена пользователем: {blu_tex_name}")
+                                        continue
+
+                                # VTF существует → создаём VMT если нет
                                 shared_vmt_path = vtf_output_path / f"{blu_tex_name}.vmt"
                                 if not shared_vmt_path.exists():
                                     if vmt_path.exists():
@@ -1429,7 +1478,7 @@ class VPKService:
                                         VMTService.update_vmt_basetexture_path(str(shared_vmt_path), patched_cdmaterials_path, blu_tex_name)
                                     else:
                                         VMTService.create_vmt_template_from_cdmaterials(str(shared_vmt_path), patched_cdmaterials_path, blu_tex_name)
-                                    logger.info(f"Создан VMT для общей текстуры: {blu_tex_name}.vmt")
+                                    logger.info(f"Создан VMT для shared текстуры: {blu_tex_name}.vmt")
                                 if animated_fps:
                                     VMTService.enable_animated_basetexture(str(shared_vmt_path), animated_fps)
                                 continue
@@ -1584,6 +1633,49 @@ class VPKService:
 
                     if debug_mode:
                         DebugService.save_patched_stage(ctx, ctx.decompile_dir)
+
+                    # ── Текстуры из 2D панели (c_arrow, sniper_lens и т.п.) ──────── #
+                    # Материалы из SMD модели которые НЕ в QC skinfamilies →
+                    # extra_texture_callback их не покрывает → добавляем здесь.
+                    if panel_extra_textures:
+                        # Собираем уже созданные имена (extra_materials + BLU)
+                        _processed = set()
+                        for _f in vtf_output_path.glob("*.vtf"):
+                            _processed.add(_f.stem)
+
+                        for _pet_name, _pet_img in panel_extra_textures.items():
+                            if _pet_name in _processed:
+                                continue   # уже создан через skinfamilies
+                            if not _pet_img or not os.path.isfile(_pet_img):
+                                continue
+                            try:
+                                ensure_directory_exists(vtf_output_path)
+                                _pet_png = vtf_output_path / f"{_pet_name}.png"
+                                _pet_vtf = vtf_output_path / f"{_pet_name}.vtf"
+                                _pet_vmt = vtf_output_path / f"{_pet_name}.vmt"
+                                VPKService._process_image(_pet_img, _pet_png, size)
+                                _pet_flags, _pet_opts = VPKService._parse_vtf_flags_and_options(flags or [])
+                                _pet_merged = dict(vtf_options or {})
+                                _pet_merged.update(_pet_opts)
+                                _pet_merged.pop("normal", None)
+                                VPKService._create_vtf(
+                                    str(_pet_png), str(vtf_output_path),
+                                    format_type, _pet_flags, _pet_merged
+                                )
+                                if _pet_png.exists():
+                                    _pet_png.unlink()
+                                if not _pet_vmt.exists() and vmt_path.exists():
+                                    copy_file_safe(vmt_path, _pet_vmt)
+                                    VMTService.update_vmt_basetexture_path(
+                                        str(_pet_vmt), patched_cdmaterials_path, _pet_name
+                                    )
+                                elif not _pet_vmt.exists():
+                                    VMTService.create_vmt_template_from_cdmaterials(
+                                        str(_pet_vmt), patched_cdmaterials_path, _pet_name
+                                    )
+                                logger.info(f"Panel extra texture: {_pet_name}.vtf/vmt")
+                            except Exception as _pet_exc:
+                                logger.warning(f"Panel extra texture ошибка '{_pet_name}': {_pet_exc}")
 
                     # Ждём завершения компиляции (шла параллельно с текстурами)
                     _compile_thread.join()

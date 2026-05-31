@@ -79,6 +79,30 @@ def _splash_msg(splash, app, text: str):
     app.processEvents()
 
 
+def _cleanup_stale_temp() -> None:
+    """
+    Удаляет старые папки build_* из tools/temp при старте приложения.
+
+    Эти папки остаются после прерванных или упавших сборок.
+    Активная сборка создаёт папку только во время работы, поэтому
+    при старте все build_* можно безопасно удалять.
+    """
+    import shutil
+    temp_dir = Path("tools/temp")
+    if not temp_dir.exists():
+        return
+    removed = 0
+    for entry in temp_dir.iterdir():
+        if entry.is_dir() and entry.name.startswith("build_"):
+            try:
+                shutil.rmtree(entry)
+                removed += 1
+            except Exception as e:
+                logger.warning(f"Не удалось удалить старую temp папку {entry.name}: {e}")
+    if removed:
+        logger.info(f"Очищено {removed} старых temp папок при старте")
+
+
 def main():
     logger.info("Запуск TF2 Skin Generator")
 
@@ -86,6 +110,7 @@ def main():
         from src.core.app_factory import AppFactory
 
         DirectoryPaths.ensure_exists()
+        _cleanup_stale_temp()
 
         # ── Создаём приложение и сразу показываем сплэш ──────────────────── #
         app = AppFactory.create_app(apply_theme=True)

@@ -45,6 +45,9 @@ class Preview3DWorker(QThread):
     # BLU-вариант мульти-материальных текстур: {mat_name: png_path}
     # Эмитируется для персонажей когда у каждого меша есть своя BLU-текстура
     blu_multi_material = Signal(object)
+    # Australium/Gold/Festive вариант оружия: png_path строка
+    # Эмитируется когда в QC skinfamilies есть вариантная строка без 'blue'
+    australium_ready = Signal(str)
     # Ошибка
     failed   = Signal(str)
     # Текстовый прогресс для UI
@@ -214,25 +217,38 @@ class Preview3DWorker(QThread):
                         self.blu_ready.emit(blu_paths, blu_fps)
 
             else:
-                # Обычное оружие: одна текстура (возможно анимированная)
-                frame_paths, framerate = self._extract_texture_frames()
-
-                first_tex = frame_paths[0] if frame_paths else ""
-                self.ready.emit(obj_path, first_tex)
-
-                if len(frame_paths) > 1:
-                    self.animated.emit(frame_paths, framerate)
+                # Обычное оружие
+                if len(mat_names) > 1:
+                    # ── Мульти-материальное оружие (shell, scope и т.п.) ─────── #
+                    tex_map = self._extract_multi_textures(mat_names)
+                    first_tex = next(iter(tex_map.values()), "") if tex_map else ""
+                    self.ready.emit(obj_path, first_tex)
+                    if tex_map:
+                        self.multi_material.emit(tex_map)
+                    framerate = 0.0
+                else:
+                    # ── Одиночная текстура (возможно анимированная) ──────────── #
+                    frame_paths, framerate = self._extract_texture_frames()
+                    first_tex = frame_paths[0] if frame_paths else ""
+                    self.ready.emit(obj_path, first_tex)
+                    if len(frame_paths) > 1:
+                        self.animated.emit(frame_paths, framerate)
 
                 if self.isInterruptionRequested():
                     return
 
-                # ── Текстура BLU: сначала QC skinfamilies, потом прямой поиск ─── #
+                # ── BLU + Australium через QC skinfamilies ───────────────────── #
                 blu_paths, blu_fps = [], 0.0
                 if self._decomp_dir:
                     blu_paths, blu_fps = self._extract_blu_via_qc(
                         self._decomp_dir, framerate
                     )
-                # Fallback: прямой поиск {wk}_blue.vtf (для обратной совместимости)
+                    # Если BLU нет — проверяем вариантные строки (Australium/Gold)
+                    if not blu_paths:
+                        aus_path = self._extract_variant_via_qc(self._decomp_dir)
+                        if aus_path:
+                            self.australium_ready.emit(aus_path)
+                # Fallback: прямой поиск {wk}_blue.vtf
                 if not blu_paths:
                     blu_paths, blu_fps = self._extract_blu_texture_frames(framerate)
                 if blu_paths:
@@ -1082,6 +1098,99 @@ class Preview3DWorker(QThread):
             logger.warning(f"[3D] _extract_blu_via_qc: {exc}", exc_info=True)
 
         return [], 0.0
+
+    _VARIANT_SUFFIXES = ('_gold', '_australium', '_festive', '_xmas', '_botkiller')
+
+    def _extract_variant_via_qc(self, decomp_dir: str) -> Optional[str]:
+        """
+        Извлекает текстуру варианта оружия (Australium/Gold/Festive) из QC.
+
+        Ищет строку skinfamilies у которой col 0 содержит вариантный суффикс
+        (_gold, _australium, _festive и т.п.). Australium обычно в ПОСЛЕДНЕЙ
+        строке, поэтому перебираем все строки.
+
+        Returns:
+            Путь к PNG-файлу варианта или None если нет.
+        """
+        import glob
+        qc_files = glob.glob(os.path.join(decomp_dir, "*.qc"))
+        if not qc_files:
+            return None
+
+        cdmaterials, skin_families = self._parse_qc_all_skin_families(qc_files[0])
+        if len(skin_families) < 2 or not cdmaterials:
+            return None
+
+        # Ищем строку где первый элемент — вариантный суффикс
+        variant_family = None
+        for family in skin_families:
+            if not family:
+                continue
+            first = family[0].lower()
+            if any(first.endswith(suf) for suf in self._VARIANT_SUFFIXES):
+                variant_family = family
+                break
+
+        if not variant_family:
+            return None
+
+        # Текстура варианта — col 0 этой строки
+        variant_tex = variant_family[0].lower()
+        logger.info(f"[3D] Обнаружен вариант оружия: {variant_tex}")
+
+        try:
+            import vpk as vpklib
+            from src.services.vtflib_wrapper import VTFLib
+            from PIL import Image
+
+            paks: list = []
+            for vpk_path in [self.textures_vpk_path, self.misc_vpk_path]:
+                if vpk_path and os.path.exists(vpk_path):
+                    try:
+                        paks.append(vpklib.open(vpk_path))
+                    except Exception:
+                        pass
+
+            vtf_data: Optional[bytes] = None
+            for cdmat in cdmaterials:
+                for pak in paks:
+                    try:
+                        vtf_data = pak[f"materials/{cdmat}/{variant_tex}.vtf"].read()
+                        break
+                    except KeyError:
+                        continue
+                if vtf_data:
+                    break
+
+            if not vtf_data:
+                return None
+
+            tmp = os.path.join(self._preview_dir, "_tmp_variant.vtf")
+            with open(tmp, "wb") as f:
+                f.write(vtf_data)
+            try:
+                frames, w, h = VTFLib.read_vtf_all_frames(tmp)
+            except Exception:
+                frames = []
+                w = h = 0
+            finally:
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
+
+            if not frames:
+                return None
+
+            img = Image.frombytes("RGBA", (w, h), frames[0])
+            out = os.path.join(self._preview_dir, "texture_variant.png")
+            img.save(out)
+            logger.info(f"[3D] Вариант оружия извлечён: {out}")
+            return out
+
+        except Exception as exc:
+            logger.warning(f"[3D] _extract_variant_via_qc: {exc}")
+            return None
 
     # ── VMT-поиск: QC → VMT → $baseTexture → VTF ────────────────────────── #
 

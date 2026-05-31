@@ -45,6 +45,7 @@ class BuildWorker(QThread):
         custom_vpk_source_path: Optional[str] = None,
         hat_mdl_path: Optional[str] = None,
         hat_apply_game_paints: bool = True,
+        panel_extra_textures: Optional[Dict[str, Any]] = None,
         parent=None
     ):
         super().__init__(parent)
@@ -70,6 +71,7 @@ class BuildWorker(QThread):
         self.custom_vpk_source_path = custom_vpk_source_path
         self.hat_mdl_path = hat_mdl_path
         self.hat_apply_game_paints = hat_apply_game_paints
+        self.panel_extra_textures = panel_extra_textures or {}
         self.parent_window = parent
 
         self._model_file_mutex = QMutex()
@@ -118,6 +120,7 @@ class BuildWorker(QThread):
                 blu_mode=self.blu_mode,
                 blu_image_path=self.blu_image_path,
                 hat_apply_game_paints=self.hat_apply_game_paints,
+                panel_extra_textures=self.panel_extra_textures,
                 progress_callback=self.progress.emit,
                 sub_progress_callback=self.sub_progress.emit,
                 cancel_callback=self.isInterruptionRequested
