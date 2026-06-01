@@ -9,7 +9,7 @@ import time
 import threading
 from pathlib import Path
 from typing import Tuple, List, Optional, Dict, Any, Callable
-from .build_context import BuildContext
+from .build_context import BuildContext, TextureBuildContext
 from .vmt_service import VMTService
 from .build_service import BuildService
 from .texture_service import TextureService
@@ -50,17 +50,650 @@ class VPKService:
     """Тут вся магия сборки VPK файлов. Если что-то не работает - читай логи, я не телепат."""
     
     @staticmethod
-    def _get_vtf_tool() -> Path:
-        return ToolPaths.get_vtf_tool()
-    
-    @staticmethod
     def _get_vpk_tool() -> Path:
         return ToolPaths.get_vpk_tool()
+
+    @staticmethod
+    def _build_mdl_search_paths(
+        mode: str,
+        weapon_key: str,
+        hat_mdl_path: Optional[str],
+        t: dict,
+    ) -> Tuple[List[str], Optional[str]]:
+        """
+        Строит список путей-кандидатов к MDL внутри игрового VPK.
+
+        TF2 хранит модели в разных местах (workshop / workshop_partner /
+        weapons/c_models / c_items / player/items), поэтому пробуем все
+        вероятные варианты по порядку.
+
+        Returns:
+            (paths_to_try, error). error != None — фатальная ошибка режима
+            (нет mdl_path для персонажа или оружие не найдено в конфиге);
+            вызывающий код должен очистить ctx и вернуть ошибку.
+        """
+        # ── Шапка: путь из items_game.txt, возможно с %s-плейсхолдером ──── #
+        if mode == "hat" and hat_mdl_path:
+            _norm = hat_mdl_path.replace("\\", "/")
+            _TF2_CLASSES = [
+                "heavy", "scout", "soldier", "pyro",
+                "demoman", "engineer", "medic", "sniper", "spy",
+            ]
+            base_candidates = []
+            if "%s" in _norm:
+                for cls in _TF2_CLASSES:
+                    try:
+                        base_candidates.append(_norm % cls)
+                    except (TypeError, ValueError):
+                        base_candidates.append(_norm.replace("%s", cls))
+            else:
+                base_candidates.append(_norm)
+
+            paths_to_try = []
+            for c in base_candidates:
+                paths_to_try.append(c)
+                if "models/player/items" in c and "workshop" not in c:
+                    paths_to_try.append(c.replace("models/player/items",
+                                                  "models/workshop_partner/player/items"))
+                    paths_to_try.append(c.replace("models/player/items",
+                                                  "models/workshop/player/items"))
+                elif "models/workshop/player/items" in c:
+                    paths_to_try.append(c.replace("models/workshop/player/items",
+                                                  "models/workshop_partner/player/items"))
+                    paths_to_try.append(c.replace("models/workshop/player/items",
+                                                  "models/player/items"))
+                elif "models/workshop_partner/player/items" in c:
+                    paths_to_try.append(c.replace("models/workshop_partner/player/items",
+                                                  "models/workshop/player/items"))
+                    paths_to_try.append(c.replace("models/workshop_partner/player/items",
+                                                  "models/player/items"))
+
+            seen_paths = set()
+            paths_to_try = [p for p in paths_to_try if not (p in seen_paths or seen_paths.add(p))]
+            return paths_to_try, None
+
+        # ── Тело персонажа / маски шпиона: прямой путь к MDL ────────────── #
+        if mode in PLAYER_BODY_MODE_KEYS or mode == SPY_MASK_MODE_KEY:
+            if mode == SPY_MASK_MODE_KEY:
+                _char_mdl = SPY_MDL_PATH
+            else:
+                from src.data.player_characters import PLAYER_CHARACTERS as _PC
+                _char_mdl = _PC.get(mode, {}).get('mdl_path', '')
+            if not _char_mdl:
+                return [], f"No mdl_path defined for character mode: {mode}"
+            return [_char_mdl], None
+
+        # ── Обычное оружие: пробуем все вероятные места хранения ─────────── #
+        if weapon_key not in WEAPON_MDL_PATHS:
+            return [], t['error_weapon_not_found'].format(weapon_key=weapon_key)
+
+        base_path = WEAPON_MDL_PATHS[weapon_key]
+        _folder_suffix = f"/{weapon_key}/{weapon_key}.mdl"
+        _flat_suffix = f"/{weapon_key}.mdl"
+        paths_to_try = []
+
+        # workshop_partner → workshop → стандарт → c_items: путь с папкой и без
+        for _candidate in (
+            base_path.replace("models/weapons/", "models/workshop_partner/weapons/"),
+            base_path.replace("models/weapons/", "models/workshop/weapons/"),
+            base_path,
+            base_path.replace("models/weapons/c_models/", "models/weapons/c_items/"),
+        ):
+            paths_to_try.append(_candidate)
+            if _folder_suffix in _candidate:
+                paths_to_try.append(_candidate.replace(_folder_suffix, _flat_suffix))
+
+        # Последний шанс — папки классов (там обычно старьё)
+        if '_' in mode:
+            class_name_lower = mode.split('_', 1)[0]
+            paths_to_try.append(f"models/player/items/{class_name_lower}/{weapon_key}/{weapon_key}.mdl")
+            paths_to_try.append(f"models/player/items/{class_name_lower}/{weapon_key}.mdl")
+
+        return paths_to_try, None
     
     @staticmethod
-    def _get_crowbar() -> Path:
-        return ToolPaths.get_crowbar()
-    
+    def _find_existing_mdl(
+        paths_to_try: List[str],
+        tf2_misc_vpk: str,
+        weapon_key: str,
+        t: dict,
+    ) -> Tuple[Optional[str], Optional[str]]:
+        """
+        Ищет первый существующий MDL среди путей-кандидатов внутри VPK.
+
+        Только проверяет наличие (check_mdl_exists), не распаковывая файлы —
+        так быстрее, чем тащить всю папку.
+
+        Returns:
+            (found_path, error). Ровно одно из значений не None.
+        """
+        last_error = None
+        for mdl_rel_path in paths_to_try:
+            try:
+                logger.debug(f"Проверяем наличие MDL по пути: {mdl_rel_path}")
+                if TF2VPKExtractService.check_mdl_exists(tf2_misc_vpk, mdl_rel_path):
+                    logger.info(f"MDL файл найден по пути: {mdl_rel_path}")
+                    return mdl_rel_path, None
+                logger.debug(f"MDL файл не найден по пути: {mdl_rel_path}")
+            except Exception as e:
+                logger.warning(f"Ошибка при проверке пути {mdl_rel_path}: {e}", exc_info=True)
+                last_error = e
+
+        paths_str = "\n".join([f"  - {path}" for path in paths_to_try])
+        error_msg = t['error_mdl_not_found'].format(paths=paths_str, vpk_file=tf2_misc_vpk)
+        if last_error:
+            error_msg += f"\n{str(last_error)}"
+        logger.error(f"Модель не найдена для {weapon_key}. Проверенные пути: {len(paths_to_try)}")
+        return None, error_msg
+
+    @staticmethod
+    def _resolve_replace_model_smd(
+        replace_model_enabled: bool,
+        model_ready_path: Optional[str],
+        replace_model_path: Optional[str],
+        model_file_callback,
+        parent_window,
+    ) -> Optional[str]:
+        """
+        Определяет путь к пользовательскому SMD для режима «замена модели».
+
+        Источники по приоритету: прямой путь (тесты) → callback (UI-поток) →
+        диалог QFileDialog (если есть parent_window). Возвращает None, если
+        режим выключен, задан model_ready_path или пользователь отменил выбор.
+        """
+        if not replace_model_enabled or model_ready_path:
+            return None
+
+        if replace_model_path and os.path.exists(replace_model_path):
+            logger.info(f"Используется предустановленный файл для замены модели: {replace_model_path}")
+            return replace_model_path
+
+        if model_file_callback:
+            # Qt не любит UI из рабочего потока — запрашиваем файл через callback главного потока
+            file_path = model_file_callback()
+            if file_path and os.path.exists(file_path):
+                logger.info(f"Выбран файл для замены модели через callback: {file_path}")
+                return file_path
+            logger.info("Выбор SMD файла отменен, продолжаем без замены модели")
+            return None
+
+        if parent_window:
+            from PySide6.QtWidgets import QFileDialog
+            file_path, _ = QFileDialog.getOpenFileName(
+                parent_window,
+                "Выберите SMD файл модели для замены",
+                "",
+                "SMD Files (*.smd);;All Files (*)",
+            )
+            if file_path and os.path.exists(file_path):
+                logger.info(f"Выбран файл для замены модели: {file_path}")
+                return file_path
+            logger.info("Выбор SMD файла отменен, продолжаем без замены модели")
+            return None
+
+        logger.warning("Режим замены модели включен, но путь к модели не указан и нет способа запросить файл")
+        return None
+
+    @staticmethod
+    def _write_material_vmt(target_vmt_path, base_vmt_path, cdmaterials_path: str, tex_name: str) -> None:
+        """
+        Записывает VMT вторичного материала (extra / variant / shared / BLU).
+
+        Если базовый VMT существует — копирует его и переставляет $basetexture
+        на tex_name; иначе создаёт VMT из шаблона по $cdmaterials.
+        """
+        if base_vmt_path.exists():
+            copy_file_safe(base_vmt_path, target_vmt_path)
+            VMTService.update_vmt_basetexture_path(str(target_vmt_path), cdmaterials_path, tex_name)
+        else:
+            VMTService.create_vmt_template_from_cdmaterials(str(target_vmt_path), cdmaterials_path, tex_name)
+        logger.info(f"Создан VMT вторичного материала: {target_vmt_path.name}")
+
+    @staticmethod
+    def _build_blu_team_texture(
+        blu_mode: str,
+        blu_image_path: Optional[str],
+        vtf_output_path: Path,
+        vtf_filename: str,
+        vmt_path: Path,
+        texture_filename: str,
+        patched_cdmaterials_path: str,
+        size: Tuple[int, int],
+        format_type: str,
+        flags: List[str],
+        vtf_options: dict,
+    ) -> None:
+        """
+        Создаёт BLU-командную текстуру (и VMT) рядом с RED.
+
+        blu_mode == 'same'        → копия RED VTF;
+        иначе при blu_image_path  → отдельное изображение → VTF.
+        BLU VMT — копия RED VMT с обновлённым $basetexture. Ошибки не критичны
+        (мод соберётся и без BLU-варианта).
+
+        Примечание: BLU намеренно использует только UI-опции (vtf_options),
+        не подмешивая опции из флагов — поведение сохранено как в оригинале.
+        """
+        if not blu_mode or blu_mode in ('none', ''):
+            return
+        try:
+            red_vtf_path = vtf_output_path / vtf_filename
+            blu_vtf_name = f"{texture_filename}_blue.vtf"
+            blu_vtf_path = vtf_output_path / blu_vtf_name
+            blu_created = False
+
+            if blu_mode == 'same':
+                if red_vtf_path.exists():
+                    shutil.copy2(red_vtf_path, blu_vtf_path)
+                    blu_created = True
+                    logger.info(f"BLU текстура скопирована из RED: {blu_vtf_name}")
+            elif blu_image_path and os.path.exists(blu_image_path):
+                blu_png_tmp = vtf_output_path / f"{texture_filename}_blue.png"
+                VPKService._process_image(blu_image_path, str(blu_png_tmp), size)
+                blu_vtf_flags, _ = TextureService.parse_vtf_flags_and_options(flags or [])
+                blu_opts = dict(vtf_options or {})
+                blu_opts.pop('normal', None)   # BLU — не normal map
+                VPKService._create_vtf(
+                    str(blu_png_tmp), str(vtf_output_path), format_type, blu_vtf_flags, blu_opts
+                )
+                if blu_png_tmp.exists():
+                    blu_png_tmp.unlink()
+                blu_created = blu_vtf_path.exists()
+                if blu_created:
+                    logger.info(f"BLU текстура создана: {blu_vtf_name}")
+
+            # BLU VMT — копия RED с обновлённым $basetexture
+            if blu_created and vmt_path.exists():
+                blu_vmt_path = vtf_output_path / f"{texture_filename}_blue.vmt"
+                shutil.copy2(vmt_path, blu_vmt_path)
+                VMTService.update_vmt_basetexture_path(
+                    str(blu_vmt_path), patched_cdmaterials_path, f"{texture_filename}_blue"
+                )
+                logger.info(f"BLU VMT создан: {blu_vmt_path.name}")
+        except Exception as _blu_exc:
+            logger.warning(
+                f"Не удалось создать BLU текстуру (не критично): {_blu_exc}", exc_info=True
+            )
+
+    @staticmethod
+    def _extract_original_vmt(
+        cdmaterials_path: Optional[str],
+        texture_filename: str,
+        tf2_textures_vpk: Optional[str],
+        tf2_misc_vpk: str,
+        decompile_dir,
+    ) -> Optional[str]:
+        """
+        Извлекает оригинальный VMT текстуры из игровых VPK.
+
+        Порядок: tf2_textures_dir.vpk → tf2_misc_dir.vpk (Valve кладёт текстуры
+        то туда, то туда). Возвращает путь к извлечённому VMT или None.
+        """
+        if not cdmaterials_path:
+            return None
+        if tf2_textures_vpk:
+            vmt = TF2VPKExtractService.extract_vmt_file(
+                tf2_textures_vpk, cdmaterials_path, texture_filename, decompile_dir
+            )
+            if vmt:
+                logger.info(f"Извлечен VMT файл: {vmt}")
+                return vmt
+        vmt = TF2VPKExtractService.extract_vmt_file(
+            tf2_misc_vpk, cdmaterials_path, texture_filename, str(decompile_dir)
+        )
+        if vmt:
+            logger.info(f"Извлечен VMT файл из misc: {vmt}")
+        return vmt
+
+    @staticmethod
+    def _find_decompiled_reference_smd(qc_path: str, weapon_key: str, decompile_dir) -> Optional[str]:
+        """
+        Находит основной reference-SMD декомпилированной модели.
+
+        Сначала через QC-директивы ($body/studio) — надёжнее, т.к. Crowbar
+        может назвать SMD иначе, чем weapon_key (особенно для шапок).
+        Иначе — запасной поиск по имени файла.
+        """
+        smd = ModelBuildService.extract_main_body_smd(qc_path, weapon_key)
+        if not smd:
+            smd = SMDService.find_reference_smd(str(decompile_dir), weapon_key)
+        return smd
+
+    @staticmethod
+    def _obtain_decompiled_qc(
+        ctx,
+        found_mdl_path: str,
+        weapon_key: str,
+        tf2_misc_vpk: str,
+        crowbar_exe: str,
+        debug_mode: bool,
+        language: str,
+        t: dict,
+        emit_sub,
+    ) -> Tuple[Optional[str], bool, Optional[str]]:
+        """
+        Возвращает QC-файл декомпилированной модели.
+
+        Сначала пытается восстановить из кэша (cache hit — пропускает
+        распаковку и Crowbar). Иначе извлекает MDL-набор из VPK и
+        декомпилирует через Crowbar.
+
+        Returns:
+            (qc_path, was_cached, error). error != None → фатальная ошибка
+            (MDL не извлёкся); вызывающий код чистит ctx и возвращает ошибку.
+        """
+        cached_decompile = get_cached_decompile(weapon_key, tf2_misc_vpk, found_mdl_path)
+        if cached_decompile:
+            # CACHE HIT — пропускаем extraction и decompile
+            emit_sub(-1, "Restoring cache..." if language == "en" else "Восстановление кэша...")
+            qc_path = restore_from_cache(cached_decompile, ctx.decompile_dir)
+            return qc_path, True, None
+
+        # CACHE MISS — извлекаем и декомпилируем
+        emit_sub(-1, "Extracting model..." if language == "en" else "Извлечение модели...")
+        logger.info(f"Извлекаем файлы модели: {found_mdl_path}")
+        extracted_files = TF2VPKExtractService.extract_file_set(
+            tf2_misc_vpk,
+            found_mdl_path,
+            str(ctx.extract_dir),
+            str(VPKService._get_vpk_tool()),
+        )
+
+        mdl_file = next((f for f in extracted_files if f.endswith('.mdl')), None)
+        if not mdl_file:
+            return None, False, t['error_mdl_not_extracted'].format(path=found_mdl_path)
+
+        if debug_mode:
+            DebugService.save_extracted_stage(ctx, extracted_files)
+
+        emit_sub(-1, "Decompiling model..." if language == "en" else "Декомпиляция модели...")
+        logger.info(f"Запускаем Crowbar для {weapon_key}...")
+        qc_path = ModelBuildService.decompile(mdl_file, ctx.decompile_dir, crowbar_exe)
+        if debug_mode:
+            DebugService.save_decompiled_stage(ctx, ctx.decompile_dir)
+        return qc_path, False, None
+
+    @staticmethod
+    def _apply_model_replacement(
+        ctx,
+        qc_path: str,
+        weapon_key: str,
+        replace_model_smd_path: Optional[str],
+        extra_model_callback,
+        language: str,
+        emit_sub,
+    ) -> None:
+        """
+        Применяет пользовательскую замену модели поверх декомпилированных SMD.
+
+        1. Главный reference-SMD: nodes/skeleton/материалы — из оригинала,
+           данные треугольников — из пользовательского файла.
+        2. Доп. части (shell, scope и т.п.): спрашивает каждую через
+           extra_model_callback и заменяет по тому же принципу.
+
+        Ошибки замены не прерывают сборку — логируются, сборка продолжается
+        с оригинальной моделью.
+        """
+        if replace_model_smd_path and os.path.exists(replace_model_smd_path):
+            try:
+                # Ищем основной reference-SMD через QC-директивы ($body/studio).
+                # Это надёжнее поиска по имени файла, т.к. Crowbar может назвать SMD
+                # иначе чем weapon_key (особенно для шапок).
+                _smd_files_in_decompile = [f for f in os.listdir(ctx.decompile_dir) if f.endswith('.smd')] if ctx.decompile_dir.exists() else []
+                logger.info(f"[REPLACE] weapon_key={weapon_key!r}  decompile SMDs={_smd_files_in_decompile}")
+
+                original_smd_path = VPKService._find_decompiled_reference_smd(
+                    qc_path, weapon_key, ctx.decompile_dir
+                )
+
+                if original_smd_path:
+                    logger.info(f"Заменяем модель: {replace_model_smd_path} -> {original_smd_path}")
+                    emit_sub(-1, "Replacing model..." if language == "en" else "Замена модели...")
+                    # Заменяем секции: nodes и skeleton из оригинального (иначе модель не скомпилируется),
+                    # названия материалов из оригинального (иначе текстуры не загрузятся),
+                    # данные треугольников из пользовательского (это то, что юзер хочет заменить)
+                    SMDService.replace_model_sections(
+                        replace_model_smd_path,
+                        original_smd_path,
+                        original_smd_path,  # Перезаписываем оригинальный файл под тем же именем
+                        progress_cb=lambda pct: emit_sub(pct, "Replacing model..." if language == "en" else "Замена модели..."),
+                    )
+                    logger.info(f"Модель успешно заменена: {original_smd_path}")
+                else:
+                    logger.warning(f"Не найден reference SMD файл для {weapon_key} в {ctx.decompile_dir}")
+                    if ctx.decompile_dir.exists():
+                        smd_files = [f for f in os.listdir(ctx.decompile_dir) if f.endswith('.smd')]
+                        logger.debug(f"Доступные SMD файлы в директории: {smd_files}")
+            except Exception as e:
+                logger.error(f"Ошибка при замене модели: {e}", exc_info=True)
+                # Не прерываем сборку, просто продолжаем с оригинальной моделью (лучше так, чем упасть)
+                    
+        # === Замена дополнительных частей модели (shell, scope и т.д.) ===
+        # Проверяем, есть ли в QC файле дополнительные bodygroup SMD
+        extra_body_smds = ModelBuildService.extract_extra_body_smds(qc_path, weapon_key)
+        if extra_body_smds:
+            extra_smd_names = [os.path.basename(s) for s in extra_body_smds]
+            logger.info(f"Найдены дополнительные части модели: {extra_smd_names}")
+                        
+            if extra_model_callback:
+                for extra_smd_path in extra_body_smds:
+                    extra_smd_name = os.path.basename(extra_smd_path)
+                    extra_smd_base = os.path.splitext(extra_smd_name)[0]
+                                
+                    try:
+                        # Спрашиваем пользователя через callback
+                        user_extra_smd = extra_model_callback(extra_smd_base, weapon_key)
+                                    
+                        if user_extra_smd and os.path.exists(user_extra_smd):
+                            logger.info(f"Заменяем доп. часть модели: {user_extra_smd} -> {extra_smd_path}")
+                            emit_sub(-1, f"Replacing {extra_smd_base}..." if language == "en" else f"Замена {extra_smd_base}...")
+                            SMDService.replace_model_sections(
+                                user_extra_smd,
+                                extra_smd_path,
+                                extra_smd_path,  # Перезаписываем оригинал
+                                progress_cb=lambda pct: emit_sub(pct, f"Replacing {extra_smd_base}..." if language == "en" else f"Замена {extra_smd_base}..."),
+                            )
+                            logger.info(f"Доп. часть модели успешно заменена: {extra_smd_name}")
+                        else:
+                            logger.info(f"Пользователь пропустил замену доп. части: {extra_smd_name}")
+                    except Exception as e:
+                        logger.error(f"Ошибка при замене доп. части модели {extra_smd_name}: {e}", exc_info=True)
+            else:
+                logger.debug(f"Нет callback для замены доп. частей модели, пропускаем")
+
+    @staticmethod
+    def _copy_precompiled_model(
+        model_ready_path: str,
+        qc_path: str,
+        weapon_key: str,
+        ctx,
+        language: str,
+        emit_sub,
+    ) -> None:
+        """
+        Копирует pre-compiled модель (.mdl/.vvd/.vtx/.phy) в compile_dir,
+        переименовывая под $modelname из QC (а не под имя пользовательского
+        файла) — иначе все файлы мода получат чужое имя. studiomdl не нужен.
+        """
+        emit_sub(-1, "Copying ready model..." if language == "en" else "Копирование готовой модели...")
+        try:
+            ready_dir   = os.path.dirname(model_ready_path)
+            ready_stem  = os.path.splitext(os.path.basename(model_ready_path))[0]
+            model_exts  = ('.mdl', '.vvd', '.vtx', '.phy', '.dx80.vtx', '.dx90.vtx', '.sw.vtx')
+            # Целевое имя: $modelname из QC (совпадает с weapon_key).
+            # Запрещено падать обратно на ready_stem (имя пользовательского файла) —
+            # это приводит к тому, что все файлы мода переименовываются в имя
+            # загруженной модели вместо оригинального имени шапки/оружия.
+            qc_modelname = ModelBuildService.extract_modelname_path(qc_path)
+            if qc_modelname:
+                target_stem = os.path.splitext(os.path.basename(qc_modelname))[0]
+            else:
+                # Fallback на weapon_key (оригинальное имя из игры), а не на ready_stem
+                target_stem = weapon_key
+                logger.warning(
+                    f"[MODEL READY] $modelname не найден в QC, используем weapon_key={weapon_key!r} "
+                    f"вместо ready_stem={ready_stem!r}"
+                )
+            logger.info(
+                f"[MODEL READY] ready_stem={ready_stem!r} → target_stem={target_stem!r}"
+            )
+            ensure_directory_exists(ctx.compile_dir)
+            copied = 0
+            for fname in os.listdir(ready_dir):
+                base, ext = os.path.splitext(fname)
+                # Простые расширения (os.path.splitext возвращает с точкой: '.mdl')
+                if base == ready_stem and ext.lower() in ('.mdl', '.vvd', '.phy'):
+                    dst_name = target_stem + ext
+                    copy_file_safe(
+                        os.path.join(ready_dir, fname),
+                        str(ctx.compile_dir / dst_name)
+                    )
+                    copied += 1
+                elif fname.startswith(ready_stem) and any(fname.endswith(e) for e in model_exts):
+                    # Составные расширения: .dx90.vtx, .sw.vtx и т.п.
+                    suffix  = fname[len(ready_stem):]
+                    dst_name = target_stem + suffix
+                    copy_file_safe(
+                        os.path.join(ready_dir, fname),
+                        str(ctx.compile_dir / dst_name)
+                    )
+                    copied += 1
+            if copied == 0:
+                logger.warning(
+                    f"Не найдено ни одного файла модели рядом с {model_ready_path}. "
+                    "Попробуем всё равно продолжить."
+                )
+            logger.info(f"Готовая модель: скопировано {copied} файлов в {ctx.compile_dir}")
+        except Exception as _e:
+            logger.error(f"Ошибка копирования готовой модели: {_e}", exc_info=True)
+
+    @staticmethod
+    def _start_model_compile(
+        model_ready_path: Optional[str],
+        qc_path: str,
+        weapon_key: str,
+        ctx,
+        studiomdl_exe: str,
+        tf_dir: str,
+        debug_mode: bool,
+        language: str,
+        emit_sub,
+    ) -> Tuple[threading.Thread, list]:
+        """
+        Запускает (в фоне) получение скомпилированной модели и возвращает
+        (compile_thread, compile_exc). Вызывающий код делает join() и, если
+        compile_exc[0] не None, поднимает исключение.
+
+        Сценарии:
+          • model_ready = .smd → заменяем reference SMD и компилируем studiomdl;
+          • model_ready = .mdl → копируем pre-compiled файлы (без studiomdl);
+          • обычная сборка → компилируем декомпилированный QC.
+        Компиляция идёт в фоне параллельно генерации VTF/VMT в главном потоке.
+        """
+        compile_exc: list = [None]
+
+        def _do_compile() -> None:
+            try:
+                emit_sub(-1, "Compiling model..." if language == "en" else "Компиляция модели...")
+                ModelBuildService.compile(qc_path, ctx.compile_dir, studiomdl_exe, tf_dir)
+                if debug_mode:
+                    DebugService.save_compiled_stage(ctx, ctx.compile_dir)
+            except Exception as _e:
+                compile_exc[0] = _e
+
+        if model_ready_path and os.path.exists(model_ready_path):
+            if model_ready_path.lower().endswith('.smd'):
+                # SMD: заменяем reference SMD оригинала и компилируем через studiomdl
+                emit_sub(-1, "Replacing model SMD..." if language == "en" else "Замена SMD модели...")
+                try:
+                    original_smd_path = VPKService._find_decompiled_reference_smd(
+                        qc_path, weapon_key, ctx.decompile_dir
+                    )
+                    if original_smd_path:
+                        logger.info(f"[MODEL READY SMD] Копируем {model_ready_path} → {original_smd_path}")
+                        copy_file_safe(model_ready_path, original_smd_path)
+                    else:
+                        logger.warning(
+                            f"[MODEL READY SMD] Не найден reference SMD для {weapon_key}, "
+                            f"копируем в decompile_dir как {weapon_key}_reference.smd"
+                        )
+                        copy_file_safe(model_ready_path, str(ctx.decompile_dir / f"{weapon_key}_reference.smd"))
+                except Exception as _e:
+                    logger.error(f"Ошибка замены SMD модели: {_e}", exc_info=True)
+                thread = threading.Thread(target=_do_compile, daemon=True)
+            else:
+                # MDL: копируем готовые pre-compiled файлы, studiomdl не нужен
+                VPKService._copy_precompiled_model(
+                    model_ready_path, qc_path, weapon_key, ctx, language, emit_sub
+                )
+                thread = threading.Thread(target=lambda: None, daemon=True)
+        else:
+            # Обычная сборка: компилируем декомпилированный QC
+            thread = threading.Thread(target=_do_compile, daemon=True)
+
+        thread.start()
+        return thread, compile_exc
+
+    @staticmethod
+    def _write_main_vmt(
+        vmt_file: Optional[str],
+        vmt_path,
+        texture_filename: str,
+        patched_cdmaterials_path: str,
+        mode: str,
+        hat_apply_game_paints: bool,
+        animated_fps: Optional[float],
+        is_normal_map: bool,
+    ) -> Optional[str]:
+        """
+        Записывает главный VMT текстуры и возвращает vmt_to_delete
+        (имя отредактированного VMT, который надо убрать из tools/edited_vmt
+        после сборки), либо None.
+
+        Приоритет источника: отредактированный пользователем VMT → извлечённый
+        из игры → шаблон по $cdmaterials. Затем: снятие красок (шапки),
+        анимация ($basetexture) и $bumpmap (normal-map).
+        """
+        vmt_to_delete = None
+        # Проверяем, есть ли отредактированный VMT файл (приоритет 1 - юзер знает лучше)
+        from src.services.edited_vmt_service import EditedVMTService
+        edited_vmt_path = EditedVMTService.get_edited_vmt(texture_filename)
+                    
+        if edited_vmt_path and Path(edited_vmt_path).exists():
+            # Используем отредактированный VMT файл (юзер его правил через редактор)
+            copy_file_safe(edited_vmt_path, vmt_path)
+            # Обновляем путь $baseTexture в отредактированном VMT файле на основе пути из QC
+            # (потому что путь может измениться, а юзер редактировал старый)
+            VMTService.update_vmt_basetexture_path(str(vmt_path), patched_cdmaterials_path, texture_filename)
+            logger.info(f"Использован отредактированный VMT файл: {edited_vmt_path} -> {vmt_path}")
+            vmt_to_delete = texture_filename
+        elif vmt_file and Path(vmt_file).exists():
+            # Если VMT файл извлечен, копируем его в нужную директорию и обновляем путь $baseTexture
+            # (потому что путь в оригинале может быть другим)
+            copy_file_safe(vmt_file, vmt_path)
+            VMTService.update_vmt_basetexture_path(str(vmt_path), patched_cdmaterials_path, texture_filename)
+            logger.info(f"Скопирован и обновлен извлеченный VMT файл: {vmt_file} -> {vmt_path}")
+        else:
+            # Если VMT файл не извлечен, создаем из шаблона (базовый VMT, ничего особенного)
+            VMTService.create_vmt_template_from_cdmaterials(str(vmt_path), patched_cdmaterials_path, texture_filename)
+            logger.info(f"Создан VMT файл из шаблона: {vmt_path}")
+
+        # Для шапок: если пользователь не хочет красок из игры — удаляем прокси красок
+        if mode == "hat" and not hat_apply_game_paints:
+            VMTService.remove_paint_proxies(str(vmt_path))
+            logger.info(f"Удалены прокси красок из VMT файла шапки: {vmt_path}")
+
+        if animated_fps:
+            VMTService.enable_animated_basetexture(str(vmt_path), animated_fps)
+                    
+        # Если normal map включена, обновляем VMT файл для добавления $bumpmap
+        # (это нужно для бампмаппинга, иначе нормалмап не загрузится)
+        if is_normal_map:
+            normal_weapon_key = f"{texture_filename}_normal"
+            VMTService.update_vmt_bumpmap_path(str(vmt_path), patched_cdmaterials_path, normal_weapon_key)
+            logger.info(f"Обновлен VMT файл для добавления $bumpmap: {normal_weapon_key}")
+        return vmt_to_delete
+
     @staticmethod
     def build_with_progress(
         image_path: str,
@@ -144,39 +777,40 @@ class VPKService:
             _sub_label_init = "Preparing..." if language == "en" else "Подготовка..."
             emit_sub(-1, _sub_label_init)
 
+            # Аргументы build_vpk одинаковы для обоих режимов — собираем один раз.
+            build_kwargs = dict(
+                image_path=image_path,
+                mode=mode,
+                filename=filename,
+                size=size,
+                format_type=format_type,
+                flags=flags,
+                vtf_options=vtf_options,
+                tf2_root_dir=tf2_root_dir,
+                export_folder=export_folder,
+                keep_temp_on_error=keep_temp_on_error,
+                debug_mode=debug_mode,
+                replace_model_enabled=replace_model_enabled,
+                model_ready_path=model_ready_path,
+                draw_uv_layout=draw_uv_layout,
+                replace_model_path=replace_model_path,
+                model_file_callback=model_file_callback if replace_model_enabled else None,
+                extra_texture_callback=extra_texture_callback,
+                extra_model_callback=extra_model_callback,
+                texture_mismatch_callback=texture_mismatch_callback,
+                language=language,
+                custom_vtf_path=custom_vtf_path,
+                blu_mode=blu_mode,
+                blu_image_path=blu_image_path,
+                sub_progress_callback=emit_sub,
+                hat_mdl_path=hat_mdl_path,
+                hat_apply_game_paints=hat_apply_game_paints,
+                panel_extra_textures=panel_extra_textures,
+            )
+
             if is_special_mode:
                 emit_progress(20, t.get('build_processing', 'Processing texture...'))
-
-                success, message = VPKService.build_vpk(
-                    image_path=image_path,
-                    mode=mode,
-                    filename=filename,
-                    size=size,
-                    format_type=format_type,
-                    flags=flags,
-                    vtf_options=vtf_options,
-                    tf2_root_dir=tf2_root_dir,
-                    export_folder=export_folder,
-                    keep_temp_on_error=keep_temp_on_error,
-                    debug_mode=debug_mode,
-                    replace_model_enabled=replace_model_enabled,
-                    model_ready_path=model_ready_path,
-                    draw_uv_layout=draw_uv_layout,
-                    replace_model_path=replace_model_path,
-                    model_file_callback=model_file_callback if replace_model_enabled else None,
-                    extra_texture_callback=extra_texture_callback,
-                    extra_model_callback=extra_model_callback,
-                    texture_mismatch_callback=texture_mismatch_callback,
-                    language=language,
-                    custom_vtf_path=custom_vtf_path,
-                    blu_mode=blu_mode,
-                    blu_image_path=blu_image_path,
-                    sub_progress_callback=emit_sub,
-                    hat_mdl_path=hat_mdl_path,
-                    hat_apply_game_paints=hat_apply_game_paints,
-                    panel_extra_textures=panel_extra_textures,
-                )
-
+                success, message = VPKService.build_vpk(**build_kwargs)
                 if not is_cancelled():
                     emit_progress(60, t.get('build_packing', 'Creating VPK file...'))
             else:
@@ -203,35 +837,7 @@ class VPKService:
                 progress_thread.start()
 
                 try:
-                    success, message = VPKService.build_vpk(
-                        image_path=image_path,
-                        mode=mode,
-                        filename=filename,
-                        size=size,
-                        format_type=format_type,
-                        flags=flags,
-                        vtf_options=vtf_options,
-                        tf2_root_dir=tf2_root_dir,
-                        export_folder=export_folder,
-                        keep_temp_on_error=keep_temp_on_error,
-                        debug_mode=debug_mode,
-                        replace_model_enabled=replace_model_enabled,
-                        model_ready_path=model_ready_path,
-                        draw_uv_layout=draw_uv_layout,
-                        replace_model_path=replace_model_path,
-                        model_file_callback=model_file_callback if replace_model_enabled else None,
-                        extra_texture_callback=extra_texture_callback,
-                        extra_model_callback=extra_model_callback,
-                        texture_mismatch_callback=texture_mismatch_callback,
-                        language=language,
-                        custom_vtf_path=custom_vtf_path,
-                        blu_mode=blu_mode,
-                        blu_image_path=blu_image_path,
-                        sub_progress_callback=emit_sub,
-                        hat_mdl_path=hat_mdl_path,
-                        hat_apply_game_paints=hat_apply_game_paints,
-                        panel_extra_textures=panel_extra_textures,
-                    )
+                    success, message = VPKService.build_vpk(**build_kwargs)
                     build_result[0] = success
                     build_result[1] = message
                 finally:
@@ -402,148 +1008,22 @@ class VPKService:
                     return False, str(e)
                 
                 # ── Строим список путей для поиска MDL ───────────────────────────── #
-                if mode == "hat" and hat_mdl_path:
-                    # Шапка: MDL-путь из items_game.txt
-                    # Может содержать %s — плейсхолдер для имени класса
-                    # (напр. all_domination_%s.mdl → all_domination_heavy.mdl)
-                    _norm = hat_mdl_path.replace("\\", "/")
-                    _TF2_CLASSES = [
-                        "heavy", "scout", "soldier", "pyro",
-                        "demoman", "engineer", "medic", "sniper", "spy",
-                    ]
-                    
-                    # 1. Раскрываем %s → все варианты классов
-                    base_candidates = []
-                    if "%s" in _norm:
-                        for cls in _TF2_CLASSES:
-                            try:
-                                base_candidates.append(_norm % cls)
-                            except (TypeError, ValueError):
-                                base_candidates.append(_norm.replace("%s", cls))
-                    else:
-                        base_candidates.append(_norm)
-                    
-                    # 2. Для каждого базового пути добавляем workshop-варианты
-                    paths_to_try = []
-                    for c in base_candidates:
-                        paths_to_try.append(c)
-                        if "models/player/items" in c and "workshop" not in c:
-                            paths_to_try.append(c.replace("models/player/items",
-                                                          "models/workshop_partner/player/items"))
-                            paths_to_try.append(c.replace("models/player/items",
-                                                          "models/workshop/player/items"))
-                        elif "models/workshop/player/items" in c:
-                            paths_to_try.append(c.replace("models/workshop/player/items",
-                                                          "models/workshop_partner/player/items"))
-                            paths_to_try.append(c.replace("models/workshop/player/items",
-                                                          "models/player/items"))
-                        elif "models/workshop_partner/player/items" in c:
-                            paths_to_try.append(c.replace("models/workshop_partner/player/items",
-                                                          "models/workshop/player/items"))
-                            paths_to_try.append(c.replace("models/workshop_partner/player/items",
-                                                          "models/player/items"))
-                    
-                    # 3. Убираем дубли, сохраняем порядок
-                    seen_paths = set()
-                    paths_to_try = [p for p in paths_to_try if not (p in seen_paths or seen_paths.add(p))]
-                elif mode in PLAYER_BODY_MODE_KEYS or mode == SPY_MASK_MODE_KEY:
-                    # Тело персонажа / маски шпиона: прямой путь к MDL
-                    if mode == SPY_MASK_MODE_KEY:
-                        _char_mdl = SPY_MDL_PATH
-                    else:
-                        from src.data.player_characters import PLAYER_CHARACTERS as _PC
-                        _char_mdl = _PC.get(mode, {}).get('mdl_path', '')
-                    if not _char_mdl:
-                        ctx.cleanup(on_error=True, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
-                        return False, f"No mdl_path defined for character mode: {mode}"
-                    paths_to_try = [_char_mdl]
-
-                else:
-                    if weapon_key not in WEAPON_MDL_PATHS:
-                        ctx.cleanup(on_error=True, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
-                        return False, t['error_weapon_not_found'].format(weapon_key=weapon_key)
-
-                    # Тут начинается веселье - TF2 хранит модели в разных местах, и мы не знаем где именно
-                    # Поэтому пробуем все возможные варианты, начиная с самых вероятных:
-                    # workshop_partner -> workshop -> weapons/c_models -> weapons/c_items -> player/items
-                    # И для каждого пути пробуем с папкой и без (потому что Valve любит делать по-разному, хуй знает почему)
-
-                    base_path_from_config = WEAPON_MDL_PATHS[weapon_key]
-
-                    paths_to_try = []
-
-                    # Сначала пробуем workshop_partner - там обычно все новое лежит
-                    workshop_partner_path_with_folder = base_path_from_config.replace("models/weapons/", "models/workshop_partner/weapons/")
-                    paths_to_try.append(workshop_partner_path_with_folder)
-
-                    # А может без папки? (Valve любит делать по-разному, потому что им похую на консистентность)
-                    if f"/{weapon_key}/{weapon_key}.mdl" in workshop_partner_path_with_folder:
-                        workshop_partner_path_no_folder = workshop_partner_path_with_folder.replace(f"/{weapon_key}/{weapon_key}.mdl", f"/{weapon_key}.mdl")
-                        paths_to_try.append(workshop_partner_path_no_folder)
-
-                    # Потом workshop
-                    workshop_path_with_folder = base_path_from_config.replace("models/weapons/", "models/workshop/weapons/")
-                    paths_to_try.append(workshop_path_with_folder)
-
-                    if f"/{weapon_key}/{weapon_key}.mdl" in workshop_path_with_folder:
-                        workshop_path_no_folder = workshop_path_with_folder.replace(f"/{weapon_key}/{weapon_key}.mdl", f"/{weapon_key}.mdl")
-                        paths_to_try.append(workshop_path_no_folder)
-
-                    # Стандартное место
-                    paths_to_try.append(base_path_from_config)
-
-                    if f"/{weapon_key}/{weapon_key}.mdl" in base_path_from_config:
-                        fallback_path_no_folder = base_path_from_config.replace(f"/{weapon_key}/{weapon_key}.mdl", f"/{weapon_key}.mdl")
-                        paths_to_try.append(fallback_path_no_folder)
-
-                    # Может в c_items? (еще одно место где может лежать хуйня)
-                    c_items_path_with_folder = base_path_from_config.replace("models/weapons/c_models/", "models/weapons/c_items/")
-                    paths_to_try.append(c_items_path_with_folder)
-
-                    if f"/{weapon_key}/{weapon_key}.mdl" in c_items_path_with_folder:
-                        c_items_path_no_folder = c_items_path_with_folder.replace(f"/{weapon_key}/{weapon_key}.mdl", f"/{weapon_key}.mdl")
-                        paths_to_try.append(c_items_path_no_folder)
-
-                    # Последний шанс - в папках классов (тут обычно старье валяется, но проверить надо)
-                    if '_' in mode:
-                        class_name_lower = mode.split('_', 1)[0]
-
-                        player_items_path_with_folder = f"models/player/items/{class_name_lower}/{weapon_key}/{weapon_key}.mdl"
-                        paths_to_try.append(player_items_path_with_folder)
-
-                        player_items_path_no_folder = f"models/player/items/{class_name_lower}/{weapon_key}.mdl"
-                        paths_to_try.append(player_items_path_no_folder)
+                paths_to_try, _mdl_path_error = VPKService._build_mdl_search_paths(
+                    mode, weapon_key, hat_mdl_path, t
+                )
+                if _mdl_path_error:
+                    ctx.cleanup(on_error=True, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
+                    return False, _mdl_path_error
 
                 crowbar_exe = TF2Paths.get_crowbar_path()
                 
                 try:
-                    # Оптимизация: сначала просто проверяем есть ли файл, а не тащим всю папку
-                    # Так быстрее, потому что не распаковываем кучу ненужного мусора из VPK
-                    found_mdl_path = None
-                    last_error = None
-                    
-                    for mdl_rel_path in paths_to_try:
-                        try:
-                            logger.debug(f"Проверяем наличие MDL по пути: {mdl_rel_path}")
-                            if TF2VPKExtractService.check_mdl_exists(tf2_misc_vpk, mdl_rel_path):
-                                found_mdl_path = mdl_rel_path
-                                logger.info(f"MDL файл найден по пути: {mdl_rel_path}")
-                                break
-                            else:
-                                logger.debug(f"MDL файл не найден по пути: {mdl_rel_path}")
-                        except Exception as e:
-                            logger.warning(f"Ошибка при проверке пути {mdl_rel_path}: {e}", exc_info=True)
-                            last_error = e
-                            continue
-                    
-                    if not found_mdl_path:
-                        paths_str = "\n".join([f"  - {path}" for path in paths_to_try])
-                        error_msg = t['error_mdl_not_found'].format(paths=paths_str, vpk_file=tf2_misc_vpk)
-                        if last_error:
-                            error_msg += f"\n{str(last_error)}"
-                        logger.error(f"Модель не найдена для {weapon_key}. Проверенные пути: {len(paths_to_try)}")
+                    found_mdl_path, _mdl_find_error = VPKService._find_existing_mdl(
+                        paths_to_try, tf2_misc_vpk, weapon_key, t
+                    )
+                    if _mdl_find_error:
                         ctx.cleanup(on_error=True, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
-                        return False, error_msg
+                        return False, _mdl_find_error
                     
                     # Для шапок с %s-плейсхолдером: обновляем weapon_key на реальный стем
                     # (all_domination_%s → all_domination_heavy), иначе кэш и имена файлов сломаются
@@ -555,46 +1035,13 @@ class VPKService:
                     # Ключ: weapon_key + vpk_path + mdl_rel_path + mtime(vpk).
                     # mtime VPK меняется при каждом обновлении TF2 → авто-инвалидация.
                     # При cache hit: пропускаем extract_file_set (3-10 сек) + Crowbar (10-30 сек).
-                    cached_decompile = get_cached_decompile(weapon_key, tf2_misc_vpk, found_mdl_path)
-
-                    if cached_decompile:
-                        # === CACHE HIT: пропускаем extraction и decompile ===
-                        emit_sub(-1, "Restoring cache..." if language == "en" else "Восстановление кэша...")
-                        qc_path = restore_from_cache(cached_decompile, ctx.decompile_dir)
-                    else:
-                        # === CACHE MISS: извлекаем и декомпилируем ===
-                        emit_sub(-1, "Extracting model..." if language == "en" else "Извлечение модели...")
-                        logger.info(f"Извлекаем файлы модели: {found_mdl_path}")
-                        extracted_files = TF2VPKExtractService.extract_file_set(
-                            tf2_misc_vpk,
-                            found_mdl_path,
-                            str(ctx.extract_dir),
-                            str(VPKService._get_vpk_tool())
-                        )
-                        
-                        mdl_file = None
-                        for file_path in extracted_files:
-                            if file_path.endswith('.mdl'):
-                                mdl_file = file_path
-                                break
-                        
-                        if not mdl_file:
-                            error_msg = t['error_mdl_not_extracted'].format(path=found_mdl_path)
-                            ctx.cleanup(on_error=True, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
-                            return False, error_msg
-                        
-                        if debug_mode:
-                            DebugService.save_extracted_stage(ctx, extracted_files)
-                        
-                        emit_sub(-1, "Decompiling model..." if language == "en" else "Декомпиляция модели...")
-                        logger.info(f"Запускаем Crowbar для {weapon_key}...")
-                        qc_path = ModelBuildService.decompile(
-                            mdl_file,
-                            ctx.decompile_dir,
-                            crowbar_exe
-                        )
-                        if debug_mode:
-                            DebugService.save_decompiled_stage(ctx, ctx.decompile_dir)
+                    qc_path, cached_decompile, _decomp_error = VPKService._obtain_decompiled_qc(
+                        ctx, found_mdl_path, weapon_key, tf2_misc_vpk, crowbar_exe,
+                        debug_mode, language, t, emit_sub,
+                    )
+                    if _decomp_error:
+                        ctx.cleanup(on_error=True, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
+                        return False, _decomp_error
 
                     if draw_uv_layout:
                         VPKService._generate_uv_layout(ctx, weapon_key, size, export_folder, language)
@@ -609,109 +1056,15 @@ class VPKService:
                     # Заменяем модель, если включен режим замены
                     # Пропускаем если model_ready_path задан — пользователь уже указал готовый файл
                     # Диалог выбора файла показываем здесь, после декомпиляции (чтобы знать куда копировать)
-                    replace_model_smd_path = None
-                    if replace_model_enabled and not model_ready_path:
-                        # Если передан путь модели напрямую (для тестового режима), используем его
-                        if replace_model_path and os.path.exists(replace_model_path):
-                            replace_model_smd_path = replace_model_path
-                            logger.info(f"Используется предустановленный файл для замены модели: {replace_model_smd_path}")
-                        elif model_file_callback:
-                            # Используем callback для запроса файла из главного потока (Qt не любит UI из воркера)
-                            file_path = model_file_callback()
-                            if file_path and os.path.exists(file_path):
-                                replace_model_smd_path = file_path
-                                logger.info(f"Выбран файл для замены модели через callback: {replace_model_smd_path}")
-                            else:
-                                logger.info("Выбор SMD файла отменен, продолжаем без замены модели")
-                        elif parent_window:
-                            # Показываем диалог выбора SMD файла (только если не в рабочем потоке, иначе Qt упадет)
-                            from PySide6.QtWidgets import QFileDialog
-                            
-                            file_path, _ = QFileDialog.getOpenFileName(
-                                parent_window,
-                                "Выберите SMD файл модели для замены",
-                                "",
-                                "SMD Files (*.smd);;All Files (*)"
-                            )
-                            
-                            if file_path and os.path.exists(file_path):
-                                replace_model_smd_path = file_path
-                                logger.info(f"Выбран файл для замены модели: {replace_model_smd_path}")
-                            else:
-                                logger.info("Выбор SMD файла отменен, продолжаем без замены модели")
-                        else:
-                            logger.warning("Режим замены модели включен, но путь к модели не указан и нет способа запросить файл")
+                    replace_model_smd_path = VPKService._resolve_replace_model_smd(
+                        replace_model_enabled, model_ready_path, replace_model_path,
+                        model_file_callback, parent_window,
+                    )
                     
-                    if replace_model_smd_path and os.path.exists(replace_model_smd_path):
-                        try:
-                            # Ищем основной reference-SMD через QC-директивы ($body/studio).
-                            # Это надёжнее поиска по имени файла, т.к. Crowbar может назвать SMD
-                            # иначе чем weapon_key (особенно для шапок).
-                            _smd_files_in_decompile = [f for f in os.listdir(ctx.decompile_dir) if f.endswith('.smd')] if ctx.decompile_dir.exists() else []
-                            logger.info(f"[REPLACE] weapon_key={weapon_key!r}  decompile SMDs={_smd_files_in_decompile}")
-
-                            original_smd_path = ModelBuildService.extract_main_body_smd(qc_path, weapon_key)
-
-                            # Запасной вариант: поиск по имени файла (старый метод)
-                            if not original_smd_path:
-                                original_smd_path = SMDService.find_reference_smd(str(ctx.decompile_dir), weapon_key)
-                                if original_smd_path:
-                                    logger.info(f"[REPLACE] SMD найден по имени файла (fallback): {original_smd_path}")
-
-                            if original_smd_path:
-                                logger.info(f"Заменяем модель: {replace_model_smd_path} -> {original_smd_path}")
-                                emit_sub(-1, "Replacing model..." if language == "en" else "Замена модели...")
-                                # Заменяем секции: nodes и skeleton из оригинального (иначе модель не скомпилируется),
-                                # названия материалов из оригинального (иначе текстуры не загрузятся),
-                                # данные треугольников из пользовательского (это то, что юзер хочет заменить)
-                                SMDService.replace_model_sections(
-                                    replace_model_smd_path,
-                                    original_smd_path,
-                                    original_smd_path,  # Перезаписываем оригинальный файл под тем же именем
-                                    progress_cb=lambda pct: emit_sub(pct, "Replacing model..." if language == "en" else "Замена модели..."),
-                                )
-                                logger.info(f"Модель успешно заменена: {original_smd_path}")
-                            else:
-                                logger.warning(f"Не найден reference SMD файл для {weapon_key} в {ctx.decompile_dir}")
-                                if ctx.decompile_dir.exists():
-                                    smd_files = [f for f in os.listdir(ctx.decompile_dir) if f.endswith('.smd')]
-                                    logger.debug(f"Доступные SMD файлы в директории: {smd_files}")
-                        except Exception as e:
-                            logger.error(f"Ошибка при замене модели: {e}", exc_info=True)
-                            # Не прерываем сборку, просто продолжаем с оригинальной моделью (лучше так, чем упасть)
-                    
-                    # === Замена дополнительных частей модели (shell, scope и т.д.) ===
-                    # Проверяем, есть ли в QC файле дополнительные bodygroup SMD
-                    extra_body_smds = ModelBuildService.extract_extra_body_smds(qc_path, weapon_key)
-                    if extra_body_smds:
-                        extra_smd_names = [os.path.basename(s) for s in extra_body_smds]
-                        logger.info(f"Найдены дополнительные части модели: {extra_smd_names}")
-                        
-                        if extra_model_callback:
-                            for extra_smd_path in extra_body_smds:
-                                extra_smd_name = os.path.basename(extra_smd_path)
-                                extra_smd_base = os.path.splitext(extra_smd_name)[0]
-                                
-                                try:
-                                    # Спрашиваем пользователя через callback
-                                    user_extra_smd = extra_model_callback(extra_smd_base, weapon_key)
-                                    
-                                    if user_extra_smd and os.path.exists(user_extra_smd):
-                                        logger.info(f"Заменяем доп. часть модели: {user_extra_smd} -> {extra_smd_path}")
-                                        emit_sub(-1, f"Replacing {extra_smd_base}..." if language == "en" else f"Замена {extra_smd_base}...")
-                                        SMDService.replace_model_sections(
-                                            user_extra_smd,
-                                            extra_smd_path,
-                                            extra_smd_path,  # Перезаписываем оригинал
-                                            progress_cb=lambda pct: emit_sub(pct, f"Replacing {extra_smd_base}..." if language == "en" else f"Замена {extra_smd_base}..."),
-                                        )
-                                        logger.info(f"Доп. часть модели успешно заменена: {extra_smd_name}")
-                                    else:
-                                        logger.info(f"Пользователь пропустил замену доп. части: {extra_smd_name}")
-                                except Exception as e:
-                                    logger.error(f"Ошибка при замене доп. части модели {extra_smd_name}: {e}", exc_info=True)
-                        else:
-                            logger.debug(f"Нет callback для замены доп. частей модели, пропускаем")
+                    VPKService._apply_model_replacement(
+                        ctx, qc_path, weapon_key, replace_model_smd_path,
+                        extra_model_callback, language, emit_sub,
+                    )
                     
                     # Извлекаем путь из $cdmaterials в QC файле (до патчинга, потому что потом мы его изменим)
                     original_cdmaterials_path = ModelBuildService.extract_cdmaterials_path_from_qc(qc_path)
@@ -860,9 +1213,9 @@ class VPKService:
                             user_materials = SMDService.extract_unique_materials(model_ready_path)
                             if user_materials:
                                 # Ищем оригинальный reference SMD для сравнения
-                                original_smd_for_check = ModelBuildService.extract_main_body_smd(qc_path, weapon_key)
-                                if not original_smd_for_check:
-                                    original_smd_for_check = SMDService.find_reference_smd(str(ctx.decompile_dir), weapon_key)
+                                original_smd_for_check = VPKService._find_decompiled_reference_smd(
+                                    qc_path, weapon_key, ctx.decompile_dir
+                                )
 
                                 if original_smd_for_check:
                                     original_materials = SMDService.extract_unique_materials(original_smd_for_check)
@@ -915,113 +1268,11 @@ class VPKService:
                             logger.warning(f"[MODEL READY] Ошибка проверки текстур SMD: {_tex_check_err}", exc_info=True)
                             # Не блокируем сборку из-за ошибки проверки
 
-                    # ── «Модель уже готова» — копируем pre-compiled файлы минуя studiomdl ──
-                    if model_ready_path and os.path.exists(model_ready_path):
-                        if model_ready_path.lower().endswith('.smd'):
-                            # ── SMD файл: заменяем reference SMD и компилируем через studiomdl ──
-                            emit_sub(-1, "Replacing model SMD..." if language == "en" else "Замена SMD модели...")
-                            try:
-                                # Ищем оригинальный reference SMD
-                                original_smd_path = ModelBuildService.extract_main_body_smd(qc_path, weapon_key)
-                                if not original_smd_path:
-                                    original_smd_path = SMDService.find_reference_smd(str(ctx.decompile_dir), weapon_key)
-
-                                if original_smd_path:
-                                    logger.info(f"[MODEL READY SMD] Копируем {model_ready_path} → {original_smd_path}")
-                                    copy_file_safe(model_ready_path, original_smd_path)
-                                else:
-                                    logger.warning(
-                                        f"[MODEL READY SMD] Не найден reference SMD для {weapon_key}, "
-                                        f"копируем в decompile_dir как {weapon_key}_reference.smd"
-                                    )
-                                    fallback_path = str(ctx.decompile_dir / f"{weapon_key}_reference.smd")
-                                    copy_file_safe(model_ready_path, fallback_path)
-                            except Exception as _e:
-                                logger.error(f"Ошибка замены SMD модели: {_e}", exc_info=True)
-
-                            # Компилируем через studiomdl (как обычная сборка)
-                            _compile_exc: list = [None]
-                            def _do_compile() -> None:
-                                try:
-                                    emit_sub(-1, "Compiling model..." if language == "en" else "Компиляция модели...")
-                                    ModelBuildService.compile(qc_path, ctx.compile_dir, studiomdl_exe, tf_dir)
-                                    if debug_mode:
-                                        DebugService.save_compiled_stage(ctx, ctx.compile_dir)
-                                except Exception as _e:
-                                    _compile_exc[0] = _e
-                            _compile_thread = threading.Thread(target=_do_compile, daemon=True)
-                            _compile_thread.start()
-                        else:
-                            # ── MDL файл: копируем pre-compiled файлы минуя studiomdl ──
-                            emit_sub(-1, "Copying ready model..." if language == "en" else "Копирование готовой модели...")
-                            try:
-                                ready_dir   = os.path.dirname(model_ready_path)
-                                ready_stem  = os.path.splitext(os.path.basename(model_ready_path))[0]
-                                model_exts  = ('.mdl', '.vvd', '.vtx', '.phy', '.dx80.vtx', '.dx90.vtx', '.sw.vtx')
-                                # Целевое имя: $modelname из QC (совпадает с weapon_key).
-                                # Запрещено падать обратно на ready_stem (имя пользовательского файла) —
-                                # это приводит к тому, что все файлы мода переименовываются в имя
-                                # загруженной модели вместо оригинального имени шапки/оружия.
-                                qc_modelname = ModelBuildService.extract_modelname_path(qc_path)
-                                if qc_modelname:
-                                    target_stem = os.path.splitext(os.path.basename(qc_modelname))[0]
-                                else:
-                                    # Fallback на weapon_key (оригинальное имя из игры), а не на ready_stem
-                                    target_stem = weapon_key
-                                    logger.warning(
-                                        f"[MODEL READY] $modelname не найден в QC, используем weapon_key={weapon_key!r} "
-                                        f"вместо ready_stem={ready_stem!r}"
-                                    )
-                                logger.info(
-                                    f"[MODEL READY] ready_stem={ready_stem!r} → target_stem={target_stem!r}"
-                                )
-                                ensure_directory_exists(ctx.compile_dir)
-                                copied = 0
-                                for fname in os.listdir(ready_dir):
-                                    base, ext = os.path.splitext(fname)
-                                    # Простые расширения (os.path.splitext возвращает с точкой: '.mdl')
-                                    if base == ready_stem and ext.lower() in ('.mdl', '.vvd', '.phy'):
-                                        dst_name = target_stem + ext
-                                        copy_file_safe(
-                                            os.path.join(ready_dir, fname),
-                                            str(ctx.compile_dir / dst_name)
-                                        )
-                                        copied += 1
-                                    elif fname.startswith(ready_stem) and any(fname.endswith(e) for e in model_exts):
-                                        # Составные расширения: .dx90.vtx, .sw.vtx и т.п.
-                                        suffix  = fname[len(ready_stem):]
-                                        dst_name = target_stem + suffix
-                                        copy_file_safe(
-                                            os.path.join(ready_dir, fname),
-                                            str(ctx.compile_dir / dst_name)
-                                        )
-                                        copied += 1
-                                if copied == 0:
-                                    logger.warning(
-                                        f"Не найдено ни одного файла модели рядом с {model_ready_path}. "
-                                        "Попробуем всё равно продолжить."
-                                    )
-                                logger.info(f"Готовая модель: скопировано {copied} файлов в {ctx.compile_dir}")
-                            except Exception as _e:
-                                logger.error(f"Ошибка копирования готовой модели: {_e}", exc_info=True)
-                            # Имитируем завершённый compile_thread (ничего не компилировали)
-                            _compile_exc: list = [None]
-                            _compile_thread = threading.Thread(target=lambda: None, daemon=True)
-                            _compile_thread.start()
-                    else:
-                        # Компиляция и создание текстур независимы — запускаем studiomdl в фоне
-                        # параллельно с тем, как главный поток занимается VTF/VMT
-                        _compile_exc: list = [None]
-                        def _do_compile() -> None:
-                            try:
-                                emit_sub(-1, "Compiling model..." if language == "en" else "Компиляция модели...")
-                                ModelBuildService.compile(qc_path, ctx.compile_dir, studiomdl_exe, tf_dir)
-                                if debug_mode:
-                                    DebugService.save_compiled_stage(ctx, ctx.compile_dir)
-                            except Exception as _e:
-                                _compile_exc[0] = _e
-                        _compile_thread = threading.Thread(target=_do_compile, daemon=True)
-                        _compile_thread.start()
+                    # ── Компиляция модели в фоне: обычная / SMD-замена / готовый MDL ──
+                    _compile_thread, _compile_exc = VPKService._start_model_compile(
+                        model_ready_path, qc_path, weapon_key, ctx,
+                        studiomdl_exe, tf_dir, debug_mode, language, emit_sub,
+                    )
 
                     is_normal_map = False
                     animated_fps = None
@@ -1062,174 +1313,36 @@ class VPKService:
                         copy_file_safe(custom_vtf_path, vtf_file_path)
                         logger.info(f"Использован пользовательский VTF файл: {custom_vtf_path} -> {vtf_file_path}")
                     elif image_path:
-                        # Разделяем флаги на опции VTFCmd и флаги VTF (потому что они передаются по-разному)
-                        vtf_flags, flags_parsed_options = VPKService._parse_vtf_flags_and_options(flags)
-                        
-                        # Объединяем опции из UI с опциями из флагов (UI имеет приоритет, но флаги могут переопределить)
-                        merged_options = {}
-                        if vtf_options:
-                            merged_options.update(vtf_options)
-                        merged_options.update(flags_parsed_options)
-                        
-                        is_normal_map = merged_options.get("normal", False)
-
-                        if TextureService.is_animated_image(image_path):
-                            vtf_file_path = vtf_output_path / vtf_filename
-                            animated_fps = TextureService.create_animated_vtf(
-                                image_path,
-                                str(vtf_file_path),
-                                size,
-                                format_type,
-                                vtf_flags,
-                                merged_options
-                            )
-                            logger.info(f"Создана анимированная VTF текстура: {vtf_filename}")
-                        else:
-                            VPKService._process_image(image_path, vtf_temp_png, size)
-                            if is_normal_map:
-                                normal_options = merged_options.copy()
-                                normal_options.pop("normal", None)
-                                VPKService._create_vtf(str(vtf_temp_png), str(vtf_output_path), format_type, vtf_flags, normal_options)
-                                logger.info(f"Создана обычная VTF текстура: {vtf_filename}")
-                                normal_vtf_filename = f"{texture_filename}_normal.vtf"
-                                normal_temp_png = vtf_output_path / f"{texture_filename}_normal.png"
-                                import shutil
-                                shutil.copy2(vtf_temp_png, normal_temp_png)
-                                normal_options_normal = {"normal": True}
-                                VPKService._create_vtf(str(normal_temp_png), str(vtf_output_path), format_type, [], normal_options_normal)
-                                normal_png_name = normal_temp_png.stem
-                                created_normal_vtf = vtf_output_path / f"{normal_png_name}.vtf"
-                                normal_vtf_path = vtf_output_path / normal_vtf_filename
-                                if created_normal_vtf.exists():
-                                    created_normal_vtf.rename(normal_vtf_path)
-                                    logger.info(f"Создана normal VTF текстура: {normal_vtf_filename}")
-                                else:
-                                    logger.warning(f"Normal VTF файл не был создан: {created_normal_vtf}")
-                                if normal_temp_png.exists():
-                                    normal_temp_png.unlink()
-                            else:
-                                VPKService._create_vtf(str(vtf_temp_png), str(vtf_output_path), format_type, vtf_flags, merged_options)
-                            if vtf_temp_png.exists():
-                                vtf_temp_png.unlink()
+                        animated_fps, is_normal_map = TextureService.render_image_to_vtf(
+                            image_path,
+                            vtf_output_path=vtf_output_path,
+                            out_vtf_path=vtf_output_path / vtf_filename,
+                            temp_png_path=vtf_temp_png,
+                            normal_base=texture_filename,
+                            size=size,
+                            format_type=format_type,
+                            flags=flags,
+                            vtf_options=vtf_options,
+                        )
                     
-                    # Пробуем извлечь VMT файл, используя оригинальный путь из QC (до патчинга)
-                    # Потому что в VPK он лежит по оригинальному пути, а не по патченному
-                    vmt_file = None
-                    # Пробуем найти tf2_textures_dir.vpk для извлечения VMT (там обычно лежат текстуры)
+                    # Извлекаем оригинальный VMT по пути из QC (до патчинга) — в VPK он
+                    # лежит по оригинальному пути. tf2_textures_vpk нужен и дальше по коду.
                     tf2_textures_vpk = TF2Paths.resolve_textures_vpk(tf2_root_dir)
-                    if original_cdmaterials_path and tf2_textures_vpk:
-                        vmt_file = TF2VPKExtractService.extract_vmt_file(
-                            tf2_textures_vpk,
-                            original_cdmaterials_path,
-                            texture_filename,
-                            ctx.decompile_dir
-                        )
-                        if vmt_file:
-                            logger.info(f"Извлечен VMT файл: {vmt_file}")
-                        else:
-                            # Пробуем также tf2_misc_dir.vpk (иногда текстуры лежат там, потому что Valve)
-                            vmt_file = TF2VPKExtractService.extract_vmt_file(
-                                tf2_misc_vpk,
-                                original_cdmaterials_path,
-                                texture_filename,
-                                str(ctx.decompile_dir)
-                            )
-                            if vmt_file:
-                                logger.info(f"Извлечен VMT файл из misc: {vmt_file}")
-                    elif original_cdmaterials_path:
-                        # Пробуем tf2_misc_dir.vpk если textures не найден (fallback)
-                        vmt_file = TF2VPKExtractService.extract_vmt_file(
-                            tf2_misc_vpk,
-                            original_cdmaterials_path,
-                            texture_filename,
-                            str(ctx.decompile_dir)
-                        )
-                        if vmt_file:
-                            logger.info(f"Извлечен VMT файл: {vmt_file}")
+                    vmt_file = VPKService._extract_original_vmt(
+                        original_cdmaterials_path, texture_filename,
+                        tf2_textures_vpk, tf2_misc_vpk, ctx.decompile_dir,
+                    )
                     
-                    # Проверяем, есть ли отредактированный VMT файл (приоритет 1 - юзер знает лучше)
-                    from src.services.edited_vmt_service import EditedVMTService
-                    edited_vmt_path = EditedVMTService.get_edited_vmt(texture_filename)
-                    
-                    if edited_vmt_path and Path(edited_vmt_path).exists():
-                        # Используем отредактированный VMT файл (юзер его правил через редактор)
-                        copy_file_safe(edited_vmt_path, vmt_path)
-                        # Обновляем путь $baseTexture в отредактированном VMT файле на основе пути из QC
-                        # (потому что путь может измениться, а юзер редактировал старый)
-                        VMTService.update_vmt_basetexture_path(str(vmt_path), patched_cdmaterials_path, texture_filename)
-                        logger.info(f"Использован отредактированный VMT файл: {edited_vmt_path} -> {vmt_path}")
-                        vmt_to_delete = texture_filename
-                    elif vmt_file and Path(vmt_file).exists():
-                        # Если VMT файл извлечен, копируем его в нужную директорию и обновляем путь $baseTexture
-                        # (потому что путь в оригинале может быть другим)
-                        copy_file_safe(vmt_file, vmt_path)
-                        VMTService.update_vmt_basetexture_path(str(vmt_path), patched_cdmaterials_path, texture_filename)
-                        logger.info(f"Скопирован и обновлен извлеченный VMT файл: {vmt_file} -> {vmt_path}")
-                    else:
-                        # Если VMT файл не извлечен, создаем из шаблона (базовый VMT, ничего особенного)
-                        VMTService.create_vmt_template_from_cdmaterials(str(vmt_path), patched_cdmaterials_path, texture_filename)
-                        logger.info(f"Создан VMT файл из шаблона: {vmt_path}")
-
-                    # Для шапок: если пользователь не хочет красок из игры — удаляем прокси красок
-                    if mode == "hat" and not hat_apply_game_paints:
-                        VMTService.remove_paint_proxies(str(vmt_path))
-                        logger.info(f"Удалены прокси красок из VMT файла шапки: {vmt_path}")
-
-                    if animated_fps:
-                        VMTService.enable_animated_basetexture(str(vmt_path), animated_fps)
-                    
-                    # Если normal map включена, обновляем VMT файл для добавления $bumpmap
-                    # (это нужно для бампмаппинга, иначе нормалмап не загрузится)
-                    if is_normal_map:
-                        normal_weapon_key = f"{texture_filename}_normal"
-                        VMTService.update_vmt_bumpmap_path(str(vmt_path), patched_cdmaterials_path, normal_weapon_key)
-                        logger.info(f"Обновлен VMT файл для добавления $bumpmap: {normal_weapon_key}")
+                    vmt_to_delete = VPKService._write_main_vmt(
+                        vmt_file, vmt_path, texture_filename, patched_cdmaterials_path,
+                        mode, hat_apply_game_paints, animated_fps, is_normal_map,
+                    )
 
                     # ── BLU Team Texture (командная раскраска) ───────────────────────────
-                    if blu_mode and blu_mode not in ('none', ''):
-                        try:
-                            import shutil as _shutil
-                            _red_vtf_path = vtf_output_path / vtf_filename
-                            _blu_vtf_name = f"{texture_filename}_blue.vtf"
-                            _blu_vtf_path = vtf_output_path / _blu_vtf_name
-                            _blu_created  = False
-
-                            if blu_mode == 'same':
-                                if _red_vtf_path.exists():
-                                    _shutil.copy2(_red_vtf_path, _blu_vtf_path)
-                                    _blu_created = True
-                                    logger.info(f"BLU текстура скопирована из RED: {_blu_vtf_name}")
-                            elif blu_image_path and os.path.exists(blu_image_path):
-                                _blu_png_tmp = vtf_output_path / f"{texture_filename}_blue.png"
-                                VPKService._process_image(blu_image_path, str(_blu_png_tmp), size)
-                                _blu_vtf_flags, _ = VPKService._parse_vtf_flags_and_options(flags or [])
-                                _blu_opts = dict(vtf_options or {})
-                                _blu_opts.pop('normal', None)   # BLU — не normal map
-                                VPKService._create_vtf(
-                                    str(_blu_png_tmp), str(vtf_output_path),
-                                    format_type, _blu_vtf_flags, _blu_opts
-                                )
-                                if _blu_png_tmp.exists():
-                                    _blu_png_tmp.unlink()
-                                _blu_created = _blu_vtf_path.exists()
-                                if _blu_created:
-                                    logger.info(f"BLU текстура создана: {_blu_vtf_name}")
-
-                            # Создаём BLU VMT (копия RED с обновлённым $basetexture)
-                            if _blu_created and vmt_path.exists():
-                                _blu_vmt_path = vtf_output_path / f"{texture_filename}_blue.vmt"
-                                _shutil.copy2(vmt_path, _blu_vmt_path)
-                                VMTService.update_vmt_basetexture_path(
-                                    str(_blu_vmt_path),
-                                    patched_cdmaterials_path,
-                                    f"{texture_filename}_blue",
-                                )
-                                logger.info(f"BLU VMT создан: {_blu_vmt_path.name}")
-                        except Exception as _blu_exc:
-                            logger.warning(
-                                f"Не удалось создать BLU текстуру (не критично): {_blu_exc}",
-                                exc_info=True,
-                            )
+                    VPKService._build_blu_team_texture(
+                        blu_mode, blu_image_path, vtf_output_path, vtf_filename, vmt_path,
+                        texture_filename, patched_cdmaterials_path, size, format_type, flags, vtf_options,
+                    )
 
                     # === Создаем текстуры для дополнительных материалов модели (shell, scope и т.д.) ===
                     # Это столбцы 1+ из RED строки $texturegroup
@@ -1277,11 +1390,7 @@ class VPKService:
                                 # Пользователь использует VTF - копируем
                                 copy_file_safe(extra_image_path, extra_vtf_path)
                             elif TextureService.is_animated_image(extra_image_path):
-                                vtf_flags_extra, flags_parsed_extra = VPKService._parse_vtf_flags_and_options(flags)
-                                merged_extra = {}
-                                if vtf_options:
-                                    merged_extra.update(vtf_options)
-                                merged_extra.update(flags_parsed_extra)
+                                vtf_flags_extra, merged_extra = TextureService.resolve_vtf_flags_and_options(flags, vtf_options)
                                 extra_animated_fps = TextureService.create_animated_vtf(
                                     extra_image_path, str(extra_vtf_path),
                                     size, format_type, vtf_flags_extra, merged_extra
@@ -1289,12 +1398,7 @@ class VPKService:
                             else:
                                 extra_temp_png = vtf_output_path / f"{extra_mat_name}.png"
                                 VPKService._process_image(extra_image_path, extra_temp_png, size)
-                                vtf_flags_extra, flags_parsed_extra = VPKService._parse_vtf_flags_and_options(flags)
-                                merged_extra = {}
-                                if vtf_options:
-                                    merged_extra.update(vtf_options)
-                                merged_extra.update(flags_parsed_extra)
-                                merged_extra.pop("normal", None)
+                                vtf_flags_extra, merged_extra = TextureService.resolve_vtf_flags_and_options(flags, vtf_options, drop_normal=True)
                                 VPKService._create_vtf(str(extra_temp_png), str(vtf_output_path), format_type, vtf_flags_extra, merged_extra)
                                 if extra_temp_png.exists():
                                     extra_temp_png.unlink()
@@ -1309,14 +1413,8 @@ class VPKService:
                         
                         extra_materials_vtf_paths[extra_mat_name] = extra_vtf_path
                         
-                        # Создаем VMT для дополнительного материала
-                        if vmt_path.exists():
-                            copy_file_safe(vmt_path, extra_vmt_path)
-                            VMTService.update_vmt_basetexture_path(str(extra_vmt_path), patched_cdmaterials_path, extra_mat_name)
-                            logger.info(f"Создан VMT для доп. материала: {extra_vmt_filename}")
-                        else:
-                            VMTService.create_vmt_template_from_cdmaterials(str(extra_vmt_path), patched_cdmaterials_path, extra_mat_name)
-                            logger.info(f"Создан VMT из шаблона для доп. материала: {extra_vmt_filename}")
+                        # VMT для дополнительного материала
+                        VPKService._write_material_vmt(extra_vmt_path, vmt_path, patched_cdmaterials_path, extra_mat_name)
                         
                         # Если пользователь загрузил свою extra-текстуру — используем её FPS.
                         # Если extra_image не было (скопирована основная VTF) — используем FPS основной.
@@ -1334,7 +1432,15 @@ class VPKService:
                     # если пользователь отказывается — копируем соответствующую RED текстуру
                     if blu_row:
                         red_row = tg_structure.get('red_row', [])
-                        
+                        tex_ctx = TextureBuildContext(
+                            vtf_output_path=vtf_output_path,
+                            size=size,
+                            format_type=format_type,
+                            flags=flags,
+                            vtf_options=vtf_options,
+                            custom_vtf_path=custom_vtf_path,
+                        )
+
                         for col_idx, blu_tex_name in enumerate(blu_row):
                             # Находим соответствующее RED имя для этого столбца
                             red_tex_name = red_row[col_idx] if col_idx < len(red_row) else None
@@ -1369,25 +1475,7 @@ class VPKService:
                                     if _variant_img and not os.path.isfile(_variant_img):
                                         _variant_img = None
                                     if _variant_img:
-                                        _vf, _vfp = VPKService._parse_vtf_flags_and_options(flags)
-                                        _vo = {}
-                                        if vtf_options:
-                                            _vo.update(vtf_options)
-                                        _vo.update(_vfp)
-                                        _vo.pop("normal", None)
-                                        if custom_vtf_path:
-                                            copy_file_safe(_variant_img, _variant_vtf_path)
-                                        elif TextureService.is_animated_image(_variant_img):
-                                            TextureService.create_animated_vtf(
-                                                _variant_img, str(_variant_vtf_path),
-                                                size, format_type, _vf, _vo
-                                            )
-                                        else:
-                                            _tmp_png = vtf_output_path / f"{blu_tex_name}.png"
-                                            VPKService._process_image(_variant_img, _tmp_png, size)
-                                            VPKService._create_vtf(str(_tmp_png), str(vtf_output_path), format_type, _vf, _vo)
-                                            if _tmp_png.exists():
-                                                _tmp_png.unlink()
+                                        tex_ctx.render_user_image_vtf(_variant_img, _variant_vtf_path, f"{blu_tex_name}.png")
                                         logger.info(f"Создан VTF варианта (отд. изображение): {blu_tex_name}.vtf")
                                     elif not _variant_vtf_path.exists():
                                         # Пользователь отказался или нет callback — копируем основную
@@ -1399,16 +1487,7 @@ class VPKService:
                                             logger.warning(f"Основной VTF не найден для варианта: {_main_vtf}")
 
                                 if not _variant_vmt_path.exists():
-                                    if vmt_path.exists():
-                                        copy_file_safe(vmt_path, _variant_vmt_path)
-                                        VMTService.update_vmt_basetexture_path(
-                                            str(_variant_vmt_path), patched_cdmaterials_path, blu_tex_name
-                                        )
-                                    else:
-                                        VMTService.create_vmt_template_from_cdmaterials(
-                                            str(_variant_vmt_path), patched_cdmaterials_path, blu_tex_name
-                                        )
-                                    logger.info(f"Создан VMT варианта: {blu_tex_name}.vmt")
+                                    VPKService._write_material_vmt(_variant_vmt_path, vmt_path, patched_cdmaterials_path, blu_tex_name)
                                     if animated_fps:
                                         VMTService.enable_animated_basetexture(str(_variant_vmt_path), animated_fps)
                                 continue
@@ -1455,10 +1534,7 @@ class VPKService:
                                             logger.debug(f"Shared VTF не найден в игре, пропуск: {blu_tex_name}")
                                             continue
                                     elif _shared_img and os.path.isfile(_shared_img):
-                                        _sh_flags, _sh_opts = VPKService._parse_vtf_flags_and_options(flags)
-                                        _sh_merged = dict(vtf_options or {})
-                                        _sh_merged.update(_sh_opts)
-                                        _sh_merged.pop("normal", None)
+                                        _sh_flags, _sh_merged = TextureService.resolve_vtf_flags_and_options(flags, vtf_options, drop_normal=True)
                                         _sh_png = vtf_output_path / f"{blu_tex_name}.png"
                                         VPKService._process_image(_shared_img, _sh_png, size)
                                         VPKService._create_vtf(str(_sh_png), str(vtf_output_path), format_type, _sh_flags, _sh_merged)
@@ -1473,12 +1549,7 @@ class VPKService:
                                 # VTF существует → создаём VMT если нет
                                 shared_vmt_path = vtf_output_path / f"{blu_tex_name}.vmt"
                                 if not shared_vmt_path.exists():
-                                    if vmt_path.exists():
-                                        copy_file_safe(vmt_path, shared_vmt_path)
-                                        VMTService.update_vmt_basetexture_path(str(shared_vmt_path), patched_cdmaterials_path, blu_tex_name)
-                                    else:
-                                        VMTService.create_vmt_template_from_cdmaterials(str(shared_vmt_path), patched_cdmaterials_path, blu_tex_name)
-                                    logger.info(f"Создан VMT для shared текстуры: {blu_tex_name}.vmt")
+                                    VPKService._write_material_vmt(shared_vmt_path, vmt_path, patched_cdmaterials_path, blu_tex_name)
                                 if animated_fps:
                                     VMTService.enable_animated_basetexture(str(shared_vmt_path), animated_fps)
                                 continue
@@ -1516,31 +1587,7 @@ class VPKService:
                             if _blu_mat_img and os.path.isfile(_blu_mat_img):
                                 # Пользователь дал отдельное изображение для этого BLU материала
                                 logger.info(f"Используем отдельное изображение для BLU {blu_tex_name}: {_blu_mat_img}")
-                                if custom_vtf_path:
-                                    copy_file_safe(_blu_mat_img, blu_vtf_path)
-                                elif TextureService.is_animated_image(_blu_mat_img):
-                                    vtf_flags_blu, flags_parsed_blu = VPKService._parse_vtf_flags_and_options(flags)
-                                    merged_blu = {}
-                                    if vtf_options:
-                                        merged_blu.update(vtf_options)
-                                    merged_blu.update(flags_parsed_blu)
-                                    merged_blu.pop("normal", None)
-                                    TextureService.create_animated_vtf(
-                                        _blu_mat_img, str(blu_vtf_path),
-                                        size, format_type, vtf_flags_blu, merged_blu
-                                    )
-                                else:
-                                    blu_temp_png = vtf_output_path / f"{blu_tex_name}.png"
-                                    VPKService._process_image(_blu_mat_img, blu_temp_png, size)
-                                    vtf_flags_blu, flags_parsed_blu = VPKService._parse_vtf_flags_and_options(flags)
-                                    merged_blu = {}
-                                    if vtf_options:
-                                        merged_blu.update(vtf_options)
-                                    merged_blu.update(flags_parsed_blu)
-                                    merged_blu.pop("normal", None)
-                                    VPKService._create_vtf(str(blu_temp_png), str(vtf_output_path), format_type, vtf_flags_blu, merged_blu)
-                                    if blu_temp_png.exists():
-                                        blu_temp_png.unlink()
+                                tex_ctx.render_user_image_vtf(_blu_mat_img, blu_vtf_path, f"{blu_tex_name}.png")
                             elif not blu_vtf_path.exists():
                                 # Пользователь не предоставил изображение для BLU —
                                 # не включаем в мод, движок найдёт оригинал сам.
@@ -1549,13 +1596,7 @@ class VPKService:
 
                             # Создаем VMT для BLU (копируем RED VMT и обновляем $basetexture)
                             red_vmt_src = vtf_output_path / f"{red_tex_name}.vmt"
-                            if red_vmt_src.exists():
-                                copy_file_safe(red_vmt_src, blu_vmt_path)
-                                VMTService.update_vmt_basetexture_path(str(blu_vmt_path), patched_cdmaterials_path, blu_tex_name)
-                                logger.info(f"Создан VMT для BLU: {blu_vmt_filename}")
-                            else:
-                                VMTService.create_vmt_template_from_cdmaterials(str(blu_vmt_path), patched_cdmaterials_path, blu_tex_name)
-                                logger.info(f"Создан VMT из шаблона для BLU: {blu_vmt_filename}")
+                            VPKService._write_material_vmt(blu_vmt_path, red_vmt_src, patched_cdmaterials_path, blu_tex_name)
                             
                             if animated_fps:
                                 VMTService.enable_animated_basetexture(str(blu_vmt_path), animated_fps)
@@ -1654,25 +1695,15 @@ class VPKService:
                                 _pet_vtf = vtf_output_path / f"{_pet_name}.vtf"
                                 _pet_vmt = vtf_output_path / f"{_pet_name}.vmt"
                                 VPKService._process_image(_pet_img, _pet_png, size)
-                                _pet_flags, _pet_opts = VPKService._parse_vtf_flags_and_options(flags or [])
-                                _pet_merged = dict(vtf_options or {})
-                                _pet_merged.update(_pet_opts)
-                                _pet_merged.pop("normal", None)
+                                _pet_flags, _pet_merged = TextureService.resolve_vtf_flags_and_options(flags, vtf_options, drop_normal=True)
                                 VPKService._create_vtf(
                                     str(_pet_png), str(vtf_output_path),
                                     format_type, _pet_flags, _pet_merged
                                 )
                                 if _pet_png.exists():
                                     _pet_png.unlink()
-                                if not _pet_vmt.exists() and vmt_path.exists():
-                                    copy_file_safe(vmt_path, _pet_vmt)
-                                    VMTService.update_vmt_basetexture_path(
-                                        str(_pet_vmt), patched_cdmaterials_path, _pet_name
-                                    )
-                                elif not _pet_vmt.exists():
-                                    VMTService.create_vmt_template_from_cdmaterials(
-                                        str(_pet_vmt), patched_cdmaterials_path, _pet_name
-                                    )
+                                if not _pet_vmt.exists():
+                                    VPKService._write_material_vmt(_pet_vmt, vmt_path, patched_cdmaterials_path, _pet_name)
                                 logger.info(f"Panel extra texture: {_pet_name}.vtf/vmt")
                             except Exception as _pet_exc:
                                 logger.warning(f"Panel extra texture ошибка '{_pet_name}': {_pet_exc}")
@@ -1861,10 +1892,7 @@ class VPKService:
                     # иначе VTFCmd создаст файл с неправильным именем.
                     tmp_png = masks_dir / f"{vtf_name}.png"
                     VPKService._process_image(mask_img, tmp_png, size)
-                    vtf_flags, opts = VPKService._parse_vtf_flags_and_options(flags)
-                    merged = dict(vtf_options or {})
-                    merged.update(opts)
-                    merged.pop("normal", None)
+                    vtf_flags, merged = TextureService.resolve_vtf_flags_and_options(flags, vtf_options, drop_normal=True)
                     VPKService._create_vtf(str(tmp_png), str(masks_dir), format_type, vtf_flags, merged)
                     if tmp_png.exists():
                         tmp_png.unlink()
@@ -2026,10 +2054,6 @@ class VPKService:
     @staticmethod
     def _process_image(input_path: str, output_path: str, size: Tuple[int, int]) -> None:
         return TextureService.process_image(input_path, output_path, size)
-    
-    @staticmethod
-    def _parse_vtf_flags_and_options(flags: List[str]) -> Tuple[List[str], dict]:
-        return TextureService.parse_vtf_flags_and_options(flags)
     
     @staticmethod
     def _create_vtf(png_path: str, output_path: str, format_type: str, flags: List[str], 

@@ -63,7 +63,8 @@ class VPKServiceTests(unittest.TestCase):
             )
 
     def test_parse_vtf_flags_and_options(self):
-        flags, options = VPKService._parse_vtf_flags_and_options(["NOMIP", "CLAMPS"])
+        from src.services.texture_service import TextureService
+        flags, options = TextureService.parse_vtf_flags_and_options(["NOMIP", "CLAMPS"])
         self.assertEqual(flags, ["CLAMPS"])
         self.assertTrue(options["nomipmaps"])
 

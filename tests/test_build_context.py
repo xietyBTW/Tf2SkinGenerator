@@ -3,7 +3,46 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from src.services.build_context import BuildContext
+from src.services.build_context import BuildContext, TextureBuildContext
+
+
+class TextureBuildContextTests(unittest.TestCase):
+    def _ctx(self, custom=None):
+        return TextureBuildContext(
+            vtf_output_path=Path("out"),
+            size=(512, 512),
+            format_type="DXT5",
+            flags=[],
+            vtf_options={},
+            custom_vtf_path=custom,
+        )
+
+    def test_custom_vtf_just_copies(self):
+        ctx = self._ctx(custom="user.vtf")
+        with patch("src.services.build_context.copy_file_safe") as m_copy:
+            fps = ctx.render_user_image_vtf("img.png", Path("out/t.vtf"), "t.png")
+        self.assertIsNone(fps)
+        m_copy.assert_called_once()
+
+    def test_animated_returns_fps(self):
+        ctx = self._ctx()
+        with patch("src.services.texture_service.TextureService.is_animated_image", return_value=True), \
+             patch("src.services.texture_service.TextureService.create_animated_vtf", return_value=24.0) as m_anim, \
+             patch("src.services.texture_service.TextureService.create_vtf") as m_vtf:
+            fps = ctx.render_user_image_vtf("img.gif", Path("out/t.vtf"), "t.png")
+        self.assertEqual(fps, 24.0)
+        m_anim.assert_called_once()
+        m_vtf.assert_not_called()
+
+    def test_plain_creates_vtf(self):
+        ctx = self._ctx()
+        with patch("src.services.texture_service.TextureService.is_animated_image", return_value=False), \
+             patch("src.services.texture_service.TextureService.process_image") as m_proc, \
+             patch("src.services.texture_service.TextureService.create_vtf") as m_vtf:
+            fps = ctx.render_user_image_vtf("img.png", Path("out/t.vtf"), "t.png")
+        self.assertIsNone(fps)
+        m_proc.assert_called_once()
+        m_vtf.assert_called_once()
 
 
 class BuildContextTests(unittest.TestCase):

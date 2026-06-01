@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 
-from src.ui.styled_dialog import StyledDialog, _btn_primary, _btn_secondary
+from src.ui.styled_dialog import StyledDialog
 
 
 class ErrorDialog(StyledDialog):

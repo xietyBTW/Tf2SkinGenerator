@@ -6,13 +6,65 @@ import os
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple, List
 import time
 from src.shared.logging_config import get_logger
 from src.shared.constants import DirectoryPaths
-from src.shared.file_utils import ensure_directory_exists, safe_remove
+from src.shared.file_utils import ensure_directory_exists, safe_remove, copy_file_safe
 
 logger = get_logger(__name__)
+
+
+@dataclass
+class TextureBuildContext:
+    """
+    Общие параметры рендера VTF-текстур внутри одной сборки.
+
+    Бандлит константы, которые иначе пришлось бы прокидывать в кучу
+    вспомогательных функций (vtf-папка, размер, формат, флаги, опции,
+    готовый VTF пользователя). Содержит общий рендер вторичных текстур.
+    """
+
+    vtf_output_path: Path
+    size: Tuple[int, int]
+    format_type: str
+    flags: List[str]
+    vtf_options: dict
+    custom_vtf_path: Optional[str] = None
+
+    def render_user_image_vtf(
+        self, image_path: str, target_vtf_path: Path, png_name: str
+    ) -> Optional[float]:
+        """
+        Рендерит пользовательское изображение во вторичный VTF.
+
+        custom VTF → копия; анимированное изображение → анимированный VTF
+        (возвращает fps); иначе → обычный VTF через PNG. Опция normal всегда
+        снимается (вторичные материалы не бывают normal-map).
+
+        Returns:
+            fps анимации или None.
+        """
+        from src.services.texture_service import TextureService
+
+        if self.custom_vtf_path:
+            copy_file_safe(image_path, target_vtf_path)
+            return None
+
+        vtf_flags, merged = TextureService.resolve_vtf_flags_and_options(
+            self.flags, self.vtf_options, drop_normal=True
+        )
+        if TextureService.is_animated_image(image_path):
+            return TextureService.create_animated_vtf(
+                image_path, str(target_vtf_path), self.size, self.format_type, vtf_flags, merged
+            )
+
+        png = self.vtf_output_path / png_name
+        TextureService.process_image(image_path, png, self.size)
+        TextureService.create_vtf(str(png), str(self.vtf_output_path), self.format_type, vtf_flags, merged)
+        if png.exists():
+            png.unlink()
+        return None
 
 
 @dataclass

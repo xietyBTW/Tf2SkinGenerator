@@ -12,8 +12,8 @@ from __future__ import annotations
 import os
 from typing import Dict, List, Optional
 
-from PySide6.QtCore import Qt, QPoint, QSize
-from PySide6.QtGui import QPixmap, QDragEnterEvent, QDragLeaveEvent, QDropEvent
+from PySide6.QtCore import Qt, QPoint
+from PySide6.QtGui import QPixmap, QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (
     QDialog, QFrame, QHBoxLayout, QLabel, QPushButton,
     QScrollArea, QSizePolicy, QVBoxLayout, QWidget, QFileDialog,
@@ -794,12 +794,6 @@ class ExtraTexturesDialog(QDialog):
         root.addWidget(footer)
 
     # ── Результат ─────────────────────────────────────────────────────────── #
-
-    def get_results(self) -> Dict[str, Optional[str]]:
-        """Возвращает {name: path_or_None}. None = оставить оригинал из игры."""
-        return {name: card.get_path() for name, card in self._cards.items()}
-
-    # ── Close ─────────────────────────────────────────────────────────────── #
 
     def closeEvent(self, event) -> None:
         self._popup.hide()

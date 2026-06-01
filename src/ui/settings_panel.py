@@ -2,7 +2,6 @@
 Панель настроек - Минималистичный дизайн
 """
 
-import os
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QComboBox,
     QPushButton, QLineEdit, QRadioButton, QCheckBox, QButtonGroup,
@@ -894,23 +893,6 @@ class SettingsPanel(QWidget):
             return self._build_popup._cb_ready.isChecked()
         return self._model_ready_checked
 
-    def set_replace_model_checked(self, value: bool, *, emit: bool = False) -> None:
-        self._replace_model_checked = value
-        self._refresh_build_opts_btn()
-        if hasattr(self, '_build_popup') and self._build_popup is not None:
-            self._build_popup.sync_from_panel()
-        if emit:
-            self.replace_model_toggled.emit(value)
-
-    def set_model_ready_checked(self, value: bool, *, emit: bool = False) -> None:
-        self._model_ready_checked = value
-        self._refresh_build_opts_btn()
-        if hasattr(self, '_build_popup') and self._build_popup is not None:
-            self._build_popup.sync_from_panel()
-        if emit:
-            self.model_ready_toggled.emit(value)
-
-    # Сброс обоих опций (например, при переключении в режим рук)
     def reset_build_options(self, *, emit: bool = False) -> None:
         changed_replace = self._replace_model_checked
         changed_ready   = self._model_ready_checked
@@ -1194,33 +1176,6 @@ class SettingsPanel(QWidget):
             self.parent.on_advanced_section_toggled(is_expanded)
         self._sync_crit_hit_dependent_controls()
     
-    def apply_preset(self, preset_name):
-        """Применяет выбранный пресет"""
-        if preset_name in self.presets:
-            preset = self.presets[preset_name]
-            
-            # Устанавливаем разрешение
-            if preset["resolution"] == 256:
-                self.radio_256.setChecked(True)
-            elif preset["resolution"] == 512:
-                self.radio_512.setChecked(True)
-            elif preset["resolution"] == 1024:
-                self.radio_1024.setChecked(True)
-            elif preset["resolution"] == 2048:
-                self.radio_2048.setChecked(True)
-            else:
-                self.radio_512.setChecked(True)
-            
-            # Устанавливаем формат
-            self.format_combo.setCurrentText(preset["format"])
-            
-            # Устанавливаем флаги
-            self.flag_clamps.setChecked("CLAMPS" in preset["flags"])
-            self.flag_clampt.setChecked("CLAMPT" in preset["flags"])
-            self.flag_nomipmaps.setChecked("NOMIP" in preset["flags"])
-            self.flag_nolod.setChecked("NOLOD" in preset["flags"])
-            self._sync_crit_hit_dependent_controls()
-
     def _get_crit_hit_state(self) -> bool:
         if self.parent and hasattr(self.parent, 'crit_hit_checkbox'):
             return self.parent.crit_hit_checkbox.isChecked()

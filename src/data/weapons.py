@@ -1,3 +1,5 @@
+from typing import Optional
+
 TF2_WEAPONS = {
     "Scout": {
         "PlayerSkin": {
@@ -353,16 +355,31 @@ def get_weapon_name(class_name: str, weapon_type: str, weapon_key: str, language
 def get_weapon_type_name(weapon_type: str, language: str = "ru") -> str:
     return WEAPON_TYPES.get(weapon_type, {}).get(language, weapon_type)
 
+
+def get_weapon_type_key(type_name: str, language: str = "ru") -> Optional[str]:
+    """Обратный lookup: ключ типа оружия по его переведённому названию (или None)."""
+    for key in WEAPON_TYPES:
+        if get_weapon_type_name(key, language) == type_name:
+            return key
+    return None
+
+
+def weapon_key_from_mode(mode: str) -> str:
+    """
+    Извлекает ключ оружия из mode-строки обычного оружия.
+
+    mode имеет вид "<class>_<weaponkey>" (например "scout_c_scattergun"),
+    поэтому берём часть после первого '_'. Если '_' нет — возвращаем mode как есть.
+    """
+    return mode.split('_', 1)[1] if '_' in mode else mode
+
 WEAPON_MDL_PATHS = {}
 for class_name, class_weapons in TF2_WEAPONS.items():
     for weapon_type, weapons in class_weapons.items():
         if weapon_type in ("Hands", "PlayerSkin"):
             continue  # Hands and PlayerSkin have no MDL in the build pipeline
         for weapon_key in weapons.keys():
-            if weapon_key.startswith("c_") or weapon_key.startswith("w_"):
-                WEAPON_MDL_PATHS[weapon_key] = f"models/weapons/c_models/{weapon_key}/{weapon_key}.mdl"
-            else:
-                WEAPON_MDL_PATHS[weapon_key] = f"models/weapons/c_models/{weapon_key}/{weapon_key}.mdl"
+            WEAPON_MDL_PATHS[weapon_key] = f"models/weapons/c_models/{weapon_key}/{weapon_key}.mdl"
 
 # ── Нестандартные пути MDL (папка или имя файла не совпадают с ключом оружия) ──
 

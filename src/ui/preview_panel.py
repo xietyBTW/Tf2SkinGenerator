@@ -122,12 +122,12 @@ class _ExtraSlotCard(QWidget):
         self._clear_btn.setCursor(Qt.ArrowCursor)
         self._clear_btn.clicked.connect(self._clear_image)
 
-        name_lbl = QLabel(display_name or material_name)
-        name_lbl.setStyleSheet("color:#888; font-size:11px;")
-        name_lbl.setAlignment(Qt.AlignCenter)
-        name_lbl.setWordWrap(True)
-        name_lbl.setFixedHeight(18)
-        lay.addWidget(name_lbl)
+        self._name_lbl = QLabel(display_name or material_name)
+        self._name_lbl.setStyleSheet("color:#888; font-size:11px;")
+        self._name_lbl.setAlignment(Qt.AlignCenter)
+        self._name_lbl.setWordWrap(True)
+        self._name_lbl.setFixedHeight(18)
+        lay.addWidget(self._name_lbl)
 
         # Browse убран — клик по изображению (_lbl) уже открывает браузер.
 
@@ -154,6 +154,10 @@ class _ExtraSlotCard(QWidget):
 
     def get_image(self) -> Optional[str]:
         return self._image_path
+
+    def set_display_name(self, name: str) -> None:
+        """Меняет подпись карточки (имя материала) — напр. при переключении RED/BLU."""
+        self._name_lbl.setText(name)
 
     def reset(self) -> None:
         self._image_path = None
@@ -671,6 +675,15 @@ class PreviewPanel(QWidget):
 
         # Переприменяем текущие текстуры к 3D если они загружены
         # (например, пользователь переключился в 2D, загрузил текстуру, вернулся в 3D)
+        self._reapply_textures_to_3d()
+
+    def _reapply_textures_to_3d(self, delay_ms: int = 300) -> None:
+        """
+        Повторно применяет пользовательские текстуры к 3D-модели поверх
+        VPK-оригиналов. Вызывается при переключении в 3D и сразу после
+        загрузки модели из игры (чтобы уже загруженная в 2D текстура
+        применилась без повторного 2D→3D).
+        """
         skip = (
             self._per_mesh_active
             and self.image_path is not None
@@ -680,14 +693,14 @@ class PreviewPanel(QWidget):
             return
 
         # Восстанавливаем текстуры: VPK-оригиналы + пользовательские поверх.
-        # Используем _restore_team_textures_3d — она строит полную карту и
-        # правильно обрабатывает очищенные (×) слоты, возвращая им VPK-оригинал.
+        # _restore_team_textures_3d строит полную карту и правильно
+        # обрабатывает очищенные (×) слоты, возвращая им VPK-оригинал.
         from PySide6.QtCore import QTimer
         if self._card_mode and self._material_names:
-            QTimer.singleShot(300, lambda: self._restore_team_textures_3d(self._active_team))
+            QTimer.singleShot(delay_ms, lambda: self._restore_team_textures_3d(self._active_team))
         elif self.image_path and os.path.exists(self.image_path):
             path = self.image_path
-            QTimer.singleShot(300, lambda p=path: self._apply_image_to_3d(p))
+            QTimer.singleShot(delay_ms, lambda p=path: self._apply_image_to_3d(p))
 
     def is_3d_mode(self) -> bool:
         return self.view_stack.currentIndex() == 1
@@ -881,6 +894,7 @@ class PreviewPanel(QWidget):
         # Главная карточка
         if self._main_card and self._material_names:
             main_name = self._material_names[0]
+            self._main_card.set_display_name(_display(main_name))
             tex = self._resolve_card_texture(main_name)
             if tex and os.path.exists(tex):
                 self._main_card.set_image(tex)
@@ -889,6 +903,7 @@ class PreviewPanel(QWidget):
 
         # Дополнительные карточки
         for mat_name, card in self._card_widgets.items():
+            card.set_display_name(_display(mat_name))
             tex = self._resolve_card_texture(mat_name)
             logger.debug(f"[restore 2D] team={team} mat={mat_name!r} tex={tex!r}")
             if tex and os.path.exists(tex):
@@ -1044,15 +1059,6 @@ class PreviewPanel(QWidget):
         if self.is_3d_mode() and self._3d_available:
             self._render_crithit_scene()
 
-    def update_3d_texture(self, path: str) -> None:
-        """Обновляет текстуру на 3D модели (вызывается из внешнего кода)."""
-        if self._3d_widget and self.is_3d_mode():
-            self._apply_image_to_3d(path)
-
-    # ═══════════════════════════════════════════════════════════════════════════
-    # Кнопка «Загрузить 3D»
-    # ═══════════════════════════════════════════════════════════════════════════
-
     def _on_load_3d_clicked(self) -> None:
         if self._custom_smd_mode:
             self._load_custom_smd_via_dialog()
@@ -1162,6 +1168,11 @@ class PreviewPanel(QWidget):
             self._red_frames = [texture_path]
         if self._3d_widget:
             self._3d_widget.load_model_files(obj_path, texture_path)
+            # Применяем уже загруженную в 2D текстуру к свежей модели.
+            # Задержка 400мс — чтобы выполниться после _on_3d_multi_material
+            # (он выставляет _card_mode/_material_names) и загрузки модели в JS.
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(400, self._reapply_textures_to_3d)
 
     def _on_vpk_mod_ready(self, obj_path: str, texture_path: str) -> None:
         self.btn_load_vpk.setEnabled(True)
@@ -1210,7 +1221,7 @@ class PreviewPanel(QWidget):
         logger.info(f"[Panel] Australium вариант доступен: {os.path.basename(png_path)}")
 
     def _toggle_australium(self) -> None:
-        """Переключает Australium/обычный вариант в 3D."""
+        """Переключает Australium/обычный вариант — синхронно в 3D и 2D."""
         if not self._australium_frame or not self._3d_widget:
             return
         self._australium_active = not self._australium_active
@@ -1218,6 +1229,8 @@ class PreviewPanel(QWidget):
         if self._australium_active:
             self.btn_aus.setStyleSheet(self._aus_style_on)
             QTimer.singleShot(50, lambda: self._3d_widget.update_texture_file(self._australium_frame))
+            # 2D: показываем Australium-вариант (как при переключении команд)
+            self._show_variant_in_2d(self._australium_frame)
         else:
             self.btn_aus.setStyleSheet(self._aus_style_off)
             # Возвращаем оригинальную RED текстуру
@@ -1225,6 +1238,18 @@ class PreviewPanel(QWidget):
                 QTimer.singleShot(50, lambda: self._3d_widget.update_animated_texture_files(
                     self._red_frames, self._team_framerate
                 ))
+            # 2D: возвращаем текстуру активной команды
+            self._restore_team_textures_2d(self._active_team)
+
+    def _show_variant_in_2d(self, path: str) -> None:
+        """Показывает вариант (Australium и т.п.) в 2D БЕЗ изменения сохранённых
+        текстур — это превью игрового варианта, а не пользовательский выбор."""
+        if not (path and os.path.exists(path)):
+            return
+        if self._card_mode and self._main_card:
+            self._main_card.set_image(path)
+        else:
+            self._show_image_in_preview(path)
 
     def _on_3d_blu_multi_material(self, payload) -> None:
         """Воркер нашёл BLU текстуры для многоматериальной модели (персонажи).
@@ -1595,45 +1620,6 @@ class PreviewPanel(QWidget):
                     result[k] = v
         return result
 
-    def get_slot_status(self) -> tuple:
-        """Возвращает (loaded: dict, missing: list) по всем известным слотам.
-
-        loaded  — {mat_name: path} для каждого слота у которого есть текстура
-                  (из любой команды, активная имеет приоритет).
-        missing — список mat_name из _material_names у которых нет текстуры.
-
-        Если режим одиночного слота (не card_mode), missing = [] потому что
-        наличие main-текстуры уже проверяется через get_image_path().
-        """
-        loaded = self.get_slot_image_paths()
-
-        # Учитываем также image_path для главного слота (браузер без drag-drop)
-        if self._material_names:
-            key0 = self._material_names[0]
-            if key0 not in loaded and self.image_path and os.path.exists(self.image_path):
-                loaded[key0] = self.image_path
-
-        # Только в card_mode имеет смысл проверять полноту слотов
-        if not self._card_mode or len(self._material_names) < 2:
-            return loaded, []
-
-        missing = [n for n in self._material_names if n not in loaded]
-        return loaded, missing
-
-    def _build_tex_map(self) -> dict:
-        """Строит {mat: path} для всех слотов текущей команды (только существующие файлы)."""
-        paths = self._textures.get(self._active_team, {})
-        result = {}
-        for mat in self._material_names:
-            p = paths.get(mat)
-            if p and os.path.exists(p):
-                result[mat] = p
-        return result
-
-    # ═══════════════════════════════════════════════════════════════════════════
-    # Загрузка изображений (2D)
-    # ═══════════════════════════════════════════════════════════════════════════
-
     def load_image(self, path: str) -> None:
         """Загружает изображение (или GIF) в 2D Preview."""
         self._stop_gif()
@@ -1732,35 +1718,6 @@ class PreviewPanel(QWidget):
 
         self.update_info_summary()
 
-    def clear_preview(self) -> None:
-        self._stop_gif()
-        self.image_path = None
-        self.vtf_path = None
-        if self._card_mode and self._main_card:
-            self._main_card.set_image('')
-        else:
-            self._clear_preview_label()
-        self.update_info_summary()
-
-    def get_image_path(self) -> Optional[str]:
-        """Возвращает путь к главной текстуре для сборки.
-
-        Порядок приоритета:
-          1. Активная команда (та, что выбрана пользователем)
-          2. RED команда
-          3. BLU команда
-          4. image_path (fallback если команды ещё не переключались)
-        Это позволяет начать сборку с любой загруженной текстуры.
-        """
-        key = self._material_names[0] if self._material_names else '__single__'
-        for team in _team_priority(self._active_team):
-            p = self._textures.get(team, {}).get(key)
-            if p and os.path.exists(p):
-                return p
-        if self.image_path and os.path.exists(self.image_path):
-            return self.image_path
-        return None
-
     def get_vtf_path(self) -> Optional[str]:
         return self.vtf_path
 
@@ -1813,6 +1770,15 @@ class PreviewPanel(QWidget):
             p = self._textures.get(other, {}).get(mat_name)
             if p and os.path.exists(p):
                 return p
+
+        # Fallback: игровой оригинал текущей команды из VPK (превью того, что
+        # заменяем). Так при переключении RED↔BLU карточка показывает текстуру
+        # соответствующей команды, даже если пользователь свою не загружал.
+        # Карты _vpk_*_tex_map ключуются по RED-имени материала — как и карточки.
+        vpk_map = self._vpk_red_tex_map if active == 'red' else self._vpk_blu_tex_map
+        g = vpk_map.get(mat_name)
+        if g and os.path.exists(g):
+            return g
 
         return None
 
@@ -2114,12 +2080,6 @@ class PreviewPanel(QWidget):
     # VPK мод
     # ═══════════════════════════════════════════════════════════════════════════
 
-    def enable_vpk_mod_button(self, enabled: bool = True) -> None:
-        self.btn_load_vpk.setEnabled(enabled)
-
-    def get_loaded_vpk_mod_path(self) -> Optional[str]:
-        return getattr(self, '_loaded_vpk_mod_path', None)
-
     def _on_load_vpk_clicked(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
             self,
@@ -2229,10 +2189,6 @@ class PreviewPanel(QWidget):
     # Drag & Drop (в 2D область)
     # ═══════════════════════════════════════════════════════════════════════════
 
-    def setup_drag_drop(self):   # вызывается для обратной совместимости
-        self.empty_state.setAcceptDrops(True)
-        self.preview.setAcceptDrops(True)
-
     def browse_image(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
             self,
@@ -2278,13 +2234,6 @@ class PreviewPanel(QWidget):
         return fp.lower().endswith('.vtf')
 
     # ── Совместимость с is_image_file / is_vtf_file ───────────────────────────
-    def is_image_file(self, fp): return self._is_image(fp)
-    def is_vtf_file(self, fp): return self._is_vtf(fp)
-
-    # ═══════════════════════════════════════════════════════════════════════════
-    # Info summary
-    # ═══════════════════════════════════════════════════════════════════════════
-
     def update_info_summary(self) -> None:
         if hasattr(self.parent, 'settings_panel'):
             s = self.parent.settings_panel.get_settings()

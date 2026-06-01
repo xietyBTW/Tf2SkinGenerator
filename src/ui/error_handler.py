@@ -5,7 +5,6 @@
 
 from typing import Optional, TYPE_CHECKING, Union
 from PySide6.QtWidgets import QMessageBox, QWidget, QVBoxLayout, QLabel, QPushButton
-from PySide6.QtCore import Qt
 from src.shared.logging_config import get_logger
 from src.shared.exceptions import ErrorPayload
 from src.shared.error_classifier import classify
@@ -138,18 +137,3 @@ class ErrorHandler:
         except Exception:
             QMessageBox.information(parent, t, message)
 
-    @staticmethod
-    def show_question(
-        parent: Optional['QWidget'],
-        message: str,
-        title: Optional[str] = None,
-    ) -> bool:
-        t = title or "Вопрос"
-        try:
-            clicked = _simple_dialog(parent, t, message, ["Отмена", "Да"])
-            return clicked == "Да"
-        except Exception:
-            reply = QMessageBox.question(
-                parent, t, message, QMessageBox.Yes | QMessageBox.No
-            )
-            return reply == QMessageBox.Yes

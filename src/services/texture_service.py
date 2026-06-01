@@ -1,4 +1,5 @@
 import os
+import shutil
 import subprocess
 from pathlib import Path
 from typing import List, Tuple, Optional
@@ -180,6 +181,89 @@ class TextureService:
             else:
                 vtf_flags.append(flag)
         return vtf_flags, options
+
+    @staticmethod
+    def resolve_vtf_flags_and_options(
+        flags: List[str], vtf_options: dict = None, drop_normal: bool = False
+    ) -> Tuple[List[str], dict]:
+        """
+        Парсит флаги VTF и сливает их с UI-опциями.
+
+        UI-опции применяются первыми, опции из флагов — поверх (могут
+        переопределить). drop_normal=True убирает ключ 'normal' — для
+        доп./BLU/variant материалов, где normal-map не применяется.
+
+        Returns:
+            (vtf_flags, merged_options)
+        """
+        vtf_flags, flags_parsed = TextureService.parse_vtf_flags_and_options(flags)
+        merged = dict(vtf_options) if vtf_options else {}
+        merged.update(flags_parsed)
+        if drop_normal:
+            merged.pop("normal", None)
+        return vtf_flags, merged
+
+    @staticmethod
+    def render_image_to_vtf(
+        image_path: str,
+        vtf_output_path: Path,
+        out_vtf_path: Path,
+        temp_png_path: Path,
+        normal_base: str,
+        size: Tuple[int, int],
+        format_type: str,
+        flags: List[str],
+        vtf_options: dict = None,
+    ) -> Tuple[Optional[float], bool]:
+        """
+        Рендерит изображение в VTF: анимированный / normal-map / обычный.
+
+        Единый рендер главной текстуры для обычной сборки и спец-режимов
+        (раньше дублировался в двух местах).
+
+        Args:
+            out_vtf_path:   полный путь к итоговому .vtf (для анимированного).
+            temp_png_path:  временный PNG для конвертации обычной текстуры.
+            normal_base:    стем для файлов normal-map ('{normal_base}_normal.vtf').
+            vtf_output_path: директория, куда VTFCmd кладёт .vtf.
+
+        Returns:
+            (animated_fps, is_normal_map). animated_fps != None — анимация.
+        """
+        vtf_flags, merged = TextureService.resolve_vtf_flags_and_options(flags, vtf_options)
+        is_normal_map = merged.get("normal", False)
+        animated_fps = None
+
+        if TextureService.is_animated_image(image_path):
+            animated_fps = TextureService.create_animated_vtf(
+                image_path, str(out_vtf_path), size, format_type, vtf_flags, merged
+            )
+            logger.info(f"Создана анимированная VTF текстура: {out_vtf_path.name}")
+            return animated_fps, is_normal_map
+
+        TextureService.process_image(image_path, temp_png_path, size)
+        if is_normal_map:
+            normal_options = merged.copy()
+            normal_options.pop("normal", None)
+            TextureService.create_vtf(str(temp_png_path), str(vtf_output_path), format_type, vtf_flags, normal_options)
+            normal_temp_png = vtf_output_path / f"{normal_base}_normal.png"
+            shutil.copy2(temp_png_path, normal_temp_png)
+            TextureService.create_vtf(str(normal_temp_png), str(vtf_output_path), format_type, [], {"normal": True})
+            created_normal_vtf = vtf_output_path / f"{normal_temp_png.stem}.vtf"
+            normal_vtf_path = vtf_output_path / f"{normal_base}_normal.vtf"
+            if created_normal_vtf.exists():
+                created_normal_vtf.rename(normal_vtf_path)
+                logger.info(f"Создана normal VTF текстура: {normal_vtf_path.name}")
+            else:
+                logger.warning(f"Normal VTF файл не был создан: {created_normal_vtf}")
+            if normal_temp_png.exists():
+                normal_temp_png.unlink()
+        else:
+            TextureService.create_vtf(str(temp_png_path), str(vtf_output_path), format_type, vtf_flags, merged)
+
+        if Path(temp_png_path).exists():
+            Path(temp_png_path).unlink()
+        return animated_fps, is_normal_map
 
     @staticmethod
     def create_vtf(png_path: str, output_path: str, format_type: str, flags: List[str], options: dict = None) -> None:

@@ -2,7 +2,6 @@
 Диалог выбора VPK модов для объединения — стиль StyledDialog.
 """
 
-import os
 from pathlib import Path
 from typing import List
 

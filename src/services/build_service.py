@@ -1,5 +1,4 @@
 import os
-import shutil
 from typing import List, Optional, Tuple
 from src.services.vmt_service import VMTService
 from src.services.texture_service import TextureService
@@ -49,48 +48,17 @@ class BuildService:
                 copy_file_safe(custom_vtf_path, vtf_file_path)
                 logger.info(f"Использован пользовательский VTF файл для специального режима: {custom_vtf_path} -> {vtf_file_path}")
             else:
-                vtf_flags, flags_parsed_options = TextureService.parse_vtf_flags_and_options(flags)
-                merged_options = {}
-                if vtf_options:
-                    merged_options.update(vtf_options)
-                merged_options.update(flags_parsed_options)
-                is_normal_map = merged_options.get("normal", False)
-                if TextureService.is_animated_image(image_path):
-                    vtf_file_path = vtf_output_path / vtf_filename_for_mode
-                    animated_fps = TextureService.create_animated_vtf(
-                        image_path,
-                        str(vtf_file_path),
-                        size,
-                        format_type,
-                        vtf_flags,
-                        merged_options
-                    )
-                elif is_normal_map:
-                    TextureService.process_image(image_path, vtf_temp_png, size)
-                    normal_options = merged_options.copy()
-                    normal_options.pop("normal", None)
-                    TextureService.create_vtf(str(vtf_temp_png), str(vtf_output_path), format_type, vtf_flags, normal_options)
-                    logger.info(f"Создана обычная VTF текстура для специального режима: {vtf_filename_for_mode}")
-                    normal_vtf_filename = f"{vmt_filename.replace('.vmt', '')}_normal.vtf"
-                    normal_temp_png = vtf_output_path / f"{vmt_filename.replace('.vmt', '')}_normal.png"
-                    shutil.copy2(vtf_temp_png, normal_temp_png)
-                    normal_options_normal = {"normal": True}
-                    TextureService.create_vtf(str(normal_temp_png), str(vtf_output_path), format_type, [], normal_options_normal)
-                    normal_png_name = normal_temp_png.stem
-                    created_normal_vtf = vtf_output_path / f"{normal_png_name}.vtf"
-                    normal_vtf_path = vtf_output_path / normal_vtf_filename
-                    if created_normal_vtf.exists():
-                        created_normal_vtf.rename(normal_vtf_path)
-                        logger.info(f"Создана normal VTF текстура для специального режима: {normal_vtf_filename}")
-                    else:
-                        logger.warning(f"Normal VTF файл не был создан: {created_normal_vtf}")
-                    if normal_temp_png.exists():
-                        normal_temp_png.unlink()
-                else:
-                    TextureService.process_image(image_path, vtf_temp_png, size)
-                    TextureService.create_vtf(str(vtf_temp_png), str(vtf_output_path), format_type, vtf_flags, merged_options)
-                if vtf_temp_png.exists():
-                    vtf_temp_png.unlink()
+                animated_fps, is_normal_map = TextureService.render_image_to_vtf(
+                    image_path,
+                    vtf_output_path=vtf_output_path,
+                    out_vtf_path=vtf_output_path / vtf_filename_for_mode,
+                    temp_png_path=vtf_temp_png,
+                    normal_base=vmt_filename.replace('.vmt', ''),
+                    size=size,
+                    format_type=format_type,
+                    flags=flags,
+                    vtf_options=vtf_options,
+                )
             from src.services.edited_vmt_service import EditedVMTService
             vmt_filename_without_ext = os.path.splitext(vmt_filename)[0]
             edited_vmt_path = EditedVMTService.get_edited_vmt(vmt_filename_without_ext)

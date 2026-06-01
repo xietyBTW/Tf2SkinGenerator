@@ -509,15 +509,6 @@ class HatsPanel(QWidget):
             self._selected_hat = hat
             self.hat_selected.emit(hat.mdl_path, hat.name)
 
-    def get_selected_hat(self) -> Optional[HatItem]:
-        return self._selected_hat
-
-    def clear_selection(self) -> None:
-        self._list.clearSelection()
-        self._selected_hat = None
-
-    # ── Вспомогательное ───────────────────────────────────────────────────── #
-
     def _show_placeholder(self, text: str) -> None:
         self._placeholder.setText(text)
         self._placeholder.show()

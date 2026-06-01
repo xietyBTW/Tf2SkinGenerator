@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (
     QLineEdit, QFileDialog, QComboBox, QCheckBox, QWidget, QFrame,
     QScrollArea,
 )
-from PySide6.QtCore import Qt, QUrl, QSize
+from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices
 from src.config.app_config import AppConfig
 from src.shared.logging_config import get_logger
@@ -412,5 +412,3 @@ class SettingsDialog(StyledDialog):
             QUrl("https://steamcommunity.com/tradeoffer/new/?partner=394814324&token=GNGCagXk")
         )
 
-    def get_tf2_path(self) -> str:
-        return self.tf2_game_path.text().strip()

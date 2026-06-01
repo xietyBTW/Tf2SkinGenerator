@@ -1,6 +1,4 @@
 import os
-import re
-import shutil
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QTextEdit,
     QLabel, QMessageBox,

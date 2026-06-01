@@ -719,6 +719,16 @@ class Preview3DWorker(QThread):
                         except KeyError:
                             continue
 
+                # Fallback: тот же поиск, что и для RED (_find_vtf_for_mat умеет
+                # отрезать суффикс _red/_blue → scout_head_blue ищет scout_head.vtf,
+                # т.к. голова персонажа — общий файл, тонируемый под команду в VMT).
+                if not vtf_data:
+                    for pak in paks:
+                        vtf_data = self._find_vtf_for_mat(pak, blu_tex_name, arm_folder)
+                        if vtf_data:
+                            logger.debug(f"[3D] BLU multi VTF (find_vtf_for_mat): {blu_tex_name}")
+                            break
+
                 if not vtf_data:
                     logger.debug(f"[3D] BLU multi: VTF не найден для '{blu_tex_name}'")
                     # VTF нет, но маппинг имён всё равно записываем — чтобы карточки
