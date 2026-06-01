@@ -306,6 +306,7 @@ class PreviewPanel(QWidget):
         self._australium_frame: Optional[str] = None  # PNG игрового варианта Australium/Gold
         self._australium_active: bool = False          # активен ли вариант в 3D
         self._australium_user_tex: Optional[str] = None  # своя текстура для Australium (отд. слот)
+        self._australium_mat_name: Optional[str] = None   # имя gold-материала (для сборки)
 
         # ── Per-mesh drag tracking ─────────────────────────────────────────── #
         # True если пользователь перетащил текстуру на конкретный меш в 3D.
@@ -1211,15 +1212,19 @@ class PreviewPanel(QWidget):
         self.btn_red.setVisible(True)
         self.btn_blu.setVisible(True)
 
-    def _on_australium_ready(self, png_path: str) -> None:
+    def _on_australium_ready(self, png_path: str, mat_name: str = "") -> None:
         """Воркер нашёл Australium/Gold вариант — показываем золотую кнопку."""
         if not png_path or not os.path.exists(png_path):
             return
         self._australium_frame = png_path
+        self._australium_mat_name = (mat_name or "").lower() or None
         self._australium_active = False
         self.btn_aus.setVisible(True)
         self.btn_aus.setStyleSheet(self._aus_style_off)
-        logger.info(f"[Panel] Australium вариант доступен: {os.path.basename(png_path)}")
+        logger.info(
+            f"[Panel] Australium вариант доступен: {os.path.basename(png_path)} "
+            f"(материал: {self._australium_mat_name})"
+        )
 
     def _toggle_australium(self) -> None:
         """Переключает Australium/обычный вариант — синхронно в 3D и 2D."""
@@ -1262,6 +1267,17 @@ class PreviewPanel(QWidget):
         Вызывается, когда пользователь грузит текстуру при активном Australium.
         """
         self._australium_user_tex = path or None
+        # Зеркалим в _textures под именем gold-материала — чтобы сборка видела
+        # австралий-текстуру: не блокировалась («загрузите текстуру»), не переспрашивала
+        # её в callback'е, и при этом корректно спрашивала про ОРИГИНАЛ, если он не загружен.
+        mat = self._australium_mat_name
+        if mat:
+            if path and os.path.exists(path):
+                self._textures.setdefault('red', {})[mat] = path
+                self._textures.setdefault('blu', {})[mat] = path
+            else:
+                self._textures.get('red', {}).pop(mat, None)
+                self._textures.get('blu', {}).pop(mat, None)
         shown = path if (path and os.path.exists(path)) else self._australium_frame
         self._show_variant_in_2d(shown)
         if self._3d_available and self._3d_widget and shown:
@@ -1847,12 +1863,20 @@ class PreviewPanel(QWidget):
                     return p
             return None
 
-        # Случай 4: маппинг пуст (3D не загружалась).
-        # Нейтральные текстуры ищем в обеих командах.
+        # Случай 4: маппинг пуст (одноматериальное оружие / 3D не загружалась).
+        # Нейтральные текстуры ищем в обеих командах по прямому ключу.
         for _team in ('red', 'blu'):
             p = self._textures.get(_team, {}).get(mat_name)
             if p and os.path.exists(p):
                 return p
+        # Fallback: сборка спрашивает по BLU-имени материала ({weapon}_blue),
+        # а у одноматериального оружия BLU-текстура хранится под ГЛАВНЫМ ключом.
+        # Если имя похоже на BLU-вариант и BLU-текстура загружена — отдаём её,
+        # чтобы сборка не переспрашивала уже загруженную текстуру голубой команды.
+        if mat_name.lower().endswith(('_blue', '_blu')):
+            blu = self.get_blu_image_path()
+            if blu:
+                return blu
         return None
 
     def get_blu_image_path(self) -> Optional[str]:
@@ -2208,6 +2232,7 @@ class PreviewPanel(QWidget):
         self._australium_frame = None
         self._australium_active = False
         self._australium_user_tex = None
+        self._australium_mat_name = None
         if hasattr(self, 'btn_aus'):
             self.btn_aus.setVisible(False)
             self.btn_aus.setStyleSheet(self._aus_style_off)

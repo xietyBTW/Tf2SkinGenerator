@@ -45,9 +45,9 @@ class Preview3DWorker(QThread):
     # BLU-вариант мульти-материальных текстур: {mat_name: png_path}
     # Эмитируется для персонажей когда у каждого меша есть своя BLU-текстура
     blu_multi_material = Signal(object)
-    # Australium/Gold/Festive вариант оружия: png_path строка
+    # Australium/Gold/Festive вариант оружия: (png_path, material_name)
     # Эмитируется когда в QC skinfamilies есть вариантная строка без 'blue'
-    australium_ready = Signal(str)
+    australium_ready = Signal(str, str)
     # Ошибка
     failed   = Signal(str)
     # Текстовый прогресс для UI
@@ -245,9 +245,9 @@ class Preview3DWorker(QThread):
                     )
                     # Если BLU нет — проверяем вариантные строки (Australium/Gold)
                     if not blu_paths:
-                        aus_path = self._extract_variant_via_qc(self._decomp_dir)
+                        aus_path, aus_mat = self._extract_variant_via_qc(self._decomp_dir)
                         if aus_path:
-                            self.australium_ready.emit(aus_path)
+                            self.australium_ready.emit(aus_path, aus_mat or "")
                 # Fallback: прямой поиск {wk}_blue.vtf
                 if not blu_paths:
                     blu_paths, blu_fps = self._extract_blu_texture_frames(framerate)
@@ -1125,11 +1125,11 @@ class Preview3DWorker(QThread):
         import glob
         qc_files = glob.glob(os.path.join(decomp_dir, "*.qc"))
         if not qc_files:
-            return None
+            return None, None
 
         cdmaterials, skin_families = self._parse_qc_all_skin_families(qc_files[0])
         if len(skin_families) < 2 or not cdmaterials:
-            return None
+            return None, None
 
         # Ищем строку где первый элемент — вариантный суффикс
         variant_family = None
@@ -1142,7 +1142,7 @@ class Preview3DWorker(QThread):
                 break
 
         if not variant_family:
-            return None
+            return None, None
 
         # Текстура варианта — col 0 этой строки
         variant_tex = variant_family[0].lower()
@@ -1173,7 +1173,7 @@ class Preview3DWorker(QThread):
                     break
 
             if not vtf_data:
-                return None
+                return None, None
 
             tmp = os.path.join(self._preview_dir, "_tmp_variant.vtf")
             with open(tmp, "wb") as f:
@@ -1190,17 +1190,17 @@ class Preview3DWorker(QThread):
                     pass
 
             if not frames:
-                return None
+                return None, None
 
             img = Image.frombytes("RGBA", (w, h), frames[0])
             out = os.path.join(self._preview_dir, "texture_variant.png")
             img.save(out)
             logger.info(f"[3D] Вариант оружия извлечён: {out}")
-            return out
+            return out, variant_tex
 
         except Exception as exc:
             logger.warning(f"[3D] _extract_variant_via_qc: {exc}")
-            return None
+            return None, None
 
     # ── VMT-поиск: QC → VMT → $baseTexture → VTF ────────────────────────── #
 
