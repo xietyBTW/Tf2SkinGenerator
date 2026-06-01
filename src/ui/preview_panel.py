@@ -303,8 +303,9 @@ class PreviewPanel(QWidget):
         self._crithit_class: str = 'soldier'
         self._spy_mask_mode: bool = False      # режим масок маскировки шпиона
         self._active_spy_mask: Optional[str] = None  # активный класс (cls_key)
-        self._australium_frame: Optional[str] = None  # PNG варианта Australium/Gold
-        self._australium_active: bool = False         # активен ли вариант в 3D
+        self._australium_frame: Optional[str] = None  # PNG игрового варианта Australium/Gold
+        self._australium_active: bool = False          # активен ли вариант в 3D
+        self._australium_user_tex: Optional[str] = None  # своя текстура для Australium (отд. слот)
 
         # ── Per-mesh drag tracking ─────────────────────────────────────────── #
         # True если пользователь перетащил текстуру на конкретный меш в 3D.
@@ -1228,16 +1229,19 @@ class PreviewPanel(QWidget):
         from PySide6.QtCore import QTimer
         if self._australium_active:
             self.btn_aus.setStyleSheet(self._aus_style_on)
-            QTimer.singleShot(50, lambda: self._3d_widget.update_texture_file(self._australium_frame))
-            # 2D: показываем Australium-вариант (как при переключении команд)
-            self._show_variant_in_2d(self._australium_frame)
+            # Своя текстура для Australium имеет приоритет над игровым gold-вариантом
+            tex = (self._australium_user_tex
+                   if (self._australium_user_tex and os.path.exists(self._australium_user_tex))
+                   else self._australium_frame)
+            QTimer.singleShot(50, lambda t=tex: self._3d_widget.update_texture_file(t))
+            self._show_variant_in_2d(tex)
         else:
             self.btn_aus.setStyleSheet(self._aus_style_off)
-            # Возвращаем оригинальную RED текстуру
-            if self._red_frames:
-                QTimer.singleShot(50, lambda: self._3d_widget.update_animated_texture_files(
-                    self._red_frames, self._team_framerate
-                ))
+            # Возвращаем текстуру активной команды: VPK-оригинал + пользовательская
+            # поверх. _restore_team_textures_3d корректно выбирает update_texture_file
+            # для одиночного кадра (прямой update_animated с 1 кадром и fps=0 ломал текстуру).
+            if self._3d_available and self._3d_widget:
+                self._restore_team_textures_3d(self._active_team)
             # 2D: возвращаем текстуру активной команды
             self._restore_team_textures_2d(self._active_team)
 
@@ -1250,6 +1254,19 @@ class PreviewPanel(QWidget):
             self._main_card.set_image(path)
         else:
             self._show_image_in_preview(path)
+
+    def _set_australium_user_tex(self, path: Optional[str]) -> None:
+        """
+        Сохраняет/сбрасывает СВОЮ текстуру для Australium (отдельный слот,
+        не пересекается с обычной/командной). Применяет к 2D и 3D.
+        Вызывается, когда пользователь грузит текстуру при активном Australium.
+        """
+        self._australium_user_tex = path or None
+        shown = path if (path and os.path.exists(path)) else self._australium_frame
+        self._show_variant_in_2d(shown)
+        if self._3d_available and self._3d_widget and shown:
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(50, lambda t=shown: self._3d_widget.update_texture_file(t))
 
     def _on_3d_blu_multi_material(self, payload) -> None:
         """Воркер нашёл BLU текстуры для многоматериальной модели (персонажи).
@@ -1527,6 +1544,11 @@ class PreviewPanel(QWidget):
 
     def _on_main_card_changed(self, mat_name: str, path: str) -> None:
         """Пользователь сменил или сбросил текстуру в главной карточке."""
+        # Если активен Australium — текстура идёт в его отдельный слот,
+        # не затирая обычную/командную.
+        if self._australium_active:
+            self._set_australium_user_tex(path or None)
+            return
         self._stop_gif()
         self._per_mesh_active = False
         self._per_mesh_base_image = None
@@ -1622,6 +1644,10 @@ class PreviewPanel(QWidget):
 
     def load_image(self, path: str) -> None:
         """Загружает изображение (или GIF) в 2D Preview."""
+        # Australium активен — грузим в его отдельный слот, не трогая обычную.
+        if self._australium_active:
+            self._set_australium_user_tex(path or None)
+            return
         self._stop_gif()
         if path != self._per_mesh_base_image:
             self._per_mesh_active = False
@@ -2181,6 +2207,7 @@ class PreviewPanel(QWidget):
         # Сбрасываем Australium
         self._australium_frame = None
         self._australium_active = False
+        self._australium_user_tex = None
         if hasattr(self, 'btn_aus'):
             self.btn_aus.setVisible(False)
             self.btn_aus.setStyleSheet(self._aus_style_off)
