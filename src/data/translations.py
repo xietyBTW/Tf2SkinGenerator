@@ -315,7 +315,7 @@ TRANSLATIONS = {
         'duplicate_weapons_question': 'Вы пытаетесь соединить моды, которые влияют на одно оружие.\nПродолжить?',
         
         # Кэш декомпила моделей
-        'clear_decompile_cache': '🗑 Очистить кэш моделей',
+        'clear_decompile_cache': 'Очистить кэш моделей',
         'clear_cache_confirm': 'Очистить кэш декомпилированных моделей?\n\nРазмер кэша: {size}\n\nКэш ускоряет повторную сборку того же оружия.\nПосле очистки первая сборка каждого оружия будет медленнее.',
         'clear_cache_done': 'Кэш очищен. Удалено записей: {count}.',
         'clear_decompile_cache_tooltip': 'Удаляет кэш декомпилированных моделей (~/.tf2skingen_cache).\nИспользуйте если модели перестали собираться после обновления TF2.'
@@ -632,7 +632,7 @@ TRANSLATIONS = {
         'duplicate_weapons_question': 'You are trying to merge mods that affect the same weapon.\nContinue?',
         
         # Decompile model cache
-        'clear_decompile_cache': '🗑 Clear Model Cache',
+        'clear_decompile_cache': 'Clear Model Cache',
         'clear_cache_confirm': 'Clear the model decompile cache?\n\nCache size: {size}\n\nThe cache speeds up repeated builds of the same weapon.\nAfter clearing, the first build of each weapon will be slower.',
         'clear_cache_done': 'Cache cleared. {count} entries removed.',
         'clear_decompile_cache_tooltip': 'Deletes cached decompiled models (~/.tf2skingen_cache).\nUse if models stopped building correctly after a TF2 update.'

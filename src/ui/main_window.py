@@ -99,7 +99,10 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
         self.t = TRANSLATIONS[self.language]
         self.setWindowTitle("TF2 Skin Generator")
         self.setGeometry(100, 100, 1600, 800)
-        
+        # Минимум окна: ниже этого правая колонка (настройки/кнопки) обрезалась бы.
+        # Qt сам поднимет минимум, если контенту нужно больше — обрезки не будет.
+        self.setMinimumSize(1080, 600)
+
         icon_path = AppFactory.get_icon_path()
         if icon_path:
             self.setWindowIcon(QIcon(str(icon_path)))
@@ -187,20 +190,40 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
         self.settings_panel.update_language(self.t)
         self.settings_scroll = QScrollArea()
         self.settings_scroll.setWidgetResizable(True)
-        # При очень узкой колонке показываем горизонтальный скролл вместо обрезки
-        self.settings_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        # Нижняя граница ширины колонки Step 2 (контролы сами подстраиваются под viewport)
+        self.settings_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        # Вертикальный скроллбар ВСЕГДА резервирует место (нет «прыжка» отступа
+        # при раскрытии Advanced), но визуально скрыт пока скроллить нечего.
+        self.settings_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
         self.settings_scroll.setMinimumWidth(220)
         self.settings_scroll.setWidget(self.settings_panel)
         self.settings_scroll.setStyleSheet("""
-            QScrollArea {
-                background: transparent;
-                border: none;
-            }
-            QScrollArea > QWidget > QWidget {
-                background: transparent;
-            }
+            QScrollArea { background: transparent; border: none; }
+            QScrollArea > QWidget > QWidget { background: transparent; }
         """)
+
+        # Динамический стиль вертикального скроллбара: тонкая линия когда есть что
+        # скроллить, полностью прозрачный — когда нет (место при этом зарезервировано).
+        _vsb = self.settings_scroll.verticalScrollBar()
+        _SB_THIN = (
+            "QScrollBar:vertical{background:transparent;width:10px;margin:2px 0;}"
+            "QScrollBar::handle:vertical{background:rgba(255,255,255,0.18);"
+            "border-radius:2px;min-height:30px;margin:0 3px;}"
+            "QScrollBar::handle:vertical:hover{background:rgba(255,255,255,0.34);}"
+            "QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical{height:0;}"
+            "QScrollBar::add-page:vertical,QScrollBar::sub-page:vertical{background:transparent;}"
+        )
+        _SB_HIDDEN = (
+            "QScrollBar:vertical{background:transparent;width:10px;}"
+            "QScrollBar::handle:vertical{background:transparent;}"
+            "QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical{height:0;}"
+            "QScrollBar::add-page:vertical,QScrollBar::sub-page:vertical{background:transparent;}"
+        )
+
+        def _sync_vsb(mn=0, mx=0):
+            _vsb.setStyleSheet(_SB_THIN if _vsb.maximum() > _vsb.minimum() else _SB_HIDDEN)
+
+        _vsb.rangeChanged.connect(_sync_vsb)
+        _sync_vsb()
         main_layout.addWidget(self.settings_scroll, 1)
 
         main_vertical_layout.addLayout(main_layout)

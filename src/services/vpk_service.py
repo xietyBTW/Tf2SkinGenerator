@@ -17,7 +17,7 @@ from .packaging_service import PackagingService
 from .model_service import ModelService
 from .tf2_vpk_extract_service import TF2VPKExtractService
 from .model_build_service import ModelBuildService
-from .tf2_paths import TF2Paths
+from .tf2_paths import TF2Paths, build_hat_mdl_candidates
 from .debug_service import DebugService
 from .smd_service import SMDService
 from .decompile_cache import get_cached_decompile, restore_from_cache, save_to_cache
@@ -74,43 +74,8 @@ class VPKService:
         """
         # ── Шапка: путь из items_game.txt, возможно с %s-плейсхолдером ──── #
         if mode == "hat" and hat_mdl_path:
-            _norm = hat_mdl_path.replace("\\", "/")
-            _TF2_CLASSES = [
-                "heavy", "scout", "soldier", "pyro",
-                "demoman", "engineer", "medic", "sniper", "spy",
-            ]
-            base_candidates = []
-            if "%s" in _norm:
-                for cls in _TF2_CLASSES:
-                    try:
-                        base_candidates.append(_norm % cls)
-                    except (TypeError, ValueError):
-                        base_candidates.append(_norm.replace("%s", cls))
-            else:
-                base_candidates.append(_norm)
-
-            paths_to_try = []
-            for c in base_candidates:
-                paths_to_try.append(c)
-                if "models/player/items" in c and "workshop" not in c:
-                    paths_to_try.append(c.replace("models/player/items",
-                                                  "models/workshop_partner/player/items"))
-                    paths_to_try.append(c.replace("models/player/items",
-                                                  "models/workshop/player/items"))
-                elif "models/workshop/player/items" in c:
-                    paths_to_try.append(c.replace("models/workshop/player/items",
-                                                  "models/workshop_partner/player/items"))
-                    paths_to_try.append(c.replace("models/workshop/player/items",
-                                                  "models/player/items"))
-                elif "models/workshop_partner/player/items" in c:
-                    paths_to_try.append(c.replace("models/workshop_partner/player/items",
-                                                  "models/workshop/player/items"))
-                    paths_to_try.append(c.replace("models/workshop_partner/player/items",
-                                                  "models/player/items"))
-
-            seen_paths = set()
-            paths_to_try = [p for p in paths_to_try if not (p in seen_paths or seen_paths.add(p))]
-            return paths_to_try, None
+            # Единая логика кандидатов (%s, workshop-варианты, суффиксы класса)
+            return build_hat_mdl_candidates(hat_mdl_path), None
 
         # ── Тело персонажа / маски шпиона: прямой путь к MDL ────────────── #
         if mode in PLAYER_BODY_MODE_KEYS or mode == SPY_MASK_MODE_KEY:

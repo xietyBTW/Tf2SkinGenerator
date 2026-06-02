@@ -17,7 +17,7 @@ from typing import Optional
 
 from PySide6.QtCore import QThread, Signal
 
-from src.services.tf2_paths import TF2Paths
+from src.services.tf2_paths import TF2Paths, build_hat_mdl_candidates
 from src.services.tf2_vpk_extract_service import TF2VPKExtractService
 from src.services.model_build_service import ModelBuildService
 from src.shared.logging_config import get_logger
@@ -114,74 +114,13 @@ class HatExtractWorker(QThread):
 
     # ── MDL-поиск ─────────────────────────────────────────────────────────── #
 
-    # Имена классов TF2 для подстановки вместо %s и перебора суффиксов
-    _TF2_CLASSES = [
-        "heavy", "scout", "soldier", "pyro",
-        "demoman", "engineer", "medic", "sniper", "spy",
-    ]
-
     def _find_mdl(self, vpk_path: str) -> Optional[str]:
+        """Возвращает первый существующий в VPK путь MDL шапки из кандидатов.
+
+        Список кандидатов (раскрытие %s, workshop-варианты, суффиксы класса)
+        строит общая tf2_paths.build_hat_mdl_candidates.
         """
-        Пробует несколько вариантов пути MDL в VPK и возвращает первый найденный.
-
-        Обрабатывает:
-        - %s-плейсхолдер (ghostly_gibus_%s.mdl → ghostly_gibus_heavy.mdl и т.д.)
-        - Класс-суффиксы (_heavy, _scout, ...) если нужный не нашёлся
-        - workshop / workshop_partner / основной prefix
-        """
-        norm = self._mdl_path.replace("\\", "/").lower()
-        candidates: list[str] = []
-
-        # ── Раскрываем %s → все варианты классов ──────────────────────────
-        if "%s" in norm:
-            for cls in self._TF2_CLASSES:
-                try:
-                    candidates.append(norm % cls)
-                except (TypeError, ValueError):
-                    candidates.append(norm.replace("%s", cls))
-        else:
-            candidates.append(norm)
-
-        # ── Для каждого базового пути добавляем workshop-варианты ─────────
-        expanded: list[str] = []
-        for c in candidates:
-            expanded.append(c)
-            if "models/player/items" in c and "workshop" not in c:
-                expanded.append(c.replace("models/player/items",
-                                          "models/workshop_partner/player/items"))
-                expanded.append(c.replace("models/player/items",
-                                          "models/workshop/player/items"))
-            elif "models/workshop/player/items" in c:
-                expanded.append(c.replace("models/workshop/player/items",
-                                          "models/workshop_partner/player/items"))
-                expanded.append(c.replace("models/workshop/player/items",
-                                          "models/player/items"))
-            elif "models/workshop_partner/player/items" in c:
-                expanded.append(c.replace("models/workshop_partner/player/items",
-                                          "models/workshop/player/items"))
-                expanded.append(c.replace("models/workshop_partner/player/items",
-                                          "models/player/items"))
-
-        # ── Если в пути есть суффикс класса — добавляем другие классы ─────
-        import re as _re
-        cls_pattern = _re.compile(
-            r'_(heavy|scout|soldier|pyro|demoman|engineer|medic|sniper|spy)(\.mdl)$'
-        )
-        extra: list[str] = []
-        for c in expanded:
-            m = cls_pattern.search(c)
-            if m:
-                for cls in self._TF2_CLASSES:
-                    variant = cls_pattern.sub(f'_{cls}\\2', c)
-                    if variant not in expanded:
-                        extra.append(variant)
-        expanded += extra
-
-        # ── Убираем дубли, сохраняем порядок ──────────────────────────────
-        seen: set[str] = set()
-        unique = [c for c in expanded if not (c in seen or seen.add(c))]
-
-        for candidate in unique:
+        for candidate in build_hat_mdl_candidates(self._mdl_path):
             try:
                 if TF2VPKExtractService.check_mdl_exists(vpk_path, candidate):
                     logger.info(f"MDL найден: {candidate}")

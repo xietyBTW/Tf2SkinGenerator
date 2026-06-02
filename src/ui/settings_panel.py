@@ -665,72 +665,62 @@ class SettingsPanel(QWidget):
         flags_container = QWidget()
         flags_layout = QVBoxLayout(flags_container)
         flags_layout.setContentsMargins(0, 0, 0, 0)
-        flags_layout.setSpacing(4)  # Уменьшенное расстояние между флагами
+        flags_layout.setSpacing(8)  # Расстояние между сеткой флагов и строкой гаммы
         
-        # Компактный стиль для чекбоксов флагов
+        # Стиль чекбоксов флагов: бордер-индикатор, оранжевая заливка (акцент),
+        # подсветка-«чип» при наведении — в едином стиле приложения.
         compact_checkbox_style = """
             QCheckBox {
-                padding: 2px 0px;
-                spacing: 6px;
+                color: #bbb;
                 font-size: 12px;
+                spacing: 8px;
+                padding: 6px 8px;
+                border-radius: 5px;
+                background: transparent;
+            }
+            QCheckBox:hover {
+                color: #fff;
+                background: rgba(255, 255, 255, 0.05);
             }
             QCheckBox::indicator {
-                width: 14px;
-                height: 14px;
+                width: 15px; height: 15px;
+                border: 1px solid #444;
+                border-radius: 4px;
+                background: #1e1e1e;
+            }
+            QCheckBox::indicator:hover { border-color: #ff6b35; }
+            QCheckBox::indicator:checked {
+                background: #ff6b35;
+                border-color: #ff6b35;
             }
         """
-        
-        # Первый ряд флагов (два столбца)
-        flags_row1 = QHBoxLayout()
-        flags_row1.setSpacing(8)
-        flags_row1.setContentsMargins(0, 0, 0, 0)
-        self.flag_clamps = QCheckBox(self.t['clamp_s'])
-        self.flag_clamps.setStyleSheet(compact_checkbox_style)
-        self.flag_clampt = QCheckBox(self.t['clamp_t'])
-        self.flag_clampt.setStyleSheet(compact_checkbox_style)
-        flags_row1.addWidget(self.flag_clamps)
-        flags_row1.addWidget(self.flag_clampt)
-        flags_row1.addStretch()
-        flags_layout.addLayout(flags_row1)
-        
-        # Второй ряд флагов (два столбца)
-        flags_row2 = QHBoxLayout()
-        flags_row2.setSpacing(8)
-        flags_row2.setContentsMargins(0, 0, 0, 0)
-        self.flag_nomipmaps = QCheckBox(self.t['no_mipmap'])
-        self.flag_nomipmaps.setStyleSheet(compact_checkbox_style)
-        self.flag_nolod = QCheckBox(self.t['no_lod'])
-        self.flag_nolod.setStyleSheet(compact_checkbox_style)
-        flags_row2.addWidget(self.flag_nomipmaps)
-        flags_row2.addWidget(self.flag_nolod)
-        flags_row2.addStretch()
-        flags_layout.addLayout(flags_row2)
-        
-        # Четвертый ряд - новые флаги (два столбца)
-        flags_row4 = QHBoxLayout()
-        flags_row4.setSpacing(8)
-        flags_row4.setContentsMargins(0, 0, 0, 0)
-        self.flag_nominmipmaps = QCheckBox(self.t.get('no_minimum_mipmap', 'No minimum Mipmap'))
-        self.flag_nominmipmaps.setStyleSheet(compact_checkbox_style)
-        self.option_normal = QCheckBox(self.t.get('normal_map', 'Normal Map'))
-        self.option_normal.setStyleSheet(compact_checkbox_style)
-        flags_row4.addWidget(self.flag_nominmipmaps)
-        flags_row4.addWidget(self.option_normal)
-        flags_row4.addStretch()
-        flags_layout.addLayout(flags_row4)
-        
-        # Третий ряд - новые опции VTFCmd (два столбца)
-        flags_row3 = QHBoxLayout()
-        flags_row3.setSpacing(8)
-        flags_row3.setContentsMargins(0, 0, 0, 0)
-        self.option_nothumbnail = QCheckBox(self.t.get('no_thumbnail', 'No Thumbnail'))
-        self.option_nothumbnail.setStyleSheet(compact_checkbox_style)
+
+        # Флаги — аккуратная сетка 2 столбца (выровненные колонки, «воздух»)
+        flags_grid = QGridLayout()
+        flags_grid.setHorizontalSpacing(10)
+        flags_grid.setVerticalSpacing(4)
+        flags_grid.setColumnStretch(0, 1)
+        flags_grid.setColumnStretch(1, 1)
+
+        self.flag_clamps           = QCheckBox(self.t['clamp_s'])
+        self.flag_clampt           = QCheckBox(self.t['clamp_t'])
+        self.flag_nomipmaps        = QCheckBox(self.t['no_mipmap'])
+        self.flag_nolod            = QCheckBox(self.t['no_lod'])
+        self.flag_nominmipmaps     = QCheckBox(self.t.get('no_minimum_mipmap', 'No minimum Mipmap'))
+        self.option_normal         = QCheckBox(self.t.get('normal_map', 'Normal Map'))
+        self.option_nothumbnail    = QCheckBox(self.t.get('no_thumbnail', 'No Thumbnail'))
         self.option_noreflectivity = QCheckBox(self.t.get('no_reflectivity', 'No Reflectivity'))
-        self.option_noreflectivity.setStyleSheet(compact_checkbox_style)
-        flags_row3.addWidget(self.option_nothumbnail)
-        flags_row3.addWidget(self.option_noreflectivity)
-        flags_row3.addStretch()
-        flags_layout.addLayout(flags_row3)
+
+        for _i, _cb in enumerate([
+            self.flag_clamps, self.flag_clampt,
+            self.flag_nomipmaps, self.flag_nolod,
+            self.flag_nominmipmaps, self.option_normal,
+            self.option_nothumbnail, self.option_noreflectivity,
+        ]):
+            _cb.setStyleSheet(compact_checkbox_style)
+            flags_grid.addWidget(_cb, _i // 2, _i % 2)
+
+        flags_layout.addLayout(flags_grid)
         
         # Gamma Correction - добавляем в тот же контейнер с флагами
         gamma_row = QHBoxLayout()
@@ -794,7 +784,7 @@ class SettingsPanel(QWidget):
         self.advanced_group.addWidget(self.expert_button)
         
         # Кнопка очистки кэша декомпилированных моделей
-        self.clear_cache_button = QPushButton(self.t.get('clear_decompile_cache', '🗑 Clear Model Cache'))
+        self.clear_cache_button = QPushButton(self.t.get('clear_decompile_cache', 'Clear Model Cache'))
         self.clear_cache_button.setStyleSheet(self.styles['button_secondary'])
         self.clear_cache_button.setMinimumHeight(36)
         self.clear_cache_button.setMinimumWidth(0)
@@ -1431,7 +1421,7 @@ class SettingsPanel(QWidget):
         
         # Обновляем кнопку очистки кэша
         if hasattr(self, 'clear_cache_button'):
-            self.clear_cache_button.setText(self.t.get('clear_decompile_cache', '🗑 Clear Model Cache'))
+            self.clear_cache_button.setText(self.t.get('clear_decompile_cache', 'Clear Model Cache'))
         
         # Перезапускаем валидацию имени файла, если ошибка уже отображается
         if hasattr(self, 'filename_error') and self.filename_error.isVisible():

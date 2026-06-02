@@ -7,7 +7,7 @@ from src.data.translations import TRANSLATIONS
 from src.data.weapons import WEAPON_MDL_PATHS
 from src.services.build_context import BuildContext
 from src.services.model_build_service import ModelBuildService
-from src.services.tf2_paths import TF2Paths
+from src.services.tf2_paths import TF2Paths, build_hat_mdl_candidates
 from src.services.tf2_vpk_extract_service import TF2VPKExtractService
 from src.shared.file_utils import ensure_directory_exists
 from src.shared.logging_config import get_logger
@@ -40,65 +40,8 @@ class ExtractModelService:
 
     @staticmethod
     def _build_hat_paths(mdl_rel: str) -> list:
-        """Строит список кандидатов MDL-путей для шапок.
-
-        Обрабатывает:
-        - %s-плейсхолдер → раскрывает во все 9 классов TF2
-        - workshop / workshop_partner варианты
-        - суффиксы класса (_heavy → _scout и т.д.)
-        """
-        import re as _re
-        _TF2_CLASSES = ["heavy", "scout", "soldier", "pyro",
-                        "demoman", "engineer", "medic", "sniper", "spy"]
-        norm = mdl_rel.replace("\\", "/").lower()
-
-        # 1. Раскрываем %s → все классы
-        if "%s" in norm:
-            base_set: list = []
-            for cls in _TF2_CLASSES:
-                try:
-                    v = norm % cls
-                except (TypeError, ValueError):
-                    v = norm.replace("%s", cls)
-                if v not in base_set:
-                    base_set.append(v)
-        else:
-            base_set = [norm]
-
-        # 2. Workshop/workshop_partner варианты
-        paths: list = []
-        for c in base_set:
-            paths.append(c)
-            for src, dsts in [
-                ("models/player/items",
-                 ["models/workshop_partner/player/items", "models/workshop/player/items"]),
-                ("models/workshop/player/items",
-                 ["models/workshop_partner/player/items", "models/player/items"]),
-                ("models/workshop_partner/player/items",
-                 ["models/workshop/player/items", "models/player/items"]),
-            ]:
-                if src in c:
-                    for dst in dsts:
-                        v = c.replace(src, dst)
-                        if v not in paths:
-                            paths.append(v)
-                    break
-
-        # 3. Суффиксы класса (_heavy → другие классы)
-        cls_pat = _re.compile(
-            r'_(heavy|scout|soldier|pyro|demoman|engineer|medic|sniper|spy)(\.mdl)$'
-        )
-        extra: list = []
-        for c in list(paths):
-            m = cls_pat.search(c)
-            if m:
-                for cls in _TF2_CLASSES:
-                    variant = cls_pat.sub(f'_{cls}\\2', c)
-                    if variant not in paths and variant not in extra:
-                        extra.append(variant)
-        paths += extra
-
-        return paths
+        """Кандидаты MDL-путей шапки (единая логика — см. tf2_paths.build_hat_mdl_candidates)."""
+        return build_hat_mdl_candidates(mdl_rel)
 
     @staticmethod
     def _build_paths_to_try(mode: str, weapon_key: str) -> list[str]:

@@ -95,3 +95,77 @@ class TF2Paths:
             return False, f"Crowbar CLI missing: {crowbar_path}"
         return True, None
 
+
+
+# ── Кандидаты MDL-путей для шапок (единая логика для сборки/превью/извлечения) ──
+
+_TF2_CLASSES = (
+    "heavy", "scout", "soldier", "pyro",
+    "demoman", "engineer", "medic", "sniper", "spy",
+)
+
+
+def build_hat_mdl_candidates(mdl_rel: str) -> list:
+    """
+    Список путей-кандидатов к MDL шапки внутри VPK (порядок сохранён, без дублей):
+
+      1. Раскрывает %s-плейсхолдер во все 9 классов TF2
+         (all_domination_%s.mdl → all_domination_heavy.mdl и т.д.).
+      2. Добавляет варианты расположения:
+         models/player/items ↔ models/workshop/player/items ↔
+         models/workshop_partner/player/items.
+      3. Для путей с суффиксом класса (..._heavy.mdl) добавляет остальные классы.
+
+    Все пути приводятся к нижнему регистру (в VPK ключи — lowercase).
+    Используется в сборке, 3D-превью и извлечении — раньше дублировалось трижды.
+    """
+    import re
+    norm = mdl_rel.replace("\\", "/").lower()
+
+    # 1. %s → классы
+    if "%s" in norm:
+        base = []
+        for cls in _TF2_CLASSES:
+            try:
+                v = norm % cls
+            except (TypeError, ValueError):
+                v = norm.replace("%s", cls)
+            if v not in base:
+                base.append(v)
+    else:
+        base = [norm]
+
+    # 2. player/items ↔ workshop ↔ workshop_partner
+    paths = []
+    for c in base:
+        paths.append(c)
+        for src, dsts in (
+            ("models/player/items",
+             ("models/workshop_partner/player/items", "models/workshop/player/items")),
+            ("models/workshop/player/items",
+             ("models/workshop_partner/player/items", "models/player/items")),
+            ("models/workshop_partner/player/items",
+             ("models/workshop/player/items", "models/player/items")),
+        ):
+            if src in c:
+                for dst in dsts:
+                    v = c.replace(src, dst)
+                    if v not in paths:
+                        paths.append(v)
+                break
+
+    # 3. Суффиксы класса (_heavy → остальные классы)
+    cls_pat = re.compile(
+        r'_(heavy|scout|soldier|pyro|demoman|engineer|medic|sniper|spy)\.mdl$'
+    )
+    extra = []
+    for c in list(paths):
+        if cls_pat.search(c):
+            for cls in _TF2_CLASSES:
+                # группа всегда оканчивается на .mdl — подставляем явно
+                variant = cls_pat.sub(f'_{cls}.mdl', c)
+                if variant not in paths and variant not in extra:
+                    extra.append(variant)
+    paths += extra
+
+    return paths

@@ -562,7 +562,7 @@ class PreviewPanel(QWidget):
         self.empty_state = QWidget()
         self.empty_state.setFixedHeight(500)
         self.empty_state.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.empty_state.setMinimumWidth(800)
+        self.empty_state.setMinimumWidth(440)
         self.empty_state.setStyleSheet(f"QWidget {{ {_border} }}")
         self.empty_state.setAcceptDrops(True)
         e_lay = QVBoxLayout(self.empty_state)
@@ -591,7 +591,7 @@ class PreviewPanel(QWidget):
         self.preview.setAlignment(Qt.AlignCenter)
         self.preview.setFixedHeight(500)
         self.preview.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.preview.setMinimumWidth(800)
+        self.preview.setMinimumWidth(440)
         self.preview.setAcceptDrops(True)
         self.preview.hide()
         vlay.addWidget(self.preview)
@@ -625,7 +625,7 @@ class PreviewPanel(QWidget):
         panel = QWidget()
         panel.setFixedHeight(220)
         panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        panel.setMinimumWidth(600)
+        panel.setMinimumWidth(440)
         panel.setStyleSheet("""
             QWidget { background:rgba(255,255,255,0.02); border:1px solid #333; border-radius:4px; }
         """)
@@ -657,7 +657,7 @@ class PreviewPanel(QWidget):
         qt_w = self._3d_widget.qt_widget
         qt_w.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         qt_w.setMinimumHeight(500)
-        qt_w.setMinimumWidth(800)
+        qt_w.setMinimumWidth(440)
 
         self.page_3d = qt_w
         self.view_stack.addWidget(self.page_3d)
