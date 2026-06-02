@@ -28,7 +28,7 @@ import os
 from typing import Dict, List, Optional
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QPixmap
+from PySide6.QtGui import QPixmap, QImage
 from PySide6.QtWidgets import (
     QFileDialog, QFrame, QGroupBox, QHBoxLayout, QLabel, QPushButton,
     QScrollArea, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget,
@@ -38,6 +38,22 @@ from src.shared.logging_config import get_logger
 from src.utils.themes import get_modern_styles
 
 logger = get_logger(__name__)
+
+
+def _load_pixmap(path: str, opaque: bool = False) -> QPixmap:
+    """
+    Загружает QPixmap из файла.
+
+    opaque=True — отбрасывает альфа-канал (RGB888): у игровых VTF альфа это
+    маска бликов ($phong/$envmapmask), а не прозрачность, поэтому в 2D-превью
+    её нужно игнорировать, иначе текстура выглядит полупрозрачной.
+    """
+    if opaque:
+        img = QImage(path)
+        if not img.isNull():
+            return QPixmap.fromImage(img.convertToFormat(QImage.Format_RGB888))
+    return QPixmap(path)
+
 
 # Sentinel-ключ для главной текстуры когда у модели нет именованных материалов
 # (одноматериальный случай). Используется только внутри панели для хранения в
@@ -141,13 +157,13 @@ class _ExtraSlotCard(QWidget):
 
     # ── public ────────────────────────────────────────────────────────────────
 
-    def set_image(self, path: str) -> None:
+    def set_image(self, path: str, opaque: bool = False) -> None:
         self._image_path = path or None
         if not path or not os.path.exists(path):
             self._pix_source = None
             self._show_placeholder()
             return
-        pix = QPixmap(path)
+        pix = _load_pixmap(path, opaque)
         if pix.isNull():
             self._pix_source = None
             self._show_placeholder()
@@ -733,16 +749,20 @@ class PreviewPanel(QWidget):
         return self.view_stack.currentIndex() == 1
 
     def _update_team_btn_visibility(self) -> None:
-        # Показываем кнопки RED/BLU если:
-        # - найдены BLU VPK-кадры (оружие/шапка с командной текстурой)
-        # - есть пользовательские текстуры для BLU команды
-        # - модель многоматериальная (персонажи — всегда имеют командные варианты)
-        # В режиме spy_masks скрываем RED/BLU — там своя панель масок
+        # Показываем кнопки RED/BLU только если у модели РЕАЛЬНО есть BLU-вариант:
+        # - _blu_frames        — BLU одним кадром (оружие/шапка с командной текстурой);
+        # - _vpk_blu_tex_map / _vpk_blu_name_map — per-material BLU (персонажи).
+        # Раньше учитывались _card_mode (любой мульти-материал) и _textures['blu']
+        # (нейтральные текстуры пишутся в обе команды) — это давало ложные кнопки
+        # у мульти-материальных шапок БЕЗ командного разделения.
+        # В режиме spy_masks скрываем RED/BLU — там своя панель масок.
         if self._spy_mask_mode:
             self.btn_red.setVisible(False)
             self.btn_blu.setVisible(False)
             return
-        has_blu = bool(self._blu_frames or self._textures.get('blu') or self._card_mode)
+        has_blu = bool(
+            self._blu_frames or self._vpk_blu_tex_map or self._vpk_blu_name_map
+        )
         self.btn_red.setVisible(has_blu)
         self.btn_blu.setVisible(has_blu)
 
@@ -899,8 +919,15 @@ class PreviewPanel(QWidget):
                 self.image_path = path
                 self._show_image_in_preview(path)
             else:
+                # Своей текстуры для команды нет — показываем игровой кадр команды
+                # (display-only, как делает 3D через _apply_vpk_frames). image_path
+                # оставляем None: сборка не должна считать это пользовательской текстурой.
                 self.image_path = None
-                self._clear_preview_label()
+                vpk_frames = self._blu_frames if team == 'blu' else self._red_frames
+                if vpk_frames and os.path.exists(vpk_frames[0]):
+                    self._show_image_in_preview(vpk_frames[0])
+                else:
+                    self._clear_preview_label()
 
         self.vtf_path = None
         self.update_info_summary()
@@ -924,7 +951,7 @@ class PreviewPanel(QWidget):
             self._main_card.set_display_name(_display(main_name))
             tex = self._resolve_card_texture(main_name)
             if tex and os.path.exists(tex):
-                self._main_card.set_image(tex)
+                self._main_card.set_image(tex, opaque=self._is_game_texture(tex))
             elif not self._main_card.get_image():
                 pass  # оставляем как есть
 
@@ -934,7 +961,7 @@ class PreviewPanel(QWidget):
             tex = self._resolve_card_texture(mat_name)
             logger.debug(f"[restore 2D] team={team} mat={mat_name!r} tex={tex!r}")
             if tex and os.path.exists(tex):
-                card.set_image(tex)
+                card.set_image(tex, opaque=self._is_game_texture(tex))
             else:
                 # Нет текстуры для этой команды — сбрасываем карточку
                 if not self._is_neutral_texture(mat_name):
@@ -1031,6 +1058,14 @@ class PreviewPanel(QWidget):
             'vpk_red_tex_map': dict(self._vpk_red_tex_map or {}),
             'vpk_blu_tex_map': dict(self._vpk_blu_tex_map or {}),
             'vpk_blu_name_map': dict(self._vpk_blu_name_map or {}),
+            # VPK-кадры команд и вариант Australium — нужны для восстановления
+            # кнопок RED/BLU и золотой кнопки без перезагрузки модели.
+            'red_frames': list(self._red_frames or []),
+            'blu_frames': list(self._blu_frames or []),
+            'team_framerate': self._team_framerate,
+            'australium_frame': self._australium_frame,
+            'australium_mat_name': self._australium_mat_name,
+            'australium_user_tex': self._australium_user_tex,
         }
 
     def _restore_from_memory(self, data: dict) -> None:
@@ -1044,12 +1079,25 @@ class PreviewPanel(QWidget):
         self._vpk_red_tex_map = dict(data.get('vpk_red_tex_map') or {})
         self._vpk_blu_tex_map = dict(data.get('vpk_blu_tex_map') or {})
         self._vpk_blu_name_map = dict(data.get('vpk_blu_name_map') or {})
+        # VPK-кадры команд и вариант Australium (сброшены в _reset_team_vpk_state)
+        self._red_frames = list(data.get('red_frames') or [])
+        self._blu_frames = list(data.get('blu_frames') or [])
+        self._team_framerate = data.get('team_framerate', 0.0)
+        self._australium_frame = data.get('australium_frame')
+        self._australium_mat_name = data.get('australium_mat_name')
+        self._australium_user_tex = data.get('australium_user_tex')
 
         # Пересоздаём карточки слотов (метод сам выставит _card_mode/_material_names)
         self._set_material_slots(list(data['material_names']))
 
-        # Командные кнопки
+        # Командные кнопки (учитывают восстановленные _blu_frames)
         self._update_team_btn_visibility()
+
+        # Кнопка Australium — восстанавливаем, если вариант был доступен
+        if self._australium_frame and hasattr(self, 'btn_aus'):
+            self._australium_active = False
+            self.btn_aus.setVisible(True)
+            self.btn_aus.setStyleSheet(self._aus_style_off)
 
         # Мгновенно грузим модель — obj уже на диске, воркер не нужен
         if self._3d_widget and data['obj_path'] and os.path.exists(data['obj_path']):
@@ -1393,7 +1441,7 @@ class PreviewPanel(QWidget):
         if not (path and os.path.exists(path)):
             return
         if self._card_mode and self._main_card:
-            self._main_card.set_image(path)
+            self._main_card.set_image(path, opaque=self._is_game_texture(path))
         else:
             self._show_image_in_preview(path)
 
@@ -1680,7 +1728,7 @@ class PreviewPanel(QWidget):
         # Восстанавливаем уже загруженную текстуру (если была)
         saved = self._resolve_card_texture(main_name)
         if saved and os.path.exists(saved):
-            main_card.set_image(saved)
+            main_card.set_image(saved, opaque=self._is_game_texture(saved))
         elif self.image_path and os.path.exists(self.image_path):
             main_card.set_image(self.image_path)
         main_card.image_changed.connect(self._on_main_card_changed)
@@ -1692,7 +1740,7 @@ class PreviewPanel(QWidget):
                                   parent=self._cards_bar)
             saved = self._resolve_card_texture(name)
             if saved and os.path.exists(saved):
-                card.set_image(saved)
+                card.set_image(saved, opaque=self._is_game_texture(saved))
             card.image_changed.connect(self._on_extra_card_changed)
             lay.addWidget(card)
             self._card_widgets[name] = card
@@ -1935,6 +1983,23 @@ class PreviewPanel(QWidget):
             return self.image_path
         return None
 
+    def _is_game_texture(self, path: Optional[str]) -> bool:
+        """
+        True, если path — извлечённая из игры текстура (VPK-кадр команды /
+        вариант Australium), а не пользовательская. Для таких в 2D-превью
+        отбрасываем альфу (она у VTF — маска бликов, а не прозрачность).
+        """
+        if not path:
+            return False
+        if path == self._australium_frame:
+            return True
+        if path in self._red_frames or path in self._blu_frames:
+            return True
+        if (path in self._vpk_red_tex_map.values()
+                or path in self._vpk_blu_tex_map.values()):
+            return True
+        return False
+
     def _resolve_card_texture(self, mat_name: str) -> Optional[str]:
         """Возвращает путь к текстуре для отображения в карточке при текущей команде.
 
@@ -1971,6 +2036,14 @@ class PreviewPanel(QWidget):
         g = vpk_map.get(mat_name)
         if g and os.path.exists(g):
             return g
+
+        # Fallback для ГЛАВНОГО материала: если per-material карты команды нет
+        # (BLU пришёл одним кадром через _blu_frames, как у некоторых шапок),
+        # показываем кадр команды — так же, как 3D применяет его глобально.
+        if self._material_names and mat_name == self._material_names[0]:
+            frames = self._blu_frames if active == 'blu' else self._red_frames
+            if frames and os.path.exists(frames[0]):
+                return frames[0]
 
         return None
 
@@ -2052,19 +2125,20 @@ class PreviewPanel(QWidget):
         self.preview.setStyleSheet(self._preview_style)
         self.preview.updateGeometry()
 
+        opaque = self._is_game_texture(path)
         if path.lower().endswith('.gif'):
             def _try_gif():
                 if self._gif_movie is not None:
                     return
                 w = max(self.preview.width(), self.width(), 600)
                 if not self._start_gif(path, w):
-                    pix = QPixmap(path).scaled(w, 500, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                    pix = _load_pixmap(path, opaque).scaled(w, 500, Qt.KeepAspectRatio, Qt.SmoothTransformation)
                     self.preview.setPixmap(pix)
             QTimer.singleShot(50, _try_gif)
         else:
             def _scale():
                 w = max(self.preview.width(), self.width(), 600)
-                pix = QPixmap(path).scaled(w, 500, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                pix = _load_pixmap(path, opaque).scaled(w, 500, Qt.KeepAspectRatio, Qt.SmoothTransformation)
                 self.preview.setPixmap(pix)
             QTimer.singleShot(50, _scale)
 

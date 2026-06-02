@@ -15,6 +15,61 @@
   }
 
   #canvas-container { width: 100%; height: 100%; }
+  #canvas-container.inspecting { cursor: help; }
+
+  /* ── Кнопка инспекции материала (?) ───────────────────────────────── */
+  #inspect-btn {
+    position: absolute;
+    top: 10px; right: 10px;
+    width: 26px; height: 26px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 14px; font-weight: 700;
+    display: none;
+    align-items: center; justify-content: center;
+    cursor: pointer; user-select: none;
+    z-index: 20;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+  }
+  #inspect-btn:hover { background: rgba(255, 255, 255, 0.12); color: #ddd; }
+  #inspect-btn.active {
+    background: rgba(204, 85, 34, 0.25);
+    border-color: #cc5522;
+    color: #ffae80;
+  }
+
+  /* ── Тултип материала/текстуры у курсора ──────────────────────────── */
+  #inspect-tip {
+    position: absolute;
+    display: none;
+    pointer-events: none;
+    z-index: 30;
+    background: rgba(18, 18, 18, 0.94);
+    border: 1px solid #444;
+    border-radius: 5px;
+    padding: 6px;
+    box-shadow: 0 3px 12px rgba(0, 0, 0, 0.55);
+  }
+  #inspect-tip img {
+    display: block;
+    width: 96px; height: 96px;
+    object-fit: contain;
+    background: #000;
+    border-radius: 3px;
+    image-rendering: pixelated;
+  }
+  #inspect-tip img.empty { display: none; }
+  #inspect-tip .mat {
+    color: #e0e0e0;
+    font-size: 11px;
+    margin-top: 5px;
+    max-width: 110px;
+    word-break: break-all;
+    text-align: center;
+    line-height: 1.35;
+  }
 
   /* ── Статус (idle / loading / error) ───────────────────────────────── */
   #status {
@@ -171,6 +226,13 @@
 <div id="drop-overlay">
   <div id="drop-icon">🖼</div>
   <div id="drop-text"></div>
+</div>
+
+<!-- Инспекция материала: кнопка «?» (вкл/выкл) + тултип у курсора -->
+<div id="inspect-btn">?</div>
+<div id="inspect-tip">
+  <img id="inspect-tip-img" alt="">
+  <div class="mat" id="inspect-tip-mat"></div>
 </div>
 
 
@@ -1324,10 +1386,105 @@ document.addEventListener('drop', e => {
   }
 });
 
+// ── Инспекция материала/текстуры (кнопка «?») ──────────────────────────────── //
+const _inspectBtn    = document.getElementById('inspect-btn');
+const _inspectTip    = document.getElementById('inspect-tip');
+const _inspectTipImg = document.getElementById('inspect-tip-img');
+const _inspectTipMat = document.getElementById('inspect-tip-mat');
+let   _inspectMode   = false;
+_inspectBtn.title = 'Инспектор материалов — наведи на модель';
+
+function _setInspectMode(on) {
+  _inspectMode = on;
+  _inspectBtn.classList.toggle('active', on);
+  document.getElementById('canvas-container').classList.toggle('inspecting', on);
+  if (!on) _inspectTip.style.display = 'none';
+}
+
+_inspectBtn.addEventListener('click', () => _setInspectMode(!_inspectMode));
+
+// Непрозрачная миниатюра: у VTF альфа — маска бликов ($phong), а не прозрачность.
+// На модели текстура и так рисуется непрозрачной, поэтому в превью форсим alpha=255.
+// Кэш по исходному src + уменьшение до 128px, чтобы не тормозить на больших текстурах.
+const _opaqueThumbCache = new Map();
+function _opaqueThumb(img) {
+  const key = img.src || img.currentSrc || '';
+  if (!key) return '';
+  if (_opaqueThumbCache.has(key)) return _opaqueThumbCache.get(key);
+  try {
+    const sw = img.naturalWidth || img.width, sh = img.naturalHeight || img.height;
+    if (!sw || !sh) {
+      console.warn('[inspect] opaqueThumb: zero size, tag=' + (img.tagName || typeof img));
+      return key;
+    }
+    const sc = Math.min(1, 128 / Math.max(sw, sh));
+    const w = Math.max(1, Math.round(sw * sc)), h = Math.max(1, Math.round(sh * sc));
+    const cv = document.createElement('canvas');
+    cv.width = w; cv.height = h;
+    const ctx = cv.getContext('2d');
+    ctx.drawImage(img, 0, 0, w, h);
+    const d = ctx.getImageData(0, 0, w, h);
+    const px = d.data;
+    for (let i = 3; i < px.length; i += 4) px[i] = 255;  // alpha → непрозрачно
+    ctx.putImageData(d, 0, 0);
+    const out = cv.toDataURL('image/png');
+    _opaqueThumbCache.set(key, out);
+    return out;
+  } catch (err) {
+    console.warn('[inspect] opaqueThumb FAIL: ' + (err && err.message ? err.message : err));
+    return key;  // например, таинт-канвас — отдаём как есть
+  }
+}
+
+// Имя материала + (непрозрачный) src текстуры под курсором
+function _matInfoFromMesh(mesh) {
+  if (!mesh || Array.isArray(mesh.material)) return null;
+  const mat  = mesh.material;
+  const name = (mat && mat.name) || mesh.name || '—';
+  let src = '';
+  const img = mat && mat.map && mat.map.image;
+  if (img) src = _opaqueThumb(img) || img.src || img.currentSrc || '';
+  return { name, src };
+}
+
+renderer.domElement.addEventListener('mousemove', e => {
+  if (!_inspectMode) return;
+  const info = _matInfoFromMesh(_hitMeshAt(_ndcFromEvent(e)));
+  if (!info) { _inspectTip.style.display = 'none'; return; }
+
+  _inspectTipMat.textContent = info.name;
+  if (info.src) {
+    _inspectTipImg.src = info.src;
+    _inspectTipImg.classList.remove('empty');
+  } else {
+    _inspectTipImg.removeAttribute('src');
+    _inspectTipImg.classList.add('empty');
+  }
+
+  // Позиционируем тултип у курсора, удерживая в пределах окна
+  const pad = 14;
+  _inspectTip.style.display = 'block';
+  const tw = _inspectTip.offsetWidth, th = _inspectTip.offsetHeight;
+  let x = e.clientX + pad, y = e.clientY + pad;
+  if (x + tw > window.innerWidth)  x = e.clientX - tw - pad;
+  if (y + th > window.innerHeight) y = e.clientY - th - pad;
+  _inspectTip.style.left = x + 'px';
+  _inspectTip.style.top  = y + 'px';
+});
+
+renderer.domElement.addEventListener('mouseleave', () => {
+  _inspectTip.style.display = 'none';
+});
+
 // ── Render loop ──────────────────────────────────────────────────────────── //
 function animate() {
   requestAnimationFrame(animate);
   controls.update();
+  // Кнопка инспекции доступна только когда есть обычная модель (не CritHIT)
+  const _inspectAvail = !!currentModel && !_isCritHitMode;
+  const _want = _inspectAvail ? 'flex' : 'none';
+  if (_inspectBtn.style.display !== _want) _inspectBtn.style.display = _want;
+  if (!_inspectAvail && _inspectMode) _setInspectMode(false);
   renderer.render(scene, camera);
 }
 animate();
