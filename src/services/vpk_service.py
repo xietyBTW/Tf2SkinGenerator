@@ -1685,6 +1685,11 @@ class VPKService:
                             _processed.add(_f.stem)
 
                         for _pet_name, _pet_img in panel_extra_textures.items():
+                            # Защита от UI-sentinel: '__single__' — главная текстура,
+                            # а не имя материала. Если протёк — пропускаем, иначе
+                            # в VPK появятся мусорные __single__.vmt / __single__.vtf.
+                            if not _pet_name or _pet_name.startswith('__'):
+                                continue
                             if _pet_name in _processed:
                                 continue   # уже создан через skinfamilies
                             if not _pet_img or not os.path.isfile(_pet_img):

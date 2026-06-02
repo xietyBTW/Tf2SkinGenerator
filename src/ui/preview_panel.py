@@ -39,6 +39,12 @@ from src.utils.themes import get_modern_styles
 
 logger = get_logger(__name__)
 
+# Sentinel-ключ для главной текстуры когда у модели нет именованных материалов
+# (одноматериальный случай). Используется только внутри панели для хранения в
+# self._textures. НЕ является именем материала и НЕ должен попадать в сборку —
+# главная текстура передаётся в билд отдельно через from_path.
+SINGLE_TEX_KEY = '__single__'
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # QScrollArea с горизонтальной прокруткой колесом мыши
@@ -298,6 +304,18 @@ class PreviewPanel(QWidget):
         self._3d_available: bool = False
         self._pending_3d_params: Optional[tuple] = None   # (key, mode, vpk, tex_vpk)
         self._last_3d_params: Optional[tuple] = None      # для обнаружения изменений
+
+        # ── Мини-память последнего оружия (1 слот) ────────────────────────── #
+        # _cur_obj — (mode, obj_path, texture_path) сейчас загруженной модели,
+        #            заполняется в _on_3d_ready (None если модель не загружена).
+        # _mem_mode/_mem_data — снимок ПРЕДЫДУЩЕГО загруженного оружия для
+        #            мгновенного восстановления при возврате (без воркера).
+        # _restoring_memory — флаг координации с update_extra_slots (чтобы он
+        #            не затёр восстановленное состояние).
+        self._cur_obj: Optional[tuple] = None
+        self._mem_mode: Optional[str] = None
+        self._mem_data: Optional[dict] = None
+        self._restoring_memory: bool = False
         self._custom_smd_mode: bool = False
         self._crithit_mode: bool = False
         self._crithit_class: str = 'soldier'
@@ -643,12 +661,22 @@ class PreviewPanel(QWidget):
     # Переключение 2D / 3D
     # ═══════════════════════════════════════════════════════════════════════════
 
+    def _update_3d_buttons_visibility(self) -> None:
+        """
+        Видимость кнопок «загрузить модель/VPK»: показываем только в 3D-виде
+        и НЕ в крит-режиме. Единая точка истины — вызывается и при переключении
+        вида (2D/3D), и при смене 3D-состояния (set_3d_params/set_crithit_mode),
+        иначе после крита кнопки не возвращаются.
+        """
+        show = self.is_3d_mode() and not self._crithit_mode
+        self.btn_load_3d.setVisible(show)
+        self.btn_load_vpk.setVisible(show)
+
     def _switch_to_2d(self) -> None:
         self.view_stack.setCurrentIndex(0)
         self.btn_2d.setStyleSheet(self._btn_style_active)
         self.btn_3d.setStyleSheet(self._btn_style_inactive)
-        self.btn_load_3d.setVisible(False)
-        self.btn_load_vpk.setVisible(False)
+        self._update_3d_buttons_visibility()
         # Командные кнопки остаются видны если есть BLU данные
         self._update_team_btn_visibility()
         # Синхронизируем 2D с активной командой — карточки могли не обновиться
@@ -661,17 +689,14 @@ class PreviewPanel(QWidget):
         self.view_stack.setCurrentIndex(1)
         self.btn_3d.setStyleSheet(self._btn_style_active)
         self.btn_2d.setStyleSheet(self._btn_style_inactive)
+        self._update_3d_buttons_visibility()
 
         if self._crithit_mode:
-            self.btn_load_3d.setVisible(False)
-            self.btn_load_vpk.setVisible(False)
             if self._3d_available:
                 from PySide6.QtCore import QTimer
                 QTimer.singleShot(200, self._render_crithit_scene)
             return
 
-        self.btn_load_3d.setVisible(True)
-        self.btn_load_vpk.setVisible(True)
         self.btn_load_vpk.setEnabled(True)
         self._update_team_btn_visibility()
 
@@ -867,7 +892,7 @@ class PreviewPanel(QWidget):
                 # Карточки ещё не созданы — создаём
                 self._set_material_slots(self._material_names)
         else:
-            key = self._material_names[0] if self._material_names else '__single__'
+            key = self._material_names[0] if self._material_names else SINGLE_TEX_KEY
             path = paths.get(key)
             self._stop_gif()
             if path and os.path.exists(path):
@@ -953,7 +978,7 @@ class PreviewPanel(QWidget):
                 # VPK-карта пустая (оружие/шапка без мульти-материала) → кадры
                 self._apply_vpk_frames(vpk_frames)
         else:
-            key = self._material_names[0] if self._material_names else '__single__'
+            key = self._material_names[0] if self._material_names else SINGLE_TEX_KEY
             path = paths.get(key)
             if path and os.path.exists(path):
                 QTimer.singleShot(50, lambda p=path: self._apply_image_to_3d(p))
@@ -968,6 +993,71 @@ class PreviewPanel(QWidget):
             self._3d_widget.update_animated_texture_files(frames, self._team_framerate)
         else:
             self._3d_widget.update_texture_file(frames[0])
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # Мини-память последнего оружия
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    def _snapshot_outgoing(self, outgoing_mode: str) -> Optional[dict]:
+        """
+        Делает снимок состояния уходящего оружия для мгновенного восстановления.
+
+        Возвращает None (не запоминаем), если:
+          - модель не была загружена (_cur_obj пуст или о другом режиме);
+          - режим не «обычное оружие/персонаж» (хаты, спрей, крит, кастом);
+          - активны сложные спец-режимы (маски шпиона / australium / custom SMD),
+            где состояние слишком связное — безопаснее перезагрузить заново.
+        """
+        if not self._cur_obj or self._cur_obj[0] != outgoing_mode:
+            return None
+        if not outgoing_mode or outgoing_mode in ('hat', 'spray', 'critHIT', 'custom'):
+            return None
+        if self._spy_mask_mode or self._australium_active or self._custom_smd_mode:
+            return None
+        obj_path = self._cur_obj[1]
+        if not obj_path or not os.path.exists(obj_path):
+            return None
+
+        return {
+            'mode': outgoing_mode,
+            'obj_path': obj_path,
+            'texture_path': self._cur_obj[2],
+            'material_names': list(self._material_names),
+            'card_mode': self._card_mode,
+            'has_blu': self._has_blu,
+            'active_team': self._active_team,
+            'image_path': self.image_path,
+            'textures': {t: dict(d) for t, d in self._textures.items()},
+            'vpk_red_tex_map': dict(self._vpk_red_tex_map or {}),
+            'vpk_blu_tex_map': dict(self._vpk_blu_tex_map or {}),
+            'vpk_blu_name_map': dict(self._vpk_blu_name_map or {}),
+        }
+
+    def _restore_from_memory(self, data: dict) -> None:
+        """Мгновенно восстанавливает оружие из снимка (без перезапуска воркера)."""
+        # Сначала восстанавливаем текстуры/команды — _set_material_slots читает
+        # их через _resolve_card_texture при пересоздании карточек.
+        self._textures = {t: dict(d) for t, d in data['textures'].items()}
+        self.image_path = data['image_path']
+        self._active_team = data['active_team']
+        self._has_blu = data['has_blu']
+        self._vpk_red_tex_map = dict(data.get('vpk_red_tex_map') or {})
+        self._vpk_blu_tex_map = dict(data.get('vpk_blu_tex_map') or {})
+        self._vpk_blu_name_map = dict(data.get('vpk_blu_name_map') or {})
+
+        # Пересоздаём карточки слотов (метод сам выставит _card_mode/_material_names)
+        self._set_material_slots(list(data['material_names']))
+
+        # Командные кнопки
+        self._update_team_btn_visibility()
+
+        # Мгновенно грузим модель — obj уже на диске, воркер не нужен
+        if self._3d_widget and data['obj_path'] and os.path.exists(data['obj_path']):
+            self._3d_widget.load_model_files(data['obj_path'], data['texture_path'])
+            self._cur_obj = (data['mode'], data['obj_path'], data['texture_path'])
+            # Переприменяем пользовательские текстуры поверх (после загрузки в JS)
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(300, lambda: self._restore_team_textures_3d(self._active_team))
 
     # ═══════════════════════════════════════════════════════════════════════════
     # Публичный API — управление 3D
@@ -985,6 +1075,13 @@ class PreviewPanel(QWidget):
         if new_params == self._last_3d_params:
             return   # ничего не изменилось — не сбрасываем состояние
 
+        # ── Мини-память: снимок уходящего оружия (до сброса состояния) ────── #
+        outgoing_mode = self._last_3d_params[1] if self._last_3d_params else self._weapon_mode
+        snap = self._snapshot_outgoing(outgoing_mode)
+        if snap:
+            self._mem_mode = snap['mode']
+            self._mem_data = snap
+
         self._last_3d_params = new_params
         self._pending_3d_params = new_params
         self._custom_smd_mode = False
@@ -996,12 +1093,28 @@ class PreviewPanel(QWidget):
         self._stop_worker('_3d_worker')
         self._reset_team_vpk_state()
 
+        # ── Возврат на запомненное оружие → мгновенное восстановление ─────── #
+        if self._mem_mode is not None and self._mem_mode == mode and self._mem_data is not None:
+            self._restoring_memory = True
+            self._restore_from_memory(self._mem_data)
+            self._mem_mode = None
+            self._mem_data = None   # 1 слот — извлекли
+            self.btn_load_3d.setEnabled(True)
+            self.btn_load_vpk.setEnabled(True)
+            self._update_3d_buttons_visibility()
+            return
+
+        # ── Обычный путь: убираем старую модель из сцены (disappear-fix) ──── #
+        self._cur_obj = None
         if self._3d_widget:
+            self._3d_widget.reset()
             self._3d_widget.show_prompt(
                 self.t.get('3d_prompt_weapon', 'Select a weapon and click ▶ to load the model')
             )
         self.btn_load_3d.setEnabled(True)
         self.btn_load_vpk.setEnabled(True)
+        # Вышли из крит-режима на обычное оружие — вернуть кнопки, если мы в 3D
+        self._update_3d_buttons_visibility()
 
     def reset_3d_preview(self) -> None:
         """Полный сброс 3D (при смене режима на Spray/None)."""
@@ -1009,6 +1122,7 @@ class PreviewPanel(QWidget):
         self._last_3d_params = None
         self._custom_smd_mode = False
         self._crithit_mode = False
+        self._cur_obj = None   # модель убрана — нечего запоминать
         self._stop_worker('_3d_worker')
         self._stop_worker('_vpk_mod_worker')
         self._reset_team_vpk_state()
@@ -1048,12 +1162,32 @@ class PreviewPanel(QWidget):
             self.btn_load_vpk.setEnabled(False)
 
     def set_crithit_mode(self) -> None:
+        # ── Снимок уходящего оружия в мини-память (ДО очистки состояния) ──── #
+        # Переход в крит идёт через этот метод, а не set_3d_params, поэтому
+        # снимок надо делать здесь — иначе возврат на оружие ничего не вернёт.
+        snap = self._snapshot_outgoing(self._weapon_mode)
+        if snap:
+            self._mem_mode = snap['mode']
+            self._mem_data = snap
+
+        # Текстура/изображение оружия НЕ должны протекать в крит-сцену
+        # (_render_crithit_scene использует self.image_path как текстуру биллборда).
+        self.image_path = None
+        self.vtf_path = None
+        self._cur_obj = None
+
         self._crithit_mode = True
         self._custom_smd_mode = False
         self._pending_3d_params = None
+        # Сбрасываем кэш последних 3D-параметров: иначе возврат на то же оружие,
+        # что было до крита, вызовет ранний return в set_3d_params и _crithit_mode
+        # останется True (кнопки не вернутся, крит-сцена зависнет).
+        self._last_3d_params = None
         self._stop_worker('_3d_worker')
         self._stop_worker('_vpk_mod_worker')
         self._reset_team_vpk_state()
+        # Прячем кнопки загрузки модели/VPK (крит-режим)
+        self._update_3d_buttons_visibility()
         if self._3d_widget:
             self._3d_widget.show_prompt(
                 self.t.get('3d_prompt_crithit', 'Switch to 3D tab — the soldier will appear automatically')
@@ -1168,6 +1302,9 @@ class PreviewPanel(QWidget):
         self._active_team = 'red'   # всегда синхронизируем (кнопки уже сброшены)
         if texture_path:
             self._red_frames = [texture_path]
+        # Запоминаем загруженную модель для мини-памяти (мгновенное восстановление)
+        _loaded_mode = self._pending_3d_params[1] if self._pending_3d_params else self._weapon_mode
+        self._cur_obj = (_loaded_mode, obj_path, texture_path)
         if self._3d_widget:
             self._3d_widget.load_model_files(obj_path, texture_path)
             # Применяем уже загруженную в 2D текстуру к свежей модели.
@@ -1383,6 +1520,14 @@ class PreviewPanel(QWidget):
         Для оружий карточки появятся позже через _on_3d_multi_material.
         Для рук карточки определяются сразу из HAND_MODES (без 3D).
         """
+        # Восстановление из мини-памяти уже выставило всё состояние в
+        # set_3d_params/_restore_from_memory — не затираем его.
+        if self._restoring_memory:
+            self._restoring_memory = False
+            self._weapon_key = weapon_key
+            self._weapon_mode = mode
+            return
+
         if weapon_key == self._weapon_key and mode == self._weapon_mode:
             return   # то же самое — ничего не сбрасываем
 
@@ -1654,6 +1799,11 @@ class PreviewPanel(QWidget):
         result: dict = {}
         for team in _team_priority(self._active_team):
             for k, v in self._textures.get(team, {}).items():
+                # SINGLE_TEX_KEY — это главная текстура (идёт в сборку через
+                # from_path), а не именованный материал. Пропускаем, иначе в VPK
+                # появятся мусорные __single__.vmt / __single__.vtf.
+                if k == SINGLE_TEX_KEY:
+                    continue
                 if k not in result and v and os.path.exists(v):
                     result[k] = v
         return result
@@ -1673,7 +1823,7 @@ class PreviewPanel(QWidget):
         self.vtf_path = None
 
         # Сохраняем под активной командой
-        key = self._material_names[0] if self._material_names else '__single__'
+        key = self._material_names[0] if self._material_names else SINGLE_TEX_KEY
         self._textures.setdefault(self._active_team, {})[key] = path
 
         if self._card_mode and self._main_card is not None:
@@ -1722,7 +1872,7 @@ class PreviewPanel(QWidget):
                 self.image_path = png_for_3d
 
                 # Сохраняем под активной командой
-                key = self._material_names[0] if self._material_names else '__single__'
+                key = self._material_names[0] if self._material_names else SINGLE_TEX_KEY
                 self._textures.setdefault(self._active_team, {})[key] = png_for_3d
 
                 if self._card_mode and self._main_card:
@@ -1776,7 +1926,7 @@ class PreviewPanel(QWidget):
         Возвращает None если RED не загружена → build_vpk поставит sentinel
         и покажет диалог выбора.
         """
-        key = self._material_names[0] if self._material_names else '__single__'
+        key = self._material_names[0] if self._material_names else SINGLE_TEX_KEY
         p = self._textures.get('red', {}).get(key)
         if p and os.path.exists(p):
             return p
@@ -1882,7 +2032,7 @@ class PreviewPanel(QWidget):
     def get_blu_image_path(self) -> Optional[str]:
         """Возвращает путь к пользовательской BLU текстуре (главный слот) или None."""
         blu = self._textures.get('blu', {})
-        key = self._material_names[0] if self._material_names else '__single__'
+        key = self._material_names[0] if self._material_names else SINGLE_TEX_KEY
         p = blu.get(key)
         if p and os.path.exists(p):
             return p

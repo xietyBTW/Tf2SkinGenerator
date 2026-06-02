@@ -335,6 +335,34 @@ WEAPON_TYPES = {
     "Custom": {"ru": "Кастомный мод", "en": "Custom Mod"},
 }
 
+# Слоты оружия — то, что показывается в списке «Тип оружия» под категорией «Оружие».
+# PlayerSkin/Hands/Custom сюда НЕ входят: они теперь в других категориях.
+WEAPON_SLOT_TYPES = ["Primary", "Secondary", "Melee"]
+
+# Типы оружия, которые относятся к категории «Персонаж» (тело + руки).
+CHARACTER_PART_TYPES = ["PlayerSkin", "Hands"]
+
+
+def get_character_parts(class_name: str, language: str = "ru") -> list:
+    """
+    Возвращает части персонажа (тело + руки) для категории «Персонаж»
+    как список (key, display_name).
+
+    Объединяет записи PlayerSkin и Hands выбранного класса. mode для каждой
+    части строится как f"{class.lower()}_{key}" — те же ключи, что и раньше
+    (scout_body, scout_hands, engineer_mech_hands, spy_masks и т.д.).
+    """
+    parts: list = []
+    cls = TF2_WEAPONS.get(class_name, {})
+    for ptype in CHARACTER_PART_TYPES:
+        for key, val in cls.get(ptype, {}).items():
+            if isinstance(val, dict):
+                name = val.get(language, val.get("ru", key))
+            else:
+                name = val
+            parts.append((key, name))
+    return parts
+
 def get_weapon_name(class_name: str, weapon_type: str, weapon_key: str, language: str = "ru") -> str:
     if class_name not in TF2_WEAPONS:
         return weapon_key

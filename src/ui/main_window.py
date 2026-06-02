@@ -19,7 +19,7 @@ from src.ui.vmt_editor import VMTEditorDialog
 from src.ui.settings_dialog import SettingsDialog
 from src.data.translations import TRANSLATIONS
 from src.data.weapons import (
-    TF2_WEAPONS, TF2_CLASSES, WEAPON_TYPES, SPECIAL_MODES,
+    TF2_WEAPONS, TF2_CLASSES, WEAPON_TYPES, WEAPON_SLOT_TYPES, SPECIAL_MODES,
     get_weapon_name, get_weapon_type_name, get_weapon_type_key, weapon_key_from_mode
 )
 from src.shared.logging_config import get_logger
@@ -400,8 +400,23 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
         group_layout = QVBoxLayout(self.weapon_selection_group)
         group_layout.setSpacing(12)
 
+        _lbl_style = "font-weight: 500; font-size: 13px; color: #ccc; margin-top: 8px;"
+
+        # ── Категория — верхний селектор: что вообще делаем ───────────────── #
+        self.category_label = QLabel(self.t['category'])
+        self.category_label.setStyleSheet("font-weight: 500; font-size: 13px; color: #ccc; margin-top: 4px;")
+        group_layout.addWidget(self.category_label)
+
+        # Ключи категорий в порядке отображения. Используем индекс для маппинга.
+        self._category_keys = ['weapon', 'character', 'special', 'custom']
+        self.category_combo = QComboBox()
+        self.category_combo.setStyleSheet(styles['combo'])
+        self._populate_category_combo()
+        group_layout.addWidget(self.category_combo)
+
+        # ── Класс (для категорий Оружие, Персонаж) ───────────────────────── #
         self.class_label = QLabel(self.t['class'])
-        self.class_label.setStyleSheet("font-weight: 500; font-size: 13px; color: #ccc; margin-top: 4px;")
+        self.class_label.setStyleSheet(_lbl_style)
         group_layout.addWidget(self.class_label)
 
         self.class_combo = QComboBox()
@@ -410,36 +425,45 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
             self.class_combo.addItem(f"{class_info['icon']} {class_name}")
         group_layout.addWidget(self.class_combo)
 
+        # ── Тип оружия — только слоты Primary/Secondary/Melee (Оружие) ────── #
         self.type_label = QLabel(self.t['weapon_type'])
-        self.type_label.setStyleSheet("font-weight: 500; font-size: 13px; color: #ccc; margin-top: 8px;")
+        self.type_label.setStyleSheet(_lbl_style)
         group_layout.addWidget(self.type_label)
 
         self.weapon_type_combo = QComboBox()
         self.weapon_type_combo.setStyleSheet(styles['combo'])
         group_layout.addWidget(self.weapon_type_combo)
 
+        # ── Подтип — контекстный: части персонажа ИЛИ крит/спрей ─────────── #
+        self.subtype_label = QLabel(self.t['subtype_part'])
+        self.subtype_label.setStyleSheet(_lbl_style)
+        group_layout.addWidget(self.subtype_label)
+
+        self._subtype_keys: list = []   # ключи текущих пунктов subtype_combo
+        self.subtype_combo = QComboBox()
+        self.subtype_combo.setStyleSheet(styles['combo'])
+        group_layout.addWidget(self.subtype_combo)
+
+        # ── Конкретное оружие (категория Оружие) ─────────────────────────── #
         self.weapon_label = QLabel(self.t['weapon'])
-        self.weapon_label.setStyleSheet("font-weight: 500; font-size: 13px; color: #ccc; margin-top: 8px;")
+        self.weapon_label.setStyleSheet(_lbl_style)
         group_layout.addWidget(self.weapon_label)
 
         self.weapon_combo = QComboBox()
         self.weapon_combo.setStyleSheet(styles['combo'])
         group_layout.addWidget(self.weapon_combo)
 
+        # ── Крит/Спрей чекбоксы — СКРЫТЫ, живут как внутреннее состояние ──── #
+        # settings_panel завязан на crit_hit_checkbox (hasattr/isChecked/
+        # stateChanged), поэтому объекты сохраняем. Управляются программно
+        # из subtype_combo при категории «Специальное».
         self.crit_hit_label = QLabel(self.t['crit_hit_mode'])
-        self.crit_hit_label.setStyleSheet("font-weight: 500; font-size: 13px; color: #ccc; margin-top: 16px;")
-        group_layout.addWidget(self.crit_hit_label)
-
         self.crit_hit_checkbox = ExclusiveCheckBox(self.t['enable_crit_hit'])
-        group_layout.addWidget(self.crit_hit_checkbox)
-
         self.spray_label = QLabel(self.t.get('spray_mode', 'Spray Mode:'))
-        self.spray_label.setStyleSheet("font-weight: 500; font-size: 13px; color: #ccc; margin-top: 16px;")
-        group_layout.addWidget(self.spray_label)
-
         self.spray_checkbox = ExclusiveCheckBox(self.t.get('enable_spray', 'Create spray (256×256, RGBA)'))
-        self.spray_checkbox.setStyleSheet("color: #ccc;")
-        group_layout.addWidget(self.spray_checkbox)
+        for _w in (self.crit_hit_label, self.crit_hit_checkbox, self.spray_label, self.spray_checkbox):
+            _w.setVisible(False)
+            group_layout.addWidget(_w)
 
         self.crit_hit_checkbox.set_exclusive_with([self.spray_checkbox])
         self.spray_checkbox.set_exclusive_with([self.crit_hit_checkbox])
@@ -597,8 +621,10 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
 
     def setup_connections(self) -> None:
         """Настраивает соединения сигналов"""
+        self.category_combo.currentIndexChanged.connect(self.on_category_changed)
         self.class_combo.currentTextChanged.connect(self.on_class_changed)
         self.weapon_type_combo.currentTextChanged.connect(self.on_weapon_type_changed)
+        self.subtype_combo.currentIndexChanged.connect(self.on_subtype_changed)
         self.weapon_combo.currentTextChanged.connect(self.on_weapon_changed)
         self.crit_hit_checkbox.stateChanged.connect(self._on_crit_hit_state_changed)
         self.spray_checkbox.stateChanged.connect(self._on_spray_state_changed)
@@ -612,8 +638,147 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
         if hasattr(self, 'preview_panel'):
             self.preview_panel.vpk_mod_loaded.connect(self._on_vpk_mod_loaded)
 
-        # Инициализируем первый класс
-        self.on_class_changed(self.class_combo.currentText())
+        # Инициализируем: категория «Оружие» → класс → тип → оружие
+        self.on_category_changed(0)
+
+    def _populate_category_combo(self) -> None:
+        """Заполняет category_combo локализованными названиями (сохраняя индекс)."""
+        prev = self.category_combo.currentIndex() if self.category_combo.count() else 0
+        self.category_combo.blockSignals(True)
+        self.category_combo.clear()
+        for key in self._category_keys:
+            self.category_combo.addItem(self.t.get(f'category_{key}', key))
+        if 0 <= prev < self.category_combo.count():
+            self.category_combo.setCurrentIndex(prev)
+        self.category_combo.blockSignals(False)
+
+    @property
+    def _current_category(self) -> str:
+        """Текущий ключ категории ('weapon'|'character'|'special'|'custom')."""
+        idx = self.category_combo.currentIndex()
+        if 0 <= idx < len(self._category_keys):
+            return self._category_keys[idx]
+        return 'weapon'
+
+    def _apply_category_visibility(self, cat: str) -> None:
+        """Показывает/прячет списки в зависимости от выбранной категории."""
+        show_class   = cat in ('weapon', 'character')
+        show_type    = cat == 'weapon'
+        show_weapon  = cat == 'weapon'
+        show_subtype = cat in ('character', 'special')
+
+        self.class_label.setVisible(show_class)
+        self.class_combo.setVisible(show_class)
+        self.type_label.setVisible(show_type)
+        self.weapon_type_combo.setVisible(show_type)
+        self.weapon_label.setVisible(show_weapon)
+        self.weapon_combo.setVisible(show_weapon)
+        self.subtype_label.setVisible(show_subtype)
+        self.subtype_combo.setVisible(show_subtype)
+
+        # Крит-режим мог задизейблить комбобоксы — восстанавливаем доступность
+        for _c in (self.class_combo, self.weapon_type_combo, self.weapon_combo, self.subtype_combo):
+            _c.setEnabled(True)
+
+        if show_subtype:
+            key = 'subtype_special' if cat == 'special' else 'subtype_part'
+            self.subtype_label.setText(self.t.get(key, 'Подтип:'))
+
+    def on_category_changed(self, _index: int = 0) -> None:
+        """Обработка смены верхней категории."""
+        cat = self._current_category
+        self._apply_category_visibility(cat)
+
+        # Покидая «Специальное» — снимаем крит/спрей чекбоксы (без сигналов,
+        # чтобы их хендлеры не дёргали apply_selection_auto преждевременно) и
+        # вручную уведомляем settings_panel, что крит-режим выключен.
+        if cat != 'special':
+            was_special = False
+            for cb in (self.crit_hit_checkbox, self.spray_checkbox):
+                if cb.isChecked():
+                    was_special = True
+                    cb.blockSignals(True)
+                    cb.setChecked(False)
+                    cb.blockSignals(False)
+            if was_special and hasattr(self, 'settings_panel'):
+                self.settings_panel.on_crit_hit_selected(False)
+
+        if cat == 'weapon':
+            # Перезаполняем слоты + оружие через стандартный путь
+            self.on_class_changed(self.class_combo.currentText())
+        elif cat == 'character':
+            self._populate_subtype_for_character()
+        elif cat == 'special':
+            self._populate_subtype_for_special()
+        else:  # custom
+            self.apply_selection_auto()
+
+    def _populate_subtype_for_character(self) -> None:
+        """Заполняет subtype_combo частями персонажа (тело + руки) текущего класса."""
+        from src.data.weapons import get_character_parts
+        class_name = self.current_class or (
+            self.class_combo.currentText().split(' ', 1)[1]
+            if ' ' in self.class_combo.currentText() else self.class_combo.currentText()
+        )
+        self.current_class = class_name
+        parts = get_character_parts(class_name, self.language)
+
+        self.subtype_combo.blockSignals(True)
+        self.subtype_combo.clear()
+        self._subtype_keys = []
+        for key, name in parts:
+            self.subtype_combo.addItem(name)
+            self._subtype_keys.append(key)
+        self.subtype_combo.blockSignals(False)
+
+        if self._subtype_keys:
+            self.subtype_combo.setCurrentIndex(0)
+            self.on_subtype_changed(0)
+        else:
+            self.apply_selection_auto()
+
+    def _populate_subtype_for_special(self) -> None:
+        """Заполняет subtype_combo пунктами Крит / Спрей."""
+        self.subtype_combo.blockSignals(True)
+        self.subtype_combo.clear()
+        self._subtype_keys = ['critHIT', 'spray']
+        self.subtype_combo.addItem(self.t.get('special_crit', 'Крит'))
+        self.subtype_combo.addItem(self.t.get('special_spray', 'Спрей'))
+        self.subtype_combo.blockSignals(False)
+
+        self.subtype_combo.setCurrentIndex(0)
+        self.on_subtype_changed(0)
+
+    def on_subtype_changed(self, _index: int = 0) -> None:
+        """Обработка смены подтипа (часть персонажа или крит/спрей)."""
+        idx = self.subtype_combo.currentIndex()
+        if idx < 0 or idx >= len(self._subtype_keys):
+            return
+        key = self._subtype_keys[idx]
+        cat = self._current_category
+
+        if cat == 'character':
+            # Часть персонажа: тело/руки → mode = f"{class}_{key}"
+            self.current_weapon = key
+            self.apply_selection_auto()
+        elif cat == 'special':
+            # Крит/Спрей. Выставляем оба скрытых чекбокса ДЕТЕРМИНИРОВАННО.
+            # ExclusiveCheckBox снимает партнёра только по клику мыши, а резервный
+            # путь в обработчиках stateChanged ненадёжен при программном setChecked —
+            # поэтому управляем состоянием явно, через blockSignals, без гонок.
+            want_crit = (key == 'critHIT')
+            self.crit_hit_checkbox.blockSignals(True)
+            self.spray_checkbox.blockSignals(True)
+            self.crit_hit_checkbox.setChecked(want_crit)
+            self.spray_checkbox.setChecked(not want_crit)
+            self.crit_hit_checkbox.blockSignals(False)
+            self.spray_checkbox.blockSignals(False)
+            # Побочные эффекты, которые раньше делали обработчики чекбоксов:
+            self.selected_smd_path = None
+            if hasattr(self, 'settings_panel'):
+                self.settings_panel.reset_build_options(emit=True)
+                self.settings_panel.on_crit_hit_selected(want_crit)
+            self.apply_selection_auto()
     
     def update_ui_text(self) -> None:
         """Обновляет текст интерфейса при смене языка"""
@@ -622,10 +787,15 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
             self.step_1_label.setText(self.t['step_1_selection'])
         if hasattr(self, 'weapon_selection_group'):
             self.weapon_selection_group.setTitle(self.t['weapon_selection'])
+        if hasattr(self, 'category_label'):
+            self.category_label.setText(self.t['category'])
         if hasattr(self, 'class_label'):
             self.class_label.setText(self.t['class'])
         if hasattr(self, 'type_label'):
             self.type_label.setText(self.t['weapon_type'])
+        if hasattr(self, 'subtype_label'):
+            _sub_key = 'subtype_special' if self._current_category == 'special' else 'subtype_part'
+            self.subtype_label.setText(self.t.get(_sub_key, 'Подтип:'))
         if hasattr(self, 'weapon_label'):
             self.weapon_label.setText(self.t['weapon'])
         
@@ -659,30 +829,11 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
         if hasattr(self, 'hats_panel'):
             self.hats_panel.update_language(self.language)
 
-        # Обновляем списки оружий с учетом нового языка
-        if hasattr(self, 'weapon_type_combo') and self.current_class:
-            # Обновляем типы оружия
-            self.weapon_type_combo.clear()
-            if self.current_class in TF2_WEAPONS:
-                for weapon_type in TF2_WEAPONS[self.current_class].keys():
-                    type_name = get_weapon_type_name(weapon_type, self.language)
-                    self.weapon_type_combo.addItem(type_name)
-            # "Custom Mod" — всегда последний фиксированный пункт
-            self.weapon_type_combo.addItem(
-                get_weapon_type_name("Custom", self.language)
-            )
+        # Обновляем категорию и зависимые списки с учётом нового языка
+        if hasattr(self, 'category_combo'):
+            self._populate_category_combo()
+            self.on_category_changed(self.category_combo.currentIndex())
 
-            # Восстанавливаем выбор и обновляем список оружий
-            if self.weapon_type_combo.count() > 0:
-                # Используем ключ current_weapon_type для точного поиска (не текст, который изменился)
-                idx = self._find_weapon_type_index(self.current_weapon_type) if self.current_weapon_type else -1
-                if idx == -1:
-                    idx = self._find_weapon_type_index("Primary")
-                if idx == -1:
-                    idx = 0
-                self.weapon_type_combo.setCurrentIndex(idx)
-                self.on_weapon_type_changed(self.weapon_type_combo.currentText())
-    
     def _find_weapon_type_index(self, type_key: str) -> int:
         """Возвращает индекс в weapon_type_combo для заданного ключа типа оружия, или -1."""
         target = get_weapon_type_name(type_key, self.language)
@@ -692,29 +843,34 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
         return -1
 
     def on_class_changed(self, class_text: str) -> None:
-        """Обработка изменения класса"""
+        """Обработка изменения класса (для категорий Оружие и Персонаж)."""
         # Извлекаем имя класса из текста с иконкой
         class_name = class_text.split(' ', 1)[1] if ' ' in class_text else class_text
         self.current_class = class_name
 
-        # Сохраняем текущий тип оружия; при первом запуске (None) → выбираем "Primary"
-        saved_key = self.current_weapon_type or "Primary"
+        cat = self._current_category
 
-        # Обновляем типы оружия
+        # В категории «Персонаж» смена класса перезаполняет части (тело/руки)
+        if cat == 'character':
+            self._populate_subtype_for_character()
+            return
+
+        # В прочих категориях, кроме «Оружие», класс не влияет на списки
+        if cat != 'weapon':
+            return
+
+        # ── Категория «Оружие»: заполняем слоты Primary/Secondary/Melee ──── #
+        saved_key = self.current_weapon_type if self.current_weapon_type in WEAPON_SLOT_TYPES else "Primary"
+
         self.weapon_type_combo.blockSignals(True)
         self.weapon_type_combo.clear()
         if class_name in TF2_WEAPONS:
-            for weapon_type in TF2_WEAPONS[class_name].keys():
-                type_name = get_weapon_type_name(weapon_type, self.language)
-                self.weapon_type_combo.addItem(type_name)
-        # "Custom Mod" — всегда последний фиксированный пункт
-        self.weapon_type_combo.addItem(
-            get_weapon_type_name("Custom", self.language)
-        )
+            for weapon_type in WEAPON_SLOT_TYPES:
+                if weapon_type in TF2_WEAPONS[class_name]:
+                    self.weapon_type_combo.addItem(get_weapon_type_name(weapon_type, self.language))
         self.weapon_type_combo.blockSignals(False)
 
         if self.weapon_type_combo.count() > 0:
-            # Пробуем восстановить сохранённый тип; если недоступен — берём "Primary"
             idx = self._find_weapon_type_index(saved_key)
             if idx == -1:
                 idx = self._find_weapon_type_index("Primary")
@@ -722,52 +878,24 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
                 idx = 0
             self.weapon_type_combo.setCurrentIndex(idx)
             self.on_weapon_type_changed(self.weapon_type_combo.currentText())
-    
+
     def on_weapon_type_changed(self, type_text: str) -> None:
-        """Обработка изменения типа оружия"""
+        """Обработка изменения слота оружия (только Primary/Secondary/Melee)."""
         weapon_type = get_weapon_type_key(type_text, self.language)
 
         if weapon_type and self.current_class:
             self.current_weapon_type = weapon_type
 
-            is_custom = (weapon_type == "Custom")
-            self._set_hands_mode_ui(weapon_type in ("Hands", "PlayerSkin", "Custom"))
-
-            # В custom режиме комбо оружий не нужен
-            self.weapon_combo.setVisible(not is_custom)
-            self.weapon_label.setVisible(not is_custom)
-
-            if not is_custom:
-                # Обновляем список оружия
-                self.weapon_combo.clear()
-                if self.current_class in TF2_WEAPONS and weapon_type in TF2_WEAPONS[self.current_class]:
-                    for weapon_key in TF2_WEAPONS[self.current_class][weapon_type].keys():
-                        weapon_name = get_weapon_name(self.current_class, weapon_type, weapon_key, self.language)
-                        self.weapon_combo.addItem(f"{weapon_name} ({weapon_key})")
+            # Обновляем список конкретного оружия для выбранного слота
+            self.weapon_combo.clear()
+            if self.current_class in TF2_WEAPONS and weapon_type in TF2_WEAPONS[self.current_class]:
+                for weapon_key in TF2_WEAPONS[self.current_class][weapon_type].keys():
+                    weapon_name = get_weapon_name(self.current_class, weapon_type, weapon_key, self.language)
+                    self.weapon_combo.addItem(f"{weapon_name} ({weapon_key})")
 
             self.apply_selection_auto()
 
-    def _set_hands_mode_ui(self, is_hands: bool) -> None:
-        """Скрывает/показывает секции CritHIT и Spray при выборе режима рук."""
-        # При входе в режим рук — снимаем чекбоксы и сбрасываем build-options
-        if is_hands:
-            for cb in (self.crit_hit_checkbox, self.spray_checkbox):
-                cb.blockSignals(True)
-                cb.setChecked(False)
-                cb.blockSignals(False)
-            # Сбрасываем опции в меню шестерёнки (замена модели / готовая модель)
-            if hasattr(self, 'settings_panel'):
-                self.settings_panel.reset_build_options(emit=True)
-            self.selected_smd_path = None
 
-        for widget in (
-            self.crit_hit_label,
-            self.crit_hit_checkbox,
-            self.spray_label,
-            self.spray_checkbox,
-        ):
-            widget.setVisible(not is_hands)
-    
     def on_weapon_changed(self, weapon_text: str) -> None:
         """Обработка изменения оружия"""
         if weapon_text and '(' in weapon_text:
@@ -849,36 +977,48 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
     def _on_vpk_mod_loaded(self, vpk_path: str) -> None:
         """Вызывается когда пользователь загрузил VPK мод в 3D превью."""
         self._custom_vpk_path = vpk_path
-        # Переключаем weapon_type_combo на "Custom Mod"
-        target = get_weapon_type_name("Custom", self.language)
-        for i in range(self.weapon_type_combo.count()):
-            if self.weapon_type_combo.itemText(i) == target:
-                self.weapon_type_combo.setCurrentIndex(i)
-                break
+        # Переключаем категорию на «Кастомный мод»
+        try:
+            custom_idx = self._category_keys.index('custom')
+            if self.category_combo.currentIndex() == custom_idx:
+                # Уже на custom — сигнал не сработает, пересчитываем mode вручную
+                self.apply_selection_auto()
+            else:
+                self.category_combo.setCurrentIndex(custom_idx)
+        except ValueError:
+            pass
         logger.info(f"Кастомный VPK мод загружен: {vpk_path}")
     
     def apply_selection_auto(self) -> None:
-        """Автоматически применяет выбранное оружие"""
+        """Определяет self.mode по текущей категории и выбору пользователя."""
         # Если активна вкладка шапок — mode управляется через _on_hat_selected
         if getattr(self, '_current_tab', 0) == 1:
             return
 
-        is_spray    = self.spray_checkbox.isChecked()
-        is_crit_hit = self.crit_hit_checkbox.isChecked()
+        cat = self._current_category
 
-        if is_spray:
-            self.mode = "spray"
-            logger.info("Выбран режим Spray")
-        elif is_crit_hit:
-            self.mode = "critHIT"
-            logger.info("Выбран CritHIT режим")
-        elif self.current_weapon_type == "Custom":
+        if cat == 'special':
+            # Крит/Спрей: источник истины — скрытые чекбоксы
+            if self.spray_checkbox.isChecked():
+                self.mode = "spray"
+            elif self.crit_hit_checkbox.isChecked():
+                self.mode = "critHIT"
+            else:
+                self.mode = None
+        elif cat == 'custom':
             self.mode = "custom" if getattr(self, '_custom_vpk_path', None) else None
-        elif self.current_class and self.current_weapon:
-            self.mode = f"{self.current_class.lower()}_{self.current_weapon}"
-            logger.debug(f"Выбрано оружие: {self.current_class} - {self.current_weapon}")
-        else:
-            self.mode = None
+        elif cat == 'character':
+            # Тело/руки: mode = f"{class}_{part_key}" (scout_body, spy_masks и т.д.)
+            if self.current_class and self.current_weapon:
+                self.mode = f"{self.current_class.lower()}_{self.current_weapon}"
+            else:
+                self.mode = None
+        else:  # weapon
+            if self.current_class and self.current_weapon:
+                self.mode = f"{self.current_class.lower()}_{self.current_weapon}"
+                logger.debug(f"Выбрано оружие: {self.current_class} - {self.current_weapon}")
+            else:
+                self.mode = None
 
         # Применяем ограничения UI для текущего режима
         if hasattr(self, 'settings_panel'):
