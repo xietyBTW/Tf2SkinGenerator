@@ -71,4 +71,6 @@ Thumbs.db
 Desktop.ini
 *.lnk
 .DS_Store
-cache/hats_cache.json
+
+# Кэш приложения (декомпиляция шапок и т.п.) — не коммитим
+cache/
