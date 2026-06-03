@@ -913,7 +913,8 @@ class SettingsPanel(QWidget):
                     кнопки инструментов недоступны
           Spray   — только 256×256; только форматы с альфа; флаги недоступны;
                     UV/Normal скрыты; кнопки инструментов недоступны
-          Hands   — UV/Normal скрыты; VMT недоступен; Извлечь модель — доступно
+          Hands   — UV скрыт; Normal Map доступен; VMT недоступен; Извлечь модель — доступно
+          Тело    — UV скрыт; Normal Map доступен (модель VertexLitGeneric)
         """
         try:
             from src.data.player_hands import HAND_MODE_KEYS
@@ -1006,10 +1007,13 @@ class SettingsPanel(QWidget):
                 self.advanced_group.content_widget.updateGeometry()
 
         # ── 5. Normal Map ─────────────────────────────────────────────────── #
-        # Только для обычного оружия; CritHIT управляет сам
+        # Доступно для моделей (VertexLitGeneric): оружие, руки, тело персонажа —
+        # все идут через декомпиляционный пайплайн, который патчит $bumpmap в VMT.
+        # Недоступно: Spray/Crit (UnlitGeneric, бамп бессмыслен); CritHIT управляет сам.
+        normal_allowed = is_normal or is_hands or is_player_body
         if hasattr(self, 'option_normal') and not is_crit:
-            self.option_normal.setEnabled(is_normal)
-            if not is_normal and self.option_normal.isChecked():
+            self.option_normal.setEnabled(normal_allowed)
+            if not normal_allowed and self.option_normal.isChecked():
                 self.option_normal.blockSignals(True)
                 self.option_normal.setChecked(False)
                 self.option_normal.blockSignals(False)
