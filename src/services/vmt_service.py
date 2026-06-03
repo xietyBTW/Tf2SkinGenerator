@@ -8,6 +8,78 @@ from src.data.weapons import SPECIAL_MODES
 class VMTService:
     """Сервис для работы с VMT файлами (материалы Source Engine, хуйня с путями и шаблонами)"""
 
+    # ── Валидация синтаксиса ─────────────────────────────────────────────── #
+
+    @staticmethod
+    def validate_vmt_syntax(content: str) -> Tuple[bool, str, int]:
+        """
+        Проверяет базовый KeyValues-синтаксис VMT.
+
+        Ловит самые частые причины «невидимого материала» в игре:
+          - незакрытые/лишние фигурные скобки { };
+          - нечётные (незакрытые) кавычки в строке;
+          - отсутствие корневого блока шейдера.
+
+        Комментарии (// ...) и содержимое строк в кавычках игнорируются,
+        чтобы скобка/кавычка внутри значения не считалась структурной.
+
+        Returns:
+            (is_valid, error_message, error_line)
+            error_line — номер строки (1-based) или 0, если не привязано к строке.
+        """
+        depth = 0
+        saw_shader = False
+        saw_any_brace = False
+
+        for line_no, raw in enumerate(content.split('\n'), 1):
+            line = raw
+
+            # Обрезаем // комментарий, но только если он вне кавычек.
+            q = 0
+            cut = None
+            i = 0
+            while i < len(line):
+                ch = line[i]
+                if ch == '"':
+                    q += 1
+                elif ch == '/' and i + 1 < len(line) and line[i + 1] == '/' and q % 2 == 0:
+                    cut = i
+                    break
+                i += 1
+            if cut is not None:
+                line = line[:cut]
+
+            # Нечётное число кавычек в строке → незакрытая строка
+            if line.count('"') % 2 != 0:
+                return False, "Незакрытая кавычка", line_no
+
+            # Убираем строковые значения, чтобы скобки внутри них не считались
+            structural = re.sub(r'"[^"]*"', '', line)
+
+            # Имя шейдера/секции — токен в кавычках в начале строки до открытия блока
+            if depth == 0 and re.search(r'"[^"]+"', line):
+                saw_shader = True
+
+            for ch in structural:
+                if ch == '{':
+                    depth += 1
+                    saw_any_brace = True
+                elif ch == '}':
+                    depth -= 1
+                    if depth < 0:
+                        return False, "Лишняя закрывающая скобка }", line_no
+
+        if depth > 0:
+            return False, "Незакрытая скобка {", 0
+        if not content.strip():
+            return False, "Пустой VMT", 0
+        if not saw_any_brace:
+            return False, "Нет блока { } — VMT должен содержать тело шейдера", 0
+        if not saw_shader:
+            return False, "Не найдено имя шейдера (напр. \"VertexLitGeneric\")", 0
+
+        return True, "", 0
+
     # ── Внутренние хелперы ───────────────────────────────────────────────── #
 
     @staticmethod
