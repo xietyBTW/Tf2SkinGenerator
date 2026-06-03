@@ -24,52 +24,70 @@ class AppFactory:
     @staticmethod
     def get_icon_path() -> Optional[Path]:
         if getattr(sys, 'frozen', False):
-            base_path = Path(sys.executable).parent if hasattr(sys, '_MEIPASS') else Path(sys.executable).parent
-            
+            base_path = Path(sys.executable).parent
+
             frozen_paths = [
                 base_path / "icon.ico",
                 base_path / "installer" / "assets" / "icon.ico",
             ]
-            
+
             if hasattr(sys, '_MEIPASS'):
                 temp_path = Path(sys._MEIPASS)
-                frozen_paths.insert(0, temp_path / "installer" / "assets" / "icon.ico")
-            
+                # src/static бандлится всегда → кладём иконку туда (надёжный путь),
+                # плюс старые пути на случай отдельной поставки icon.ico.
+                frozen_paths.insert(0, temp_path / "src" / "static" / "icon.ico")
+                frozen_paths.insert(1, temp_path / "installer" / "assets" / "icon.ico")
+
             for icon_path in frozen_paths:
                 if icon_path.exists():
                     return icon_path
-        
+
         base_dir = Path(__file__).parent.parent.parent
         dev_paths = [
+            base_dir / "src" / "static" / "icon.ico",
             base_dir / "installer" / "assets" / "icon.ico",
             Path("installer/assets/icon.ico"),
         ]
-        
+
         for icon_path in dev_paths:
             if icon_path.exists():
                 return icon_path
-        
+
         return None
     
     @staticmethod
+    def _set_windows_app_id() -> None:
+        """
+        Задаёт явный AppUserModelID (Windows), чтобы панель задач показывала
+        иконку окна, а не группировала приложение под дефолтным значком.
+        """
+        if sys.platform != 'win32':
+            return
+        try:
+            import ctypes
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+                "Tf2SkinGenerator.App"
+            )
+        except Exception as e:
+            logger.debug(f"Не удалось задать AppUserModelID: {e}")
+
+    @staticmethod
     def create_app(apply_theme: bool = True) -> QApplication:
         AppFactory.setup_working_directory()
+        AppFactory._set_windows_app_id()
 
         app = QApplication(sys.argv)
         logger.info("QApplication создан")
 
-        if getattr(sys, 'frozen', False):
-            # В собранном .exe иконка уже встроена PyInstaller-ом —
-            # читаем её прямо из исполняемого файла, отдельный icon.ico не нужен
-            app.setWindowIcon(QIcon(sys.executable))
-            logger.debug("Иконка загружена из exe")
+        # Иконку окна/панели задач задаём из .ico-файла И в dev, И в frozen:
+        # QIcon(sys.executable) не умеет извлекать иконку из .exe (PE-ресурс),
+        # поэтому окно оставалось без значка, хотя у файла он есть.
+        icon_path = AppFactory.get_icon_path()
+        if icon_path:
+            app.setWindowIcon(QIcon(str(icon_path)))
+            logger.debug(f"Установлена иконка приложения: {icon_path}")
         else:
-            icon_path = AppFactory.get_icon_path()
-            if icon_path:
-                app.setWindowIcon(QIcon(str(icon_path)))
-                logger.debug(f"Установлена иконка приложения: {icon_path}")
-            else:
-                logger.warning("Иконка приложения не найдена")
+            logger.warning("Иконка приложения (.ico) не найдена — окно без значка")
 
         if apply_theme:
             AppFactory._apply_theme(app)

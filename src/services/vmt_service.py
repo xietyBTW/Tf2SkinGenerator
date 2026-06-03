@@ -487,6 +487,68 @@ class VMTService:
             f.write(new_content)
     
     @staticmethod
+    def _set_vmt_param(content: str, param: str, value: str) -> str:
+        """
+        Идемпотентно ставит параметр VMT в корневой блок шейдера.
+
+        Если параметр уже есть — заменяет значение; иначе вставляет новую строку
+        перед закрывающей скобкой корневого блока. Регистронезависимо
+        (Valve пишет $EnvMap/$envmap как попало).
+        """
+        pattern = re.compile(
+            r'(^[ \t]*"?' + re.escape(param) + r'"?[ \t]+)"[^"]*"',
+            re.IGNORECASE | re.MULTILINE,
+        )
+        new_content, n = pattern.subn(lambda m: f'{m.group(1)}"{value}"', content, count=1)
+        if n:
+            return new_content
+
+        open_brace = content.find('{')
+        if open_brace == -1:
+            return content
+        end = VMTService._find_block_end(content, open_brace)
+        if end is None:
+            return content
+        return content[:end] + f'\t"{param}" "{value}"\n' + content[end:]
+
+    @staticmethod
+    def add_material_map_params(vmt_path: str, cdmaterials_path: str, map_texture_key: str,
+                                path_param: str, extra_vmt: dict = None) -> bool:
+        """
+        Вписывает в VMT файловую карту материала (Фаза 2): путь к карте + скаляры.
+
+        path_param   — параметр-путь ($detail / $selfillummask / $phongexponenttexture);
+        map_texture_key — имя VTF-карты без расширения (например c_scattergun_detail);
+        extra_vmt    — сопутствующие параметры ($detailscale, $selfillum, $phong …).
+
+        Путь карты строится так же, как $basetexture/$bumpmap — от $cdmaterials.
+        Работает только на VertexLitGeneric. Возвращает True, если VMT изменён.
+        Не пишет результат, если он не прошёл валидацию синтаксиса.
+        """
+        if not os.path.exists(vmt_path):
+            return False
+
+        with open(vmt_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+
+        m = re.match(r'\s*"?([A-Za-z_]+)"?', content)
+        if not (m and m.group(1).lower() == 'vertexlitgeneric'):
+            return False
+
+        tex_path = VMTService._get_texture_path_from_cdmaterials(cdmaterials_path, map_texture_key)
+        content = VMTService._set_vmt_param(content, path_param, tex_path)
+        for param, value in (extra_vmt or {}).items():
+            content = VMTService._set_vmt_param(content, param, str(value))
+
+        is_valid, _err, _line = VMTService.validate_vmt_syntax(content)
+        if not is_valid:
+            return False
+
+        with open(vmt_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+        return True
+
+    @staticmethod
     def remove_paint_proxies(vmt_path: str) -> None:
         """
         Removes game paint (tint color) proxies from a hat VMT file so that

@@ -218,9 +218,15 @@ class Preview3DWorker(QThread):
 
             else:
                 # Обычное оружие
+                # Доп. текстуры по фиксированному пути (вне QC/модели), напр.
+                # HUD-вставки Dead Ringer (pocket_watch_fg/bg).
+                fixed_extras = self._extract_fixed_extra_textures()
+
                 if len(mat_names) > 1:
                     # ── Мульти-материальное оружие (shell, scope и т.п.) ─────── #
                     tex_map = self._extract_multi_textures(mat_names)
+                    if fixed_extras:
+                        tex_map.update(fixed_extras)
                     first_tex = next(iter(tex_map.values()), "") if tex_map else ""
                     self.ready.emit(obj_path, first_tex)
                     if tex_map:
@@ -231,7 +237,16 @@ class Preview3DWorker(QThread):
                     frame_paths, framerate = self._extract_texture_frames()
                     first_tex = frame_paths[0] if frame_paths else ""
                     self.ready.emit(obj_path, first_tex)
-                    if len(frame_paths) > 1:
+                    if fixed_extras:
+                        # Главная текстура + фиксированные доп. → карточки в 2D
+                        combined: dict = {}
+                        main_name = mat_names[0] if mat_names else self.weapon_key
+                        if first_tex:
+                            combined[main_name] = first_tex
+                        combined.update(fixed_extras)
+                        if len(combined) > 1:
+                            self.multi_material.emit(combined)
+                    elif len(frame_paths) > 1:
                         self.animated.emit(frame_paths, framerate)
 
                 if self.isInterruptionRequested():
@@ -513,12 +528,31 @@ class Preview3DWorker(QThread):
         SMD файлах рядом с reference SMD. Пример: c_righthand_bodygroup.smd
         внутри c_pyro_arms — правая рука, которая включается при нужном оружии.
 
+        Дополнительно подбирает ВСЕ part-SMD, на которые ссылается QC через
+        $body/$bodygroup (studio "...smd") — например центральную вставку
+        Dead Ringer (pocket_watch_fg), которая лежит отдельным part-SMD и иначе
+        не попала бы в превью (её материала не было бы среди mat_names).
+
         Returns:
-            Список путей к найденным _bodygroup.smd файлам.
+            Список путей к доп. SMD (bodygroup-файлы + part-SMD из QC).
         """
         directory = os.path.dirname(reference_smd_path)
-        pattern   = os.path.join(directory, "*_bodygroup.smd")
-        return sorted(glob.glob(pattern))
+        found = set(glob.glob(os.path.join(directory, "*_bodygroup.smd")))
+
+        # Все доп. body-SMD из QC (исключая основной/physics/anim — это делает сервис).
+        try:
+            qcs = glob.glob(os.path.join(directory, "*.qc"))
+            if qcs:
+                from src.services.model_build_service import ModelBuildService
+                for smd in ModelBuildService.extract_extra_body_smds(qcs[0], self.weapon_key):
+                    found.add(smd)
+        except Exception as exc:
+            logger.debug(f"[3D] Не удалось собрать part-SMD из QC: {exc}")
+
+        # Не включаем сам reference (он уже основной)
+        found.discard(os.path.abspath(reference_smd_path))
+        found.discard(reference_smd_path)
+        return sorted(found)
 
     @staticmethod
     def _scan_smd_mat_names(smd_paths: list) -> set:
@@ -566,7 +600,18 @@ class Preview3DWorker(QThread):
             from src.services.vtflib_wrapper import VTFLib
             from src.data.player_hands import HAND_MODE_KEYS, HAND_MODES
 
-            pak = vpklib.open(self.textures_vpk_path)
+            # Открываем ОБА VPK: VTF обычно в textures, но VMT (для материалов,
+            # чья текстура задаётся через $basetexture, напр. pocket_watch_fg
+            # у Dead Ringer) — чаще в misc.
+            paks: list = []
+            for _vpk_path in [self.textures_vpk_path, self.misc_vpk_path]:
+                if _vpk_path and os.path.exists(_vpk_path):
+                    try:
+                        paks.append(vpklib.open(_vpk_path))
+                    except Exception as _exc:
+                        logger.debug(f"[3D] Ошибка открытия VPK {_vpk_path}: {_exc}")
+            if not paks:
+                return result
 
             # Для моделей рук / скинов персонажа определяем папку (materials/models/player/{folder}/)
             # Все материалы SMD текстурируем — _find_vtf_for_mat ищет сначала
@@ -586,8 +631,22 @@ class Preview3DWorker(QThread):
                     os.path.splitext(os.path.basename(self.weapon_key))[0]
                 )
 
+            # Пути материалов из QC ($cdmaterials) — авторитетный источник для
+            # оружия: позволяет найти ВСЕ материалы модели (вторая текстура и т.п.),
+            # даже если их папка не совпадает с именем материала.
+            cdmats = self._get_qc_cdmaterials()
+
             for mat_name in mat_names:
-                vtf_data = self._find_vtf_for_mat(pak, mat_name, arm_folder)
+                # 1) Прямой поиск VTF по угадываемым путям и $cdmaterials.
+                vtf_data = None
+                for _pak in paks:
+                    vtf_data = self._find_vtf_for_mat(_pak, mat_name, arm_folder, cdmats)
+                    if vtf_data:
+                        break
+                # 2) Fallback: материал → его VMT → $basetexture → VTF
+                #    (покрывает материалы без прямого VTF, напр. pocket_watch_fg).
+                if not vtf_data and cdmats:
+                    vtf_data = self._resolve_vtf_via_vmt(paks, cdmats, mat_name)
                 if not vtf_data:
                     logger.warning(f"[3D] Текстура для материала '{mat_name}' не найдена")
                     continue
@@ -771,8 +830,129 @@ class Preview3DWorker(QThread):
         # result: {red_mat_name: (blu_png_path, blu_display_name)}
         return result
 
+    def _extract_fixed_extra_textures(self) -> dict:
+        """
+        Извлекает доп. текстуры предмета, заданные ФИКСИРОВАННЫМ путём в VPK
+        (вне QC и геометрии модели) — см. WEAPON_EXTRA_TEXTURES.
+
+        Пример: HUD-вставки Dead Ringer pocket_watch_fg/bg по пути
+        materials/vgui/replay/thumbnails/deadringer/...
+
+        Returns:
+            {material_name: png_path} для найденных текстур.
+        """
+        from src.data.weapons import WEAPON_EXTRA_TEXTURES
+        extras = WEAPON_EXTRA_TEXTURES.get(self.weapon_key, [])
+        if not extras:
+            return {}
+
+        result: dict = {}
+        try:
+            import vpk as vpklib
+            paks: list = []
+            for _vpk_path in [self.textures_vpk_path, self.misc_vpk_path]:
+                if _vpk_path and os.path.exists(_vpk_path):
+                    try:
+                        paks.append(vpklib.open(_vpk_path))
+                    except Exception as _exc:
+                        logger.debug(f"[3D] Ошибка открытия VPK {_vpk_path}: {_exc}")
+
+            for ex in extras:
+                # 1) Прямой VTF по указанному пути.
+                data = None
+                for pak in paks:
+                    try:
+                        data = pak[ex["vpk"]].read()
+                        break
+                    except KeyError:
+                        continue
+                # 2) Через VMT → $basetexture (часто VTF лежит не там, куда смотрит HUD).
+                if not data and ex.get("vmt"):
+                    for pak in paks:
+                        try:
+                            vmt_raw = pak[ex["vmt"]].read()
+                        except KeyError:
+                            continue
+                        base = self._parse_basetexture_from_vmt(
+                            vmt_raw.decode("utf-8", errors="replace"))
+                        if base:
+                            for pak2 in paks:
+                                data = self._find_vtf_for_basetexture(pak2, base)
+                                if data:
+                                    break
+                        if data:
+                            break
+
+                png = self._vtf_data_to_png(data, ex["name"]) if data else None
+                # 3) Слот предлагаем ВСЕГДА — даже без оригинала (пустой плейсхолдер).
+                if not png:
+                    png = self._make_blank_png(ex["name"])
+                    logger.info(f"[3D] Фикс. доп. текстура без оригинала — пустой слот: {ex['name']}")
+                if png:
+                    result[ex["name"]] = png
+        except Exception as exc:
+            logger.warning(f"[3D] Ошибка извлечения фикс. доп. текстур: {exc}", exc_info=True)
+        return result
+
+    def _make_blank_png(self, name: str) -> Optional[str]:
+        """Создаёт пустой прозрачный PNG-плейсхолдер (для слота без оригинала)."""
+        try:
+            from PIL import Image
+            img = Image.new("RGBA", (256, 256), (0, 0, 0, 0))
+            png_path = os.path.join(self._preview_dir, f"{name}.png")
+            img.save(png_path)
+            return png_path
+        except Exception as exc:
+            logger.debug(f"[3D] Не удалось создать плейсхолдер для {name}: {exc}")
+            return None
+
+    def _resolve_vtf_via_vmt(self, paks: list, cdmaterials: list, mat_name: str) -> Optional[bytes]:
+        """
+        Резолвит VTF материала через его VMT: {cdmat}/{mat}.vmt → $basetexture → VTF.
+
+        Нужно для материалов, у которых текстура задаётся через VMT, а не лежит
+        по «угадываемому» пути (напр. центральная вставка Dead Ringer
+        'pocket_watch_fg'). VMT и VTF могут быть в разных VPK — ищем по всем.
+        """
+        mat_lower = mat_name.lower()
+        for pak in paks:
+            info = self._find_vmt_content_in_vpk(pak, cdmaterials, mat_lower)
+            if not info:
+                continue
+            base = self._parse_basetexture_from_vmt(info[1])
+            if not base:
+                continue
+            for pak2 in paks:
+                data = self._find_vtf_for_basetexture(pak2, base)
+                if data:
+                    logger.debug(f"[3D] '{mat_name}' резолвлен через VMT → {base}")
+                    return data
+        return None
+
+    def _get_qc_cdmaterials(self) -> list:
+        """
+        Возвращает список путей $cdmaterials из QC декомпилированной модели
+        (без 'materials/' и слешей по краям). Кэшируется. Нужен чтобы найти
+        текстуры ВСЕХ материалов оружия по авторитетным путям из QC.
+        """
+        if getattr(self, '_cached_cdmaterials', None) is not None:
+            return self._cached_cdmaterials
+        cdmats: list = []
+        try:
+            import glob
+            decomp = getattr(self, '_decomp_dir', None)
+            if decomp:
+                qcs = glob.glob(os.path.join(decomp, "*.qc"))
+                if qcs:
+                    cdmats, _ = self._parse_qc_texture_info(qcs[0])
+        except Exception as exc:
+            logger.debug(f"[3D] Не удалось распарсить $cdmaterials: {exc}")
+        self._cached_cdmaterials = cdmats
+        return cdmats
+
     def _find_vtf_for_mat(
-        self, pak, mat_name: str, arm_folder: Optional[str]
+        self, pak, mat_name: str, arm_folder: Optional[str],
+        cdmaterials: Optional[list] = None,
     ) -> Optional[bytes]:
         """Ищет VTF-данные для имени материала из SMD."""
         paths: list = []
@@ -825,7 +1005,15 @@ class Preview3DWorker(QThread):
                         )
                     break
 
-        # Стандартные пути оружий
+        # Пути из QC ($cdmaterials) — авторитетные: текстура лежит ровно там,
+        # куда указывает модель. Покрывает вторую/третью текстуру оружия в
+        # нестандартных папках (parts/, общая папка модели и т.п.).
+        for cd in (cdmaterials or []):
+            paths.append(f"materials/{cd}/{mat_name}.vtf")
+            if mat_lower != mat_name:
+                paths.append(f"materials/{cd}/{mat_lower}.vtf")
+
+        # Стандартные пути оружий (fallback-угадывание)
         paths += [
             f"materials/models/workshop_partner/weapons/c_models/{mat_name}/{mat_name}.vtf",
             f"materials/models/weapons/c_models/{mat_name}/{mat_name}.vtf",

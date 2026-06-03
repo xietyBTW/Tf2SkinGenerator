@@ -1789,6 +1789,7 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
                 hat_mdl_path=getattr(self, '_hat_mdl_path', None),
                 hat_apply_game_paints=hat_apply_game_paints,
                 panel_extra_textures=_panel_extra_textures,
+                material_maps=settings.get('material_maps', {}),
                 # Без parent=self ! Если дать parent=self, Qt станет владельцем
                 # и не удалит старый воркер при замене, и сигналы будут дублироваться.
             )

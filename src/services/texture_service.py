@@ -3,7 +3,7 @@ import shutil
 import subprocess
 from pathlib import Path
 from typing import List, Tuple, Optional
-from PIL import Image
+from PIL import Image, ImageOps
 from src.shared.constants import ToolPaths
 from src.shared.logging_config import get_logger
 from src.services.vtflib_wrapper import VTFLib, VTFImageFormat, VTFImageFlags
@@ -23,6 +23,50 @@ class TextureService:
     @staticmethod
     def get_vtf_tool() -> Path:
         return ToolPaths.get_vtf_tool()
+
+    @staticmethod
+    def derive_effect_map(
+        base_image_path: str,
+        out_png_path: str,
+        kind: str,
+        size: Tuple[int, int],
+        threshold: Optional[int] = None,
+        contrast: bool = True,
+    ) -> str:
+        """
+        Строит карту эффекта ИЗ базовой текстуры (без участия пользователя).
+
+        kind:
+          • "phong"     → RGBA: RGB = яркость (карта экспоненты), ALPHA = маска
+                          блеска (по яркости / порогу). Светлые линии → острый
+                          блик, тёмное → матовое.
+          • "selfillum" → L (grayscale): маска свечения по яркости / порогу.
+
+        threshold: 0..255 — если задан, маска бинаризуется по этому порогу
+                   (блестит/светится только то, что ярче). None → плавно.
+        contrast:  авто-контраст яркости (растягивает динамику).
+        """
+        img = Image.open(base_image_path).convert("RGB")
+        if size:
+            img = img.resize(size, Image.LANCZOS)
+        gray = ImageOps.grayscale(img)
+        if contrast:
+            gray = ImageOps.autocontrast(gray)
+
+        def _mask(src):
+            if threshold is None:
+                return src
+            return src.point(lambda p: 255 if p >= threshold else 0)
+
+        if kind == "phong":
+            out = Image.merge("RGBA", (gray, gray, gray, _mask(gray)))
+        elif kind == "selfillum":
+            out = _mask(gray).convert("L")
+        else:
+            out = gray
+        out.save(out_png_path)
+        logger.info(f"Карта '{kind}' выведена из базовой текстуры: {out_png_path}")
+        return out_png_path
 
     @staticmethod
     def process_image(input_path: str, output_path: str, size: Tuple[int, int]) -> None:

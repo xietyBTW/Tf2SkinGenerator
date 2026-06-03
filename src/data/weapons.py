@@ -208,6 +208,10 @@ TF2_WEAPONS = {
             "c_jag": {"ru": "Острозуб", "en": "Jag"},
             "c_drg_wrenchmotron": {"ru": "Озарение", "en": "Eureka Effect"}
         },
+        "PDA": {
+            "c_builder": {"ru": "КПК строительства", "en": "Construction PDA"},
+            "c_pda_engineer": {"ru": "КПК сноса", "en": "Destruction PDA"},
+        },
         "Hands": {
             "hands": {"ru": "Руки", "en": "Hands"},
             "mech_hands": {"ru": "Рука робота (МвМ)", "en": "Robot Hand (MvM)"},
@@ -302,6 +306,11 @@ TF2_WEAPONS = {
             "c_switchblade": {"ru": "Главный делец", "en": "Big Earner"},
             "c_xms_cold_shoulder": {"ru": "Сосулька", "en": "Spy-Cicle"}
         },
+        "Watch": {
+            "c_spy_watch": {"ru": "Часы невидимости", "en": "Invis Watch"},
+            "c_leather_watch": {"ru": "Плащ и кинжал", "en": "Cloak and Dagger"},
+            "c_pocket_watch": {"ru": "Запасной выход", "en": "Dead Ringer"},
+        },
         "Hands": {
             "hands": {"ru": "Руки", "en": "Hands"},
         },
@@ -331,13 +340,17 @@ WEAPON_TYPES = {
     "Primary": {"ru": "Основное", "en": "Primary"},
     "Secondary": {"ru": "Дополнительное", "en": "Secondary"},
     "Melee": {"ru": "Ближний бой", "en": "Melee"},
+    "Watch": {"ru": "Часы", "en": "Watch"},
+    "PDA": {"ru": "КПК", "en": "PDA"},
     "Hands": {"ru": "Руки", "en": "Hands"},
     "Custom": {"ru": "Кастомный мод", "en": "Custom Mod"},
 }
 
 # Слоты оружия — то, что показывается в списке «Тип оружия» под категорией «Оружие».
 # PlayerSkin/Hands/Custom сюда НЕ входят: они теперь в других категориях.
-WEAPON_SLOT_TYPES = ["Primary", "Secondary", "Melee"]
+# Watch (часы шпиона) и PDA (КПК инженера) показываются только у тех классов,
+# где они есть (фильтр по TF2_WEAPONS в main_window).
+WEAPON_SLOT_TYPES = ["Primary", "Secondary", "Melee", "Watch", "PDA"]
 
 # Типы оружия, которые относятся к категории «Персонаж» (тело + руки).
 CHARACTER_PART_TYPES = ["PlayerSkin", "Hands"]
@@ -469,6 +482,18 @@ WEAPON_MDL_PATHS["w_sd_sapper"] = (
     "models/weapons/w_models/w_sd_sapper.mdl"
 )
 
+# Часы шпиона: Invis Watch лежит плоским файлом, Dead Ringer и Cloak and Dagger —
+# в подпапке parts/. КПК инженера (c_builder, c_pda_engineer) совпадают с дефолтом.
+WEAPON_MDL_PATHS["c_spy_watch"] = (
+    "models/weapons/c_models/c_spy_watch.mdl"
+)
+WEAPON_MDL_PATHS["c_pocket_watch"] = (
+    "models/weapons/c_models/c_pocket_watch/parts/c_pocket_watch.mdl"
+)
+WEAPON_MDL_PATHS["c_leather_watch"] = (
+    "models/weapons/c_models/c_leather_watch/parts/c_leather_watch.mdl"
+)
+
 # ── Модели рук (c_class_arms) ─────────────────────────────────────────────────
 _ARM_CLASSES = [
     "c_scout_arms",
@@ -498,6 +523,29 @@ WEAPON_MDL_PATHS["player_engineer"] = "models/player/engineer.mdl"
 WEAPON_MDL_PATHS["player_medic"]    = "models/player/medic.mdl"
 WEAPON_MDL_PATHS["player_sniper"]   = "models/player/sniper.mdl"
 WEAPON_MDL_PATHS["player_spy"]      = "models/player/spy.mdl"
+
+# ── Доп. текстуры по фиксированному пути (вне QC/модели) ──────────────────────
+# Некоторые предметы используют текстуры, которых НЕТ ни в $texturegroup, ни в
+# геометрии модели (например HUD-вставки Dead Ringer). Их нельзя найти через
+# материалы модели — путь зашит в игре. Здесь задаём такие текстуры явно:
+#   {weapon_key: [{"name", "vpk" (путь в VPK с materials/...vtf), "ru", "en"}]}
+# Превью покажет для них слот, сборка запишет картинку ровно по этому пути.
+WEAPON_EXTRA_TEXTURES: dict[str, list[dict]] = {
+    "c_pocket_watch": [
+        {
+            "name": "pocket_watch_fg",
+            "vpk":  "materials/vgui/replay/thumbnails/deadringer/pocket_watch_fg.vtf",
+            "vmt":  "materials/vgui/pocket_watch_fg.vmt",
+            "ru": "Центральная вставка", "en": "Center insert",
+        },
+        {
+            "name": "pocket_watch_bg",
+            "vpk":  "materials/vgui/replay/thumbnails/deadringer/pocket_watch_bg.vtf",
+            "vmt":  "materials/vgui/pocket_watch_bg.vmt",
+            "ru": "Фон циферблата", "en": "Watch background",
+        },
+    ],
+}
 
 # ── Нестандартные пути VTF (дополнительные пути для поиска текстур) ───────────
 # Используются как приоритетный список ПЕРЕД стандартными путями.

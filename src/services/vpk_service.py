@@ -281,6 +281,252 @@ class VPKService:
             )
 
     @staticmethod
+    def _build_material_maps(
+        material_maps: Optional[dict],
+        vtf_output_path: Path,
+        texture_filename: str,
+        vmt_path: Path,
+        patched_cdmaterials_path: str,
+        size: Tuple[int, int],
+        base_image_path: Optional[str] = None,
+        is_normal_map: bool = False,
+    ) -> None:
+        """
+        Генерит файловые карты материала (Фаза 2) и вписывает их в главный VMT.
+
+        material_maps: {map_id: {"image": путь | "derive": True, "$param": override, ...}}.
+        Источник карты:
+          • "image"  — пользователь загрузил файл;
+          • "derive" — карта выводится ИЗ базовой текстуры (base_image_path):
+                       phong → RGB=яркость, ALPHA=маска; selfillum → маска по яркости.
+
+        Для derive-phong дополнительно генерим карту нормалей из базовой текстуры
+        (без bumpmap Source не считает блик) и добавляем $envmap — это и есть
+        «Авто-блеск» из одной галочки.
+
+        Параметры пишутся в ГЛАВНЫЙ VMT — BLU-копии и зеркальные VMT наследуют их.
+        Ошибка одной карты не валит сборку.
+        """
+        if not material_maps:
+            return
+        from src.data.material_maps import MATERIAL_MAPS, MAP_ORDER
+
+        for map_id in MAP_ORDER:
+            spec = material_maps.get(map_id)
+            if not spec:
+                continue
+
+            cfg = MATERIAL_MAPS[map_id]
+            map_key = f"{texture_filename}{cfg['suffix']}"
+            derive = bool(spec.get("derive")) and bool(cfg.get("derive_kind"))
+            image = spec.get("image")
+
+            if not derive and (not image or not os.path.isfile(image)):
+                logger.warning(f"Карта '{map_id}': нет файла и не derive ({image!r}), пропуск")
+                continue
+            if derive and (not base_image_path or not os.path.isfile(base_image_path)):
+                logger.warning(f"Карта '{map_id}': derive невозможен — нет базовой текстуры, пропуск")
+                continue
+
+            try:
+                ensure_directory_exists(vtf_output_path)
+                temp_png = vtf_output_path / f"{map_key}.png"
+                if derive:
+                    threshold = spec.get("threshold")
+                    threshold = int(threshold) if threshold not in (None, "") else None
+                    TextureService.derive_effect_map(
+                        base_image_path, str(temp_png), cfg["derive_kind"], size,
+                        threshold=threshold,
+                    )
+                    # derive уже в нужном размере → VTF напрямую (сохраняем альфу-маску)
+                    VPKService._create_vtf(
+                        str(temp_png), str(vtf_output_path),
+                        cfg["format"], list(cfg["flags"]), {}
+                    )
+                else:
+                    VPKService._process_image(image, str(temp_png), size)
+                    VPKService._create_vtf(
+                        str(temp_png), str(vtf_output_path),
+                        cfg["format"], list(cfg["flags"]), {}
+                    )
+                if temp_png.exists():
+                    temp_png.unlink()
+            except Exception as e:
+                logger.warning(f"Не удалось создать VTF карты '{map_id}': {e}", exc_info=True)
+                continue
+
+            # extra_vmt + переопределения числовых из UI (ключи вида "$param")
+            extra = dict(cfg["extra_vmt"])
+            for k, v in spec.items():
+                if isinstance(k, str) and k.startswith("$"):
+                    extra[k] = str(v)
+
+            # derive-режим: доклеиваем сопутствующие параметры (envmap и т.п.)
+            if derive:
+                extra.update(cfg.get("derive_extra_vmt", {}))
+                if cfg.get("derive_auto_normal"):
+                    VPKService._ensure_derived_normal(
+                        base_image_path, vtf_output_path, texture_filename, vmt_path,
+                        patched_cdmaterials_path, size, is_normal_map,
+                    )
+
+            VMTService.add_material_map_params(
+                str(vmt_path), patched_cdmaterials_path, map_key, cfg["path_param"], extra
+            )
+            logger.info(
+                f"Карта материала '{map_id}' добавлена в VMT: {map_key}.vtf "
+                f"({'derive' if derive else 'file'})"
+            )
+
+    @staticmethod
+    def _ensure_derived_normal(
+        base_image_path: str,
+        vtf_output_path: Path,
+        texture_filename: str,
+        vmt_path: Path,
+        patched_cdmaterials_path: str,
+        size: Tuple[int, int],
+        is_normal_map: bool,
+    ) -> None:
+        """
+        Гарантирует наличие карты нормалей для phong (без неё блик не считается).
+
+        Если normal уже сгенерирован (галочка Normal Map) или файл уже есть —
+        ничего не делает. Иначе строит {texture}_normal.vtf из базовой текстуры
+        (VTFCmd -normal, формат DXT5) и прописывает $bumpmap в VMT.
+        """
+        normal_vtf = vtf_output_path / f"{texture_filename}_normal.vtf"
+        if is_normal_map or normal_vtf.exists():
+            return
+        try:
+            norm_png = vtf_output_path / f"{texture_filename}_normal.png"
+            VPKService._process_image(base_image_path, str(norm_png), size)
+            VPKService._create_vtf(str(norm_png), str(vtf_output_path), "DXT5", [], {"normal": True})
+            if norm_png.exists():
+                norm_png.unlink()
+            if normal_vtf.exists():
+                VMTService.update_vmt_bumpmap_path(
+                    str(vmt_path), patched_cdmaterials_path, f"{texture_filename}_normal"
+                )
+                logger.info(f"Авто-нормаль для phong создана: {normal_vtf.name}")
+        except Exception as e:
+            logger.warning(f"Не удалось создать авто-нормаль для phong: {e}", exc_info=True)
+
+    @staticmethod
+    def _build_fixed_extra_textures(
+        weapon_key: str,
+        panel_extra_textures: Optional[dict],
+        ctx,
+        size: Tuple[int, int],
+        format_type: str,
+        flags: List[str],
+        vtf_options: dict,
+        misc_vpk: Optional[str] = None,
+        textures_vpk: Optional[str] = None,
+    ) -> set:
+        """
+        Записывает доп. текстуры предмета, заданные ФИКСИРОВАННЫМ путём
+        (вне QC/модели) — см. WEAPON_EXTRA_TEXTURES. Пример: HUD-вставки Dead Ringer.
+
+        Схема «фикс консоль» (как у $cdmaterials):
+          • VTF пишем под materials/console/<orig vtf>  — чтобы не клобберить глобально;
+          • игровой VMT берём по оригинальному пути (туда смотрит HUD) и кладём в мод,
+            пропатчив $basetexture → console/<orig basetexture>.
+
+        Возвращает множество обработанных имён — чтобы общий цикл panel_extra_textures
+        не записал их повторно по cdmaterials-пути.
+        """
+        handled: set = set()
+        if not panel_extra_textures:
+            return handled
+        from src.data.weapons import WEAPON_EXTRA_TEXTURES
+        cfg = WEAPON_EXTRA_TEXTURES.get(weapon_key, [])
+        for ex in cfg:
+            name = ex["name"]
+            img = panel_extra_textures.get(name)
+            if not img or not os.path.isfile(img):
+                continue
+            try:
+                vtf_rel = ex["vpk"].replace("\\", "/")
+                base_no_mat = vtf_rel[len("materials/"):] if vtf_rel.startswith("materials/") else vtf_rel
+                base_no_ext = os.path.splitext(base_no_mat)[0]      # vgui/.../pocket_watch_fg
+                console_base = "console/" + base_no_ext             # для $basetexture
+
+                # 1) VTF под console-путём
+                console_vtf_rel = "materials/console/" + base_no_mat
+                target_dir = ctx.vpkroot_dir
+                for part in os.path.dirname(console_vtf_rel).split("/"):
+                    if part:
+                        target_dir = target_dir / part
+                ensure_directory_exists(target_dir)
+                stem = os.path.splitext(os.path.basename(console_vtf_rel))[0]
+                tmp_png = target_dir / f"{stem}.png"
+                VPKService._process_image(img, str(tmp_png), size)
+                _flags, _merged = TextureService.resolve_vtf_flags_and_options(
+                    flags, vtf_options, drop_normal=True
+                )
+                VPKService._create_vtf(str(tmp_png), str(target_dir), format_type, _flags, _merged)
+                if tmp_png.exists():
+                    tmp_png.unlink()
+
+                # 2) VMT по оригинальному пути ($basetexture → console_base)
+                VPKService._write_fixed_extra_vmt(ex, console_base, ctx, misc_vpk, textures_vpk)
+
+                handled.add(name)
+                logger.info(f"Фикс. доп. текстура (console): {console_vtf_rel}; vmt={ex.get('vmt')}")
+            except Exception as exc:
+                logger.warning(f"Фикс. доп. текстура '{name}' — ошибка: {exc}", exc_info=True)
+        return handled
+
+    @staticmethod
+    def _write_fixed_extra_vmt(ex: dict, console_base: str, ctx,
+                               misc_vpk: Optional[str], textures_vpk: Optional[str]) -> None:
+        """
+        Кладёт VMT фиксированной доп. текстуры по её оригинальному пути в мод.
+
+        Берёт игровой VMT (если найден в VPK) и патчит $basetexture → console_base;
+        если игрового нет — создаёт минимальный UnlitGeneric (vgui-материал).
+        """
+        vmt_rel = ex.get("vmt")
+        if not vmt_rel:
+            return
+        vmt_rel = vmt_rel.replace("\\", "/")
+
+        content = None
+        try:
+            import vpk as vpklib
+            for vpk_path in (misc_vpk, textures_vpk):
+                if not vpk_path or not os.path.exists(vpk_path):
+                    continue
+                try:
+                    pak = vpklib.open(vpk_path)
+                    content = pak[vmt_rel].read().decode("utf-8", errors="replace")
+                    break
+                except Exception:
+                    continue
+        except Exception as exc:
+            logger.debug(f"Не удалось прочитать игровой VMT {vmt_rel}: {exc}")
+
+        if content:
+            content = VMTService._set_vmt_param(content, "$basetexture", console_base)
+        else:
+            content = (
+                '"UnlitGeneric"\n{\n'
+                f'\t"$basetexture" "{console_base}"\n'
+                '\t"$translucent" "1"\n'
+                '\t"$vertexalpha" "1"\n}\n'
+            )
+
+        target = ctx.vpkroot_dir
+        for part in vmt_rel.split("/"):
+            if part:
+                target = target / part
+        ensure_directory_exists(target.parent)
+        with open(target, "w", encoding="utf-8") as f:
+            f.write(content)
+        logger.info(f"Фикс. доп. VMT записан: {vmt_rel} ($basetexture → {console_base})")
+
+    @staticmethod
     def _extract_original_vmt(
         cdmaterials_path: Optional[str],
         texture_filename: str,
@@ -688,6 +934,7 @@ class VPKService:
         hat_mdl_path: Optional[str] = None,
         hat_apply_game_paints: bool = True,
         panel_extra_textures: Optional[dict] = None,
+        material_maps: Optional[dict] = None,
         progress_callback: Optional[Callable[[int, str], None]] = None,
         sub_progress_callback: Optional[Callable[[int, str], None]] = None,
         cancel_callback: Optional[Callable[[], bool]] = None
@@ -771,6 +1018,7 @@ class VPKService:
                 hat_mdl_path=hat_mdl_path,
                 hat_apply_game_paints=hat_apply_game_paints,
                 panel_extra_textures=panel_extra_textures,
+                material_maps=material_maps,
             )
 
             if is_special_mode:
@@ -857,6 +1105,7 @@ class VPKService:
         blu_image_path: str = None,   # Путь к BLU-изображению (для 'upload' / 'hue_shift')
         sub_progress_callback: Optional[Callable[[int, str], None]] = None,
         panel_extra_textures: Optional[dict] = None,  # {mat_name: img_path} из 2D панели
+        material_maps: Optional[dict] = None,  # файловые карты материала (detail/selfillum/phongexp)
     ) -> Tuple[bool, str]:
         """
         Главная функция - делает из картинки VPK файл.
@@ -1303,6 +1552,14 @@ class VPKService:
                         mode, hat_apply_game_paints, animated_fps, is_normal_map,
                     )
 
+                    # ── Файловые карты материала (detail / selfillum / phong-exp) ────────
+                    # Пишем в главный VMT ДО создания BLU/зеркал — те наследуют параметры.
+                    VPKService._build_material_maps(
+                        material_maps, vtf_output_path, texture_filename, vmt_path,
+                        patched_cdmaterials_path, size,
+                        base_image_path=image_path, is_normal_map=is_normal_map,
+                    )
+
                     # ── BLU Team Texture (командная раскраска) ───────────────────────────
                     VPKService._build_blu_team_texture(
                         blu_mode, blu_image_path, vtf_output_path, vtf_filename, vmt_path,
@@ -1643,6 +1900,13 @@ class VPKService:
                     # ── Текстуры из 2D панели (c_arrow, sniper_lens и т.п.) ──────── #
                     # Материалы из SMD модели которые НЕ в QC skinfamilies →
                     # extra_texture_callback их не покрывает → добавляем здесь.
+                    # Фиксированные доп. текстуры (vgui-вставки и т.п.) — пишем по
+                    # их зашитому пути, не по cdmaterials. Возвращает обработанные имена.
+                    _fixed_handled = VPKService._build_fixed_extra_textures(
+                        weapon_key, panel_extra_textures, ctx, size,
+                        format_type, flags, vtf_options,
+                    )
+
                     if panel_extra_textures:
                         # Собираем уже созданные имена (extra_materials + BLU)
                         _processed = set()
@@ -1650,6 +1914,8 @@ class VPKService:
                             _processed.add(_f.stem)
 
                         for _pet_name, _pet_img in panel_extra_textures.items():
+                            if _pet_name in _fixed_handled:
+                                continue   # уже записан по фиксированному пути
                             # Защита от UI-sentinel: '__single__' — главная текстура,
                             # а не имя материала. Если протёк — пропускаем, иначе
                             # в VPK появятся мусорные __single__.vmt / __single__.vtf.

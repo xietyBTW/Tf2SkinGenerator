@@ -747,7 +747,21 @@ class SettingsPanel(QWidget):
         flags_layout.addLayout(gamma_row)
         
         self.advanced_group.addWidget(flags_container)
-        
+
+        # ── Карты материала (Фаза 2): detail / самосвечение / phong-exp ──────── #
+        # Открывает диалог загрузки карт. Доступно только для моделей (VertexLitGeneric).
+        self._material_maps = {}
+        self.material_maps_button = QPushButton(self.t.get('material_maps_button', 'Material Maps…'))
+        self.material_maps_button.setStyleSheet(self.styles['button_secondary'])
+        self.material_maps_button.setMinimumHeight(34)
+        self.material_maps_button.setMinimumWidth(0)
+        self.material_maps_button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.material_maps_button.setToolTip(self.t.get(
+            'material_maps_button_tip',
+            'Add detail / self-illum / phong maps from images — the app builds the VTF and wires the VMT.'))
+        self.material_maps_button.clicked.connect(self._open_material_maps_dialog)
+        self.advanced_group.addWidget(self.material_maps_button)
+
         # UV разметка
         uv_layout_row = QHBoxLayout()
         uv_layout_row.setSpacing(6)
@@ -1018,6 +1032,15 @@ class SettingsPanel(QWidget):
                 self.option_normal.setChecked(False)
                 self.option_normal.blockSignals(False)
 
+        # Карты материала — тот же гейт (только VertexLitGeneric). Вне моделей
+        # кнопку скрываем и сбрасываем выбранные карты.
+        maps_allowed = normal_allowed and not is_crit
+        if hasattr(self, 'material_maps_button'):
+            self.material_maps_button.setVisible(maps_allowed)
+            if not maps_allowed and self._material_maps:
+                self._material_maps = {}
+                self._refresh_material_maps_button()
+
         # ── 6. Кнопки инструментов ────────────────────────────────────────── #
 
         def _tip(spray_ru, spray_en, crit_ru, crit_en, hands_ru, hands_en):
@@ -1151,6 +1174,22 @@ class SettingsPanel(QWidget):
                     self.uv_layout_checkbox.blockSignals(False)
                 QTimer.singleShot(0, reset_uv)
 
+    def _open_material_maps_dialog(self) -> None:
+        """Открывает диалог настройки файловых карт материала."""
+        from src.ui.material_maps_dialog import MaterialMapsDialog
+        dlg = MaterialMapsDialog(self.t, current=self._material_maps, parent=self)
+        if dlg.exec():
+            self._material_maps = dlg.get_maps()
+            self._refresh_material_maps_button()
+
+    def _refresh_material_maps_button(self) -> None:
+        """Подсветка кнопки + счётчик, если карты заданы."""
+        if not hasattr(self, 'material_maps_button'):
+            return
+        base = self.t.get('material_maps_button', 'Material Maps…')
+        n = len(self._material_maps)
+        self.material_maps_button.setText(f"{base}  ({n})" if n else base)
+
     def _on_normal_map_state_changed(self, state: int) -> None:
         """Обработчик изменения состояния Normal Map"""
         is_checked = (state == Qt.Checked)
@@ -1267,6 +1306,7 @@ class SettingsPanel(QWidget):
             'format': format_type,
             'flags': flags,
             'vtf_options': options,  # Новое поле для опций VTFCmd
+            'material_maps': dict(getattr(self, '_material_maps', {})),  # файловые карты (Фаза 2)
             'draw_uv_layout': draw_uv_layout,  # Флаг для рисования UV разметки
             'filename': filename,
             'tf2_game_folder': tf2_path,
@@ -1380,6 +1420,8 @@ class SettingsPanel(QWidget):
         self.filename_label.setText(self.t['filename_vpk'])
         self.flags_label.setText(self.t['flags_vtf'])
         self.tools_label.setText(self.t['tools'])
+        if hasattr(self, 'material_maps_button'):
+            self._refresh_material_maps_button()
         
         # Обновляем радио кнопки
         if hasattr(self, 'radio_256'):
