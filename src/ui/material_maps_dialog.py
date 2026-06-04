@@ -8,14 +8,14 @@
 
 import os
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QCheckBox,
+    QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QCheckBox,
     QPushButton, QLineEdit, QComboBox, QWidget, QFileDialog, QFrame,
     QGraphicsDropShadowEffect,
 )
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QDoubleValidator, QColor
 
-from src.data.material_maps import MATERIAL_MAPS, MAP_ORDER
+from src.data.material_maps import MATERIAL_MAPS, MAP_DISPLAY_ORDER
 
 _IMG_FILTER = "Images (*.png *.jpg *.jpeg *.bmp *.tga *.tiff *.webp);;All Files (*)"
 
@@ -121,7 +121,7 @@ class MaterialMapsDialog(QDialog):
         current = current or {}
 
         self.setWindowTitle(self.t.get('material_maps_title', 'Material Maps'))
-        self.setMinimumWidth(500)
+        self.setMinimumWidth(780)   # два столбца карточек
         self.setStyleSheet(_DIALOG_QSS)
         # Безрамочное окно со скруглением + тенью
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
@@ -163,8 +163,23 @@ class MaterialMapsDialog(QDialog):
         intro.setStyleSheet("color:#8c8c8c; font-size:11px;")
         content.addWidget(intro)
 
-        for map_id in MAP_ORDER:
-            content.addWidget(self._build_card(map_id, current.get(map_id)))
+        # Карточки в сетку 2 столбца — чтобы окно не было слишком длинным.
+        # AlignTop: карта не растягивается по высоте под более «высокого» соседа
+        # по ряду — иначе у коротких карт (detail/phongwarp) появлялась пустота.
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(12)
+        grid.setVerticalSpacing(12)
+        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(1, 1)
+        order = MAP_DISPLAY_ORDER
+        for i, map_id in enumerate(order):
+            card = self._build_card(map_id, current.get(map_id))
+            # Нечётная последняя карта растягивается на оба столбца (без «дыры»).
+            if i == len(order) - 1 and len(order) % 2 == 1:
+                grid.addWidget(card, i // 2, 0, 1, 2, Qt.AlignTop)
+            else:
+                grid.addWidget(card, i // 2, i % 2, Qt.AlignTop)
+        content.addLayout(grid)
 
         content.addSpacing(2)
 
@@ -211,13 +226,15 @@ class MaterialMapsDialog(QDialog):
         cb = QCheckBox(self.t.get(f'map_{map_id}', map_id.capitalize()))
         cb.setStyleSheet("QCheckBox { color:#fff; font-size:13px; font-weight:600; }")
         cb.setChecked(bool(saved.get('image')) or bool(saved.get('derive')))
-        head.addWidget(cb)
+        head.addWidget(cb, 0, Qt.AlignVCenter)
         head.addStretch()
         badge = QLabel(cfg['format'])
+        badge.setSizePolicy(badge.sizePolicy().Policy.Fixed, badge.sizePolicy().Policy.Fixed)
         badge.setStyleSheet(
             "color:#9a9a9a; font-size:10px; font-weight:600; background:#161616;"
             " border:1px solid #333; border-radius:4px; padding:2px 7px;")
-        head.addWidget(badge, 0, Qt.AlignRight)
+        # AlignVCenter — иначе бейдж уезжает к верхнему краю и торчит над карточкой
+        head.addWidget(badge, 0, Qt.AlignRight | Qt.AlignVCenter)
         outer.addLayout(head)
 
         # Тело карты (всё, что гаснет при выключенной галочке).

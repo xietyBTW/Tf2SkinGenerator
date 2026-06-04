@@ -331,6 +331,7 @@ class VPKService:
             try:
                 ensure_directory_exists(vtf_output_path)
                 temp_png = vtf_output_path / f"{map_key}.png"
+                _map_opts = dict(cfg.get("options", {}))   # напр. {'nomipmaps': True} у warp-карт
                 if derive:
                     threshold = spec.get("threshold")
                     threshold = int(threshold) if threshold not in (None, "") else None
@@ -341,13 +342,13 @@ class VPKService:
                     # derive уже в нужном размере → VTF напрямую (сохраняем альфу-маску)
                     VPKService._create_vtf(
                         str(temp_png), str(vtf_output_path),
-                        cfg["format"], list(cfg["flags"]), {}
+                        cfg["format"], list(cfg["flags"]), _map_opts
                     )
                 else:
                     VPKService._process_image(image, str(temp_png), size)
                     VPKService._create_vtf(
                         str(temp_png), str(vtf_output_path),
-                        cfg["format"], list(cfg["flags"]), {}
+                        cfg["format"], list(cfg["flags"]), _map_opts
                     )
                 if temp_png.exists():
                     temp_png.unlink()
@@ -413,6 +414,23 @@ class VPKService:
             logger.warning(f"Не удалось создать авто-нормаль для phong: {e}", exc_info=True)
 
     @staticmethod
+    def _file_content_hash(path: str) -> Optional[str]:
+        """
+        Быстрый хэш содержимого файла (для дедупликации одинаковых картинок).
+        Возвращает hex-строку MD5 или None при ошибке чтения.
+        Сравнение по содержимому ловит идентичные картинки даже из разных файлов.
+        """
+        import hashlib
+        try:
+            h = hashlib.md5()
+            with open(path, "rb") as f:
+                for chunk in iter(lambda: f.read(1 << 16), b""):
+                    h.update(chunk)
+            return h.hexdigest()
+        except OSError:
+            return None
+
+    @staticmethod
     def _build_fixed_extra_textures(
         weapon_key: str,
         panel_extra_textures: Optional[dict],
@@ -441,57 +459,102 @@ class VPKService:
             return handled
         from src.data.weapons import WEAPON_EXTRA_TEXTURES
         cfg = WEAPON_EXTRA_TEXTURES.get(weapon_key, [])
+
+        # Кэш уже сконвертированных VTF по хэшу содержимого исходной картинки.
+        # Если в fg и bg (или любые два слота) загружена ОДНА И ТА ЖЕ картинка
+        # (по содержимому, даже из разных файлов) — конвертируем один раз,
+        # для остальных просто копируем готовый VTF. Конвертация GIF→VTF дорогая
+        # (извлечение кадров), так что это заметно ускоряет сборку.
+        _vtf_cache: dict = {}   # {img_hash: (built_vtf_path, fps)}
+
         for ex in cfg:
             name = ex["name"]
             img = panel_extra_textures.get(name)
             if not img or not os.path.isfile(img):
                 continue
             try:
-                vtf_rel = ex["vpk"].replace("\\", "/")
+                # VTF и VMT кладём по РЕАЛЬНОМУ игровому пути (без console-схемы):
+                # так VMT лежит в той же папке, что и VTF, и нет дублей vgui.
+                vtf_rel = ex["vpk"].replace("\\", "/")               # materials/vgui/.../x.vtf
                 base_no_mat = vtf_rel[len("materials/"):] if vtf_rel.startswith("materials/") else vtf_rel
-                base_no_ext = os.path.splitext(base_no_mat)[0]      # vgui/.../pocket_watch_fg
-                console_base = "console/" + base_no_ext             # для $basetexture
+                base_path = os.path.splitext(base_no_mat)[0]         # vgui/.../pocket_watch_fg (для $basetexture)
 
-                # 1) VTF под console-путём
-                console_vtf_rel = "materials/console/" + base_no_mat
+                # 1) VTF по реальному пути
                 target_dir = ctx.vpkroot_dir
-                for part in os.path.dirname(console_vtf_rel).split("/"):
+                for part in os.path.dirname(vtf_rel).split("/"):
                     if part:
                         target_dir = target_dir / part
                 ensure_directory_exists(target_dir)
-                stem = os.path.splitext(os.path.basename(console_vtf_rel))[0]
-                tmp_png = target_dir / f"{stem}.png"
-                VPKService._process_image(img, str(tmp_png), size)
+                stem = os.path.splitext(os.path.basename(vtf_rel))[0]
+                dest_vtf = target_dir / f"{stem}.vtf"
                 _flags, _merged = TextureService.resolve_vtf_flags_and_options(
                     flags, vtf_options, drop_normal=True
                 )
-                VPKService._create_vtf(str(tmp_png), str(target_dir), format_type, _flags, _merged)
-                if tmp_png.exists():
-                    tmp_png.unlink()
 
-                # 2) VMT по оригинальному пути ($basetexture → console_base)
-                VPKService._write_fixed_extra_vmt(ex, console_base, ctx, misc_vpk, textures_vpk)
+                _img_hash = VPKService._file_content_hash(img)
+                _cached = _vtf_cache.get(_img_hash) if _img_hash else None
+                if _cached:
+                    # Та же картинка уже сконвертирована — переиспользуем готовый VTF
+                    _src_vtf, _ex_fps = _cached
+                    copy_file_safe(_src_vtf, dest_vtf)
+                    logger.info(
+                        f"Доп. текстура переиспользована (идентичная картинка): "
+                        f"{stem}.vtf ← {Path(_src_vtf).name}"
+                    )
+                elif TextureService.is_animated_image(img):
+                    # Анимированный GIF → многокадровый VTF (циферблат Dead Ringer
+                    # анимируется через AnimatedTexture-прокси в его игровом VMT).
+                    _ex_fps = TextureService.create_animated_vtf(
+                        img, str(dest_vtf), size, format_type, _flags, _merged
+                    )
+                    logger.info(f"Фикс. доп. текстура анимирована: {stem}.vtf @ {_ex_fps}fps")
+                    if _img_hash:
+                        _vtf_cache[_img_hash] = (dest_vtf, _ex_fps)
+                else:
+                    _ex_fps = None
+                    tmp_png = target_dir / f"{stem}.png"
+                    VPKService._process_image(img, str(tmp_png), size)
+                    VPKService._create_vtf(str(tmp_png), str(target_dir), format_type, _flags, _merged)
+                    if tmp_png.exists():
+                        tmp_png.unlink()
+                    if _img_hash:
+                        _vtf_cache[_img_hash] = (dest_vtf, _ex_fps)
+
+                # 2) VMT рядом с VTF ($basetexture → реальный путь)
+                VPKService._write_fixed_extra_vmt(ex, base_path, ctx, misc_vpk, textures_vpk)
+
+                # Игровой VMT fg/bg уже содержит AnimatedTexture-прокси, но если
+                # его не нашли (минимальный шаблон) — добавляем прокси для анимации.
+                if _ex_fps:
+                    _vmt_target = ctx.vpkroot_dir
+                    for _p in ex["vmt"].replace("\\", "/").split("/"):
+                        if _p:
+                            _vmt_target = _vmt_target / _p
+                    if _vmt_target.exists():
+                        VMTService.enable_animated_basetexture(str(_vmt_target), _ex_fps)
 
                 handled.add(name)
-                logger.info(f"Фикс. доп. текстура (console): {console_vtf_rel}; vmt={ex.get('vmt')}")
+                logger.info(f"Фикс. доп. текстура: {vtf_rel}; vmt={ex.get('vmt')}")
             except Exception as exc:
                 logger.warning(f"Фикс. доп. текстура '{name}' — ошибка: {exc}", exc_info=True)
         return handled
 
     @staticmethod
-    def _write_fixed_extra_vmt(ex: dict, console_base: str, ctx,
+    def _write_fixed_extra_vmt(ex: dict, base_texture_path: str, ctx,
                                misc_vpk: Optional[str], textures_vpk: Optional[str]) -> None:
         """
-        Кладёт VMT фиксированной доп. текстуры по её оригинальному пути в мод.
+        Кладёт VMT фиксированной доп. текстуры В ТУ ЖЕ папку, что и её VTF
+        (реальный игровой путь, без console-схемы).
 
-        Берёт игровой VMT (если найден в VPK) и патчит $basetexture → console_base;
-        если игрового нет — создаёт минимальный UnlitGeneric (vgui-материал).
+        Берёт игровой VMT (если найден в VPK) и патчит $basetexture →
+        base_texture_path; если игрового нет — создаёт минимальный UnlitGeneric.
         """
         vmt_rel = ex.get("vmt")
         if not vmt_rel:
             return
         vmt_rel = vmt_rel.replace("\\", "/")
 
+        # Игровой VMT ищем по тому же пути, что и в моде (реальный путь к материалу)
         content = None
         try:
             import vpk as vpklib
@@ -508,11 +571,11 @@ class VPKService:
             logger.debug(f"Не удалось прочитать игровой VMT {vmt_rel}: {exc}")
 
         if content:
-            content = VMTService._set_vmt_param(content, "$basetexture", console_base)
+            content = VMTService._set_vmt_param(content, "$basetexture", base_texture_path)
         else:
             content = (
                 '"UnlitGeneric"\n{\n'
-                f'\t"$basetexture" "{console_base}"\n'
+                f'\t"$basetexture" "{base_texture_path}"\n'
                 '\t"$translucent" "1"\n'
                 '\t"$vertexalpha" "1"\n}\n'
             )
@@ -524,7 +587,36 @@ class VPKService:
         ensure_directory_exists(target.parent)
         with open(target, "w", encoding="utf-8") as f:
             f.write(content)
-        logger.info(f"Фикс. доп. VMT записан: {vmt_rel} ($basetexture → {console_base})")
+        logger.info(f"Фикс. доп. VMT записан: {vmt_rel} ($basetexture → {base_texture_path})")
+
+    @staticmethod
+    def _write_fixed_extra_files(weapon_key: str, ctx) -> None:
+        """
+        Пишет доп. статические файлы мода (HUD-скрипты .res, метаданные info.vdf
+        и т.п.) по их зашитому пути в корень VPK — см. WEAPON_EXTRA_FILES.
+
+        Содержимое фиксированное (из конфига). Пишется независимо от того,
+        загрузил ли пользователь HUD-текстуры: эти файлы активируют мод
+        (напр. кастомный циферблат Dead Ringer).
+        """
+        from src.data.weapons import WEAPON_EXTRA_FILES
+        files = WEAPON_EXTRA_FILES.get(weapon_key, [])
+        for f in files:
+            rel = f.get("path", "").replace("\\", "/")
+            content = f.get("content", "")
+            if not rel:
+                continue
+            try:
+                target = ctx.vpkroot_dir
+                for part in rel.split("/"):
+                    if part:
+                        target = target / part
+                ensure_directory_exists(target.parent)
+                with open(target, "w", encoding="utf-8") as out:
+                    out.write(content)
+                logger.info(f"Доп. файл мода записан: {rel}")
+            except Exception as exc:
+                logger.warning(f"Не удалось записать доп. файл '{rel}': {exc}", exc_info=True)
 
     @staticmethod
     def _extract_original_vmt(
@@ -1319,6 +1411,14 @@ class VPKService:
                     blu_row = tg_structure.get('blu_row', [])
                     extra_materials = tg_structure.get('extra_materials', [])
 
+                    # Оружие с одной общей текстурой (напр. часы шпиона) — BLU не нужен.
+                    # Иначе в мод попадёт лишняя _blue текстура.
+                    from src.data.weapons import NO_BLU_WEAPON_KEYS
+                    if weapon_key in NO_BLU_WEAPON_KEYS:
+                        if blu_row:
+                            logger.info(f"[{weapon_key}] BLU-row подавлен (одиночная текстура)")
+                        blu_row = []
+
                     # ── Для режимов рук: фильтруем $texturegroup до актуальных текстур рук ─────────
                     # Проблема: QC руки инженера (c_engineer_arms) в column 0 содержит "engineer_red"
                     # (текстуру ТЕЛА), а не текстуру руки. Аналогично у медика — "medic_red".
@@ -1376,6 +1476,19 @@ class VPKService:
                             f"[HANDS] texture_filename={texture_filename!r}, "
                             f"extra_materials={extra_materials}, blu_row={blu_row}"
                         )
+
+                    # Исключаем служебные материалы (глаза/зубы/sheen-оверлеи) —
+                    # для них не нужно спрашивать текстуру при сборке. Тот же фильтр,
+                    # что и для карточек 2D (единый источник). Делаем ПОСЛЕ hands-блока,
+                    # т.к. он переназначает extra_materials/blu_row.
+                    from src.data.material_filter import is_editable_material as _is_edit
+                    _drop_extra = [m for m in extra_materials if not _is_edit(m)]
+                    if _drop_extra:
+                        logger.info(f"Служебные материалы исключены из сборки: {_drop_extra}")
+                    extra_materials = [m for m in extra_materials if _is_edit(m)]
+                    # blu_row НЕ фильтруем удалением — он индексируется по колонкам
+                    # вместе с red_row. Служебные blu-материалы пропускаются ВНУТРИ
+                    # цикла (по col_idx), чтобы не сместить выравнивание.
 
                     if blu_row:
                         logger.info(f"Найдена BLU команда: {blu_row}")
@@ -1561,10 +1674,17 @@ class VPKService:
                     )
 
                     # ── BLU Team Texture (командная раскраска) ───────────────────────────
-                    VPKService._build_blu_team_texture(
-                        blu_mode, blu_image_path, vtf_output_path, vtf_filename, vmt_path,
-                        texture_filename, patched_cdmaterials_path, size, format_type, flags, vtf_options,
-                    )
+                    # Для оружия с одной общей текстурой (часы шпиона) BLU не создаём,
+                    # даже если в BLU-слот случайно попала картинка — иначе появится
+                    # лишний {texture}_blue.vtf/vmt.
+                    from src.data.weapons import NO_BLU_WEAPON_KEYS as _NO_BLU
+                    if weapon_key not in _NO_BLU:
+                        VPKService._build_blu_team_texture(
+                            blu_mode, blu_image_path, vtf_output_path, vtf_filename, vmt_path,
+                            texture_filename, patched_cdmaterials_path, size, format_type, flags, vtf_options,
+                        )
+                    else:
+                        logger.info(f"[{weapon_key}] BLU team texture пропущена (одиночная текстура)")
 
                     # === Создаем текстуры для дополнительных материалов модели (shell, scope и т.д.) ===
                     # Это столбцы 1+ из RED строки $texturegroup
@@ -1664,6 +1784,11 @@ class VPKService:
                         )
 
                         for col_idx, blu_tex_name in enumerate(blu_row):
+                            # Служебные материалы (sheen-оверлеи, глаза и т.п.) не
+                            # включаем в мод. Пропускаем по col_idx, не удаляя из
+                            # списка, чтобы сохранить выравнивание с red_row.
+                            if not _is_edit(blu_tex_name):
+                                continue
                             # Находим соответствующее RED имя для этого столбца
                             red_tex_name = red_row[col_idx] if col_idx < len(red_row) else None
 
@@ -1848,7 +1973,9 @@ class VPKService:
                     # пути из $cdmaterials (до патча). VMT указывает на те же VTF что и уже
                     # созданный мод (по console\ пути), т.е. VTF-файлы не дублируются.
                     from src.data.player_hands import HAND_MODE_KEYS as _HAND_MODE_KEYS
-                    if mode in _HAND_MODE_KEYS and original_cdmaterials_path:
+                    from src.data.weapons import MIRROR_VMT_WEAPON_KEYS as _MIRROR_KEYS
+                    _need_mirror = (mode in _HAND_MODE_KEYS) or (weapon_key in _MIRROR_KEYS)
+                    if _need_mirror and original_cdmaterials_path:
                         orig_mat_rel = "materials/" + original_cdmaterials_path.replace('\\', '/').strip().rstrip('/')
                         orig_vtf_dir = ctx.vpkroot_dir
                         for _part in orig_mat_rel.rstrip('/').split('/'):
@@ -1907,6 +2034,10 @@ class VPKService:
                         format_type, flags, vtf_options,
                     )
 
+                    # Доп. статические файлы мода (HUD .res, info.vdf) — напр. для
+                    # кастомного циферблата Dead Ringer. Пишутся всегда (активируют мод).
+                    VPKService._write_fixed_extra_files(weapon_key, ctx)
+
                     if panel_extra_textures:
                         # Собираем уже созданные имена (extra_materials + BLU)
                         _processed = set()
@@ -1927,19 +2058,28 @@ class VPKService:
                                 continue
                             try:
                                 ensure_directory_exists(vtf_output_path)
-                                _pet_png = vtf_output_path / f"{_pet_name}.png"
                                 _pet_vtf = vtf_output_path / f"{_pet_name}.vtf"
                                 _pet_vmt = vtf_output_path / f"{_pet_name}.vmt"
-                                VPKService._process_image(_pet_img, _pet_png, size)
                                 _pet_flags, _pet_merged = TextureService.resolve_vtf_flags_and_options(flags, vtf_options, drop_normal=True)
-                                VPKService._create_vtf(
-                                    str(_pet_png), str(vtf_output_path),
-                                    format_type, _pet_flags, _pet_merged
-                                )
-                                if _pet_png.exists():
-                                    _pet_png.unlink()
+                                # Анимированный GIF → многокадровый VTF + прокси в VMT
+                                _pet_fps = None
+                                if TextureService.is_animated_image(_pet_img):
+                                    _pet_fps = TextureService.create_animated_vtf(
+                                        _pet_img, str(_pet_vtf), size, format_type, _pet_flags, _pet_merged
+                                    )
+                                else:
+                                    _pet_png = vtf_output_path / f"{_pet_name}.png"
+                                    VPKService._process_image(_pet_img, _pet_png, size)
+                                    VPKService._create_vtf(
+                                        str(_pet_png), str(vtf_output_path),
+                                        format_type, _pet_flags, _pet_merged
+                                    )
+                                    if _pet_png.exists():
+                                        _pet_png.unlink()
                                 if not _pet_vmt.exists():
                                     VPKService._write_material_vmt(_pet_vmt, vmt_path, patched_cdmaterials_path, _pet_name)
+                                if _pet_fps:
+                                    VMTService.enable_animated_basetexture(str(_pet_vmt), _pet_fps)
                                 logger.info(f"Panel extra texture: {_pet_name}.vtf/vmt")
                             except Exception as _pet_exc:
                                 logger.warning(f"Panel extra texture ошибка '{_pet_name}': {_pet_exc}")
@@ -1950,9 +2090,28 @@ class VPKService:
                         raise _compile_exc[0]
 
                     # Копируем скомпилированные файлы в vpkroot (VMT файл уже скопирован ранее)
-                    # Используем путь из $modelname в QC файле (чтобы структура папок была правильной)
-                    VPKService._copy_compiled_models_to_vpkroot(ctx, qc_path)
-                    
+                    # Используем путь из $modelname в QC файле (чтобы структура папок была правильной).
+                    # Для material-only оружия (Dead Ringer) модель в мод НЕ кладём —
+                    # его показывает родная игровая модель (viewmodel), а скин и карты
+                    # находятся через зеркальный VMT по оригинальному пути, который
+                    # ссылается на console-VTF. Папку console при этом ОСТАВЛЯЕМ.
+                    from src.data.weapons import MATERIAL_ONLY_WEAPON_KEYS as _MAT_ONLY
+                    if weapon_key in _MAT_ONLY:
+                        logger.info(f"[{weapon_key}] Material-only: модель в мод не включается (console сохраняется)")
+                    else:
+                        VPKService._copy_compiled_models_to_vpkroot(ctx, qc_path)
+
+                    # Подстраховка: для оружия без BLU удаляем любые {texture}_blue.*,
+                    # если их успел создать другой путь (texturegroup/варианты).
+                    from src.data.weapons import NO_BLU_WEAPON_KEYS as _NO_BLU2
+                    if weapon_key in _NO_BLU2:
+                        for _blue in vtf_output_path.glob(f"{texture_filename}_blue.*"):
+                            try:
+                                _blue.unlink()
+                                logger.info(f"[{weapon_key}] Удалён лишний BLU-файл: {_blue.name}")
+                            except OSError:
+                                pass
+
                 except Exception as e:
                     error_msg = str(e)
                     if hasattr(e, 'stderr') and e.stderr:

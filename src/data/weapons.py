@@ -535,14 +535,82 @@ WEAPON_EXTRA_TEXTURES: dict[str, list[dict]] = {
         {
             "name": "pocket_watch_fg",
             "vpk":  "materials/vgui/replay/thumbnails/deadringer/pocket_watch_fg.vtf",
-            "vmt":  "materials/vgui/pocket_watch_fg.vmt",
+            # VMT кладём В ТУ ЖЕ папку, что и VTF (так требует игра, без дублей vgui)
+            "vmt":  "materials/vgui/replay/thumbnails/deadringer/pocket_watch_fg.vmt",
             "ru": "Центральная вставка", "en": "Center insert",
         },
         {
             "name": "pocket_watch_bg",
             "vpk":  "materials/vgui/replay/thumbnails/deadringer/pocket_watch_bg.vtf",
-            "vmt":  "materials/vgui/pocket_watch_bg.vmt",
+            "vmt":  "materials/vgui/replay/thumbnails/deadringer/pocket_watch_bg.vmt",
             "ru": "Фон циферблата", "en": "Watch background",
+        },
+    ],
+}
+
+# ── Оружие без BLU-команды ───────────────────────────────────────────────────
+# У некоторых предметов модель использует ОДНУ текстуру для обеих команд
+# (напр. часы шпиона). Для них не нужно создавать BLU-вариант — игнорируем
+# blu_row из $texturegroup, иначе в мод попадёт лишняя _blue текстура.
+NO_BLU_WEAPON_KEYS: frozenset = frozenset({"c_pocket_watch"})
+
+# ── Оружие, которому нужен зеркальный VMT по оригинальному пути ───────────────
+# Некоторые предметы отображаются в игре ДРУГОЙ моделью, чем та, что собирает
+# инструмент, и ссылаются на текстуру по ОРИГИНАЛЬНОМУ пути материала, а не по
+# пропатченному console\. Для них создаём зеркальный VMT по оригинальному
+# $cdmaterials-пути — тогда «чужая» модель найдёт скин.
+# Dead Ringer виден через РОДНОЙ viewmodel (v_watch_pocket_spy), который смотрит
+# на материал по ОРИГИНАЛЬНОМУ пути. Зеркальный VMT по этому пути ссылается на
+# console-VTF (текстура + все карты), поэтому папку console оставляем как есть.
+MIRROR_VMT_WEAPON_KEYS: frozenset = frozenset({"c_pocket_watch"})
+
+# ── Оружие «только материалы» (без модели в моде) ────────────────────────────
+# Эти предметы отображаются РОДНОЙ игровой моделью (напр. Dead Ringer виден
+# через viewmodel v_watch_pocket_spy). Своя перекомпилированная модель в моде
+# не нужна и вредна (игра подхватит «чужую»). Собираем только материалы (VTF/VMT
+# по console-пути) + зеркальный VMT по оригинальному пути — родная модель найдёт
+# скин и карты материала. Модель .mdl в мод НЕ кладём.
+MATERIAL_ONLY_WEAPON_KEYS: frozenset = frozenset({"c_pocket_watch"})
+
+# ── 3D-превью: подмена модели и фильтр материалов ────────────────────────────
+# Для некоторых предметов в 3D надо показывать ДРУГУЮ модель, чем собирает
+# инструмент. Dead Ringer: собираем c_pocket_watch, но в игре от первого лица
+# видно viewmodel v_watch_pocket_spy (руки + часы в одном меше). Показываем его,
+# оставляя только меши часов (материалы по whitelist), руки скрываем.
+PREVIEW_MDL_OVERRIDE: dict[str, str] = {
+    "c_pocket_watch": "models/weapons/v_models/v_watch_pocket_spy.mdl",
+}
+# Подстроки имён материалов, которые ОСТАВЛЯЕМ в превью (остальные меши скрыты).
+PREVIEW_MAT_WHITELIST: dict[str, tuple] = {
+    "c_pocket_watch": ("watch",),   # c_pocket_watch / pocket_watch_fg / pocket_watch_bg
+}
+
+# ── Доп. статические файлы мода (скрипты/метаданные) ─────────────────────────
+# Некоторым предметам нужны не-материальные файлы в моде: HUD-скрипты (.res),
+# метаданные мода (info.vdf) и т.п. Кладутся в корень VPK по указанному пути
+# ровно с заданным содержимым. {weapon_key: [{"path", "content"}]}.
+WEAPON_EXTRA_FILES: dict[str, list[dict]] = {
+    "c_pocket_watch": [
+        {
+            "path": "scripts/screens/pda_spy_invis_pocket.res",
+            "content": (
+                '"pda_spy_invis.res"\n'
+                '{\n'
+                '\t"InvisProgress"\n'
+                '\t{\n'
+                '\t\t"ControlName"\t"CircularProgressBar"\t"fieldName"\t"InvisProgress"\n'
+                '\t\t"xpos"\t"10"\t"ypos"\t"10"\t"zpos"\t"1"\t"wide"\t"260"\t"tall"\t"80"\n'
+                '\t\t"visible"\t"1"\t"enabled"\t"1"\n'
+                '\n'
+                '\t\t"fg_image"\t"replay/thumbnails/deadringer/pocket_watch_fg"\t\n'
+                '\t\t"bg_image"\t"replay/thumbnails/deadringer/pocket_watch_bg"\n'
+                '\t}\t\n'
+                '}\n'
+            ),
+        },
+        {
+            "path": "info.vdf",
+            "content": '"stan-deadringer" { "ui_version" "3" }\n',
         },
     ],
 }

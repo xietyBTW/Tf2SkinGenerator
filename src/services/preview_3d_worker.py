@@ -129,8 +129,27 @@ class Preview3DWorker(QThread):
             from src.data.player_characters import PLAYER_BODY_MODE_KEYS as _PBK
             # Персонажи TF2 компилируются с $upaxis Y — SMD уже Y-up, конвертацию Z→Y не делаем
             _source_zup = self.mode not in _PBK
+
+            # Превью-фильтр материалов: для моделей, где надо показать только часть
+            # (напр. Dead Ringer на viewmodel с руками — оставляем только часы).
+            _include_mats = None
+            from src.data.weapons import PREVIEW_MAT_WHITELIST
+            _wl = PREVIEW_MAT_WHITELIST.get(self.weapon_key)
+            if _wl:
+                _all_mats = self._scan_smd_mat_names([smd_path] + bodygroup_smds)
+                _keep = {m for m in _all_mats if any(s in m.lower() for s in _wl)}
+                if _keep:
+                    _include_mats = _keep
+                    logger.info(f"[3D] Превью-фильтр {self.weapon_key}: оставляем меши {_keep}")
+                else:
+                    logger.warning(
+                        f"[3D] Whitelist {_wl} не совпал ни с одним материалом "
+                        f"({_all_mats}) — показываю всю модель"
+                    )
+
             ok, mat_names = SmdToObjService.convert(
                 smd_path, obj_path,
+                include_mats=_include_mats,
                 extra_smd_paths=bodygroup_smds,
                 source_zup=_source_zup,
             )
@@ -278,9 +297,14 @@ class Preview3DWorker(QThread):
     def _get_reference_smd(self) -> Optional[str]:
         """Возвращает reference SMD из кэша или после декомпиляции."""
         from src.data.player_characters import PLAYER_BODY_MODE_KEYS as _PBK, SPY_MASK_MODE_KEY as _SMK
+        from src.data.weapons import PREVIEW_MDL_OVERRIDE
+        _override = PREVIEW_MDL_OVERRIDE.get(self.weapon_key)
         if self.mode == "hat" or self.mode in _PBK or self.mode == _SMK:
             # weapon_key IS the full MDL path for hats and player body modes
             mdl_rel = self.weapon_key
+        elif _override:
+            # Превью-подмена модели (напр. Dead Ringer → viewmodel v_watch_pocket_spy)
+            mdl_rel = _override
         else:
             mdl_rel = WEAPON_MDL_PATHS.get(
                 self.weapon_key,
@@ -318,10 +342,11 @@ class Preview3DWorker(QThread):
         logger.info(f"[3D] cwd={os.getcwd()} | crowbar={crowbar_abs} | vpk={self.misc_vpk_path}")
 
         from src.data.player_characters import PLAYER_BODY_MODE_KEYS as _PBK
+        from src.data.weapons import PREVIEW_MDL_OVERRIDE
         if self.mode == "hat":
             paths_to_try = self._build_hat_paths(mdl_rel_hint)
-        elif self.mode in _PBK:
-            # Персонажи: прямой путь, без workshop-вариантов
+        elif self.mode in _PBK or self.weapon_key in PREVIEW_MDL_OVERRIDE:
+            # Персонажи и превью-подмены: прямой путь, без workshop-вариантов
             paths_to_try = [mdl_rel_hint]
         else:
             paths_to_try = ExtractModelService._build_paths_to_try(

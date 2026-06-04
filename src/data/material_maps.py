@@ -56,7 +56,38 @@ MATERIAL_MAPS = {
         "derive_auto_normal": True,
         "derive_extra_vmt": {"$envmap": "env_cubemap", "$envmaptint": "[ .3 .3 .3 ]"},
     },
+    # ── Warp-карты (градиенты-lookup) ────────────────────────────────────────
+    # Это не обычные текстуры, а градиенты: lightwarp ремапит освещённость,
+    # phongwarp — цвет/градиент блика. Им нужны CLAMP (без тайлинга) + NOMIP
+    # (иначе градиент размывается мип-уровнями) и формат без DXT-бандинга.
+    "phongwarp": {
+        "suffix": "_phongwarp",
+        "format": "BGR888",            # градиент → без DXT-бандинга
+        "flags": ("CLAMPS", "CLAMPT"), # без тайлинга
+        "options": {"nomipmaps": True},
+        "path_param": "$phongwarptexture",
+        "extra_vmt": {"$phong": "1"},  # phongwarp работает только при $phong
+        "numeric": (),
+        "needs_alpha": False,
+    },
+    "lightwarp": {
+        "suffix": "_lightwarp",
+        "format": "BGR888",
+        "flags": ("CLAMPS", "CLAMPT"),
+        "options": {"nomipmaps": True},
+        "path_param": "$lightwarptexture",
+        "extra_vmt": {},               # lightwarp работает самостоятельно
+        "numeric": (),
+        "needs_alpha": False,
+    },
 }
 
-# Стабильный порядок обработки/отображения.
-MAP_ORDER = ("detail", "selfillum", "phongexp")
+# Порядок ОБРАБОТКИ при сборке (стабильный, не влияет на UI).
+MAP_ORDER = ("detail", "selfillum", "phongexp", "phongwarp", "lightwarp")
+
+# Порядок ОТОБРАЖЕНИЯ в диалоге (сетка 2 столбца, ряд за рядом).
+# Подобран так, чтобы в одном ряду стояли карты схожей высоты:
+#   ряд1: phongexp + selfillum (обе с «авто» и порогом),
+#   ряд2: detail + phongwarp,
+#   ряд3: lightwarp (на всю ширину).
+MAP_DISPLAY_ORDER = ("phongexp", "selfillum", "detail", "phongwarp", "lightwarp")

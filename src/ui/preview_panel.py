@@ -61,6 +61,9 @@ def _load_pixmap(path: str, opaque: bool = False) -> QPixmap:
 # главная текстура передаётся в билд отдельно через from_path.
 SINGLE_TEX_KEY = '__single__'
 
+# Фильтр служебных материалов (глаза/зубы/sheen-оверлеи) — общий для UI и сборки.
+from src.data.material_filter import is_editable_material as _is_editable_material
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # QScrollArea с горизонтальной прокруткой колесом мыши
@@ -1507,11 +1510,18 @@ class PreviewPanel(QWidget):
         """Модель многоматериальная — применяем и создаём карточки."""
         if not (self._3d_widget and tex_map):
             return
+        # В 3D применяем ВСЕ текстуры (включая глаза/зубы), иначе служебные меши
+        # останутся без текстуры.
         self._3d_widget.apply_material_map(tex_map)
         if self._active_team == 'red' and not self._vpk_red_tex_map:
             self._vpk_red_tex_map = dict(tex_map)
 
-        mat_keys = list(tex_map.keys())
+        # А вот КАРТОЧКИ создаём только для редактируемых материалов — служебные
+        # (eyeball_l/eyeball_r и т.п.) исключаем. Если после фильтра пусто
+        # (вся модель «служебная») — оставляем как есть, чтобы не было пустоты.
+        mat_keys = [m for m in tex_map.keys() if _is_editable_material(m)]
+        if not mat_keys:
+            mat_keys = list(tex_map.keys())
         current_all = (
             self._material_names if self._card_mode else []
         )
