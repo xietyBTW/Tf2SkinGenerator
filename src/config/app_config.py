@@ -30,6 +30,9 @@ class AppConfig:
         "keep_temp_on_error": False,
         "debug_mode": False,
         "window_geometry": None,
+        # Пользовательские паттерны материалов-исключений (доп. к дефолтным
+        # из material_filter): не показываются в 2D и не пишутся в мод.
+        "material_blacklist": [],
     }
     
     @staticmethod

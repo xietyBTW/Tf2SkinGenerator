@@ -1842,22 +1842,17 @@ class VPKService:
                             # Если BLU имя совпадает с RED — shared/нейтральная текстура.
                             #
                             # Два типа:
-                            #   1. СИСТЕМНЫЕ (eyeball, invulnfx, _invun, _zombie) — пропускаем.
-                            #      Движок найдёт сам через другой $cdmaterials (effects/).
+                            #   1. СЛУЖЕБНЫЕ (eyeball, invulnfx, _invun, _zombie, sheen…) —
+                            #      из единого блэклиста material_filter; пропускаем,
+                            #      движок найдёт оригинал сам.
                             #   2. НАСТОЯЩИЕ СКИНОВЫЕ (sniper_lens, c_arrow и т.п.) — спрашиваем
                             #      пользователя через extra_texture_callback, как для extra_materials.
                             if blu_tex_name == red_tex_name:
                                 if blu_tex_name == texture_filename:
                                     continue
 
-                                _n = blu_tex_name.lower()
-                                _is_system_tex = (
-                                    'eyeball'  in _n or
-                                    'invulnfx' in _n or
-                                    '_invun'   in _n or   # sniper_red_invun
-                                    '_invuln'  in _n or   # sniper_lens_invuln
-                                    '_zombie'  in _n
-                                )
+                                from src.data.material_filter import is_editable_material as _is_edit_shared
+                                _is_system_tex = not _is_edit_shared(blu_tex_name)
 
                                 shared_vtf_path = vtf_output_path / f"{blu_tex_name}.vtf"
                                 if not shared_vtf_path.exists():
