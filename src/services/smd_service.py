@@ -235,7 +235,12 @@ class SMDService:
         for idx, (user_mat, tri_lines) in enumerate(user_triangles_data):
             mat = (
                 original_material_names[idx] if idx < n_orig else original_material_names[-1]
-            ) if n_orig > 0 else user_mat
+            ) if n_orig > 0 else SMDService._sanitize_material_name(user_mat)
+            # keep_user_materials (n_orig==0): имя материала меша нормализуется
+            # (lowercase + точки→'_'). studiomdl трактует имя материала как файл и
+            # ОБРЕЗАЕТ всё после первой точки: 'material.001' → 'material',
+            # 'material.001_bloody' → 'material' → оба скина схлопываются, группа
+            # выбрасывается → текстура не находится (фиолет). Точку убираем.
 
             out.write(mat)
             out.write('\n')
@@ -323,6 +328,49 @@ class SMDService:
                 materials.add(s)
 
         return materials
+
+    @staticmethod
+    def _sanitize_material_name(name: str) -> str:
+        """
+        Нормализует имя материала под Source/studiomdl.
+
+        • lowercase — Source ищет пути материалов в нижнем регистре;
+        • точки → '_' — studiomdl трактует имя как файл и обрезает всё после
+          первой точки ('material.001' → 'material'), что ломает скины и текстуры.
+        """
+        return (name or '').strip().lower().replace('.', '_')
+
+    @staticmethod
+    def ordered_unique_materials(smd_path: str) -> List[str]:
+        """
+        Имена материалов SMD в порядке первого появления (уникальные).
+
+        Это «источник истины» для сборки: модель компилируется именно с этими
+        именами, поэтому имена VTF/VMT, $texturegroup и $basetexture должны им
+        соответствовать (иначе текстура не находится — фиолетовая).
+        """
+        result: List[str] = []
+        seen = set()
+        if not os.path.exists(smd_path):
+            return result
+        in_triangles = False
+        with open(smd_path, 'r', encoding='utf-8', errors='replace') as f:
+            for line in f:
+                s = line.strip()
+                if not s:
+                    continue
+                if not in_triangles:
+                    if s == 'triangles':
+                        in_triangles = True
+                    continue
+                if s == 'end':
+                    break
+                if s[0].isdigit() or s[0] == '-':
+                    continue
+                if s not in seen:
+                    seen.add(s)
+                    result.append(s)
+        return result
 
 
 # ---------------------------------------------------------------------------

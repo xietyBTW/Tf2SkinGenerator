@@ -493,7 +493,10 @@ class ModelBuildService:
             for mat in variant_mats:
                 # skin 0 — всегда базовое имя; иначе вариант или базовое (наследование)
                 names.append(mat if skin == 0 else ov.get(mat, mat))
-            row = ' '.join(f'"{n}"' for n in names)
+            # Имена материалов → нижний регистр: Source приводит пути материалов
+            # к lowercase при загрузке, а лукап в VPK регистрозависим. Файлы VTF/VMT
+            # пишутся тоже в нижнем регистре — иначе текстура не находится (фиолетовая).
+            row = ' '.join(f'"{n.lower()}"' for n in names)
             lines.append(f'\t{{ {row} }}')
         lines.append('}')
         return '\n'.join(lines) + '\n'

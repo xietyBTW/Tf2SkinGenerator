@@ -215,6 +215,65 @@ class VPKService:
         logger.info(f"Создан VMT вторичного материала: {target_vmt_path.name}")
 
     @staticmethod
+    def _render_extra_texture(
+        name: str,
+        img: str,
+        vtf_output_path: Path,
+        vmt_path: Path,
+        patched_cdmaterials_path: str,
+        size: Tuple[int, int],
+        format_type: str,
+        flags: List[str],
+        vtf_options: dict,
+    ) -> bool:
+        """
+        Универсальный рендер доп. текстуры в VPK: {name}.vtf + {name}.vmt
+        рядом с базовой текстурой.
+
+        Источник:
+          • .vtf      → копируется как есть (без переконвертации);
+          • анимация  → анимированный VTF (+ AnimatedTexture-прокси в VMT);
+          • картинка  → ресайз + обычный VTF.
+        VMT строится на основе главного (vmt_path) с $basetexture → name.
+
+        Возвращает True, если текстура создана; False — если img пуст/не файл.
+        Единая точка для panel_extra_textures и вариантов стилей (skinfamilies).
+        """
+        if not img or not os.path.isfile(img):
+            return False
+
+        # Имя в нижний регистр: Source ищет материалы/текстуры в lowercase,
+        # а лукап в VPK регистрозависим — иначе текстура не находится (фиолетовая).
+        name = name.lower()
+
+        ensure_directory_exists(vtf_output_path)
+        out_vtf = vtf_output_path / f"{name}.vtf"
+        out_vmt = vtf_output_path / f"{name}.vmt"
+        vtf_flags, merged = TextureService.resolve_vtf_flags_and_options(
+            flags, vtf_options, drop_normal=True
+        )
+
+        fps = None
+        if str(img).lower().endswith('.vtf'):
+            copy_file_safe(img, out_vtf)
+        elif TextureService.is_animated_image(img):
+            fps = TextureService.create_animated_vtf(
+                img, str(out_vtf), size, format_type, vtf_flags, merged
+            )
+        else:
+            tmp_png = vtf_output_path / f"{name}.png"
+            VPKService._process_image(img, tmp_png, size)
+            VPKService._create_vtf(str(tmp_png), str(vtf_output_path), format_type, vtf_flags, merged)
+            if tmp_png.exists():
+                tmp_png.unlink()
+
+        if not out_vmt.exists():
+            VPKService._write_material_vmt(out_vmt, vmt_path, patched_cdmaterials_path, name)
+        if fps:
+            VMTService.enable_animated_basetexture(str(out_vmt), fps)
+        return True
+
+    @staticmethod
     def _build_blu_team_texture(
         blu_mode: str,
         blu_image_path: Optional[str],
@@ -285,6 +344,43 @@ class VPKService:
             logger.warning(
                 f"Не удалось создать BLU текстуру (не критично): {_blu_exc}", exc_info=True
             )
+
+    @staticmethod
+    def _remap_skin_data_to_smd(skin_build_data: dict, smd_mats: list) -> dict:
+        """
+        Переименовывает материалы стилей под ФАКТИЧЕСКИЕ имена материалов SMD.
+
+        UI собирает имена из превью-загрузки; к моменту сборки имена меша в SMD
+        могут отличаться (другой экспорт/регистр). Сопоставляем UI↔SMD ПО ИНДЕКСУ
+        (порядок появления материалов) и переписываем mesh_materials / tg_overrides /
+        variant_files на SMD-имена. Картинки вариантов сохраняются.
+        """
+        ui_mats = skin_build_data.get('mesh_materials', [])
+        if not ui_mats or not smd_mats:
+            return skin_build_data
+
+        name_map = {um: (smd_mats[i] if i < len(smd_mats) else um)
+                    for i, um in enumerate(ui_mats)}
+
+        old_variants = skin_build_data.get('variant_files', {})
+        new_tg: dict = {}
+        new_variants: dict = {}
+        for skin_idx, mats in skin_build_data.get('tg_overrides', {}).items():
+            for ui_mat, old_vname in mats.items():
+                base = name_map.get(ui_mat, ui_mat)
+                # суффикс роли = хвост старого имени варианта после "ui_mat_"
+                prefix = (ui_mat + '_')
+                suffix = old_vname[len(prefix):] if old_vname.lower().startswith(prefix.lower()) else old_vname
+                new_vname = f"{base}_{suffix}"
+                new_tg.setdefault(skin_idx, {})[base] = new_vname
+                if old_vname in old_variants:
+                    new_variants[new_vname] = old_variants[old_vname]
+
+        return {
+            'mesh_materials': [name_map.get(m, m) for m in ui_mats],
+            'tg_overrides': new_tg,
+            'variant_files': new_variants,
+        }
 
     @staticmethod
     def _build_material_maps(
@@ -1539,19 +1635,51 @@ class VPKService:
                     # удаляем $lod (они нам не нужны, только мусорят)
                     ModelBuildService.patch_qc_file(qc_path, weapon_key, original_cdmaterials_path)
 
-                    # ── Инъекция сгенерированного $texturegroup для кастомных стилей ──
-                    # Заменяем игровую группу на нашу (только переменные материалы,
-                    # выровненные по мешу пользователя). studiomdl запечёт её в MDL.
+                    # Игровое имя текстуры/VMT (источник ОРИГИНАЛЬНОГО кода VMT из игры).
+                    # Для кастомной модели texture_filename станет именем материала SMD,
+                    # но оригинальный VMT тащим по игровому имени (c_sd_cleaver),
+                    # затем лишь переставим $basetexture на материал модели.
+                    _game_vmt_name = texture_filename
+
+                    # ── Кастомная модель: имена ведём от ФАКТИЧЕСКИХ материалов SMD ──
+                    # Имена VTF/VMT, $texturegroup и $basetexture обязаны совпадать с
+                    # материалом, с которым реально компилируется модель (из reference-SMD).
+                    # UI-имена могли разойтись с SMD (другой экспорт/регистр) → текстура
+                    # не находилась (фиолетовая). Картинки скинов мапим по индексу.
+                    if replace_keep_materials:
+                        _ref_smd = VPKService._find_decompiled_reference_smd(
+                            qc_path, weapon_key, ctx.decompile_dir
+                        )
+                        _smd_mats = SMDService.ordered_unique_materials(_ref_smd) if _ref_smd else []
+                        if _smd_mats:
+                            logger.info(f"[SKIN BUILD] материалы SMD (истина): {_smd_mats}")
+                            if _has_skins:
+                                skin_build_data = VPKService._remap_skin_data_to_smd(
+                                    skin_build_data, _smd_mats
+                                )
+                            if texture_filename != _smd_mats[0]:
+                                logger.info(
+                                    f"[SKIN BUILD] main texture_filename: "
+                                    f"{texture_filename!r} → {_smd_mats[0]!r} (материал SMD)"
+                                )
+                                texture_filename = _smd_mats[0]
+
+                    # ── $texturegroup кастомной модели ──
                     if _has_skins:
+                        # Свои стили: генерируем группу (имена выровнены по SMD).
                         _tg_block = ModelBuildService.generate_texturegroup_block(
                             skin_build_data.get('mesh_materials', []),
                             skin_build_data.get('tg_overrides', {}),
                         )
                         ModelBuildService.replace_texturegroup_in_qc(qc_path, _tg_block)
-                        logger.info(
-                            f"[SKIN BUILD] $texturegroup инъектирован в QC:\n{_tg_block}"
-                        )
-                    
+                        logger.info(f"[SKIN BUILD] $texturegroup инъектирован в QC:\n{_tg_block}")
+                    elif replace_keep_materials:
+                        # Одно-скиновая кастомная модель: убираем игровую группу — её
+                        # имена относятся к игровой модели, не к мешу (иначе пустые
+                        # skin-строки ремапят материал в пустоту → фиолет).
+                        ModelBuildService.replace_texturegroup_in_qc(qc_path, '')
+                        logger.info("[SKIN BUILD] игровой $texturegroup удалён (одно-скиновая кастомная модель)")
+
                     # Извлекаем путь из $cdmaterials после патчинга (теперь с префиксом console\)
                     patched_cdmaterials_path = ModelBuildService.extract_cdmaterials_path_from_qc(qc_path)
                     if not patched_cdmaterials_path:
@@ -1714,8 +1842,12 @@ class VPKService:
                     # Извлекаем оригинальный VMT по пути из QC (до патчинга) — в VPK он
                     # лежит по оригинальному пути. tf2_textures_vpk нужен и дальше по коду.
                     tf2_textures_vpk = TF2Paths.resolve_textures_vpk(tf2_root_dir)
+                    # Оригинальный VMT берём по ИГРОВОМУ имени (c_sd_cleaver.vmt) —
+                    # чтобы сохранить родной код материала (phong/прокси и т.п.).
+                    # _write_main_vmt затем переставит $basetexture на texture_filename
+                    # (имя материала меша).
                     vmt_file = VPKService._extract_original_vmt(
-                        original_cdmaterials_path, texture_filename,
+                        original_cdmaterials_path, _game_vmt_name,
                         tf2_textures_vpk, tf2_misc_vpk, ctx.decompile_dir,
                     )
                     
@@ -2112,35 +2244,12 @@ class VPKService:
                                 continue
                             if _pet_name in _processed:
                                 continue   # уже создан через skinfamilies
-                            if not _pet_img or not os.path.isfile(_pet_img):
-                                continue
                             try:
-                                ensure_directory_exists(vtf_output_path)
-                                _pet_vtf = vtf_output_path / f"{_pet_name}.vtf"
-                                _pet_vmt = vtf_output_path / f"{_pet_name}.vmt"
-                                _pet_flags, _pet_merged = TextureService.resolve_vtf_flags_and_options(flags, vtf_options, drop_normal=True)
-                                # Готовый VTF → копируем как есть; GIF → анимированный; иначе обычный
-                                _pet_fps = None
-                                if str(_pet_img).lower().endswith('.vtf'):
-                                    copy_file_safe(_pet_img, _pet_vtf)
-                                elif TextureService.is_animated_image(_pet_img):
-                                    _pet_fps = TextureService.create_animated_vtf(
-                                        _pet_img, str(_pet_vtf), size, format_type, _pet_flags, _pet_merged
-                                    )
-                                else:
-                                    _pet_png = vtf_output_path / f"{_pet_name}.png"
-                                    VPKService._process_image(_pet_img, _pet_png, size)
-                                    VPKService._create_vtf(
-                                        str(_pet_png), str(vtf_output_path),
-                                        format_type, _pet_flags, _pet_merged
-                                    )
-                                    if _pet_png.exists():
-                                        _pet_png.unlink()
-                                if not _pet_vmt.exists():
-                                    VPKService._write_material_vmt(_pet_vmt, vmt_path, patched_cdmaterials_path, _pet_name)
-                                if _pet_fps:
-                                    VMTService.enable_animated_basetexture(str(_pet_vmt), _pet_fps)
-                                logger.info(f"Panel extra texture: {_pet_name}.vtf/vmt")
+                                if VPKService._render_extra_texture(
+                                    _pet_name, _pet_img, vtf_output_path, vmt_path,
+                                    patched_cdmaterials_path, size, format_type, flags, vtf_options,
+                                ):
+                                    logger.info(f"Panel extra texture: {_pet_name}.vtf/vmt")
                             except Exception as _pet_exc:
                                 logger.warning(f"Panel extra texture ошибка '{_pet_name}': {_pet_exc}")
 
@@ -2151,40 +2260,14 @@ class VPKService:
                     if _has_skins:
                         _variant_files = skin_build_data.get('variant_files', {})
                         for _v_name, _v_img in _variant_files.items():
-                            if not _v_img or not os.path.isfile(_v_img):
-                                logger.warning(f"[SKIN BUILD] нет файла варианта '{_v_name}': {_v_img}")
-                                continue
                             try:
-                                ensure_directory_exists(vtf_output_path)
-                                _v_vtf = vtf_output_path / f"{_v_name}.vtf"
-                                _v_vmt = vtf_output_path / f"{_v_name}.vmt"
-                                _v_flags, _v_merged = TextureService.resolve_vtf_flags_and_options(
-                                    flags, vtf_options, drop_normal=True
-                                )
-                                _v_fps = None
-                                if str(_v_img).lower().endswith('.vtf'):
-                                    copy_file_safe(_v_img, _v_vtf)
-                                elif TextureService.is_animated_image(_v_img):
-                                    _v_fps = TextureService.create_animated_vtf(
-                                        _v_img, str(_v_vtf), size, format_type, _v_flags, _v_merged
-                                    )
+                                if VPKService._render_extra_texture(
+                                    _v_name, _v_img, vtf_output_path, vmt_path,
+                                    patched_cdmaterials_path, size, format_type, flags, vtf_options,
+                                ):
+                                    logger.info(f"[SKIN BUILD] вариант: {_v_name}.vtf/vmt")
                                 else:
-                                    _v_png = vtf_output_path / f"{_v_name}.png"
-                                    VPKService._process_image(_v_img, _v_png, size)
-                                    VPKService._create_vtf(
-                                        str(_v_png), str(vtf_output_path),
-                                        format_type, _v_flags, _v_merged
-                                    )
-                                    if _v_png.exists():
-                                        _v_png.unlink()
-                                # VMT варианта — на основе главного VMT, $basetexture → имя варианта
-                                if not _v_vmt.exists():
-                                    VPKService._write_material_vmt(
-                                        _v_vmt, vmt_path, patched_cdmaterials_path, _v_name
-                                    )
-                                if _v_fps:
-                                    VMTService.enable_animated_basetexture(str(_v_vmt), _v_fps)
-                                logger.info(f"[SKIN BUILD] вариант: {_v_name}.vtf/vmt")
+                                    logger.warning(f"[SKIN BUILD] нет файла варианта '{_v_name}': {_v_img}")
                             except Exception as _v_exc:
                                 logger.warning(f"[SKIN BUILD] вариант '{_v_name}' — ошибка: {_v_exc}", exc_info=True)
 

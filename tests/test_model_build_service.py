@@ -423,6 +423,37 @@ class ModelBuildServiceTests(unittest.TestCase):
             self.assertIn("c_weapon_shell.smd", basenames)
             self.assertIn("c_weapon_scope.smd", basenames)
 
+    def test_generate_texturegroup_block_empty(self):
+        self.assertEqual(ModelBuildService.generate_texturegroup_block(["m"], {}), "")
+
+    def test_generate_texturegroup_block_only_variant_materials(self):
+        # В группу попадают только переменные материалы; постоянные опускаются.
+        block = ModelBuildService.generate_texturegroup_block(
+            ["body", "lefteye"], {1: {"lefteye": "lefteye_bloody"}},
+        )
+        self.assertIn('"lefteye"', block)
+        self.assertIn('"lefteye_bloody"', block)
+        self.assertNotIn('body', block)   # постоянный материал не пишется
+
+    def test_generate_texturegroup_block_lowercases_names(self):
+        # Имена приводятся к нижнему регистру (иначе фиолетовые текстуры).
+        block = ModelBuildService.generate_texturegroup_block(
+            ["Material.001"], {1: {"Material.001": "Material.001_Bloody"}},
+        )
+        self.assertIn('"material.001"', block)
+        self.assertIn('"material.001_bloody"', block)
+        self.assertNotIn("Material.001", block)
+
+    def test_generate_texturegroup_block_skin0_is_base(self):
+        block = ModelBuildService.generate_texturegroup_block(
+            ["mat"], {2: {"mat": "mat_v2"}},
+        )
+        lines = [l for l in block.splitlines() if l.strip().startswith('{') and '"' in l]
+        # 3 строки скинов: skin0=base, skin1=наследует base, skin2=variant
+        self.assertEqual(lines[0].strip(), '{ "mat" }')
+        self.assertEqual(lines[1].strip(), '{ "mat" }')
+        self.assertEqual(lines[2].strip(), '{ "mat_v2" }')
+
 
 if __name__ == "__main__":
     unittest.main()

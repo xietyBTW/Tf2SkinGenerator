@@ -428,6 +428,51 @@ class VPKServiceTests(unittest.TestCase):
                     VPKService._generate_uv_layout(ctx, "weapon", (4, 4), export_folder=str(base))
             generate.assert_called()
 
+    def test_render_extra_texture_missing_returns_false(self):
+        # Нет файла/пустой путь → False, без побочных эффектов
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            for bad in (None, "", os.path.join(tmp, "nope.png")):
+                self.assertFalse(VPKService._render_extra_texture(
+                    "mat", bad, out, out / "main.vmt",
+                    "models/weapons/c_models", (4, 4), "DXT1", [], {},
+                ))
+            self.assertEqual(list(out.glob("*.vtf")), [])
+
+    def test_render_extra_texture_vtf_input_copies_and_writes_vmt(self):
+        # На вход .vtf → копируется как есть + создаётся VMT (без vtfcmd)
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            src_vtf = out / "src.vtf"
+            src_vtf.write_bytes(b"VTF\x00fake")
+            ok = VPKService._render_extra_texture(
+                "lefteye_bloody", str(src_vtf), out, out / "main.vmt",
+                "models/weapons/c_models", (4, 4), "DXT1", [], {},
+            )
+            self.assertTrue(ok)
+            self.assertTrue((out / "lefteye_bloody.vtf").exists())
+            self.assertTrue((out / "lefteye_bloody.vmt").exists())
+            self.assertEqual((out / "lefteye_bloody.vtf").read_bytes(), b"VTF\x00fake")
+
+
+    def test_remap_skin_data_to_smd_by_index(self):
+        # UI собрал 'Material.001', SMD-материал 'material' → ремап по индексу,
+        # картинки вариантов сохраняются.
+        sbd = {
+            'mesh_materials': ['Material.001'],
+            'tg_overrides': {1: {'Material.001': 'Material.001_bloody'}},
+            'variant_files': {'Material.001_bloody': '/img/bloody.png'},
+        }
+        out = VPKService._remap_skin_data_to_smd(sbd, ['material'])
+        self.assertEqual(out['mesh_materials'], ['material'])
+        self.assertEqual(out['tg_overrides'], {1: {'material': 'material_bloody'}})
+        self.assertEqual(out['variant_files'], {'material_bloody': '/img/bloody.png'})
+
+    def test_remap_skin_data_to_smd_empty_smd_noop(self):
+        sbd = {'mesh_materials': ['a'], 'tg_overrides': {1: {'a': 'a_x'}},
+               'variant_files': {'a_x': '/p'}}
+        self.assertIs(VPKService._remap_skin_data_to_smd(sbd, []), sbd)
+
 
 if __name__ == "__main__":
     unittest.main()
