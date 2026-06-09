@@ -209,6 +209,7 @@ TRANSLATIONS = {
         '3d_select_smd_title': 'Выберите SMD файл модели',
         '3d_load_model_tip':   'Загрузить 3D модель',
         '3d_load_vpk_tip':     'Загрузить VPK мод для 3D Preview',
+        '3d_replace_model_tip': 'Заменить модель своей (SMD) — сразу видно в 3D, материалы → карточки',
         '3d_team_red_tip':     'Текстура команды RED',
         '3d_team_blu_tip':     'Текстура команды BLU',
 
@@ -563,6 +564,7 @@ TRANSLATIONS = {
         '3d_select_smd_title': 'Select SMD Model File',
         '3d_load_model_tip':   'Load 3D model',
         '3d_load_vpk_tip':     'Load VPK mod for 3D Preview',
+        '3d_replace_model_tip': 'Replace the model with your own (SMD) — shown in 3D, materials → cards',
         '3d_team_red_tip':     'RED team texture',
         '3d_team_blu_tip':     'BLU team texture',
 

@@ -1662,6 +1662,11 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
                 hasattr(self, 'settings_panel') and
                 self.settings_panel.is_model_ready_checked()
             )
+            # Кнопка 🔄: если в превью загружена кастомная модель — включаем замену
+            # автоматически (без галочки в настройках). Развязывает кнопку и настройки.
+            if (not model_ready_enabled and hasattr(self, 'preview_panel')
+                    and self.preview_panel.get_custom_smd_path()):
+                replace_model_enabled = True
 
             # Взаимоисключение с CritHIT — сбрасываем оба флага если активен CritHIT
             is_crit_hit = (hasattr(self, 'crit_hit_checkbox') and
@@ -1673,22 +1678,28 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
                 replace_model_enabled = False
                 model_ready_enabled   = False
 
-            # Если "Замена модели" — запрашиваем путь к SMD файлу ДО запуска воркера
-            # (чтобы диалог не появился позади модального диалога прогресса сборки)
+            # Если "Замена модели" — берём путь к SMD. Сначала пробуем модель,
+            # уже загруженную в 3D-превью (чтобы не просить выбрать файл повторно).
+            # Если её нет — показываем диалог выбора ДО запуска воркера.
             replace_model_smd_path: Optional[str] = None
             if replace_model_enabled and not model_ready_enabled:
-                smd_file, _ = QFileDialog.getOpenFileName(
-                    self,
-                    self.t.get(
-                        'replace_model_select_title',
-                        'Select SMD file for model replacement'
-                    ),
-                    "",
-                    "SMD Files (*.smd);;All Files (*)"
-                )
-                if not smd_file:
-                    return  # Пользователь отменил
-                replace_model_smd_path = smd_file
+                if hasattr(self, 'preview_panel'):
+                    replace_model_smd_path = self.preview_panel.get_custom_smd_path()
+                if replace_model_smd_path:
+                    logger.info(f"Замена модели: используем загруженную в превью SMD: {replace_model_smd_path}")
+                else:
+                    smd_file, _ = QFileDialog.getOpenFileName(
+                        self,
+                        self.t.get(
+                            'replace_model_select_title',
+                            'Select SMD file for model replacement'
+                        ),
+                        "",
+                        "SMD Files (*.smd);;All Files (*)"
+                    )
+                    if not smd_file:
+                        return  # Пользователь отменил
+                    replace_model_smd_path = smd_file
 
             # Если "Модель уже готова" — запрашиваем путь к .mdl файлу ДО запуска воркера
             model_ready_path: Optional[str] = None
@@ -1765,6 +1776,21 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
                 if main_key and main_key in _panel_extra_textures:
                     _panel_extra_textures.pop(main_key)
 
+            # Стили (skinfamilies) кастомной модели: пользователь определил
+            # доп-стили в полосе стилей → генерируем $texturegroup и варианты.
+            # None, если стилей нет (обычная одно-скиновая сборка).
+            _skin_build_data = None
+            _replace_keep_materials = False
+            if replace_model_enabled and hasattr(self, 'preview_panel'):
+                _skin_build_data = self.preview_panel.get_skin_build_data()
+                if _skin_build_data:
+                    logger.info(
+                        f"[SKIN BUILD] стили: {_skin_build_data['tg_overrides']}"
+                    )
+                # «Готовая» модель со своими материалами → не схлопывать в один.
+                if hasattr(self.preview_panel, 'get_custom_keep_materials'):
+                    _replace_keep_materials = self.preview_panel.get_custom_keep_materials()
+
             self._build_worker = BuildWorker(
                 image_path=from_path,
                 mode=self.mode,
@@ -1790,6 +1816,8 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
                 hat_apply_game_paints=hat_apply_game_paints,
                 panel_extra_textures=_panel_extra_textures,
                 material_maps=settings.get('material_maps', {}),
+                skin_build_data=_skin_build_data,
+                replace_keep_materials=_replace_keep_materials,
                 # Без parent=self ! Если дать parent=self, Qt станет владельцем
                 # и не удалит старый воркер при замене, и сигналы будут дублироваться.
             )

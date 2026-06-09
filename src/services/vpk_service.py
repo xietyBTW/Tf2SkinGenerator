@@ -252,6 +252,12 @@ class VPKService:
                     shutil.copy2(red_vtf_path, blu_vtf_path)
                     blu_created = True
                     logger.info(f"BLU текстура скопирована из RED: {blu_vtf_name}")
+            elif blu_image_path and str(blu_image_path).lower().endswith('.vtf'):
+                # В BLU-карточку загрузили готовый VTF — копируем как есть
+                copy_file_safe(blu_image_path, blu_vtf_path)
+                blu_created = blu_vtf_path.exists()
+                if blu_created:
+                    logger.info(f"BLU текстура: готовый VTF скопирован → {blu_vtf_name}")
             elif blu_image_path and os.path.exists(blu_image_path):
                 blu_png_tmp = vtf_output_path / f"{texture_filename}_blue.png"
                 VPKService._process_image(blu_image_path, str(blu_png_tmp), size)
@@ -493,7 +499,12 @@ class VPKService:
 
                 _img_hash = VPKService._file_content_hash(img)
                 _cached = _vtf_cache.get(_img_hash) if _img_hash else None
-                if _cached:
+                if str(img).lower().endswith('.vtf'):
+                    # Пользователь загрузил готовый VTF — копируем как есть
+                    copy_file_safe(img, dest_vtf)
+                    _ex_fps = None
+                    logger.info(f"Фикс. доп. текстура: готовый VTF скопирован → {stem}.vtf")
+                elif _cached:
                     # Та же картинка уже сконвертирована — переиспользуем готовый VTF
                     _src_vtf, _ex_fps = _cached
                     copy_file_safe(_src_vtf, dest_vtf)
@@ -725,6 +736,7 @@ class VPKService:
         extra_model_callback,
         language: str,
         emit_sub,
+        keep_user_materials: bool = False,
     ) -> None:
         """
         Применяет пользовательскую замену модели поверх декомпилированных SMD.
@@ -760,8 +772,12 @@ class VPKService:
                         original_smd_path,
                         original_smd_path,  # Перезаписываем оригинальный файл под тем же именем
                         progress_cb=lambda pct: emit_sub(pct, "Replacing model..." if language == "en" else "Замена модели..."),
+                        keep_user_materials=keep_user_materials,
                     )
-                    logger.info(f"Модель успешно заменена: {original_smd_path}")
+                    logger.info(
+                        f"Модель успешно заменена: {original_smd_path} "
+                        f"(keep_user_materials={keep_user_materials})"
+                    )
                 else:
                     logger.warning(f"Не найден reference SMD файл для {weapon_key} в {ctx.decompile_dir}")
                     if ctx.decompile_dir.exists():
@@ -1027,6 +1043,8 @@ class VPKService:
         hat_apply_game_paints: bool = True,
         panel_extra_textures: Optional[dict] = None,
         material_maps: Optional[dict] = None,
+        skin_build_data: Optional[dict] = None,
+        replace_keep_materials: bool = False,
         progress_callback: Optional[Callable[[int, str], None]] = None,
         sub_progress_callback: Optional[Callable[[int, str], None]] = None,
         cancel_callback: Optional[Callable[[], bool]] = None
@@ -1111,6 +1129,8 @@ class VPKService:
                 hat_apply_game_paints=hat_apply_game_paints,
                 panel_extra_textures=panel_extra_textures,
                 material_maps=material_maps,
+                skin_build_data=skin_build_data,
+                replace_keep_materials=replace_keep_materials,
             )
 
             if is_special_mode:
@@ -1198,6 +1218,8 @@ class VPKService:
         sub_progress_callback: Optional[Callable[[int, str], None]] = None,
         panel_extra_textures: Optional[dict] = None,  # {mat_name: img_path} из 2D панели
         material_maps: Optional[dict] = None,  # файловые карты материала (detail/selfillum/phongexp)
+        skin_build_data: Optional[dict] = None,  # стили кастомной модели → $texturegroup + варианты
+        replace_keep_materials: bool = False,  # сохранить материалы пользовательской модели (многотекстурная/«готовая»)
     ) -> Tuple[bool, str]:
         """
         Главная функция - делает из картинки VPK файл.
@@ -1370,6 +1392,7 @@ class VPKService:
                     VPKService._apply_model_replacement(
                         ctx, qc_path, weapon_key, replace_model_smd_path,
                         extra_model_callback, language, emit_sub,
+                        keep_user_materials=replace_keep_materials,
                     )
                     
                     # Извлекаем путь из $cdmaterials в QC файле (до патчинга, потому что потом мы его изменим)
@@ -1490,6 +1513,23 @@ class VPKService:
                     # вместе с red_row. Служебные blu-материалы пропускаются ВНУТРИ
                     # цикла (по col_idx), чтобы не сместить выравнивание.
 
+                    # ── Стили (skinfamilies) кастомной модели ──────────────────
+                    # Если пользователь определил доп-стили, ИГРОВОЙ $texturegroup
+                    # неприменим: его имена (c_sd_cleaver_bloody, _blue …) относятся
+                    # к игровой модели, а не к мешу пользователя. Подавляем
+                    # производные из него BLU/extra-материалы и команду — мы
+                    # сгенерируем свою группу и варианты ниже. Меш-материалы базы
+                    # приходят отдельно через panel_extra_textures.
+                    _has_skins = bool(skin_build_data and skin_build_data.get('tg_overrides'))
+                    if _has_skins:
+                        logger.info(
+                            "[SKIN BUILD] кастомные стили → подавляем игровой "
+                            f"texturegroup (blu_row={blu_row}, extra={extra_materials})"
+                        )
+                        blu_row = []
+                        extra_materials = []
+                        blu_mode = 'none'   # не плодим {texture}_blue
+
                     if blu_row:
                         logger.info(f"Найдена BLU команда: {blu_row}")
                     if extra_materials:
@@ -1498,6 +1538,19 @@ class VPKService:
                     # Пропатчиваем QC файл: добавляем console\ к $cdmaterials (чтобы текстуры загружались из консольных команд),
                     # удаляем $lod (они нам не нужны, только мусорят)
                     ModelBuildService.patch_qc_file(qc_path, weapon_key, original_cdmaterials_path)
+
+                    # ── Инъекция сгенерированного $texturegroup для кастомных стилей ──
+                    # Заменяем игровую группу на нашу (только переменные материалы,
+                    # выровненные по мешу пользователя). studiomdl запечёт её в MDL.
+                    if _has_skins:
+                        _tg_block = ModelBuildService.generate_texturegroup_block(
+                            skin_build_data.get('mesh_materials', []),
+                            skin_build_data.get('tg_overrides', {}),
+                        )
+                        ModelBuildService.replace_texturegroup_in_qc(qc_path, _tg_block)
+                        logger.info(
+                            f"[SKIN BUILD] $texturegroup инъектирован в QC:\n{_tg_block}"
+                        )
                     
                     # Извлекаем путь из $cdmaterials после патчинга (теперь с префиксом console\)
                     patched_cdmaterials_path = ModelBuildService.extract_cdmaterials_path_from_qc(qc_path)
@@ -1639,6 +1692,12 @@ class VPKService:
                         ensure_directory_exists(vtf_output_path)
                         copy_file_safe(custom_vtf_path, vtf_file_path)
                         logger.info(f"Использован пользовательский VTF файл: {custom_vtf_path} -> {vtf_file_path}")
+                    elif image_path and str(image_path).lower().endswith('.vtf'):
+                        # В карточку главного материала загрузили готовый VTF —
+                        # копируем как есть, без PIL-конвертации (иначе «cannot identify image»).
+                        ensure_directory_exists(vtf_output_path)
+                        copy_file_safe(image_path, vtf_output_path / vtf_filename)
+                        logger.info(f"Главная текстура: готовый VTF скопирован → {vtf_filename}")
                     elif image_path:
                         animated_fps, is_normal_map = TextureService.render_image_to_vtf(
                             image_path,
@@ -1728,8 +1787,9 @@ class VPKService:
                             # Пользователь предоставил отдельное изображение для этого материала
                             logger.info(f"Используем отдельное изображение для {extra_mat_name}: {extra_image_path}")
 
-                            if custom_vtf_path:
-                                # Пользователь использует VTF - копируем
+                            if custom_vtf_path or extra_image_path.lower().endswith('.vtf'):
+                                # Пользователь загрузил готовый VTF (глобально или в эту
+                                # карточку) — копируем как есть, без переконвертации.
                                 copy_file_safe(extra_image_path, extra_vtf_path)
                             elif TextureService.is_animated_image(extra_image_path):
                                 vtf_flags_extra, merged_extra = TextureService.resolve_vtf_flags_and_options(flags, vtf_options)
@@ -1875,6 +1935,9 @@ class VPKService:
                                         else:
                                             logger.debug(f"Shared VTF не найден в игре, пропуск: {blu_tex_name}")
                                             continue
+                                    elif _shared_img and str(_shared_img).lower().endswith('.vtf'):
+                                        copy_file_safe(_shared_img, shared_vtf_path)
+                                        logger.info(f"Shared: готовый VTF скопирован → {blu_tex_name}.vtf")
                                     elif _shared_img and os.path.isfile(_shared_img):
                                         _sh_flags, _sh_merged = TextureService.resolve_vtf_flags_and_options(flags, vtf_options, drop_normal=True)
                                         _sh_png = vtf_output_path / f"{blu_tex_name}.png"
@@ -2056,9 +2119,11 @@ class VPKService:
                                 _pet_vtf = vtf_output_path / f"{_pet_name}.vtf"
                                 _pet_vmt = vtf_output_path / f"{_pet_name}.vmt"
                                 _pet_flags, _pet_merged = TextureService.resolve_vtf_flags_and_options(flags, vtf_options, drop_normal=True)
-                                # Анимированный GIF → многокадровый VTF + прокси в VMT
+                                # Готовый VTF → копируем как есть; GIF → анимированный; иначе обычный
                                 _pet_fps = None
-                                if TextureService.is_animated_image(_pet_img):
+                                if str(_pet_img).lower().endswith('.vtf'):
+                                    copy_file_safe(_pet_img, _pet_vtf)
+                                elif TextureService.is_animated_image(_pet_img):
                                     _pet_fps = TextureService.create_animated_vtf(
                                         _pet_img, str(_pet_vtf), size, format_type, _pet_flags, _pet_merged
                                     )
@@ -2078,6 +2143,50 @@ class VPKService:
                                 logger.info(f"Panel extra texture: {_pet_name}.vtf/vmt")
                             except Exception as _pet_exc:
                                 logger.warning(f"Panel extra texture ошибка '{_pet_name}': {_pet_exc}")
+
+                    # ── VTF/VMT вариантов стилей (skinfamilies) ─────────────────
+                    # Для каждой переопределённой текстуры доп-стиля (напр.
+                    # lefteye_bloody) создаём VTF + VMT рядом с базовыми. Имена
+                    # совпадают с теми, что выписаны в инъектированный $texturegroup.
+                    if _has_skins:
+                        _variant_files = skin_build_data.get('variant_files', {})
+                        for _v_name, _v_img in _variant_files.items():
+                            if not _v_img or not os.path.isfile(_v_img):
+                                logger.warning(f"[SKIN BUILD] нет файла варианта '{_v_name}': {_v_img}")
+                                continue
+                            try:
+                                ensure_directory_exists(vtf_output_path)
+                                _v_vtf = vtf_output_path / f"{_v_name}.vtf"
+                                _v_vmt = vtf_output_path / f"{_v_name}.vmt"
+                                _v_flags, _v_merged = TextureService.resolve_vtf_flags_and_options(
+                                    flags, vtf_options, drop_normal=True
+                                )
+                                _v_fps = None
+                                if str(_v_img).lower().endswith('.vtf'):
+                                    copy_file_safe(_v_img, _v_vtf)
+                                elif TextureService.is_animated_image(_v_img):
+                                    _v_fps = TextureService.create_animated_vtf(
+                                        _v_img, str(_v_vtf), size, format_type, _v_flags, _v_merged
+                                    )
+                                else:
+                                    _v_png = vtf_output_path / f"{_v_name}.png"
+                                    VPKService._process_image(_v_img, _v_png, size)
+                                    VPKService._create_vtf(
+                                        str(_v_png), str(vtf_output_path),
+                                        format_type, _v_flags, _v_merged
+                                    )
+                                    if _v_png.exists():
+                                        _v_png.unlink()
+                                # VMT варианта — на основе главного VMT, $basetexture → имя варианта
+                                if not _v_vmt.exists():
+                                    VPKService._write_material_vmt(
+                                        _v_vmt, vmt_path, patched_cdmaterials_path, _v_name
+                                    )
+                                if _v_fps:
+                                    VMTService.enable_animated_basetexture(str(_v_vmt), _v_fps)
+                                logger.info(f"[SKIN BUILD] вариант: {_v_name}.vtf/vmt")
+                            except Exception as _v_exc:
+                                logger.warning(f"[SKIN BUILD] вариант '{_v_name}' — ошибка: {_v_exc}", exc_info=True)
 
                     # Ждём завершения компиляции (шла параллельно с текстурами)
                     _compile_thread.join()
@@ -2276,6 +2385,10 @@ class VPKService:
                     else:
                         logger.debug(f"Маска не найдена в VPK, пропускаем: {vtf_name}")
                         continue
+                elif mask_img and str(mask_img).lower().endswith('.vtf'):
+                    # В карточку маски загрузили готовый VTF — копируем как есть
+                    copy_file_safe(mask_img, mask_vtf_path)
+                    logger.info(f"Маска: готовый VTF скопирован → {vtf_name}.vtf")
                 elif mask_img and os.path.isfile(mask_img):
                     # Конвертируем изображение пользователя.
                     # ВАЖНО: имя PNG должно совпадать с именем VTF (без _tmp),

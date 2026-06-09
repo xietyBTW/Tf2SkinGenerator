@@ -20,10 +20,11 @@ class SMDService:
         original_smd_path: str,
         output_smd_path: Optional[str] = None,
         progress_cb: Optional[Callable[[int], None]] = None,
+        keep_user_materials: bool = False,
     ) -> str:
         """
-        Заменяет секции nodes/skeleton и названия материалов в пользовательском SMD
-        на соответствующие из оригинального SMD игры.
+        Заменяет секции nodes/skeleton (а опц. и имена материалов) в пользовательском
+        SMD на соответствующие из оригинального SMD игры.
 
         Args:
             user_smd_path:     Путь к SMD пользователя (геометрия)
@@ -31,6 +32,10 @@ class SMDService:
             output_smd_path:   Куда записать результат (None = перезаписать user_smd_path)
             progress_cb:       Опциональный callback(pct: int 0-100). Вызывается с троттлингом
                                ~60 fps, чтобы не замедлять парсинг.
+            keep_user_materials: True — сохранить ИМЕНА материалов пользователя (для
+                               многотекстурных/«готовых» моделей; иначе все материалы
+                               схлопнутся в один материал оригинала). nodes/skeleton
+                               всё равно берутся из оригинала (риггинг под скелет TF2).
         Returns:
             Путь к записанному файлу.
         """
@@ -72,10 +77,13 @@ class SMDService:
             _wlines(out, orig_parts.get('nodes') or user_parts.get('nodes'))
             _wlines(out, orig_parts.get('skeleton') or user_parts.get('skeleton'))
             # Запись треугольников → 80..100 %
+            # keep_user_materials → передаём пустой список оригинальных имён,
+            # тогда _write_merged_triangles сохраняет материалы пользователя.
+            _orig_mat_names = [] if keep_user_materials else orig_parts.get('material_names', [])
             SMDService._write_merged_triangles(
                 out,
                 user_parts.get('triangles_data', []),
-                orig_parts.get('material_names', []),
+                _orig_mat_names,
                 progress_cb=_cb,
                 pct_start=80,
                 pct_end=100,

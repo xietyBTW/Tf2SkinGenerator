@@ -315,56 +315,57 @@ class ModelBuildService:
     @staticmethod
     def _parse_texturegroup_rows(qc_path: str) -> List[List[str]]:
         """
-        Парсит ВСЕ строки из $texturegroup в QC файле.
-        
+        Парсит строки-скины из $texturegroup в QC файле.
+
+        Каждый скин — это внутренний блок `{ ... }`, который МОЖЕТ занимать
+        несколько строк (studiomdl/Crowbar часто пишут каждый материал на своей
+        строке). Поэтому парсим по фигурным скобкам, а не построчно — иначе одна
+        строка-скин из N материалов ошибочно превращается в N «скинов».
+
         Returns:
-            Список строк, каждая строка - список имен материалов
+            Список скинов, каждый скин — список имён материалов.
         """
         if not os.path.exists(qc_path):
             return []
-        
-        with open(qc_path, 'r', encoding='utf-8') as f:
-            lines = f.readlines()
-        
-        i = 0
-        while i < len(lines):
-            line = lines[i]
-            stripped = line.strip()
-            
-            if re.match(r'\$texturegroup\s+', stripped, re.IGNORECASE):
-                i += 1
-                
-                while i < len(lines) and (not lines[i].strip() or lines[i].strip().startswith('//')):
-                    i += 1
-                
-                if i < len(lines) and lines[i].strip().startswith('{'):
-                    i += 1
-                    
-                    while i < len(lines) and (not lines[i].strip() or lines[i].strip().startswith('//')):
-                        i += 1
-                    
-                    rows: List[List[str]] = []
-                    
-                    while i < len(lines):
-                        current_line = lines[i]
-                        stripped_current = current_line.strip()
-                        
-                        if stripped_current == '}':
-                            break
-                        
-                        matches = re.findall(r'"([^"]+)"', current_line)
-                        row_names = [name.strip() for name in matches if name.strip()]
-                        
-                        if row_names:
-                            rows.append(row_names)
-                        
-                        i += 1
-                    
-                    return rows
-            
-            i += 1
-        
-        return []
+
+        try:
+            with open(qc_path, 'r', encoding='utf-8', errors='replace') as f:
+                content = f.read()
+        except Exception:
+            return []
+
+        # Находим начало блока $texturegroup и его открывающую скобку.
+        m = re.search(r'(?im)^[ \t]*\$texturegroup\b', content)
+        if not m:
+            return []
+        outer_open = content.find('{', m.end())
+        if outer_open == -1:
+            return []
+
+        # Находим закрывающую скобку всего блока (учёт вложенности).
+        depth = 0
+        outer_close = None
+        for i in range(outer_open, len(content)):
+            c = content[i]
+            if c == '{':
+                depth += 1
+            elif c == '}':
+                depth -= 1
+                if depth == 0:
+                    outer_close = i
+                    break
+        if outer_close is None:
+            return []
+
+        inner = content[outer_open + 1:outer_close]
+
+        # Каждый внутренний { ... } — один скин (может быть многострочным).
+        rows: List[List[str]] = []
+        for grp in re.finditer(r'\{([^{}]*)\}', inner, re.DOTALL):
+            names = [n.strip() for n in re.findall(r'"([^"]+)"', grp.group(1)) if n.strip()]
+            if names:
+                rows.append(names)
+        return rows
     
     @staticmethod
     def extract_texturegroup_structure(qc_path: str) -> dict:
@@ -445,11 +446,194 @@ class ModelBuildService:
         blu_names_set = set(blu_row_raw)
         extra_raw = base_rows[0][1:] if len(base_rows[0]) > 1 else []
         result['extra_materials'] = [m for m in extra_raw if m not in blu_names_set]
-        
+
         return result
 
+    @staticmethod
+    def generate_texturegroup_block(mesh_materials: List[str],
+                                    skin_overrides: dict) -> str:
+        """
+        Генерирует блок $texturegroup "skinfamilies" из материалов меша и
+        переопределений по скинам.
 
+        Args:
+            mesh_materials: имена материалов меша (порядок = skin 0, базовые имена).
+            skin_overrides: {skin_index(int>=1): {material_name: variant_texture_name}}.
+                            Только материалы, которые пользователь сделал РАЗНЫМИ
+                            в этом скине. Остальные наследуют базовое имя.
 
+        Правила Source:
+          • в группу попадают ТОЛЬКО переменные материалы (переопределённые хоть в
+            одном скине); постоянные не пишутся вообще;
+          • во всех строках одинаковые столбцы, в порядке mesh_materials;
+          • skin 0 = базовые имена; skin K = вариант (если есть) или базовое имя.
+
+        Returns:
+            Текст блока $texturegroup (с переводом строки) или '' если вариантов нет
+            (тогда группа не нужна — модель одно-скиновая).
+        """
+        if not skin_overrides:
+            return ''
+
+        # Переменные материалы — те, что переопределены хотя бы в одном скине.
+        # Сохраняем порядок mesh_materials (важно для выравнивания столбцов).
+        overridden = set()
+        for ov in skin_overrides.values():
+            overridden.update(ov.keys())
+        variant_mats = [m for m in mesh_materials if m in overridden]
+        if not variant_mats:
+            return ''
+
+        n_skins = 1 + max(skin_overrides.keys())
+
+        lines = ['$texturegroup "skinfamilies"', '{']
+        for skin in range(n_skins):
+            ov = skin_overrides.get(skin, {})
+            names = []
+            for mat in variant_mats:
+                # skin 0 — всегда базовое имя; иначе вариант или базовое (наследование)
+                names.append(mat if skin == 0 else ov.get(mat, mat))
+            row = ' '.join(f'"{n}"' for n in names)
+            lines.append(f'\t{{ {row} }}')
+        lines.append('}')
+        return '\n'.join(lines) + '\n'
+
+    # Суффиксы строк-вариантов (австралий/голд/festive и т.п.) — это НЕ обычные
+    # скины-стили, а отдельные «варианты»; считаем их отдельно.
+    _VARIANT_SUFFIXES = ('_gold', '_australium', '_botkiller', '_strange',
+                         '_unusual', '_festive', '_xmas')
+
+    @staticmethod
+    def _skin_role_label(row: List[str], idx: int) -> str:
+        """Дружелюбная подпись скина по суффиксу его текстуры (иначе 'Skin N')."""
+        if idx == 0:
+            return 'Skin 0'
+        name = (row[0] if row else '').lower()
+        friendly = {'_bloody': 'Bloody', '_clean': 'Clean', '_dirty': 'Dirty'}
+        for suf, label in friendly.items():
+            if name.endswith(suf):
+                return label
+        return f'Skin {idx}'
+
+    @staticmethod
+    def extract_skin_info(qc_path: str) -> dict:
+        """
+        Читает $texturegroup игрового QC и возвращает инфу о скинах — для UI
+        (вкладки) и генерации. ОТДЕЛЬНАЯ новая функция: существующую логику
+        (extract_texturegroup_structure / RED-BLU) НЕ трогает.
+
+        Returns:
+            {
+              'num_skins': int,        # число базовых строк-скинов (0/1 = без стилей)
+              'roles': [str, ...],     # подпись каждого скина (RED/BLU или Skin N)
+              'is_team': bool,         # row1 = команда (суффикс _blue/_blu)
+              'has_australium': bool,  # присутствует строка-вариант (_gold и т.п.)
+              'rows': [[...], ...],    # сырые строки группы
+            }
+        """
+        rows = ModelBuildService._parse_texturegroup_rows(qc_path)
+        info = {'num_skins': len(rows), 'roles': [], 'is_team': False,
+                'has_australium': False, 'rows': rows}
+        if not rows:
+            return info
+
+        sufx = ModelBuildService._VARIANT_SUFFIXES
+        info['has_australium'] = any(
+            r and any(r[0].lower().endswith(s) for s in sufx) for r in rows
+        )
+        # Базовые строки (без variant-суффикса в первом материале)
+        base_rows = [r for r in rows if r and not any(r[0].lower().endswith(s) for s in sufx)]
+        if not base_rows:
+            base_rows = rows
+
+        # Дедуп идентичных строк. TF2 часто ПАДДИТ skinfamilies одинаковыми
+        # строками, чтобы разные индексы скина (обычный/странный/фестив/килстрик)
+        # давали один и тот же вид — это НЕ разные стили. Схлопываем их в один.
+        seen = set()
+        unique_rows = []
+        for r in base_rows:
+            key = tuple(x.lower() for x in r)
+            if key not in seen:
+                seen.add(key)
+                unique_rows.append(r)
+        base_rows = unique_rows
+        n = len(base_rows)
+        info['num_skins'] = n
+
+        # Детект команды: row1[0] == row0[0] + _blue/_blu
+        is_team = False
+        if n >= 2 and base_rows[0] and base_rows[1]:
+            b0 = base_rows[0][0].lower()
+            b1 = base_rows[1][0].lower()
+            is_team = b1 in (b0 + '_blue', b0 + '_blu')
+        info['is_team'] = is_team
+
+        if n <= 1:
+            info['roles'] = ['Skin 0'] if n == 1 else []
+        elif is_team:
+            info['roles'] = ['RED', 'BLU'] + [f'Skin {i}' for i in range(2, n)]
+        else:
+            info['roles'] = [ModelBuildService._skin_role_label(base_rows[i], i) for i in range(n)]
+        return info
+
+    @staticmethod
+    def _strip_texturegroup(content: str) -> str:
+        """Удаляет блок $texturegroup { ... } из текста QC (с учётом вложенности)."""
+        m = re.search(r'(?im)^[ \t]*\$texturegroup\b', content)
+        if not m:
+            return content
+        brace = content.find('{', m.end())
+        if brace == -1:
+            return content
+        depth = 0
+        end = None
+        for i in range(brace, len(content)):
+            if content[i] == '{':
+                depth += 1
+            elif content[i] == '}':
+                depth -= 1
+                if depth == 0:
+                    end = i
+                    break
+        if end is None:
+            return content
+        start = content.rfind('\n', 0, m.start()) + 1
+        tail = end + 1
+        if tail < len(content) and content[tail] == '\n':
+            tail += 1
+        return content[:start] + content[tail:]
+
+    @staticmethod
+    def replace_texturegroup_in_qc(qc_path: str, new_block: str) -> bool:
+        """
+        Заменяет $texturegroup в QC на сгенерированный (или удаляет, если new_block пуст).
+
+        Только для КАСТОМНЫХ моделей: исходная группа ссылается на игровые имена
+        материалов, которых нет в меше пользователя — её надо убрать/заменить,
+        иначе studiomdl ругается на висящие материалы. Пустой new_block → модель
+        одно-скиновая (без группы, что валидно).
+
+        Returns True, если файл изменён.
+        """
+        if not os.path.exists(qc_path):
+            return False
+        with open(qc_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+
+        content = ModelBuildService._strip_texturegroup(content)
+
+        if new_block and new_block.strip():
+            # Вставляем после $modelname (texturegroup должен идти после $body/$model)
+            m = re.search(r'(?im)^[ \t]*\$modelname\b.*$', content)
+            if m:
+                insert_at = m.end()
+                content = content[:insert_at] + '\n\n' + new_block.rstrip() + '\n' + content[insert_at:]
+            else:
+                content = new_block.rstrip() + '\n' + content
+
+        with open(qc_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+        return True
 
     @staticmethod
     def determine_weapon_type_and_path(weapon_key: str, cdmaterials_path: Optional[str]) -> Tuple[str, str]:
