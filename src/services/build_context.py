@@ -196,8 +196,10 @@ class BuildContext:
         if base_temp_dir is None:
             base_temp_dir = DirectoryPaths.BASE_TEMP_DIR
         
+        # Суффикс из urandom исключает коллизию двух сборок в одну секунду
         timestamp = int(time.time())
-        build_id = f"build_{timestamp}_{mode}"
+        unique = os.urandom(3).hex()
+        build_id = f"build_{timestamp}_{unique}_{mode}"
         temp_dir = base_temp_dir / build_id
         
         ctx = BuildContext(

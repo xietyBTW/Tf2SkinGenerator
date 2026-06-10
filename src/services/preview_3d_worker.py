@@ -20,6 +20,7 @@ from PySide6.QtCore import QThread, Signal
 
 from src.data.weapons import WEAPON_MDL_PATHS
 from src.services import decompile_cache
+from src.services import qc_skin_parser
 from src.services.model_build_service import ModelBuildService
 from src.services.tf2_paths import TF2Paths
 from src.services.tf2_vpk_extract_service import TF2VPKExtractService
@@ -277,11 +278,13 @@ class Preview3DWorker(QThread):
                     blu_paths, blu_fps = self._extract_blu_via_qc(
                         self._decomp_dir, framerate
                     )
-                    # Если BLU нет — проверяем вариантные строки (Australium/Gold)
-                    if not blu_paths:
-                        aus_path, aus_mat = self._extract_variant_via_qc(self._decomp_dir)
-                        if aus_path:
-                            self.australium_ready.emit(aus_path, aus_mat or "")
+                    # Вариантные строки (Australium/Gold/Festive) проверяем
+                    # НЕЗАВИСИМО от BLU: у большинства австралиум-оружий
+                    # (ракетница и т.п.) есть И команды, И gold-строки —
+                    # раньше «if not blu_paths» полностью скрывал вариант.
+                    aus_path, aus_mat = self._extract_variant_via_qc(self._decomp_dir)
+                    if aus_path:
+                        self.australium_ready.emit(aus_path, aus_mat or "")
                 # Fallback: прямой поиск {wk}_blue.vtf
                 if not blu_paths:
                     blu_paths, blu_fps = self._extract_blu_texture_frames(framerate)
@@ -344,7 +347,8 @@ class Preview3DWorker(QThread):
         from src.data.player_characters import PLAYER_BODY_MODE_KEYS as _PBK
         from src.data.weapons import PREVIEW_MDL_OVERRIDE
         if self.mode == "hat":
-            paths_to_try = self._build_hat_paths(mdl_rel_hint)
+            from src.services.tf2_paths import build_hat_mdl_candidates
+            paths_to_try = build_hat_mdl_candidates(mdl_rel_hint)
         elif self.mode in _PBK or self.weapon_key in PREVIEW_MDL_OVERRIDE:
             # Персонажи и превью-подмены: прямой путь, без workshop-вариантов
             paths_to_try = [mdl_rel_hint]
@@ -373,7 +377,7 @@ class Preview3DWorker(QThread):
         try:
             mdl_dir = tempfile.mkdtemp(prefix="tf2sg_mdl_")
             extracted = TF2VPKExtractService.extract_file_set(
-                self.misc_vpk_path, found_rel, mdl_dir, None
+                self.misc_vpk_path, found_rel, mdl_dir
             )
             mdl_file = next((f for f in extracted if f.endswith(".mdl")), None)
             if not mdl_file:
@@ -391,78 +395,22 @@ class Preview3DWorker(QThread):
             ModelBuildService.decompile(mdl_file, decomp_dir, crowbar)
             logger.info(f"[3D] Crowbar завершён успешно")
 
-            decompile_cache.save_to_cache(
+            cached_dir = decompile_cache.save_to_cache(
                 self.weapon_key, self.misc_vpk_path, found_rel, decomp_dir
             )
 
             shutil.rmtree(mdl_dir, ignore_errors=True)
+            # Дальше работаем с копией в кэше, а temp-папку удаляем —
+            # иначе tf2sg_decomp_* копились бы в %TEMP% бесконечно.
+            if cached_dir:
+                shutil.rmtree(decomp_dir, ignore_errors=True)
+                return self._find_reference_smd(cached_dir)
             return self._find_reference_smd(decomp_dir)
 
         except Exception as exc:
             logger.error(f"[3D] Ошибка декомпиляции для {self.weapon_key}: {exc}", exc_info=True)
             self.failed.emit(f"Decompile error: {exc}")
             return None
-
-    def _build_hat_paths(self, mdl_rel: str) -> list:
-        """Строит список кандидатов путей MDL для шапок в VPK.
-
-        Обрабатывает:
-        - %s-плейсхолдер → раскрывает во все 9 классов TF2
-        - workshop / workshop_partner варианты
-        - суффиксы класса (_heavy → _scout, _soldier и т.д.)
-        """
-        import re as _re
-        _TF2_CLASSES = ["heavy", "scout", "soldier", "pyro",
-                        "demoman", "engineer", "medic", "sniper", "spy"]
-        norm = mdl_rel.replace("\\", "/").lower()
-
-        # ── 1. Раскрываем %s → все классы ─────────────────────────────────
-        if "%s" in norm:
-            base_set: list = []
-            for cls in _TF2_CLASSES:
-                try:
-                    v = norm % cls
-                except (TypeError, ValueError):
-                    v = norm.replace("%s", cls)
-                if v not in base_set:
-                    base_set.append(v)
-        else:
-            base_set = [norm]
-
-        # ── 2. Workshop/workshop_partner варианты ──────────────────────────
-        paths: list = []
-        for c in base_set:
-            paths.append(c)
-            for src, dsts in [
-                ("models/player/items",
-                 ["models/workshop_partner/player/items", "models/workshop/player/items"]),
-                ("models/workshop/player/items",
-                 ["models/workshop_partner/player/items", "models/player/items"]),
-                ("models/workshop_partner/player/items",
-                 ["models/workshop/player/items", "models/player/items"]),
-            ]:
-                if src in c:
-                    for dst in dsts:
-                        v = c.replace(src, dst)
-                        if v not in paths:
-                            paths.append(v)
-                    break
-
-        # ── 3. Суффиксы класса (_heavy → другие классы) ───────────────────
-        cls_pat = _re.compile(
-            r'_(heavy|scout|soldier|pyro|demoman|engineer|medic|sniper|spy)(\.mdl)$'
-        )
-        extra: list = []
-        for c in list(paths):
-            m = cls_pat.search(c)
-            if m:
-                for cls in _TF2_CLASSES:
-                    variant = cls_pat.sub(f'_{cls}\\2', c)
-                    if variant not in paths and variant not in extra:
-                        extra.append(variant)
-        paths += extra
-
-        return paths
 
     def _find_reference_smd(self, directory: str) -> Optional[str]:
         """Находит reference SMD (исключая physics/anim) в директории."""
@@ -729,16 +677,17 @@ class Preview3DWorker(QThread):
         if not qc_files:
             return {}
 
-        cdmaterials, skin_families = self._parse_qc_all_skin_families(qc_files[0])
-        if len(skin_families) < 2 or not cdmaterials:
+        cdmaterials = qc_skin_parser.parse_cdmaterials(qc_files[0])
+        layout = qc_skin_parser.parse_skin_layout(qc_files[0])
+        if not layout.second_row or not cdmaterials:
             logger.debug(
-                f"[3D] _extract_blu_multi_textures_via_qc: "
-                f"skin families={len(skin_families)} → нет BLU варианта"
+                "[3D] _extract_blu_multi_textures_via_qc: "
+                "второй скин в QC не найден → нет BLU варианта"
             )
             return {}
 
-        red_family = [t.lower() for t in skin_families[0]]
-        blu_family = skin_families[1]
+        red_family = [t.lower() for t in layout.base_rows[0]]
+        blu_family = layout.second_row
 
         result: dict = {}
         try:
@@ -969,7 +918,7 @@ class Preview3DWorker(QThread):
             if decomp:
                 qcs = glob.glob(os.path.join(decomp, "*.qc"))
                 if qcs:
-                    cdmats, _ = self._parse_qc_texture_info(qcs[0])
+                    cdmats = qc_skin_parser.parse_cdmaterials(qcs[0])
         except Exception as exc:
             logger.debug(f"[3D] Не удалось распарсить $cdmaterials: {exc}")
         self._cached_cdmaterials = cdmats
@@ -1053,126 +1002,7 @@ class Preview3DWorker(QThread):
                 continue
         return None
 
-    # ── QC-парсинг текстур шапок ──────────────────────────────────────────── #
-
-    @staticmethod
-    def _parse_qc_texture_info(qc_path: str) -> tuple:
-        """
-        Разбирает QC-файл и извлекает пути материалов и имена текстур.
-
-        Пример QC:
-            $cdmaterials "models/player/items/all_class/"
-            $texturegroup "skinfamilies"
-            {
-                { "fwk_engineer_blueprints"  "fwk_engineer_blueprints_blue" }
-                ...
-            }
-
-        Returns:
-            (cdmaterials: list[str], skin0_textures: list[str])
-            cdmaterials    — список путей $cdmaterials без leading/trailing слешей
-            skin0_textures — список имён текстур из первого скин-семейства
-        """
-        import re
-        try:
-            with open(qc_path, encoding="utf-8", errors="replace") as f:
-                content = f.read()
-        except Exception:
-            return [], []
-
-        _cdmat_raw2 = re.findall(r'\$cdmaterials\s+"([^"]+)"', content, re.IGNORECASE)
-        cdmaterials: list = []
-        for _m in _cdmat_raw2:
-            _p = _m.replace("\\", "/").strip("/")
-            if _p.lower().startswith("console/"):
-                _p = _p[len("console/"):]
-            if ".." in _p:
-                continue
-            _p = _p.strip("/")
-            if _p:
-                cdmaterials.append(_p)
-
-        skin0_textures: list = []
-        tg = re.search(
-            r'\$texturegroup\s+"skinfamilies"\s*\{',
-            content, re.IGNORECASE,
-        )
-        if tg:
-            rest = content[tg.end():]
-            first_family = re.search(r'\{([^}]+)\}', rest)
-            if first_family:
-                skin0_textures = re.findall(r'"([^"]+)"', first_family.group(1))
-
-        return cdmaterials, skin0_textures
-
-    @staticmethod
-    def _parse_qc_all_skin_families(qc_path: str) -> tuple:
-        """
-        Разбирает QC-файл и возвращает все семейства скинов из $texturegroup.
-
-        Пример QC:
-            $texturegroup "skinfamilies"
-            {
-                { "c_scattergun"      }   ← skin 0 = RED
-                { "c_scattergun_blue" }   ← skin 1 = BLU
-            }
-
-        Returns:
-            (cdmaterials: list[str], skin_families: list[list[str]])
-            skin_families[0] = список текстур RED (skin 0)
-            skin_families[1] = список текстур BLU (skin 1) — если есть
-        """
-        import re
-        try:
-            with open(qc_path, encoding="utf-8", errors="replace") as f:
-                content = f.read()
-        except Exception:
-            return [], []
-
-        _cdmat_raw = re.findall(r'\$cdmaterials\s+"([^"]+)"', content, re.IGNORECASE)
-        cdmaterials: list = []
-        for _m in _cdmat_raw:
-            _p = _m.replace("\\", "/").strip("/")
-            # Crowbar добавляет "console/" — убираем, в VPK этого префикса нет
-            if _p.lower().startswith("console/"):
-                _p = _p[len("console/"):]
-            # Относительные пути типа "../../effects" — системные папки движка, пропускаем
-            if ".." in _p:
-                continue
-            _p = _p.strip("/")
-            if _p:
-                cdmaterials.append(_p)
-
-        skin_families: list = []
-        tg = re.search(
-            r'\$texturegroup\s+"skinfamilies"\s*\{',
-            content, re.IGNORECASE,
-        )
-        if not tg:
-            return cdmaterials, skin_families
-
-        # Находим закрывающую скобку всего texturegroup-блока (учитываем вложенность)
-        depth = 1
-        pos = tg.end()
-        outer_end = pos
-        while pos < len(content) and depth > 0:
-            if content[pos] == '{':
-                depth += 1
-            elif content[pos] == '}':
-                depth -= 1
-                if depth == 0:
-                    outer_end = pos
-                    break
-            pos += 1
-
-        tg_content = content[tg.end():outer_end]
-        # Каждый { ... } внутри — одно семейство скинов
-        for m in re.finditer(r'\{([^}]+)\}', tg_content):
-            family = re.findall(r'"([^"]+)"', m.group(1))
-            if family:
-                skin_families.append(family)
-
-        return cdmaterials, skin_families
+    # ── QC-парсинг текстур (единая логика — см. qc_skin_parser) ─────────── #
 
     def _extract_blu_via_qc(self, decomp_dir: str, red_framerate: float) -> tuple:
         """
@@ -1190,29 +1020,22 @@ class Preview3DWorker(QThread):
             logger.debug(f"[3D] _extract_blu_via_qc: QC не найден в {decomp_dir}")
             return [], 0.0
 
-        cdmaterials, skin_families = self._parse_qc_all_skin_families(qc_files[0])
-        if len(skin_families) < 2:
-            logger.debug(
-                f"[3D] _extract_blu_via_qc: skin families={len(skin_families)} "
-                f"→ нет BLU варианта в QC"
-            )
+        cdmaterials = qc_skin_parser.parse_cdmaterials(qc_files[0])
+        layout = qc_skin_parser.parse_skin_layout(qc_files[0])
+        if not layout.second_row:
+            logger.debug("[3D] _extract_blu_via_qc: второго скина в QC нет → нет BLU варианта")
             return [], 0.0
 
-        blu_tex_names = skin_families[1]   # skin 1 = BLU (или вариант оружия)
-        if not blu_tex_names:
-            return [], 0.0
-
-        # Проверяем: это настоящая BLU-команда или вариант оружия (австралий/gold/festive)?
-        # Настоящая BLU содержит хотя бы одну текстуру с 'blue' в имени.
-        # Если ни одной — это вариант (c_scattergun_gold, c_flaregun_australium и т.д.),
-        # и переключатель RED/BLU показывать не нужно.
-        _is_real_blu = any('blue' in name.lower() for name in blu_tex_names)
-        if not _is_real_blu:
+        # Переключатель RED/BLU показываем только для настоящей команды
+        # (по именам: col0 + _blue/_blu), а не для стилей вроде bloody/clean.
+        if not layout.blu_is_team:
             logger.info(
-                f"[3D] skin family 1 не является BLU-командой (нет 'blue' в именах): "
-                f"{blu_tex_names} — вероятно вариант оружия (австралий/gold/festive), пропускаем"
+                f"[3D] второй скин не является BLU-командой: {layout.second_row} "
+                f"— стиль или вариант, переключатель команд не нужен"
             )
             return [], 0.0
+
+        blu_tex_names = layout.second_row
 
         logger.info(
             f"[3D] QC BLU skin family: cdmaterials={cdmaterials}, "
@@ -1322,15 +1145,12 @@ class Preview3DWorker(QThread):
 
         return [], 0.0
 
-    _VARIANT_SUFFIXES = ('_gold', '_australium', '_festive', '_xmas', '_botkiller')
-
     def _extract_variant_via_qc(self, decomp_dir: str) -> Optional[str]:
         """
         Извлекает текстуру варианта оружия (Australium/Gold/Festive) из QC.
 
-        Ищет строку skinfamilies у которой col 0 содержит вариантный суффикс
-        (_gold, _australium, _festive и т.п.). Australium обычно в ПОСЛЕДНЕЙ
-        строке, поэтому перебираем все строки.
+        Строку варианта выбирает qc_skin_parser.pick_preview_variant:
+        приоритет у настоящего австралиума, затем прочие «внешние» варианты.
 
         Returns:
             Путь к PNG-файлу варианта или None если нет.
@@ -1340,20 +1160,12 @@ class Preview3DWorker(QThread):
         if not qc_files:
             return None, None
 
-        cdmaterials, skin_families = self._parse_qc_all_skin_families(qc_files[0])
-        if len(skin_families) < 2 or not cdmaterials:
+        cdmaterials = qc_skin_parser.parse_cdmaterials(qc_files[0])
+        layout = qc_skin_parser.parse_skin_layout(qc_files[0])
+        if not cdmaterials:
             return None, None
 
-        # Ищем строку где первый элемент — вариантный суффикс
-        variant_family = None
-        for family in skin_families:
-            if not family:
-                continue
-            first = family[0].lower()
-            if any(first.endswith(suf) for suf in self._VARIANT_SUFFIXES):
-                variant_family = family
-                break
-
+        variant_family = qc_skin_parser.pick_preview_variant(layout)
         if not variant_family:
             return None, None
 
@@ -1557,7 +1369,7 @@ class Preview3DWorker(QThread):
             logger.warning(f"[3D] QC не найден в {decomp_dir}")
             return {}
 
-        cdmaterials, _ = self._parse_qc_texture_info(qc_files[0])
+        cdmaterials = qc_skin_parser.parse_cdmaterials(qc_files[0])
         if not cdmaterials:
             logger.warning(f"[3D] $cdmaterials не найден в QC: {qc_files[0]}")
             return {}
@@ -1913,13 +1725,14 @@ class Preview3DWorker(QThread):
         if not qc_files:
             return None
 
-        cdmaterials, skin_families = self._parse_qc_all_skin_families(qc_files[0])
+        cdmaterials = qc_skin_parser.parse_cdmaterials(qc_files[0])
         if not cdmaterials:
             return None
 
-        # RED-текстуры: skin family 0 (или weapon_key как единственный кандидат)
-        if skin_families:
-            red_tex_names = [t for t in skin_families[0] if t]
+        # RED-текстуры: первая строка группы (или weapon_key как единственный кандидат)
+        rows = qc_skin_parser.parse_texturegroup_rows(qc_files[0])
+        if rows:
+            red_tex_names = [t for t in rows[0] if t]
         else:
             red_tex_names = [self.weapon_key]
 

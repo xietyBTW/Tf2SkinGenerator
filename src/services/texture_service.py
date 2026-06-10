@@ -380,19 +380,11 @@ class TextureService:
             else:
                 vtf_args.extend(["-flag", flag.lower()])
         logger.info(f"VTFCmd команда: {' '.join(vtf_args)}")
-        logger.info(f"VTFCmd аргументы (список): {vtf_args}")
-        logger.info(f"Передаваемый формат: {vtf_format} (исходный: {format_type})")
-        logger.info(f"Опции VTFCmd: {options}")
-        logger.info(f"Флаги VTF: {flags}")
-        result = subprocess.run(vtf_args, check=True, capture_output=True, text=True,
+        logger.debug(f"Формат: {vtf_format} (исходный: {format_type}), опции: {options}, флаги: {flags}")
+        # Без check=True: при ненулевом коде формируем информативное исключение
+        # с выводом VTFCmd, а не сырой CalledProcessError.
+        result = subprocess.run(vtf_args, capture_output=True, text=True,
                                 creationflags=subprocess.CREATE_NO_WINDOW)
         if result.returncode != 0:
-            from src.data.translations import TRANSLATIONS
-            t = TRANSLATIONS.get('en', TRANSLATIONS['en'])
-            raise RuntimeError(
-                t['error_vtf_creation_failed'].format(
-                    command=' '.join(vtf_args),
-                    stdout=result.stdout,
-                    stderr=result.stderr
-                )
-            )
+            from src.shared.exceptions import VTFCreationError
+            raise VTFCreationError(' '.join(vtf_args), result.stdout, result.stderr)

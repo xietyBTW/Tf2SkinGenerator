@@ -75,5 +75,24 @@ class UserBlacklistTests(unittest.TestCase):
             self.assertFalse(mf.is_editable_material("eyeball_l"))
 
 
+class PatternsArgumentTests(unittest.TestCase):
+    def test_explicit_patterns_skip_config(self):
+        """С готовым списком паттернов конфиг читаться не должен."""
+        with mock.patch.object(mf, "get_blacklist_patterns") as m_patterns:
+            self.assertFalse(mf.is_editable_material("anything", patterns=["anything"]))
+            self.assertTrue(mf.is_editable_material("anything", patterns=["other"]))
+        m_patterns.assert_not_called()
+
+    def test_filter_editable_loads_patterns_once(self):
+        """filter_editable загружает паттерны один раз на проход, не на каждый материал."""
+        with mock.patch.object(
+            mf, "get_blacklist_patterns",
+            return_value=list(mf.DEFAULT_NON_EDITABLE_PATTERNS),
+        ) as m_patterns:
+            result = mf.filter_editable(["c_scattergun", "eyeball_l", "c_arrow"])
+        self.assertEqual(result, ["c_scattergun", "c_arrow"])
+        m_patterns.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()

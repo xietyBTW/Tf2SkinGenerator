@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 from typing import Tuple
+from src.shared.exceptions import RequiredFileMissingError
 from src.shared.file_utils import ensure_directory_exists, copy_file_safe
 from src.shared.logging_config import get_logger
 from src.services.model_build_service import ModelBuildService
@@ -16,8 +17,7 @@ class ModelService:
         if not modelname_path:
             from src.data.translations import TRANSLATIONS
             t = TRANSLATIONS.get('en', TRANSLATIONS['en'])
-            from src.shared.exceptions import FileNotFoundError
-            raise FileNotFoundError(t['error_modelname_not_extracted'].format(qc_path=qc_path))
+            raise RequiredFileMissingError(qc_path, t['error_modelname_not_extracted'].format(qc_path=qc_path))
         normalized_path = modelname_path.replace('\\', '/')
         path_parts = normalized_path.split('/')
         if len(path_parts) > 1:
@@ -32,8 +32,7 @@ class ModelService:
         if not ctx.compile_dir.exists():
             from src.data.translations import TRANSLATIONS
             t = TRANSLATIONS.get('en', TRANSLATIONS['en'])
-            from src.shared.exceptions import FileNotFoundError
-            raise FileNotFoundError(str(ctx.compile_dir), t['error_compile_dir_not_found'].format(path=ctx.compile_dir))
+            raise RequiredFileMissingError(str(ctx.compile_dir), t['error_compile_dir_not_found'].format(path=ctx.compile_dir))
         model_filename = Path(modelname_path).name
         model_basename = Path(model_filename).stem
         model_files = []
@@ -45,8 +44,7 @@ class ModelService:
         if not model_files:
             from src.data.translations import TRANSLATIONS
             t = TRANSLATIONS.get('en', TRANSLATIONS['en'])
-            from src.shared.exceptions import FileNotFoundError
-            raise FileNotFoundError(t['error_model_files_not_found'].format(path=ctx.compile_dir, model=model_basename))
+            raise RequiredFileMissingError(str(ctx.compile_dir), t['error_model_files_not_found'].format(path=ctx.compile_dir, model=model_basename))
         logger.debug(f"Копируем {len(model_files)} файлов модели из {ctx.compile_dir} в {target_dir}")
         for file_name in model_files:
             src = ctx.compile_dir / file_name

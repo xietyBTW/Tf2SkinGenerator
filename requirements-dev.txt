@@ -1,0 +1,4 @@
+-r requirements.txt
+pyinstaller>=5.13.0
+coverage>=7.6.0
+vulture>=2.11

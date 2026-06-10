@@ -44,11 +44,7 @@ class TF2Paths:
                 f"tf2_misc_dir.vpk not found at: {tf2_misc_dir_vpk}\n"
                 f"Expected path: <tf2_root_dir>\\tf\\tf2_misc_dir.vpk"
             )
-        
-        # Путь к tf2_textures_dir.vpk (для извлечения VMT файлов)
-        tf2_textures_dir_vpk = os.path.join(tf_dir, "tf2_textures_dir.vpk")
-        # Проверяем наличие, но не выбрасываем ошибку если не найден (может быть в другом месте)
-        
+
         return studiomdl_exe, tf2_misc_dir_vpk, tf_dir
     
     @staticmethod

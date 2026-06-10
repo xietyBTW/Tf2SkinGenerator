@@ -1,11 +1,9 @@
 """
-Вся хуйня с VPK файлами - распаковка, сборка, конвертация текстур.
-Если что-то сломалось - виноват не я, а Valve с их ебанутым форматом.
+Работа с VPK файлами: распаковка, сборка, конвертация текстур.
 """
 
 import os
 import shutil
-import time
 import threading
 from pathlib import Path
 from typing import Tuple, List, Optional, Dict, Any, Callable
@@ -32,14 +30,7 @@ from src.data.player_characters import (
 )
 from src.shared.logging_config import get_logger
 from src.shared.constants import ToolPaths, DirectoryPaths, EXTRA_TEX_USE_GAME_ORIGINAL
-from src.shared.exceptions import (
-    TF2PathNotSpecifiedError,
-    ModelNotFoundError,
-    VTFCreationError,
-    VPKCreationError,
-    BuildError,
-    PathTooLongError
-)
+from src.shared.exceptions import VPKCreationError
 from src.shared.file_utils import ensure_file_exists, ensure_directory_exists, copy_file_safe
 from src.shared.validators import validate_build_params
 
@@ -47,7 +38,7 @@ logger = get_logger(__name__)
 
 
 class VPKService:
-    """Тут вся магия сборки VPK файлов. Если что-то не работает - читай логи, я не телепат."""
+    """Главный конвейер сборки VPK файлов. Детали ошибок — в логах."""
     
     @staticmethod
     def _get_vpk_tool() -> Path:
@@ -806,7 +797,6 @@ class VPKService:
             tf2_misc_vpk,
             found_mdl_path,
             str(ctx.extract_dir),
-            str(VPKService._get_vpk_tool()),
         )
 
         mdl_file = next((f for f in extracted_files if f.endswith('.mdl')), None)
@@ -1227,45 +1217,18 @@ class VPKService:
                 material_maps=material_maps,
                 skin_build_data=skin_build_data,
                 replace_keep_materials=replace_keep_materials,
+                progress_callback=progress_callback,
+                cancel_callback=cancel_callback,
             )
 
+            # Прогресс эмитится самим build_vpk на реальных границах стадий
+            # (декомпиляция / текстуры / компиляция / упаковка) — без
+            # потока-имитатора с фиксированными процентами.
             if is_special_mode:
                 emit_progress(20, t.get('build_processing', 'Processing texture...'))
-                success, message = VPKService.build_vpk(**build_kwargs)
-                if not is_cancelled():
-                    emit_progress(60, t.get('build_packing', 'Creating VPK file...'))
             else:
                 emit_progress(10, t.get('build_extracting', 'Extracting model...'))
-
-                build_complete = threading.Event()
-                build_result: List[Optional[object]] = [None, None]
-
-                def update_progress() -> None:
-                    stages = [
-                        (25, t.get('build_decompiling', 'Decompiling model...')),
-                        (40, t.get('build_processing', 'Processing texture...')),
-                        (60, t.get('build_compiling', 'Compiling model...')),
-                        (80, t.get('build_packing', 'Creating VPK file...')),
-                    ]
-                    for progress, status in stages:
-                        if build_complete.is_set():
-                            break
-                        time.sleep(0.5)
-                        if not is_cancelled():
-                            emit_progress(progress, status)
-
-                progress_thread = threading.Thread(target=update_progress, daemon=True)
-                progress_thread.start()
-
-                try:
-                    success, message = VPKService.build_vpk(**build_kwargs)
-                    build_result[0] = success
-                    build_result[1] = message
-                finally:
-                    build_complete.set()
-                    progress_thread.join(timeout=1.0)
-
-                success, message = build_result[0], build_result[1]
+            success, message = VPKService.build_vpk(**build_kwargs)
 
             if is_cancelled():
                 return False, t.get('build_cancelled', 'Build cancelled by user'), True
@@ -1312,15 +1275,17 @@ class VPKService:
         blu_mode: str = "none",       # BLU-командная текстура: 'none' | 'same' | 'upload' | 'hue_shift'
         blu_image_path: str = None,   # Путь к BLU-изображению (для 'upload' / 'hue_shift')
         sub_progress_callback: Optional[Callable[[int, str], None]] = None,
+        progress_callback: Optional[Callable[[int, str], None]] = None,  # Главный прогресс (проценты стадий)
+        cancel_callback: Optional[Callable[[], bool]] = None,  # True = пользователь запросил отмену
         panel_extra_textures: Optional[dict] = None,  # {mat_name: img_path} из 2D панели
         material_maps: Optional[dict] = None,  # файловые карты материала (detail/selfillum/phongexp)
         skin_build_data: Optional[dict] = None,  # стили кастомной модели → $texturegroup + варианты
         replace_keep_materials: bool = False,  # сохранить материалы пользовательской модели (многотекстурная/«готовая»)
     ) -> Tuple[bool, str]:
         """
-        Главная функция - делает из картинки VPK файл.
-        Если что-то пойдет не так - вернет False и описание проблемы.
-        Вся эта хуйня с моделями, текстурами и VPK - тут.
+        Главная функция: делает из картинки VPK файл.
+        Возвращает (success, message); при ошибке message содержит описание.
+        Здесь весь конвейер: модель → текстуры → компиляция → упаковка.
         """
         from src.data.translations import TRANSLATIONS
         t = TRANSLATIONS.get(language, TRANSLATIONS['en'])
@@ -1328,6 +1293,20 @@ class VPKService:
         def emit_sub(pct: int, label: str) -> None:
             if sub_progress_callback:
                 sub_progress_callback(pct, label)
+
+        def emit_progress(value: int, message: str) -> None:
+            if progress_callback:
+                progress_callback(value, message)
+
+        def is_cancelled() -> bool:
+            return bool(cancel_callback and cancel_callback())
+
+        def cancelled_result(ctx) -> Tuple[bool, str]:
+            """Очистка ctx и стандартный ответ при отмене пользователем."""
+            if ctx is not None:
+                ctx.cleanup(on_error=False, keep_on_error=False, debug_mode=debug_mode)
+            logger.info("Сборка отменена пользователем")
+            return False, t.get('build_cancelled', 'Build cancelled by user')
 
         ctx = None
         try:
@@ -1413,7 +1392,7 @@ class VPKService:
                 if mode in HAND_MODE_KEYS:
                     replace_model_enabled = False
 
-                # Без пути к TF2 вообще хуй че получится - нужны VPK файлы игры
+                # Без пути к TF2 продолжать нельзя — нужны VPK файлы игры
                 if not tf2_root_dir:
                     logger.error("Путь к TF2 не указан")
                     ctx.cleanup(on_error=True, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
@@ -1455,6 +1434,10 @@ class VPKService:
                         weapon_key = Path(found_mdl_path).stem
                         logger.info(f"Hat weapon_key обновлён: {weapon_key}")
 
+                    if is_cancelled():
+                        return cancelled_result(ctx)
+                    emit_progress(25, t.get('build_decompiling', 'Decompiling model...'))
+
                     # === Кэш декомпила — проверяем ДО extraction ===
                     # Ключ: weapon_key + vpk_path + mdl_rel_path + mtime(vpk).
                     # mtime VPK меняется при каждом обновлении TF2 → авто-инвалидация.
@@ -1476,6 +1459,10 @@ class VPKService:
                     # Сохраняем в кэш после очистки — следующая сборка пропустит extraction + decompile
                     if not cached_decompile:
                         save_to_cache(weapon_key, tf2_misc_vpk, found_mdl_path, ctx.decompile_dir)
+
+                    if is_cancelled():
+                        return cancelled_result(ctx)
+                    emit_progress(40, t.get('build_processing', 'Processing texture...'))
                     
                     # Заменяем модель, если включен режим замены
                     # Пропускаем если model_ready_path задан — пользователь уже указал готовый файл
@@ -1540,57 +1527,19 @@ class VPKService:
 
                     # ── Для режимов рук: фильтруем $texturegroup до актуальных текстур рук ─────────
                     # Проблема: QC руки инженера (c_engineer_arms) в column 0 содержит "engineer_red"
-                    # (текстуру ТЕЛА), а не текстуру руки. Аналогично у медика — "medic_red".
-                    # Без фильтрации пользовательское изображение заменяет всё тело персонажа,
-                    # а не только руки, потому что именно column 0 получает изображение пользователя.
-                    #
-                    # Решение: для hand-режимов сравниваем текстуры из QC со списком рук
-                    # из player_hands.py и оставляем только совпадающие (+ их BLU-варианты).
+                    # (текстуру ТЕЛА), а не текстуру руки — без фильтрации картинка
+                    # пользователя заменила бы всё тело персонажа.
                     if mode in HAND_MODE_KEYS:
                         from src.data.player_hands import get_hand_textures as _ght_hands
+                        from src.services.qc_skin_parser import restrict_to_materials
                         _h_list = _ght_hands(mode)  # [(folder, vtf_name), ...]
-                        _h_names_lc = {n.lower() for _, n in _h_list}
 
-                        _red_row_full = tg_structure.get('red_row', [])
-                        _blu_row_full = tg_structure.get('blu_row', [])
-
-                        # Позиции в red_row, где стоят настоящие текстуры рук
-                        _hand_idx = [i for i, t in enumerate(_red_row_full)
-                                     if t.lower() in _h_names_lc]
-
-                        # Переопределяем texture_filename если column 0 — текстура тела
-                        if texture_filename.lower() not in _h_names_lc:
-                            if _hand_idx:
-                                texture_filename = _red_row_full[_hand_idx[0]]
-                            elif _h_list:
-                                texture_filename = _h_list[0][1]
-                            logger.info(
-                                f"[HANDS] texture_filename → {texture_filename!r} "
-                                f"(body texture excluded from mod)"
-                            )
-
-                        # blu_row: BLU-варианты строго на позициях hand-текстур в red_row.
-                        # Если BLU-текстура на этой позиции совпадает с RED — это нейтральная
-                        # (общая) текстура; она будет создана через путь extra_materials/main, не BLU.
-                        # Важно: вычисляем РАНЬШЕ extra_materials, чтобы избежать дублирования.
-                        _filtered_blu: list = []
-                        for _hi in _hand_idx:
-                            if _hi < len(_blu_row_full):
-                                _b = _blu_row_full[_hi]
-                                _r = _red_row_full[_hi]
-                                if _b.lower() != _r.lower():
-                                    _filtered_blu.append(_b)
-                        blu_row = _filtered_blu
-                        _filtered_blu_lc = {t.lower() for t in _filtered_blu}
-
-                        # extra_materials: hand-текстуры из red_row, кроме основной
-                        # и кроме тех, что уже попали в blu_row (иначе создадутся дважды).
-                        extra_materials = [
-                            _red_row_full[i] for i in _hand_idx
-                            if _red_row_full[i].lower() != texture_filename.lower()
-                            and _red_row_full[i].lower() not in _filtered_blu_lc
-                        ]
-
+                        texture_filename, extra_materials, blu_row = restrict_to_materials(
+                            main_texture=texture_filename,
+                            red_row=tg_structure.get('red_row', []),
+                            blu_row=tg_structure.get('blu_row', []),
+                            allowed_names=[n for _, n in _h_list],
+                        )
                         logger.info(
                             f"[HANDS] texture_filename={texture_filename!r}, "
                             f"extra_materials={extra_materials}, blu_row={blu_row}"
@@ -1775,6 +1724,10 @@ class VPKService:
                         except Exception as _tex_check_err:
                             logger.warning(f"[MODEL READY] Ошибка проверки текстур SMD: {_tex_check_err}", exc_info=True)
                             # Не блокируем сборку из-за ошибки проверки
+
+                    if is_cancelled():
+                        return cancelled_result(ctx)
+                    emit_progress(60, t.get('build_compiling', 'Compiling model...'))
 
                     # ── Компиляция модели в фоне: обычная / SMD-замена / готовый MDL ──
                     _compile_thread, _compile_exc = VPKService._start_model_compile(
@@ -2313,6 +2266,9 @@ class VPKService:
                     return False, t['error_model_work'].format(error=error_msg)
             
             # Собираем VPK файл (финальный этап - упаковываем все в один файл)
+            if is_cancelled():
+                return cancelled_result(ctx)
+            emit_progress(80, t.get('build_packing', 'Creating VPK file...'))
             emit_sub(-1, "Packing VPK..." if language == "en" else "Упаковка VPK...")
             # Логируем все файлы в VPK root (для отладки, чтобы видеть какие файлы идут в мод)
             if ctx.vpkroot_dir.exists():

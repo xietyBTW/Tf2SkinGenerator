@@ -6,7 +6,7 @@ from src.data.weapons import SPECIAL_MODES
 
 
 class VMTService:
-    """Сервис для работы с VMT файлами (материалы Source Engine, хуйня с путями и шаблонами)"""
+    """Сервис для работы с VMT файлами (материалы Source Engine: пути и шаблоны)"""
 
     # ── Валидация синтаксиса ─────────────────────────────────────────────── #
 
@@ -241,7 +241,7 @@ class VMTService:
         Формирует путь для $baseTexture на основе пути из $cdmaterials.
         
         В VMT файле путь $baseTexture должен быть БЕЗ префикса materials/ и с прямыми слешами.
-        Это путь относительно корня материалов игры. Source Engine - ебанутый, требует именно так.
+        Это путь относительно корня материалов игры — Source Engine требует именно такой формат.
         
         Args:
             cdmaterials_path: Путь из $cdmaterials в QC файле

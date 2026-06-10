@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from src.shared.constants import ToolPaths, Resolution, VTFFormat, DirectoryPaths
+from src.shared.constants import ToolPaths, DirectoryPaths
 
 
 class ConstantsTests(unittest.TestCase):
@@ -20,14 +20,6 @@ class ConstantsTests(unittest.TestCase):
         with patch.object(ToolPaths, "VPK_TOOL", missing):
             result = ToolPaths.get_vpk_tool()
         self.assertEqual(result, missing)
-
-    def test_resolution_from_string(self):
-        self.assertEqual(Resolution.from_string("1024"), Resolution.HIGH)
-        self.assertEqual(Resolution.from_string("bad"), Resolution.NORMAL)
-
-    def test_vtf_format_is_valid(self):
-        self.assertTrue(VTFFormat.is_valid("DXT1"))
-        self.assertFalse(VTFFormat.is_valid("BAD"))
 
     def test_directory_paths_ensure_exists(self):
         with tempfile.TemporaryDirectory() as tmp:

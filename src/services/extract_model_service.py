@@ -192,7 +192,6 @@ class ExtractModelService:
                 tf2_misc_vpk,
                 found_mdl_path,
                 str(ctx.extract_dir),
-                None,
             )
 
             mdl_file = None
@@ -266,7 +265,3 @@ class ExtractModelService:
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dst)
         return str(export_dir)
-
-    @staticmethod
-    def extract_original_model_with_progress(*args, **kwargs):
-        raise RuntimeError("extract_original_model_with_progress is deprecated; use prepare_decompiled_model_files_with_progress + export_selected_files")

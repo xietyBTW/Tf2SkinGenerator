@@ -16,7 +16,7 @@ logger = get_logger(__name__)
 
 
 def _simple_dialog(parent, title: str, message: str,
-                   buttons: list, icon: str = "") -> str:
+                   buttons: list) -> str:
     """
     Показывает простой стилизованный диалог с одной кнопкой или несколькими.
 

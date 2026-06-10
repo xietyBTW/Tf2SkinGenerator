@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
     QScrollArea, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget,
 )
 
+from src.shared.file_utils import get_temp_file_path
 from src.shared.logging_config import get_logger
 from src.utils.themes import get_modern_styles
 
@@ -63,9 +64,8 @@ def _vtf_to_temp_png(vtf_path: str) -> Optional[str]:
     try:
         from src.services.vtflib_wrapper import VTFLib
         from PIL import Image
-        import tempfile
         rgba, w, h = VTFLib.read_vtf_as_rgba(vtf_path)
-        png = tempfile.mktemp(suffix='.png')
+        png = str(get_temp_file_path(prefix='tf2_vtf_', suffix='.png'))
         Image.frombytes("RGBA", (w, h), rgba).save(png)
         return png
     except Exception as exc:
@@ -393,6 +393,7 @@ class PreviewPanel(QWidget):
         self._australium_active: bool = False          # активен ли вариант в 3D
         self._australium_user_tex: Optional[str] = None  # своя текстура для Australium (отд. слот)
         self._australium_mat_name: Optional[str] = None   # имя gold-материала (для сборки)
+        self._aus_card = None                          # карточка «Australium» в ряду типов текстур
 
         # ── Per-mesh drag tracking ─────────────────────────────────────────── #
         # True если пользователь перетащил текстуру на конкретный меш в 3D.
@@ -496,16 +497,22 @@ class PreviewPanel(QWidget):
 
         lay.addSpacing(8)
 
-        # Стили кнопок 2D/3D
-        self._btn_style_active = """
-            QPushButton { background:#2a2a2a; color:#ccc; border:1px solid #444;
-                padding:4px 16px; font-size:11px; font-weight:600; border-radius:3px; }
-        """
-        self._btn_style_inactive = """
-            QPushButton { background:transparent; color:#555; border:1px solid #2a2a2a;
-                padding:4px 16px; font-size:11px; border-radius:3px; }
-            QPushButton:hover { background:rgba(255,255,255,0.04); color:#888; border-color:#383838; }
-        """
+        # Единые стили текстовых чипов тулбара: 2D/3D и кнопки стилей
+        # (skinfamilies) выглядят одинаково — один источник вместо двух.
+        def _chip_style(active: bool, h_pad: int = 16) -> str:
+            if active:
+                return (
+                    "QPushButton { background:#2a2a2a; color:#ccc; border:1px solid #444;"
+                    f" padding:4px {h_pad}px; font-size:11px; font-weight:600; border-radius:3px; }}"
+                )
+            return (
+                "QPushButton { background:transparent; color:#555; border:1px solid #2a2a2a;"
+                f" padding:4px {h_pad}px; font-size:11px; border-radius:3px; }}"
+                " QPushButton:hover { background:rgba(255,255,255,0.04); color:#888; border-color:#383838; }"
+            )
+
+        self._btn_style_active = _chip_style(True)
+        self._btn_style_inactive = _chip_style(False)
 
         self.btn_3d = QPushButton("3D")
         self.btn_2d = QPushButton("2D")
@@ -616,16 +623,9 @@ class PreviewPanel(QWidget):
         self._skin_anchor.setFixedWidth(0)
         lay.addWidget(self._skin_anchor)
         self._toolbar_layout = lay
-        self._skin_btn_style_on = (
-            "QPushButton { background:rgba(255,255,255,0.09); border:1px solid #666;"
-            " border-radius:4px; padding:4px 10px; color:#ddd; font-size:11px; }"
-            " QPushButton:hover { border-color:#888; }"
-        )
-        self._skin_btn_style_off = (
-            "QPushButton { background:transparent; border:1px solid #2a2a2a;"
-            " border-radius:4px; padding:4px 10px; color:#888; font-size:11px; }"
-            " QPushButton:hover { border-color:#555; color:#ccc; }"
-        )
+        # Кнопки стилей — те же чипы, что и 2D/3D (чуть меньше отступы)
+        self._skin_btn_style_on = _chip_style(True, h_pad=12)
+        self._skin_btn_style_off = _chip_style(False, h_pad=12)
 
         self._active_spy_mask: Optional[str] = None   # активный класс маски
 
@@ -833,22 +833,29 @@ class PreviewPanel(QWidget):
         return self.view_stack.currentIndex() == 1
 
     def _update_team_btn_visibility(self) -> None:
-        # Показываем кнопки RED/BLU только если у модели РЕАЛЬНО есть BLU-вариант:
-        # - _blu_frames        — BLU одним кадром (оружие/шапка с командной текстурой);
-        # - _vpk_blu_tex_map / _vpk_blu_name_map — per-material BLU (персонажи).
-        # Раньше учитывались _card_mode (любой мульти-материал) и _textures['blu']
-        # (нейтральные текстуры пишутся в обе команды) — это давало ложные кнопки
-        # у мульти-материальных шапок БЕЗ командного разделения.
-        # В режиме spy_masks скрываем RED/BLU — там своя панель масок.
+        """
+        Единая точка синхронизации командных/вариантных кнопок тулбара.
+
+        RED/BLU видимы только если у модели РЕАЛЬНО есть BLU-вариант:
+          - _blu_frames        — BLU одним кадром (оружие/шапка с командной текстурой);
+          - _vpk_blu_tex_map / _vpk_blu_name_map — per-material BLU (персонажи).
+        (учёт _card_mode / _textures['blu'] давал ложные кнопки у
+        мульти-материальных шапок без командного разделения).
+
+        Australium-кнопка видима, когда воркер извлёк вариант (_australium_frame).
+        В режиме spy_masks всё скрыто — там своя панель масок.
+        """
         if self._spy_mask_mode:
             self.btn_red.setVisible(False)
             self.btn_blu.setVisible(False)
+            self.btn_aus.setVisible(False)
             return
         has_blu = bool(
             self._blu_frames or self._vpk_blu_tex_map or self._vpk_blu_name_map
         )
         self.btn_red.setVisible(has_blu)
         self.btn_blu.setVisible(has_blu)
+        self.btn_aus.setVisible(bool(self._australium_frame))
 
     # ═══════════════════════════════════════════════════════════════════════════
     # Маски маскировки шпиона
@@ -1177,14 +1184,10 @@ class PreviewPanel(QWidget):
         # Пересоздаём карточки слотов (метод сам выставит _card_mode/_material_names)
         self._set_material_slots(list(data['material_names']))
 
-        # Командные кнопки (учитывают восстановленные _blu_frames)
+        # Командные и Australium кнопки (учитывают восстановленное состояние)
+        self._australium_active = False
+        self.btn_aus.setStyleSheet(self._aus_style_off)
         self._update_team_btn_visibility()
-
-        # Кнопка Australium — восстанавливаем, если вариант был доступен
-        if self._australium_frame and hasattr(self, 'btn_aus'):
-            self._australium_active = False
-            self.btn_aus.setVisible(True)
-            self.btn_aus.setStyleSheet(self._aus_style_off)
 
         # Мгновенно грузим модель — obj уже на диске, воркер не нужен
         if self._3d_widget and data['obj_path'] and os.path.exists(data['obj_path']):
@@ -1539,18 +1542,80 @@ class PreviewPanel(QWidget):
         self.btn_blu.setVisible(True)
 
     def _on_australium_ready(self, png_path: str, mat_name: str = "") -> None:
-        """Воркер нашёл Australium/Gold вариант — показываем золотую кнопку."""
+        """
+        Воркер нашёл Australium/Gold вариант: показываем золотую кнопку в
+        тулбаре И отдельную карточку «Australium» в ряду типов текстур —
+        чтобы вариант был виден и заменялся так же, как остальные типы.
+        """
         if not png_path or not os.path.exists(png_path):
             return
         self._australium_frame = png_path
         self._australium_mat_name = (mat_name or "").lower() or None
         self._australium_active = False
-        self.btn_aus.setVisible(True)
         self.btn_aus.setStyleSheet(self._aus_style_off)
+        self._update_team_btn_visibility()
         logger.info(
             f"[Panel] Australium вариант доступен: {os.path.basename(png_path)} "
             f"(материал: {self._australium_mat_name})"
         )
+
+        # Australium как отдельный тип текстуры (карточка); для кастомных
+        # моделей со стилями _append_australium_card сам ничего не сделает.
+        if self._original_skin_info or self._custom_smd_mode:
+            return
+        if self._card_mode:
+            self._append_australium_card(self._cards_layout)
+        elif self._material_names:
+            # Одиночная текстура → переключаемся на карточки, чтобы вариант
+            # был виден (основная + Australium).
+            self._set_material_slots(list(self._material_names), force_cards=True)
+
+    def _append_australium_card(self, lay) -> None:
+        """Добавляет карточку «Australium» в конец ряда карточек (если вариант есть)."""
+        if not self._australium_frame:
+            return
+        if self._aus_card is not None:
+            return  # уже есть — _set_material_slots пересоздаёт при rebuild
+        # Кастомные модели со стилями: игровой texturegroup подавляется,
+        # вариант не применяется — карточку не показываем.
+        if self._original_skin_info or self._custom_smd_mode:
+            return
+
+        card = _ExtraSlotCard(
+            '__australium__',
+            display_name='Australium',
+            parent=self._cards_bar,
+        )
+        card.setToolTip(self.t.get(
+            'australium_card_tip',
+            'Gold/Australium variant — upload your own texture or keep the game one',
+        ))
+        shown = (self._australium_user_tex
+                 if (self._australium_user_tex and os.path.exists(self._australium_user_tex))
+                 else self._australium_frame)
+        card.set_image(shown, opaque=self._is_game_texture(shown))
+        card.image_changed.connect(self._on_aus_card_changed)
+
+        # Вставляем перед хвостовым stretch, если он есть
+        idx = lay.count()
+        if idx and lay.itemAt(idx - 1).spacerItem() is not None:
+            lay.insertWidget(idx - 1, card)
+        else:
+            lay.addWidget(card)
+        self._aus_card = card
+
+    def _on_aus_card_changed(self, _mat: str, path: str) -> None:
+        """Пользователь загрузил/очистил текстуру в карточке Australium."""
+        if path and os.path.exists(path):
+            self._set_australium_user_tex(path)
+        else:
+            self._set_australium_user_tex(None)
+            # После очистки показываем игровой gold-вариант обратно
+            if self._aus_card is not None and self._australium_frame:
+                self._aus_card.set_image(
+                    self._australium_frame,
+                    opaque=self._is_game_texture(self._australium_frame),
+                )
 
     def _toggle_australium(self) -> None:
         """Переключает Australium/обычный вариант — синхронно в 3D и 2D."""
@@ -1605,10 +1670,18 @@ class PreviewPanel(QWidget):
                 self._textures.get('red', {}).pop(mat, None)
                 self._textures.get('blu', {}).pop(mat, None)
         shown = path if (path and os.path.exists(path)) else self._australium_frame
-        self._show_variant_in_2d(shown)
-        if self._3d_available and self._3d_widget and shown:
-            from PySide6.QtCore import QTimer
-            QTimer.singleShot(50, lambda t=shown: self._3d_widget.update_texture_file(t))
+
+        # Карточка Australium всегда отражает актуальную текстуру варианта
+        if self._aus_card is not None and shown:
+            self._aus_card.set_image(shown, opaque=self._is_game_texture(shown))
+
+        # Главное превью и 3D подменяем ТОЛЬКО при активном gold-тумблере:
+        # загрузка через карточку Australium не должна затирать основную текстуру.
+        if self._australium_active:
+            self._show_variant_in_2d(shown)
+            if self._3d_available and self._3d_widget and shown:
+                from PySide6.QtCore import QTimer
+                QTimer.singleShot(50, lambda t=shown: self._3d_widget.update_texture_file(t))
 
     def _on_3d_blu_multi_material(self, payload) -> None:
         """Воркер нашёл BLU текстуры для многоматериальной модели (персонажи).
@@ -1852,6 +1925,7 @@ class PreviewPanel(QWidget):
                 w.deleteLater()
         self._card_widgets.clear()
         self._main_card = None
+        self._aus_card = None
 
         if len(names) < 1 or (len(names) < 2 and not force_cards):
             # ── Одиночный режим ─────────────────────────────────────────────── #
@@ -1899,6 +1973,9 @@ class PreviewPanel(QWidget):
             card.image_changed.connect(self._on_extra_card_changed)
             lay.addWidget(card)
             self._card_widgets[name] = card
+
+        # Australium — отдельный тип текстуры в конце ряда (если вариант найден)
+        self._append_australium_card(lay)
 
         lay.addStretch()
 
@@ -2318,13 +2395,12 @@ class PreviewPanel(QWidget):
             from src.services.vtflib_wrapper import VTFLib
             from PIL import Image
             from PySide6.QtGui import QImage
-            import tempfile
 
             rgba, w, h = VTFLib.read_vtf_as_rgba(path)
             qimg = QImage(rgba, w, h, w * 4, QImage.Format_RGBA8888)
             if not qimg.isNull():
                 rendered = True
-                png_for_3d = tempfile.mktemp(suffix='.png')
+                png_for_3d = str(get_temp_file_path(prefix='tf2_3d_', suffix='.png'))
                 Image.frombytes("RGBA", (w, h), rgba).save(png_for_3d)
                 self.image_path = png_for_3d
 
@@ -2597,7 +2673,6 @@ class PreviewPanel(QWidget):
 
         try:
             from PIL import Image
-            import tempfile
 
             gif = Image.open(gif_path)
             n = getattr(gif, 'n_frames', 1)
@@ -2613,7 +2688,7 @@ class PreviewPanel(QWidget):
             frames = []
             for i in range(n):
                 gif.seek(i)
-                tmp = tempfile.mktemp(suffix='.png', prefix=f'tf2_gif{i}_')
+                tmp = str(get_temp_file_path(prefix=f'tf2_gif{i}_', suffix='.png'))
                 gif.convert('RGBA').save(tmp)
                 frames.append(tmp)
 
@@ -2646,7 +2721,7 @@ class PreviewPanel(QWidget):
                        'image/webp': '.webp', 'image/bmp': '.bmp'}
             ext = ext_map.get(mime, '.png')
             img_bytes = _b64.b64decode(b64data)
-            tmp = tempfile.mktemp(suffix=ext, prefix='tf2_3ddrop_')
+            tmp = str(get_temp_file_path(prefix='tf2_3ddrop_', suffix=ext))
             with open(tmp, 'wb') as f:
                 f.write(img_bytes)
 
@@ -2756,12 +2831,11 @@ class PreviewPanel(QWidget):
     @staticmethod
     def _convert_model_vtf(vtf_path: str) -> str:
         try:
-            import tempfile
             from src.services.vtflib_wrapper import VTFLib
             from PIL import Image
             rgba, w, h = VTFLib.read_vtf_as_rgba(vtf_path)
             img = Image.frombytes("RGBA", (w, h), rgba)
-            png = tempfile.mktemp(suffix='.png', prefix='tf2_model_tex_')
+            png = str(get_temp_file_path(prefix='tf2_model_tex_', suffix='.png'))
             img.save(png)
             return png
         except Exception as exc:
@@ -2965,7 +3039,7 @@ class PreviewPanel(QWidget):
         if hasattr(self, 'btn_blu'):
             self.btn_blu.setVisible(False)
             self.btn_blu.setStyleSheet(self._team_style_off)
-        # Сбрасываем Australium
+        # Сбрасываем Australium (кнопку и карточку-тип)
         self._australium_frame = None
         self._australium_active = False
         self._australium_user_tex = None
@@ -2973,6 +3047,10 @@ class PreviewPanel(QWidget):
         if hasattr(self, 'btn_aus'):
             self.btn_aus.setVisible(False)
             self.btn_aus.setStyleSheet(self._aus_style_off)
+        if self._aus_card is not None:
+            self._aus_card.setParent(None)
+            self._aus_card.deleteLater()
+            self._aus_card = None
 
     # ═══════════════════════════════════════════════════════════════════════════
     # Drag & Drop (в 2D область)

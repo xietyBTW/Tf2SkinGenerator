@@ -15,8 +15,8 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .coverage
-.coveragerc
 coverage.json
+coverage_baseline.json
 htmlcov/
 mainTest.py
 run_test.bat

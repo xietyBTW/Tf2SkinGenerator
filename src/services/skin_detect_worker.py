@@ -135,10 +135,11 @@ class SkinDetectWorker(QThread):
             return None
 
         mdl_dir = decomp_dir = None
+        cached_dir = None
         try:
             mdl_dir = tempfile.mkdtemp(prefix="tf2sg_skin_mdl_")
             extracted = TF2VPKExtractService.extract_file_set(
-                self.misc_vpk_path, found_rel, mdl_dir, None
+                self.misc_vpk_path, found_rel, mdl_dir
             )
             mdl_file = next((f for f in extracted if f.endswith(".mdl")), None)
             if not mdl_file:
@@ -147,10 +148,12 @@ class SkinDetectWorker(QThread):
                 return None
             decomp_dir = tempfile.mkdtemp(prefix="tf2sg_skin_decomp_")
             ModelBuildService.decompile(mdl_file, decomp_dir, crowbar)
-            decompile_cache.save_to_cache(
+            cached_dir = decompile_cache.save_to_cache(
                 self.weapon_key, self.misc_vpk_path, found_rel, decomp_dir
             )
-            qcs = glob.glob(os.path.join(decomp_dir, "*.qc"))
+            # QC читаем из кэш-копии, чтобы temp-папку можно было удалить.
+            search_dir = cached_dir or decomp_dir
+            qcs = glob.glob(os.path.join(search_dir, "*.qc"))
             return qcs[0] if qcs else None
         except Exception as exc:
             logger.warning(f"[SKIN] decompile error для {self.weapon_key}: {exc}")
@@ -158,4 +161,7 @@ class SkinDetectWorker(QThread):
         finally:
             if mdl_dir:
                 shutil.rmtree(mdl_dir, ignore_errors=True)
-            # decomp_dir НЕ удаляем — он сохранён в кэш и переиспользуется.
+            # temp-папку декомпиляции удаляем только если QC сохранён в кэш —
+            # иначе вызывающий код продолжает читать из decomp_dir.
+            if decomp_dir and cached_dir:
+                shutil.rmtree(decomp_dir, ignore_errors=True)

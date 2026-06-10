@@ -50,12 +50,23 @@ def _matches(name_lower: str, pattern: str) -> bool:
     return pattern in name_lower
 
 
-def is_editable_material(name: str) -> bool:
-    """True, если материал предназначен для редактирования (не в блэклисте)."""
+def is_editable_material(name: str, patterns: list = None) -> bool:
+    """
+    True, если материал предназначен для редактирования (не в блэклисте).
+
+    Args:
+        patterns: Готовый список паттернов. Если None — будет загружен
+                  из конфига (один доступ к AppConfig на вызов). При проверке
+                  множества материалов передавайте get_blacklist_patterns()
+                  снаружи, чтобы не перечитывать конфиг в цикле.
+    """
+    if patterns is None:
+        patterns = get_blacklist_patterns()
     n = (name or '').lower()
-    return not any(_matches(n, p) for p in get_blacklist_patterns())
+    return not any(_matches(n, p) for p in patterns)
 
 
 def filter_editable(names) -> list:
     """Оставляет только редактируемые материалы из списка имён."""
-    return [n for n in names if is_editable_material(n)]
+    patterns = get_blacklist_patterns()
+    return [n for n in names if is_editable_material(n, patterns)]

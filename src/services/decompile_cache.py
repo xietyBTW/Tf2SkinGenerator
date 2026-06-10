@@ -115,6 +115,33 @@ def get_cached_decompile(
         return None
 
 
+def _purge_stale_entries(weapon_key: str, mdl_rel_path: str, keep_key: str) -> None:
+    """
+    Удаляет записи того же оружия с устаревшим mtime VPK.
+
+    mtime входит в ключ кэша, поэтому после обновления игры старые записи
+    становятся недостижимыми, но без этой очистки копились бы бесконечно.
+    """
+    try:
+        for entry in get_cache_dir().iterdir():
+            if not entry.is_dir() or entry.name == keep_key:
+                continue
+            meta_file = _meta_path(entry)
+            if not meta_file.exists():
+                continue
+            try:
+                with open(meta_file, "r", encoding="utf-8") as f:
+                    meta = json.load(f)
+            except Exception:
+                continue
+            if (meta.get("weapon_key") == weapon_key
+                    and meta.get("mdl_rel_path") == mdl_rel_path):
+                shutil.rmtree(entry, ignore_errors=True)
+                logger.debug(f"Удалена устаревшая запись кэша: {entry.name} ({weapon_key})")
+    except Exception as e:
+        logger.warning(f"Ошибка очистки устаревшего кэша для {weapon_key}: {e}")
+
+
 def save_to_cache(
     weapon_key: str,
     vpk_path: str,
@@ -129,10 +156,15 @@ def save_to_cache(
         vpk_path:      Путь к VPK файлу
         mdl_rel_path:  Относительный путь MDL в VPK
         decompile_dir: Папка с QC + SMD после Crowbar
+
+    Returns:
+        Путь к папке записи кэша, или None при ошибке.
     """
     try:
         key = _cache_key(weapon_key, vpk_path, mdl_rel_path)
         entry_dir = get_cache_dir() / key
+
+        _purge_stale_entries(weapon_key, mdl_rel_path, keep_key=key)
 
         if entry_dir.exists():
             shutil.rmtree(entry_dir)
@@ -224,6 +256,12 @@ def find_cached_qc_for_weapon(weapon_key: str) -> Optional[str]:
             if meta.get("weapon_key") != weapon_key:
                 continue
             if meta.get("version") != _CACHE_VERSION:
+                continue
+            # Запись от старой версии VPK (игра обновилась) → пропускаем,
+            # иначе вернём устаревший QC.
+            stored_vpk = meta.get("vpk_path", "")
+            if stored_vpk and meta.get("vpk_mtime", "") != _vpk_mtime(stored_vpk):
+                logger.debug(f"Кэш QC для {weapon_key} устарел (VPK обновился), пропускаем")
                 continue
             qc_name = meta.get("qc_filename")
             if not qc_name:

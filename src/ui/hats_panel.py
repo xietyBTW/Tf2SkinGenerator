@@ -499,7 +499,7 @@ class HatsPanel(QWidget):
 
     # ── Выбор предмета ────────────────────────────────────────────────────── #
 
-    def _on_item_changed(self, current, previous) -> None:
+    def _on_item_changed(self, current, _previous) -> None:
         if current is None:
             self._selected_hat = None
             self.hat_deselected.emit()

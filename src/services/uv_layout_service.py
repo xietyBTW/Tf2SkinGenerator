@@ -4,9 +4,8 @@
 
 import os
 import re
-import traceback
 from typing import List, Tuple, Optional
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw
 from src.shared.logging_config import get_logger
 
 logger = get_logger(__name__)

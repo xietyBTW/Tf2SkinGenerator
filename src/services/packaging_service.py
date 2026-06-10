@@ -58,12 +58,11 @@ class PackagingService:
             Абсолютный путь к созданному VPK файлу.
 
         Raises:
-            VPKCreationError:  vpk.exe вернул ненулевой код
-            FileNotFoundError: vpk.exe не создал файл
+            VPKCreationError:         vpk.exe вернул ненулевой код
+            RequiredFileMissingError: vpk.exe не создал файл
         """
         from src.data.translations import TRANSLATIONS
-        from src.shared.exceptions import VPKCreationError
-        from src.shared.exceptions import FileNotFoundError as TFFileNotFoundError
+        from src.shared.exceptions import VPKCreationError, RequiredFileMissingError
 
         t = TRANSLATIONS.get(language, TRANSLATIONS['en'])
 
@@ -100,7 +99,7 @@ class PackagingService:
                 path=vpkroot_parent,
             )
             logger.error(error_msg)
-            raise TFFileNotFoundError(temp_vpk_path, error_msg)
+            raise RequiredFileMissingError(str(temp_vpk_path), error_msg)
 
         export_folder_path = Path(export_folder)
         ensure_directory_exists(export_folder_path)

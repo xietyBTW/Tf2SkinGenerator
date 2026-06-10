@@ -15,7 +15,7 @@ import os
 import re
 import time
 import logging
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import List, Dict, Optional, Callable
 

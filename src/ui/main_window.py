@@ -5,7 +5,7 @@
 import os
 from typing import Optional, Tuple
 from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QMessageBox, QFileDialog, QCheckBox, QPushButton, QDialog, QScrollArea,
     QFrame,
 )
@@ -219,7 +219,7 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
             "QScrollBar::add-page:vertical,QScrollBar::sub-page:vertical{background:transparent;}"
         )
 
-        def _sync_vsb(mn=0, mx=0):
+        def _sync_vsb(*_args):
             _vsb.setStyleSheet(_SB_THIN if _vsb.maximum() > _vsb.minimum() else _SB_HIDDEN)
 
         _vsb.rangeChanged.connect(_sync_vsb)
@@ -1342,7 +1342,10 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
             # Нет кэша — пробуем без декомпиляции (быстро, не всегда работает)
             return None
 
-        cdmaterials, skin0_textures = Preview3DWorker._parse_qc_texture_info(qc_path)
+        from src.services import qc_skin_parser
+        cdmaterials = qc_skin_parser.parse_cdmaterials(qc_path)
+        _rows = qc_skin_parser.parse_texturegroup_rows(qc_path)
+        skin0_textures = _rows[0] if _rows else []
         if not cdmaterials:
             return None
 

@@ -105,18 +105,16 @@ class TF2VPKExtractService:
         dir_vpk_path: str,
         mdl_rel_path: str,
         out_dir: str,
-        vpk_exe_path: str = None  # Не используется, оставлен для совместимости
     ) -> List[str]:
         """
         Извлекает набор файлов модели из VPK (.mdl и связанные файлы)
         ОПТИМИЗИРОВАНО: Извлекает только после подтверждения существования MDL
-        
+
         Args:
             dir_vpk_path: Путь к tf2_misc_dir.vpk
             mdl_rel_path: Относительный путь к .mdl файлу внутри VPK
             out_dir: Директория для извлечения
-            vpk_exe_path: Не используется (оставлен для совместимости)
-            
+
         Returns:
             Список путей к извлеченным файлам
             

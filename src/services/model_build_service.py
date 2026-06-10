@@ -1,6 +1,6 @@
 """
 Сервис для декомпила и компила моделей TF2.
-Вся хуйня с Crowbar, studiomdl, QC файлами и прочей ебаниной.
+Работа с Crowbar, studiomdl и QC файлами.
 """
 
 import os
@@ -9,6 +9,7 @@ import shutil
 import subprocess
 from pathlib import Path
 from typing import List, Optional, Tuple
+from src.services import qc_skin_parser
 from src.shared.logging_config import get_logger
 from src.shared.file_utils import ensure_directory_exists
 
@@ -24,7 +25,7 @@ logger = get_logger(__name__)
 
 
 class ModelBuildService:
-    """Вся хуйня с декомпилом и компилом моделей. Crowbar для декомпила, studiomdl для компила. Без них - никак."""
+    """Декомпиляция и компиляция моделей: Crowbar для декомпила, studiomdl для компила."""
     
     @staticmethod
     def decompile(
@@ -35,7 +36,7 @@ class ModelBuildService:
         """
         Декомпилирует .mdl в QC через Crowbar.
         
-        Без Crowbar - хуй че получится, studiomdl не умеет обратно из MDL делать QC.
+        Без Crowbar декомпиляция невозможна: studiomdl не умеет из MDL делать QC.
         Это единственный способ получить QC из готовой модели.
         
         Args:
@@ -190,94 +191,13 @@ class ModelBuildService:
     @staticmethod
     def extract_texturegroup_filename(qc_path: str) -> Optional[str]:
         """
-        Вытаскивает имя файла из $texturegroup.
-        
-        В $texturegroup может быть куча вариантов (обычный, золотой, странный и т.д.), 
-        а нам нужен базовый без суффиксов типа _gold, _xmas. Выбираем самое простое.
-        
-        Формат:
-        $texturegroup "skinfamilies"
-        {
-            { "c_scattergun"      "c_scattergun_gold" }
-            ...
-        }
-        
-        Args:
-            qc_path: Путь к QC файлу
-            
+        Базовое имя главной текстуры из $texturegroup (col0 первой базовой
+        строки, варианты _gold/_festive/… пропускаются).
+
         Returns:
-            Имя файла (например, "c_scattergun") или None если не найден
+            Имя текстуры (например, "c_scattergun") или None если группы нет.
         """
-        if not os.path.exists(qc_path):
-            return None
-        
-        with open(qc_path, 'r', encoding='utf-8') as f:
-            lines = f.readlines()
-        
-        i = 0
-        while i < len(lines):
-            line = lines[i]
-            stripped = line.strip()
-            
-            # Ищем $texturegroup
-            if re.match(r'\$texturegroup\s+', stripped, re.IGNORECASE):
-                i += 1
-                
-                # Пропускаем пустые строки и комментарии (мусор)
-                while i < len(lines) and (not lines[i].strip() or lines[i].strip().startswith('//')):
-                    i += 1
-                
-                # Ищем открывающую скобку
-                if i < len(lines) and lines[i].strip().startswith('{'):
-                    i += 1
-                    
-                    # Снова пропускаем мусор
-                    while i < len(lines) and (not lines[i].strip() or lines[i].strip().startswith('//')):
-                        i += 1
-                    
-                    # Собираем все имена из блока (может быть несколько вариантов)
-                    all_names = []
-                    brace_count = 0
-                    start_reading = False
-                    
-                    while i < len(lines):
-                        current_line = lines[i]
-                        stripped_current = current_line.strip()
-                        
-                        # Если встретили закрывающую скобку - выходим
-                        if stripped_current == '}':
-                            break
-                        
-                        # Вытаскиваем все имена в кавычках из строки (формат: { "имя1" "имя2" } или { "имя" })
-                        matches = re.findall(r'"([^"]+)"', current_line)
-                        for name in matches:
-                            if name.strip():  # Пустые игнорируем
-                                all_names.append(name.strip())
-                        
-                        i += 1
-                    
-                    # Если нашли имена - выбираем самое простое без суффиксов (_gold, _xmas и т.д.)
-                    if all_names:
-                        # Список суффиксов которые нужно отфильтровать (варианты оружия, нам нужен базовый)
-                        suffixes_to_avoid = ['_gold', '_xmas', '_festive', '_australium', '_botkiller', '_strange', '_unusual']
-                        
-                        # Ищем имя без суффиксов (базовое имя текстуры)
-                        simple_name = None
-                        for name in all_names:
-                            has_suffix = any(name.endswith(suffix) for suffix in suffixes_to_avoid)
-                            if not has_suffix:
-                                simple_name = name
-                                break
-                        
-                        # Если не нашли без суффиксов - берем первое (fallback, хотя такое маловероятно)
-                        if simple_name:
-                            return simple_name
-                        else:
-                            return all_names[0]
-            
-            i += 1
-        
-        return None
+        return qc_skin_parser.parse_skin_layout(qc_path).main_texture
     
     @staticmethod
     def extract_texturegroup_all_columns(qc_path: str) -> List[str]:
@@ -314,58 +234,8 @@ class ModelBuildService:
     
     @staticmethod
     def _parse_texturegroup_rows(qc_path: str) -> List[List[str]]:
-        """
-        Парсит строки-скины из $texturegroup в QC файле.
-
-        Каждый скин — это внутренний блок `{ ... }`, который МОЖЕТ занимать
-        несколько строк (studiomdl/Crowbar часто пишут каждый материал на своей
-        строке). Поэтому парсим по фигурным скобкам, а не построчно — иначе одна
-        строка-скин из N материалов ошибочно превращается в N «скинов».
-
-        Returns:
-            Список скинов, каждый скин — список имён материалов.
-        """
-        if not os.path.exists(qc_path):
-            return []
-
-        try:
-            with open(qc_path, 'r', encoding='utf-8', errors='replace') as f:
-                content = f.read()
-        except Exception:
-            return []
-
-        # Находим начало блока $texturegroup и его открывающую скобку.
-        m = re.search(r'(?im)^[ \t]*\$texturegroup\b', content)
-        if not m:
-            return []
-        outer_open = content.find('{', m.end())
-        if outer_open == -1:
-            return []
-
-        # Находим закрывающую скобку всего блока (учёт вложенности).
-        depth = 0
-        outer_close = None
-        for i in range(outer_open, len(content)):
-            c = content[i]
-            if c == '{':
-                depth += 1
-            elif c == '}':
-                depth -= 1
-                if depth == 0:
-                    outer_close = i
-                    break
-        if outer_close is None:
-            return []
-
-        inner = content[outer_open + 1:outer_close]
-
-        # Каждый внутренний { ... } — один скин (может быть многострочным).
-        rows: List[List[str]] = []
-        for grp in re.finditer(r'\{([^{}]*)\}', inner, re.DOTALL):
-            names = [n.strip() for n in re.findall(r'"([^"]+)"', grp.group(1)) if n.strip()]
-            if names:
-                rows.append(names)
-        return rows
+        """Строки-скины из $texturegroup (делегирует в qc_skin_parser)."""
+        return qc_skin_parser.parse_texturegroup_rows(qc_path)
     
     @staticmethod
     def extract_texturegroup_structure(qc_path: str) -> dict:
@@ -394,60 +264,17 @@ class ModelBuildService:
                 'all_rows': [...]                                        # Все строки
             }
         """
-        rows = ModelBuildService._parse_texturegroup_rows(qc_path)
-        
-        result = {
-            'red_row': [],
-            'blu_row': [],
-            'main_texture': None,
-            'extra_materials': [],
-            'all_rows': rows,
+        layout = qc_skin_parser.parse_skin_layout(qc_path)
+        # Позиционная семантика для сборки: blu_row = вторая базовая строка
+        # КАК ЕСТЬ (команда или стиль — решает blu_is_team; сборка рендерит
+        # второй скин в любом случае). Column alignment с RED сохранён.
+        return {
+            'red_row': layout.base_rows[0] if layout.base_rows else [],
+            'blu_row': layout.second_row,
+            'main_texture': layout.main_texture,
+            'extra_materials': layout.extra_materials,
+            'all_rows': layout.all_rows,
         }
-        
-        if not rows:
-            return result
-        
-        # Суффиксы вариантов которые нужно пропускать при поиске базовых строк
-        variant_suffixes = ['_gold', '_xmas', '_festive', '_australium', '_botkiller', '_strange', '_unusual']
-        
-        # Находим "базовые" строки — те, у которых первый столбец не имеет суффиксов вариантов
-        base_rows = []
-        for row in rows:
-            first_name = row[0]
-            has_variant_suffix = any(first_name.endswith(suffix) for suffix in variant_suffixes)
-            if not has_variant_suffix:
-                base_rows.append(row)
-        
-        # Если ни одна строка не "базовая" (все с суффиксами) — берем все строки как базовые
-        if not base_rows:
-            base_rows = rows[:]
-        
-        # Первая базовая строка = RED
-        result['red_row'] = base_rows[0]
-        result['main_texture'] = base_rows[0][0]
-        
-        # Ищем BLU строку: вторая базовая строка (если есть)
-        # В TF2 BLU обычно идет сразу после RED
-        blu_row_raw = base_rows[1] if len(base_rows) > 1 else []
-        
-        # НЕ дедуплицируем BLU строку — сохраняем column alignment с RED строкой.
-        # Важно для моделей персонажей (medic, scout…) где Valve повторяет текстуры
-        # в нескольких колонках для нужд шейдеров (eyeball, invulnfx и т.п.):
-        #   RED col5=medic_blue, BLU col5=medic_blue → shared → обработается автоматически.
-        # Дублирующиеся VTF не создаются дважды благодаря exists()-проверкам в цикле BLU.
-        result['blu_row'] = blu_row_raw
-
-        # extra_materials = столбцы RED строки начиная с col 1, НО без тех что уже есть в BLU строке.
-        # Проблема: Valve иногда пишет ВСЕ скины в одну RED строку:
-        #   { "c_flaregun" "c_flaregun_shell" "c_flaregun_blue" "c_flaregun_shell_blue" }
-        # В этом случае "c_flaregun_blue" и "c_flaregun_shell_blue" — это BLU варианты, а не extra_materials.
-        # Они обрабатываются в BLU loop, поэтому из extra_materials их нужно исключить.
-        # Используем set() из уникальных имён BLU строки для фильтрации.
-        blu_names_set = set(blu_row_raw)
-        extra_raw = base_rows[0][1:] if len(base_rows[0]) > 1 else []
-        result['extra_materials'] = [m for m in extra_raw if m not in blu_names_set]
-
-        return result
 
     @staticmethod
     def generate_texturegroup_block(mesh_materials: List[str],
@@ -501,83 +328,30 @@ class ModelBuildService:
         lines.append('}')
         return '\n'.join(lines) + '\n'
 
-    # Суффиксы строк-вариантов (австралий/голд/festive и т.п.) — это НЕ обычные
-    # скины-стили, а отдельные «варианты»; считаем их отдельно.
-    _VARIANT_SUFFIXES = ('_gold', '_australium', '_botkiller', '_strange',
-                         '_unusual', '_festive', '_xmas')
-
-    @staticmethod
-    def _skin_role_label(row: List[str], idx: int) -> str:
-        """Дружелюбная подпись скина по суффиксу его текстуры (иначе 'Skin N')."""
-        if idx == 0:
-            return 'Skin 0'
-        name = (row[0] if row else '').lower()
-        friendly = {'_bloody': 'Bloody', '_clean': 'Clean', '_dirty': 'Dirty'}
-        for suf, label in friendly.items():
-            if name.endswith(suf):
-                return label
-        return f'Skin {idx}'
-
     @staticmethod
     def extract_skin_info(qc_path: str) -> dict:
         """
         Читает $texturegroup игрового QC и возвращает инфу о скинах — для UI
-        (вкладки) и генерации. ОТДЕЛЬНАЯ новая функция: существующую логику
-        (extract_texturegroup_structure / RED-BLU) НЕ трогает.
+        (вкладки) и генерации. Padding-дубли схлопнуты, варианты
+        (_gold/_festive…) скинами не считаются.
 
         Returns:
             {
-              'num_skins': int,        # число базовых строк-скинов (0/1 = без стилей)
+              'num_skins': int,        # число уникальных базовых скинов
               'roles': [str, ...],     # подпись каждого скина (RED/BLU или Skin N)
               'is_team': bool,         # row1 = команда (суффикс _blue/_blu)
               'has_australium': bool,  # присутствует строка-вариант (_gold и т.п.)
               'rows': [[...], ...],    # сырые строки группы
             }
         """
-        rows = ModelBuildService._parse_texturegroup_rows(qc_path)
-        info = {'num_skins': len(rows), 'roles': [], 'is_team': False,
-                'has_australium': False, 'rows': rows}
-        if not rows:
-            return info
-
-        sufx = ModelBuildService._VARIANT_SUFFIXES
-        info['has_australium'] = any(
-            r and any(r[0].lower().endswith(s) for s in sufx) for r in rows
-        )
-        # Базовые строки (без variant-суффикса в первом материале)
-        base_rows = [r for r in rows if r and not any(r[0].lower().endswith(s) for s in sufx)]
-        if not base_rows:
-            base_rows = rows
-
-        # Дедуп идентичных строк. TF2 часто ПАДДИТ skinfamilies одинаковыми
-        # строками, чтобы разные индексы скина (обычный/странный/фестив/килстрик)
-        # давали один и тот же вид — это НЕ разные стили. Схлопываем их в один.
-        seen = set()
-        unique_rows = []
-        for r in base_rows:
-            key = tuple(x.lower() for x in r)
-            if key not in seen:
-                seen.add(key)
-                unique_rows.append(r)
-        base_rows = unique_rows
-        n = len(base_rows)
-        info['num_skins'] = n
-
-        # Детект команды: row1[0] == row0[0] + _blue/_blu
-        is_team = False
-        if n >= 2 and base_rows[0] and base_rows[1]:
-            b0 = base_rows[0][0].lower()
-            b1 = base_rows[1][0].lower()
-            is_team = b1 in (b0 + '_blue', b0 + '_blu')
-        info['is_team'] = is_team
-
-        if n <= 1:
-            info['roles'] = ['Skin 0'] if n == 1 else []
-        elif is_team:
-            info['roles'] = ['RED', 'BLU'] + [f'Skin {i}' for i in range(2, n)]
-        else:
-            info['roles'] = [ModelBuildService._skin_role_label(base_rows[i], i) for i in range(n)]
-        return info
+        layout = qc_skin_parser.parse_skin_layout(qc_path)
+        return {
+            'num_skins': len(layout.unique_base_rows),
+            'roles': layout.roles,
+            'is_team': layout.blu_is_team,
+            'has_australium': bool(layout.variants),
+            'rows': layout.all_rows,
+        }
 
     @staticmethod
     def _strip_texturegroup(content: str) -> str:
@@ -640,23 +414,23 @@ class ModelBuildService:
 
     @staticmethod
     def determine_weapon_type_and_path(weapon_key: str, cdmaterials_path: Optional[str]) -> Tuple[str, str]:
-        """
+        r"""
         Определяет тип оружия (v_ или c_) и правильный путь для $cdmaterials.
-        
-        К исходному пути добавляется префикс vgui\replay\thumbnails\ - это костыль для работы в TF2,
-        потому что текстуры должны лежать в этой структуре для загрузки через консольные команды.
-        Без этого префикса текстуры не загрузятся, потому что Source Engine - ебанутый.
-        
+
+        К исходному пути добавляется префикс vgui\replay\thumbnails\ —
+        обходной путь для TF2: текстуры должны лежать в этой структуре,
+        чтобы загружаться через консольные команды Source Engine.
+
         Args:
             weapon_key: Ключ оружия (например, c_shogun_kunai или v_machete)
             cdmaterials_path: Путь из $cdmaterials в QC файле (опционально)
-            
+
         Returns:
             Tuple[weapon_type, cdmaterials_path]
             weapon_type: 'v' или 'c'
             cdmaterials_path: Путь для $cdmaterials с добавленным префиксом vgui\replay\thumbnails\
         """
-        # Префикс - костыль для работы в TF2, без него текстуры не загрузятся
+        # Без этого префикса текстуры в TF2 не загрузятся
         prefix = 'vgui\\replay\\thumbnails\\'
         
         # Сначала пытаемся определить тип по исходному пути из QC (если путь есть)

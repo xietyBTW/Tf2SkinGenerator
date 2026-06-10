@@ -11,7 +11,7 @@ from src.data.weapons import SPECIAL_MODES
 from src.data.translations import TRANSLATIONS
 from src.services.build_context import BuildContext
 from src.services.vpk_service import VPKService
-from src.shared.exceptions import VPKCreationError, FileNotFoundError as SharedFileNotFoundError
+from src.shared.exceptions import VPKCreationError, RequiredFileMissingError as SharedFileNotFoundError
 
 
 class VPKServiceTests(unittest.TestCase):
@@ -100,6 +100,7 @@ class VPKServiceTests(unittest.TestCase):
                     self.assertIn("-nomipmaps", args)
     
     def test_create_vtf_error(self):
+        from src.shared.exceptions import VTFCreationError
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
             png_path = base / "img.png"
@@ -108,8 +109,11 @@ class VPKServiceTests(unittest.TestCase):
                 def fake_run(*args, **kwargs):
                     return type("R", (), {"returncode": 1, "stdout": "bad", "stderr": "err"})()
                 with patch("src.services.texture_service.subprocess.run", side_effect=fake_run):
-                    with self.assertRaises(RuntimeError):
+                    with self.assertRaises(VTFCreationError) as cm:
                         VPKService._create_vtf(str(png_path), str(base), "DXT1", [], {})
+                    # Сообщение должно содержать вывод VTFCmd
+                    self.assertIn("bad", str(cm.exception))
+                    self.assertIn("err", str(cm.exception))
 
     def test_create_vpk_file_success_and_failure(self):
         with tempfile.TemporaryDirectory() as tmp:

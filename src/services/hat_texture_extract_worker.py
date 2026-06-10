@@ -87,7 +87,10 @@ class HatTextureExtractWorker(QThread):
             self.finished.emit(False, f"QC not found in: {decomp_dir}")
             return
 
-        cdmaterials, skin0_textures = Preview3DWorker._parse_qc_texture_info(qc_files[0])
+        from src.services import qc_skin_parser
+        cdmaterials = qc_skin_parser.parse_cdmaterials(qc_files[0])
+        rows = qc_skin_parser.parse_texturegroup_rows(qc_files[0])
+        skin0_textures = rows[0] if rows else []
         if not cdmaterials:
             self.finished.emit(False, "No $cdmaterials in QC")
             return
