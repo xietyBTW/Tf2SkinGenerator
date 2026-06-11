@@ -952,22 +952,30 @@ class VPKService:
         tf_dir: str,
         language: str,
         emit_sub,
+        target_mdl_paths: Optional[list] = None,
     ) -> None:
         """
-        Собирает модель для ВСЕХ классов мультиклассовой (%s) шапки при замене модели.
+        Собирает модель для остальных классов мультиклассовой шапки при замене модели.
 
-        Основная сборка компилирует модель только одного класса. У all-class шапок
-        каждый класс — отдельная MDL со СВОИМ скелетом (bonemerge), поэтому просто
-        скопировать модель одного класса на путь другого нельзя (съедет). Для каждого
-        ОСТАЛЬНОГО класса декомпилируем его MDL, вставляем геометрию пользователя
-        (скелет берём класса), компилируем и кладём в VPK по его $modelname.
+        Основная сборка компилирует модель только одного класса. У мультиклассовых
+        шапок каждый класс — отдельная MDL со СВОИМ скелетом (bonemerge), поэтому
+        просто скопировать модель одного класса на путь другого нельзя (съедет). Для
+        каждого ОСТАЛЬНОГО класса декомпилируем его MDL, вставляем геометрию
+        пользователя (скелет берём класса), компилируем и кладём в VPK по его
+        $modelname.
+
+        Источник списка путей:
+          • target_mdl_paths — явные MDL-пути остальных классов (model_player_per_class
+            с произвольными путями; основной режим — выбор классов в UI);
+          • иначе — legacy %s-шаблон в hat_mdl_path, раскрытый по всем классам.
 
         Ошибки одного класса не валят сборку — этот класс просто останется с
         оригинальной игровой моделью.
         """
         if not (replace_model_smd_path and os.path.exists(replace_model_smd_path)):
             return
-        if not hat_mdl_path or "%s" not in hat_mdl_path:
+        use_explicit = bool(target_mdl_paths)
+        if not use_explicit and (not hat_mdl_path or "%s" not in hat_mdl_path):
             return
 
         import re as _re
@@ -985,35 +993,54 @@ class VPKService:
             m = _cls_pat.search((p or '').replace('\\', '/').lower())
             return m.group(1) if m else None
 
-        built_cls = _cls_of(built_mdl_path or '')
-        seen_cls = {built_cls} if built_cls else set()
-
-        # Один существующий MDL на класс (исключая уже собранный класс).
         to_build: list = []
-        for cand in build_hat_mdl_candidates(hat_mdl_path):
-            cls = _cls_of(cand)
-            if not cls or cls in seen_cls:
-                continue
-            try:
-                if TF2VPKExtractService.check_mdl_exists(tf2_misc_vpk, cand):
-                    to_build.append(cand)
-                    seen_cls.add(cls)
-            except Exception:
-                continue
+        seen = set()
+        if use_explicit:
+            # Явные пути остальных классов (основной класс уже собран primary-сборкой).
+            # Пути из model_player_per_class авторитетны — берём как есть, без
+            # суффиксной экспансии (она могла бы подставить модель другого класса).
+            for cand in target_mdl_paths:
+                norm = (cand or '').replace('\\', '/').lower()
+                if not norm or norm in seen:
+                    continue
+                try:
+                    if TF2VPKExtractService.check_mdl_exists(tf2_misc_vpk, norm):
+                        to_build.append(norm)
+                        seen.add(norm)
+                    else:
+                        logger.warning(f"[HAT MULTI] MDL класса не найден в игре, пропуск: {norm}")
+                except Exception:
+                    continue
+        else:
+            # Legacy %s: один существующий MDL на класс (исключая уже собранный).
+            built_cls = _cls_of(built_mdl_path or '')
+            seen_cls = {built_cls} if built_cls else set()
+            for cand in build_hat_mdl_candidates(hat_mdl_path):
+                cls = _cls_of(cand)
+                if not cls or cls in seen_cls:
+                    continue
+                try:
+                    if TF2VPKExtractService.check_mdl_exists(tf2_misc_vpk, cand):
+                        to_build.append(cand)
+                        seen_cls.add(cls)
+                except Exception:
+                    continue
 
         if not to_build:
             return
         logger.info(
-            f"[HAT MULTI] доп. классы для замены модели: {[_cls_of(p) for p in to_build]}"
+            f"[HAT MULTI] доп. классы для замены модели: "
+            f"{[(_cls_of(p) or Path(p).stem) for p in to_build]}"
         )
 
         for mdl_rel in to_build:
             cls = _cls_of(mdl_rel)
             wk = Path(mdl_rel).stem
             try:
-                emit_sub(-1, f"Class model: {cls}..." if language == "en"
-                         else f"Модель класса: {cls}...")
-                cls_root = ctx.temp_dir / f"hatcls_{cls}"
+                _lbl = cls or wk
+                emit_sub(-1, f"Class model: {_lbl}..." if language == "en"
+                         else f"Модель класса: {_lbl}...")
+                cls_root = ctx.temp_dir / f"hatcls_{wk}"
                 extract_d = cls_root / "extract"
                 decomp_d = cls_root / "decompile"
                 comp_d = cls_root / "compile"
@@ -1289,6 +1316,7 @@ class VPKService:
         custom_vpk_source_path: Optional[str] = None,
         hat_mdl_path: Optional[str] = None,
         hat_apply_game_paints: bool = True,
+        hat_class_models: Optional[dict] = None,
         panel_extra_textures: Optional[dict] = None,
         material_maps: Optional[dict] = None,
         material_settings: Optional[dict] = None,
@@ -1377,6 +1405,7 @@ class VPKService:
                 sub_progress_callback=emit_sub,
                 hat_mdl_path=hat_mdl_path,
                 hat_apply_game_paints=hat_apply_game_paints,
+                hat_class_models=hat_class_models,
                 panel_extra_textures=panel_extra_textures,
                 material_maps=material_maps,
                 material_settings=material_settings,
@@ -1436,6 +1465,7 @@ class VPKService:
         texture_mismatch_callback=None,  # Колбэк для предупреждения о несовпадении текстур: callback(msg) -> bool
         hat_mdl_path: Optional[str] = None,  # Прямой MDL-путь для шапок (обходит WEAPON_MDL_PATHS)
         hat_apply_game_paints: bool = True,  # True = сохранить краски игры, False = убрать прокси красок из VMT
+        hat_class_models: Optional[dict] = None,  # мультиклассовая шапка: {класс: mdl} для выбранных классов
         language: str = "en",  # Язык для ошибок
         custom_vtf_path: str = None,  # Если юзер сам сделал VTF - используем его вместо генерации из картинки
         blu_mode: str = "none",       # BLU-командная текстура: 'none' | 'same' | 'upload' | 'hue_shift'
@@ -2447,15 +2477,25 @@ class VPKService:
                     else:
                         VPKService._copy_compiled_models_to_vpkroot(ctx, qc_path)
 
-                    # Мультиклассовая (%s) шапка с заменой модели: собираем модель
-                    # для ОСТАЛЬНЫХ классов (основная сборка делает только один).
-                    if (mode == "hat" and hat_mdl_path and "%s" in hat_mdl_path
-                            and replace_model_smd_path):
-                        VPKService._build_extra_class_hat_models(
-                            ctx, hat_mdl_path, found_mdl_path, replace_model_smd_path,
-                            replace_keep_materials, tf2_misc_vpk, studiomdl_exe,
-                            crowbar_exe, tf_dir, language, emit_sub,
-                        )
+                    # Мультиклассовая шапка с заменой модели: собираем модель для
+                    # ОСТАЛЬНЫХ выбранных классов (основная сборка делает только один).
+                    # Источник: явный список выбранных классов (model_player_per_class)
+                    # либо legacy %s-шаблон в hat_mdl_path.
+                    if mode == "hat" and replace_model_smd_path:
+                        _extra_targets = None
+                        if hat_class_models and len(hat_class_models) > 1:
+                            # Все выбранные классы, КРОМЕ primary (он уже собран).
+                            _extra_targets = [
+                                m for m in hat_class_models.values() if m != hat_mdl_path
+                            ]
+                        _is_pct_tmpl = bool(hat_mdl_path and "%s" in hat_mdl_path)
+                        if _extra_targets or _is_pct_tmpl:
+                            VPKService._build_extra_class_hat_models(
+                                ctx, hat_mdl_path, found_mdl_path, replace_model_smd_path,
+                                replace_keep_materials, tf2_misc_vpk, studiomdl_exe,
+                                crowbar_exe, tf_dir, language, emit_sub,
+                                target_mdl_paths=_extra_targets,
+                            )
 
                     # Подстраховка: для оружия без BLU удаляем любые {texture}_blue.*,
                     # если их успел создать другой путь (texturegroup/варианты).

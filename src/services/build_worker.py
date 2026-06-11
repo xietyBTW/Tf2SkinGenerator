@@ -45,6 +45,7 @@ class BuildWorker(QThread):
         custom_vpk_source_path: Optional[str] = None,
         hat_mdl_path: Optional[str] = None,
         hat_apply_game_paints: bool = True,
+        hat_class_models: Optional[Dict[str, str]] = None,
         panel_extra_textures: Optional[Dict[str, Any]] = None,
         material_maps: Optional[Dict[str, Any]] = None,
         material_settings: Optional[Dict[str, Any]] = None,
@@ -76,6 +77,7 @@ class BuildWorker(QThread):
         self.custom_vpk_source_path = custom_vpk_source_path
         self.hat_mdl_path = hat_mdl_path
         self.hat_apply_game_paints = hat_apply_game_paints
+        self.hat_class_models = hat_class_models
         self.panel_extra_textures = panel_extra_textures or {}
         self.material_maps = material_maps or {}
         self.material_settings = material_settings or {}
@@ -108,6 +110,7 @@ class BuildWorker(QThread):
                 image_path=self.image_path,
                 mode=self.mode,
                 hat_mdl_path=self.hat_mdl_path,
+                hat_class_models=self.hat_class_models,
                 filename=self.filename,
                 size=self.size,
                 format_type=self.format_type,

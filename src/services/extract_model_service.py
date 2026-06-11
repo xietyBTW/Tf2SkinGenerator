@@ -112,6 +112,7 @@ class ExtractModelService:
         language: str = "en",
         progress_callback: Optional[Callable[[int, str], None]] = None,
         cancel_callback: Optional[Callable[[], bool]] = None,
+        hat_class_models: Optional[Dict[str, str]] = None,
     ) -> Tuple[bool, str, bool, Optional[Dict[str, Any]]]:
         t = TRANSLATIONS.get(language, TRANSLATIONS["en"])
 
@@ -149,6 +150,15 @@ class ExtractModelService:
 
             emit_progress(15, "extract_model_checking", "Проверка файлов игры...")
             _, tf2_misc_vpk, _ = TF2Paths.resolve(tf2_root_dir)
+
+            # Мультиклассовая шапка: извлекаем и декомпилируем модель КАЖДОГО класса
+            # в свою подпапку decompile_dir/<class>/ — чтобы в экспорте были все
+            # классы, а не только первый найденный.
+            if is_hat_mode and hat_class_models and len(hat_class_models) > 1:
+                return ExtractModelService._prepare_multiclass_hat(
+                    tf2_misc_vpk, hat_class_models, weapon_key, mode, t,
+                    emit_progress, is_cancelled,
+                )
 
             if is_hat_mode:
                 paths_to_try = ExtractModelService._build_hat_paths(weapon_key)
@@ -234,6 +244,91 @@ class ExtractModelService:
             if ctx:
                 ExtractModelService.cleanup_temp_dir(str(ctx.temp_dir))
             return False, str(e), False, None
+
+    @staticmethod
+    def _resolve_existing_mdl(tf2_misc_vpk: str, mdl_rel: str) -> Optional[str]:
+        """Возвращает путь MDL, который реально есть в VPK (прямой или вариант)."""
+        norm = (mdl_rel or "").replace("\\", "/").lower()
+        if not norm:
+            return None
+        for cand in [norm] + build_hat_mdl_candidates(norm):
+            try:
+                if TF2VPKExtractService.check_mdl_exists(tf2_misc_vpk, cand):
+                    return cand
+            except Exception:
+                continue
+        return None
+
+    @staticmethod
+    def _prepare_multiclass_hat(
+        tf2_misc_vpk: str,
+        hat_class_models: Dict[str, str],
+        weapon_key: str,
+        mode: str,
+        t: dict,
+        emit_progress,
+        is_cancelled,
+    ) -> Tuple[bool, str, bool, Optional[Dict[str, Any]]]:
+        """
+        Извлекает + декомпилирует модель каждого класса в decompile_dir/<class>/.
+
+        Ошибка одного класса не валит весь экспорт — он просто пропускается.
+        """
+        ctx = BuildContext.create(f"model_export_{mode}", weapon_key, debug_mode=False)
+        crowbar_exe = TF2Paths.get_crowbar_path()
+        decompile_root = Path(ctx.decompile_dir)
+        files: List[str] = []
+        done_classes: List[str] = []
+
+        classes = list(hat_class_models.items())
+        for idx, (cls, mdl_rel) in enumerate(classes):
+            if is_cancelled():
+                ExtractModelService.cleanup_temp_dir(str(ctx.temp_dir))
+                return False, t.get("extract_model_cancelled", "Извлечение отменено пользователем"), True, None
+            pct = 20 + int((idx) / max(1, len(classes)) * 70)
+            emit_progress(pct, "extract_model_extracting", f"Извлечение модели: {cls}...")
+
+            found = ExtractModelService._resolve_existing_mdl(tf2_misc_vpk, mdl_rel)
+            if not found:
+                logger.warning(f"[EXPORT MULTI] MDL класса {cls} не найден в игре: {mdl_rel}")
+                continue
+            try:
+                cls_extract = Path(ctx.extract_dir) / cls
+                cls_decomp = decompile_root / cls
+                ensure_directory_exists(cls_extract)
+                ensure_directory_exists(cls_decomp)
+
+                extracted = TF2VPKExtractService.extract_file_set(
+                    tf2_misc_vpk, found, str(cls_extract)
+                )
+                mdl_file = next((f for f in extracted if f.endswith(".mdl")), None)
+                if not mdl_file:
+                    logger.warning(f"[EXPORT MULTI] {cls}: MDL не извлёкся")
+                    continue
+                ModelBuildService.decompile(mdl_file, str(cls_decomp), crowbar_exe)
+                done_classes.append(cls)
+            except Exception as exc:
+                logger.warning(f"[EXPORT MULTI] {cls}: ошибка извлечения/декомпиляции: {exc}",
+                               exc_info=True)
+                continue
+
+        if not done_classes:
+            ExtractModelService.cleanup_temp_dir(str(ctx.temp_dir))
+            return False, t.get("error_mdl_not_found", "MDL not found"), False, None
+
+        for p in decompile_root.rglob("*"):
+            if p.is_file():
+                files.append(p.relative_to(decompile_root).as_posix())
+        files.sort()
+
+        emit_progress(95, "extract_model_completed", "Извлечение завершено")
+        logger.info(f"[EXPORT MULTI] декомпилированы классы: {done_classes}")
+        data = {
+            "temp_dir": str(ctx.temp_dir),
+            "decompile_dir": str(decompile_root),
+            "files": files,
+        }
+        return True, t.get("extract_model_completed", "Извлечение завершено"), False, data
 
     @staticmethod
     def export_selected_files(

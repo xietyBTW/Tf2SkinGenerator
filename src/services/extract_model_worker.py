@@ -17,6 +17,7 @@ class ExtractModelWorker(QThread):
         mode: str,
         weapon_key: str,
         language: str = "en",
+        hat_class_models=None,
         parent=None,
     ):
         super().__init__(parent)
@@ -24,6 +25,7 @@ class ExtractModelWorker(QThread):
         self.mode = mode
         self.weapon_key = weapon_key
         self.language = language
+        self.hat_class_models = hat_class_models
         self.prepared_temp_dir = None
         self.prepared_decompile_dir = None
         self.prepared_files = None
@@ -37,6 +39,7 @@ class ExtractModelWorker(QThread):
                 language=self.language,
                 progress_callback=self.progress.emit,
                 cancel_callback=self.isInterruptionRequested,
+                hat_class_models=self.hat_class_models,
             )
 
             if cancelled:

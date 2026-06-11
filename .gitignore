@@ -72,3 +72,4 @@ Desktop.ini
 *.lnk
 .DS_Store
 cache/hats_cache.json
+/cache

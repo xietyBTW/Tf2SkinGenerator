@@ -1766,6 +1766,21 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
                 )
                 hat_apply_game_paints = (reply == QMessageBox.Yes)
 
+            # Мультиклассовая шапка: какие классы собирать (выбор в списке шапок).
+            # None — обычная шапка (одна общая модель) или не режим шапки.
+            hat_class_models = None
+            hat_mdl_path_for_build = getattr(self, '_hat_mdl_path', None)
+            if self.mode == "hat" and hasattr(self, 'hats_panel'):
+                hat_class_models = self.hats_panel.get_selected_class_models()
+                if hat_class_models:
+                    # Основная (primary) сборка идёт по ПЕРВОМУ выбранному классу,
+                    # остальные дособираются в тот же VPK в vpk_service.
+                    hat_mdl_path_for_build = next(iter(hat_class_models.values()))
+                    logger.info(
+                        f"[HAT multiclass] классы для сборки: "
+                        f"{list(hat_class_models.keys())}"
+                    )
+
             # Сбрасываем запомненный выбор «применить ко всем» — каждая новая
             # сборка начинается без предыдущих предпочтений пользователя.
             self._extra_texture_apply_all: Optional[str] = None
@@ -1848,8 +1863,9 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
                 blu_mode=_blu_mode,
                 blu_image_path=_blu_image,
                 custom_vpk_source_path=getattr(self, '_custom_vpk_path', None),
-                hat_mdl_path=getattr(self, '_hat_mdl_path', None),
+                hat_mdl_path=hat_mdl_path_for_build,
                 hat_apply_game_paints=hat_apply_game_paints,
+                hat_class_models=hat_class_models,
                 panel_extra_textures=_panel_extra_textures,
                 material_maps=(self.preview_panel.get_texture_maps()
                                if hasattr(self, 'preview_panel') else {}),
@@ -2207,11 +2223,18 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
 
             from src.services.extract_model_worker import ExtractModelWorker
 
+            # Мультиклассовая шапка → экспортируем модели ВСЕХ классов, а не только
+            # первого найденного.
+            hat_class_models = None
+            if self.mode == "hat" and hasattr(self, 'hats_panel'):
+                hat_class_models = self.hats_panel.get_all_class_models()
+
             self._extract_model_worker = ExtractModelWorker(
                 tf2_root_dir=tf2_root_dir,
                 mode=self.mode,
                 weapon_key=weapon_key,
                 language=self.language,
+                hat_class_models=hat_class_models,
                 parent=self
             )
             self._extract_model_export_folder = export_folder
