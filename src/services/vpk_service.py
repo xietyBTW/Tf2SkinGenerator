@@ -1165,6 +1165,7 @@ class VPKService:
         material_settings: Optional[dict] = None,
         skin_build_data: Optional[dict] = None,
         replace_keep_materials: bool = False,
+        custom_qc_text: Optional[str] = None,
         progress_callback: Optional[Callable[[int, str], None]] = None,
         sub_progress_callback: Optional[Callable[[int, str], None]] = None,
         cancel_callback: Optional[Callable[[], bool]] = None
@@ -1252,6 +1253,7 @@ class VPKService:
                 material_settings=material_settings,
                 skin_build_data=skin_build_data,
                 replace_keep_materials=replace_keep_materials,
+                custom_qc_text=custom_qc_text,
                 progress_callback=progress_callback,
                 cancel_callback=cancel_callback,
             )
@@ -1317,6 +1319,7 @@ class VPKService:
         material_settings: Optional[dict] = None,  # пер-текстурные настройки {material: {size,format,flags,options}}
         skin_build_data: Optional[dict] = None,  # стили кастомной модели → $texturegroup + варианты
         replace_keep_materials: bool = False,  # сохранить материалы пользовательской модели (многотекстурная/«готовая»)
+        custom_qc_text: Optional[str] = None,  # отредактированный пользователем QC («готовая» модель)
     ) -> Tuple[bool, str]:
         """
         Главная функция: делает из картинки VPK файл.
@@ -1656,6 +1659,7 @@ class VPKService:
                                 texture_filename = _smd_mats[0]
 
                     # ── $texturegroup кастомной модели ──
+                    _tg_block = ''
                     if _has_skins:
                         # Свои стили: генерируем группу (имена выровнены по SMD).
                         _tg_block = ModelBuildService.generate_texturegroup_block(
@@ -1670,6 +1674,18 @@ class VPKService:
                         # skin-строки ремапят материал в пустоту → фиолет).
                         ModelBuildService.replace_texturegroup_in_qc(qc_path, '')
                         logger.info("[SKIN BUILD] игровой $texturegroup удалён (одно-скиновая кастомная модель)")
+
+                    # ── Отредактированный пользователем QC ───────────────────────
+                    # Заменяем QC текстом пользователя, синхронизировав $texturegroup
+                    # с актуальными стилями (правки человека не теряются). Делается
+                    # ДО извлечения cdmaterials — дальше всё читается из этого QC.
+                    if replace_keep_materials and custom_qc_text and custom_qc_text.strip():
+                        _final_qc = ModelBuildService.replace_texturegroup_in_text(
+                            custom_qc_text, _tg_block
+                        )
+                        with open(qc_path, 'w', encoding='utf-8') as _qf:
+                            _qf.write(_final_qc)
+                        logger.info("[QC EDIT] QC заменён пользовательским (texturegroup синхронизирован)")
 
                     # Извлекаем путь из $cdmaterials после патчинга (теперь с префиксом console\)
                     patched_cdmaterials_path = ModelBuildService.extract_cdmaterials_path_from_qc(qc_path)

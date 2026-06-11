@@ -1798,6 +1798,12 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
                 if hasattr(self.preview_panel, 'get_custom_keep_materials'):
                     _replace_keep_materials = self.preview_panel.get_custom_keep_materials()
 
+            # Отредактированный пользователем QC (только для «готовой» модели).
+            _custom_qc_text = None
+            if _replace_keep_materials and hasattr(self, 'preview_panel') \
+                    and hasattr(self.preview_panel, 'get_custom_qc_text'):
+                _custom_qc_text = self.preview_panel.get_custom_qc_text()
+
             self._build_worker = BuildWorker(
                 image_path=from_path,
                 mode=self.mode,
@@ -1828,6 +1834,7 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
                                    if hasattr(self, 'preview_panel') else {}),
                 skin_build_data=_skin_build_data,
                 replace_keep_materials=_replace_keep_materials,
+                custom_qc_text=_custom_qc_text,
                 # Без parent=self ! Если дать parent=self, Qt станет владельцем
                 # и не удалит старый воркер при замене, и сигналы будут дублироваться.
             )

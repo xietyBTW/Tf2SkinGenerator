@@ -400,8 +400,17 @@ class ModelBuildService:
         with open(qc_path, 'r', encoding='utf-8') as f:
             content = f.read()
 
-        content = ModelBuildService._strip_texturegroup(content)
+        content = ModelBuildService.replace_texturegroup_in_text(content, new_block)
 
+        with open(qc_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+        return True
+
+    @staticmethod
+    def replace_texturegroup_in_text(content: str, new_block: str) -> str:
+        """Строковая версия replace_texturegroup_in_qc: вырезает старую группу и
+        вставляет new_block после $modelname (или убирает, если блок пуст)."""
+        content = ModelBuildService._strip_texturegroup(content)
         if new_block and new_block.strip():
             # Вставляем после $modelname (texturegroup должен идти после $body/$model)
             m = re.search(r'(?im)^[ \t]*\$modelname\b.*$', content)
@@ -410,10 +419,40 @@ class ModelBuildService:
                 content = content[:insert_at] + '\n\n' + new_block.rstrip() + '\n' + content[insert_at:]
             else:
                 content = new_block.rstrip() + '\n' + content
+        return content
 
-        with open(qc_path, 'w', encoding='utf-8') as f:
-            f.write(content)
-        return True
+    @staticmethod
+    def make_corrected_qc(src_qc_path: str, weapon_key: str, tg_block: str = '') -> str:
+        """
+        Возвращает текст QC в том виде, в каком его получает компилятор: пути
+        пропатчены под console\\, $lod удалены, $texturegroup заменён на tg_block
+        (или убран, если пуст). Не мутирует исходный файл — работает на копии.
+
+        Нужен для редактора QC: пользователь видит ИСПРАВЛЕННЫЙ QC, а не сырой
+        декомпилированный из игры.
+        """
+        import tempfile
+        if not src_qc_path or not os.path.exists(src_qc_path):
+            return ''
+        tmp = tempfile.mktemp(suffix='.qc', prefix='tf2sg_qcedit_')
+        try:
+            shutil.copy2(src_qc_path, tmp)
+            cdmat = ModelBuildService.extract_cdmaterials_path_from_qc(tmp)
+            try:
+                ModelBuildService.patch_qc_file(tmp, weapon_key, cdmat)
+            except Exception as exc:
+                logger.debug(f"[QC EDIT] patch_qc_file для превью не удался: {exc}")
+            ModelBuildService.replace_texturegroup_in_qc(tmp, tg_block)
+            with open(tmp, 'r', encoding='utf-8', errors='replace') as f:
+                return f.read()
+        except Exception as exc:
+            logger.warning(f"[QC EDIT] make_corrected_qc: {exc}")
+            return ''
+        finally:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
 
     @staticmethod
     def determine_weapon_type_and_path(weapon_key: str, cdmaterials_path: Optional[str]) -> Tuple[str, str]:

@@ -50,6 +50,7 @@ class BuildWorker(QThread):
         material_settings: Optional[Dict[str, Any]] = None,
         skin_build_data: Optional[Dict[str, Any]] = None,
         replace_keep_materials: bool = False,
+        custom_qc_text: Optional[str] = None,
         parent=None
     ):
         super().__init__(parent)
@@ -80,6 +81,7 @@ class BuildWorker(QThread):
         self.material_settings = material_settings or {}
         self.skin_build_data = skin_build_data
         self.replace_keep_materials = replace_keep_materials
+        self.custom_qc_text = custom_qc_text
         self.parent_window = parent
 
         self._model_file_mutex = QMutex()
@@ -133,6 +135,7 @@ class BuildWorker(QThread):
                 material_settings=self.material_settings,
                 skin_build_data=self.skin_build_data,
                 replace_keep_materials=self.replace_keep_materials,
+                custom_qc_text=self.custom_qc_text,
                 progress_callback=self.progress.emit,
                 sub_progress_callback=self.sub_progress.emit,
                 cancel_callback=self.isInterruptionRequested

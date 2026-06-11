@@ -169,14 +169,17 @@ class _ExtraSlotCard(QWidget):
         self._clear_btn.clicked.connect(self._clear_image)
 
         # ── Кнопка-шестерёнка (пер-текстурные настройки) — левый верхний угол ── #
-        self._gear_btn = QPushButton("⚙", self._lbl)
+        from PySide6.QtCore import QSize
+        self._gear_btn = QPushButton(self._lbl)
+        self._gear_btn.setIcon(_make_gear_icon("#bbbbbb", 14))
+        self._gear_btn.setIconSize(QSize(14, 14))
         self._gear_btn.setFixedSize(22, 22)
         self._gear_btn.setCursor(Qt.ArrowCursor)
         self._gear_btn.setToolTip(self.t.get('tex_settings_tip', 'Texture settings') if hasattr(self, 't') else 'Texture settings')
         self._gear_btn.setStyleSheet(
-            "QPushButton { background: rgba(0,0,0,160); color:#bbb; border:1px solid #555;"
-            " border-radius:3px; font-size:13px; padding:0; }"
-            " QPushButton:hover { background: rgba(255,107,53,0.85); color:#fff; border-color:#ff6b35; }"
+            "QPushButton { background: rgba(0,0,0,160); border:1px solid #555;"
+            " border-radius:3px; padding:0; }"
+            " QPushButton:hover { background: rgba(255,107,53,0.85); border-color:#ff6b35; }"
         )
         self._gear_btn.move(4, 4)
         self._gear_btn.clicked.connect(lambda: self.settings_requested.emit(self.material_name))
@@ -437,6 +440,8 @@ class PreviewPanel(QWidget):
         # True — модель «готова»: сохранять её материалы как есть (многотекстурная).
         # False — заменить только геометрию (адаптировать под игровой материал).
         self._custom_keep_materials: bool = False
+        # Отредактированный пользователем QC (исправленный). None = авто-QC.
+        self._custom_qc_text: Optional[str] = None
         self._crithit_mode: bool = False
         self._crithit_class: str = 'soldier'
         self._spy_mask_mode: bool = False      # режим масок маскировки шпиона
@@ -616,6 +621,19 @@ class PreviewPanel(QWidget):
         self.btn_replace_model.setVisible(False)
         self.btn_replace_model.clicked.connect(self._on_replace_model_clicked)
         lay.addWidget(self.btn_replace_model)
+
+        # Кнопка «Редактировать QC» — только для «готовой» модели (keep_materials).
+        self.btn_edit_qc = QPushButton("QC")
+        self.btn_edit_qc.setFixedHeight(26)
+        self.btn_edit_qc.setStyleSheet(
+            "QPushButton { background:transparent; border:1px solid #2a2a2a;"
+            " border-radius:3px; padding:0 8px; color:#888; font-size:11px; font-weight:600; }"
+            " QPushButton:hover { background:rgba(255,255,255,0.05); border-color:#555; color:#ccc; }"
+        )
+        self.btn_edit_qc.setToolTip(self.t.get('qc_edit_tip', 'Edit QC (jigglebones etc.)'))
+        self.btn_edit_qc.setVisible(False)
+        self.btn_edit_qc.clicked.connect(self._on_edit_qc_clicked)
+        lay.addWidget(self.btn_edit_qc)
 
         # Командные кнопки RED/BLU
         lay.addSpacing(8)
@@ -1889,6 +1907,9 @@ class PreviewPanel(QWidget):
         self._per_mesh_base_image = None
         self._custom_smd_path = None   # сменили оружие — забываем кастомную модель
         self._custom_keep_materials = False
+        self._custom_qc_text = None
+        if hasattr(self, 'btn_edit_qc'):
+            self.btn_edit_qc.setVisible(False)
         self._reset_skin_state()       # и стили оригинала
         self._tex_overrides = {}       # и пер-текстурные настройки (материалы другие)
         self._tex_maps = {}            # и пер-текстурные карты
@@ -3080,12 +3101,12 @@ class PreviewPanel(QWidget):
     # ═══════════════════════════════════════════════════════════════════════════
 
     def _on_replace_model_clicked(self) -> None:
-        """Кнопка 🔄: выбрать свою модель и сразу показать её в 3D + карточки.
+        """Кнопка «заменить модель»: выбрать свою модель и сразу показать её в 3D + карточки.
         Не требует предварительной загрузки оригинала: данные оригинала (кости/
         материалы) сборка тянет из игры сама. Замена включается автоматически —
         сборка видит загруженную модель через get_custom_smd_path().
 
-        ВАЖНО: НЕ ставим self._custom_smd_mode — иначе кнопка-куб 🧊
+        ВАЖНО: НЕ ставим self._custom_smd_mode — иначе кнопка-куб
         (_on_load_3d_clicked) начнёт грузить кастомную SMD вместо игровой модели.
         Эта кнопка полностью независима: грузит SMD напрямую, путь хранится в
         _custom_smd_path (его читает сборка)."""
@@ -3141,6 +3162,61 @@ class PreviewPanel(QWidget):
         """Для сборки: сохранять ли материалы пользовательской модели."""
         return self._custom_keep_materials
 
+    def get_custom_qc_text(self) -> Optional[str]:
+        """Для сборки: отредактированный пользователем QC (None = авто)."""
+        return self._custom_qc_text
+
+    def _current_tg_block(self) -> str:
+        """Текущий $texturegroup из стилей (или '' — группы нет)."""
+        try:
+            from src.services.model_build_service import ModelBuildService
+            data = self.get_skin_build_data()
+            if data:
+                return ModelBuildService.generate_texturegroup_block(
+                    data.get('mesh_materials', []), data.get('tg_overrides', {})
+                )
+        except Exception as exc:
+            logger.debug(f"[QC EDIT] tg_block: {exc}")
+        return ''
+
+    def _on_edit_qc_clicked(self) -> None:
+        """Открывает редактор ИСПРАВЛЕННОГО QC с замочками на важных блоках."""
+        from src.services.model_build_service import ModelBuildService
+        from src.services import decompile_cache
+        from src.ui.qc_editor_dialog import QCEditorDialog
+
+        tg_block = self._current_tg_block()
+        if self._custom_qc_text:
+            # Уже редактировали — показываем правки пользователя, но $texturegroup
+            # синхронизируем с актуальными стилями (правки человека не теряются).
+            qc_text = ModelBuildService.replace_texturegroup_in_text(
+                self._custom_qc_text, tg_block
+            )
+        else:
+            qc_path = decompile_cache.find_cached_qc_for_weapon(self._weapon_key)
+            qc_text = ModelBuildService.make_corrected_qc(
+                qc_path or '', self._weapon_key, tg_block
+            )
+        if not qc_text.strip():
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.information(
+                self,
+                self.t.get('qc_edit_title', 'QC Editor'),
+                'QC ещё не извлечён из игры. Подождите загрузку модели в 3D и попробуйте снова.'
+                if self._lang == 'ru' else
+                'QC not extracted yet. Wait for the 3D model to load and try again.',
+            )
+            return
+
+        dlg = QCEditorDialog(qc_text=qc_text, lang=self._lang, parent=self)
+        code = dlg.exec()
+        if code == 2:        # «Сбросить к исходному»
+            self._custom_qc_text = None
+            logger.info("[QC EDIT] сброс к авто-QC")
+        elif code:           # Сохранить
+            self._custom_qc_text = dlg.get_text()
+            logger.info(f"[QC EDIT] сохранён QC ({len(self._custom_qc_text)} символов)")
+
     def _load_custom_smd_via_dialog(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
             self,
@@ -3194,6 +3270,10 @@ class PreviewPanel(QWidget):
                     self._material_names = editable
                     self._card_mode = False
                 logger.info(f"[CUSTOM MODEL keep] материалы из SMD → карточки: {editable}")
+                # Редактор QC доступен только для «готовой» модели.
+                self._custom_qc_text = None
+                if hasattr(self, 'btn_edit_qc'):
+                    self.btn_edit_qc.setVisible(True)
                 # Стили (skinfamilies) оригинала — для переопределения под свои текстуры.
                 self._start_skin_detection()
             else:
@@ -3202,6 +3282,9 @@ class PreviewPanel(QWidget):
                 # QC игровой модели (там всё сводится к игровым текстурам). Воркер
                 # извлекает их в фоне, НЕ перезагружая геометрию на оригинальную.
                 logger.info("[CUSTOM MODEL geometry-only] геометрия пользователя + карточки из QC")
+                self._custom_qc_text = None
+                if hasattr(self, 'btn_edit_qc'):
+                    self.btn_edit_qc.setVisible(False)
                 self._3d_widget.load_model_files(obj_path, self.image_path or '')
                 if self._pending_3d_params:
                     self._start_qc_cards_worker()
@@ -3446,6 +3529,44 @@ def _make_replace_icon(color: str = "#666666", size: int = 16):
     p.drawLine(QLineF(s*.84, s*.64, s*.16, s*.64))
     p.drawLine(QLineF(s*.16, s*.64, s*.33, s*.52))
     p.drawLine(QLineF(s*.16, s*.64, s*.33, s*.76))
+    p.end()
+    return QIcon(pix)
+
+
+def _make_gear_icon(color: str = "#bbbbbb", size: int = 16):
+    """Иконка «настройки» — шестерёнка."""
+    import math
+    from PySide6.QtGui import QIcon, QPixmap, QPainter, QPen, QColor
+    from PySide6.QtCore import Qt, QPointF, QLineF
+    pix = QPixmap(size, size)
+    pix.fill(Qt.transparent)
+    p = QPainter(pix)
+    p.setRenderHint(QPainter.Antialiasing)
+    s = float(size)
+    cx = cy = s / 2.0
+    r_body = s * 0.27     # радиус «тела» шестерёнки (вершины зубьев)
+    r_out = s * 0.45      # вершина зубьев
+    r_hole = s * 0.115    # центральное отверстие
+    n_teeth = 8
+
+    # ── Зубья (толстые скруглённые нубы) ──
+    tooth_pen = QPen(QColor(color))
+    tooth_pen.setWidthF(max(1.6, s * 0.11))
+    tooth_pen.setCapStyle(Qt.RoundCap)
+    p.setPen(tooth_pen)
+    p.setBrush(Qt.NoBrush)
+    for i in range(n_teeth):
+        a = (2.0 * math.pi * i) / n_teeth
+        ca, sa = math.cos(a), math.sin(a)
+        p.drawLine(QLineF(cx + ca * r_body, cy + sa * r_body,
+                          cx + ca * r_out, cy + sa * r_out))
+
+    # ── Кольцо тела + центральное отверстие ──
+    ring_pen = QPen(QColor(color))
+    ring_pen.setWidthF(1.4)
+    p.setPen(ring_pen)
+    p.drawEllipse(QPointF(cx, cy), r_body, r_body)
+    p.drawEllipse(QPointF(cx, cy), r_hole, r_hole)
     p.end()
     return QIcon(pix)
 
