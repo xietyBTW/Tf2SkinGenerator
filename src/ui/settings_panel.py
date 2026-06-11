@@ -252,13 +252,9 @@ class SettingsPanel(QWidget):
             "color:#e3c24a; font-size:12px; font-weight:600; background:transparent; border:none;")
         self._edit_banner_lbl.setWordWrap(True)
         _eb.addWidget(self._edit_banner_lbl, 1)
-        self._edit_maps_btn = QPushButton(self.t.get('tex_maps_btn', 'Доп. материалы…'))
-        self._edit_maps_btn.setStyleSheet(
-            "QPushButton{background:transparent;color:#ccc;border:1px solid #555;border-radius:5px;"
-            "padding:3px 10px;font-size:11px;} QPushButton:hover{border-color:#ff6b35;color:#fff;}")
-        self._edit_maps_btn.clicked.connect(
-            lambda: self.material_maps_requested.emit(self._edit_material or ''))
-        _eb.addWidget(self._edit_maps_btn)
+        # Кнопка «Material Maps» намеренно НЕ дублируется в баннере — она уже есть
+        # в разделе Advanced и в режиме редактирования текстуры открывает карты
+        # именно для редактируемого материала (через self._edit_material).
         self._edit_reset_btn = QPushButton(self.t.get('tex_reset_global', 'Сбросить'))
         self._edit_reset_btn.setStyleSheet(
             "QPushButton{background:transparent;color:#bbb;border:1px solid #555;border-radius:5px;"

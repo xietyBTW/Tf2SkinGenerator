@@ -657,22 +657,30 @@ class ModelBuildService:
         qc_dir = os.path.dirname(qc_path)
         wk_low = weapon_key.lower()
 
-        # Все ссылки studio "*.smd" в порядке появления
-        all_refs: List[str] = re.findall(r'studio\s+"([^"]+\.smd)"', content, re.IGNORECASE)
-        if not all_refs:
-            return None
-
         def _abs(ref: str) -> Optional[str]:
             p = os.path.join(qc_dir, ref)
             return p if os.path.exists(p) else None
 
-        # Приоритет 1: $body … "ref.smd"  (строчный формат без bodygroup)
-        body_inline = re.search(r'^\s*\$body\b[^"\n]*"([^"]+\.smd)"', content, re.IGNORECASE | re.MULTILINE)
-        if body_inline:
-            p = _abs(body_inline.group(1))
+        # Приоритет 1: основной body, заданный директивой $body / $model — в т.ч.
+        # формат с именем bodygroup: $model "name" "ref.smd". Используем ТОТ ЖЕ
+        # паттерн, что и extract_extra_body_smds ([^\n{]*? перешагивает кавычки),
+        # чтобы обе функции согласованно определяли основной SMD. Иначе у шапок с
+        # телом через $model основная геометрия заменяется не в том SMD (или не
+        # заменяется вовсе), а реальное тело остаётся оригинальным.
+        # ВАЖНО: проверяем ДО guard'а на studio-ссылки — у простой модели без
+        # $bodygroup ключевого слова studio вовсе нет, но $body/$model есть.
+        body_dir = re.search(r'\$(?:model|body)\b[^\n{]*?"([^"]+\.smd)"',
+                             content, re.IGNORECASE)
+        if body_dir:
+            p = _abs(body_dir.group(1))
             if p:
-                logger.debug(f"[MAIN BODY SMD] via $body inline: {p}")
+                logger.debug(f"[MAIN BODY SMD] via $body/$model: {p}")
                 return p
+
+        # Все ссылки studio "*.smd" в порядке появления (приоритеты 2-5)
+        all_refs: List[str] = re.findall(r'studio\s+"([^"]+\.smd)"', content, re.IGNORECASE)
+        if not all_refs:
+            return None
 
         # Приоритет 2-5: перебираем все studio-ссылки
         found_wk_ref = found_wk = found_ref = found_first = None

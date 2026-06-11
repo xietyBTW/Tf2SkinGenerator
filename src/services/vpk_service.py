@@ -940,6 +940,135 @@ class VPKService:
                 logger.debug(f"Нет callback для замены доп. частей модели, пропускаем")
 
     @staticmethod
+    def _build_extra_class_hat_models(
+        ctx,
+        hat_mdl_path: str,
+        built_mdl_path: Optional[str],
+        replace_model_smd_path: Optional[str],
+        keep_user_materials: bool,
+        tf2_misc_vpk: str,
+        studiomdl_exe: str,
+        crowbar_exe: str,
+        tf_dir: str,
+        language: str,
+        emit_sub,
+    ) -> None:
+        """
+        Собирает модель для ВСЕХ классов мультиклассовой (%s) шапки при замене модели.
+
+        Основная сборка компилирует модель только одного класса. У all-class шапок
+        каждый класс — отдельная MDL со СВОИМ скелетом (bonemerge), поэтому просто
+        скопировать модель одного класса на путь другого нельзя (съедет). Для каждого
+        ОСТАЛЬНОГО класса декомпилируем его MDL, вставляем геометрию пользователя
+        (скелет берём класса), компилируем и кладём в VPK по его $modelname.
+
+        Ошибки одного класса не валят сборку — этот класс просто останется с
+        оригинальной игровой моделью.
+        """
+        if not (replace_model_smd_path and os.path.exists(replace_model_smd_path)):
+            return
+        if not hat_mdl_path or "%s" not in hat_mdl_path:
+            return
+
+        import re as _re
+        from src.services.tf2_paths import build_hat_mdl_candidates
+        from src.services.decompile_cache import (
+            get_cached_decompile, restore_from_cache, save_to_cache,
+        )
+
+        _cls_pat = _re.compile(
+            r'_(heavy|scout|soldier|pyro|demoman|engineer|medic|sniper|spy)\.mdl$',
+            _re.IGNORECASE,
+        )
+
+        def _cls_of(p: str) -> Optional[str]:
+            m = _cls_pat.search((p or '').replace('\\', '/').lower())
+            return m.group(1) if m else None
+
+        built_cls = _cls_of(built_mdl_path or '')
+        seen_cls = {built_cls} if built_cls else set()
+
+        # Один существующий MDL на класс (исключая уже собранный класс).
+        to_build: list = []
+        for cand in build_hat_mdl_candidates(hat_mdl_path):
+            cls = _cls_of(cand)
+            if not cls or cls in seen_cls:
+                continue
+            try:
+                if TF2VPKExtractService.check_mdl_exists(tf2_misc_vpk, cand):
+                    to_build.append(cand)
+                    seen_cls.add(cls)
+            except Exception:
+                continue
+
+        if not to_build:
+            return
+        logger.info(
+            f"[HAT MULTI] доп. классы для замены модели: {[_cls_of(p) for p in to_build]}"
+        )
+
+        for mdl_rel in to_build:
+            cls = _cls_of(mdl_rel)
+            wk = Path(mdl_rel).stem
+            try:
+                emit_sub(-1, f"Class model: {cls}..." if language == "en"
+                         else f"Модель класса: {cls}...")
+                cls_root = ctx.temp_dir / f"hatcls_{cls}"
+                extract_d = cls_root / "extract"
+                decomp_d = cls_root / "decompile"
+                comp_d = cls_root / "compile"
+                for _d in (extract_d, decomp_d, comp_d):
+                    ensure_directory_exists(_d)
+
+                # QC: из кэша декомпила или свежая декомпиляция.
+                cached = get_cached_decompile(wk, tf2_misc_vpk, mdl_rel)
+                if cached:
+                    qc_p = restore_from_cache(cached, str(decomp_d))
+                else:
+                    extracted = TF2VPKExtractService.extract_file_set(
+                        tf2_misc_vpk, mdl_rel, str(extract_d)
+                    )
+                    mdl_file = next((f for f in extracted if f.endswith('.mdl')), None)
+                    if not mdl_file:
+                        logger.warning(f"[HAT MULTI] {cls}: MDL не извлёкся")
+                        continue
+                    qc_p = ModelBuildService.decompile(mdl_file, str(decomp_d), crowbar_exe)
+                    ModelBuildService.remove_lod_files(str(decomp_d))
+                    save_to_cache(wk, tf2_misc_vpk, mdl_rel, str(decomp_d))
+
+                if not qc_p or not os.path.exists(qc_p):
+                    logger.warning(f"[HAT MULTI] {cls}: QC не найден")
+                    continue
+
+                # Вставляем геометрию пользователя в reference SMD ЭТОГО класса
+                # (скелет/кости — класса, иначе bonemerge съедет).
+                ref_smd = VPKService._find_decompiled_reference_smd(qc_p, wk, decomp_d)
+                if not ref_smd:
+                    logger.warning(f"[HAT MULTI] {cls}: reference SMD не найден — пропуск")
+                    continue
+                SMDService.replace_model_sections(
+                    replace_model_smd_path, ref_smd, ref_smd,
+                    keep_user_materials=keep_user_materials,
+                )
+
+                # Патчим cdmaterials под console\ (как основная модель) — чтобы
+                # модель класса нашла нашу текстуру по тому же пути.
+                _cdmat = ModelBuildService.extract_cdmaterials_path_from_qc(qc_p)
+                ModelBuildService.patch_qc_file(qc_p, wk, _cdmat)
+
+                ModelBuildService.compile(qc_p, str(comp_d), studiomdl_exe, tf_dir)
+
+                # Копируем скомпилированные файлы в VPK по $modelname этого класса.
+                _sub = type('SubCtx', (), {'compile_dir': comp_d, 'vpkroot_dir': ctx.vpkroot_dir})()
+                VPKService._copy_compiled_models_to_vpkroot(_sub, qc_p)
+                logger.info(f"[HAT MULTI] модель класса {cls} собрана и добавлена в мод")
+            except Exception as exc:
+                logger.warning(
+                    f"[HAT MULTI] класс {cls}: ошибка сборки модели — класс останется "
+                    f"с оригинальной моделью: {exc}", exc_info=True
+                )
+
+    @staticmethod
     def _copy_precompiled_model(
         model_ready_path: str,
         qc_path: str,
@@ -2317,6 +2446,16 @@ class VPKService:
                         logger.info(f"[{weapon_key}] Material-only: модель в мод не включается (console сохраняется)")
                     else:
                         VPKService._copy_compiled_models_to_vpkroot(ctx, qc_path)
+
+                    # Мультиклассовая (%s) шапка с заменой модели: собираем модель
+                    # для ОСТАЛЬНЫХ классов (основная сборка делает только один).
+                    if (mode == "hat" and hat_mdl_path and "%s" in hat_mdl_path
+                            and replace_model_smd_path):
+                        VPKService._build_extra_class_hat_models(
+                            ctx, hat_mdl_path, found_mdl_path, replace_model_smd_path,
+                            replace_keep_materials, tf2_misc_vpk, studiomdl_exe,
+                            crowbar_exe, tf_dir, language, emit_sub,
+                        )
 
                     # Подстраховка: для оружия без BLU удаляем любые {texture}_blue.*,
                     # если их успел создать другой путь (texturegroup/варианты).

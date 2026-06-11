@@ -768,9 +768,12 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
         """Заполняет subtype_combo пунктами Крит / Спрей."""
         self.subtype_combo.blockSignals(True)
         self.subtype_combo.clear()
-        self._subtype_keys = ['critHIT', 'spray']
+        self._subtype_keys = ['critHIT', 'spray', 'death_ice', 'death_gold', 'death_fire']
         self.subtype_combo.addItem(self.t.get('special_crit', 'Крит'))
         self.subtype_combo.addItem(self.t.get('special_spray', 'Спрей'))
+        self.subtype_combo.addItem(self.t.get('special_death_ice', 'Эффект смерти: Лёд'))
+        self.subtype_combo.addItem(self.t.get('special_death_gold', 'Эффект смерти: Золото'))
+        self.subtype_combo.addItem(self.t.get('special_death_fire', 'Эффект смерти: Огонь'))
         self.subtype_combo.blockSignals(False)
 
         self.subtype_combo.setCurrentIndex(0)
@@ -789,15 +792,16 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
             self.current_weapon = key
             self.apply_selection_auto()
         elif cat == 'special':
-            # Крит/Спрей. Выставляем оба скрытых чекбокса ДЕТЕРМИНИРОВАННО.
-            # ExclusiveCheckBox снимает партнёра только по клику мыши, а резервный
-            # путь в обработчиках stateChanged ненадёжен при программном setChecked —
-            # поэтому управляем состоянием явно, через blockSignals, без гонок.
+            # Подтип special — источник истины. Крит/Спрей дополнительно
+            # синхронизируют свои скрытые чекбоксы; скины эффектов смерти
+            # (death_*) держат оба чекбокса выключенными.
+            self._special_subtype = key
             want_crit = (key == 'critHIT')
+            want_spray = (key == 'spray')
             self.crit_hit_checkbox.blockSignals(True)
             self.spray_checkbox.blockSignals(True)
             self.crit_hit_checkbox.setChecked(want_crit)
-            self.spray_checkbox.setChecked(not want_crit)
+            self.spray_checkbox.setChecked(want_spray)
             self.crit_hit_checkbox.blockSignals(False)
             self.spray_checkbox.blockSignals(False)
             # Побочные эффекты, которые раньше делали обработчики чекбоксов:
@@ -1025,13 +1029,14 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
         cat = self._current_category
 
         if cat == 'special':
-            # Крит/Спрей: источник истины — скрытые чекбоксы
-            if self.spray_checkbox.isChecked():
-                self.mode = "spray"
-            elif self.crit_hit_checkbox.isChecked():
-                self.mode = "critHIT"
-            else:
-                self.mode = None
+            # Источник истины — выбранный подтип (крит/спрей/скин эффекта смерти).
+            self.mode = getattr(self, '_special_subtype', None)
+            if self.mode is None:
+                # Fallback на чекбоксы (на случай старого состояния).
+                if self.spray_checkbox.isChecked():
+                    self.mode = "spray"
+                elif self.crit_hit_checkbox.isChecked():
+                    self.mode = "critHIT"
         elif cat == 'custom':
             self.mode = "custom" if getattr(self, '_custom_vpk_path', None) else None
         elif cat == 'character':
@@ -1077,7 +1082,7 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
         is_spy_masks = (self.mode == SPY_MASK_MODE_KEY)
         is_normal_weapon = (
             self.mode
-            and self.mode not in ("spray", "critHIT")
+            and self.mode not in SPECIAL_MODES.values()
             and not is_hand_mode
             and not is_player_body
             and not is_spy_masks
@@ -1125,6 +1130,24 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
             self.preview_panel.set_crithit_mode()
             return
 
+        # Эффекты смерти (лёд/золото/огонь): тот же персонаж, но текстура
+        # пользователя ложится на саму модель — как эффект ляжет в игре.
+        # Сначала показываем оригинальную игровую текстуру эффекта из VPK.
+        if self.mode in ("death_ice", "death_gold", "death_fire"):
+            _tex_vpk = _misc_vpk = ''
+            _root = self.settings_panel.get_settings().get('tf2_game_folder', '')
+            if _root:
+                try:
+                    from src.services.tf2_paths import TF2Paths
+                    _, _misc_vpk, _ = TF2Paths.resolve(_root)
+                    _tex_vpk = TF2Paths.resolve_textures_vpk(_root)
+                except Exception:
+                    _tex_vpk = _misc_vpk = ''
+            self.preview_panel.set_death_effect_mode(
+                mode=self.mode, textures_vpk=_tex_vpk or '', misc_vpk=_misc_vpk or ''
+            )
+            return
+
         weapon_key = self._resolve_3d_weapon_key()
         if weapon_key is None:
             return
@@ -1169,7 +1192,7 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
 
         mode = getattr(self, 'mode', None) or ''
 
-        if not mode or mode in ('spray', 'critHIT', 'custom'):
+        if not mode or mode in set(SPECIAL_MODES.values()) | {'custom'}:
             self.preview_panel.update_extra_slots('', mode='')
             return
 

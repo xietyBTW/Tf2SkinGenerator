@@ -321,7 +321,16 @@ TF2_WEAPONS = {
 SPECIAL_MODES = {
     "CritHIT": "critHIT",
     "Spray": "spray",
+    # Скины эффектов смерти (override игровых материалов рагдолла, client-side):
+    "DeathIce":  "death_ice",    # лёд (как от Sky-cicle)    → models/player/shared/ice_player
+    "DeathGold": "death_gold",   # золото (Golden Pan/Saxxy) → models/player/shared/gold_player
+    "DeathFire": "death_fire",   # огонь горящего игрока     → effects/tiledfire/fireLayeredSlowTiled512
 }
+
+# Спец-режимы, где пишем ТОЛЬКО VTF (без VMT): эти материалы используют особый
+# игровой шейдер/прокси (cloak/цвет/scroll), поэтому собственный VMT их сломает —
+# игровой VMT сам подхватит нашу текстуру по тому же пути.
+VTF_ONLY_SPECIAL_MODES = {"death_ice", "death_gold", "death_fire"}
 
 TF2_CLASSES = {
     "Scout": {"color": "#87CEEB", "icon": ""},

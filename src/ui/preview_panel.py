@@ -444,6 +444,12 @@ class PreviewPanel(QWidget):
         self._custom_qc_text: Optional[str] = None
         self._crithit_mode: bool = False
         self._crithit_class: str = 'soldier'
+        # Режим «эффект смерти»: та же модель-персонаж, что у крита, но
+        # пользовательская текстура накладывается на саму МОДЕЛЬ (лёд/золото/огонь),
+        # а не на billboard — чтобы показать, как эффект ляжет в игре.
+        self._death_effect_mode: bool = False
+        # PNG оригинальной игровой текстуры эффекта (дефолт, пока юзер не загрузил свою).
+        self._death_default_tex: str = ''
         self._spy_mask_mode: bool = False      # режим масок маскировки шпиона
         self._active_spy_mask: Optional[str] = None  # активный класс (cls_key)
         self._australium_frame: Optional[str] = None  # PNG игрового варианта Australium/Gold
@@ -1308,6 +1314,8 @@ class PreviewPanel(QWidget):
         self._pending_3d_params = new_params
         self._custom_smd_mode = False
         self._crithit_mode = False
+        self._death_effect_mode = False
+        self._death_default_tex = ''
         # Сохраняем VPK пути — нужны для _switch_spy_mask
         self._current_misc_vpk = misc_vpk_path
         self._current_textures_vpk = textures_vpk_path
@@ -1344,6 +1352,8 @@ class PreviewPanel(QWidget):
         self._last_3d_params = None
         self._custom_smd_mode = False
         self._crithit_mode = False
+        self._death_effect_mode = False
+        self._death_default_tex = ''
         self._cur_obj = None   # модель убрана — нечего запоминать
         self._stop_worker('_3d_worker')
         self._stop_worker('_vpk_mod_worker')
@@ -1357,6 +1367,8 @@ class PreviewPanel(QWidget):
         self._last_3d_params = None
         self._custom_smd_mode = False
         self._crithit_mode = False
+        self._death_effect_mode = False
+        self._death_default_tex = ''
         self._stop_worker('_3d_worker')
         self._reset_team_vpk_state()
         if self._3d_widget:
@@ -1407,6 +1419,7 @@ class PreviewPanel(QWidget):
         self._cur_obj = None
 
         self._crithit_mode = True
+        self._death_effect_mode = False
         self._custom_smd_mode = False
         self._pending_3d_params = None
         # Сбрасываем кэш последних 3D-параметров: иначе возврат на то же оружие,
@@ -1424,6 +1437,73 @@ class PreviewPanel(QWidget):
             )
         if self.is_3d_mode() and self._3d_available:
             self._render_crithit_scene()
+
+    def set_death_effect_mode(self, mode: str = '',
+                              textures_vpk: str = '', misc_vpk: str = '') -> None:
+        """Режим превью эффекта смерти (лёд/золото/огонь): модель-персонаж крита,
+        но пользовательская текстура накладывается на МОДЕЛЬ — как будет в игре.
+
+        Сначала на модель кладётся ОРИГИНАЛЬНАЯ игровая текстура эффекта (лёд/
+        золото/огонь) из VPK — как у обычных моделей подтягивается игровая
+        текстура. Пользовательская заменяет её при загрузке.
+
+        Переиспользует крит-инфраструктуру (_crithit_mode = «режим сцены с
+        персонажем»), флаг _death_effect_mode меняет, куда идёт текстура."""
+        # Игровую текстуру эффекта тянем ДО set_crithit_mode (он чистит image_path).
+        self._death_default_tex = ''
+        if mode and (textures_vpk or misc_vpk):
+            self._death_default_tex = self._extract_game_texture_for_death(
+                mode, [textures_vpk, misc_vpk]
+            )
+        self.set_crithit_mode()
+        self._death_effect_mode = True
+        if self._3d_widget:
+            self._3d_widget.show_prompt(
+                self.t.get('3d_prompt_death_effect',
+                           'Switch to 3D tab — the effect will appear on the model')
+            )
+        if self.is_3d_mode() and self._3d_available:
+            self._render_crithit_scene()
+
+    def _extract_game_texture_for_death(self, mode: str, vpk_paths: list) -> str:
+        """Достаёт оригинальную VTF эффекта из игрового VPK → PNG (для дефолта).
+
+        Возвращает путь к PNG или '' если не нашли (тогда модель без текстуры)."""
+        try:
+            from src.services.vmt_service import VMTService
+            rel, _vmt, vtf = VMTService.get_weapon_relpaths(mode)
+            rel_url = rel.replace('\\', '/').rstrip('/')
+            candidates = [f"{rel_url}/{vtf}"]
+            if vtf.lower() != vtf:
+                candidates.append(f"{rel_url}/{vtf.lower()}")
+            import vpk as vpklib
+            import tempfile
+            for vpk_path in vpk_paths:
+                if not vpk_path or not os.path.exists(vpk_path):
+                    continue
+                try:
+                    pak = vpklib.open(vpk_path)
+                except Exception:
+                    continue
+                for cand in candidates:
+                    try:
+                        data = pak[cand].read()
+                    except KeyError:
+                        continue
+                    tmp = tempfile.mktemp(suffix='.vtf', prefix='tf2_deatheff_')
+                    with open(tmp, 'wb') as f:
+                        f.write(data)
+                    png = self._convert_model_vtf(tmp)
+                    try:
+                        os.remove(tmp)
+                    except OSError:
+                        pass
+                    if png:
+                        logger.info(f"[DEATH FX] игровая текстура эффекта: {cand}")
+                        return png
+        except Exception as exc:
+            logger.debug(f"[DEATH FX] не удалось достать игровую текстуру: {exc}")
+        return ''
 
     def _on_load_3d_clicked(self) -> None:
         if self._custom_smd_mode:
@@ -2483,7 +2563,7 @@ class PreviewPanel(QWidget):
                     QTimer.singleShot(300, lambda p=path, m=mat_name: self._3d_widget.apply_material_map({m: p}))
             elif self.is_3d_mode() and self._crithit_mode and self._3d_widget:
                 from PySide6.QtCore import QTimer
-                QTimer.singleShot(300, lambda p=path: self._3d_widget.update_crithit_texture(p))
+                QTimer.singleShot(300, lambda p=path: self._update_scene_texture(p))
         else:
             # Сброс текстуры (нажат ×) — удаляем и восстанавливаем оригинал в 3D.
             # Вызываем restore независимо от текущего режима (2D или 3D) — иначе
@@ -2601,7 +2681,7 @@ class PreviewPanel(QWidget):
                 and not self._from_3d_drop:
             from PySide6.QtCore import QTimer
             if self._crithit_mode:
-                QTimer.singleShot(300, lambda p=path: self._3d_widget.update_crithit_texture(p))
+                QTimer.singleShot(300, lambda p=path: self._update_scene_texture(p))
             elif self._card_mode and self._material_names:
                 mat = self._material_names[0]
                 if path.lower().endswith('.gif'):
@@ -2666,7 +2746,7 @@ class PreviewPanel(QWidget):
 
         if png_for_3d and self._3d_available and self._3d_widget and self.is_3d_mode():
             if self._crithit_mode:
-                self._3d_widget.update_crithit_texture(png_for_3d)
+                self._update_scene_texture(png_for_3d)
             elif self._card_mode and self._material_names:
                 self._3d_widget.apply_material_map({self._material_names[0]: png_for_3d})
             else:
@@ -3014,12 +3094,30 @@ class PreviewPanel(QWidget):
     # CritHIT режим
     # ═══════════════════════════════════════════════════════════════════════════
 
+    def _update_scene_texture(self, path: str) -> None:
+        """Применяет новую текстуру к сцене-персонажу: для эффекта смерти —
+        перерисовываем модель с текстурой; для крита — обновляем billboard."""
+        if not self._3d_widget:
+            return
+        if self._death_effect_mode:
+            self._render_crithit_scene()      # текстура ложится на модель
+        else:
+            self._3d_widget.update_crithit_texture(path)   # billboard крита
+
     def _render_crithit_scene(self) -> None:
         if not self._3d_widget or not self._3d_available:
             return
-        crit_path = self.image_path or ''
         class_name = self._crithit_class
         custom_model, model_tex = self._find_crithit_custom_model(class_name)
+
+        if self._death_effect_mode:
+            # Эффект смерти: на модель — текстура пользователя, иначе оригинальная
+            # игровая текстура эффекта (лёд/золото/огонь). Billboard не показываем.
+            crit_path = ''
+            model_tex = self.image_path or self._death_default_tex or ''
+        else:
+            # Крит: текстура пользователя — billboard, модель в своей текстуре.
+            crit_path = self.image_path or ''
 
         if model_tex.lower().endswith('.vtf'):
             model_tex = self._convert_model_vtf(model_tex)

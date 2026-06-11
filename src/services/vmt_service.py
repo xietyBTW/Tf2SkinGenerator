@@ -163,6 +163,21 @@ class VMTService:
                 rel_path = os.path.join("materials", "vgui", "logos")
                 vmt_filename = "spray.vmt"
                 vtf_filename = "spray.vtf"
+            elif mode == "death_ice":
+                # Лёд рагдолла (Sky-cicle). Override игрового материала по пути:
+                rel_path = os.path.join("materials", "models", "player", "shared")
+                vmt_filename = "ice_player.vmt"
+                vtf_filename = "ice_player.vtf"
+            elif mode == "death_gold":
+                # Золотая статуя (Golden Frying Pan / Saxxy).
+                rel_path = os.path.join("materials", "models", "player", "shared")
+                vmt_filename = "gold_player.vmt"
+                vtf_filename = "gold_player.vtf"
+            elif mode == "death_fire":
+                # Огонь горящего игрока (слоистый огонь).
+                rel_path = os.path.join("materials", "effects", "tiledfire")
+                vmt_filename = "fireLayeredSlowTiled512.vmt"
+                vtf_filename = "fireLayeredSlowTiled512.vtf"
             else:
                 # Для других специальных режимов (если будут добавлены новые)
                 rel_path = os.path.join("materials", "effects")
