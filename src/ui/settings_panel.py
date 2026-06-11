@@ -162,11 +162,18 @@ class CollapsibleGroup(QWidget):
 class SettingsPanel(QWidget):
     replace_model_toggled = Signal(bool)
     model_ready_toggled   = Signal(bool)
+    # Режим «настройки текстуры»: панель Step 2 редактирует конкретный материал.
+    texture_setting_changed = Signal(str, object)  # (material, {size,format,flags,options})
+    texture_edit_reset      = Signal(str)           # (material) — вернуть к глобальным
+    texture_edit_exited     = Signal()
+    material_maps_requested = Signal(str)           # (material; '' = главный) — открыть карты материала
 
     def __init__(self, parent=None):
         super().__init__()
         self.parent = parent
         self.styles = get_modern_styles()
+        self._edit_material = None       # редактируемый материал (None = глобальные)
+        self._edit_snapshot = None       # стэш глобальных настроек на время редактирования
         # Получаем язык из родителя, если он есть, иначе из конфига
         if parent and hasattr(parent, 't'):
             self.t = parent.t
@@ -230,7 +237,43 @@ class SettingsPanel(QWidget):
         self.step_label.setMinimumWidth(0)
         self.step_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         main_layout.addWidget(self.step_label)
-        
+
+        # ── Баннер режима «настройки текстуры» ───────────────────────────────
+        # Когда активен — Step 2 редактирует настройки конкретного материала
+        # (а не глобальные). Скрыт по умолчанию.
+        self._edit_banner = QFrame()
+        self._edit_banner.setStyleSheet(
+            "QFrame { background: rgba(216,176,32,0.12); border:1px solid #8a7320; border-radius:6px; }"
+        )
+        _eb = QHBoxLayout(self._edit_banner)
+        _eb.setContentsMargins(10, 6, 8, 6); _eb.setSpacing(8)
+        self._edit_banner_lbl = QLabel("")
+        self._edit_banner_lbl.setStyleSheet(
+            "color:#e3c24a; font-size:12px; font-weight:600; background:transparent; border:none;")
+        self._edit_banner_lbl.setWordWrap(True)
+        _eb.addWidget(self._edit_banner_lbl, 1)
+        self._edit_maps_btn = QPushButton(self.t.get('tex_maps_btn', 'Доп. материалы…'))
+        self._edit_maps_btn.setStyleSheet(
+            "QPushButton{background:transparent;color:#ccc;border:1px solid #555;border-radius:5px;"
+            "padding:3px 10px;font-size:11px;} QPushButton:hover{border-color:#ff6b35;color:#fff;}")
+        self._edit_maps_btn.clicked.connect(
+            lambda: self.material_maps_requested.emit(self._edit_material or ''))
+        _eb.addWidget(self._edit_maps_btn)
+        self._edit_reset_btn = QPushButton(self.t.get('tex_reset_global', 'Сбросить'))
+        self._edit_reset_btn.setStyleSheet(
+            "QPushButton{background:transparent;color:#bbb;border:1px solid #555;border-radius:5px;"
+            "padding:3px 10px;font-size:11px;} QPushButton:hover{border-color:#888;color:#fff;}")
+        self._edit_reset_btn.clicked.connect(self._on_tex_edit_reset)
+        _eb.addWidget(self._edit_reset_btn)
+        self._edit_done_btn = QPushButton(self.t.get('tex_done', 'Готово'))
+        self._edit_done_btn.setStyleSheet(
+            "QPushButton{background:#ff6b35;color:#fff;border:none;border-radius:5px;"
+            "padding:3px 12px;font-size:11px;font-weight:600;}")
+        self._edit_done_btn.clicked.connect(lambda: self.exit_texture_edit(restore=True))
+        _eb.addWidget(self._edit_done_btn)
+        self._edit_banner.setVisible(False)
+        main_layout.addWidget(self._edit_banner)
+
         # ПЕРВЫЙ КОНТЕЙНЕР - Основные настройки
         # Minimum по вертикали: не сжимать блок (Maximum давал сжатие в QScrollArea)
         main_settings_container = QWidget()
@@ -502,7 +545,10 @@ class SettingsPanel(QWidget):
         self.material_maps_button.setToolTip(self.t.get(
             'material_maps_button_tip',
             'Add detail / self-illum / phong maps from images — the app builds the VTF and wires the VMT.'))
-        self.material_maps_button.clicked.connect(self._open_material_maps_dialog)
+        # Карты материала теперь ПЕР-ТЕКСТУРНЫЕ: глобальная кнопка целит в главный
+        # материал ('' = главный), а в режиме редактирования — в выбранный.
+        self.material_maps_button.clicked.connect(
+            lambda: self.material_maps_requested.emit(self._edit_material or ''))
         self.advanced_group.addWidget(self.material_maps_button)
 
         # UV разметка
@@ -850,6 +896,17 @@ class SettingsPanel(QWidget):
         self.extract_texture_button.clicked.connect(self.extract_texture_triggered)
         self.merge_vpk_button.clicked.connect(self.merge_vpk_triggered)
         self.filename_input.textChanged.connect(self.validate_vpk_name)
+        # Привязка контролов к режиму «настройки текстуры»: при изменении в
+        # режиме редактирования → оверрайд материала (вне режима — игнор).
+        for _rb in (self.radio_256, self.radio_512, self.radio_1024, self.radio_2048):
+            _rb.toggled.connect(self._on_edit_control_changed)
+        self.format_combo.currentTextChanged.connect(self._on_edit_control_changed)
+        for _fa in ('flag_clamps', 'flag_clampt', 'flag_nomipmaps', 'flag_nolod',
+                    'flag_nominmipmaps', 'option_normal', 'option_nothumbnail',
+                    'option_noreflectivity'):
+            _w = getattr(self, _fa, None)
+            if _w is not None:
+                _w.stateChanged.connect(self._on_edit_control_changed)
         # Подключаем сигнал сворачивания/разворачивания секции "Дополнительно"
         self.advanced_group.toggled.connect(self.on_advanced_toggled)
         # Подключаем обработчик для чекбокса UV разметки
@@ -948,9 +1005,23 @@ class SettingsPanel(QWidget):
         self.filename_error.hide()
         self.button.setEnabled(True)
         return True
-    
-    def get_settings(self):
-        """Возвращает текущие настройки"""
+
+    # ── Режим «настройки текстуры» (Step 2 редактирует материал) ──────────── #
+
+    def _edit_controls(self):
+        """Контролы, которые относятся к пер-текстурным настройкам."""
+        ctrls = [self.radio_256, self.radio_512, self.radio_1024, self.radio_2048,
+                 self.format_combo, self.flag_clamps, self.flag_clampt,
+                 self.flag_nomipmaps, self.flag_nolod]
+        for a in ('flag_nominmipmaps', 'option_normal',
+                  'option_nothumbnail', 'option_noreflectivity'):
+            w = getattr(self, a, None)
+            if w is not None:
+                ctrls.append(w)
+        return ctrls
+
+    def _read_texture_controls(self) -> dict:
+        """Текущие значения контролов как пер-текстурные настройки (без gamma)."""
         if self.radio_256.isChecked():
             size = (256, 256)
         elif self.radio_2048.isChecked():
@@ -959,28 +1030,97 @@ class SettingsPanel(QWidget):
             size = (1024, 1024)
         else:
             size = (512, 512)
-        format_type = self.format_combo.currentText()
-        
         flags = []
-        if self.flag_clamps.isChecked():
-            flags.append("CLAMPS")
-        if self.flag_clampt.isChecked():
-            flags.append("CLAMPT")
-        if self.flag_nomipmaps.isChecked():
-            flags.append("NOMIP")
-        if self.flag_nolod.isChecked():
-            flags.append("NOLOD")
-        if hasattr(self, 'flag_nominmipmaps') and self.flag_nominmipmaps.isChecked():
+        if self.flag_clamps.isChecked():    flags.append("CLAMPS")
+        if self.flag_clampt.isChecked():    flags.append("CLAMPT")
+        if self.flag_nomipmaps.isChecked(): flags.append("NOMIP")
+        if self.flag_nolod.isChecked():     flags.append("NOLOD")
+        if getattr(self, 'flag_nominmipmaps', None) and self.flag_nominmipmaps.isChecked():
             flags.append("NOMINMIP")
-        
-        # Опции VTFCmd
         options = {}
-        if hasattr(self, 'option_nothumbnail') and self.option_nothumbnail.isChecked():
+        if getattr(self, 'option_nothumbnail', None) and self.option_nothumbnail.isChecked():
             options['nothumbnail'] = True
-        if hasattr(self, 'option_noreflectivity') and self.option_noreflectivity.isChecked():
+        if getattr(self, 'option_noreflectivity', None) and self.option_noreflectivity.isChecked():
             options['noreflectivity'] = True
-        if hasattr(self, 'option_normal') and self.option_normal.isChecked():
+        if getattr(self, 'option_normal', None) and self.option_normal.isChecked():
             options['normal'] = True
+        return {'size': size, 'format': self.format_combo.currentText(),
+                'flags': flags, 'options': options}
+
+    def _set_texture_controls(self, s: dict) -> None:
+        """Выставляет контролы по настройкам s, БЕЗ эмита (block signals)."""
+        for w in self._edit_controls():
+            w.blockSignals(True)
+        try:
+            size = s.get('size') or (512, 512)
+            w0 = size[0] if isinstance(size, (tuple, list)) and size else 512
+            {256: self.radio_256, 512: self.radio_512,
+             1024: self.radio_1024, 2048: self.radio_2048}.get(w0, self.radio_512).setChecked(True)
+            idx = self.format_combo.findText(s.get('format') or 'DXT1')
+            self.format_combo.setCurrentIndex(idx if idx >= 0 else 0)
+            fl = set(s.get('flags') or [])
+            self.flag_clamps.setChecked('CLAMPS' in fl)
+            self.flag_clampt.setChecked('CLAMPT' in fl)
+            self.flag_nomipmaps.setChecked('NOMIP' in fl)
+            self.flag_nolod.setChecked('NOLOD' in fl)
+            if getattr(self, 'flag_nominmipmaps', None):
+                self.flag_nominmipmaps.setChecked('NOMINMIP' in fl)
+            opt = s.get('options') or {}
+            if getattr(self, 'option_normal', None):
+                self.option_normal.setChecked(bool(opt.get('normal')))
+            if getattr(self, 'option_nothumbnail', None):
+                self.option_nothumbnail.setChecked(bool(opt.get('nothumbnail')))
+            if getattr(self, 'option_noreflectivity', None):
+                self.option_noreflectivity.setChecked(bool(opt.get('noreflectivity')))
+        finally:
+            for w in self._edit_controls():
+                w.blockSignals(False)
+
+    def enter_texture_edit(self, material: str, settings: dict) -> None:
+        """Переводит Step 2 в режим редактирования настроек материала."""
+        if self._edit_material is None:
+            self._edit_snapshot = self._read_texture_controls()  # стэш глобальных
+        self._edit_material = material
+        self._set_texture_controls(settings)
+        self._edit_banner_lbl.setText(
+            self.t.get('tex_editing', 'Текстура: ') + f'«{material}»')
+        self._edit_banner.setVisible(True)
+
+    def exit_texture_edit(self, restore: bool = True) -> None:
+        """Выходит из режима редактирования, возвращая глобальные значения."""
+        if self._edit_material is None:
+            return
+        self._edit_material = None
+        if restore and self._edit_snapshot is not None:
+            self._set_texture_controls(self._edit_snapshot)
+        self._edit_snapshot = None
+        self._edit_banner.setVisible(False)
+        self.texture_edit_exited.emit()
+
+    def is_editing_texture(self) -> bool:
+        return self._edit_material is not None
+
+    def _on_edit_control_changed(self, *args) -> None:
+        """Изменение контрола в режиме редактирования → оверрайд материала."""
+        if self._edit_material:
+            self.texture_setting_changed.emit(self._edit_material, self._read_texture_controls())
+
+    def _on_tex_edit_reset(self) -> None:
+        mat = self._edit_material
+        if mat is not None:
+            self.texture_edit_reset.emit(mat)
+        self.exit_texture_edit(restore=True)
+
+    def get_settings(self):
+        """Возвращает текущие настройки"""
+        # Размер/формат/флаги/опции. В режиме редактирования текстуры контролы
+        # показывают настройки материала, поэтому ГЛОБАЛЬНЫЕ берём из снимка.
+        tex = (self._edit_snapshot if (self._edit_material and self._edit_snapshot)
+               else self._read_texture_controls())
+        size = tex['size']
+        format_type = tex['format']
+        flags = list(tex['flags'])
+        options = dict(tex['options'])
         if hasattr(self, 'option_gamma') and self.option_gamma.isChecked():
             options['gamma'] = True
             if hasattr(self, 'gamma_value_input'):

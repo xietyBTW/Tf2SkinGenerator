@@ -656,6 +656,10 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
         if hasattr(self, 'settings_panel'):
             self.settings_panel.replace_model_toggled.connect(self.on_replace_model_changed)
             self.settings_panel.model_ready_toggled.connect(self._on_model_ready_toggled)
+            # Пер-текстурные карты материала: запрос из settings_panel → диалог у превью.
+            if hasattr(self, 'preview_panel'):
+                self.settings_panel.material_maps_requested.connect(
+                    self.preview_panel.open_material_maps)
 
         # Когда пользователь загрузил VPK мод в 3D — автоматически переключаем на Custom
         if hasattr(self, 'preview_panel'):
@@ -1818,7 +1822,10 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
                 hat_mdl_path=getattr(self, '_hat_mdl_path', None),
                 hat_apply_game_paints=hat_apply_game_paints,
                 panel_extra_textures=_panel_extra_textures,
-                material_maps=settings.get('material_maps', {}),
+                material_maps=(self.preview_panel.get_texture_maps()
+                               if hasattr(self, 'preview_panel') else {}),
+                material_settings=(self.preview_panel.get_texture_overrides()
+                                   if hasattr(self, 'preview_panel') else {}),
                 skin_build_data=_skin_build_data,
                 replace_keep_materials=_replace_keep_materials,
                 # Без parent=self ! Если дать parent=self, Qt станет владельцем

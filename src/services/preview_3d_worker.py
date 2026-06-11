@@ -241,12 +241,18 @@ class Preview3DWorker(QThread):
                 # Доп. текстуры по фиксированному пути (вне QC/модели), напр.
                 # HUD-вставки Dead Ringer (pocket_watch_fg/bg).
                 fixed_extras = self._extract_fixed_extra_textures()
+                # Материалы из QC $texturegroup, которых нет в геометрии
+                # (напр. smiley у гранатомёта) — чтобы карточки 2D совпадали
+                # с тем, что предлагает сборка.
+                tg_extras = self._extract_texturegroup_extras(mat_names)
 
                 if len(mat_names) > 1:
                     # ── Мульти-материальное оружие (shell, scope и т.п.) ─────── #
                     tex_map = self._extract_multi_textures(mat_names)
                     if fixed_extras:
                         tex_map.update(fixed_extras)
+                    if tg_extras:
+                        tex_map.update(tg_extras)
                     first_tex = next(iter(tex_map.values()), "") if tex_map else ""
                     self.ready.emit(obj_path, first_tex)
                     if tex_map:
@@ -257,13 +263,16 @@ class Preview3DWorker(QThread):
                     frame_paths, framerate = self._extract_texture_frames()
                     first_tex = frame_paths[0] if frame_paths else ""
                     self.ready.emit(obj_path, first_tex)
-                    if fixed_extras:
-                        # Главная текстура + фиксированные доп. → карточки в 2D
+                    # Главная текстура + доп. (фиксированные и из $texturegroup) → карточки 2D
+                    extra_cards: dict = {}
+                    extra_cards.update(fixed_extras)
+                    extra_cards.update(tg_extras)
+                    if extra_cards:
                         combined: dict = {}
                         main_name = mat_names[0] if mat_names else self.weapon_key
                         if first_tex:
                             combined[main_name] = first_tex
-                        combined.update(fixed_extras)
+                        combined.update(extra_cards)
                         if len(combined) > 1:
                             self.multi_material.emit(combined)
                     elif len(frame_paths) > 1:
@@ -344,13 +353,14 @@ class Preview3DWorker(QThread):
 
         logger.info(f"[3D] cwd={os.getcwd()} | crowbar={crowbar_abs} | vpk={self.misc_vpk_path}")
 
-        from src.data.player_characters import PLAYER_BODY_MODE_KEYS as _PBK
+        from src.data.player_characters import PLAYER_BODY_MODE_KEYS as _PBK, SPY_MASK_MODE_KEY as _SMK
         from src.data.weapons import PREVIEW_MDL_OVERRIDE
         if self.mode == "hat":
             from src.services.tf2_paths import build_hat_mdl_candidates
             paths_to_try = build_hat_mdl_candidates(mdl_rel_hint)
-        elif self.mode in _PBK or self.weapon_key in PREVIEW_MDL_OVERRIDE:
-            # Персонажи и превью-подмены: прямой путь, без workshop-вариантов
+        elif self.mode in _PBK or self.mode == _SMK or self.weapon_key in PREVIEW_MDL_OVERRIDE:
+            # Персонажи, маски шпиона и превью-подмены: прямой путь (weapon_key —
+            # это уже полный путь MDL, не ключ из WEAPON_MDL_PATHS).
             paths_to_try = [mdl_rel_hint]
         else:
             paths_to_try = ExtractModelService._build_paths_to_try(
@@ -867,6 +877,47 @@ class Preview3DWorker(QThread):
         except Exception as exc:
             logger.warning(f"[3D] Ошибка извлечения фикс. доп. текстур: {exc}", exc_info=True)
         return result
+
+    def _extract_texturegroup_extras(self, mat_names: list) -> dict:
+        """
+        Материалы из QC $texturegroup (колонки 1+), которых НЕТ среди материалов
+        геометрии (mat_names) — напр. smiley у гранатомёта демомена. Сборка их
+        предлагает (из $texturegroup), поэтому показываем их карточками и в 2D,
+        чтобы списки совпадали (единый источник — тот же блэклист).
+
+        Текстуру резолвим через $cdmaterials; если не нашли — пустой слот.
+
+        Returns:
+            {material_name: png_path} для материалов вне геометрии.
+        """
+        if not self._decomp_dir:
+            return {}
+        try:
+            qc_files = glob.glob(os.path.join(self._decomp_dir, "*.qc"))
+            if not qc_files:
+                return {}
+            from src.services.model_build_service import ModelBuildService
+            from src.data.material_filter import is_editable_material
+            tg = ModelBuildService.extract_texturegroup_structure(qc_files[0])
+            extras = tg.get('extra_materials', []) or []
+            known = {m.lower() for m in mat_names}
+            # Тем же блэклистом, что и сборка/карточки, и только то, чего нет
+            # в геометрии (иначе материал уже показан обычным путём).
+            missing = [m for m in extras
+                       if m.lower() not in known and is_editable_material(m)]
+            if not missing:
+                return {}
+            logger.info(f"[3D] Доп. материалы из $texturegroup (вне геометрии): {missing}")
+            resolved = self._extract_multi_textures(missing)
+            result: dict = {}
+            for m in missing:
+                png = resolved.get(m) or self._make_blank_png(m)
+                if png:
+                    result[m] = png
+            return result
+        except Exception as exc:
+            logger.debug(f"[3D] Не удалось собрать доп. материалы $texturegroup: {exc}")
+            return {}
 
     def _make_blank_png(self, name: str) -> Optional[str]:
         """Создаёт пустой прозрачный PNG-плейсхолдер (для слота без оригинала)."""

@@ -351,6 +351,9 @@ class ModelBuildService:
             'is_team': layout.blu_is_team,
             'has_australium': bool(layout.variants),
             'rows': layout.all_rows,
+            # Полный список скинов (база+команда+варианты) с сырыми индексами —
+            # для кастомной модели (показ всех групп как переопределяемых стилей).
+            'skins': layout.skins,
         }
 
     @staticmethod
@@ -521,17 +524,28 @@ class ModelBuildService:
         # Определяем основной SMD (reference) - это тот, который содержит weapon_key
         # и/или имеет "_reference" в названии
         main_smd_name = None
-        for smd_ref in all_smd_refs:
-            smd_base = os.path.splitext(os.path.basename(smd_ref))[0].lower()
-            wk_lower = weapon_key.lower()
-            
-            # Основной SMD - первый, который:
-            # 1. Содержит weapon_key + "_reference"
-            # 2. Или просто совпадает с weapon_key
-            if wk_lower + '_reference' == smd_base or wk_lower == smd_base:
-                main_smd_name = smd_ref
-                break
-        
+
+        # У персонажей (и части моделей) основной body задаётся через $model/$body,
+        # БЕЗ ключевого слова studio — значит его нет в all_smd_refs, и брать первую
+        # studio-ссылку за основную нельзя (иначе bodygroup вроде demo_smiley.smd
+        # ошибочно считается основным телом и отбрасывается из доп. SMD).
+        body_dir = re.search(r'\$(?:model|body)\b[^\n{]*?"([^"]+\.smd)"',
+                             content, re.IGNORECASE)
+        if body_dir:
+            main_smd_name = body_dir.group(1)
+
+        if not main_smd_name:
+            for smd_ref in all_smd_refs:
+                smd_base = os.path.splitext(os.path.basename(smd_ref))[0].lower()
+                wk_lower = weapon_key.lower()
+
+                # Основной SMD - первый, который:
+                # 1. Содержит weapon_key + "_reference"
+                # 2. Или просто совпадает с weapon_key
+                if wk_lower + '_reference' == smd_base or wk_lower == smd_base:
+                    main_smd_name = smd_ref
+                    break
+
         # Если не нашли по точному совпадению - берем первый SMD с weapon_key в имени
         if not main_smd_name:
             for smd_ref in all_smd_refs:

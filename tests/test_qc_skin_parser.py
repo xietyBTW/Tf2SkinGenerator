@@ -171,6 +171,40 @@ class PickPreviewVariantTests(unittest.TestCase):
         self.assertIsNone(pick_preview_variant(layout))
 
 
+class SkinsListTests(unittest.TestCase):
+    """skins — полный список (база+команда+варианты) с сырыми индексами."""
+
+    def test_team_style_australium_all_listed_with_raw_indices(self):
+        layout = classify_rows([
+            ["c_x"], ["c_x_blue"], ["c_x_bloody"], ["c_x_gold"],
+        ])
+        self.assertEqual(layout.skins, [
+            {'index': 0, 'role': 'RED'},
+            {'index': 1, 'role': 'BLU'},
+            {'index': 2, 'role': 'Bloody'},
+            {'index': 3, 'role': 'Australium'},
+        ])
+
+    def test_raw_index_preserved_through_padding(self):
+        # padding-дубли skin0 пропускаются, но индекс варианта сохраняется
+        layout = classify_rows([
+            ["c_x"], ["c_x"], ["c_x"], ["c_x_gold"],
+        ])
+        self.assertEqual(layout.skins, [
+            {'index': 0, 'role': 'Skin 0'},
+            {'index': 3, 'role': 'Australium'},
+        ])
+
+    def test_single_skin(self):
+        self.assertEqual(classify_rows([["c_x"]]).skins, [{'index': 0, 'role': 'Skin 0'}])
+
+    def test_styles_without_team(self):
+        layout = classify_rows([["c_x"], ["c_x_bloody"]])
+        self.assertEqual(
+            [s['role'] for s in layout.skins], ['Skin 0', 'Bloody']
+        )
+
+
 class RestrictToMaterialsTests(unittest.TestCase):
     """Фильтрация раскладки для режимов рук (инженер/медик: тело в col0)."""
 

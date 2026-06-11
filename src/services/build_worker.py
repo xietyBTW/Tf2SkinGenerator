@@ -47,6 +47,7 @@ class BuildWorker(QThread):
         hat_apply_game_paints: bool = True,
         panel_extra_textures: Optional[Dict[str, Any]] = None,
         material_maps: Optional[Dict[str, Any]] = None,
+        material_settings: Optional[Dict[str, Any]] = None,
         skin_build_data: Optional[Dict[str, Any]] = None,
         replace_keep_materials: bool = False,
         parent=None
@@ -76,6 +77,7 @@ class BuildWorker(QThread):
         self.hat_apply_game_paints = hat_apply_game_paints
         self.panel_extra_textures = panel_extra_textures or {}
         self.material_maps = material_maps or {}
+        self.material_settings = material_settings or {}
         self.skin_build_data = skin_build_data
         self.replace_keep_materials = replace_keep_materials
         self.parent_window = parent
@@ -128,6 +130,7 @@ class BuildWorker(QThread):
                 hat_apply_game_paints=self.hat_apply_game_paints,
                 panel_extra_textures=self.panel_extra_textures,
                 material_maps=self.material_maps,
+                material_settings=self.material_settings,
                 skin_build_data=self.skin_build_data,
                 replace_keep_materials=self.replace_keep_materials,
                 progress_callback=self.progress.emit,

@@ -182,6 +182,10 @@ class SkinLayout:
     variants: Dict[str, List[str]] = field(default_factory=dict)
     #: Подписи уникальных скинов для UI: RED/BLU, Bloody/Clean или Skin N.
     roles: List[str] = field(default_factory=list)
+    #: ВСЕ осмысленные скины (база + команда + варианты) для кастомной модели:
+    #: [{'index': сырой_индекс_в_all_rows, 'role': подпись}]. Индекс сохраняется
+    #: «как в модели» — игра выбирает скин (команда/качество/стиль) по нему.
+    skins: List[dict] = field(default_factory=list)
 
     def describe(self) -> str:
         """Одна строка для лога: как классифицирован QC."""
@@ -271,6 +275,37 @@ def classify_rows(rows: List[List[str]]) -> SkinLayout:
         layout.roles = ['RED', 'BLU'] + [f'Skin {i}' for i in range(2, n)]
     else:
         layout.roles = [_style_label(unique_rows[i], i) for i in range(n)]
+
+    # Полный список скинов для кастомной модели: ВСЕ осмысленные строки (база +
+    # команда + варианты), с СЫРЫМ индексом (позиция в all_rows = индекс скина в
+    # модели). Padding-дубли skin 0 пропускаем — сборка заполнит их базой; но
+    # индексы оставшихся строк сохраняем, чтобы команда/австралий/стиль
+    # выбирались игрой по правильному индексу.
+    has_team = any(
+        r and (r[0].lower().endswith('_blue') or r[0].lower().endswith('_blu'))
+        for r in rows
+    )
+    skins: List[dict] = []
+    seen_keys = set()
+    for raw_idx, row in enumerate(rows):
+        if not row:
+            continue
+        key = tuple(x.lower() for x in row)
+        if raw_idx != 0 and key in seen_keys:
+            continue  # padding/дубль базового скина
+        seen_keys.add(key)
+        col0 = row[0].lower()
+        kind = variant_kind(row[0])
+        if raw_idx == 0:
+            role = 'RED' if has_team else 'Skin 0'
+        elif kind:
+            role = kind.capitalize()
+        elif col0.endswith('_blue') or col0.endswith('_blu'):
+            role = 'BLU'
+        else:
+            role = _style_label(row, raw_idx)
+        skins.append({'index': raw_idx, 'role': role})
+    layout.skins = skins
 
     return layout
 

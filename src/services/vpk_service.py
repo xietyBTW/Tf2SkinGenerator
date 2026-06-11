@@ -383,94 +383,127 @@ class VPKService:
         size: Tuple[int, int],
         base_image_path: Optional[str] = None,
         is_normal_map: bool = False,
+        panel_extra_textures: Optional[dict] = None,
     ) -> None:
         """
-        Генерит файловые карты материала (Фаза 2) и вписывает их в главный VMT.
+        Генерит файловые карты материала ПЕР-ТЕКСТУРНО.
 
-        material_maps: {map_id: {"image": путь | "derive": True, "$param": override, ...}}.
-        Источник карты:
-          • "image"  — пользователь загрузил файл;
-          • "derive" — карта выводится ИЗ базовой текстуры (base_image_path):
-                       phong → RGB=яркость, ALPHA=маска; selfillum → маска по яркости.
-
-        Для derive-phong дополнительно генерим карту нормалей из базовой текстуры
-        (без bumpmap Source не считает блик) и добавляем $envmap — это и есть
-        «Авто-блеск» из одной галочки.
-
-        Параметры пишутся в ГЛАВНЫЙ VMT — BLU-копии и зеркальные VMT наследуют их.
+        material_maps: {material_name: {map_id: spec}} — карты для каждого выбранного
+        материала (а не глобально на главный). Карты каждого материала пишутся в
+        ЕГО VMT:
+          • главный (== texture_filename) → vmt_path, база = base_image_path;
+          • прочие → {mat}.vmt (создан extra/panel_extra), база = panel_extra_textures[mat].
+        Если есть {mat}_blue.vmt — параметры дублируются туда (команда наследует).
         Ошибка одной карты не валит сборку.
         """
         if not material_maps:
             return
-        from src.data.material_maps import MATERIAL_MAPS, MAP_ORDER
+        panel_extra_textures = panel_extra_textures or {}
+        for mat, maps in material_maps.items():
+            if not maps:
+                continue
+            # Пустой ключ '' = главный материал (UI не всегда знает texture_filename).
+            if mat in ('', texture_filename):
+                real_mat = texture_filename
+                mat_vmt = vmt_path
+                mat_base = base_image_path
+            else:
+                real_mat = mat
+                mat_vmt = vtf_output_path / f"{mat}.vmt"
+                mat_base = panel_extra_textures.get(mat)
+                if not mat_vmt.exists():
+                    logger.warning(f"Карты материала '{mat}': VMT не найден ({mat_vmt.name}), пропуск")
+                    continue
+            VPKService._apply_maps_for_material(
+                maps, real_mat, mat_vmt, mat_base, vtf_output_path,
+                patched_cdmaterials_path, size, is_normal_map,
+            )
+            _blu_vmt = vtf_output_path / f"{real_mat}_blue.vmt"
+            if _blu_vmt.exists():
+                VPKService._apply_maps_for_material(
+                    maps, real_mat, _blu_vmt, mat_base, vtf_output_path,
+                    patched_cdmaterials_path, size, is_normal_map, params_only=True,
+                )
 
+    @staticmethod
+    def _apply_maps_for_material(
+        material_maps: dict,
+        mat: str,
+        vmt_path: Path,
+        base_image_path: Optional[str],
+        vtf_output_path: Path,
+        patched_cdmaterials_path: str,
+        size: Tuple[int, int],
+        is_normal_map: bool = False,
+        params_only: bool = False,
+    ) -> None:
+        """
+        Применяет набор карт к ОДНОМУ материалу: генерит VTF (имена {mat}{suffix})
+        и вписывает параметры в его VMT. params_only=True — только параметры (VTF
+        уже создан, напр. при дублировании в BLU-VMT).
+
+        Источник карты: "image" (файл) либо "derive" (из базовой текстуры material'а).
+        Для derive-phong доп. создаётся карта нормалей + $envmap («Авто-блеск»).
+        """
+        from src.data.material_maps import MATERIAL_MAPS, MAP_ORDER
         for map_id in MAP_ORDER:
             spec = material_maps.get(map_id)
             if not spec:
                 continue
-
             cfg = MATERIAL_MAPS[map_id]
-            map_key = f"{texture_filename}{cfg['suffix']}"
+            map_key = f"{mat}{cfg['suffix']}"
             derive = bool(spec.get("derive")) and bool(cfg.get("derive_kind"))
             image = spec.get("image")
 
             if not derive and (not image or not os.path.isfile(image)):
-                logger.warning(f"Карта '{map_id}': нет файла и не derive ({image!r}), пропуск")
+                if not params_only:
+                    logger.warning(f"Карта '{map_id}' [{mat}]: нет файла и не derive, пропуск")
                 continue
             if derive and (not base_image_path or not os.path.isfile(base_image_path)):
-                logger.warning(f"Карта '{map_id}': derive невозможен — нет базовой текстуры, пропуск")
+                if not params_only:
+                    logger.warning(f"Карта '{map_id}' [{mat}]: derive невозможен — нет базы, пропуск")
                 continue
 
-            try:
-                ensure_directory_exists(vtf_output_path)
-                temp_png = vtf_output_path / f"{map_key}.png"
-                _map_opts = dict(cfg.get("options", {}))   # напр. {'nomipmaps': True} у warp-карт
-                if derive:
-                    threshold = spec.get("threshold")
-                    threshold = int(threshold) if threshold not in (None, "") else None
-                    TextureService.derive_effect_map(
-                        base_image_path, str(temp_png), cfg["derive_kind"], size,
-                        threshold=threshold,
-                    )
-                    # derive уже в нужном размере → VTF напрямую (сохраняем альфу-маску)
-                    VPKService._create_vtf(
-                        str(temp_png), str(vtf_output_path),
-                        cfg["format"], list(cfg["flags"]), _map_opts
-                    )
-                else:
-                    VPKService._process_image(image, str(temp_png), size)
-                    VPKService._create_vtf(
-                        str(temp_png), str(vtf_output_path),
-                        cfg["format"], list(cfg["flags"]), _map_opts
-                    )
-                if temp_png.exists():
-                    temp_png.unlink()
-            except Exception as e:
-                logger.warning(f"Не удалось создать VTF карты '{map_id}': {e}", exc_info=True)
-                continue
+            if not params_only:
+                try:
+                    ensure_directory_exists(vtf_output_path)
+                    temp_png = vtf_output_path / f"{map_key}.png"
+                    _map_opts = dict(cfg.get("options", {}))
+                    if derive:
+                        threshold = spec.get("threshold")
+                        threshold = int(threshold) if threshold not in (None, "") else None
+                        TextureService.derive_effect_map(
+                            base_image_path, str(temp_png), cfg["derive_kind"], size,
+                            threshold=threshold,
+                        )
+                        VPKService._create_vtf(str(temp_png), str(vtf_output_path),
+                                               cfg["format"], list(cfg["flags"]), _map_opts)
+                    else:
+                        VPKService._process_image(image, str(temp_png), size)
+                        VPKService._create_vtf(str(temp_png), str(vtf_output_path),
+                                               cfg["format"], list(cfg["flags"]), _map_opts)
+                    if temp_png.exists():
+                        temp_png.unlink()
+                except Exception as e:
+                    logger.warning(f"Не удалось создать VTF карты '{map_id}' [{mat}]: {e}", exc_info=True)
+                    continue
 
-            # extra_vmt + переопределения числовых из UI (ключи вида "$param")
             extra = dict(cfg["extra_vmt"])
             for k, v in spec.items():
                 if isinstance(k, str) and k.startswith("$"):
                     extra[k] = str(v)
-
-            # derive-режим: доклеиваем сопутствующие параметры (envmap и т.п.)
             if derive:
                 extra.update(cfg.get("derive_extra_vmt", {}))
-                if cfg.get("derive_auto_normal"):
+                if cfg.get("derive_auto_normal") and not params_only:
                     VPKService._ensure_derived_normal(
-                        base_image_path, vtf_output_path, texture_filename, vmt_path,
+                        base_image_path, vtf_output_path, mat, vmt_path,
                         patched_cdmaterials_path, size, is_normal_map,
                     )
 
             VMTService.add_material_map_params(
                 str(vmt_path), patched_cdmaterials_path, map_key, cfg["path_param"], extra
             )
-            logger.info(
-                f"Карта материала '{map_id}' добавлена в VMT: {map_key}.vtf "
-                f"({'derive' if derive else 'file'})"
-            )
+            logger.info(f"Карта '{map_id}' [{mat}] → {map_key}.vtf ({'derive' if derive else 'file'})")
 
     @staticmethod
     def _ensure_derived_normal(
@@ -1129,6 +1162,7 @@ class VPKService:
         hat_apply_game_paints: bool = True,
         panel_extra_textures: Optional[dict] = None,
         material_maps: Optional[dict] = None,
+        material_settings: Optional[dict] = None,
         skin_build_data: Optional[dict] = None,
         replace_keep_materials: bool = False,
         progress_callback: Optional[Callable[[int, str], None]] = None,
@@ -1215,6 +1249,7 @@ class VPKService:
                 hat_apply_game_paints=hat_apply_game_paints,
                 panel_extra_textures=panel_extra_textures,
                 material_maps=material_maps,
+                material_settings=material_settings,
                 skin_build_data=skin_build_data,
                 replace_keep_materials=replace_keep_materials,
                 progress_callback=progress_callback,
@@ -1279,6 +1314,7 @@ class VPKService:
         cancel_callback: Optional[Callable[[], bool]] = None,  # True = пользователь запросил отмену
         panel_extra_textures: Optional[dict] = None,  # {mat_name: img_path} из 2D панели
         material_maps: Optional[dict] = None,  # файловые карты материала (detail/selfillum/phongexp)
+        material_settings: Optional[dict] = None,  # пер-текстурные настройки {material: {size,format,flags,options}}
         skin_build_data: Optional[dict] = None,  # стили кастомной модели → $texturegroup + варианты
         replace_keep_materials: bool = False,  # сохранить материалы пользовательской модели (многотекстурная/«готовая»)
     ) -> Tuple[bool, str]:
@@ -1767,6 +1803,17 @@ class VPKService:
                                 logger.warning(f"Не найден оригинальный RED VTF: '{texture_filename}'")
                             image_path = None  # VTF уже на месте, не передаём дальше
 
+                    # Эффективные настройки на материал: пер-текстурный оверрайд
+                    # поверх глобальных (size/format/flags/options). Нет оверрайда —
+                    # возвращаются глобальные, поведение не меняется.
+                    from src.data.texture_overrides import effective_settings as _eff_settings
+                    _global_tex = {'size': size, 'format': format_type,
+                                   'flags': flags or [], 'options': vtf_options or {}}
+
+                    def _eff(_mat):
+                        e = _eff_settings(_global_tex, (material_settings or {}).get(_mat))
+                        return e['size'], e['format'], e['flags'], e['options']
+
                     if custom_vtf_path:
                         # Если юзер сам сделал VTF - просто копируем его, не генерируем из картинки
                         vtf_file_path = vtf_output_path / vtf_filename
@@ -1780,16 +1827,17 @@ class VPKService:
                         copy_file_safe(image_path, vtf_output_path / vtf_filename)
                         logger.info(f"Главная текстура: готовый VTF скопирован → {vtf_filename}")
                     elif image_path:
+                        _ms, _mf, _mfl, _mo = _eff(texture_filename)
                         animated_fps, is_normal_map = TextureService.render_image_to_vtf(
                             image_path,
                             vtf_output_path=vtf_output_path,
                             out_vtf_path=vtf_output_path / vtf_filename,
                             temp_png_path=vtf_temp_png,
                             normal_base=texture_filename,
-                            size=size,
-                            format_type=format_type,
-                            flags=flags,
-                            vtf_options=vtf_options,
+                            size=_ms,
+                            format_type=_mf,
+                            flags=_mfl,
+                            vtf_options=_mo,
                         )
                     
                     # Извлекаем оригинальный VMT по пути из QC (до патчинга) — в VPK он
@@ -1809,13 +1857,9 @@ class VPKService:
                         mode, hat_apply_game_paints, animated_fps, is_normal_map,
                     )
 
-                    # ── Файловые карты материала (detail / selfillum / phong-exp) ────────
-                    # Пишем в главный VMT ДО создания BLU/зеркал — те наследуют параметры.
-                    VPKService._build_material_maps(
-                        material_maps, vtf_output_path, texture_filename, vmt_path,
-                        patched_cdmaterials_path, size,
-                        base_image_path=image_path, is_normal_map=is_normal_map,
-                    )
+                    # Пер-текстурные файловые карты (detail/selfillum/phong) применяются
+                    # ПОЗЖЕ — после создания VMT доп. материалов и BLU (см. ниже),
+                    # чтобы карты ложились в VMT именно своего материала.
 
                     # ── BLU Team Texture (командная раскраска) ───────────────────────────
                     # Для оружия с одной общей текстурой (часы шпиона) BLU не создаём,
@@ -1837,7 +1881,7 @@ class VPKService:
                     
                     for extra_mat_name in extra_materials:
                         logger.info(f"Создаем текстуры для дополнительного материала: {extra_mat_name}")
-                        
+
                         extra_vtf_filename = f"{extra_mat_name}.vtf"
                         extra_vmt_filename = f"{extra_mat_name}.vmt"
                         extra_vtf_path = vtf_output_path / extra_vtf_filename
@@ -2198,13 +2242,24 @@ class VPKService:
                             if _pet_name in _processed:
                                 continue   # уже создан через skinfamilies
                             try:
+                                _es, _ef, _efl, _eo = _eff(_pet_name)
                                 if VPKService._render_extra_texture(
                                     _pet_name, _pet_img, vtf_output_path, vmt_path,
-                                    patched_cdmaterials_path, size, format_type, flags, vtf_options,
+                                    patched_cdmaterials_path, _es, _ef, _efl, _eo,
                                 ):
                                     logger.info(f"Panel extra texture: {_pet_name}.vtf/vmt")
                             except Exception as _pet_exc:
                                 logger.warning(f"Panel extra texture ошибка '{_pet_name}': {_pet_exc}")
+
+                    # ── Пер-текстурные файловые карты (detail/selfillum/phong/warp) ──────
+                    # Теперь VMT всех материалов (главный + доп. + BLU) созданы, поэтому
+                    # карты каждого материала ложатся в его собственный VMT.
+                    VPKService._build_material_maps(
+                        material_maps, vtf_output_path, texture_filename, vmt_path,
+                        patched_cdmaterials_path, size,
+                        base_image_path=image_path, is_normal_map=is_normal_map,
+                        panel_extra_textures=panel_extra_textures,
+                    )
 
                     # ── VTF/VMT вариантов стилей (skinfamilies) ─────────────────
                     # Для каждой переопределённой текстуры доп-стиля (напр.
