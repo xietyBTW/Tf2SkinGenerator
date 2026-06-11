@@ -1602,9 +1602,15 @@ class VPKService:
                     # сгенерируем свою группу и варианты ниже. Меш-материалы базы
                     # приходят отдельно через panel_extra_textures.
                     _has_skins = bool(skin_build_data and skin_build_data.get('tg_overrides'))
-                    if _has_skins:
+                    # Для «готовой» кастомной модели (keep_materials) ИГРОВОЙ
+                    # $texturegroup неприменим ВСЕГДА — у меша свои материалы
+                    # (c_sd_cleaver/mouth/lefteye…), а игровые имена (c_scattergun,
+                    # c_scattergun_gold) к нему отношения не имеют. Иначе сборка
+                    # начнёт спрашивать текстуры для игровых слотов, которых нет
+                    # в карточках. Базовые меш-материалы идут через panel_extra_textures.
+                    if _has_skins or replace_keep_materials:
                         logger.info(
-                            "[SKIN BUILD] кастомные стили → подавляем игровой "
+                            "[SKIN BUILD] кастомная модель → подавляем игровой "
                             f"texturegroup (blu_row={blu_row}, extra={extra_materials})"
                         )
                         blu_row = []

@@ -1888,6 +1888,7 @@ class PreviewPanel(QWidget):
         self._per_mesh_active = False
         self._per_mesh_base_image = None
         self._custom_smd_path = None   # сменили оружие — забываем кастомную модель
+        self._custom_keep_materials = False
         self._reset_skin_state()       # и стили оригинала
         self._tex_overrides = {}       # и пер-текстурные настройки (материалы другие)
         self._tex_maps = {}            # и пер-текстурные карты
