@@ -1889,7 +1889,8 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
                     and hasattr(self.preview_panel, 'get_custom_qc_text'):
                 _custom_qc_text = self.preview_panel.get_custom_qc_text()
 
-            self._build_worker = BuildWorker(
+            from src.services.build_request import BuildRequest
+            _request = BuildRequest(
                 image_path=from_path,
                 mode=self.mode,
                 filename=name,
@@ -1921,9 +1922,10 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
                 skin_build_data=_skin_build_data,
                 replace_keep_materials=_replace_keep_materials,
                 custom_qc_text=_custom_qc_text,
-                # Без parent=self ! Если дать parent=self, Qt станет владельцем
-                # и не удалит старый воркер при замене, и сигналы будут дублироваться.
             )
+            # Без parent=self ! Если дать parent=self, Qt станет владельцем
+            # и не удалит старый воркер при замене, и сигналы будут дублироваться.
+            self._build_worker = BuildWorker(request=_request)
             
             # Подключаем сигналы
             self._build_worker.finished.connect(self._on_build_finished)

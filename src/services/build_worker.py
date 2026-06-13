@@ -1,6 +1,7 @@
 from PySide6.QtCore import QThread, Signal, QMutex, QWaitCondition
-from typing import Optional, Dict, Any, Tuple
+from typing import Optional
 from src.services.vpk_service import VPKService
+from src.services.build_request import BuildRequest
 from src.shared.logging_config import get_logger
 from src.data.translations import TRANSLATIONS
 
@@ -21,69 +22,17 @@ class BuildWorker(QThread):
     request_extra_model = Signal(str, str)    # (smd_name, weapon_key) - запрос доп. модели (shell и т.д.)
     texture_mismatch_warning = Signal(str)    # (warning_message) — предупреждение о несовпадении текстур
 
-    def __init__(
-        self,
-        image_path: Optional[str],
-        mode: str,
-        filename: str,
-        size: Tuple[int, int],
-        format_type: str = "DXT1",
-        flags: Optional[list] = None,
-        vtf_options: Optional[Dict[str, Any]] = None,
-        tf2_root_dir: str = "",
-        export_folder: str = "export",
-        keep_temp_on_error: bool = False,
-        debug_mode: bool = False,
-        replace_model_enabled: bool = False,
-        replace_model_path: Optional[str] = None,
-        model_ready_path: Optional[str] = None,
-        draw_uv_layout: bool = False,
-        language: str = "en",
-        custom_vtf_path: Optional[str] = None,
-        blu_mode: str = "none",
-        blu_image_path: Optional[str] = None,
-        custom_vpk_source_path: Optional[str] = None,
-        hat_mdl_path: Optional[str] = None,
-        hat_apply_game_paints: bool = True,
-        hat_class_models: Optional[Dict[str, str]] = None,
-        panel_extra_textures: Optional[Dict[str, Any]] = None,
-        material_maps: Optional[Dict[str, Any]] = None,
-        material_settings: Optional[Dict[str, Any]] = None,
-        skin_build_data: Optional[Dict[str, Any]] = None,
-        replace_keep_materials: bool = False,
-        custom_qc_text: Optional[str] = None,
-        parent=None
-    ):
+    def __init__(self, request: Optional[BuildRequest] = None, parent=None, **legacy_kwargs):
+        """
+        request — все параметры сборки (см. BuildRequest). Для совместимости
+        со старым стилем вызова по kwargs (BuildWorker(image_path=..., mode=...))
+        request можно не передавать — тогда он соберётся из kwargs.
+        """
         super().__init__(parent)
-        self.image_path = image_path
-        self.mode = mode
-        self.filename = filename
-        self.size = size
-        self.format_type = format_type
-        self.flags = flags or []
-        self.vtf_options = vtf_options or {}
-        self.tf2_root_dir = tf2_root_dir
-        self.export_folder = export_folder
-        self.keep_temp_on_error = keep_temp_on_error
-        self.debug_mode = debug_mode
-        self.replace_model_enabled = replace_model_enabled
-        self.replace_model_path = replace_model_path
-        self.model_ready_path = model_ready_path
-        self.draw_uv_layout = draw_uv_layout
-        self.language = language
-        self.custom_vtf_path = custom_vtf_path
-        self.blu_mode = blu_mode
-        self.blu_image_path = blu_image_path
-        self.custom_vpk_source_path = custom_vpk_source_path
-        self.hat_mdl_path = hat_mdl_path
-        self.hat_apply_game_paints = hat_apply_game_paints
-        self.hat_class_models = hat_class_models
-        self.panel_extra_textures = panel_extra_textures or {}
-        self.material_maps = material_maps or {}
-        self.material_settings = material_settings or {}
-        self.skin_build_data = skin_build_data
-        self.replace_keep_materials = replace_keep_materials
-        self.custom_qc_text = custom_qc_text
+        if request is None:
+            request = BuildRequest(**legacy_kwargs)
+        self.request = request
+        self.language = request.language
         self.parent_window = parent
 
         self._model_file_mutex = QMutex()
@@ -104,44 +53,17 @@ class BuildWorker(QThread):
 
     def run(self) -> None:
         try:
-            t = TRANSLATIONS.get(self.language, TRANSLATIONS['en'])
+            r = self.request
+            t = TRANSLATIONS.get(r.language, TRANSLATIONS['en'])
             success, message, cancelled = VPKService.build_with_progress(
-                custom_vpk_source_path=self.custom_vpk_source_path,
-                image_path=self.image_path,
-                mode=self.mode,
-                hat_mdl_path=self.hat_mdl_path,
-                hat_class_models=self.hat_class_models,
-                filename=self.filename,
-                size=self.size,
-                format_type=self.format_type,
-                flags=self.flags,
-                vtf_options=self.vtf_options,
-                tf2_root_dir=self.tf2_root_dir,
-                export_folder=self.export_folder,
-                keep_temp_on_error=self.keep_temp_on_error,
-                debug_mode=self.debug_mode,
-                replace_model_enabled=self.replace_model_enabled,
-                model_ready_path=self.model_ready_path,
-                draw_uv_layout=self.draw_uv_layout,
-                replace_model_path=self.replace_model_path,
-                model_file_callback=self._request_model_file_callback if (self.replace_model_enabled and not self.replace_model_path) else None,
+                r,
+                model_file_callback=self._request_model_file_callback if (r.replace_model_enabled and not r.replace_model_path) else None,
                 extra_texture_callback=self._request_extra_texture_callback,
-                extra_model_callback=self._request_extra_model_callback if self.replace_model_enabled else None,
-                texture_mismatch_callback=self._texture_mismatch_callback if self.model_ready_path else None,
-                language=self.language,
-                custom_vtf_path=self.custom_vtf_path,
-                blu_mode=self.blu_mode,
-                blu_image_path=self.blu_image_path,
-                hat_apply_game_paints=self.hat_apply_game_paints,
-                panel_extra_textures=self.panel_extra_textures,
-                material_maps=self.material_maps,
-                material_settings=self.material_settings,
-                skin_build_data=self.skin_build_data,
-                replace_keep_materials=self.replace_keep_materials,
-                custom_qc_text=self.custom_qc_text,
+                extra_model_callback=self._request_extra_model_callback if r.replace_model_enabled else None,
+                texture_mismatch_callback=self._texture_mismatch_callback if r.model_ready_path else None,
                 progress_callback=self.progress.emit,
                 sub_progress_callback=self.sub_progress.emit,
-                cancel_callback=self.isInterruptionRequested
+                cancel_callback=self.isInterruptionRequested,
             )
 
             if cancelled:

@@ -241,7 +241,7 @@ class MergeVPKService:
             try:
                 if temp_dir.exists():
                     shutil.rmtree(temp_dir)
-            except:
+            except Exception:
                 pass
             return False, t.get('error_merging_vpk', 'Error merging VPK files: {error}').format(error=str(e))
         finally:

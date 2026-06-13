@@ -271,6 +271,7 @@ class ModelBuildService:
         return {
             'red_row': layout.base_rows[0] if layout.base_rows else [],
             'blu_row': layout.second_row,
+            'blu_is_team': layout.blu_is_team,  # вторая строка — настоящая команда, а не вариант
             'main_texture': layout.main_texture,
             'extra_materials': layout.extra_materials,
             'all_rows': layout.all_rows,

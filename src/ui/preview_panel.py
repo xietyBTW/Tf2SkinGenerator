@@ -27,7 +27,7 @@
 import os
 from typing import Dict, List, Optional
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QThread
 from PySide6.QtGui import QPixmap, QImage
 from PySide6.QtWidgets import (
     QFileDialog, QFrame, QGroupBox, QHBoxLayout, QLabel, QPushButton,
@@ -81,6 +81,7 @@ SINGLE_TEX_KEY = '__single__'
 
 # Фильтр служебных материалов (глаза/зубы/sheen-оверлеи) — общий для UI и сборки.
 from src.data.material_filter import is_editable_material as _is_editable_material
+from src.ui.preview_mode import PreviewMode, PreviewState
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -361,6 +362,32 @@ def _team_priority(active_team: str) -> list:
 # Основная панель
 # ═══════════════════════════════════════════════════════════════════════════════
 
+class _SpyMaskVtfWorker(QThread):
+    """
+    Извлекает игровые VTF масок шпиона → PNG в фоне. Один источник и для 3D-превью
+    (переключатель маски), и для 2D-карточек (массовая загрузка превью).
+    Эмитит (vtf_name, png_path) на каждую успешно извлечённую маску.
+    """
+    one = Signal(str, str)  # (vtf_name, png_path)
+
+    def __init__(self, vtf_names, vpk_paths, out_dir, parent=None):
+        super().__init__(parent)
+        self._names = list(vtf_names)
+        self._vpks = list(vpk_paths)
+        self._dir = out_dir
+
+    def run(self):
+        from src.services import vtf_preview_service as vps
+        os.makedirs(self._dir, exist_ok=True)
+        paks = vps.open_vpks(self._vpks)
+        for vtf in self._names:
+            data = vps.read_from_vpks(paks, f"materials/models/player/spy/{vtf}.vtf")
+            png = vps.vtf_bytes_to_png(
+                data, os.path.join(self._dir, f"{vtf}.png"), self._dir)
+            if png:
+                self.one.emit(vtf, png)
+
+
 class PreviewPanel(QWidget):
     """2D + 3D панель предпросмотра с чистым управлением состоянием."""
 
@@ -435,22 +462,22 @@ class PreviewPanel(QWidget):
         self._mem_mode: Optional[str] = None
         self._mem_data: Optional[dict] = None
         self._restoring_memory: bool = False
-        self._custom_smd_mode: bool = False
+        # Явный режим превью вместо россыпи взаимоисключающих булевых флагов
+        # (_custom_smd_mode/_spy_mask_mode/_crithit_mode/_death_effect_mode теперь
+        # — свойства, читающие из _pstate). Источник правды по «что показываем».
+        self._pstate = PreviewState()
         self._custom_smd_path: Optional[str] = None   # путь загруженной кастомной модели
         # True — модель «готова»: сохранять её материалы как есть (многотекстурная).
         # False — заменить только геометрию (адаптировать под игровой материал).
         self._custom_keep_materials: bool = False
         # Отредактированный пользователем QC (исправленный). None = авто-QC.
         self._custom_qc_text: Optional[str] = None
-        self._crithit_mode: bool = False
         self._crithit_class: str = 'soldier'
         # Режим «эффект смерти»: та же модель-персонаж, что у крита, но
         # пользовательская текстура накладывается на саму МОДЕЛЬ (лёд/золото/огонь),
         # а не на billboard — чтобы показать, как эффект ляжет в игре.
-        self._death_effect_mode: bool = False
         # PNG оригинальной игровой текстуры эффекта (дефолт, пока юзер не загрузил свою).
         self._death_default_tex: str = ''
-        self._spy_mask_mode: bool = False      # режим масок маскировки шпиона
         self._active_spy_mask: Optional[str] = None  # активный класс (cls_key)
         self._australium_frame: Optional[str] = None  # PNG игрового варианта Australium/Gold
         self._australium_active: bool = False          # активен ли вариант в 3D
@@ -494,6 +521,29 @@ class PreviewPanel(QWidget):
 
         self.setAcceptDrops(True)
         self._build_ui()
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # Режим превью (взаимоисключающие флаги → свойства поверх _pstate)
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    @property
+    def _custom_smd_mode(self) -> bool:
+        return self._pstate.is_custom
+
+    @property
+    def _spy_mask_mode(self) -> bool:
+        return self._pstate.is_spy_masks
+
+    @property
+    def _crithit_mode(self) -> bool:
+        # critHIT-сцена (персонаж+billboard) активна И в чистом critHIT, И в режиме
+        # эффекта смерти — death переиспользует крит-инфраструктуру (раньше оба
+        # булевых флага стояли True одновременно).
+        return self._pstate.is_crithit or self._pstate.is_death
+
+    @property
+    def _death_effect_mode(self) -> bool:
+        return self._pstate.is_death
 
     # ═══════════════════════════════════════════════════════════════════════════
     # UI
@@ -951,11 +1001,20 @@ class PreviewPanel(QWidget):
     # Маски маскировки шпиона
     # ═══════════════════════════════════════════════════════════════════════════
 
+    def _sync_spy_mask_buttons(self) -> None:
+        """Видимость селекторов масок = режим масок активен. Единая точка —
+        вызывать после любого перехода режима, чтобы кнопки не «залипали»."""
+        vis = self._pstate.is_spy_masks
+        for _cls_key, _btn in self._spy_mask_buttons:
+            _btn.setVisible(vis)
+
     def set_spy_mask_mode(self, enabled: bool) -> None:
         """Включает/выключает режим масок шпиона (показывает кнопки классов)."""
-        self._spy_mask_mode = enabled
-        for _cls_key, _btn in self._spy_mask_buttons:
-            _btn.setVisible(enabled)
+        if enabled:
+            self._pstate.enter(PreviewMode.SPY_MASKS)
+        elif self._pstate.is_spy_masks:
+            self._pstate.reset()
+        self._sync_spy_mask_buttons()
         if enabled and self._active_spy_mask is None:
             # По умолчанию активируем первую маску (Scout)
             from src.data.player_characters import SPY_DISGUISE_MASKS
@@ -998,61 +1057,16 @@ class PreviewPanel(QWidget):
                               self._3d_widget.apply_material_map({'mask_spy': p}))
             return
 
-        # Нет пользовательской текстуры — извлекаем из VPK в фоне
-        from PySide6.QtCore import QThread, Signal as _Signal
-
-        class _MaskExtractWorker(QThread):
-            done = _Signal(str)  # png_path
-
-            def __init__(self, vtf_name, misc_vpk, textures_vpk, preview_dir):
-                super().__init__()
-                self._vtf = vtf_name
-                self._misc = misc_vpk
-                self._tex = textures_vpk
-                self._dir = preview_dir
-
-            def run(self):
-                try:
-                    import vpk as vpklib
-                    from src.services.vtflib_wrapper import VTFLib
-                    from PIL import Image
-                    vtf_path_in_vpk = f"materials/models/player/spy/{self._vtf}.vtf"
-                    vtf_data = None
-                    for vp in [self._tex, self._misc]:
-                        if not vp or not os.path.exists(vp):
-                            continue
-                        try:
-                            pak = vpklib.open(vp)
-                            vtf_data = pak[vtf_path_in_vpk].read()
-                            break
-                        except (KeyError, Exception):
-                            continue
-                    if not vtf_data:
-                        return
-                    tmp = os.path.join(self._dir, f"_tmp_{self._vtf}.vtf")
-                    with open(tmp, "wb") as f:
-                        f.write(vtf_data)
-                    frames, w, h = VTFLib.read_vtf_all_frames(tmp)
-                    os.remove(tmp)
-                    if frames:
-                        img = Image.frombytes("RGBA", (w, h), frames[0])
-                        out = os.path.join(self._dir, f"{self._vtf}.png")
-                        img.save(out)
-                        self.done.emit(out)
-                except Exception:
-                    pass
-
-        # Сохраняем воркер чтобы не был удалён GC
-        w = _MaskExtractWorker(
-            vtf_name,
-            getattr(self, '_current_misc_vpk', None),
-            getattr(self, '_current_textures_vpk', None),
-            os.path.join('tools', 'temp', 'spy_mask_preview'),
+        # Нет пользовательской текстуры — извлекаем из VPK в фоне (общий воркер).
+        out_dir = os.path.join('tools', 'temp', 'spy_mask_preview')
+        w = _SpyMaskVtfWorker(
+            [vtf_name],
+            [getattr(self, '_current_textures_vpk', None),
+             getattr(self, '_current_misc_vpk', None)],
+            out_dir, parent=self,
         )
-        os.makedirs(os.path.join('tools', 'temp', 'spy_mask_preview'), exist_ok=True)
-        w.done.connect(lambda png: self._3d_widget.apply_material_map({'mask_spy': png}))
+        w.one.connect(lambda _n, png: self._3d_widget.apply_material_map({'mask_spy': png}))
         w.start()
-        # Храним ссылку
         if not hasattr(self, '_mask_workers'):
             self._mask_workers = []
         self._mask_workers.append(w)
@@ -1312,9 +1326,9 @@ class PreviewPanel(QWidget):
 
         self._last_3d_params = new_params
         self._pending_3d_params = new_params
-        self._custom_smd_mode = False
-        self._crithit_mode = False
-        self._death_effect_mode = False
+        # Обычная игровая модель — гасим спец-режимы (custom/critHIT/death).
+        if self._pstate.mode in (PreviewMode.CUSTOM, PreviewMode.CRITHIT, PreviewMode.DEATH):
+            self._pstate.reset()
         self._death_default_tex = ''
         # Сохраняем VPK пути — нужны для _switch_spy_mask
         self._current_misc_vpk = misc_vpk_path
@@ -1350,9 +1364,9 @@ class PreviewPanel(QWidget):
         """Полный сброс 3D (при смене режима на Spray/None)."""
         self._pending_3d_params = None
         self._last_3d_params = None
-        self._custom_smd_mode = False
-        self._crithit_mode = False
-        self._death_effect_mode = False
+        # Обычная игровая модель — гасим спец-режимы (custom/critHIT/death).
+        if self._pstate.mode in (PreviewMode.CUSTOM, PreviewMode.CRITHIT, PreviewMode.DEATH):
+            self._pstate.reset()
         self._death_default_tex = ''
         self._cur_obj = None   # модель убрана — нечего запоминать
         self._stop_worker('_3d_worker')
@@ -1365,9 +1379,9 @@ class PreviewPanel(QWidget):
     def show_3d_no_tf2_message(self) -> None:
         self._pending_3d_params = None
         self._last_3d_params = None
-        self._custom_smd_mode = False
-        self._crithit_mode = False
-        self._death_effect_mode = False
+        # Обычная игровая модель — гасим спец-режимы (custom/critHIT/death).
+        if self._pstate.mode in (PreviewMode.CUSTOM, PreviewMode.CRITHIT, PreviewMode.DEATH):
+            self._pstate.reset()
         self._death_default_tex = ''
         self._stop_worker('_3d_worker')
         self._reset_team_vpk_state()
@@ -1385,7 +1399,12 @@ class PreviewPanel(QWidget):
         return p if (p and os.path.isfile(p)) else None
 
     def set_custom_model_mode(self, enabled: bool = True) -> None:
-        self._custom_smd_mode = enabled
+        if enabled:
+            self._pstate.enter(PreviewMode.CUSTOM)
+        elif self._pstate.is_custom:
+            self._pstate.reset()
+        # Кастомная модель — не режим масок: прячем селекторы масок шпиона.
+        self._sync_spy_mask_buttons()
         self._pending_3d_params = None
         if not enabled:
             self._custom_smd_path = None   # вышли из режима — забываем модель
@@ -1403,7 +1422,10 @@ class PreviewPanel(QWidget):
             self.btn_load_3d.setEnabled(False)
             self.btn_load_vpk.setEnabled(False)
 
-    def set_crithit_mode(self) -> None:
+    def set_crithit_mode(self, _render: bool = True) -> None:
+        # _render=False — когда метод используется как подложка для эффекта смерти:
+        # рендер крит-сцены отложен до входа в DEATH (иначе первый рендер уйдёт в
+        # billboard, т.к. _death_effect_mode ещё False).
         # ── Снимок уходящего оружия в мини-память (ДО очистки состояния) ──── #
         # Переход в крит идёт через этот метод, а не set_3d_params, поэтому
         # снимок надо делать здесь — иначе возврат на оружие ничего не вернёт.
@@ -1418,9 +1440,10 @@ class PreviewPanel(QWidget):
         self.vtf_path = None
         self._cur_obj = None
 
-        self._crithit_mode = True
-        self._death_effect_mode = False
-        self._custom_smd_mode = False
+        self._pstate.enter(PreviewMode.CRITHIT)
+        # Маски шпиона не относятся к крит/спец-режимам — прячем их селекторы,
+        # иначе при переходе из режима масок в Special они «залипают».
+        self._sync_spy_mask_buttons()
         self._pending_3d_params = None
         # Сбрасываем кэш последних 3D-параметров: иначе возврат на то же оружие,
         # что было до крита, вызовет ранний return в set_3d_params и _crithit_mode
@@ -1435,7 +1458,7 @@ class PreviewPanel(QWidget):
             self._3d_widget.show_prompt(
                 self.t.get('3d_prompt_crithit', 'Switch to 3D tab — the soldier will appear automatically')
             )
-        if self.is_3d_mode() and self._3d_available:
+        if _render and self.is_3d_mode() and self._3d_available:
             self._render_crithit_scene()
 
     def set_death_effect_mode(self, mode: str = '',
@@ -1455,8 +1478,8 @@ class PreviewPanel(QWidget):
             self._death_default_tex = self._extract_game_texture_for_death(
                 mode, [textures_vpk, misc_vpk]
             )
-        self.set_crithit_mode()
-        self._death_effect_mode = True
+        self.set_crithit_mode(_render=False)   # настройка крит-сцены БЕЗ рендера
+        self._pstate.enter(PreviewMode.DEATH)  # → DEATH (_crithit_mode остаётся True, см. свойство)
         if self._3d_widget:
             self._3d_widget.show_prompt(
                 self.t.get('3d_prompt_death_effect',
@@ -2136,64 +2159,7 @@ class PreviewPanel(QWidget):
         if not names:
             return
         out_dir = os.path.join('tools', 'temp', 'spy_mask_preview')
-        os.makedirs(out_dir, exist_ok=True)
-
-        from PySide6.QtCore import QThread, Signal as _Signal
-
-        class _SpyMaskPreviewWorker(QThread):
-            one = _Signal(str, str)  # (vtf_name, png_path)
-
-            def __init__(self, vtf_names, misc_vpk, textures_vpk, preview_dir):
-                super().__init__()
-                self._names = vtf_names
-                self._misc = misc_vpk
-                self._tex = textures_vpk
-                self._dir = preview_dir
-
-            def run(self):
-                try:
-                    import vpk as vpklib
-                    from src.services.vtflib_wrapper import VTFLib
-                    from PIL import Image
-                except Exception:
-                    return
-                paks = []
-                for vp in [self._tex, self._misc]:
-                    if vp and os.path.exists(vp):
-                        try:
-                            paks.append(vpklib.open(vp))
-                        except Exception:
-                            pass
-                for vtf in self._names:
-                    try:
-                        path_in_vpk = f"materials/models/player/spy/{vtf}.vtf"
-                        data = None
-                        for pak in paks:
-                            try:
-                                data = pak[path_in_vpk].read()
-                                break
-                            except KeyError:
-                                continue
-                        if not data:
-                            continue
-                        tmp = os.path.join(self._dir, f"_tmp_{vtf}.vtf")
-                        with open(tmp, "wb") as f:
-                            f.write(data)
-                        frames, w, h = VTFLib.read_vtf_all_frames(tmp)
-                        try:
-                            os.remove(tmp)
-                        except OSError:
-                            pass
-                        if not frames:
-                            continue
-                        img = Image.frombytes("RGBA", (w, h), frames[0])
-                        out = os.path.join(self._dir, f"{vtf}.png")
-                        img.save(out)
-                        self.one.emit(vtf, out)
-                    except Exception:
-                        continue
-
-        w = _SpyMaskPreviewWorker(names, misc, tex, out_dir)
+        w = _SpyMaskVtfWorker(names, [tex, misc], out_dir, parent=self)
         w.one.connect(self._on_spy_mask_preview)
         w.start()
         if not hasattr(self, '_mask_workers'):
@@ -3179,6 +3145,16 @@ class PreviewPanel(QWidget):
                     else:
                         self._textures.setdefault('red', {})[vtf_name] = tmp
                         self._on_extra_card_changed(vtf_name, tmp)
+                return
+
+            # ── critHIT / эффект смерти ───────────────────────────────────── #
+            # Дроп ведём через обычный load_image (БЕЗ _from_3d_drop): он выставит
+            # image_path, обновит 2D и перерисует сцену с правильным роутингом
+            # (death → текстура на модель, crit → billboard). С _from_3d_drop
+            # повторное применение в 3D пропускалось, и текстура «зависала» на
+            # billboard, пока не переключишь 2D↔3D.
+            if self._crithit_mode:
+                self.load_image(tmp)
                 return
 
             _norm = material_name.lower() if material_name else ''

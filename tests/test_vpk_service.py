@@ -478,5 +478,211 @@ class VPKServiceTests(unittest.TestCase):
         self.assertIs(VPKService._remap_skin_data_to_smd(sbd, []), sbd)
 
 
+class BuildVpkCharacterizationTests(unittest.TestCase):
+    """
+    Характеризационный тест build_vpk: фиксирует, КАКИЕ VTF-файлы (и с какими
+    именами) производит пайплайн для обычного оружия с панельной доп.текстурой.
+    Внешние инструменты (crowbar/studiomdl/VTFCmd/упаковка) замоканы; create_vtf
+    пишет маркер-файл, чтобы наблюдать именование материалов через весь конвейер.
+
+    Назначение — сетка безопасности под рефакторинг build_vpk: рефактор не должен
+    менять состав/имена выходных файлов. Имена материалов через пайплайн — то самое
+    место, что ломалось ранее (фиолетовые текстуры).
+    """
+
+    def _run_build(self, base: Path, panel_extra_textures: dict, *,
+                   texturegroup_extras=(), extra_texture_callback=None,
+                   material_maps=None, blu_mode="none", blu_image_path=None,
+                   blu_is_team=False, red_not_found=False):
+        from contextlib import ExitStack
+        from src.shared.constants import EXTRA_TEX_USE_GAME_ORIGINAL
+        from src.services.build_context import BuildContext as _BC
+
+        img = base / "img.png"
+        Image.new("RGB", (8, 8), color="red").save(img)
+        vmt_source = base / "src.vmt"
+        vmt_source.write_text('"VertexLitGeneric"\n{\n}\n', encoding="utf-8")
+
+        ctx = _BC("id", "scout_c_scattergun", "c_scattergun", base / "ctx")
+        ctx.create_directories()
+        ctx.decompile_dir.mkdir(parents=True, exist_ok=True)
+        qc = ctx.decompile_dir / "c_scattergun.qc"
+        qc.write_text("// qc", encoding="utf-8")
+
+        def fake_create_vtf(png_path, output_dir, *a, **k):
+            out = Path(output_dir) / f"{Path(png_path).stem}.vtf"
+            out.write_bytes(b"VTF\x00marker")
+
+        def fake_process_image(input_path, output_path, size):
+            Path(output_path).write_bytes(b"png")
+
+        captured = {}
+
+        def fake_create_vpk(ctx_arg, *a, **k):
+            # Снимок дерева в МОМЕНТ упаковки (после — build делает ctx.cleanup()).
+            captured['vtf'] = sorted(p.name for p in Path(ctx_arg.vpkroot_dir).rglob("*.vtf"))
+            return str(base / "out.vpk")
+
+        P = "src.services.vpk_service."
+        with ExitStack() as es:
+            m = es.enter_context
+            m(patch(P + "BuildContext.create", return_value=ctx))
+            m(patch(P + "TF2Paths.check_crowbar", return_value=(True, "")))
+            m(patch(P + "TF2Paths.resolve", return_value=("studiomdl.exe", "tf2_misc_dir.vpk", str(base))))
+            m(patch(P + "TF2Paths.resolve_textures_vpk", return_value="tf2_textures_dir.vpk"))
+            m(patch(P + "TF2VPKExtractService.check_mdl_exists", return_value=True))
+            m(patch(P + "TF2VPKExtractService.extract_file_set", return_value=[str(base / "c_scattergun.mdl")]))
+            # Герметичность: не читаем и не пишем глобальный кэш декомпиляции,
+            # иначе соседние тесты поймают кэш-хит на c_scattergun. Патчим имена
+            # в namespace vpk_service (там импорт на уровне модуля).
+            m(patch(P + "get_cached_decompile", return_value=None))
+            m(patch(P + "save_to_cache"))
+            m(patch(P + "TF2VPKExtractService.extract_vmt_file", return_value=str(vmt_source)))
+            m(patch(P + "ModelBuildService.decompile", return_value=str(qc)))
+            m(patch(P + "ModelBuildService.extract_cdmaterials_path_from_qc", return_value="models/weapons/c_scattergun"))
+            m(patch(P + "ModelBuildService.extract_all_cdmaterials_paths_from_qc", return_value=["models/weapons/c_scattergun"]))
+            m(patch(P + "ModelBuildService.extract_texturegroup_filename", return_value="c_scattergun"))
+            m(patch(P + "ModelBuildService.extract_texturegroup_structure",
+                    return_value={"red_row": ["c_scattergun"], "blu_row": [],
+                                  "blu_is_team": blu_is_team,
+                                  "main_texture": "c_scattergun",
+                                  "extra_materials": list(texturegroup_extras),
+                                  "all_rows": [["c_scattergun"]]}))
+            m(patch(P + "ModelBuildService.patch_qc_file"))
+            m(patch(P + "ModelBuildService.compile"))
+            m(patch(P + "ModelBuildService.remove_lod_files"))
+            m(patch(P + "VMTService.update_vmt_basetexture_path"))
+            m(patch(P + "VMTService.create_vmt_template_from_cdmaterials"))
+            m(patch(P + "VPKService._copy_compiled_models_to_vpkroot"))
+            m(patch(P + "VPKService._create_vpk_file", side_effect=fake_create_vpk))
+            m(patch(P + "TextureService.create_vtf", side_effect=fake_create_vtf))
+            m(patch(P + "TextureService.process_image", side_effect=fake_process_image))
+            if red_not_found:
+                # Имитируем «игровая RED-текстура не найдена» → должно дать warning.
+                m(patch(P + "VPKService._get_original_vtf_bytes", return_value=None))
+            ok, msg = VPKService.build_vpk(
+                image_path=(EXTRA_TEX_USE_GAME_ORIGINAL if red_not_found else str(img)),
+                mode="scout_c_scattergun",
+                filename="out.vpk",
+                size=(4, 4),
+                format_type="DXT1",
+                flags=[],
+                vtf_options={},
+                tf2_root_dir=str(base),
+                export_folder=str(base),
+                language="en",
+                panel_extra_textures=panel_extra_textures,
+                extra_texture_callback=extra_texture_callback,
+                material_maps=material_maps,
+                blu_mode=blu_mode,
+                blu_image_path=blu_image_path,
+            )
+        return ok, msg, captured.get('vtf', [])
+
+    def test_produces_expected_vtf_tree(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            extra_png = base / "shell.png"
+            Image.new("RGB", (4, 4), color="blue").save(extra_png)
+
+            ok, msg, vtf_names = self._run_build(
+                base, panel_extra_textures={"c_scattergun_shell": str(extra_png)})
+
+            self.assertTrue(ok, msg)
+            # Главная текстура и панельный доп.материал — именно с этими (lowercase) именами.
+            self.assertIn("c_scattergun.vtf", vtf_names)
+            self.assertIn("c_scattergun_shell.vtf", vtf_names)
+
+    def test_extra_material_name_lowercased(self):
+        # Имя материала из 2D-панели приводится к нижнему регистру в выходе.
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            extra_png = base / "shell.png"
+            Image.new("RGB", (4, 4), color="blue").save(extra_png)
+
+            ok, msg, vtf_names = self._run_build(
+                base, panel_extra_textures={"C_Scattergun_SHELL": str(extra_png)})
+
+            self.assertTrue(ok, msg)
+            self.assertIn("c_scattergun_shell.vtf", vtf_names)
+            self.assertNotIn("C_Scattergun_SHELL.vtf", vtf_names)
+
+    def test_texturegroup_extra_and_detail_map(self):
+        # Шире покрываем build_vpk: доп.материал из $texturegroup (через callback)
+        # и файловая карта detail на главном материале — снимок VTF фиксирует их имена.
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            shell_png = base / "shell2.png"
+            Image.new("RGB", (4, 4), color="green").save(shell_png)
+            detail_png = base / "detail.png"
+            Image.new("RGB", (4, 4), color="white").save(detail_png)
+
+            def extra_cb(material_name, weapon_key):
+                return str(shell_png)
+
+            ok, msg, vtf_names = self._run_build(
+                base,
+                panel_extra_textures={},
+                texturegroup_extras=["c_scattergun_shell2"],
+                extra_texture_callback=extra_cb,
+                material_maps={"c_scattergun": {"detail": {"image": str(detail_png)}}},
+            )
+
+            self.assertTrue(ok, msg)
+            self.assertIn("c_scattergun.vtf", vtf_names)         # главный
+            self.assertIn("c_scattergun_shell2.vtf", vtf_names)  # доп. из texturegroup
+            self.assertIn("c_scattergun_detail.vtf", vtf_names)  # карта detail
+
+    def test_blu_team_texture_only_for_real_team(self):
+        # Командная (BLU) текстура создаётся ТОЛЬКО при настоящей команде
+        # (blu_is_team). У вариант-онли оружия (австралий) — НЕ создаётся.
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            blu_img = base / "blu.vtf"
+            blu_img.write_bytes(b"VTF\x00blu")
+
+            # Настоящая команда → BLU есть.
+            ok, msg, vtf_names = self._run_build(
+                base, panel_extra_textures={},
+                blu_mode="upload", blu_image_path=str(blu_img), blu_is_team=True)
+            self.assertTrue(ok, msg)
+            self.assertIn("c_scattergun_blue.vtf", vtf_names)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            blu_img = base / "blu.vtf"
+            blu_img.write_bytes(b"VTF\x00blu")
+
+            # Нет команды (как у скаттергана: обычный+австралий) → BLU подавлен,
+            # даже если blu_mode='upload'. Регресс на c_scattergun_blue.
+            ok, msg, vtf_names = self._run_build(
+                base, panel_extra_textures={},
+                blu_mode="upload", blu_image_path=str(blu_img), blu_is_team=False)
+            self.assertTrue(ok, msg)
+            self.assertIn("c_scattergun.vtf", vtf_names)
+            self.assertNotIn("c_scattergun_blue.vtf", vtf_names)
+
+    def test_missing_game_texture_surfaces_warning(self):
+        # Игровая текстура не найдена → сборка успешна, но в сообщении есть
+        # предупреждение (иначе пользователь узнаёт о фиолете только в игре).
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            ok, msg = self._run_build(
+                base, panel_extra_textures={}, red_not_found=True)[:2]
+            self.assertTrue(ok, msg)
+            self.assertIn("Warnings:", msg)            # en по умолчанию
+            self.assertIn("c_scattergun", msg)         # имя проблемного материала
+
+
+class BuildContextWarnTests(unittest.TestCase):
+    def test_warn_collects_and_dedups(self):
+        ctx = BuildContext("id", "m", "w", Path("/tmp/x"))
+        self.assertEqual(ctx.warnings, [])
+        ctx.warn("texture X missing")
+        ctx.warn("texture X missing")   # дубль не добавляется
+        ctx.warn("texture Y missing")
+        self.assertEqual(ctx.warnings, ["texture X missing", "texture Y missing"])
+
+
 if __name__ == "__main__":
     unittest.main()

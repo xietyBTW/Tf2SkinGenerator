@@ -97,7 +97,7 @@ class TF2VPKExtractService:
             if should_close and hasattr(vpk_file, 'close'):
                 try:
                     vpk_file.close()
-                except:
+                except Exception:
                     pass
     
     @staticmethod
@@ -252,7 +252,7 @@ class TF2VPKExtractService:
             if hasattr(vpk_file, 'close'):
                 try:
                     vpk_file.close()
-                except:
+                except Exception:
                     pass
     
     @staticmethod
@@ -346,7 +346,7 @@ class TF2VPKExtractService:
                     if hasattr(vpk_file, 'close'):
                         try:
                             vpk_file.close()
-                        except:
+                        except Exception:
                             pass
                     return extracted_file_path
             
@@ -354,7 +354,7 @@ class TF2VPKExtractService:
             if hasattr(vpk_file, 'close'):
                 try:
                     vpk_file.close()
-                except:
+                except Exception:
                     pass
             
         except Exception as e:
@@ -507,7 +507,7 @@ class TF2VPKExtractService:
                         if hasattr(vpk_file, 'close'):
                             try:
                                 vpk_file.close()
-                            except:
+                            except Exception:
                                 pass
 
                         # Конвертируем VTF в выбранный формат, если нужно
@@ -521,7 +521,7 @@ class TF2VPKExtractService:
                                 # Удаляем временный VTF файл
                                 try:
                                     os.remove(extracted_file_path)
-                                except:
+                                except Exception:
                                     pass
                                 return converted_path
 
@@ -531,7 +531,7 @@ class TF2VPKExtractService:
             if hasattr(vpk_file, 'close'):
                 try:
                     vpk_file.close()
-                except:
+                except Exception:
                     pass
             logger.warning(f"Текстура не найдена для оружия {weapon_key}")
             return None

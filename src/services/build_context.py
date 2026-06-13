@@ -4,7 +4,7 @@
 
 import os
 import shutil
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Tuple, List
 import time
@@ -75,7 +75,17 @@ class BuildContext:
     mode: str
     weapon_key: str
     temp_dir: Path
-    
+    # Пользовательские предупреждения о НЕкритичных, но важных проблемах сборки
+    # (текстура/материал не найдены → в игре будет фиолет). Показываются после
+    # сборки, чтобы пользователь не искал причину «успешного» но битого мода.
+    warnings: List[str] = field(default_factory=list)
+
+    def warn(self, message: str) -> None:
+        """Добавляет предупприждение пользователю (без дублей) + лог."""
+        if message not in self.warnings:
+            self.warnings.append(message)
+        logger.warning(f"[BUILD WARN] {message}")
+
     @property
     def vpkroot_dir(self) -> Path:
         """Корень VPK для упаковки"""

@@ -634,29 +634,9 @@ class Preview3DWorker(QThread):
                     logger.warning(f"[3D] Текстура для материала '{mat_name}' не найдена")
                     continue
 
-                tmp_vtf = os.path.join(self._preview_dir, f"_tmp_{mat_name}.vtf")
-                with open(tmp_vtf, "wb") as f:
-                    f.write(vtf_data)
-
-                all_frames = None
-                try:
-                    all_frames, w, h = VTFLib.read_vtf_all_frames(tmp_vtf)
-                except Exception as vtf_exc:
-                    logger.warning(
-                        f"[3D] VTFLib не смог декодировать '{mat_name}': {vtf_exc}"
-                    )
-                finally:
-                    try:
-                        os.remove(tmp_vtf)
-                    except OSError:
-                        pass
-
-                if not all_frames:
+                png_path = self._vtf_data_to_png(vtf_data, mat_name)
+                if not png_path:
                     continue
-
-                img = Image.frombytes("RGBA", (w, h), all_frames[0])
-                png_path = os.path.join(self._preview_dir, f"{mat_name}.png")
-                img.save(png_path)
                 result[mat_name] = png_path
                 logger.debug(f"[3D] Материал '{mat_name}' → {os.path.basename(png_path)}")
 
@@ -780,28 +760,10 @@ class Preview3DWorker(QThread):
                         result[mat_name] = (None, blu_tex_name)
                     continue
 
-                # Декодируем VTF → PNG
-                tmp_vtf = os.path.join(self._preview_dir, f"_tmp_blu_{mat_name}.vtf")
-                with open(tmp_vtf, "wb") as f:
-                    f.write(vtf_data)
-                try:
-                    all_frames, w, h = VTFLib.read_vtf_all_frames(tmp_vtf)
-                except Exception as exc:
-                    logger.warning(f"[3D] BLU multi VTF decode '{mat_name}': {exc}")
-                    all_frames = []
-                    w = h = 0
-                finally:
-                    try:
-                        os.remove(tmp_vtf)
-                    except OSError:
-                        pass
-
-                if not all_frames:
+                # Декодируем VTF → PNG (первый кадр)
+                png_path = self._vtf_data_to_png(vtf_data, f"blu_{mat_name}")
+                if not png_path:
                     continue
-
-                img = Image.frombytes("RGBA", (w, h), all_frames[0])
-                png_path = os.path.join(self._preview_dir, f"blu_{mat_name}.png")
-                img.save(png_path)
                 result[mat_name] = (png_path, blu_tex_name)
                 logger.debug(
                     f"[3D] BLU multi: '{mat_name}' → '{blu_tex_name}' "
@@ -1154,35 +1116,11 @@ class Preview3DWorker(QThread):
                     continue
 
                 # ── Декодируем все кадры из VTF ───────────────────────────── #
-                vtf_file = os.path.join(self._preview_dir, "_tmp_blu_qc.vtf")
-                with open(vtf_file, "wb") as f:
-                    f.write(vtf_data)
-                try:
-                    all_frames_rgba, w, h = VTFLib.read_vtf_all_frames(vtf_file)
-                except Exception as exc:
-                    logger.warning(f"[3D] BLU VTF decode failed: {exc}")
-                    all_frames_rgba = []
-                    w = h = 0
-                finally:
-                    try:
-                        os.remove(vtf_file)
-                    except OSError:
-                        pass
-
-                if not all_frames_rgba:
+                from src.services import vtf_preview_service as _vps
+                frame_paths = _vps.vtf_bytes_to_frame_pngs(
+                    vtf_data, self._preview_dir, "texture_blu")
+                if not frame_paths:
                     continue
-
-                frame_paths: list = []
-                for i, rgba in enumerate(all_frames_rgba):
-                    img  = Image.frombytes("RGBA", (w, h), rgba)
-                    name = (
-                        f"texture_blu_{i:03d}.png"
-                        if len(all_frames_rgba) > 1
-                        else "texture_blu.png"
-                    )
-                    path = os.path.join(self._preview_dir, name)
-                    img.save(path)
-                    frame_paths.append(path)
 
                 fps = red_framerate if len(frame_paths) > 1 else 0.0
                 logger.info(
@@ -1251,26 +1189,9 @@ class Preview3DWorker(QThread):
             if not vtf_data:
                 return None, None
 
-            tmp = os.path.join(self._preview_dir, "_tmp_variant.vtf")
-            with open(tmp, "wb") as f:
-                f.write(vtf_data)
-            try:
-                frames, w, h = VTFLib.read_vtf_all_frames(tmp)
-            except Exception:
-                frames = []
-                w = h = 0
-            finally:
-                try:
-                    os.remove(tmp)
-                except OSError:
-                    pass
-
-            if not frames:
+            out = self._vtf_data_to_png(vtf_data, "texture_variant")
+            if not out:
                 return None, None
-
-            img = Image.frombytes("RGBA", (w, h), frames[0])
-            out = os.path.join(self._preview_dir, "texture_variant.png")
-            img.save(out)
             logger.info(f"[3D] Вариант оружия извлечён: {out}")
             return out, variant_tex
 
@@ -1374,27 +1295,9 @@ class Preview3DWorker(QThread):
         Сохраняет VTF-байты как PNG в preview_dir.
         Возвращает путь к PNG или None при ошибке.
         """
-        vtf_file = os.path.join(self._preview_dir, f"_tmp_{name}.vtf")
-        with open(vtf_file, "wb") as f:
-            f.write(vtf_data)
-        try:
-            from src.services.vtflib_wrapper import VTFLib
-            from PIL import Image
-            all_frames, w, h = VTFLib.read_vtf_all_frames(vtf_file)
-            if not all_frames:
-                return None
-            img = Image.frombytes("RGBA", (w, h), all_frames[0])
-            png_path = os.path.join(self._preview_dir, f"{name}.png")
-            img.save(png_path)
-            return png_path
-        except Exception as exc:
-            logger.warning(f"[3D] VTFLib ошибка для {name}: {exc}")
-            return None
-        finally:
-            try:
-                os.remove(vtf_file)
-            except OSError:
-                pass
+        from src.services import vtf_preview_service as _vps
+        return _vps.vtf_bytes_to_png(
+            vtf_data, os.path.join(self._preview_dir, f"{name}.png"), self._preview_dir)
 
     def _extract_hat_textures_via_qc_vmt(
         self, decomp_dir: str, mat_names: list
@@ -1570,24 +1473,9 @@ class Preview3DWorker(QThread):
                 )
                 return [], 0.0
 
-            vtf_file = os.path.join(self._preview_dir, "_tmp_hat.vtf")
-            with open(vtf_file, "wb") as f:
-                f.write(vtf_data)
-
-            from src.services.vtflib_wrapper import VTFLib
-            from PIL import Image
-
-            all_frames_rgba, w, h = VTFLib.read_vtf_all_frames(vtf_file)
-            os.remove(vtf_file)
-
-            frame_paths: list = []
-            for i, rgba in enumerate(all_frames_rgba):
-                img = Image.frombytes("RGBA", (w, h), rgba)
-                name = f"hat_tex_{i:03d}.png" if len(all_frames_rgba) > 1 else "hat_tex.png"
-                path = os.path.join(self._preview_dir, name)
-                img.save(path)
-                frame_paths.append(path)
-
+            from src.services import vtf_preview_service as _vps
+            frame_paths = _vps.vtf_bytes_to_frame_pngs(
+                vtf_data, self._preview_dir, "hat_tex")
             return frame_paths, 0.0
 
         except Exception as exc:
@@ -1604,54 +1492,18 @@ class Preview3DWorker(QThread):
             (frame_paths, framerate) — стандартный формат как у других методов.
         """
         try:
-            import vpk as vpklib
-            from src.services.vtflib_wrapper import VTFLib
-            from PIL import Image
-
-            vtf_path_in_vpk = f"materials/models/player/spy/{mask_vtf_name}.vtf"
-            vtf_data: Optional[bytes] = None
-
-            for vpk_path in [self.textures_vpk_path, self.misc_vpk_path]:
-                if not vpk_path or not os.path.exists(vpk_path):
-                    continue
-                try:
-                    pak = vpklib.open(vpk_path)
-                    vtf_data = pak[vtf_path_in_vpk].read()
-                    logger.debug(f"[3D] Маска шпиона VTF: {vtf_path_in_vpk}")
-                    break
-                except KeyError:
-                    continue
-                except Exception as _e:
-                    logger.debug(f"[3D] VPK ошибка при поиске маски: {_e}")
-
+            from src.services import vtf_preview_service as _vps
+            paks = _vps.open_vpks([self.textures_vpk_path, self.misc_vpk_path])
+            vtf_data = _vps.read_from_vpks(
+                paks, f"materials/models/player/spy/{mask_vtf_name}.vtf")
             if not vtf_data:
                 logger.warning(f"[3D] Маска {mask_vtf_name}.vtf не найдена в VPK")
                 return [], 0.0
-
-            # Декодируем VTF → PNG
-            tmp_vtf = os.path.join(self._preview_dir, f"_tmp_mask_{mask_vtf_name}.vtf")
-            with open(tmp_vtf, "wb") as f:
-                f.write(vtf_data)
-            try:
-                all_frames, w, h = VTFLib.read_vtf_all_frames(tmp_vtf)
-            except Exception as exc:
-                logger.warning(f"[3D] Ошибка декодирования маски VTF: {exc}")
+            png_path = self._vtf_data_to_png(vtf_data, mask_vtf_name)
+            if not png_path:
                 return [], 0.0
-            finally:
-                try:
-                    os.remove(tmp_vtf)
-                except OSError:
-                    pass
-
-            if not all_frames:
-                return [], 0.0
-
-            img = Image.frombytes("RGBA", (w, h), all_frames[0])
-            png_path = os.path.join(self._preview_dir, f"{mask_vtf_name}.png")
-            img.save(png_path)
             logger.info(f"[3D] Маска шпиона извлечена: {png_path}")
             return [png_path], 0.0
-
         except Exception as exc:
             logger.warning(f"[3D] _extract_spy_mask_texture: {exc}", exc_info=True)
             return [], 0.0
@@ -1721,25 +1573,9 @@ class Preview3DWorker(QThread):
                 logger.warning(f"Текстура для {self.weapon_key} не найдена в VPK")
                 return [], 0.0
 
-            # Сохраняем VTF во временный файл
-            vtf_file = os.path.join(self._preview_dir, "_tmp.vtf")
-            with open(vtf_file, "wb") as f:
-                f.write(vtf_data)
-
-            from src.services.vtflib_wrapper import VTFLib
-            from PIL import Image
-
-            # Читаем все кадры
-            all_frames_rgba, w, h = VTFLib.read_vtf_all_frames(vtf_file)
-            os.remove(vtf_file)
-
-            frame_paths: list[str] = []
-            for i, rgba in enumerate(all_frames_rgba):
-                img  = Image.frombytes("RGBA", (w, h), rgba)
-                name = f"texture_{i:03d}.png" if len(all_frames_rgba) > 1 else "texture.png"
-                path = os.path.join(self._preview_dir, name)
-                img.save(path)
-                frame_paths.append(path)
+            from src.services import vtf_preview_service as _vps
+            frame_paths = _vps.vtf_bytes_to_frame_pngs(
+                vtf_data, self._preview_dir, "texture")
 
             # Framerate из VMT
             framerate = 0.0
@@ -1859,23 +1695,11 @@ class Preview3DWorker(QThread):
             if not vtf_data:
                 return [], 0.0
 
-            vtf_file = os.path.join(self._preview_dir, "_tmp_blu.vtf")
-            with open(vtf_file, "wb") as f:
-                f.write(vtf_data)
-
-            from src.services.vtflib_wrapper import VTFLib
-            from PIL import Image
-
-            all_frames_rgba, w, h = VTFLib.read_vtf_all_frames(vtf_file)
-            os.remove(vtf_file)
-
-            frame_paths: list[str] = []
-            for i, rgba in enumerate(all_frames_rgba):
-                img  = Image.frombytes("RGBA", (w, h), rgba)
-                name = f"texture_blu_{i:03d}.png" if len(all_frames_rgba) > 1 else "texture_blu.png"
-                path = os.path.join(self._preview_dir, name)
-                img.save(path)
-                frame_paths.append(path)
+            from src.services import vtf_preview_service as _vps
+            frame_paths = _vps.vtf_bytes_to_frame_pngs(
+                vtf_data, self._preview_dir, "texture_blu")
+            if not frame_paths:
+                return [], 0.0
 
             # Используем тот же framerate что и у RED (из VMT)
             fps = red_framerate if len(frame_paths) > 1 else 0.0
