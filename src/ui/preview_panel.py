@@ -1541,10 +1541,22 @@ class PreviewPanel(QWidget):
         # кастомной модели. Останавливаем и фоновый детектор стилей, чтобы
         # его поздний колбэк не пересоздал кнопки уже после сброса.
         self._stop_worker('_skin_worker')
+        # Признак, что уходим ИМЕННО с кастомной модели (до сброса флагов).
+        was_custom = bool(
+            self._custom_smd_path or self._custom_keep_materials
+            or self._original_skin_info or self._custom_smd_mode
+        )
         self._reset_skin_state()
         self._custom_smd_path = None
         self._custom_keep_materials = False
         self._reset_team_vpk_state()
+        # Возврат от кастомной модели: сбрасываем её карточки/материалы. Иначе их
+        # идентичность (напр. "material") остаётся, и у одно-текстурной игровой
+        # модели (где multi_material не приходит) австралий/команда привяжутся к
+        # чужой карточке. Для мульти-материальной модели карточки пересоберёт
+        # _on_3d_multi_material. На обычной смене оружия (не кастом) не трогаем.
+        if was_custom:
+            self._set_material_slots([])
         self.btn_load_3d.setEnabled(False)
         self._3d_widget.show_loading(self.t.get('3d_preparing', 'Preparing 3D model...'))
 
@@ -1899,6 +1911,13 @@ class PreviewPanel(QWidget):
         if self._active_team == 'red' and not self._vpk_red_tex_map:
             self._vpk_red_tex_map = dict(tex_map)
 
+        # Режим масок шпиона: карточки уже выставлены под 9 масок
+        # (update_extra_slots_spy_masks). Материалы SMD (mask_spy + тело) НЕ должны
+        # их перетирать — иначе в 2D останутся только маска и тело. Текстуры к 3D
+        # выше уже применены, на этом выходим.
+        if self._spy_mask_mode:
+            return
+
         # А вот КАРТОЧКИ создаём только для редактируемых материалов — служебные
         # (eyeball_l/eyeball_r и т.п.) исключаем. Если после фильтра пусто
         # (вся модель «служебная») — оставляем как есть, чтобы не было пустоты.
@@ -2051,6 +2070,10 @@ class PreviewPanel(QWidget):
         # Создаём карточки через _set_material_slots_with_display
         self._set_material_slots_with_display(names_with_display)
 
+        # Подгружаем игровые превью каждой маски в карточки (как у обычного оружия) —
+        # чтобы заранее было видно оригинальные текстуры, а не пустые слоты.
+        self._load_spy_mask_previews()
+
     def _set_material_slots_with_display(self, names_display: list) -> None:
         """Показывает карточки для пар (mat_name, display_name).
         Используется для масок шпиона где display_name = имя класса.
@@ -2090,6 +2113,103 @@ class PreviewPanel(QWidget):
         self.empty_state.hide()
         self.preview.hide()
         self._cards_scroll.show()
+
+    def _load_spy_mask_previews(self) -> None:
+        """
+        Извлекает игровые VTF всех масок в фоне и проставляет их превью в карточки
+        2D — чтобы заранее были видны оригинальные текстуры (как у обычного оружия).
+
+        Превью регистрируется в _vpk_red_tex_map (как ИГРОВАЯ текстура), а НЕ в
+        _textures['red'], поэтому в сборку как пользовательская не попадёт —
+        некастомизированные маски берут оригинал из игры.
+        """
+        if not self._spy_mask_mode or not self._card_widgets:
+            return
+        misc = getattr(self, '_current_misc_vpk', None)
+        tex = getattr(self, '_current_textures_vpk', None)
+        if not (misc or tex):
+            return
+        # Только маски без пользовательской текстуры — для них показываем оригинал.
+        names = [n for n in self._material_names
+                 if not (self._textures['red'].get(n)
+                         and os.path.exists(self._textures['red'][n]))]
+        if not names:
+            return
+        out_dir = os.path.join('tools', 'temp', 'spy_mask_preview')
+        os.makedirs(out_dir, exist_ok=True)
+
+        from PySide6.QtCore import QThread, Signal as _Signal
+
+        class _SpyMaskPreviewWorker(QThread):
+            one = _Signal(str, str)  # (vtf_name, png_path)
+
+            def __init__(self, vtf_names, misc_vpk, textures_vpk, preview_dir):
+                super().__init__()
+                self._names = vtf_names
+                self._misc = misc_vpk
+                self._tex = textures_vpk
+                self._dir = preview_dir
+
+            def run(self):
+                try:
+                    import vpk as vpklib
+                    from src.services.vtflib_wrapper import VTFLib
+                    from PIL import Image
+                except Exception:
+                    return
+                paks = []
+                for vp in [self._tex, self._misc]:
+                    if vp and os.path.exists(vp):
+                        try:
+                            paks.append(vpklib.open(vp))
+                        except Exception:
+                            pass
+                for vtf in self._names:
+                    try:
+                        path_in_vpk = f"materials/models/player/spy/{vtf}.vtf"
+                        data = None
+                        for pak in paks:
+                            try:
+                                data = pak[path_in_vpk].read()
+                                break
+                            except KeyError:
+                                continue
+                        if not data:
+                            continue
+                        tmp = os.path.join(self._dir, f"_tmp_{vtf}.vtf")
+                        with open(tmp, "wb") as f:
+                            f.write(data)
+                        frames, w, h = VTFLib.read_vtf_all_frames(tmp)
+                        try:
+                            os.remove(tmp)
+                        except OSError:
+                            pass
+                        if not frames:
+                            continue
+                        img = Image.frombytes("RGBA", (w, h), frames[0])
+                        out = os.path.join(self._dir, f"{vtf}.png")
+                        img.save(out)
+                        self.one.emit(vtf, out)
+                    except Exception:
+                        continue
+
+        w = _SpyMaskPreviewWorker(names, misc, tex, out_dir)
+        w.one.connect(self._on_spy_mask_preview)
+        w.start()
+        if not hasattr(self, '_mask_workers'):
+            self._mask_workers = []
+        self._mask_workers.append(w)
+
+    def _on_spy_mask_preview(self, vtf_name: str, png: str) -> None:
+        """Проставляет извлечённое игровое превью маски в её карточку."""
+        if not png or not os.path.exists(png):
+            return
+        # Регистрируем как игровую текстуру (распознаётся _is_game_texture),
+        # не как пользовательскую — поэтому показываем opaque и в сборку не тащим.
+        self._vpk_red_tex_map[vtf_name] = png
+        card = self._card_widgets.get(vtf_name)
+        if card:
+            card.set_image(png, opaque=True)
 
     def _set_material_slots(self, names: List[str], force_cards: bool = False) -> None:
         """Показывает карточки для списка материалов (или большое превью если < 2).

@@ -167,6 +167,7 @@ class SettingsPanel(QWidget):
     texture_edit_reset      = Signal(str)           # (material) — вернуть к глобальным
     texture_edit_exited     = Signal()
     material_maps_requested = Signal(str)           # (material; '' = главный) — открыть карты материала
+    vmt_edit_requested      = Signal(str)           # (material; '' = главный) — открыть VMT-редактор материала
 
     def __init__(self, parent=None):
         super().__init__()
@@ -546,6 +547,20 @@ class SettingsPanel(QWidget):
         self.material_maps_button.clicked.connect(
             lambda: self.material_maps_requested.emit(self._edit_material or ''))
         self.advanced_group.addWidget(self.material_maps_button)
+
+        # Редактор VMT — тоже ПЕР-ТЕКСТУРНЫЙ: целит в выбранный материал
+        # (или в главный вне режима редактирования).
+        self.edit_vmt_button = QPushButton(self.t.get('edit_vmt_button', 'Редактировать VMT…'))
+        self.edit_vmt_button.setStyleSheet(self.styles['button_secondary'])
+        self.edit_vmt_button.setMinimumHeight(34)
+        self.edit_vmt_button.setMinimumWidth(0)
+        self.edit_vmt_button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.edit_vmt_button.setToolTip(self.t.get(
+            'edit_vmt_button_tip',
+            'Открыть VMT этого материала для ручной правки. У каждого материала своя правка.'))
+        self.edit_vmt_button.clicked.connect(
+            lambda: self.vmt_edit_requested.emit(self._edit_material or ''))
+        self.advanced_group.addWidget(self.edit_vmt_button)
 
         # UV разметка
         uv_layout_row = QHBoxLayout()

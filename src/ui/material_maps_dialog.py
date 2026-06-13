@@ -213,6 +213,7 @@ class MaterialMapsDialog(QDialog):
     def _build_card(self, map_id: str, saved: dict) -> QWidget:
         saved = saved or {}
         cfg = MATERIAL_MAPS[map_id]
+        vmt_only = bool(cfg.get('vmt_only'))  # параметрическая карта без текстуры (rim)
 
         card = QFrame()
         card.setObjectName("card")
@@ -225,7 +226,8 @@ class MaterialMapsDialog(QDialog):
         head.setSpacing(8)
         cb = QCheckBox(self.t.get(f'map_{map_id}', map_id.capitalize()))
         cb.setStyleSheet("QCheckBox { color:#fff; font-size:13px; font-weight:600; }")
-        cb.setChecked(bool(saved.get('image')) or bool(saved.get('derive')))
+        cb.setChecked(bool(saved.get('image')) or bool(saved.get('derive'))
+                      or (vmt_only and bool(saved.get('enabled'))))
         head.addWidget(cb, 0, Qt.AlignVCenter)
         head.addStretch()
         badge = QLabel(cfg['format'])
@@ -263,24 +265,27 @@ class MaterialMapsDialog(QDialog):
             auto_cb.setChecked(bool(saved.get('derive')))
             lay.addWidget(auto_cb)
 
-        # Строка файла
-        file_row = QHBoxLayout()
-        file_row.setSpacing(6)
-        path_edit = QLineEdit(saved.get('image', ''))
-        path_edit.setReadOnly(True)
-        path_edit.setMinimumHeight(30)
-        path_edit.setPlaceholderText(self.t.get('map_no_file', 'No file selected'))
-        browse = QPushButton(self.t.get('map_browse', 'Browse'))
-        browse.setMinimumHeight(30)
-        clear = QPushButton('×')
-        clear.setFixedSize(30, 30)
-        clear.setToolTip(self.t.get('map_clear', 'Clear'))
-        browse.clicked.connect(lambda _, e=path_edit: self._browse(e))
-        clear.clicked.connect(lambda _, e=path_edit: e.clear())
-        file_row.addWidget(path_edit, 1)
-        file_row.addWidget(browse)
-        file_row.addWidget(clear)
-        lay.addLayout(file_row)
+        # Строка файла (у параметрических карт вроде rim light её нет)
+        file_row = None
+        path_edit = None
+        if not vmt_only:
+            file_row = QHBoxLayout()
+            file_row.setSpacing(6)
+            path_edit = QLineEdit(saved.get('image', ''))
+            path_edit.setReadOnly(True)
+            path_edit.setMinimumHeight(30)
+            path_edit.setPlaceholderText(self.t.get('map_no_file', 'No file selected'))
+            browse = QPushButton(self.t.get('map_browse', 'Browse'))
+            browse.setMinimumHeight(30)
+            clear = QPushButton('×')
+            clear.setFixedSize(30, 30)
+            clear.setToolTip(self.t.get('map_clear', 'Clear'))
+            browse.clicked.connect(lambda _, e=path_edit: self._browse(e))
+            clear.clicked.connect(lambda _, e=path_edit: e.clear())
+            file_row.addWidget(path_edit, 1)
+            file_row.addWidget(browse)
+            file_row.addWidget(clear)
+            lay.addLayout(file_row)
 
         # Ряд параметров: порог (derive) + числовые ($detailscale и т.п.) в одну линию
         numeric = {}
@@ -336,10 +341,11 @@ class MaterialMapsDialog(QDialog):
             auto = bool(auto_cb and auto_cb.isChecked())
             body.setEnabled(on)
             card.setStyleSheet(_CARD_ON if on else _CARD_OFF)
-            for i in range(file_row.count()):
-                wdg = file_row.itemAt(i).widget()
-                if wdg:
-                    wdg.setEnabled(on and not auto)
+            if file_row is not None:
+                for i in range(file_row.count()):
+                    wdg = file_row.itemAt(i).widget()
+                    if wdg:
+                        wdg.setEnabled(on and not auto)
             if threshold_edit is not None:
                 threshold_edit.setEnabled(on and auto)
 
@@ -371,18 +377,22 @@ class MaterialMapsDialog(QDialog):
         for map_id, row in self._rows.items():
             if not row['cb'].isChecked():
                 continue
-            auto = bool(row['auto'] and row['auto'].isChecked())
 
-            if auto:
-                entry = {'derive': True}
-                thr = row['threshold'].text().strip() if row['threshold'] else ''
-                if thr:
-                    entry['threshold'] = thr
+            if MATERIAL_MAPS[map_id].get('vmt_only'):
+                # Параметрическая карта (rim light) — текстуры нет, только флаг + числа.
+                entry = {'enabled': True}
             else:
-                img = row['path'].text().strip()
-                if not img or not os.path.isfile(img):
-                    continue
-                entry = {'image': img}
+                auto = bool(row['auto'] and row['auto'].isChecked())
+                if auto:
+                    entry = {'derive': True}
+                    thr = row['threshold'].text().strip() if row['threshold'] else ''
+                    if thr:
+                        entry['threshold'] = thr
+                else:
+                    img = row['path'].text().strip() if row['path'] else ''
+                    if not img or not os.path.isfile(img):
+                        continue
+                    entry = {'image': img}
 
             for param, w in row['numeric'].items():
                 val = w.currentData() if isinstance(w, QComboBox) else w.text().strip()

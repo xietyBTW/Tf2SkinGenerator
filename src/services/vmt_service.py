@@ -550,8 +550,10 @@ class VMTService:
         if not (m and m.group(1).lower() == 'vertexlitgeneric'):
             return False
 
-        tex_path = VMTService._get_texture_path_from_cdmaterials(cdmaterials_path, map_texture_key)
-        content = VMTService._set_vmt_param(content, path_param, tex_path)
+        # path_param=None — карта без своей текстуры (только параметры, напр. rim light).
+        if path_param:
+            tex_path = VMTService._get_texture_path_from_cdmaterials(cdmaterials_path, map_texture_key)
+            content = VMTService._set_vmt_param(content, path_param, tex_path)
         for param, value in (extra_vmt or {}).items():
             content = VMTService._set_vmt_param(content, param, str(value))
 

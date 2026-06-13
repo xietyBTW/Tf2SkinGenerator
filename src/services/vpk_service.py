@@ -259,7 +259,18 @@ class VPKService:
                 tmp_png.unlink()
 
         if not out_vmt.exists():
-            VPKService._write_material_vmt(out_vmt, vmt_path, patched_cdmaterials_path, name)
+            # Пер-материальный отредактированный VMT (если пользователь правил его
+            # для этого материала) — копируем его, затем чиним путь $basetexture
+            # под наш VTF/пропатченный cdmaterials. Иначе — обычная генерация.
+            from src.services.edited_vmt_service import EditedVMTService
+            _edited = EditedVMTService.get_edited_vmt(name)
+            if _edited and os.path.exists(_edited):
+                copy_file_safe(_edited, out_vmt)
+                VMTService.update_vmt_basetexture_path(
+                    str(out_vmt), patched_cdmaterials_path, name)
+                logger.info(f"Доп.материал '{name}': использован отредактированный VMT")
+            else:
+                VPKService._write_material_vmt(out_vmt, vmt_path, patched_cdmaterials_path, name)
         if fps:
             VMTService.enable_animated_basetexture(str(out_vmt), fps)
         return True
@@ -446,11 +457,95 @@ class VPKService:
         Для derive-phong доп. создаётся карта нормалей + $envmap («Авто-блеск»).
         """
         from src.data.material_maps import MATERIAL_MAPS, MAP_ORDER
+
+        # ── Pre-pass: разрешение конфликта $envmapmask + $bumpmap ──────────────
+        # Source игнорирует отдельный $envmapmask при наличии $bumpmap. Если на
+        # материале вместе с отражением активен эффект с нормалью (rim/phong) и
+        # нормаль генерим МЫ — печём маску отражения в альфу нормали и используем
+        # $normalmapalphaenvmapmask. Тогда обе фичи работают одновременно.
+        envmask_combined = False
+        envmask_spec = material_maps.get("envmapmask")
+        if envmask_spec and base_image_path and os.path.isfile(base_image_path):
+            rim_on = bool((material_maps.get("rimlight") or {}).get("enabled"))
+            phong_on = bool(material_maps.get("phongexp"))
+            try:
+                _vmt_txt0 = open(vmt_path, encoding="utf-8", errors="ignore").read().lower()
+            except OSError:
+                _vmt_txt0 = ""
+            real_normal = (is_normal_map
+                           or (vtf_output_path / f"{mat}_normal.vtf").exists()
+                           or "$bumpmap" in _vmt_txt0)
+            needs_bump = real_normal or rim_on or phong_on
+            if needs_bump and not real_normal:
+                # Нормаль генерим мы → можем запечь маску в её альфу.
+                if params_only:
+                    # BLU-дубль: VTF уже создан для RED, пишем только параметры.
+                    VMTService.add_material_map_params(
+                        str(vmt_path), patched_cdmaterials_path, None, None,
+                        {"$envmap": "env_cubemap", "$normalmapalphaenvmapmask": "1"})
+                    envmask_combined = True
+                else:
+                    mask_png = vtf_output_path / f"{mat}_envmask_src.png"
+                    ok_mask = False
+                    if envmask_spec.get("derive"):
+                        thr = envmask_spec.get("threshold")
+                        thr = int(thr) if thr not in (None, "") else None
+                        TextureService.derive_effect_map(
+                            base_image_path, str(mask_png), "envmapmask", size, threshold=thr)
+                        ok_mask = mask_png.exists()
+                    elif envmask_spec.get("image") and os.path.isfile(envmask_spec["image"]):
+                        VPKService._process_image(envmask_spec["image"], str(mask_png), size)
+                        ok_mask = mask_png.exists()
+                    if ok_mask:
+                        envmask_combined = VPKService._ensure_normal_with_envmask(
+                            base_image_path, mask_png, vtf_output_path, mat,
+                            vmt_path, patched_cdmaterials_path, size)
+                        if mask_png.exists():
+                            mask_png.unlink()
+            elif real_normal:
+                logger.warning(
+                    f"[{mat}] envmapmask + готовая нормаль: отдельный $envmapmask "
+                    f"может игнорироваться движком (есть $bumpmap)")
+
         for map_id in MAP_ORDER:
             spec = material_maps.get(map_id)
             if not spec:
                 continue
+            # envmapmask уже разрешён через альфу нормали — отдельную карту не пишем.
+            if map_id == "envmapmask" and envmask_combined:
+                continue
             cfg = MATERIAL_MAPS[map_id]
+
+            # Параметрическая карта без своей текстуры (rim light): только пишем
+            # VMT-параметры (+ числовые переопределения из UI). Работает и при
+            # params_only (дублирование в BLU-VMT) — там тоже нужны те же параметры.
+            if cfg.get("vmt_only"):
+                if not spec.get("enabled"):
+                    continue
+                extra = dict(cfg["extra_vmt"])
+                for k, v in spec.items():
+                    if isinstance(k, str) and k.startswith("$"):
+                        extra[k] = str(v)
+                # Rim/phong не считаются без $bumpmap. Если в VMT его ещё нет —
+                # генерим нормаль из базы (существующую НЕ трогаем). params_only
+                # (дубль в BLU-VMT) только пишет параметры, VTF уже создан.
+                if not params_only and cfg.get("derive_auto_normal") \
+                        and base_image_path and os.path.isfile(base_image_path):
+                    try:
+                        _vmt_txt = open(vmt_path, encoding="utf-8", errors="ignore").read().lower()
+                    except OSError:
+                        _vmt_txt = ""
+                    if "$bumpmap" not in _vmt_txt:
+                        VPKService._ensure_derived_normal(
+                            base_image_path, vtf_output_path, mat, vmt_path,
+                            patched_cdmaterials_path, size, is_normal_map,
+                        )
+                VMTService.add_material_map_params(
+                    str(vmt_path), patched_cdmaterials_path, None, None, extra
+                )
+                logger.info(f"Карта '{map_id}' [{mat}] → VMT-параметры (+нормаль при необходимости)")
+                continue
+
             map_key = f"{mat}{cfg['suffix']}"
             derive = bool(spec.get("derive")) and bool(cfg.get("derive_kind"))
             image = spec.get("image")
@@ -469,17 +564,20 @@ class VPKService:
                     ensure_directory_exists(vtf_output_path)
                     temp_png = vtf_output_path / f"{map_key}.png"
                     _map_opts = dict(cfg.get("options", {}))
+                    # Карта может требовать фиксированный размер (warp-градиенты:
+                    # lightwarp = 256×1, phongwarp = 256×256). Иначе — глобальный.
+                    _map_size = tuple(cfg.get("size") or size)
                     if derive:
                         threshold = spec.get("threshold")
                         threshold = int(threshold) if threshold not in (None, "") else None
                         TextureService.derive_effect_map(
-                            base_image_path, str(temp_png), cfg["derive_kind"], size,
+                            base_image_path, str(temp_png), cfg["derive_kind"], _map_size,
                             threshold=threshold,
                         )
                         VPKService._create_vtf(str(temp_png), str(vtf_output_path),
                                                cfg["format"], list(cfg["flags"]), _map_opts)
                     else:
-                        VPKService._process_image(image, str(temp_png), size)
+                        VPKService._process_image(image, str(temp_png), _map_size)
                         VPKService._create_vtf(str(temp_png), str(vtf_output_path),
                                                cfg["format"], list(cfg["flags"]), _map_opts)
                     if temp_png.exists():
@@ -504,6 +602,45 @@ class VPKService:
                 str(vmt_path), patched_cdmaterials_path, map_key, cfg["path_param"], extra
             )
             logger.info(f"Карта '{map_id}' [{mat}] → {map_key}.vtf ({'derive' if derive else 'file'})")
+
+    @staticmethod
+    def _ensure_normal_with_envmask(
+        base_image_path: str,
+        mask_png: Path,
+        vtf_output_path: Path,
+        mat: str,
+        vmt_path: Path,
+        patched_cdmaterials_path: str,
+        size: Tuple[int, int],
+    ) -> bool:
+        """
+        Создаёт {mat}_normal.vtf, у которого RGB — нормаль из базы, а АЛЬФА —
+        маска отражения. Прописывает $bumpmap + $envmap + $normalmapalphaenvmapmask.
+
+        Так отражение по маске и эффекты с нормалью (rim/phong) уживаются: движок
+        берёт маску отражения из альфы нормали, а не из отдельного $envmapmask
+        (который при наличии $bumpmap игнорируется).
+        """
+        try:
+            norm_png = vtf_output_path / f"{mat}_normal.png"
+            TextureService.make_normal_with_alpha(
+                base_image_path, str(mask_png), str(norm_png), size)
+            # DXT5 — сохраняет альфу (маску). Не -normal: RGB уже нормаль.
+            VPKService._create_vtf(str(norm_png), str(vtf_output_path), "DXT5", [], {})
+            if norm_png.exists():
+                norm_png.unlink()
+            if not (vtf_output_path / f"{mat}_normal.vtf").exists():
+                return False
+            VMTService.update_vmt_bumpmap_path(
+                str(vmt_path), patched_cdmaterials_path, f"{mat}_normal")
+            VMTService.add_material_map_params(
+                str(vmt_path), patched_cdmaterials_path, None, None,
+                {"$envmap": "env_cubemap", "$normalmapalphaenvmapmask": "1"})
+            logger.info(f"[{mat}] отражение запечено в альфу нормали ($normalmapalphaenvmapmask)")
+            return True
+        except Exception as e:
+            logger.warning(f"[{mat}] не удалось запечь маску отражения в нормаль: {e}", exc_info=True)
+            return False
 
     @staticmethod
     def _ensure_derived_normal(
@@ -2363,31 +2500,12 @@ class VPKService:
                         else:
                             logger.debug("Оригинальный и пропатченный пути совпадают, зеркало не нужно")
 
-                    # ── Зеркальные VMT для all-class шапок ───────────────────────────────
-                    # Проблема: у all-class шапок каждый класс имеет свою модель (%s-плейсхолдер).
-                    # Инструмент компилирует модель только одного класса (первый найденный в VPK)
-                    # с пропатченным $cdmaterials (console\ путь). Модели остальных восьми классов
-                    # берутся из базового VPK игры и ссылаются на ОРИГИНАЛЬНЫЙ путь текстур.
-                    # Из-за этого только один класс видит новую текстуру.
-                    #
-                    # Фикс: создаём зеркальные VMT по оригинальному пути из $cdmaterials.
-                    # Зеркальные VMT ссылаются на те же VTF (по console\ пути) — дублировать их не нужно.
-                    # Так все классы, использующие оригинальные модели, тоже найдут кастомную текстуру.
-                    if mode == "hat" and hat_mdl_path and "%s" in hat_mdl_path and original_cdmaterials_path:
-                        _hat_orig_rel = "materials/" + original_cdmaterials_path.replace('\\', '/').strip().rstrip('/')
-                        _hat_orig_dir = ctx.vpkroot_dir
-                        for _part in _hat_orig_rel.rstrip('/').split('/'):
-                            _hat_orig_dir = _hat_orig_dir / _part
-
-                        if _hat_orig_dir != vtf_output_path:
-                            ensure_directory_exists(_hat_orig_dir)
-                            for _vmt_src in vtf_output_path.glob("*.vmt"):
-                                _vmt_mirror = _hat_orig_dir / _vmt_src.name
-                                if not _vmt_mirror.exists():
-                                    copy_file_safe(_vmt_src, _vmt_mirror)
-                                    logger.info(f"Зеркальный VMT для all-class шапки: {_vmt_mirror.name}")
-                        else:
-                            logger.debug("Пути для шапки совпадают, зеркало не нужно")
+                    # ПРИМЕЧАНИЕ: раньше здесь создавалось «зеркало VMT по оригинальному
+                    # пути» для all-class (%s) шапок, чтобы текстуру увидели все 9 классов
+                    # (когда компилировалась модель лишь одного). Теперь сборка делает
+                    # модель КАЖДОГО выбранного класса с console\-путём, поэтому зеркало
+                    # не нужно — и вредно: оно затирало бы материал у НЕвыбранных классов
+                    # (они должны оставаться с оригинальной игровой текстурой). Удалено.
 
                     if debug_mode:
                         DebugService.save_patched_stage(ctx, ctx.decompile_dir)

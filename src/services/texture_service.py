@@ -3,7 +3,7 @@ import shutil
 import subprocess
 from pathlib import Path
 from typing import List, Tuple, Optional
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, ImageFilter
 from src.shared.constants import ToolPaths
 from src.shared.logging_config import get_logger
 from src.services.vtflib_wrapper import VTFLib, VTFImageFormat, VTFImageFlags
@@ -62,10 +62,43 @@ class TextureService:
             out = Image.merge("RGBA", (gray, gray, gray, _mask(gray)))
         elif kind == "selfillum":
             out = _mask(gray).convert("L")
+        elif kind == "envmapmask":
+            # Маска отражения кубмапа: светлое/металл (или ярче порога) блестит сильнее.
+            out = _mask(gray).convert("L")
         else:
             out = gray
         out.save(out_png_path)
         logger.info(f"Карта '{kind}' выведена из базовой текстуры: {out_png_path}")
+        return out_png_path
+
+    @staticmethod
+    def make_normal_with_alpha(
+        base_image_path: str,
+        mask_png_path: str,
+        out_png_path: str,
+        size: Tuple[int, int],
+    ) -> str:
+        """
+        Строит карту нормалей из базовой текстуры (Sobel по яркости) и кладёт
+        в её АЛЬФУ маску из mask_png_path.
+
+        Нужно для сосуществования отражения и эффектов с нормалью: при наличии
+        $bumpmap движок игнорирует отдельный $envmapmask и читает маску отражения
+        из альфы нормали ($normalmapalphaenvmapmask). Нормаль приближённая (как и
+        любая «нормаль из диффуза»), но направление здесь некритично — важна альфа.
+        """
+        base = Image.open(base_image_path).convert("RGB")
+        if size:
+            base = base.resize(size, Image.LANCZOS)
+        gray = ImageOps.grayscale(base)
+        sx = ImageFilter.Kernel((3, 3), (-1, 0, 1, -2, 0, 2, -1, 0, 1), scale=2, offset=128)
+        sy = ImageFilter.Kernel((3, 3), (-1, -2, -1, 0, 0, 0, 1, 2, 1), scale=2, offset=128)
+        r = gray.filter(sx)                      # наклон по X
+        g = gray.filter(sy)                      # наклон по Y
+        b = Image.new("L", gray.size, 255)       # Z вверх (приближённо)
+        mask = Image.open(mask_png_path).convert("L").resize(gray.size, Image.LANCZOS)
+        Image.merge("RGBA", (r, g, b, mask)).save(out_png_path)
+        logger.info(f"Нормаль с маской отражения в альфе: {out_png_path}")
         return out_png_path
 
     @staticmethod

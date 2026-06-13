@@ -660,6 +660,8 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
             if hasattr(self, 'preview_panel'):
                 self.settings_panel.material_maps_requested.connect(
                     self.preview_panel.open_material_maps)
+            # Пер-текстурный VMT-редактор: запрос из settings_panel → редактор материала.
+            self.settings_panel.vmt_edit_requested.connect(self._open_vmt_for_material)
 
         # Когда пользователь загрузил VPK мод в 3D — автоматически переключаем на Custom
         if hasattr(self, 'preview_panel'):
@@ -1307,13 +1309,50 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
             display_name = weapon_key
         return weapon_key, display_name
 
-    def _open_vmt_for_target(self, weapon_key: str, display_name: str) -> None:
-        """Открывает сохранённый VMT либо извлекает оригинал из игры и открывает редактор."""
+    def _open_vmt_for_material(self, material: str = "") -> None:
+        """
+        Открывает VMT-редактор для КОНКРЕТНОГО материала карточки (пер-текстурно).
+        material='' → главный материал текущего превью.
+        """
+        if not hasattr(self, 'mode') or not self.mode:
+            ErrorHandler.show_warning(self, self.t.get('select_weapon_error', 'Select a weapon first'), self.t['error'])
+            return
+        from src.data.weapons import SPECIAL_MODES
+        if self.mode in set(SPECIAL_MODES.values()) | {"custom"}:
+            ErrorHandler.show_warning(self, self.t.get('vmt_editor_not_available', 'VMT editor is not available for this mode.'), self.t['error'])
+            return
+        target = self._resolve_vmt_target()
+        if target is None:
+            return
+        weapon_key, display_name = target
+
+        mat = (material or '').strip()
+        if not mat and hasattr(self, 'preview_panel'):
+            names = getattr(self.preview_panel, '_material_names', None) or []
+            mat = names[0] if names else ''
+        if not mat:
+            mat = weapon_key  # запасной ключ (как у глобальной кнопки)
+
+        # Ключ хранилища и извлекаемый файл = имя материала. Для главного материала
+        # это совпадает с texture_filename, который сборка уже ищет.
+        self._open_vmt_for_target(weapon_key, mat, edit_key=mat, material_name=mat)
+
+    def _open_vmt_for_target(self, weapon_key: str, display_name: str,
+                             edit_key: Optional[str] = None,
+                             material_name: Optional[str] = None) -> None:
+        """
+        Открывает сохранённый VMT либо извлекает оригинал из игры и открывает редактор.
+
+        edit_key      — ключ EditedVMTService (по умолч. weapon_key — главный материал).
+        material_name — имя VMT-файла для извлечения (по умолч. weapon_key).
+        """
         from src.services.edited_vmt_service import EditedVMTService
+        edit_key = edit_key or weapon_key
+        material_name = material_name or weapon_key
         # ── Открываем сохранённый VMT (если есть) ────────────────────────── #
-        edited_vmt_path = EditedVMTService.get_edited_vmt(weapon_key)
+        edited_vmt_path = EditedVMTService.get_edited_vmt(edit_key)
         if edited_vmt_path and os.path.exists(edited_vmt_path):
-            self.open_vmt_editor(edited_vmt_path, weapon_key, display_name)
+            self.open_vmt_editor(edited_vmt_path, edit_key, display_name)
             return
 
         # ── Нет сохранённого — нужен путь к TF2 для извлечения ──────────── #
@@ -1330,9 +1369,9 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
 
         # ── Извлекаем VMT из VPK ─────────────────────────────────────────── #
         if self.mode == "hat":
-            vmt_path = self._extract_hat_vmt_from_game(weapon_key, tf2_root_dir)
+            vmt_path = self._extract_hat_vmt_from_game(weapon_key, tf2_root_dir, material_name)
         else:
-            vmt_path = self.extract_original_vmt_from_game(weapon_key, tf2_root_dir)
+            vmt_path = self.extract_original_vmt_from_game(weapon_key, tf2_root_dir, material_name)
 
         if not vmt_path:
             ErrorHandler.show_warning(
@@ -1345,10 +1384,11 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
             )
             return
 
-        self.open_vmt_editor(vmt_path, weapon_key, display_name)
+        self.open_vmt_editor(vmt_path, edit_key, display_name)
 
 
-    def _extract_hat_vmt_from_game(self, hat_mdl: str, tf2_root_dir: str) -> Optional[str]:
+    def _extract_hat_vmt_from_game(self, hat_mdl: str, tf2_root_dir: str,
+                                   material_name: Optional[str] = None) -> Optional[str]:
         """
         Извлекает VMT для шапки через цепочку QC → cdmaterials → VPK.
         Переиспользует ту же логику что и 3D Preview.
@@ -1376,8 +1416,11 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
         if not cdmaterials:
             return None
 
-        # Имя материала: из $texturegroup или имя файла MDL без расширения и класса
-        mat_names = list(skin0_textures) if skin0_textures else []
+        # Конкретный материал (пер-карточная правка) — ищем именно его.
+        if material_name:
+            mat_names = [material_name]
+        else:
+            mat_names = list(skin0_textures) if skin0_textures else []
         if not mat_names:
             import re as _re
             stem = os.path.splitext(os.path.basename(hat_mdl))[0]
@@ -1435,7 +1478,8 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
         except OSError:
             return None
     
-    def extract_original_vmt_from_game(self, weapon_key: str, tf2_root_dir: str) -> Optional[str]:
+    def extract_original_vmt_from_game(self, weapon_key: str, tf2_root_dir: str,
+                                       material_name: Optional[str] = None) -> Optional[str]:
         """
         Извлекает оригинальный VMT файл из игры для оружия
         
@@ -1503,12 +1547,15 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
         if tf2_misc_vpk:
             vpk_files.append(tf2_misc_vpk)
         
+        # Имя VMT-файла: для доп. материала — его имя, иначе главный (weapon_key).
+        # Папки ($cdmaterials) у материалов одного оружия общие, меняется только файл.
+        fname = material_name or weapon_key
         for cdmaterials_path in search_paths:
             for vpk_file in vpk_files:
                 vmt_file = TF2VPKExtractService.extract_vmt_file(
                     vpk_file,
                     cdmaterials_path,
-                    weapon_key,
+                    fname,
                     temp_dir
                 )
                 if vmt_file and os.path.exists(vmt_file):

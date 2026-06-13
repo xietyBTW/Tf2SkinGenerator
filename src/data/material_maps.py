@@ -56,6 +56,37 @@ MATERIAL_MAPS = {
         "derive_auto_normal": True,
         "derive_extra_vmt": {"$envmap": "env_cubemap", "$envmaptint": "[ .3 .3 .3 ]"},
     },
+    "envmapmask": {
+        "suffix": "_envmask",
+        "format": "DXT1",          # маска отражения — оттенки серого, альфа не нужна
+        "flags": (),
+        "path_param": "$envmapmask",
+        # $envmapmask работает только при включённом отражении кубмапа.
+        "extra_vmt": {"$envmap": "env_cubemap"},
+        "numeric": (),
+        "needs_alpha": False,
+        # «Авто»: маска из яркости базы (металл/светлое блестит сильнее).
+        "derive_kind": "envmapmask",
+    },
+    # ── Rim light (параметрический, без своей текстуры) ───────────────────────
+    # Обводка светом по контуру. Маску берёт из АЛЬФЫ $phongexponenttexture
+    # (если включена phong-карта), иначе применяется равномерно. Требует $phong.
+    "rimlight": {
+        "vmt_only": True,          # текстуры нет — пишем только параметры VMT
+        "format": "VMT",           # для бейджа в диалоге
+        "path_param": None,
+        "extra_vmt": {
+            "$phong": "1",
+            "$rimlight": "1",
+            "$rimlightexponent": "4",
+            "$rimlightboost": "2",
+        },
+        "numeric": ("$rimlightexponent", "$rimlightboost"),
+        # Rim считается phong-шейдером, а phong требует $bumpmap — без карты
+        # нополей эффект НЕ виден. Поэтому гарантируем нормаль (не затирая
+        # существующую): генерим из базы, если в VMT ещё нет $bumpmap.
+        "derive_auto_normal": True,
+    },
     # ── Warp-карты (градиенты-lookup) ────────────────────────────────────────
     # Это не обычные текстуры, а градиенты: lightwarp ремапит освещённость,
     # phongwarp — цвет/градиент блика. Им нужны CLAMP (без тайлинга) + NOMIP
@@ -65,6 +96,7 @@ MATERIAL_MAPS = {
         "format": "BGR888",            # градиент → без DXT-бандинга
         "flags": ("CLAMPS", "CLAMPT"), # без тайлинга
         "options": {"nomipmaps": True},
+        "size": (256, 256),            # 2D-lookup (fresnel × half-angle) — фикс. размер
         "path_param": "$phongwarptexture",
         "extra_vmt": {"$phong": "1"},  # phongwarp работает только при $phong
         "numeric": (),
@@ -75,6 +107,10 @@ MATERIAL_MAPS = {
         "format": "BGR888",
         "flags": ("CLAMPS", "CLAMPT"),
         "options": {"nomipmaps": True},
+        # $lightwarptexture в Source — 1D-рампа 256×1 (освещённость 0..1 берётся
+        # как координата X). Игнорируем глобальный размер сборки и всегда делаем
+        # 256×1, иначе ремап освещения искажается / раздувается память.
+        "size": (256, 1),
         "path_param": "$lightwarptexture",
         "extra_vmt": {},               # lightwarp работает самостоятельно
         "numeric": (),
@@ -83,11 +119,9 @@ MATERIAL_MAPS = {
 }
 
 # Порядок ОБРАБОТКИ при сборке (стабильный, не влияет на UI).
-MAP_ORDER = ("detail", "selfillum", "phongexp", "phongwarp", "lightwarp")
+MAP_ORDER = ("detail", "selfillum", "phongexp", "envmapmask", "rimlight",
+             "phongwarp", "lightwarp")
 
 # Порядок ОТОБРАЖЕНИЯ в диалоге (сетка 2 столбца, ряд за рядом).
-# Подобран так, чтобы в одном ряду стояли карты схожей высоты:
-#   ряд1: phongexp + selfillum (обе с «авто» и порогом),
-#   ряд2: detail + phongwarp,
-#   ряд3: lightwarp (на всю ширину).
-MAP_DISPLAY_ORDER = ("phongexp", "selfillum", "detail", "phongwarp", "lightwarp")
+MAP_DISPLAY_ORDER = ("phongexp", "rimlight", "envmapmask", "selfillum",
+                     "detail", "phongwarp", "lightwarp")
