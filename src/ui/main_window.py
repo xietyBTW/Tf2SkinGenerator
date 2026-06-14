@@ -1745,6 +1745,13 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
                     and self.preview_panel.get_custom_smd_path()):
                 replace_model_enabled = True
 
+            # Замену модели НЕ поддерживаем для тела персонажа (сложный скелет/flex/
+            # bodygroups — подмена геометрией ломает модель). Принудительно выключаем.
+            from src.data.player_characters import PLAYER_BODY_MODE_KEYS
+            if self.mode in PLAYER_BODY_MODE_KEYS and replace_model_enabled:
+                logger.info("Замена модели недоступна для тела персонажа — выключаем.")
+                replace_model_enabled = False
+
             # Взаимоисключение с CritHIT — сбрасываем оба флага если активен CritHIT
             is_crit_hit = (hasattr(self, 'crit_hit_checkbox') and
                            self.crit_hit_checkbox.isChecked())
@@ -1922,6 +1929,14 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
                 skin_build_data=_skin_build_data,
                 replace_keep_materials=_replace_keep_materials,
                 custom_qc_text=_custom_qc_text,
+                isolate_shoulders=(
+                    self.settings_panel.is_isolate_shoulders_checked()
+                    if hasattr(self, 'settings_panel') else False
+                ),
+                panel_blu_textures=(
+                    self.preview_panel.get_blu_slot_image_paths()
+                    if hasattr(self, 'preview_panel') else None
+                ),
             )
             # Без parent=self ! Если дать parent=self, Qt станет владельцем
             # и не удалит старый воркер при замене, и сигналы будут дублироваться.
@@ -2222,40 +2237,50 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
             self._build_worker.set_texture_mismatch_result(decision)
 
 
+    def _resolve_extractable_weapon_key(self):
+        """
+        Резолвит weapon_key для извлечения модели / генерации UV (с показом
+        предупреждений). Возвращает строку или None, если режим не подходит.
+        """
+        if not hasattr(self, 'mode') or not self.mode:
+            ErrorHandler.show_warning(self, self.t['select_weapon_error'], self.t['error'])
+            return None
+
+        from src.data.weapons import SPECIAL_MODES
+        if self.mode in SPECIAL_MODES.values():
+            error_msg = self.t.get('extract_model_special_mode_error', 'Cannot extract model for special modes')
+            ErrorHandler.show_warning(self, error_msg, self.t['error'])
+            return None
+
+        # Для режимов рук weapon_key — это ключ arm-модели (например "c_pyro_arms"),
+        # для скинов персонажа — это ключ MDL модели (например "player_scout").
+        from src.data.player_hands import HAND_MODE_KEYS, HAND_MODES
+        from src.data.player_characters import PLAYER_BODY_MODE_KEYS, PLAYER_CHARACTERS
+        if self.mode in HAND_MODE_KEYS:
+            weapon_key = HAND_MODES[self.mode].get("arm_model", "")
+            if not weapon_key:
+                ErrorHandler.show_warning(self, self.t.get('extract_model_special_mode_error', 'Cannot extract model for this mode'), self.t['error'])
+                return None
+        elif self.mode in PLAYER_BODY_MODE_KEYS:
+            # Для персонажей weapon_key = полный MDL путь (как в 3D preview)
+            weapon_key = PLAYER_CHARACTERS[self.mode].get("mdl_path", "")
+            if not weapon_key:
+                ErrorHandler.show_warning(self, self.t.get('extract_model_special_mode_error', 'Cannot extract model for this mode'), self.t['error'])
+                return None
+        elif self.mode == "hat":
+            weapon_key = getattr(self, '_hat_mdl_path', None)
+            if not weapon_key:
+                ErrorHandler.show_warning(self, self.t.get('select_weapon_error', 'Select a hat first'), self.t['error'])
+                return None
+        else:
+            weapon_key = weapon_key_from_mode(self.mode)
+        return weapon_key
+
     def extract_original_model(self) -> None:
         try:
-            if not hasattr(self, 'mode') or not self.mode:
-                ErrorHandler.show_warning(self, self.t['select_weapon_error'], self.t['error'])
+            weapon_key = self._resolve_extractable_weapon_key()
+            if not weapon_key:
                 return
-
-            from src.data.weapons import SPECIAL_MODES
-            if self.mode in SPECIAL_MODES.values():
-                error_msg = self.t.get('extract_model_special_mode_error', 'Cannot extract model for special modes')
-                ErrorHandler.show_warning(self, error_msg, self.t['error'])
-                return
-
-            # Для режимов рук weapon_key — это ключ arm-модели (например "c_pyro_arms"),
-            # для скинов персонажа — это ключ MDL модели (например "player_scout").
-            from src.data.player_hands import HAND_MODE_KEYS, HAND_MODES
-            from src.data.player_characters import PLAYER_BODY_MODE_KEYS, PLAYER_CHARACTERS
-            if self.mode in HAND_MODE_KEYS:
-                weapon_key = HAND_MODES[self.mode].get("arm_model", "")
-                if not weapon_key:
-                    ErrorHandler.show_warning(self, self.t.get('extract_model_special_mode_error', 'Cannot extract model for this mode'), self.t['error'])
-                    return
-            elif self.mode in PLAYER_BODY_MODE_KEYS:
-                # Для персонажей weapon_key = полный MDL путь (как в 3D preview)
-                weapon_key = PLAYER_CHARACTERS[self.mode].get("mdl_path", "")
-                if not weapon_key:
-                    ErrorHandler.show_warning(self, self.t.get('extract_model_special_mode_error', 'Cannot extract model for this mode'), self.t['error'])
-                    return
-            elif self.mode == "hat":
-                weapon_key = getattr(self, '_hat_mdl_path', None)
-                if not weapon_key:
-                    ErrorHandler.show_warning(self, self.t.get('select_weapon_error', 'Select a hat first'), self.t['error'])
-                    return
-            else:
-                weapon_key = weapon_key_from_mode(self.mode)
 
             settings = self.settings_panel.get_settings()
             tf2_root_dir = settings.get('tf2_game_folder', '')
@@ -2404,6 +2429,73 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
     def _on_export_model_error(self, error_message: str) -> None:
         self._close_progress('_export_model_progress_dialog', 'extract_model_button')
         ErrorHandler.show_error(self, Exception(error_message), "Ошибка экспорта модели", self.t['error'])
+
+    def export_uv_template(self) -> None:
+        """По кнопке: декомпилирует модель и рисует UV-шаблон в папку экспорта
+        (без полной сборки мода)."""
+        try:
+            weapon_key = self._resolve_extractable_weapon_key()
+            if not weapon_key:
+                return
+
+            settings = self.settings_panel.get_settings()
+            tf2_root_dir = settings.get('tf2_game_folder', '')
+            if not tf2_root_dir:
+                ErrorHandler.show_warning(self, self.t.get('tf2_path_not_specified', 'TF2 path not specified in settings'), self.t['error'])
+                return
+
+            export_folder = settings.get('export_folder', 'export')
+            image_size = settings.get('size') or (1024, 1024)
+
+            if self._worker_busy('_uv_template_worker', 'extract_model_already_running',
+                                 'Operation is already in progress. Please wait.'):
+                return
+
+            from src.services.uv_template_worker import UVTemplateWorker
+            self._uv_template_worker = UVTemplateWorker(
+                tf2_root_dir=tf2_root_dir,
+                mode=self.mode,
+                weapon_key=weapon_key,
+                image_size=image_size,
+                export_folder=export_folder,
+                language=self.language,
+                parent=self,
+            )
+            self._uv_template_worker.finished.connect(self._on_uv_template_finished)
+            self._uv_template_worker.progress.connect(self._on_uv_template_progress)
+            self._uv_template_worker.error.connect(self._on_uv_template_error)
+
+            self._launch_progress(
+                '_uv_template_progress_dialog', self._uv_template_worker,
+                self._cancel_uv_template,
+                title=self.t.get('export_uv_progress_title', 'UV Template'),
+                text=self.t.get('export_uv_progress_text', 'Generating UV template...'),
+                disable_button='export_uv_button',
+            )
+        except Exception as e:
+            ErrorHandler.show_error(self, e, "Ошибка при запуске генерации UV-шаблона", self.t['error'])
+
+    def _on_uv_template_finished(self, success: bool, message: str) -> None:
+        self._close_progress('_uv_template_progress_dialog', 'export_uv_button')
+        if success:
+            text = self.t.get('export_uv_success', 'UV template saved:') + f"\n{message}"
+            ErrorHandler.show_info(self, text, self.t.get('success', 'Success'))
+        else:
+            if message == 'no_smd':
+                message = self.t.get('export_uv_no_smd', 'Reference SMD not found for UV template.')
+            elif message == 'render_failed':
+                message = self.t.get('export_uv_failed', 'Failed to render UV template.')
+            ErrorHandler.show_warning(self, message, self.t['error'])
+
+    def _on_uv_template_progress(self, percentage: int, status: str) -> None:
+        self._update_progress('_uv_template_progress_dialog', percentage, status)
+
+    def _on_uv_template_error(self, error_message: str) -> None:
+        self._close_progress('_uv_template_progress_dialog', 'export_uv_button')
+        ErrorHandler.show_error(self, Exception(error_message), "Ошибка генерации UV-шаблона", self.t['error'])
+
+    def _cancel_uv_template(self) -> None:
+        self._cancel_worker('_uv_template_worker')
 
     def extract_original_texture(self) -> None:
         """Запускает асинхронное извлечение оригинальной текстуры оружия/рук/шапки из игры"""

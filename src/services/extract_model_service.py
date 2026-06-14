@@ -105,6 +105,37 @@ class ExtractModelService:
             pass
 
     @staticmethod
+    def generate_uv_template(
+        decompile_dir: str,
+        weapon_key: str,
+        image_size: Tuple[int, int],
+        export_folder: str = "export",
+    ) -> Tuple[bool, str]:
+        """
+        Генерирует PNG c UV-разметкой из уже декомпилированной модели
+        (без полной сборки мода). Возвращает (успех, путь_или_сообщение_об_ошибке).
+        """
+        from src.services.smd_service import SMDService
+        from src.services.uv_layout_service import UVLayoutService
+
+        smd_path = SMDService.find_reference_smd(str(decompile_dir), weapon_key)
+        if not smd_path or not os.path.exists(smd_path):
+            logger.warning(f"UV-шаблон: не найден reference SMD для {weapon_key} в {decompile_dir}")
+            return False, "no_smd"
+
+        # weapon_key для персонажей/шапок может быть полным mdl-путём — берём
+        # безопасное имя файла из его basename.
+        safe_name = Path(str(weapon_key).replace("\\", "/")).stem or "model"
+        out_path = ExtractModelService._next_available_file(
+            Path(export_folder), f"{safe_name}_uv_layout.png"
+        )
+        ensure_directory_exists(out_path.parent)
+        if UVLayoutService.generate_uv_layout_from_smd(smd_path, str(out_path), image_size):
+            logger.info(f"UV-шаблон сохранён: {out_path}")
+            return True, str(out_path)
+        return False, "render_failed"
+
+    @staticmethod
     def prepare_decompiled_model_files_with_progress(
         tf2_root_dir: str,
         mode: str,

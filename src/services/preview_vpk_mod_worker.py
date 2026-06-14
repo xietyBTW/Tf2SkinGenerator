@@ -89,6 +89,9 @@ class PreviewVpkModWorker(QThread):
     ready     = Signal(str, str)      # (obj_path, first_frame_path)
     animated  = Signal(object, float) # ([frame_paths], framerate) — только если кадров > 1
     blu_ready = Signal(object, float) # BLU командная раскраска — если найдена
+    cards_ready = Signal(object)      # [card_dict] — 2D-карточки всех текстур мода
+    materials_ready = Signal(object)  # [material_name] — имена материалов модели (для наложения по мешам)
+    skins_ready = Signal(object)      # skin_info — стили модели (skinfamilies) из QC
     failed    = Signal(str)
     progress  = Signal(str)
 
@@ -136,6 +139,7 @@ class PreviewVpkModWorker(QThread):
         self.misc_vpk_path     = misc_vpk_path
         self.textures_vpk_path = textures_vpk_path
         self._preview_dir: Optional[str] = None
+        self._model_materials: List[str] = []
         self._p = self._PROGRESS.get(lang, self._PROGRESS['en'])
 
     # ── Точка входа ───────────────────────────────────────────────────────── #
@@ -176,6 +180,19 @@ class PreviewVpkModWorker(QThread):
                 f"VPK мод «{os.path.basename(self.user_vpk_path)}»: "
                 f"{len(mdl_files)} MDL, {len(vmt_files)} VMT, {len(vtf_files)} VTF"
             )
+
+            # ── 2D-карточки всех текстур мода (РАНО) ──────────────────────── #
+            # Эмитим карточки сразу после сканирования VTF, ДО тяжёлой/прерываемой
+            # работы по модели — иначе перезапуск воркера (смена категории) мог
+            # прервать run() до их формирования, и в 2D оставалась лишь одна
+            # карточка (от обычной фильтрации материалов модели).
+            try:
+                cards = self._build_cards_from_pak(pak, vtf_files, vmt_files)
+                if cards:
+                    logger.info(f"VPK мод: 2D-карточек подготовлено: {len(cards)}")
+                    self.cards_ready.emit(cards)
+            except Exception as exc:
+                logger.debug(f"VPK мод: не удалось собрать 2D-карточки: {exc}")
 
             if self.isInterruptionRequested():
                 return
@@ -259,6 +276,11 @@ class PreviewVpkModWorker(QThread):
             first_tex = frame_paths[0] if frame_paths else ""
             self.ready.emit(obj_path, first_tex)
 
+            # Имена материалов модели → панель наложит текстуры мода по мешам.
+            if self._model_materials:
+                logger.info(f"VPK мод: материалы модели: {self._model_materials}")
+                self.materials_ready.emit(list(self._model_materials))
+
             if len(frame_paths) > 1:
                 self.animated.emit(frame_paths, framerate)
 
@@ -273,9 +295,148 @@ class PreviewVpkModWorker(QThread):
             if blu_paths:
                 self.blu_ready.emit(blu_paths, blu_fps)
 
+            # ── 7. Стили модели (skinfamilies) из QC ──────────────────────── #
+            try:
+                if decomp_dir:
+                    qc_path = self._find_qc_in_dir(decomp_dir)
+                    if qc_path:
+                        from src.services.model_build_service import ModelBuildService
+                        info = ModelBuildService.extract_skin_info(qc_path)
+                        skins = (info or {}).get('skins') or []
+                        if len(skins) >= 2:
+                            # Превью УЖЕ существующих текстур каждого стиля — чтобы
+                            # при переключении стиля карточки были не пустыми.
+                            info['skin_textures'] = self._build_skin_textures(pak, info, vtf_files)
+                            logger.info(f"VPK мод: стилей определено: {len(skins)} ({info.get('roles')})")
+                            self.skins_ready.emit(info)
+            except Exception as exc:
+                logger.debug(f"VPK мод: стили не определены: {exc}")
+
         except Exception as exc:
             logger.error(f"PreviewVpkModWorker: {exc}", exc_info=True)
             self.failed.emit(str(exc))
+
+    # ── 2D-карточки: все основные текстуры мода из открытого pak ──────────── #
+
+    def _build_cards_from_pak(self, pak, vtf_files: List[str], vmt_files: List[str]) -> list:
+        """Строит карточки для ВСЕХ основных VTF мода прямо из открытого pak.
+
+        Служебные VTF (lightwarp/bump/normal/…) отброшены через _is_base_vtf.
+        Имя карточки = стебель VTF; при коллизии добавляется папка. Превью —
+        первый кадр VTF. vmt_path привязывается по совпадению стебля.
+        """
+        # Индекс VMT по стеблю для привязки.
+        vmt_by_stem = {}
+        for vmt_rel in vmt_files:
+            stem = os.path.splitext(os.path.basename(vmt_rel))[0].lower()
+            vmt_by_stem.setdefault(stem, vmt_rel)
+
+        base = sorted(v for v in vtf_files if _is_base_vtf(v))
+        # Подсчёт коллизий стеблей для дизамбигуации.
+        stems = [os.path.splitext(os.path.basename(v))[0] for v in base]
+        counts: dict = {}
+        for s in stems:
+            counts[s] = counts.get(s, 0) + 1
+
+        cards = []
+        used: set = set()
+        for vtf_rel in base:
+            stem = os.path.splitext(os.path.basename(vtf_rel))[0]
+            folder = os.path.basename(os.path.dirname(vtf_rel))
+            name = stem if counts.get(stem, 0) <= 1 else f"{stem} [{folder}]"
+            while name in used:
+                name += "_"
+            used.add(name)
+
+            preview_png = None
+            try:
+                data = pak[vtf_rel].read()
+                preview_png = self._vtf_bytes_first_frame_png(data, name)
+            except Exception as exc:
+                logger.debug(f"VPK мод: превью VTF не удалось ({vtf_rel}): {exc}")
+
+            cards.append({
+                'name': name,
+                'display_name': name,
+                'is_blue': stem.lower().endswith('_blue'),
+                'preview_png': preview_png,
+                'vmt_path': vmt_by_stem.get(stem.lower()),
+            })
+
+        # RED-материалы первыми, затем BLU (как в обычной раскладке карточек).
+        return [c for c in cards if not c['is_blue']] + [c for c in cards if c['is_blue']]
+
+    def _build_skin_textures(self, pak, info: dict, vtf_files: List[str]) -> dict:
+        """Для каждого стиля (skinfamilies) — превью существующих текстур по
+        базовому материалу: {raw_skin_idx: {base_material: preview_png}}.
+
+        Строки $texturegroup: строка 0 — базовые материалы (колонки = меш-слоты),
+        строка K — материалы стиля K в тех же колонках. Текстуру стиля берём по
+        совпадению стебля материала с VTF-файлом мода.
+        """
+        rows = info.get('rows') or []
+        skins = info.get('skins') or []
+        if not rows or not skins:
+            return {}
+        base_row = rows[0]
+        vtf_by_stem = {
+            os.path.splitext(os.path.basename(v))[0].lower(): v for v in vtf_files
+        }
+        out: dict = {}
+        for s in skins:
+            ridx = s.get('index', 0)
+            if ridx >= len(rows):
+                continue
+            row = rows[ridx]
+            mp: dict = {}
+            for col, base_mat in enumerate(base_row):
+                if col >= len(row):
+                    continue
+                variant_mat = row[col]
+                # В стиль включаем ТОЛЬКО материалы, которые отличаются от базовой
+                # строки. Одинаковый материал (eyes/mouth и т.п.) наследует базу —
+                # его не показываем как отдельную карточку стиля.
+                if variant_mat.strip().lower() == base_mat.strip().lower():
+                    continue
+                stem = os.path.splitext(os.path.basename(variant_mat))[0].lower()
+                vtf_rel = vtf_by_stem.get(stem)
+                if not vtf_rel:
+                    continue
+                try:
+                    data = pak[vtf_rel].read()
+                    png = self._vtf_bytes_first_frame_png(data, f"skin{ridx}_{base_mat}")
+                    if png:
+                        mp[base_mat] = png
+                except Exception:
+                    continue
+            if mp:
+                out[ridx] = mp
+        return out
+
+    def _vtf_bytes_first_frame_png(self, vtf_data: bytes, key: str) -> Optional[str]:
+        """Сохраняет первый кадр VTF в уникальный PNG (для превью карточки)."""
+        import re as _re
+        safe = _re.sub(r'[^A-Za-z0-9_.-]', '_', key)
+        tmp_vtf = os.path.join(self._preview_dir, f"_card_{safe}.vtf")
+        try:
+            with open(tmp_vtf, "wb") as f:
+                f.write(vtf_data)
+            from src.services.vtflib_wrapper import VTFLib
+            from PIL import Image
+            all_frames, w, h = VTFLib.read_vtf_all_frames(tmp_vtf)
+            if not all_frames:
+                return None
+            out = os.path.join(self._preview_dir, f"_card_{safe}.png")
+            Image.frombytes("RGBA", (w, h), all_frames[0]).save(out)
+            return out
+        except Exception:
+            return None
+        finally:
+            try:
+                if os.path.exists(tmp_vtf):
+                    os.remove(tmp_vtf)
+            except Exception:
+                pass
 
     # ── MDL: декомпиляция из пользовательского VPK ───────────────────────── #
 
@@ -340,7 +501,9 @@ class PreviewVpkModWorker(QThread):
             self.progress.emit(self._p['converting'])
             obj_path = os.path.join(self._preview_dir, "model.obj")
             from src.services.smd_to_obj_service import SmdToObjService
-            ok = SmdToObjService.convert(smd_path, obj_path)
+            ok, mat_names = SmdToObjService.convert(smd_path, obj_path)
+            if ok:
+                self._model_materials = list(mat_names or [])
             return (obj_path if ok else None), decomp_dir
 
         except Exception as exc:
@@ -441,7 +604,9 @@ class PreviewVpkModWorker(QThread):
         self.progress.emit(self._p['converting'])
         obj_path = os.path.join(self._preview_dir, "model.obj")
         from src.services.smd_to_obj_service import SmdToObjService
-        ok = SmdToObjService.convert(smd_path, obj_path)
+        ok, mat_names = SmdToObjService.convert(smd_path, obj_path)
+        if ok:
+            self._model_materials = list(mat_names or [])
         return (obj_path if ok else None), decomp_dir
 
     # ── Текстура из пользовательского VPK ────────────────────────────────── #

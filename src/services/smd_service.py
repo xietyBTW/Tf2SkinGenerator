@@ -372,6 +372,48 @@ class SMDService:
                     result.append(s)
         return result
 
+    @staticmethod
+    def rename_materials_in_smd(smd_path: str, rename_map: dict) -> int:
+        """
+        Переименовывает материалы в секции triangles SMD (привязка меша).
+
+        Нужно для изоляции: studiomdl берёт имена материалов skin 0 из самого SMD,
+        поэтому чтобы модель ссылалась на новый материал (vm_engineer_red),
+        переименование надо сделать здесь, а не только в $texturegroup.
+
+        rename_map: {orig_lower: new_name}. Сопоставление без учёта регистра.
+        Возвращает число заменённых строк-материалов.
+        """
+        if not os.path.exists(smd_path) or not rename_map:
+            return 0
+        rm = {k.lower(): v for k, v in rename_map.items()}
+        out_lines: List[str] = []
+        in_triangles = False
+        changed = 0
+        with open(smd_path, 'r', encoding='utf-8', errors='replace') as f:
+            for line in f:
+                s = line.strip()
+                if not in_triangles:
+                    out_lines.append(line)
+                    if s == 'triangles':
+                        in_triangles = True
+                    continue
+                if s == 'end':
+                    in_triangles = False
+                    out_lines.append(line)
+                    continue
+                # Строка материала — не вершина (не начинается с цифры/'-') и не пустая.
+                if s and not (s[0].isdigit() or s[0] == '-') and s.lower() in rm:
+                    nl = line.replace(s, rm[s.lower()], 1)
+                    out_lines.append(nl)
+                    changed += 1
+                else:
+                    out_lines.append(line)
+        if changed:
+            with open(smd_path, 'w', encoding='utf-8') as f:
+                f.writelines(out_lines)
+        return changed
+
 
 # ---------------------------------------------------------------------------
 # Backward-compat aliases (используются тестами)

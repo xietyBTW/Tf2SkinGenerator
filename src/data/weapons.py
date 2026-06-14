@@ -21,7 +21,8 @@ TF2_WEAPONS = {
             "c_energy_drink": {"ru": "Дамский пистолет Красавчика", "en": "Bonk! Atomic Punch"},
             "c_madmilk": {"ru": "Зломолоко", "en": "Mad Milk"},
             "c_winger_pistol": {"ru": "Дрёма", "en": "Winger"},
-            "c_pep_pistol": {"ru": "Критокола", "en": "Crit-A-Cola"}
+            "c_pep_pistol": {"ru": "Критокола", "en": "Crit-A-Cola"},
+            "c_breadmonster_milk": {"ru": "Мутировавшее молоко", "en": "Mutated Milk"}
         },
         "Melee": {
             "c_bat": {"ru": "Стандартная Бита", "en": "Bat"},
@@ -33,7 +34,9 @@ TF2_WEAPONS = {
             "c_scout_sword": {"ru": "Трехрунный меч", "en": "Three-Rune Blade"},
             "c_rift_fire_mace": {"ru": "Солнце на палочке", "en": "Sun-On-A-Stick"},
             "c_xms_giftwrap": {"ru": "Обёрточный убийца", "en": "Wrap Assassin"},
-            "c_invasion_bat": {"ru": "Веер войны", "en": "The Batsaber"}
+            "c_invasion_bat": {"ru": "Веер войны", "en": "The Batsaber"},
+            "c_shogun_warfan": {"ru": "Боевой веер", "en": "Fan O'War"},
+            "c_crossing_guard": {"ru": "Регулировщик", "en": "Crossing Guard"}
         },
         "Hands": {
             "hands": {"ru": "Руки", "en": "Hands"},
@@ -51,7 +54,8 @@ TF2_WEAPONS = {
             "c_dumpster_device": {"ru": "Тренировочный ракетомёт", "en": "Beggar's Bazooka"},
             "c_liberty_launcher": {"ru": "Освободитель", "en": "Liberty Launcher"},
             "c_drg_cowmangler": {"ru": "Линчеватель скота 5000", "en": "Cow Mangler 5000"},
-            "c_atom_launcher": {"ru": "Авиаудар", "en": "Air Strike"}
+            "c_atom_launcher": {"ru": "Авиаудар", "en": "Air Strike"},
+            "c_rocketjumper": {"ru": "Прыгатель", "en": "Rocket Jumper"}
         },
         "Secondary": {
             "c_shotgun": {"ru": "Стандартный Дробовик", "en": "Shotgun"},
@@ -62,7 +66,8 @@ TF2_WEAPONS = {
             "c_drg_righteousbison": {"ru": "Благочестивый бизон", "en": "Righteous Bison"},
             "tankerboots": {"ru": "Людодавы", "en": "Mantreads"},
             "c_paratrooper_pack": {"ru": "Парашютист", "en": "B.A.S.E Jumper"},
-            "c_trenchgun": {"ru": "Паническая атака", "en": "Panic Attack"}
+            "c_trenchgun": {"ru": "Паническая атака", "en": "Panic Attack"},
+            "c_shogun_warhorn": {"ru": "Командирский рожок", "en": "Concheror"}
         },
         "Melee": {
             "c_shovel": {"ru": "Стандартная Лопата", "en": "Shovel"},
@@ -70,7 +75,9 @@ TF2_WEAPONS = {
             "c_shogun_katana_soldier": {"ru": "Полудзатоити", "en": "Half-Zatoichi"},
             "c_riding_crop": {"ru": "Дисциплинарное взыскание", "en": "Disciplinary Action"},
             "c_market_gardener": {"ru": "Землекоп", "en": "Market Gardener"},
-            "c_pickaxe": {"ru": "План эвакуации", "en": "Escape Plan"}
+            "c_pickaxe": {"ru": "План эвакуации", "en": "Escape Plan"},
+            "c_ham": {"ru": "Кадавр", "en": "Ham Shank"},
+            "c_paintrain": {"ru": "Болевой поезд", "en": "Pain Train"}
         },
         "Hands": {
             "hands": {"ru": "Руки", "en": "Hands"},
@@ -96,7 +103,9 @@ TF2_WEAPONS = {
             "c_detonator": {"ru": "Детонатор", "en": "Detonator"},
             "c_scorch_shot": {"ru": "Людоплав", "en": "Scorch Shot"},
             "c_rocketpack": {"ru": "Обжигающий выстрел", "en": "Thermal Thruster"},
-            "c_trenchgun": {"ru": "Паническая атака", "en": "Panic Attack"}
+            "c_trenchgun": {"ru": "Паническая атака", "en": "Panic Attack"},
+            "c_drg_manmelter": {"ru": "Испепелятор", "en": "Manmelter"},
+            "c_gascan": {"ru": "Газовый террорист", "en": "Gas Passer"}
         },
         "Melee": {
             "c_fireaxe": {"ru": "Стандартный Пожарный топор", "en": "Fire Axe"},
@@ -108,7 +117,8 @@ TF2_WEAPONS = {
             "c_drg_thirddegree": {"ru": "Третья степень", "en": "Third Degree"},
             "c_sd_neonsign": {"ru": "Неоновый аннигилятор", "en": "Neon Annihilator"},
             "c_slapping_glove": {"ru": "Горячая рука", "en": "Hot Hand"},
-            "c_lollichop": {"ru": "Заостренный осколок вулкана", "en": "Lollichop"}
+            "c_lollichop": {"ru": "Заостренный осколок вулкана", "en": "Lollichop"},
+            "c_rift_fire_axe": {"ru": "Заточенный осколок вулкана", "en": "Sharpened Volcano Fragment"}
         },
         "Hands": {
             "hands": {"ru": "Руки", "en": "Hands"},
@@ -132,7 +142,8 @@ TF2_WEAPONS = {
             "c_sticky_jumper": {"ru": "Штурмовой щит", "en": "Sticky Jumper"},
             "c_targe": {"ru": "Роскошное прикрытие", "en": "Chargin' Targe"},
             "c_persian_shield": {"ru": "Верный штурвал", "en": "Splendid Screen"},
-            "c_kingmaker_sticky": {"ru": "Быстромёт", "en": "Quickiebomb Launcher"}
+            "c_kingmaker_sticky": {"ru": "Быстромёт", "en": "Quickiebomb Launcher"},
+            "c_wheel_shield": {"ru": "Переломный момент", "en": "Tide Turner"}
         },
         "Melee": {
             "c_bottle": {"ru": "Стандартная Бутылка", "en": "Bottle"},
@@ -142,7 +153,10 @@ TF2_WEAPONS = {
             "c_caber": {"ru": "Аллапульское бревно", "en": "Ullapool Caber"},
             "c_claidheamohmor": {"ru": "Клеймор", "en": "Claidheamh Mòr"},
             "c_shogun_katana": {"ru": "Полудзатоити", "en": "Half-Zatoichi"},
-            "c_demo_sultan_sword": {"ru": "Персидский заклинатель", "en": "Persian Persuader"}
+            "c_demo_sultan_sword": {"ru": "Персидский заклинатель", "en": "Persian Persuader"},
+            "c_scotland_shard": {"ru": "Шотландское рукопожатие", "en": "Scottish Handshake"},
+            "c_golfclub": {"ru": "Девятка Несси", "en": "Nessie's Nine Iron"},
+            "c_paintrain": {"ru": "Болевой поезд", "en": "Pain Train"}
         },
         "Hands": {
             "hands": {"ru": "Руки", "en": "Hands"},
@@ -168,7 +182,8 @@ TF2_WEAPONS = {
             "c_buffalo_steak": {"ru": "Бутерброд из мяса буйвола", "en": "Buffalo Steak Sandvich"},
             "c_trenchgun": {"ru": "Паническая атака", "en": "Panic Attack"},
             "c_banana": {"ru": "Утешительный банан", "en": "Second Banana"},
-            "c_robo_sandwich": {"ru": "Робо-бутерброд", "en": "Robo-Sandvich"}
+            "c_robo_sandwich": {"ru": "Робо-бутерброд", "en": "Robo-Sandvich"},
+            "c_russian_riot": {"ru": "Семейный бизнес", "en": "Family Business"}
         },
         "Melee": {
             "c_sr3_punch": {"ru": "Стандартные Кулаки", "en": "Apoco-Fists"},
@@ -192,7 +207,8 @@ TF2_WEAPONS = {
             "c_drg_pomson": {"ru": "Самосуд", "en": "Pomson 6000"},
             "c_dex_shotgun": {"ru": "Овдовитель", "en": "Widowmaker"},
             "c_tele_shotgun": {"ru": "Спасатель", "en": "Rescue Ranger"},
-            "c_trenchgun": {"ru": "Паническая атака", "en": "Panic Attack"}
+            "c_trenchgun": {"ru": "Паническая атака", "en": "Panic Attack"},
+            "c_frontierjustice": {"ru": "Карабинер", "en": "Frontier Justice"}
         },
         "Secondary": {
             "c_pistol": {"ru": "Стандартный Пистолет", "en": "Pistol"},
@@ -272,7 +288,8 @@ TF2_WEAPONS = {
             "c_machete": {"ru": "Стандартный Кукри", "en": "Kukri"},
             "c_wood_machete": {"ru": "Заточка дикаря", "en": "Tribalman's Shiv"},
             "c_croc_knife": {"ru": "Кустолом", "en": "Bushwacka"},
-            "c_scimitar": {"ru": "Шаханшах", "en": "Shahanshah"}
+            "c_scimitar": {"ru": "Шаханшах", "en": "Shahanshah"},
+            "c_prinny_knife": {"ru": "Мачете Принни", "en": "Prinny Machete"}
         },
         "Hands": {
             "hands": {"ru": "Руки", "en": "Hands"},
@@ -294,7 +311,8 @@ TF2_WEAPONS = {
             "c_sapper": {"ru": "Жучок", "en": "Sapper"},
             "c_p2rec": {"ru": "Жучок-Уитличок", "en": "Ap-Sap"},
             "c_breadmonster_sapper": {"ru": "Закусочная атака", "en": "Snack Attack"},
-            "w_sd_sapper": {"ru": "Откатофон", "en": "Red-Tape Recorder"}
+            "w_sd_sapper": {"ru": "Откатофон", "en": "Red-Tape Recorder"},
+            "c_ttg_sam_gun": {"ru": "Большой улов", "en": "Big Kill"}
         },
         "Melee": {
             "c_knife": {"ru": "Стандартный Нож", "en": "Knife"},
@@ -304,7 +322,8 @@ TF2_WEAPONS = {
             "c_voodoo_pin": {"ru": "Иголка вуду", "en": "Wanga Voodoo Knife"},
             "c_shogun_kunai": {"ru": "Кунай заговорщика", "en": "Conniver's Kunai"},
             "c_switchblade": {"ru": "Главный делец", "en": "Big Earner"},
-            "c_xms_cold_shoulder": {"ru": "Сосулька", "en": "Spy-Cicle"}
+            "c_xms_cold_shoulder": {"ru": "Сосулька", "en": "Spy-Cicle"},
+            "c_unarmed_combat": {"ru": "Рукопашная", "en": "Unarmed Combat"}
         },
         "Watch": {
             "c_spy_watch": {"ru": "Часы невидимости", "en": "Invis Watch"},
@@ -313,6 +332,16 @@ TF2_WEAPONS = {
         },
         "Hands": {
             "hands": {"ru": "Руки", "en": "Hands"},
+        },
+    },
+    "All-Class": {
+        "Melee": {
+            "c_frying_pan": {"ru": "Сковорода", "en": "Frying Pan"},
+            "c_saxxy": {"ru": "Саксси", "en": "Saxxy"},
+            "c_picket": {"ru": "Идейный борец", "en": "Conscientious Objector"},
+            "c_carnival_mallet": {"ru": "Сокрушитель", "en": "Necro Smasher"},
+            "c_skullbat": {"ru": "Бита из ада", "en": "Bat Outta Hell"},
+            "c_tw_eagle": {"ru": "Посох свободы", "en": "Freedom Staff"}
         },
     }
 }
@@ -341,7 +370,8 @@ TF2_CLASSES = {
     "Engineer": {"color": "#DAA520", "icon": ""},
     "Medic": {"color": "#FF0000", "icon": ""},
     "Sniper": {"color": "#228B22", "icon": ""},
-    "Spy": {"color": "#4B0082", "icon": ""}
+    "Spy": {"color": "#4B0082", "icon": ""},
+    "All-Class": {"color": "#B0B0B0", "icon": ""}
 }
 
 WEAPON_TYPES = {
@@ -432,6 +462,11 @@ for class_name, class_weapons in TF2_WEAPONS.items():
             WEAPON_MDL_PATHS[weapon_key] = f"models/weapons/c_models/{weapon_key}/{weapon_key}.mdl"
 
 # ── Нестандартные пути MDL (папка или имя файла не совпадают с ключом оружия) ──
+
+# Mutated Milk: общая папка c_breadmonster/, файл c_breadmonster_milk.mdl
+WEAPON_MDL_PATHS["c_breadmonster_milk"] = (
+    "models/weapons/c_models/c_breadmonster/c_breadmonster_milk.mdl"
+)
 
 # Axtinguisher: папка c_axtinguisher/, файл c_axtinguisher_pyro.mdl
 WEAPON_MDL_PATHS["c_axtinguisher_pyro"] = (

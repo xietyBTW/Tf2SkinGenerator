@@ -44,3 +44,9 @@ class BuildRequest:
     skin_build_data: Optional[Dict[str, Any]] = None
     replace_keep_materials: bool = False
     custom_qc_text: Optional[str] = None
+    # Режим рук: изолировать «плечи/тело» вьюмодели (переименовать общий с миром
+    # материал → уникальный, чтобы правка не трогала мирового персонажа).
+    isolate_shoulders: bool = False
+    # {material: path} BLU-слотов из цветного переключателя — для рук: нейтральный
+    # материал с синей текстурой делается командным (red=база, blue=вариант).
+    panel_blu_textures: Optional[Dict[str, Any]] = None

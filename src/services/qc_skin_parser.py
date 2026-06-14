@@ -391,3 +391,113 @@ def restrict_to_materials(
     ]
 
     return main_texture, extra_materials, filtered_blu
+
+
+def detect_shoulder_materials(mesh_materials: List[str],
+                              hand_whitelist: List[str]) -> List[str]:
+    """
+    Материалы arms-модели, которые НЕ являются руками (т.е. «плечи/тело»,
+    общие с мировым персонажем). Это ровно те материалы, что сейчас
+    выкидываются restrict_to_materials.
+
+    Args:
+        mesh_materials: материалы меша arms-модели (red_row из $texturegroup).
+        hand_whitelist: известные имена текстур рук (HAND_MODES[...]["textures"]).
+
+    Returns:
+        Список «плечевых» материалов (порядок сохранён, дубли убраны). Пусто —
+        руки «чистые» (без мирового тела), изолировать нечего.
+    """
+    allowed = {n.lower() for n in hand_whitelist}
+    seen: set = set()
+    out: List[str] = []
+    for m in mesh_materials:
+        ml = m.lower()
+        if not m or ml in allowed or ml in seen:
+            continue
+        seen.add(ml)
+        out.append(m)
+    return out
+
+
+def team_reference(rows: List[List[str]]):
+    """
+    Находит «эталонный» командный столбец в строках $texturegroup — тот, где
+    есть пара X_red / X_blue (по нему отличаем RED-скины от BLU). Используется,
+    чтобы понять, какие строки относятся к синей команде.
+
+    Returns:
+        (col_index, blue_value) или None, если команд-столбца нет.
+    """
+    if not rows:
+        return None
+    ncols = max((len(r) for r in rows), default=0)
+    # Приоритет: точная пара X_red / X_blue с одинаковым стеблем.
+    for c in range(ncols):
+        vals = {r[c].lower() for r in rows if c < len(r)}
+        reds = [v for v in vals if v.endswith('_red')]
+        blues = [v for v in vals if v.endswith('_blue')]
+        for red in reds:
+            stem = red[:-4]
+            if f"{stem}_blue" in blues:
+                return c, f"{stem}_blue"
+    # Фолбэк: любой столбец, где встречаются и *_red, и *_blue.
+    for c in range(ncols):
+        vals = {r[c].lower() for r in rows if c < len(r)}
+        blues = [v for v in vals if v.endswith('_blue')]
+        reds = [v for v in vals if v.endswith('_red')]
+        if blues and reds:
+            return c, blues[0]
+    return None
+
+
+def neutral_materials(rows: List[List[str]]) -> List[str]:
+    """
+    Материалы из столбцов $texturegroup, значение которых ОДИНАКОВО во всех
+    скинах (нейтральные — не меняются между RED и BLU). Это кандидаты на
+    «повышение» до командных. Порядок сохранён, дубли убраны.
+    """
+    if not rows:
+        return []
+    ncols = max((len(r) for r in rows), default=0)
+    out: List[str] = []
+    seen: set = set()
+    for c in range(ncols):
+        vals = {r[c] for r in rows if c < len(r)}
+        if len(vals) == 1:
+            m = next(iter(vals))
+            if m and m.lower() not in seen:
+                seen.add(m.lower())
+                out.append(m)
+    return out
+
+
+def apply_team_promotions(rows: List[List[str]], promotions: dict) -> List[List[str]]:
+    """
+    «Повышает» нейтральные материалы до командных: в строках СИНЕЙ команды
+    заменяет материал на его BLU-вариант (RED-строки не трогает).
+
+    Args:
+        rows:       строки $texturegroup.
+        promotions: {material_lower: blue_variant_name}.
+
+    Returns:
+        Новые строки (копия). Если команд-эталон не найден или promotions пуст —
+        возвращает копию без изменений.
+    """
+    base = [list(r) for r in rows]
+    if not promotions:
+        return base
+    ref = team_reference(rows)
+    if not ref:
+        return base
+    col, blue_val = ref
+    bl = blue_val.lower()
+    out: List[List[str]] = []
+    for r in base:
+        is_blue = col < len(r) and r[col].lower() == bl
+        if is_blue:
+            out.append([promotions.get(c.lower(), c) for c in r])
+        else:
+            out.append(list(r))
+    return out

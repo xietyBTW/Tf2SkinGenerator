@@ -401,7 +401,17 @@ class SettingsPanel(QWidget):
         self.extract_model_button.setMinimumWidth(0)
         self.extract_model_button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         main_settings_layout.addWidget(self.extract_model_button)
-        
+
+        # Кнопка генерации UV-шаблона по запросу (без полной сборки)
+        self.export_uv_button = QPushButton(
+            self.t.get('export_uv', 'Export UV Template (PNG)')
+        )
+        self.export_uv_button.setStyleSheet(self.styles['button_secondary'])
+        self.export_uv_button.setMinimumHeight(40)
+        self.export_uv_button.setMinimumWidth(0)
+        self.export_uv_button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        main_settings_layout.addWidget(self.export_uv_button)
+
         # Кнопка извлечения оригинальной текстуры
         self.extract_texture_button = QPushButton(self.t.get('extract_texture', 'Extract Original Texture'))
         self.extract_texture_button.setStyleSheet(self.styles['button_secondary'])
@@ -577,7 +587,20 @@ class SettingsPanel(QWidget):
         self.uv_layout_widget = QWidget()  # Сохраняем ссылку для скрытия/показа
         self.uv_layout_widget.setLayout(uv_layout_row)
         self.advanced_group.addWidget(self.uv_layout_widget)
-        
+
+        # Изоляция плеч вьюмодели (только для режимов рук)
+        self.isolate_shoulders_checkbox = QCheckBox(
+            self.t.get('isolate_shoulders', 'Изолировать плечи (вьюмодель)')
+        )
+        self.isolate_shoulders_checkbox.setStyleSheet(compact_checkbox_style)
+        self.isolate_shoulders_checkbox.setToolTip(
+            self.t.get('isolate_shoulders_tip',
+                       'Плечи/тело руки переименовываются в уникальный материал — '
+                       'правка не затронет мирового персонажа. Доступно для рук.')
+        )
+        self.isolate_shoulders_checkbox.setVisible(False)
+        self.advanced_group.addWidget(self.isolate_shoulders_checkbox)
+
         # Обновляем разрешение UV при изменении разрешения текстуры
         self.radio_256.toggled.connect(self._update_uv_resolution_label)
         self.radio_512.toggled.connect(self._update_uv_resolution_label)
@@ -662,6 +685,13 @@ class SettingsPanel(QWidget):
 
     def is_model_ready_checked(self) -> bool:
         return self._model_ready_checked
+
+    def is_isolate_shoulders_checked(self) -> bool:
+        # Не используем isVisible(): в свёрнутом аккордеоне «Дополнительно» он даёт
+        # False даже у отмеченной галочки. Галочка сбрасывается в
+        # apply_mode_restrictions при выходе из режима рук, поэтому isChecked() точен.
+        cb = getattr(self, 'isolate_shoulders_checkbox', None)
+        return bool(cb and cb.isChecked())
 
     def reset_build_options(self, *, emit: bool = False) -> None:
         changed_replace = self._replace_model_checked
@@ -764,6 +794,12 @@ class SettingsPanel(QWidget):
                 self.gamma_value_input.setEnabled(
                     hasattr(self, 'option_gamma') and self.option_gamma.isChecked()
                 )
+
+        # ── Изоляция плеч: только для режимов рук ─────────────────────────── #
+        if hasattr(self, 'isolate_shoulders_checkbox'):
+            self.isolate_shoulders_checkbox.setVisible(is_hands)
+            if not is_hands and self.isolate_shoulders_checkbox.isChecked():
+                self.isolate_shoulders_checkbox.setChecked(False)
 
         # ── 4. UV Layout ─────────────────────────────────────────────────── #
         # Видима только для обычного оружия; CritHIT, руки и скины персонажей скрывают
@@ -904,6 +940,7 @@ class SettingsPanel(QWidget):
         self.expert_button.clicked.connect(self.expert_mode_triggered)
         self.button.clicked.connect(self.build_vpk)
         self.extract_model_button.clicked.connect(self.extract_model_triggered)
+        self.export_uv_button.clicked.connect(self.export_uv_triggered)
         self.extract_texture_button.clicked.connect(self.extract_texture_triggered)
         self.merge_vpk_button.clicked.connect(self.merge_vpk_triggered)
         self.filename_input.textChanged.connect(self.validate_vpk_name)
@@ -1199,6 +1236,11 @@ class SettingsPanel(QWidget):
         if hasattr(self.parent, 'extract_original_model'):
             self.parent.extract_original_model()
     
+    def export_uv_triggered(self):
+        """Обработка нажатия кнопки генерации UV-шаблона"""
+        if hasattr(self.parent, 'export_uv_template'):
+            self.parent.export_uv_template()
+
     def extract_texture_triggered(self):
         """Обработка нажатия кнопки извлечения текстуры"""
         if hasattr(self.parent, 'extract_original_texture'):
@@ -1263,6 +1305,10 @@ class SettingsPanel(QWidget):
         self.button.setText(self.t.get('build', 'Собрать VPK'))
         if hasattr(self, 'extract_model_button'):
             self.extract_model_button.setText(self.t.get('extract_model', 'Extract Original Model (SMD)'))
+            self.export_uv_button.setText(self.t.get('export_uv', 'Export UV Template (PNG)'))
+            if hasattr(self, 'isolate_shoulders_checkbox'):
+                self.isolate_shoulders_checkbox.setText(
+                    self.t.get('isolate_shoulders', 'Изолировать плечи (вьюмодель)'))
         self.filename_input.setPlaceholderText(self.t.get('placeholder', 'Имя VPK'))
         
         # Обновляем метки

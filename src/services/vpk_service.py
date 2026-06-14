@@ -1475,6 +1475,9 @@ class VPKService:
         skin_build_data = r.skin_build_data
         replace_keep_materials = r.replace_keep_materials
         custom_qc_text = r.custom_qc_text
+        isolate_shoulders = r.isolate_shoulders
+        panel_blu_textures = r.panel_blu_textures
+        logger.info(f"[BUILD] режим={r.mode!r}, isolate_shoulders={isolate_shoulders}")
 
         from src.data.translations import TRANSLATIONS
         t = TRANSLATIONS.get(language, TRANSLATIONS['en'])
@@ -1561,6 +1564,8 @@ class VPKService:
                 skin_build_data=skin_build_data,
                 replace_keep_materials=replace_keep_materials,
                 custom_qc_text=custom_qc_text,
+                isolate_shoulders=isolate_shoulders,
+                panel_blu_textures=panel_blu_textures,
                 progress_callback=progress_callback,
                 cancel_callback=cancel_callback,
             )
@@ -1719,6 +1724,8 @@ class VPKService:
         skin_build_data: Optional[dict] = None,  # стили кастомной модели → $texturegroup + варианты
         replace_keep_materials: bool = False,  # сохранить материалы пользовательской модели (многотекстурная/«готовая»)
         custom_qc_text: Optional[str] = None,  # отредактированный пользователем QC («готовая» модель)
+        isolate_shoulders: bool = False,  # руки: изолировать плечи/тело вьюмодели (переименование материала)
+        panel_blu_textures: Optional[dict] = None,  # {mat: path} BLU-слотов (руки: промоушен нейтральных в командные)
     ) -> Tuple[bool, str]:
         """
         Главная функция: делает из картинки VPK файл.
@@ -1971,6 +1978,7 @@ class VPKService:
                     # Проблема: QC руки инженера (c_engineer_arms) в column 0 содержит "engineer_red"
                     # (текстуру ТЕЛА), а не текстуру руки — без фильтрации картинка
                     # пользователя заменила бы всё тело персонажа.
+                    _orig_main_pre_restrict = texture_filename  # col0 (может быть плечи)
                     if mode in HAND_MODE_KEYS:
                         from src.data.player_hands import get_hand_textures as _ght_hands
                         from src.services.qc_skin_parser import restrict_to_materials
@@ -1986,6 +1994,169 @@ class VPKService:
                             f"[HANDS] texture_filename={texture_filename!r}, "
                             f"extra_materials={extra_materials}, blu_row={blu_row}"
                         )
+
+                    # ── Изоляция плеч вьюмодели (опционально) ────────────────────
+                    # Материал плеч/тела arms-модели общий с мировым персонажем.
+                    # Переименовываем его на уникальный (engineer_red → vm_engineer_red)
+                    # в $texturegroup ДО компиляции: перекомпилированная модель станет
+                    # ссылаться на новый материал, а мир останется на старом. Позже
+                    # запишем переименованный материал отдельным блоком.
+                    _shoulder_iso = []   # [(new_name, orig_name, source_path|None)]
+                    if mode in HAND_MODE_KEYS:
+                        from src.services.qc_skin_parser import detect_shoulder_materials
+                        from src.data.material_filter import is_editable_material as _is_edit_sh
+                        _whitelist = [n for _, n in _ght_hands(mode)]
+                        # Материалы РЕАЛЬНОГО меша (из reference SMD), а не полная
+                        # skin-таблица red_row (там варианты/ганслингер/blue).
+                        _ref_smd = VPKService._find_decompiled_reference_smd(
+                            qc_path, weapon_key, ctx.decompile_dir
+                        )
+                        _mesh_mats = SMDService.ordered_unique_materials(_ref_smd) if _ref_smd else []
+                        _shoulders = detect_shoulder_materials(
+                            _mesh_mats or tg_structure.get('red_row', []), _whitelist
+                        )
+                        _shoulders = [s for s in _shoulders if _is_edit_sh(s)]
+
+                        # Источник текстуры каждого плеча: карточка из panel_extra
+                        # ИЛИ image_path (если плечи были col0/«главной» — тогда их
+                        # текстура ушла в from_path и была выкинута из panel_extra).
+                        _pet = panel_extra_textures or {}
+                        def _shoulder_src(s):
+                            v = _pet.get(s)
+                            if not v:
+                                _sl = s.lower()
+                                v = next((vv for kk, vv in _pet.items() if kk.lower() == _sl), None)
+                            if v and os.path.isfile(v):
+                                return v
+                            if (s.lower() == str(_orig_main_pre_restrict).lower()
+                                    and image_path and image_path != EXTRA_TEX_USE_GAME_ORIGINAL
+                                    and os.path.isfile(str(image_path))):
+                                return image_path
+                            return None
+                        _srcs = {s: _shoulder_src(s) for s in _shoulders}
+                        _has_user_shoulder = any(_srcs.values())
+                        _do_iso = bool(_shoulders) and (isolate_shoulders or _has_user_shoulder)
+                        logger.info(
+                            f"[SHOULDER ISO] флаг={isolate_shoulders}, плечи={_shoulders}, "
+                            f"источники={ {s: bool(p) for s, p in _srcs.items()} }, изолируем={_do_iso}"
+                        )
+                        if not _do_iso:
+                            _shoulders = []
+
+                        # ── Команд-промоушен нейтральных материалов (через RED/BLU
+                        # переключатель = групповая логика): синие переопределения
+                        # из skin_build_data → командные варианты. ──
+                        _promo = {}            # {mat_lower: variant_name}
+                        _variant_entries = []  # [(variant, orig_mat, src_path)]
+                        _shoulder_blue_user = {}  # {red_shoulder_lower: blue_path} — правка синих плеч (из главной BLU)
+                        # Промоушен: НЕЙТРАЛЬНЫЙ материал (нет своего blue-варианта в
+                        # blu_row) с загруженной СИНЕЙ текстурой → делаем командным.
+                        # Уже-командные (medic_hands_red→medic_hands_blue в blu_row) и
+                        # плечи — НЕ трогаем (их ведёт нативный BLU-блок / изоляция).
+                        if panel_blu_textures:
+                            from src.services import qc_skin_parser as _qsp
+                            _rows_now = ModelBuildService._parse_texturegroup_rows(qc_path) or []
+                            _neutral = {m.lower() for m in _qsp.neutral_materials(_rows_now)}
+                            _sh_set = {s.lower() for s in _shoulders}
+                            for _m, _bp in panel_blu_textures.items():
+                                _ml = _m.lower()
+                                if (_ml in _neutral and _ml not in _sh_set
+                                        and _bp and os.path.isfile(str(_bp))):
+                                    _var = (_m[:-4] + '_blue') if _ml.endswith('_red') else (_m + '_blue')
+                                    _var = SMDService._sanitize_material_name(_var)
+                                    _promo[_ml] = _var
+                                    _variant_entries.append((_var, _m, _bp))
+                            if _promo:
+                                logger.info(f"[TEAM PROMO] нейтральные → командные: {_promo}")
+
+                        if _shoulders or _promo:
+                            _rename = {
+                                s: SMDService._sanitize_material_name(f"vm_{s}")
+                                for s in _shoulders
+                            }
+                            # ── Синяя команда: BLU-вариант плеча по соглашению имён
+                            # (engineer_red → engineer_blue); фолбэк — та же колонка
+                            # blu-строки texturegroup. Тоже изолируем (vm_engineer_blue),
+                            # иначе синий игрок увидит оригинал/фиолет. ──
+                            _red_row = tg_structure.get('red_row', []) or []
+                            _blu_row = tg_structure.get('blu_row', []) or []
+                            _blue_iso = []   # [(vm_blue, orig_blue, is_main, red_shoulder)]
+                            for s in _shoulders:
+                                _sl = s.lower()
+                                _bv = None
+                                if _sl.endswith('_red'):
+                                    _bv = s[:-4] + '_blue'
+                                else:
+                                    _col = next((i for i, m in enumerate(_red_row) if m.lower() == _sl), None)
+                                    if _col is not None and _col < len(_blu_row):
+                                        _cand = _blu_row[_col]
+                                        if _cand and _cand.lower() != _sl:
+                                            _bv = _cand
+                                if not _bv or _bv.lower() == _sl:
+                                    continue   # команд-нейтральный материал
+                                _rename[_bv] = SMDService._sanitize_material_name(f"vm_{_bv}")
+                                _blue_iso.append((_rename[_bv], _bv,
+                                                  s.lower() == str(_orig_main_pre_restrict).lower(),
+                                                  s))
+
+                            _rows = ModelBuildService._parse_texturegroup_rows(qc_path) \
+                                or [tg_structure.get('red_row', [])]
+                            # Промоушен нейтральных в командные (синие строки → варианты),
+                            # затем переименование плеч на vm_*.
+                            if _promo:
+                                from src.services.qc_skin_parser import apply_team_promotions
+                                _rows = apply_team_promotions(_rows, _promo)
+                            _tg = ModelBuildService.generate_renamed_texturegroup(_rows, _rename)
+                            if _tg:
+                                ModelBuildService.replace_texturegroup_in_qc(qc_path, _tg)
+                            # ГЛАВНОЕ: studiomdl берёт имя материала skin 0 из SMD,
+                            # поэтому переименовываем материал в самих SMD (reference
+                            # + bodygroup), иначе модель ссылается на старое имя и
+                            # текстура становится фиолетовой.
+                            _smds = []
+                            if _ref_smd:
+                                _smds.append(_ref_smd)
+                            try:
+                                _smds += ModelBuildService.extract_extra_body_smds(qc_path, weapon_key) or []
+                            except Exception:
+                                pass
+                            _rmap_smd = {s.lower(): _rename[s] for s in _shoulders}
+                            for _sp in _smds:
+                                try:
+                                    _n = SMDService.rename_materials_in_smd(_sp, _rmap_smd)
+                                    if _n:
+                                        logger.info(f"[SHOULDER ISO] SMD {os.path.basename(_sp)}: заменено {_n} материалов")
+                                except Exception as _e:
+                                    logger.warning(f"[SHOULDER ISO] не удалось переименовать в {_sp}: {_e}")
+                            _shoulder_iso = [(_rename[s], s, _srcs[s]) for s in _shoulders]
+                            # Синие плечи: источник — пользовательская BLU-картинка
+                            # (если плечи были главной) либо оригинал {orig_blue} из игры.
+                            _blue_main_src = (
+                                blu_image_path
+                                if (blu_image_path and blu_image_path != EXTRA_TEX_USE_GAME_ORIGINAL
+                                    and os.path.isfile(str(blu_image_path)))
+                                else None
+                            )
+                            for _vm_blue, _orig_blue, _is_main, _red_sh in _blue_iso:
+                                # Приоритет: правка синих плеч из карточки (skin_build_data)
+                                # → главная BLU-картинка → оригинал {orig_blue} из игры.
+                                _bsrc = _shoulder_blue_user.get(_red_sh.lower())
+                                if not _bsrc and _is_main:
+                                    _bsrc = _blue_main_src
+                                _shoulder_iso.append((_vm_blue, _orig_blue, _bsrc))
+                            if _blue_iso:
+                                logger.info(f"[SHOULDER ISO] синие плечи: {[b[0] for b in _blue_iso]}")
+                            # Командные варианты нейтральных (из «+») — пишем их VTF/VMT.
+                            for _var, _orig_m, _vsrc in _variant_entries:
+                                _shoulder_iso.append((_var, _orig_m, _vsrc))
+                            if _variant_entries:
+                                logger.info(f"[TEAM PROMO] варианты записаны: {[v[0] for v in _variant_entries]}")
+                            logger.info(f"[SHOULDER ISO] переименованы плечи: {_rename}")
+                            # Если текстура плеч пришла как image_path (главная) —
+                            # НЕ даём записать её на руку: главная уйдёт на оригинал.
+                            if any(p is not None and p == image_path for p in _srcs.values()):
+                                image_path = EXTRA_TEX_USE_GAME_ORIGINAL
+                                logger.info("[SHOULDER ISO] главная текстура (плечи) перенаправлена в vm_*; руке — оригинал")
 
                     # Исключаем служебные материалы (глаза/зубы/sheen-оверлеи) —
                     # для них не нужно спрашивать текстуру при сборке. Тот же фильтр,
@@ -2007,7 +2178,11 @@ class VPKService:
                     # производные из него BLU/extra-материалы и команду — мы
                     # сгенерируем свою группу и варианты ниже. Меш-материалы базы
                     # приходят отдельно через panel_extra_textures.
-                    _has_skins = bool(skin_build_data and skin_build_data.get('tg_overrides'))
+                    # Для рук $texturegroup уже сгенерирован выше (изоляция плеч +
+                    # промоушен): vm_* для плеч + _blu варианты в синих строках.
+                    # Старый «кастомный» SKIN BUILD путь его перезатёр бы — отключаем.
+                    _has_skins = (bool(skin_build_data and skin_build_data.get('tg_overrides'))
+                                  and mode not in HAND_MODE_KEYS)
                     # Для «готовой» кастомной модели (keep_materials) ИГРОВОЙ
                     # $texturegroup неприменим ВСЕГДА — у меша свои материалы
                     # (c_sd_cleaver/mouth/lefteye…), а игровые имена (c_scattergun,
@@ -2342,7 +2517,48 @@ class VPKService:
                             _extra_fps = animated_fps
                         if _extra_fps:
                             VMTService.enable_animated_basetexture(str(extra_vmt_path), _extra_fps)
-                    
+
+                    # === Изолированные плечи вьюмодели ===
+                    # Пишем переименованный материал плеч (vm_<orig>) под главным
+                    # console-путём. Источник: пользовательская текстура (ключ —
+                    # ОРИГИНАЛЬНОЕ имя материала) либо оригинал тела из игры.
+                    for _new_name, _orig_name, _sh_src in _shoulder_iso:
+                        _sh_vtf = vtf_output_path / f"{_new_name}.vtf"
+                        _sh_vmt = vtf_output_path / f"{_new_name}.vmt"
+                        # Источник уже разрешён при детекте (карточка/image_path/BLU);
+                        # без источника — берём оригинал из игры (без лишних диалогов).
+                        try:
+                            if _sh_src and os.path.isfile(_sh_src):
+                                if str(_sh_src).lower().endswith('.vtf'):
+                                    copy_file_safe(_sh_src, _sh_vtf)
+                                else:
+                                    _sh_png = vtf_output_path / f"{_new_name}.png"
+                                    VPKService._process_image(_sh_src, _sh_png, size)
+                                    _vf, _vo = TextureService.resolve_vtf_flags_and_options(flags, vtf_options, drop_normal=True)
+                                    VPKService._create_vtf(str(_sh_png), str(vtf_output_path), format_type, _vf, _vo)
+                                    if _sh_png.exists():
+                                        _sh_png.unlink()
+                            else:
+                                # По умолчанию — оригинальная текстура тела из игры
+                                # (по ОРИГИНАЛЬНОМУ имени), чтобы плечи не стали фиолетовыми.
+                                _orig_vtf = VPKService._get_original_vtf_bytes(
+                                    _orig_name, original_cdmaterials_paths,
+                                    tf2_textures_vpk, tf2_misc_vpk
+                                )
+                                if _orig_vtf:
+                                    with open(_sh_vtf, "wb") as _f:
+                                        _f.write(_orig_vtf)
+                                else:
+                                    ctx.warn(
+                                        f"Не найдена оригинальная текстура плеч '{_orig_name}' — "
+                                        f"плечи вьюмодели могут быть фиолетовыми."
+                                    )
+                                    continue
+                            VPKService._write_material_vmt(_sh_vmt, vmt_path, patched_cdmaterials_path, _new_name)
+                            logger.info(f"[SHOULDER ISO] записан материал плеч: {_new_name}")
+                        except Exception as _e:
+                            logger.error(f"[SHOULDER ISO] ошибка записи {_new_name}: {_e}", exc_info=True)
+
                     # === Создаем текстуры для BLU команды ===
                     # BLU - это отдельная строка (row 1) в $texturegroup
                     # Для каждого материала в BLU строке спрашиваем отдельное изображение,

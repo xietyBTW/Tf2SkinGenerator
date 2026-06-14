@@ -330,6 +330,37 @@ class ModelBuildService:
         return '\n'.join(lines) + '\n'
 
     @staticmethod
+    def generate_renamed_texturegroup(rows: List[List[str]],
+                                      rename_map: dict) -> str:
+        """
+        Генерирует `$texturegroup` с ПЕРЕИМЕНОВАННЫМИ материалами (в т.ч. в skin 0).
+
+        Используется для изоляции плеч вьюмодели: материал, общий с миром
+        (`engineer`), переименовываем в уникальный (`vm_engineer`) во ВСЕХ строках
+        этого texturegroup — тогда arms-модель ссылается на новый путь, а мировой
+        персонаж остаётся на старом.
+
+        Args:
+            rows:       строки существующего texturegroup (или [[mesh_materials]],
+                        если группы не было) — порядок столбцов = порядок материалов.
+            rename_map: {orig_material_lower: new_name}. Ключи в нижнем регистре.
+
+        Returns:
+            Текст блока `$texturegroup` (с \n) или '' если переименовывать нечего.
+        """
+        if not rows:
+            return ''
+        rm = {k.lower(): v for k, v in (rename_map or {}).items()}
+        lines = ['$texturegroup "skinfamilies"', '{']
+        for row in rows:
+            names = [rm.get(m.lower(), m) for m in row]
+            # Source приводит пути материалов к lowercase; файлы пишем тоже в lower.
+            row_txt = ' '.join(f'"{n.lower()}"' for n in names)
+            lines.append(f'\t{{ {row_txt} }}')
+        lines.append('}')
+        return '\n'.join(lines) + '\n'
+
+    @staticmethod
     def extract_skin_info(qc_path: str) -> dict:
         """
         Читает $texturegroup игрового QC и возвращает инфу о скинах — для UI
