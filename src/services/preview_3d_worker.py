@@ -363,8 +363,10 @@ class Preview3DWorker(QThread):
             # это уже полный путь MDL, не ключ из WEAPON_MDL_PATHS).
             paths_to_try = [mdl_rel_hint]
         else:
+            from src.data.weapon_model_index import tf2_root_from_misc_vpk
+            _tf2_root = tf2_root_from_misc_vpk(self.misc_vpk_path)
             paths_to_try = ExtractModelService._build_paths_to_try(
-                self.mode, self.weapon_key
+                self.mode, self.weapon_key, _tf2_root
             )
 
         found_rel: Optional[str] = None

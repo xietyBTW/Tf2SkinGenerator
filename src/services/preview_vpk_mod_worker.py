@@ -554,8 +554,10 @@ class PreviewVpkModWorker(QThread):
         else:
             # Ищем MDL в игровом VPK
             fake_mode = f"scout_{weapon_key}"   # класс не важен, только weapon_key
+            from src.data.weapon_model_index import tf2_root_from_misc_vpk
+            _tf2_root = tf2_root_from_misc_vpk(self.misc_vpk_path)
             paths_to_try = ExtractModelService._build_paths_to_try(
-                fake_mode, weapon_key
+                fake_mode, weapon_key, _tf2_root
             )
 
             found_rel: Optional[str] = None

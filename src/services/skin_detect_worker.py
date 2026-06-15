@@ -118,7 +118,9 @@ class SkinDetectWorker(QThread):
         if self.mode == "hat" or self.mode in _PBK or self.weapon_key in PREVIEW_MDL_OVERRIDE:
             paths_to_try = [mdl_rel]
         else:
-            paths_to_try = ExtractModelService._build_paths_to_try(self.mode, self.weapon_key)
+            from src.data.weapon_model_index import tf2_root_from_misc_vpk
+            _tf2_root = tf2_root_from_misc_vpk(self.misc_vpk_path)
+            paths_to_try = ExtractModelService._build_paths_to_try(self.mode, self.weapon_key, _tf2_root)
 
         found_rel: Optional[str] = None
         for path in paths_to_try:

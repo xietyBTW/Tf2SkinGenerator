@@ -50,6 +50,7 @@ class VPKService:
         weapon_key: str,
         hat_mdl_path: Optional[str],
         t: dict,
+        tf2_root: Optional[str] = None,
     ) -> Tuple[List[str], Optional[str]]:
         """
         Строит список путей-кандидатов к MDL внутри игрового VPK.
@@ -87,6 +88,17 @@ class VPKService:
         _folder_suffix = f"/{weapon_key}/{weapon_key}.mdl"
         _flat_suffix = f"/{weapon_key}.mdl"
         paths_to_try = []
+
+        # Точный путь из items_game.txt (авторитетный) — первым кандидатом.
+        # Убирает зависимость от угадывания папок/префиксов и ручных оверрайдов.
+        if tf2_root:
+            try:
+                from src.data.weapon_model_index import resolve_weapon_mdl
+                _exact = resolve_weapon_mdl(weapon_key, tf2_root)
+                if _exact:
+                    paths_to_try.append(_exact)
+            except Exception as _e:
+                logger.debug(f"weapon index: {_e}")
 
         # workshop_partner → workshop → стандарт → c_items: путь с папкой и без
         for _candidate in (
@@ -1857,7 +1869,7 @@ class VPKService:
                 
                 # ── Строим список путей для поиска MDL ───────────────────────────── #
                 paths_to_try, _mdl_path_error = VPKService._build_mdl_search_paths(
-                    mode, weapon_key, hat_mdl_path, t
+                    mode, weapon_key, hat_mdl_path, t, tf2_root_dir
                 )
                 if _mdl_path_error:
                     ctx.cleanup(on_error=True, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)

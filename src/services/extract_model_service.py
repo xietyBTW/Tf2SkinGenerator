@@ -44,9 +44,19 @@ class ExtractModelService:
         return build_hat_mdl_candidates(mdl_rel)
 
     @staticmethod
-    def _build_paths_to_try(mode: str, weapon_key: str) -> list[str]:
+    def _build_paths_to_try(mode: str, weapon_key: str, tf2_root: str = None) -> list[str]:
         base_path_from_config = WEAPON_MDL_PATHS[weapon_key]
         paths_to_try = []
+
+        # Точный путь из items_game.txt (авторитетный) — первым кандидатом.
+        if tf2_root:
+            try:
+                from src.data.weapon_model_index import resolve_weapon_mdl
+                _exact = resolve_weapon_mdl(weapon_key, tf2_root)
+                if _exact and _exact not in paths_to_try:
+                    paths_to_try.append(_exact)
+            except Exception:
+                pass
 
         workshop_partner_path_with_folder = base_path_from_config.replace(
             "models/weapons/", "models/workshop_partner/weapons/"
@@ -197,7 +207,7 @@ class ExtractModelService:
                 # Прямой MDL путь — как у шапок
                 paths_to_try = [weapon_key]
             else:
-                paths_to_try = ExtractModelService._build_paths_to_try(mode, weapon_key)
+                paths_to_try = ExtractModelService._build_paths_to_try(mode, weapon_key, tf2_root_dir)
             found_mdl_path = None
             last_error = None
             for idx, mdl_rel_path in enumerate(paths_to_try):
