@@ -12,7 +12,7 @@
 """
 
 from PySide6.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+    QVBoxLayout, QLabel, QPushButton,
     QTextEdit, QApplication, QSizePolicy,
 )
 from PySide6.QtCore import Qt

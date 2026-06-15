@@ -6,7 +6,7 @@ import os
 import shutil
 import threading
 from pathlib import Path
-from typing import Tuple, List, Optional, Dict, Any, Callable
+from typing import Tuple, List, Optional, Callable
 from .build_context import BuildContext, TextureBuildContext
 from .vmt_service import VMTService
 from .build_service import BuildService
@@ -26,12 +26,10 @@ from src.data.player_characters import (
     SPY_MASK_MODE_KEY,
     SPY_MDL_PATH,
     SPY_DISGUISE_MASKS,
-    SPY_MASK_VTF_NAMES,
 )
 from src.shared.logging_config import get_logger
-from src.shared.constants import ToolPaths, DirectoryPaths, EXTRA_TEX_USE_GAME_ORIGINAL
-from src.shared.exceptions import VPKCreationError
-from src.shared.file_utils import ensure_file_exists, ensure_directory_exists, copy_file_safe
+from src.shared.constants import DirectoryPaths, EXTRA_TEX_USE_GAME_ORIGINAL
+from src.shared.file_utils import ensure_directory_exists, copy_file_safe
 from src.shared.validators import validate_build_params
 
 logger = get_logger(__name__)
@@ -40,10 +38,6 @@ logger = get_logger(__name__)
 class VPKService:
     """Главный конвейер сборки VPK файлов. Детали ошибок — в логах."""
     
-    @staticmethod
-    def _get_vpk_tool() -> Path:
-        return ToolPaths.get_vpk_tool()
-
     @staticmethod
     def _build_mdl_search_paths(
         mode: str,
@@ -1093,7 +1087,7 @@ class VPKService:
                     except Exception as e:
                         logger.error(f"Ошибка при замене доп. части модели {extra_smd_name}: {e}", exc_info=True)
             else:
-                logger.debug(f"Нет callback для замены доп. частей модели, пропускаем")
+                logger.debug("Нет callback для замены доп. частей модели, пропускаем")
 
     @staticmethod
     def _build_extra_class_hat_models(
@@ -3029,7 +3023,6 @@ class VPKService:
         Это гарантирует что body-текстуры шпиона остаются из игры.
         """
         try:
-            is_ru = (language == 'ru')
             # Папка для текстур масок внутри vpkroot
             masks_dir = ctx.vpkroot_dir / "materials" / "models" / "player" / "spy"
             ensure_directory_exists(masks_dir)
@@ -3046,7 +3039,6 @@ class VPKService:
             any_created = False
 
             for cls_key, vtf_name, name_en, name_ru, btn in SPY_DISGUISE_MASKS:
-                display = name_ru if is_ru else name_en
                 mask_vtf_path = masks_dir / f"{vtf_name}.vtf"
                 mask_vmt_path = masks_dir / f"{vtf_name}.vmt"
 

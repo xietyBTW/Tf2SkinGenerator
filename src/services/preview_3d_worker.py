@@ -117,7 +117,7 @@ class Preview3DWorker(QThread):
             self.progress.emit(self._p['converting'])
             obj_path = os.path.join(self._preview_dir, "model.obj")
             from src.services.smd_to_obj_service import SmdToObjService
-            from src.data.player_hands import HAND_MODE_KEYS, HAND_MODES
+            from src.data.player_hands import HAND_MODE_KEYS
 
             # Ищем bodygroup SMDs в той же папке (например c_righthand_bodygroup.smd)
             bodygroup_smds = self._find_bodygroup_smds(smd_path)
@@ -405,7 +405,7 @@ class Preview3DWorker(QThread):
             decomp_dir = tempfile.mkdtemp(prefix="tf2sg_decomp_")
             logger.info(f"[3D] Запускаем Crowbar: mdl={mdl_file} → {decomp_dir}")
             ModelBuildService.decompile(mdl_file, decomp_dir, crowbar)
-            logger.info(f"[3D] Crowbar завершён успешно")
+            logger.info("[3D] Crowbar завершён успешно")
 
             cached_dir = decompile_cache.save_to_cache(
                 self.weapon_key, self.misc_vpk_path, found_rel, decomp_dir
@@ -446,7 +446,7 @@ class Preview3DWorker(QThread):
         if self.mode == SPY_MASK_MODE_KEY:
             mask_smd = os.path.join(directory, "spy_mask.smd")
             if os.path.exists(mask_smd):
-                logger.debug(f"[3D] spy_mask.smd найден")
+                logger.debug("[3D] spy_mask.smd найден")
                 return mask_smd
             # Fallback: ищем любой *mask*.smd
             mask_smds = [p for p in glob.glob(os.path.join(directory, "*mask*.smd"))
@@ -581,8 +581,6 @@ class Preview3DWorker(QThread):
         result: dict = {}
         try:
             import vpk as vpklib
-            from PIL import Image
-            from src.services.vtflib_wrapper import VTFLib
             from src.data.player_hands import HAND_MODE_KEYS, HAND_MODES
 
             # Открываем ОБА VPK: VTF обычно в textures, но VMT (для материалов,
@@ -684,8 +682,6 @@ class Preview3DWorker(QThread):
         result: dict = {}
         try:
             import vpk as vpklib
-            from src.services.vtflib_wrapper import VTFLib
-            from PIL import Image
 
             paks: list = []
             for vpk_path in [self.textures_vpk_path, self.misc_vpk_path]:
@@ -1059,8 +1055,6 @@ class Preview3DWorker(QThread):
 
         try:
             import vpk as vpklib
-            from src.services.vtflib_wrapper import VTFLib
-            from PIL import Image
 
             paks: list = []
             for vpk_path in [self.textures_vpk_path, self.misc_vpk_path]:
@@ -1166,8 +1160,6 @@ class Preview3DWorker(QThread):
 
         try:
             import vpk as vpklib
-            from src.services.vtflib_wrapper import VTFLib
-            from PIL import Image
 
             paks: list = []
             for vpk_path in [self.textures_vpk_path, self.misc_vpk_path]:

@@ -30,7 +30,7 @@ from typing import Dict, List, Optional
 from PySide6.QtCore import Qt, Signal, QThread
 from PySide6.QtGui import QPixmap, QImage
 from PySide6.QtWidgets import (
-    QFileDialog, QFrame, QGroupBox, QHBoxLayout, QLabel, QPushButton,
+    QFileDialog, QFrame, QHBoxLayout, QLabel, QPushButton,
     QScrollArea, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget,
 )
 
@@ -3444,7 +3444,7 @@ class PreviewPanel(QWidget):
         if not data_url:
             return
         try:
-            import base64 as _b64, tempfile
+            import base64 as _b64
             if ',' not in data_url:
                 return
             header, b64data = data_url.split(',', 1)

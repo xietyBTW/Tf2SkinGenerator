@@ -63,7 +63,6 @@ class HatTextureExtractWorker(QThread):
 
     def _extract(self) -> None:
         from src.services.tf2_paths import TF2Paths
-        from src.services import decompile_cache
         from src.services.preview_3d_worker import Preview3DWorker
 
         self.progress.emit(5, "Resolving TF2 paths...")

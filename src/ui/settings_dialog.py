@@ -5,7 +5,7 @@
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QLineEdit, QFileDialog, QComboBox, QCheckBox, QWidget, QFrame,
-    QScrollArea, QPlainTextEdit,
+    QPlainTextEdit,
 )
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices
@@ -346,15 +346,15 @@ class SettingsDialog(StyledDialog):
         )
         supp_btn = QPushButton(self.t.get('support', 'Open link'))
         supp_btn.setCursor(Qt.PointingHandCursor)
-        supp_btn.setStyleSheet(f"""
-            QPushButton {{
+        supp_btn.setStyleSheet("""
+            QPushButton {
                 color: #4e7baa;
                 background: transparent;
                 border: none;
                 font-size: 11.5px;
                 padding: 0;
-            }}
-            QPushButton:hover {{ color: #6a9ece; text-decoration: underline; }}
+            }
+            QPushButton:hover { color: #6a9ece; text-decoration: underline; }
         """)
         supp_btn.clicked.connect(self.open_support_link)
         supp_row.addWidget(supp_lbl)

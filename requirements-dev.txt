@@ -2,3 +2,4 @@
 pyinstaller>=5.13.0
 coverage>=7.6.0
 vulture>=2.11
+ruff>=0.15,<0.16

@@ -5,9 +5,9 @@
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QComboBox,
     QPushButton, QLineEdit, QRadioButton, QCheckBox, QButtonGroup,
-    QWidget, QSizePolicy, QFileDialog, QFrame, QApplication,
+    QWidget, QSizePolicy, QFrame,
 )
-from PySide6.QtCore import Qt, Signal, QTimer, QEvent, QPoint, QRect
+from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QDoubleValidator, QMouseEvent
 from src.data.translations import TRANSLATIONS
 from src.utils.themes import get_modern_styles
@@ -634,20 +634,7 @@ class SettingsPanel(QWidget):
             )
         )
         self.advanced_group.addWidget(self.clear_cache_button)
-        
-        # Настройки сборки моделей - УДАЛЕНО: перенесено в диалог настроек
-        # build_label = QLabel("Настройки сборки")
-        # build_label.setStyleSheet("font-weight: 500; font-size: 13px; color: #ccc; margin-top: 12px;")
-        # self.advanced_group.addWidget(build_label)
-        
-        # self.keep_temp_checkbox = QCheckBox("Сохранить временные файлы при ошибке")
-        # self.keep_temp_checkbox.stateChanged.connect(self.save_build_settings)
-        # self.advanced_group.addWidget(self.keep_temp_checkbox)
-        
-        # self.debug_mode_checkbox = QCheckBox("Режим отладки")
-        # self.debug_mode_checkbox.stateChanged.connect(self.save_build_settings)
-        # self.advanced_group.addWidget(self.debug_mode_checkbox)
-        
+
         # Добавляем accordion во второй контейнер
         advanced_container_layout.addWidget(self.advanced_group)
         
@@ -984,14 +971,6 @@ class SettingsPanel(QWidget):
                     self.uv_layout_checkbox.blockSignals(False)
                 QTimer.singleShot(0, reset_uv)
 
-    def _open_material_maps_dialog(self) -> None:
-        """Открывает диалог настройки файловых карт материала."""
-        from src.ui.material_maps_dialog import MaterialMapsDialog
-        dlg = MaterialMapsDialog(self.t, current=self._material_maps, parent=self)
-        if dlg.exec():
-            self._material_maps = dlg.get_maps()
-            self._refresh_material_maps_button()
-
     def _refresh_material_maps_button(self) -> None:
         """Подсветка кнопки + счётчик, если карты заданы."""
         if not hasattr(self, 'material_maps_button'):
@@ -1145,10 +1124,7 @@ class SettingsPanel(QWidget):
         self._edit_banner.setVisible(False)
         self.texture_edit_exited.emit()
 
-    def is_editing_texture(self) -> bool:
-        return self._edit_material is not None
-
-    def _on_edit_control_changed(self, *args) -> None:
+    def _on_edit_control_changed(self, *_args) -> None:
         """Изменение контрола в режиме редактирования → оверрайд материала."""
         if self._edit_material:
             self.texture_setting_changed.emit(self._edit_material, self._read_texture_controls())
@@ -1209,15 +1185,11 @@ class SettingsPanel(QWidget):
         }
     
     def load_config(self):
-        """Загружает настройки из конфига"""
-        config = AppConfig.load_config()
-        
-        # Загружаем настройки отладки и временных файлов - УДАЛЕНО: теперь загружаются в SettingsDialog
-        pass
-    
-    def save_build_settings(self):
-        """Сохраняет настройки сборки в конфиг"""
-        # Сохранение настроек бигда больше не производится здесь для чекбоксов отладки
+        """Загружает настройки из конфига.
+
+        Сейчас no-op: настройки отладки/временных файлов загружаются в SettingsDialog.
+        Метод сохранён, т.к. вызывается из __init__ и может снова понадобиться.
+        """
         pass
     
     def expert_mode_triggered(self):

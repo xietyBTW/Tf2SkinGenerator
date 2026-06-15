@@ -80,51 +80,6 @@ def get_player_body_extra_label(mode_key: str, vtf_name: str, language: str = "e
     return vtf_name
 
 
-# Маппинг mode_key → (player_key для WEAPON_TEXTURE_PATHS)
-_BODY_MODE_TO_PLAYER_KEY: Dict[str, str] = {
-    "scout_body":    "player_scout",
-    "soldier_body":  "player_soldier",
-    "pyro_body":     "player_pyro",
-    "demoman_body":  "player_demo",
-    "heavy_body":    "player_heavy",
-    "engineer_body": "player_engineer",
-    "medic_body":    "player_medic",
-    "sniper_body":   "player_sniper",
-    "spy_body":      "player_spy",
-}
-
-
-def get_player_body_textures(mode_key: str) -> List[Tuple[str, str]]:
-    """
-    Возвращает список (folder, vtf_name) основных текстур тела персонажа.
-
-    Используется в PlayerTextureBuildService как texture_getter.
-    Путь к VTF: materials/models/player/{folder}/{vtf_name}.vtf
-
-    Пример:
-        get_player_body_textures("spy_body")
-        → [("spy", "spy_red")]
-    """
-    from src.data.weapons import WEAPON_TEXTURE_PATHS
-
-    player_key = _BODY_MODE_TO_PLAYER_KEY.get(mode_key)
-    if not player_key:
-        return []
-
-    vtf_paths = WEAPON_TEXTURE_PATHS.get(player_key, [])
-    result: List[Tuple[str, str]] = []
-    for vtf_path in vtf_paths:
-        # Формат: "materials/models/player/{folder}/{vtf_name}.vtf"
-        # Нам нужны folder и vtf_name
-        parts = vtf_path.replace("\\", "/").split("/")
-        if len(parts) >= 2:
-            vtf_name = parts[-1].replace(".vtf", "")
-            folder = parts[-2]
-            result.append((folder, vtf_name))
-
-    return result
-
-
 # ──────────────────────────────────────────────────────────────────────────────
 # Маски маскировки шпиона
 # ──────────────────────────────────────────────────────────────────────────────

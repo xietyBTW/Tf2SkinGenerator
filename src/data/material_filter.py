@@ -25,10 +25,6 @@ DEFAULT_NON_EDITABLE_PATTERNS = (
     '_sheen', '_overlay', '_fresnel',
 )
 
-# Обратная совместимость со старым именем константы.
-NON_EDITABLE_MAT_PATTERNS = DEFAULT_NON_EDITABLE_PATTERNS
-
-
 def _user_patterns() -> list:
     """Пользовательские паттерны блэклиста из конфига (могут отсутствовать)."""
     try:

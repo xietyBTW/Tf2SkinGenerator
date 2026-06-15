@@ -4,14 +4,12 @@
 
 import os
 import shutil
-import subprocess
 from pathlib import Path
 from typing import List, Tuple, Dict, Optional, Callable
 from src.shared.logging_config import get_logger
-from src.shared.constants import ToolPaths, DirectoryPaths
+from src.shared.constants import DirectoryPaths
 from src.shared.file_utils import ensure_directory_exists, copy_file_safe
 from src.shared.validators import sanitize_path
-from src.shared.exceptions import VPKCreationError
 
 logger = get_logger(__name__)
 

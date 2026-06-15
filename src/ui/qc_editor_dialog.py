@@ -239,7 +239,7 @@ class QCLockEdit(QPlainTextEdit):
 
     # ── Защита от правки закрытых блоков ─────────────────────────────────── #
 
-    def _edit_blocked(self, key_text_changes: bool, is_backspace: bool, is_delete: bool) -> bool:
+    def _edit_blocked(self, is_backspace: bool, is_delete: bool) -> bool:
         locked = self.locked_line_numbers()
         if not locked:
             return False
@@ -271,12 +271,12 @@ class QCLockEdit(QPlainTextEdit):
             or (event.text() and event.text().isprintable())
             or key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Tab)
         )
-        if modifies and self._edit_blocked(True, is_backspace, is_delete):
+        if modifies and self._edit_blocked(is_backspace, is_delete):
             return  # блок закрыт — игнорируем правку
         super().keyPressEvent(event)
 
     def insertFromMimeData(self, source):
-        if self._edit_blocked(True, False, False):
+        if self._edit_blocked(False, False):
             return
         super().insertFromMimeData(source)
 

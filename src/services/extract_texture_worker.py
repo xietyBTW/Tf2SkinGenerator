@@ -6,7 +6,6 @@ from PySide6.QtCore import QThread, Signal
 from typing import List, Optional, Tuple
 from src.services.tf2_vpk_extract_service import TF2VPKExtractService
 from src.shared.logging_config import get_logger
-from src.data.translations import TRANSLATIONS
 
 logger = get_logger(__name__)
 

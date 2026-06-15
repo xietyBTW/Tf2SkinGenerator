@@ -4,7 +4,7 @@ import subprocess
 from pathlib import Path
 from typing import List, Tuple, Optional
 from PIL import Image, ImageOps, ImageFilter
-from src.shared.constants import ToolPaths
+from src.shared.constants import ToolPaths, ToolTimeouts
 from src.shared.logging_config import get_logger
 from src.services.vtflib_wrapper import VTFLib, VTFImageFormat, VTFImageFlags
 
@@ -416,8 +416,15 @@ class TextureService:
         logger.debug(f"Формат: {vtf_format} (исходный: {format_type}), опции: {options}, флаги: {flags}")
         # Без check=True: при ненулевом коде формируем информативное исключение
         # с выводом VTFCmd, а не сырой CalledProcessError.
-        result = subprocess.run(vtf_args, capture_output=True, text=True,
-                                creationflags=subprocess.CREATE_NO_WINDOW)
+        from src.shared.exceptions import VTFCreationError
+        try:
+            result = subprocess.run(vtf_args, capture_output=True, text=True,
+                                    creationflags=subprocess.CREATE_NO_WINDOW,
+                                    timeout=ToolTimeouts.VTF)
+        except subprocess.TimeoutExpired:
+            raise VTFCreationError(
+                ' '.join(vtf_args), "",
+                f"VTFCmd timed out after {ToolTimeouts.VTF}s"
+            )
         if result.returncode != 0:
-            from src.shared.exceptions import VTFCreationError
             raise VTFCreationError(' '.join(vtf_args), result.stdout, result.stderr)

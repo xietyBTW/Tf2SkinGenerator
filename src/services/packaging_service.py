@@ -2,7 +2,7 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
-from src.shared.constants import ToolPaths
+from src.shared.constants import ToolPaths, ToolTimeouts
 from src.shared.file_utils import ensure_directory_exists
 from src.shared.logging_config import get_logger
 
@@ -73,13 +73,19 @@ class PackagingService:
             temp_vpk_path.unlink()
 
         logger.info("Запуск vpk.exe для создания VPK...")
-        result = subprocess.run(
-            [str(ToolPaths.get_vpk_tool()), "-v", str(vpkroot_dir.resolve())],
-            cwd=str(vpkroot_parent),
-            capture_output=True,
-            text=True,
-            creationflags=subprocess.CREATE_NO_WINDOW,
-        )
+        try:
+            result = subprocess.run(
+                [str(ToolPaths.get_vpk_tool()), "-v", str(vpkroot_dir.resolve())],
+                cwd=str(vpkroot_parent),
+                capture_output=True,
+                text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+                timeout=ToolTimeouts.VPK,
+            )
+        except subprocess.TimeoutExpired:
+            raise VPKCreationError(
+                "", f"vpk.exe timed out after {ToolTimeouts.VPK}s"
+            )
 
         logger.debug(f"vpk.exe завершился с кодом: {result.returncode}")
         if result.stdout:

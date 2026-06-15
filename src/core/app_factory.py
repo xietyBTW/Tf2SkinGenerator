@@ -102,7 +102,7 @@ class AppFactory:
         
         if theme_name not in ['dark', 'blue']:
             theme_name = 'dark'
-            logger.warning(f"Неизвестная тема в конфиге, используется темная")
+            logger.warning("Неизвестная тема в конфиге, используется темная")
         
         logger.info(f"Применяется тема: {theme_name}")
         apply_theme(app, theme_name)

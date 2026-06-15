@@ -9,7 +9,7 @@ BuildWorker → build_with_progress (и дублировались в build_kwar
 функции UI-потока, их передают отдельно.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
 
 

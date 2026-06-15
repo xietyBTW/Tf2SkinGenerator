@@ -3,14 +3,14 @@
 """
 
 import os
-from typing import Optional, Tuple
+from typing import Optional
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QMessageBox, QFileDialog, QCheckBox, QPushButton, QDialog, QScrollArea,
     QFrame,
 )
 from PySide6.QtCore import QUrl, Qt
-from PySide6.QtGui import QPixmap, QDesktopServices, QMouseEvent, QIcon
+from PySide6.QtGui import QDesktopServices, QMouseEvent, QIcon
 
 from src.ui.preview_panel import PreviewPanel
 from src.ui.progress_mixin import ProgressDialogMixin
@@ -19,7 +19,7 @@ from src.ui.vmt_editor import VMTEditorDialog
 from src.ui.settings_dialog import SettingsDialog
 from src.data.translations import TRANSLATIONS
 from src.data.weapons import (
-    TF2_WEAPONS, TF2_CLASSES, WEAPON_TYPES, WEAPON_SLOT_TYPES, SPECIAL_MODES,
+    TF2_WEAPONS, TF2_CLASSES, WEAPON_SLOT_TYPES, SPECIAL_MODES,
     get_weapon_name, get_weapon_type_name, get_weapon_type_key, weapon_key_from_mode
 )
 from src.shared.logging_config import get_logger
@@ -1396,7 +1396,6 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
         from src.services.tf2_paths import TF2Paths
         from src.services.preview_3d_worker import Preview3DWorker
         from src.services import decompile_cache
-        import glob, tempfile
 
         # ── 1. Ищем QC в кэше декомпиляции ──────────────────────────────── #
         try:
@@ -2723,7 +2722,7 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
         body.addWidget(edit)
 
         err_lbl = QLabel("")
-        err_lbl.setStyleSheet(f"color:#c04040; font-size:10px;")
+        err_lbl.setStyleSheet("color:#c04040; font-size:10px;")
         body.addWidget(err_lbl)
 
         root.addLayout(body)
@@ -2761,7 +2760,6 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
         """Открывает диалог объединения VPK файлов"""
         from src.ui.merge_vpk_dialog import MergeVPKDialog
         from src.services.merge_vpk_service import MergeVPKService
-        from src.shared.validators import validate_vpk_filename
         
         # Открываем диалог выбора модов
         dialog = MergeVPKDialog(self)

@@ -206,7 +206,7 @@ class BuildWorker(QThread):
 
     def _texture_mismatch_callback(self, warning_message: str) -> bool:
         """Показывает предупреждение о несовпадении текстур, ожидает решения пользователя."""
-        logger.debug(f"Запрос подтверждения: несовпадение текстур")
+        logger.debug("Запрос подтверждения: несовпадение текстур")
         result = self._emit_and_wait(
             self._texture_mismatch_mutex,
             self._texture_mismatch_condition,

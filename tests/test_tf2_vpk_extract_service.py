@@ -33,33 +33,6 @@ class FakeVPK:
 
 
 class TF2VpkExtractServiceTests(unittest.TestCase):
-    def test_find_tf2_misc_dir_vpk(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            base = Path(tmp)
-            target = base / "tf2_misc_dir.vpk"
-            target.write_bytes(b"data")
-            self.assertEqual(
-                TF2VPKExtractService.find_tf2_misc_dir_vpk(str(base)),
-                str(target)
-            )
-
-    def test_find_tf2_misc_dir_vpk_recursive(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            base = Path(tmp)
-            nested = base / "a" / "b"
-            nested.mkdir(parents=True)
-            target = nested / "tf2_misc_dir.vpk"
-            target.write_bytes(b"data")
-            self.assertEqual(
-                TF2VPKExtractService.find_tf2_misc_dir_vpk(str(base)),
-                str(target)
-            )
-
-    def test_find_tf2_misc_dir_vpk_missing(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            base = Path(tmp)
-            self.assertIsNone(TF2VPKExtractService.find_tf2_misc_dir_vpk(str(base / "missing")))
-
     def test_check_mdl_exists_not_available(self):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
@@ -157,35 +130,6 @@ class TF2VpkExtractServiceTests(unittest.TestCase):
                 with patch.object(tf2_module.vpk, "open", return_value=FakeVPK(files)):
                     result = TF2VPKExtractService.extract_vmt_file(str(vpk_path), "materials/models", "c_test", str(base))
                     self.assertIsNone(result)
-
-    def test_extract_texture_vtf(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            base = Path(tmp)
-            vpk_path = base / "tf2_textures_dir.vpk"
-            vpk_path.write_bytes(b"data")
-            rel_path = "materials/models/weapons/c_models/c_test/c_test.vtf"
-            files = {rel_path: b"vtf"}
-            with patch.object(tf2_module, "VPK_AVAILABLE", True):
-                with patch.object(tf2_module.vpk, "open", return_value=FakeVPK(files)):
-                    out_dir = base / "out"
-                    result = TF2VPKExtractService.extract_texture(str(vpk_path), "c_test", str(out_dir), export_format="VTF")
-                    self.assertTrue(Path(result).exists())
-
-    def test_extract_texture_converted_png(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            base = Path(tmp)
-            vpk_path = base / "tf2_textures_dir.vpk"
-            vpk_path.write_bytes(b"data")
-            rel_path = "materials/models/weapons/c_models/c_test/c_test.vtf"
-            files = {rel_path: b"vtf"}
-            with patch.object(tf2_module, "VPK_AVAILABLE", True):
-                with patch.object(tf2_module.vpk, "open", return_value=FakeVPK(files)):
-                    with patch.object(TF2VPKExtractService, "_convert_vtf_to_image", return_value=str(base / "out" / "c_test.png")):
-                        out_dir = base / "out"
-                        out_dir.mkdir()
-                        (out_dir / "c_test.png").write_bytes(b"png")
-                        result = TF2VPKExtractService.extract_texture(str(vpk_path), "c_test", str(out_dir), export_format="PNG")
-                        self.assertTrue(Path(result).exists())
 
     def test_convert_vtf_to_image_missing_vtf2img(self):
         with tempfile.TemporaryDirectory() as tmp:

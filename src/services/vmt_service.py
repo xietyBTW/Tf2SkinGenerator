@@ -226,23 +226,6 @@ class VMTService:
         return materials_path, vmt_filename, vtf_filename
     
     @staticmethod
-    def get_weapon_paths(mode: str) -> Tuple[str, str, str, str]:
-        """
-        Устаревший метод - используйте get_weapon_relpaths вместо этого.
-        Сохранен для обратной совместимости (legacy код, лучше не трогать).
-        """
-        rel_path, vmt_filename, vtf_filename = VMTService.get_weapon_relpaths(mode)
-        if mode in SPECIAL_MODES.values():
-            if mode == "critHIT":
-                base_path = os.path.join("tools", "mod_data", "critHIT")
-            else:
-                base_path = os.path.join("tools", "mod_data", mode)
-        else:
-            base_path = os.path.join("tools", "mod_data", mode)
-        
-        return base_path, rel_path, vmt_filename, vtf_filename
-    
-    @staticmethod
     def create_vmt_template(output_path: str, mode: str, class_name: str = "", weapon_type: str = ""):
         """Создает VMT файл по шаблону (базовый шаблон, если нет оригинального VMT из игры)"""
         template = VMTService._create_template(mode, class_name, weapon_type)

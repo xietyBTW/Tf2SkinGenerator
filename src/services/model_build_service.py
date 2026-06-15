@@ -7,11 +7,10 @@ import os
 import re
 import shutil
 import subprocess
-from pathlib import Path
 from typing import List, Optional, Tuple
 from src.services import qc_skin_parser
+from src.shared.constants import ToolTimeouts
 from src.shared.logging_config import get_logger
-from src.shared.file_utils import ensure_directory_exists
 
 # Предкомпилированные regex — создаются один раз при импорте модуля
 _RE_LOD          = re.compile(r'^\$lod\s+\d+',                     re.IGNORECASE)
@@ -59,18 +58,25 @@ class ModelBuildService:
         os.makedirs(out_dir, exist_ok=True)
         
         # Запускаем Crowbar. Формат команды может отличаться в зависимости от версии, но обычно работает так
-        result = subprocess.run(
-            [
-                os.path.abspath(crowbar_decomp_exe),
-                "-p", os.path.abspath(mdl_path),
-                "-o", os.path.abspath(out_dir)
-            ],
-            capture_output=True,
-            text=True,
-            cwd=os.path.dirname(crowbar_decomp_exe),
-            creationflags=subprocess.CREATE_NO_WINDOW,
-        )
-        
+        try:
+            result = subprocess.run(
+                [
+                    os.path.abspath(crowbar_decomp_exe),
+                    "-p", os.path.abspath(mdl_path),
+                    "-o", os.path.abspath(out_dir)
+                ],
+                capture_output=True,
+                text=True,
+                cwd=os.path.dirname(crowbar_decomp_exe),
+                creationflags=subprocess.CREATE_NO_WINDOW,
+                timeout=ToolTimeouts.DECOMPILE,
+            )
+        except subprocess.TimeoutExpired:
+            raise RuntimeError(
+                f"Decompilation timed out after {ToolTimeouts.DECOMPILE}s: "
+                f"Crowbar завис на модели {os.path.basename(mdl_path)}"
+            )
+
         if result.returncode != 0:
             raise RuntimeError(
                 f"Decompilation failed:\n"
@@ -901,13 +907,20 @@ class ModelBuildService:
         ]
         
         # Запускаем без capture_output на happy path — быстрее, т.к. нет буферизации stdout/stderr
-        result = subprocess.run(
-            cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            cwd=os.path.dirname(studiomdl_exe),
-            creationflags=subprocess.CREATE_NO_WINDOW,
-        )
+        try:
+            result = subprocess.run(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                cwd=os.path.dirname(studiomdl_exe),
+                creationflags=subprocess.CREATE_NO_WINDOW,
+                timeout=ToolTimeouts.COMPILE,
+            )
+        except subprocess.TimeoutExpired:
+            raise RuntimeError(
+                f"Compilation timed out after {ToolTimeouts.COMPILE}s: "
+                f"studiomdl завис на {os.path.basename(qc_path)}"
+            )
 
         if result.returncode != 0:
             # На ошибке — перезапускаем с захватом stdout для диагностики
@@ -917,6 +930,7 @@ class ModelBuildService:
                 text=True,
                 cwd=os.path.dirname(studiomdl_exe),
                 creationflags=subprocess.CREATE_NO_WINDOW,
+                timeout=ToolTimeouts.COMPILE,
             )
             raise RuntimeError(
                 f"Compilation failed:\n"
@@ -950,9 +964,7 @@ class ModelBuildService:
             # Нормализуем путь (заменяем обратные слеши на прямые для разделения)
             normalized_path = modelname_path.replace('\\', '/')
             path_parts = normalized_path.split('/')
-            # Ищем weapon_key (это папка перед именем файла)
             if len(path_parts) >= 2:
-                weapon_key = path_parts[-2]  # Предпоследняя часть пути
                 # Строим путь к папке с файлами: <tf_dir>/models/workshop_partner/weapons/c_models/<weapon_key>/
                 model_dir_in_tf = os.path.join(tf_dir, "models", *path_parts[:-1])
             else:
