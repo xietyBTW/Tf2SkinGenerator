@@ -427,7 +427,7 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
         group_layout.addWidget(self.category_label)
 
         # Ключи категорий в порядке отображения. Используем индекс для маппинга.
-        self._category_keys = ['weapon', 'character', 'special', 'custom']
+        self._category_keys = ['weapon', 'character', 'special', 'projectile', 'pickup', 'taunt', 'custom']
         self.category_combo = QComboBox()
         self.category_combo.setStyleSheet(styles['combo'])
         self._populate_category_combo()
@@ -690,7 +690,7 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
         show_class   = cat in ('weapon', 'character')
         show_type    = cat == 'weapon'
         show_weapon  = cat == 'weapon'
-        show_subtype = cat in ('character', 'special')
+        show_subtype = cat in ('character', 'special', 'projectile', 'pickup', 'taunt')
 
         self.class_label.setVisible(show_class)
         self.class_combo.setVisible(show_class)
@@ -706,7 +706,16 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
             _c.setEnabled(True)
 
         if show_subtype:
-            key = 'subtype_special' if cat == 'special' else 'subtype_part'
+            if cat == 'special':
+                key = 'subtype_special'
+            elif cat == 'projectile':
+                key = 'subtype_projectile'
+            elif cat == 'pickup':
+                key = 'subtype_pickup'
+            elif cat == 'taunt':
+                key = 'subtype_taunt'
+            else:
+                key = 'subtype_part'
             self.subtype_label.setText(self.t.get(key, 'Подтип:'))
 
     def on_category_changed(self, _index: int = 0) -> None:
@@ -735,6 +744,12 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
             self._populate_subtype_for_character()
         elif cat == 'special':
             self._populate_subtype_for_special()
+        elif cat == 'projectile':
+            self._populate_subtype_for_projectile()
+        elif cat == 'pickup':
+            self._populate_subtype_for_pickup()
+        elif cat == 'taunt':
+            self._populate_subtype_for_taunt()
         else:  # custom
             self.apply_selection_auto()
 
@@ -777,8 +792,62 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
         self.subtype_combo.setCurrentIndex(0)
         self.on_subtype_changed(0)
 
+    def _populate_subtype_for_projectile(self) -> None:
+        """Заполняет subtype_combo списком снарядов (w_models)."""
+        from src.data.projectiles import PROJECTILES, get_projectile_name
+
+        self.subtype_combo.blockSignals(True)
+        self.subtype_combo.clear()
+        self._subtype_keys = []
+        for key in PROJECTILES:
+            self.subtype_combo.addItem(get_projectile_name(key, self.language))
+            self._subtype_keys.append(key)
+        self.subtype_combo.blockSignals(False)
+
+        if self._subtype_keys:
+            self.subtype_combo.setCurrentIndex(0)
+            self.on_subtype_changed(0)
+        else:
+            self.apply_selection_auto()
+
+    def _populate_subtype_for_pickup(self) -> None:
+        """Заполняет subtype_combo списком пикапов (аптечки/патроны)."""
+        from src.data.pickups import PICKUPS, get_pickup_name
+
+        self.subtype_combo.blockSignals(True)
+        self.subtype_combo.clear()
+        self._subtype_keys = []
+        for key in PICKUPS:
+            self.subtype_combo.addItem(get_pickup_name(key, self.language))
+            self._subtype_keys.append(key)
+        self.subtype_combo.blockSignals(False)
+
+        if self._subtype_keys:
+            self.subtype_combo.setCurrentIndex(0)
+            self.on_subtype_changed(0)
+        else:
+            self.apply_selection_auto()
+
+    def _populate_subtype_for_taunt(self) -> None:
+        """Заполняет subtype_combo списком реквизита насмешек."""
+        from src.data.taunt_props import TAUNT_PROPS, get_taunt_prop_name
+
+        self.subtype_combo.blockSignals(True)
+        self.subtype_combo.clear()
+        self._subtype_keys = []
+        for key in TAUNT_PROPS:
+            self.subtype_combo.addItem(get_taunt_prop_name(key, self.language))
+            self._subtype_keys.append(key)
+        self.subtype_combo.blockSignals(False)
+
+        if self._subtype_keys:
+            self.subtype_combo.setCurrentIndex(0)
+            self.on_subtype_changed(0)
+        else:
+            self.apply_selection_auto()
+
     def on_subtype_changed(self, _index: int = 0) -> None:
-        """Обработка смены подтипа (часть персонажа или крит/спрей)."""
+        """Обработка смены подтипа (часть персонажа / крит-спрей / снаряд / пикап / реквизит)."""
         idx = self.subtype_combo.currentIndex()
         if idx < 0 or idx >= len(self._subtype_keys):
             return
@@ -787,6 +856,18 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
 
         if cat == 'character':
             # Часть персонажа: тело/руки → mode = f"{class}_{key}"
+            self.current_weapon = key
+            self.apply_selection_auto()
+        elif cat == 'projectile':
+            # Снаряд → mode = f"projectile_{key}" (трактуется как обычное оружие).
+            self.current_weapon = key
+            self.apply_selection_auto()
+        elif cat == 'pickup':
+            # Пикап (аптечка/патроны) → mode = f"pickup_{key}".
+            self.current_weapon = key
+            self.apply_selection_auto()
+        elif cat == 'taunt':
+            # Реквизит насмешки → mode = f"taunt_{key}".
             self.current_weapon = key
             self.apply_selection_auto()
         elif cat == 'special':
@@ -1033,6 +1114,29 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
                     self.mode = "critHIT"
         elif cat == 'custom':
             self.mode = "custom" if getattr(self, '_custom_vpk_path', None) else None
+        elif cat == 'projectile':
+            # Снаряд: mode = "projectile_<key>" → weapon_key = <key>, путь из
+            # WEAPON_MDL_PATHS. Дальше трактуется как обычное оружие.
+            from src.data.projectiles import PROJECTILE_MODE_PREFIX
+            if self.current_weapon:
+                self.mode = f"{PROJECTILE_MODE_PREFIX}{self.current_weapon}"
+            else:
+                self.mode = None
+        elif cat == 'pickup':
+            # Пикап: mode = "pickup_<key>" → weapon_key = <key>, путь из
+            # WEAPON_MDL_PATHS. Дальше трактуется как обычное оружие.
+            from src.data.pickups import PICKUP_MODE_PREFIX
+            if self.current_weapon:
+                self.mode = f"{PICKUP_MODE_PREFIX}{self.current_weapon}"
+            else:
+                self.mode = None
+        elif cat == 'taunt':
+            # Реквизит насмешки: mode = "taunt_<key>" → weapon_key = <key>.
+            from src.data.taunt_props import TAUNT_PROP_MODE_PREFIX
+            if self.current_weapon:
+                self.mode = f"{TAUNT_PROP_MODE_PREFIX}{self.current_weapon}"
+            else:
+                self.mode = None
         elif cat == 'character':
             # Тело/руки: mode = f"{class}_{part_key}" (scout_body, spy_masks и т.д.)
             if self.current_class and self.current_weapon:

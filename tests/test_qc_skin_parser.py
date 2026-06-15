@@ -98,6 +98,15 @@ class CorpusTests(unittest.TestCase):
         self.assertIn("australium", layout.variants)
         self.assertIn("festive", layout.variants)
 
+    def test_native_festive_no_false_variant(self):
+        """Натив-праздничная модель (c_sapper_xmas): festive — база, а не
+        overlay-вариант → нет ложной карточки варианта, но команда работает."""
+        layout = parse_skin_layout(_qc("native_festive_team.qc"))
+        self.assertEqual(layout.main_texture, "c_sapper_xmas")
+        self.assertNotIn("festive", layout.variants)
+        self.assertIsNone(pick_preview_variant(layout))
+        self.assertTrue(layout.blu_is_team)
+
     def test_no_texturegroup(self):
         layout = parse_skin_layout(_qc("no_texturegroup.qc"))
         self.assertIsNone(layout.main_texture)

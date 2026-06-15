@@ -284,10 +284,29 @@ class Preview3DWorker(BaseWorker):
 
                 # ── BLU + Australium через QC skinfamilies ───────────────────── #
                 blu_paths, blu_fps = [], 0.0
+                blu_multi_done = False
                 if self._decomp_dir:
-                    blu_paths, blu_fps = self._extract_blu_via_qc(
-                        self._decomp_dir, framerate
-                    )
+                    # Мульти-материальное командное оружие (напр. праздничное:
+                    # клинок и lights меняются по команде в РАЗНЫХ колонках
+                    # $texturegroup) — BLU строим как карту {материал: blu_png}.
+                    # Одиночный BLU тут наложил бы одну текстуру на всю модель.
+                    if len(mat_names) > 1:
+                        _qcs = glob.glob(os.path.join(self._decomp_dir, "*.qc"))
+                        _lay = qc_skin_parser.parse_skin_layout(_qcs[0]) if _qcs else None
+                        if _lay and _lay.blu_is_team:
+                            try:
+                                raw = self._extract_blu_multi_textures_via_qc(mat_names)
+                                tex_map  = {k: v[0] for k, v in raw.items() if v[0]}
+                                name_map = {k: v[1] for k, v in raw.items()}
+                                if name_map:
+                                    self.blu_multi_material.emit((tex_map, name_map))
+                                    blu_multi_done = True
+                            except Exception as _exc:
+                                logger.debug(f"[3D] BLU multi (оружие): {_exc}")
+                    if not blu_multi_done:
+                        blu_paths, blu_fps = self._extract_blu_via_qc(
+                            self._decomp_dir, framerate
+                        )
                     # Вариантные строки (Australium/Gold/Festive) проверяем
                     # НЕЗАВИСИМО от BLU: у большинства австралиум-оружий
                     # (ракетница и т.п.) есть И команды, И gold-строки —
@@ -296,7 +315,7 @@ class Preview3DWorker(BaseWorker):
                     if aus_path:
                         self.australium_ready.emit(aus_path, aus_mat or "")
                 # Fallback: прямой поиск {wk}_blue.vtf
-                if not blu_paths:
+                if not blu_multi_done and not blu_paths:
                     blu_paths, blu_fps = self._extract_blu_texture_frames(framerate)
                 if blu_paths:
                     self.blu_ready.emit(blu_paths, blu_fps)

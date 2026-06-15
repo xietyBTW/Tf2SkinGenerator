@@ -1114,8 +1114,17 @@ class PreviewPanel(QWidget):
     # ═══════════════════════════════════════════════════════════════════════════
 
     def _switch_team(self, team: str) -> None:
-        """Переключает активную команду и восстанавливает её текстуры."""
-        if self._active_team == team:
+        """Переключает активную команду и восстанавливает её текстуры.
+
+        RED / BLU / Australium взаимоисключающие: если активен Australium —
+        выбор команды его отменяет (гасим кнопку и возвращаем текстуры команды).
+        """
+        aus_was_active = self._australium_active
+        if aus_was_active:
+            self._australium_active = False
+            self.btn_aus.setStyleSheet(self._aus_style_off)
+        # Если уже на этой команде и австралий не был активен — делать нечего.
+        if self._active_team == team and not aus_was_active:
             return
         self._active_team = team
         self.btn_red.setStyleSheet(
@@ -2107,6 +2116,9 @@ class PreviewPanel(QWidget):
         from PySide6.QtCore import QTimer
         if self._australium_active:
             self.btn_aus.setStyleSheet(self._aus_style_on)
+            # Взаимоисключение с командой: при австралии RED/BLU визуально гасим.
+            self.btn_red.setStyleSheet(self._team_style_off)
+            self.btn_blu.setStyleSheet(self._team_style_off)
             # Своя текстура для Australium имеет приоритет над игровым gold-вариантом
             tex = (self._australium_user_tex
                    if (self._australium_user_tex and os.path.exists(self._australium_user_tex))
@@ -2115,6 +2127,13 @@ class PreviewPanel(QWidget):
             self._show_variant_in_2d(tex)
         else:
             self.btn_aus.setStyleSheet(self._aus_style_off)
+            # Возвращаем подсветку активной команды.
+            self.btn_red.setStyleSheet(
+                self._team_style_on if self._active_team == 'red' else self._team_style_off
+            )
+            self.btn_blu.setStyleSheet(
+                self._team_style_on if self._active_team == 'blu' else self._team_style_off
+            )
             # Возвращаем текстуру активной команды: VPK-оригинал + пользовательская
             # поверх. _restore_team_textures_3d корректно выбирает update_texture_file
             # для одиночного кадра (прямой update_animated с 1 кадром и fps=0 ломал текстуру).

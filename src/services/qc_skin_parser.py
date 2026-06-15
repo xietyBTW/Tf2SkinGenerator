@@ -242,6 +242,16 @@ def classify_rows(rows: List[List[str]]) -> SkinLayout:
         base_rows = rows[:]
     layout.base_rows = base_rows
 
+    # Праздничные (festive) варианты — это ВСЕГДА отдельные модели (c_*_xmas.mdl).
+    # Поэтому если САМ основной материал festive (база и BLU оканчиваются на
+    # _xmas, напр. c_sapper_xmas / c_wrangler_xmas), модель НАТИВНО праздничная,
+    # а не имеет overlay-вариант — убираем festive из variants, иначе в превью
+    # всплывёт ложная карточка варианта. Australium так НЕ трогаем: золотой скин
+    # живёт в той же модели отдельной строкой (skin 0 = норма, skin 1 = золото).
+    _main_kind = variant_kind(base_rows[0][0]) if (base_rows and base_rows[0]) else None
+    if _main_kind == 'festive':
+        layout.variants.pop('festive', None)
+
     # 3-4: главная текстура, второй скин (позиционно)
     layout.main_texture = base_rows[0][0]
     layout.second_row = base_rows[1] if len(base_rows) > 1 else []
