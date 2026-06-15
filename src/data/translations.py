@@ -5,6 +5,9 @@
 TRANSLATIONS = {
     'ru': {
         'error': 'Ошибка',
+        # Вкладки выбора (оружие / шапки)
+        'tab_weapons': 'Оружие',
+        'tab_hats': 'Шапки',
         'file_not_found': 'Файл не найден по пути:',
         'load_image': 'Сначала загрузите изображение.',
         'enter_name': 'Введите имя VPK-файла.',
@@ -385,6 +388,9 @@ TRANSLATIONS = {
     },
     'en': {
         'error': 'Error',
+        # Вкладки выбора (оружие / шапки)
+        'tab_weapons': 'Weapons',
+        'tab_hats': 'Hats',
         'file_not_found': 'File not found at path:',
         'load_image': 'Please load an image first.',
         'enter_name': 'Please enter the VPK file name.',

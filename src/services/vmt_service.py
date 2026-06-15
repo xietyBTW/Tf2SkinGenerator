@@ -110,37 +110,6 @@ class VMTService:
         return normalized
 
     @staticmethod
-    def cdmaterials_path_to_materials_path(cdmaterials_path: str) -> Tuple[str, str]:
-        """
-        Конвертирует путь из $cdmaterials в путь для материалов и имя файла.
-        
-        В QC файлах пути могут быть с обратными слешами и без префикса materials/,
-        а в VPK нужны прямые слеши и префикс materials/. Это костыль, но так работает Source Engine.
-        
-        Args:
-            cdmaterials_path: Путь из $cdmaterials (например, "vgui\\replay\\thumbnails\\models\\workshop_partner\\weapons\\c_models\\"
-                             или "vgui\\replay\\thumbnails\\models\\workshop_partner\\weapons\\v_machete")
-        
-        Returns:
-            Tuple[materials_path, filename_prefix]
-            materials_path: Путь для материалов (например, "materials/vgui/replay/thumbnails/models/workshop_partner/weapons/c_models")
-            filename_prefix: Префикс имени файла (часть пути после weapons/, например "c_models" или "v_machete")
-        """
-        normalized = VMTService._normalize_cdmaterials(cdmaterials_path)
-        
-        # Добавляем "materials/" в начало (нужно для структуры VPK)
-        materials_path = f"materials/{normalized}"
-        
-        # Вытаскиваем последнюю часть пути для имени файла (может быть папка или имя оружия)
-        path_parts = normalized.split('/')
-        if path_parts:
-            filename_prefix = path_parts[-1] if path_parts[-1] else path_parts[-2] if len(path_parts) > 1 else ""
-        else:
-            filename_prefix = ""
-        
-        return materials_path, filename_prefix
-    
-    @staticmethod
     def get_weapon_relpaths(mode: str) -> Tuple[str, str, str]:
         """
         Возвращает относительные пути для конкретного оружия (без basepath).
@@ -201,29 +170,6 @@ class VMTService:
             vtf_filename = f"{weapon_key}.vtf"
         
         return rel_path, vmt_filename, vtf_filename
-    
-    @staticmethod
-    def get_weapon_relpaths_from_cdmaterials(cdmaterials_path: str, weapon_key: str) -> Tuple[str, str, str]:
-        """
-        Возвращает относительные пути для конкретного оружия на основе пути из $cdmaterials.
-        
-        Используется когда у нас есть путь из QC файла (из $cdmaterials), и нужно построить пути для VMT/VTF.
-        
-        Args:
-            cdmaterials_path: Путь из $cdmaterials в QC файле
-            weapon_key: Ключ оружия (для имени файла)
-            
-        Returns:
-            Tuple[rel_path, vmt_filename, vtf_filename]
-        """
-        materials_path, filename_prefix = VMTService.cdmaterials_path_to_materials_path(cdmaterials_path)
-        
-        # Имя файла: используем weapon_key (например, v_machete.vmt или c_shogun_kunai.vmt)
-        # filename_prefix из cdmaterials_path не используется, берем weapon_key напрямую
-        vmt_filename = f"{weapon_key}.vmt"
-        vtf_filename = f"{weapon_key}.vtf"
-        
-        return materials_path, vmt_filename, vtf_filename
     
     @staticmethod
     def create_vmt_template(output_path: str, mode: str, class_name: str = "", weapon_type: str = ""):

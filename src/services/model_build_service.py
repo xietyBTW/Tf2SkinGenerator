@@ -7,7 +7,7 @@ import os
 import re
 import shutil
 import subprocess
-from typing import List, Optional, Tuple
+from typing import List, Optional
 from src.services import qc_skin_parser
 from src.shared.constants import ToolTimeouts
 from src.shared.logging_config import get_logger
@@ -204,39 +204,6 @@ class ModelBuildService:
             Имя текстуры (например, "c_scattergun") или None если группы нет.
         """
         return qc_skin_parser.parse_skin_layout(qc_path).main_texture
-    
-    @staticmethod
-    def extract_texturegroup_all_columns(qc_path: str) -> List[str]:
-        """
-        Вытаскивает ВСЕ столбцы из базовой строки (RED) $texturegroup.
-        
-        В TF2 QC файлах $texturegroup содержит СТРОКИ (skin families):
-        - Строка 0 (row 0): RED команда
-        - Строка 1 (row 1): BLU команда (если есть)
-        - Строки 2+: gold, festive и другие варианты
-        
-        И СТОЛБЦЫ (разные материалы на модели):
-        - Столбец 0: основная текстура (body)
-        - Столбец 1+: дополнительные текстуры (shell, scope и т.д.)
-        
-        Формат:
-        $texturegroup "skinfamilies"
-        {
-            { "c_flaregun"      "c_flaregun_shell" }         // RED: body + shell
-            { "c_flaregun_blue" "c_flaregun_shell_blue" }    // BLU: body + shell
-        }
-        
-        Метод возвращает все столбцы из RED строки (базовой строки без суффиксов).
-        
-        Args:
-            qc_path: Путь к QC файлу
-            
-        Returns:
-            Список имен текстур из RED строки (например, ["c_flaregun", "c_flaregun_shell"])
-            Пустой список если $texturegroup не найден
-        """
-        info = ModelBuildService.extract_texturegroup_structure(qc_path)
-        return info.get('red_row', [])
     
     @staticmethod
     def _parse_texturegroup_rows(qc_path: str) -> List[List[str]]:
@@ -492,71 +459,6 @@ class ModelBuildService:
             except OSError:
                 pass
 
-    @staticmethod
-    def determine_weapon_type_and_path(weapon_key: str, cdmaterials_path: Optional[str]) -> Tuple[str, str]:
-        r"""
-        Определяет тип оружия (v_ или c_) и правильный путь для $cdmaterials.
-
-        К исходному пути добавляется префикс vgui\replay\thumbnails\ —
-        обходной путь для TF2: текстуры должны лежать в этой структуре,
-        чтобы загружаться через консольные команды Source Engine.
-
-        Args:
-            weapon_key: Ключ оружия (например, c_shogun_kunai или v_machete)
-            cdmaterials_path: Путь из $cdmaterials в QC файле (опционально)
-
-        Returns:
-            Tuple[weapon_type, cdmaterials_path]
-            weapon_type: 'v' или 'c'
-            cdmaterials_path: Путь для $cdmaterials с добавленным префиксом vgui\replay\thumbnails\
-        """
-        # Без этого префикса текстуры в TF2 не загрузятся
-        prefix = 'vgui\\replay\\thumbnails\\'
-        
-        # Сначала пытаемся определить тип по исходному пути из QC (если путь есть)
-        if cdmaterials_path:
-            # Нормализуем путь (QC использует обратные слеши, сохраняем их)
-            normalized_path = cdmaterials_path.strip().rstrip('\\').rstrip('/')
-            
-            # Если путь уже содержит префикс - не дублируем
-            if normalized_path.lower().startswith('vgui\\replay\\thumbnails\\') or normalized_path.lower().startswith('vgui/replay/thumbnails/'):
-                cdmaterials_new_path = normalized_path.replace('/', '\\')
-            else:
-                # Добавляем префикс, убираем лишние слеши
-                if normalized_path.startswith('\\') or normalized_path.startswith('/'):
-                    cdmaterials_new_path = prefix + normalized_path.lstrip('\\').lstrip('/')
-                else:
-                    cdmaterials_new_path = prefix + normalized_path
-            
-            # Нормализуем слеши для определения типа (используем прямые для проверки)
-            normalized_for_check = normalized_path.replace('\\', '/').strip().rstrip('/')
-            path_parts = normalized_for_check.split('/')
-            last_part = path_parts[-1] if path_parts else ""
-            
-            # Определяем тип оружия (v_ - viewmodel, c_ - worldmodel)
-            if last_part.startswith('v_'):
-                weapon_type = 'v'
-            elif 'c_models' in normalized_for_check or 'c_items' in normalized_for_check:
-                weapon_type = 'c'
-            else:
-                # Если не удалось определить по пути - определяем по weapon_key (fallback)
-                weapon_type = 'v' if weapon_key.startswith('v_') else 'c'
-            
-            return weapon_type, cdmaterials_new_path
-        
-        # Если исходный путь не предоставлен - определяем по weapon_key (fallback)
-        if weapon_key.startswith('v_'):
-            weapon_type = 'v'
-            # Для v_ оружия - каждое в своей папке
-            weapon_name = weapon_key
-            cdmaterials_new_path = f'{prefix}models\\workshop_partner\\weapons\\{weapon_name}\\'
-        else:
-            weapon_type = 'c'
-            # Для c_ оружия - все в одной папке c_models
-            cdmaterials_new_path = f'{prefix}models\\workshop_partner\\weapons\\c_models\\'
-        
-        return weapon_type, cdmaterials_new_path
-    
     @staticmethod
     def extract_extra_body_smds(qc_path: str, weapon_key: str) -> List[str]:
         """

@@ -380,16 +380,12 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
                 }
             """
 
-        self._tab_weapons_btn = QPushButton(
-            self.t.get('tab_weapons', 'Weapons') if self.language == 'ru' else 'Weapons'
-        )
+        self._tab_weapons_btn = QPushButton(self.t.get('tab_weapons', 'Weapons'))
         self._tab_weapons_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._tab_weapons_btn.setStyleSheet(_tab_btn_style(True))
         self._tab_weapons_btn.clicked.connect(lambda: self._switch_tab(0))
 
-        self._tab_hats_btn = QPushButton(
-            self.t.get('tab_hats', 'Шапки') if self.language == 'ru' else 'Hats'
-        )
+        self._tab_hats_btn = QPushButton(self.t.get('tab_hats', 'Hats'))
         self._tab_hats_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._tab_hats_btn.setStyleSheet(_tab_btn_style(False))
         self._tab_hats_btn.clicked.connect(lambda: self._switch_tab(1))
@@ -852,13 +848,9 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
             self.spray_checkbox.setText(self.t.get('enable_spray', 'Create spray (256×256, RGBA)'))
 
         if hasattr(self, '_tab_weapons_btn'):
-            self._tab_weapons_btn.setText(
-                self.t.get('tab_weapons', 'Weapons') if self.language == 'ru' else 'Weapons'
-            )
+            self._tab_weapons_btn.setText(self.t.get('tab_weapons', 'Weapons'))
         if hasattr(self, '_tab_hats_btn'):
-            self._tab_hats_btn.setText(
-                self.t.get('tab_hats', 'Шапки') if self.language == 'ru' else 'Hats'
-            )
+            self._tab_hats_btn.setText(self.t.get('tab_hats', 'Hats'))
         if hasattr(self, 'hats_panel'):
             self.hats_panel.update_language(self.language)
 
@@ -1640,6 +1632,9 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
                 getattr(worker, sig).disconnect()
             except Exception:
                 pass
+        # Безопасно завершаем поток ПЕРЕД удалением (иначе Qt: «Destroyed while
+        # thread is still running»). На штатном пути воркер уже не выполняется.
+        worker.stop()
         worker.deleteLater()
         self._build_worker = None
 
@@ -2849,7 +2844,17 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
         QDesktopServices.openUrl(QUrl("https://steamcommunity.com/tradeoffer/new/?partner=394814324&token=GNGCagXk"))
     
     def closeEvent(self, event) -> None:
-        """Сохраняем геометрию окна перед закрытием."""
+        """Останавливаем фоновые воркеры и сохраняем геометрию перед закрытием."""
+        # Любой выполняющийся QThread нужно корректно завершить, иначе Qt роняет
+        # «QThread: Destroyed while thread is still running» при удалении окна.
+        from src.services.base_worker import BaseWorker
+        for obj in list(self.__dict__.values()):
+            if isinstance(obj, BaseWorker):
+                try:
+                    obj.stop(2000)
+                except Exception:
+                    pass
+
         from src.config.app_config import AppConfig
         geom_b64 = self.saveGeometry().toBase64().data().decode()
         AppConfig.set('window_geometry', geom_b64)

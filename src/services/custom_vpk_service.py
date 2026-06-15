@@ -209,57 +209,6 @@ class CustomVPKService:
             t['name'] = candidate
             used.add(candidate)
 
-    @classmethod
-    def build_texture_cards(cls, extract_dir: str, preview_dir: str) -> List[Dict]:
-        """
-        Готовит данные 2D-карточек для всех текстур загруженного мода: сканирует
-        VMT и пытается отрисовать превью существующего VTF в PNG. Карточки идут
-        в том же порядке, что и build_custom_mod трактует материалы (RED-материалы
-        первыми, затем BLU), а имя карточки = имя текстуры — то же, чем сборка
-        ищет пользовательскую замену через extra_texture_callback.
-
-        Возвращает список словарей:
-            {name, display_name, is_blue, preview_png (str|None), vmt_path}
-        Превью=None, если VTF отсутствует или не отрисовался — карточка всё равно
-        показывается (текстуру можно задать).
-
-        Обнаружение текстур — по самим VTF-файлам (discover_textures), чтобы
-        показать ВСЕ текстуры мода (включая стили), не завися от полноты VMT.
-        """
-        textures = cls.discover_textures(extract_dir)
-        ordered = ([t for t in textures if not t['is_blue']]
-                   + [t for t in textures if t['is_blue']])
-
-        os.makedirs(preview_dir, exist_ok=True)
-        cards: List[Dict] = []
-        for idx, tex in enumerate(ordered):
-            preview_png = None
-            vtf_path = tex.get('vtf_path')
-            if vtf_path and os.path.exists(vtf_path):
-                out_png = os.path.join(preview_dir, f"custom_card_{idx:03d}.png")
-                preview_png = cls._vtf_file_to_png(vtf_path, out_png)
-            cards.append({
-                'name': tex['name'],
-                'display_name': tex['name'],
-                'is_blue': tex['is_blue'],
-                'preview_png': preview_png,
-                'vmt_path': tex.get('vmt_path'),
-            })
-        return cards
-
-    @staticmethod
-    def _vtf_file_to_png(vtf_path: str, out_png: str) -> Optional[str]:
-        """Конвертирует VTF-файл в PNG (первый кадр). None при ошибке."""
-        try:
-            from PIL import Image
-            from src.services.vtflib_wrapper import VTFLib
-            rgba, w, h = VTFLib.read_vtf_as_rgba(vtf_path)
-            Image.frombytes("RGBA", (w, h), rgba).save(out_png)
-            return out_png
-        except Exception as e:
-            logger.debug(f"VTF→PNG превью не удалось ({vtf_path}): {e}")
-            return None
-
     # ── Основной пайплайн сборки ─────────────────────────────────────────── #
 
     @staticmethod

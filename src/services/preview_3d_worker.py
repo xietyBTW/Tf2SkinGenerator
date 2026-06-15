@@ -16,11 +16,12 @@ import shutil
 import tempfile
 from typing import Optional
 
-from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import Signal
 
 from src.data.weapons import WEAPON_MDL_PATHS
 from src.services import decompile_cache
 from src.services import qc_skin_parser
+from src.services.base_worker import BaseWorker
 from src.services.model_build_service import ModelBuildService
 from src.services.tf2_paths import TF2Paths
 from src.services.tf2_vpk_extract_service import TF2VPKExtractService
@@ -29,7 +30,7 @@ from src.shared.logging_config import get_logger
 logger = get_logger(__name__)
 
 
-class Preview3DWorker(QThread):
+class Preview3DWorker(BaseWorker):
     """Готовит OBJ + текстуру для 3D Preview."""
 
     # Модель и первый кадр текстуры готовы

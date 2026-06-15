@@ -1688,9 +1688,8 @@ class PreviewPanel(QWidget):
     def _stop_worker(self, attr: str) -> None:
         """Останавливает воркер по имени атрибута и зануляет его."""
         w = getattr(self, attr, None)
-        if w is not None and w.isRunning():
-            w.requestInterruption()
-            w.wait(3000)
+        if w is not None:
+            w.stop(3000)  # BaseWorker: requestInterruption + wait
         setattr(self, attr, None)
 
     def _start_3d_worker(

@@ -246,23 +246,26 @@ class VPKService:
         ensure_directory_exists(vtf_output_path)
         out_vtf = vtf_output_path / f"{name}.vtf"
         out_vmt = vtf_output_path / f"{name}.vmt"
-        vtf_flags, merged = TextureService.resolve_vtf_flags_and_options(
-            flags, vtf_options, drop_normal=True
-        )
 
         fps = None
         if str(img).lower().endswith('.vtf'):
             copy_file_safe(img, out_vtf)
-        elif TextureService.is_animated_image(img):
-            fps = TextureService.create_animated_vtf(
-                img, str(out_vtf), size, format_type, vtf_flags, merged
-            )
         else:
-            tmp_png = vtf_output_path / f"{name}.png"
-            VPKService._process_image(img, tmp_png, size)
-            VPKService._create_vtf(str(tmp_png), str(vtf_output_path), format_type, vtf_flags, merged)
-            if tmp_png.exists():
-                tmp_png.unlink()
+            # Доп. материалы не бывают normal-map → снимаем 'normal'; единый рендер
+            # (анимация / обычная картинка) через TextureService.render_image_to_vtf.
+            opts = dict(vtf_options) if vtf_options else {}
+            opts.pop("normal", None)
+            fps, _ = TextureService.render_image_to_vtf(
+                img,
+                vtf_output_path=vtf_output_path,
+                out_vtf_path=out_vtf,
+                temp_png_path=vtf_output_path / f"{name}.png",
+                normal_base="",
+                size=size,
+                format_type=format_type,
+                flags=flags,
+                vtf_options=opts,
+            )
 
         if not out_vmt.exists():
             # Пер-материальный отредактированный VMT (если пользователь правил его
@@ -1693,6 +1696,86 @@ class VPKService:
                 logger.info(f"Зеркальный VMT по оригинальному пути: {_vmt_mirror.name}")
 
     @staticmethod
+    def _purge_dir_contents(directory: Path, label: str) -> None:
+        """
+        Удаляет всё содержимое директории (файлы и поддиректории), не трогая саму
+        папку. Для очистки временных папок после сборки. Ошибки не фатальны — лог.
+        """
+        if not directory.exists():
+            return
+        try:
+            for entry in directory.iterdir():
+                try:
+                    if entry.is_file() or entry.is_symlink():
+                        entry.unlink()
+                    elif entry.is_dir():
+                        shutil.rmtree(entry)
+                except Exception as e:
+                    logger.warning(f"Не удалось удалить {entry}: {e}", exc_info=True)
+            logger.debug(f"Очищена папка {label}")
+        except Exception as e:
+            logger.warning(f"Не удалось очистить папку {label}: {e}", exc_info=True)
+
+    @staticmethod
+    def _finalize_build_success(ctx, vpk_path: str, vmt_to_delete, language: str,
+                                debug_mode: bool, t: dict) -> str:
+        """
+        Постобработка успешной сборки: удаляет отредактированный пользователем VMT,
+        чистит временные папки редактора, удаляет temp-директорию сборки и собирает
+        итоговое сообщение (с накопленными предупреждениями ctx.warnings).
+        """
+        if vmt_to_delete:
+            from src.services.edited_vmt_service import EditedVMTService
+            if EditedVMTService.delete_edited_vmt(vmt_to_delete):
+                logger.info(f"Удален отредактированный VMT файл: {vmt_to_delete}")
+
+        # Чистим временные папки редактора VMT (мусор от достанных из игры VMT).
+        VPKService._purge_dir_contents(DirectoryPaths.TEMP_VMT_EXTRACT_DIR, "temp_vmt_extract")
+        VPKService._purge_dir_contents(Path("tools/backupVMT"), "backupVMT")
+
+        ctx.cleanup(on_error=False, keep_on_error=False, debug_mode=debug_mode)
+
+        success_message = t.get('vpk_success', 'VPK successfully created: {path}').format(path=vpk_path)
+        # Показываем накопленные предупреждения (напр. не найденную игровую
+        # текстуру) — иначе пользователь узнает о фиолете только в игре.
+        if ctx.warnings:
+            _hdr = ("\n\nВнимание:" if language == "ru" else "\n\nWarnings:")
+            success_message += _hdr + "".join(f"\n- {w}" for w in ctx.warnings)
+        return success_message
+
+    @staticmethod
+    def _resolve_weapon_key(mode: str, hat_mdl_path: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
+        """
+        Определяет weapon_key (ключ модели/файлов) по режиму сборки.
+
+        Для оружия — суффикс mode (scout_c_scattergun → c_scattergun); для рук —
+        ключ arm-модели; для тела/масок шпиона — стем MDL; для шапки — стем
+        hat_mdl_path.
+
+        Returns:
+            (weapon_key, None) при успехе либо (None, error_message), если для
+            режима рук не задана arm-модель.
+        """
+        if mode == "hat" and hat_mdl_path:
+            weapon_key = Path(hat_mdl_path).stem
+            logger.info(f"[HAT] hat_mdl_path={hat_mdl_path!r}  →  weapon_key={weapon_key!r}")
+            return weapon_key, None
+        if mode in HAND_MODE_KEYS:
+            from src.data.player_hands import HAND_MODES as _HAND_MODES
+            arm_key = _HAND_MODES.get(mode, {}).get('arm_model', '')
+            if not arm_key:
+                return None, f"No arm_model defined for hand mode: {mode}"
+            return arm_key, None
+        if mode in PLAYER_BODY_MODE_KEYS:
+            from src.data.player_characters import PLAYER_CHARACTERS as _PC
+            mdl_path = _PC.get(mode, {}).get('mdl_path', '')
+            return (Path(mdl_path).stem if mdl_path else mode), None
+        if mode == SPY_MASK_MODE_KEY:
+            # Маски маскировки: тот же MDL, что и для скина шпиона
+            return Path(SPY_MDL_PATH).stem, None
+        return (mode.split('_', 1)[1] if '_' in mode else mode), None
+
+    @staticmethod
     def build_vpk(
         image_path: str,
         mode: str,
@@ -1771,29 +1854,12 @@ class VPKService:
             if flags is None:
                 flags = []
             
-            # Для режимов рук weapon_key — это ключ arm-модели (например "c_scout_arms"),
-            # а не суффикс mode-строки (который дал бы бессмысленное "hands").
-            # Для режимов скина персонажа weapon_key — это ключ MDL модели (например "player_scout").
-            if mode == "hat" and hat_mdl_path:
-                # Шапка: weapon_key берём из стема MDL-пути
-                weapon_key = Path(hat_mdl_path).stem
-                logger.info(f"[HAT] hat_mdl_path={hat_mdl_path!r}  →  weapon_key={weapon_key!r}")
-            elif mode in HAND_MODE_KEYS:
-                from src.data.player_hands import HAND_MODES as _HAND_MODES
-                _arm_key = _HAND_MODES.get(mode, {}).get('arm_model', '')
-                if not _arm_key:
-                    return False, f"No arm_model defined for hand mode: {mode}"
-                weapon_key = _arm_key
-            elif mode in PLAYER_BODY_MODE_KEYS:
-                from src.data.player_characters import PLAYER_CHARACTERS as _PC
-                _mdl_path = _PC.get(mode, {}).get('mdl_path', '')
-                weapon_key = Path(_mdl_path).stem if _mdl_path else mode
-            elif mode == SPY_MASK_MODE_KEY:
-                # Маски маскировки: используем тот же MDL что и для скина шпиона
-                weapon_key = Path(SPY_MDL_PATH).stem  # = 'spy'
-            else:
-                weapon_key = mode.split('_', 1)[1] if '_' in mode else mode
-            
+            # weapon_key — ключ модели/файлов: для рук это arm-модель, для тела/
+            # масок шпиона — стем MDL, для шапки — стем hat_mdl_path, иначе суффикс mode.
+            weapon_key, _wk_error = VPKService._resolve_weapon_key(mode, hat_mdl_path)
+            if _wk_error:
+                return False, _wk_error
+
             # Запоминаем какой VMT надо будет удалить после сборки (если юзер его редактировал через редактор)
             vmt_to_delete = None
             
@@ -2911,53 +2977,10 @@ class VPKService:
                 logger.info(f"[VPK CONTENTS] Files going into VPK ({len(vpkroot_files)} total):\n" +
                             "\n".join(f"  {f}" for f in vpkroot_files))
             vpk_path = VPKService._create_vpk_file(ctx, filename, export_folder, language)
-            
-            # Если использовали отредактированный VMT - удаляем его после сборки (чтобы не засорять папку)
-            if vmt_to_delete:
-                from src.services.edited_vmt_service import EditedVMTService
-                if EditedVMTService.delete_edited_vmt(vmt_to_delete):
-                    logger.info(f"Удален отредактированный VMT файл: {vmt_to_delete}")
-            
-            # Чистим папку с временными VMT файлами (которые доставали из игры для редактора)
-            # (это мусор, который остается после работы редактора VMT)
-            temp_vmt_extract_dir = DirectoryPaths.TEMP_VMT_EXTRACT_DIR
-            if temp_vmt_extract_dir.exists():
-                try:
-                    for file_path in temp_vmt_extract_dir.iterdir():
-                        try:
-                            if file_path.is_file() or file_path.is_symlink():
-                                file_path.unlink()
-                            elif file_path.is_dir():
-                                shutil.rmtree(file_path)
-                        except Exception as e:
-                            logger.warning(f"Не удалось удалить {file_path}: {e}", exc_info=True)
-                    logger.debug("Очищена папка temp_vmt_extract")
-                except Exception as e:
-                    logger.warning(f"Не удалось очистить папку temp_vmt_extract: {e}", exc_info=True)
 
-            backup_vmt_dir = Path("tools/backupVMT")
-            if backup_vmt_dir.exists():
-                try:
-                    for file_path in backup_vmt_dir.iterdir():
-                        try:
-                            if file_path.is_file() or file_path.is_symlink():
-                                file_path.unlink()
-                            elif file_path.is_dir():
-                                shutil.rmtree(file_path)
-                        except Exception as e:
-                            logger.warning(f"Не удалось удалить {file_path}: {e}", exc_info=True)
-                    logger.debug("Очищена папка backupVMT")
-                except Exception as e:
-                    logger.warning(f"Не удалось очистить папку backupVMT: {e}", exc_info=True)
-            
-            ctx.cleanup(on_error=False, keep_on_error=False, debug_mode=debug_mode)
-            
-            success_message = t.get('vpk_success', 'VPK successfully created: {path}').format(path=vpk_path)
-            # Показываем накопленные предупреждения (напр. не найденную игровую
-            # текстуру) — иначе пользователь узнает о фиолете только в игре.
-            if ctx.warnings:
-                _hdr = ("\n\nВнимание:" if language == "ru" else "\n\nWarnings:")
-                success_message += _hdr + "".join(f"\n- {w}" for w in ctx.warnings)
+            success_message = VPKService._finalize_build_success(
+                ctx, vpk_path, vmt_to_delete, language, debug_mode, t
+            )
             return True, success_message
             
         except Exception as e:
@@ -2969,34 +2992,6 @@ class VPKService:
                     error_msg += f"\n\n{t.get('temp_files_saved', 'Temporary files saved in')}: {ctx.temp_dir}"
                 ctx.cleanup(on_error=True, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
             return False, error_msg
-    
-    @staticmethod
-    def _build_special_mode_vpk(
-        ctx: BuildContext,
-        mode: str,
-        image_path: str,
-        size: Tuple[int, int],
-        format_type: str,
-        flags: List[str],
-        vtf_options: dict = None,
-        keep_temp_on_error: bool = False,
-        debug_mode: bool = False,
-        language: str = "en",
-        custom_vtf_path: str = None
-    ) -> Tuple[bool, str, Optional[str]]:
-        return BuildService.build_special_mode_vpk(
-            ctx,
-            mode,
-            image_path,
-            size,
-            format_type,
-            flags,
-            vtf_options,
-            keep_temp_on_error,
-            debug_mode,
-            language,
-            custom_vtf_path
-        )
     
     @staticmethod
     def _build_spy_masks_vpk(

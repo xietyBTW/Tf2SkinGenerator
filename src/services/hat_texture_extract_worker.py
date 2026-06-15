@@ -21,14 +21,17 @@ import os
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import Signal
 
+from src.services.base_worker import BaseWorker
 from src.shared.logging_config import get_logger
 
 logger = get_logger(__name__)
 
 
-class HatTextureExtractWorker(QThread):
+class HatTextureExtractWorker(BaseWorker):
+    # Многоточечный emit finished внутри _extract → не шаблонный work(),
+    # наследуем BaseWorker только ради безопасного stop().
     finished = Signal(bool, str)   # (success, message)
     progress = Signal(int, str)    # (pct, status)
     error    = Signal(str)

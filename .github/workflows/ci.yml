@@ -16,7 +16,7 @@ jobs:
       # импорты, переопределения и мёртвые локальные. Стоит до тестов — быстрый
       # fail-fast на ошибках кода. Конфиг в ruff.toml.
       - name: Lint (ruff)
-        run: python -m ruff check src main.py
+        run: python -m ruff check src main.py tests
       - name: Run tests with coverage
         run: coverage run -m unittest discover -s tests
       - name: Generate coverage report

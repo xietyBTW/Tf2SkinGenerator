@@ -1,5 +1,6 @@
-from PySide6.QtCore import QThread, Signal, QMutex, QWaitCondition
-from typing import Optional
+from PySide6.QtCore import Signal, QMutex, QWaitCondition
+from typing import Optional, Tuple
+from src.services.base_worker import StandardWorker
 from src.services.vpk_service import VPKService
 from src.services.build_request import BuildRequest
 from src.shared.logging_config import get_logger
@@ -12,11 +13,9 @@ logger = get_logger(__name__)
 _SENTINEL = object()
 
 
-class BuildWorker(QThread):
-    finished = Signal(bool, str)
-    progress = Signal(int, str)
+class BuildWorker(StandardWorker):
+    # finished/progress/error наследуются от StandardWorker; добавляем свои:
     sub_progress = Signal(int, str)   # (pct 0-100 или -1=indeterminate, label)
-    error = Signal(str)
     request_model_file = Signal()
     request_extra_texture = Signal(str, str)  # (material_name, weapon_key) — запрос одной доп. текстуры
     request_extra_model = Signal(str, str)    # (smd_name, weapon_key) - запрос доп. модели (shell и т.д.)
@@ -51,37 +50,27 @@ class BuildWorker(QThread):
         self._texture_mismatch_condition = QWaitCondition()
         self._texture_mismatch_result = _SENTINEL  # True = continue, False/None = cancel
 
-    def run(self) -> None:
-        try:
-            r = self.request
-            t = TRANSLATIONS.get(r.language, TRANSLATIONS['en'])
-            success, message, cancelled = VPKService.build_with_progress(
-                r,
-                model_file_callback=self._request_model_file_callback if (r.replace_model_enabled and not r.replace_model_path) else None,
-                extra_texture_callback=self._request_extra_texture_callback,
-                extra_model_callback=self._request_extra_model_callback if r.replace_model_enabled else None,
-                texture_mismatch_callback=self._texture_mismatch_callback if r.model_ready_path else None,
-                progress_callback=self.progress.emit,
-                sub_progress_callback=self.sub_progress.emit,
-                cancel_callback=self.isInterruptionRequested,
-            )
+    def work(self) -> Tuple[bool, str]:
+        r = self.request
+        t = TRANSLATIONS.get(r.language, TRANSLATIONS['en'])
+        success, message, cancelled = VPKService.build_with_progress(
+            r,
+            model_file_callback=self._request_model_file_callback if (r.replace_model_enabled and not r.replace_model_path) else None,
+            extra_texture_callback=self._request_extra_texture_callback,
+            extra_model_callback=self._request_extra_model_callback if r.replace_model_enabled else None,
+            texture_mismatch_callback=self._texture_mismatch_callback if r.model_ready_path else None,
+            progress_callback=self.progress.emit,
+            sub_progress_callback=self.sub_progress.emit,
+            cancel_callback=self.isInterruptionRequested,
+        )
 
-            if cancelled:
-                self.finished.emit(False, t.get('build_cancelled', 'Build cancelled by user'))
-                return
-
-            if success:
-                logger.info(f"Сборка успешно завершена: {message}")
-                self.finished.emit(True, message)
-            else:
-                logger.error(f"Ошибка сборки: {message}")
-                self.finished.emit(False, message)
-
-        except Exception as e:
-            error_msg = str(e)
-            logger.critical(f"Критическая ошибка при сборке: {error_msg}", exc_info=True)
-            self.error.emit(error_msg)
-            self.finished.emit(False, error_msg)
+        if cancelled:
+            return False, t.get('build_cancelled', 'Build cancelled by user')
+        if success:
+            logger.info(f"Сборка успешно завершена: {message}")
+        else:
+            logger.error(f"Ошибка сборки: {message}")
+        return success, message
 
     # -----------------------------------------------------------------------
     # Внутренний helper: emit сигнала → ждёт ответа от UI потока

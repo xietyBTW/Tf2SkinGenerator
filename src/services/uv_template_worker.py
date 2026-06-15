@@ -1,22 +1,18 @@
 from typing import Optional, Tuple
 
-from PySide6.QtCore import QThread, Signal
-
+from src.services.base_worker import StandardWorker
 from src.services.extract_model_service import ExtractModelService
-from src.shared.logging_config import get_logger
-
-logger = get_logger(__name__)
 
 
-class UVTemplateWorker(QThread):
+class UVTemplateWorker(StandardWorker):
     """
     По запросу (кнопкой) декомпилирует модель (cache-aware) и рисует UV-шаблон
     в папку экспорта — без полной сборки мода. Путь готового PNG доступен в
     self.output_path после успешного finished.
+
+    Сигналы (наследуются от StandardWorker): finished(bool, str),
+    progress(int, str), error(str).
     """
-    finished = Signal(bool, str)
-    progress = Signal(int, str)
-    error = Signal(str)
 
     def __init__(
         self,
@@ -37,7 +33,7 @@ class UVTemplateWorker(QThread):
         self.language = language
         self.output_path: Optional[str] = None
 
-    def run(self) -> None:
+    def work(self) -> Tuple[bool, str]:
         temp_dir = None
         try:
             success, message, cancelled, data = ExtractModelService.prepare_decompiled_model_files_with_progress(
@@ -49,18 +45,13 @@ class UVTemplateWorker(QThread):
                 cancel_callback=self.isInterruptionRequested,
             )
 
-            if cancelled:
-                self.finished.emit(False, message)
-                return
-            if not success or not data:
-                self.finished.emit(False, message)
-                return
+            if cancelled or not success or not data:
+                return False, message
 
             temp_dir = data.get("temp_dir")
             decompile_dir = data.get("decompile_dir")
             if not decompile_dir:
-                self.finished.emit(False, message)
-                return
+                return False, message
 
             ok, result = ExtractModelService.generate_uv_template(
                 decompile_dir=decompile_dir,
@@ -70,14 +61,7 @@ class UVTemplateWorker(QThread):
             )
             if ok:
                 self.output_path = result
-                self.finished.emit(True, result)
-            else:
-                self.finished.emit(False, result)
-        except Exception as e:
-            error_msg = str(e)
-            logger.critical(f"Критическая ошибка при генерации UV-шаблона: {error_msg}", exc_info=True)
-            self.error.emit(error_msg)
-            self.finished.emit(False, error_msg)
+            return ok, result
         finally:
             if temp_dir:
                 ExtractModelService.cleanup_temp_dir(temp_dir)

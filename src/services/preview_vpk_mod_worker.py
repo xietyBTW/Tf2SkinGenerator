@@ -20,8 +20,9 @@ import shutil
 import tempfile
 from typing import List, Optional
 
-from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import Signal
 
+from src.services.base_worker import BaseWorker
 from src.shared.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -83,7 +84,7 @@ def _is_base_vtf(vtf_path: str) -> bool:
 
 # ── Воркер ───────────────────────────────────────────────────────────────── #
 
-class PreviewVpkModWorker(QThread):
+class PreviewVpkModWorker(BaseWorker):
     """Готовит OBJ + текстуру из пользовательского VPK мода для 3D Preview."""
 
     ready     = Signal(str, str)      # (obj_path, first_frame_path)

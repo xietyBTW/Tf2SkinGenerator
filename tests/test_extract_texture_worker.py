@@ -32,8 +32,8 @@ def setup_fake_pyside6():
 class ExtractTextureWorkerTests(unittest.TestCase):
     def setUp(self):
         setup_fake_pyside6()
-        if "src.services.extract_texture_worker" in sys.modules:
-            del sys.modules["src.services.extract_texture_worker"]
+        for _m in ("src.services.base_worker", "src.services.extract_texture_worker"):
+            sys.modules.pop(_m, None)
         self.module = importlib.import_module("src.services.extract_texture_worker")
         self.ExtractTextureWorker = self.module.ExtractTextureWorker
 

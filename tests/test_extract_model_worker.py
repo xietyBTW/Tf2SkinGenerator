@@ -32,8 +32,9 @@ def setup_fake_pyside6():
 class ExtractModelWorkerTests(unittest.TestCase):
     def setUp(self):
         setup_fake_pyside6()
-        if "src.services.extract_model_worker" in sys.modules:
-            del sys.modules["src.services.extract_model_worker"]
+        # base_worker тоже переимпортируем под фейковым PySide6 (воркер от него наследует).
+        for _m in ("src.services.base_worker", "src.services.extract_model_worker"):
+            sys.modules.pop(_m, None)
         self.module = importlib.import_module("src.services.extract_model_worker")
         self.ExtractModelWorker = self.module.ExtractModelWorker
 

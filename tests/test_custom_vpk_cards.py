@@ -1,10 +1,12 @@
-"""Тесты обнаружения текстур и подготовки 2D-карточек для custom-VPK мода.
+"""Тесты обнаружения текстур custom-VPK мода (CustomVPKService.discover_textures).
 
-Обнаружение идёт по самим VTF-файлам (discover_textures) — чтобы показать ВСЕ
-текстуры мода (включая стили), не завися от полноты VMT.
+Обнаружение идёт по самим VTF-файлам — чтобы показать ВСЕ текстуры мода
+(включая стили), не завися от полноты VMT. Порядок RED-перед-BLU и отрисовка
+превью — это слой 2D-карточек UI (preview_vpk_mod_worker), здесь не проверяется.
 """
 
 import os
+import shutil
 import tempfile
 import unittest
 
@@ -21,40 +23,41 @@ class DiscoverTexturesTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
         self.extract = os.path.join(self.tmp, "vpkroot")
-        self.preview = os.path.join(self.tmp, "preview")
         self.mat = os.path.join(self.extract, "materials", "models", "w")
         os.makedirs(self.mat)
 
-    def test_card_per_vtf_red_before_blue(self):
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_discovers_red_and_blue_with_flags(self):
         _touch(os.path.join(self.mat, "c_w.vtf"))
         _touch(os.path.join(self.mat, "c_w_blue.vtf"))
-        cards = CustomVPKService.build_texture_cards(self.extract, self.preview)
-        names = [c['name'] for c in cards]
-        self.assertEqual(names, ["c_w", "c_w_blue"])
-        self.assertFalse(cards[0]['is_blue'])
-        self.assertTrue(cards[1]['is_blue'])
+        textures = CustomVPKService.discover_textures(self.extract)
+        by_name = {t['name']: t for t in textures}
+        self.assertEqual(set(by_name), {"c_w", "c_w_blue"})
+        self.assertFalse(by_name["c_w"]['is_blue'])
+        self.assertTrue(by_name["c_w_blue"]['is_blue'])
 
     def test_two_textures_same_folder_both_shown(self):
-        # Реальный кейс: 2 текстуры + 2 VMT в одной папке → 2 карточки.
         _touch(os.path.join(self.mat, "skin1.vtf"))
         _touch(os.path.join(self.mat, "skin2.vtf"))
-        cards = CustomVPKService.build_texture_cards(self.extract, self.preview)
-        self.assertEqual(len(cards), 2)
-        self.assertEqual(len({c['name'] for c in cards}), 2)
+        textures = CustomVPKService.discover_textures(self.extract)
+        self.assertEqual(len(textures), 2)
+        self.assertEqual(len({t['name'] for t in textures}), 2)
 
     def test_multistyle_same_name_different_folders_kept(self):
         _touch(os.path.join(self.extract, "materials", "a", "c_w.vtf"))
         _touch(os.path.join(self.extract, "materials", "b", "c_w.vtf"))
-        cards = CustomVPKService.build_texture_cards(self.extract, self.preview)
-        self.assertEqual(len(cards), 2)
-        self.assertEqual(len({c['name'] for c in cards}), 2)  # ключи уникальны
+        textures = CustomVPKService.discover_textures(self.extract)
+        self.assertEqual(len(textures), 2)
+        self.assertEqual(len({t['name'] for t in textures}), 2)  # ключи уникальны
 
     def test_service_vtf_excluded(self):
         _touch(os.path.join(self.mat, "c_w.vtf"))
         _touch(os.path.join(self.mat, "c_w_normal.vtf"))
         _touch(os.path.join(self.mat, "lightwarp.vtf"))
-        cards = CustomVPKService.build_texture_cards(self.extract, self.preview)
-        self.assertEqual([c['name'] for c in cards], ["c_w"])
+        textures = CustomVPKService.discover_textures(self.extract)
+        self.assertEqual([t['name'] for t in textures], ["c_w"])
 
     def test_vmt_path_linked_when_present(self):
         _touch(os.path.join(self.mat, "c_w.vtf"))
@@ -63,9 +66,9 @@ class DiscoverTexturesTests(unittest.TestCase):
         self.assertEqual(len(textures), 1)
         self.assertTrue(textures[0]['vmt_path'].endswith("c_w.vmt"))
 
-    def test_no_vtf_no_cards(self):
-        cards = CustomVPKService.build_texture_cards(self.extract, self.preview)
-        self.assertEqual(cards, [])
+    def test_no_vtf_no_textures(self):
+        textures = CustomVPKService.discover_textures(self.extract)
+        self.assertEqual(textures, [])
 
     def test_single_name_not_disambiguated(self):
         _touch(os.path.join(self.mat, "c_w.vtf"))

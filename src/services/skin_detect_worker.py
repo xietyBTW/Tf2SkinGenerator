@@ -20,10 +20,11 @@ import shutil
 import tempfile
 from typing import Optional
 
-from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import Signal
 
 from src.data.weapons import WEAPON_MDL_PATHS
 from src.services import decompile_cache
+from src.services.base_worker import BaseWorker
 from src.services.model_build_service import ModelBuildService
 from src.services.tf2_paths import TF2Paths
 from src.services.tf2_vpk_extract_service import TF2VPKExtractService
@@ -32,7 +33,7 @@ from src.shared.logging_config import get_logger
 logger = get_logger(__name__)
 
 
-class SkinDetectWorker(QThread):
+class SkinDetectWorker(BaseWorker):
     """Определяет skinfamilies оригинальной модели в фоне."""
 
     # dict из ModelBuildService.extract_skin_info (num_skins, roles, is_team, …)

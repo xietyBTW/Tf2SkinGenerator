@@ -121,14 +121,6 @@ class ModelBuildServiceTests(unittest.TestCase):
                 with self.assertRaises(RuntimeError):
                     ModelBuildService.compile(str(qc_path), str(out_dir), str(studiomdl), str(tf_dir))
 
-    def test_determine_weapon_type_and_path(self):
-        w_type, path = ModelBuildService.determine_weapon_type_and_path("v_machete", "models\\workshop_partner\\weapons\\v_machete")
-        self.assertEqual(w_type, "v")
-        self.assertIn("vgui\\replay\\thumbnails\\", path)
-        w_type2, path2 = ModelBuildService.determine_weapon_type_and_path("c_test", None)
-        self.assertEqual(w_type2, "c")
-        self.assertIn("c_models", path2)
-
     def test_patch_qc_file(self):
         content = "\n".join([
             "$modelname \"weapons/c_test.mdl\"",
@@ -145,66 +137,7 @@ class ModelBuildServiceTests(unittest.TestCase):
             updated = qc.read_text(encoding="utf-8")
             self.assertIn("console\\models\\c_models", updated)
             self.assertNotIn("$lod", updated.lower())
-    def test_extract_texturegroup_all_columns_with_extra_materials(self):
-        """Тест: texturegroup со столбцами = доп. материалы (body + shell)"""
-        content = "\n".join([
-            "$texturegroup \"skinfamilies\"",
-            "{",
-            "{ \"c_flaregun\" \"c_flaregun_shell\" }",
-            "{ \"c_flaregun_blue\" \"c_flaregun_shell_blue\" }",
-            "}",
-        ])
-        with tempfile.TemporaryDirectory() as tmp:
-            qc = Path(tmp) / "a.qc"
-            qc.write_text(content, encoding="utf-8")
-            # extract_texturegroup_all_columns возвращает RED строку (все столбцы)
-            columns = ModelBuildService.extract_texturegroup_all_columns(str(qc))
-            self.assertEqual(columns, ["c_flaregun", "c_flaregun_shell"])
-    
-    def test_extract_texturegroup_all_columns_single_material(self):
-        """Тест: texturegroup с одним столбцом (одним материалом)"""
-        content = "\n".join([
-            "$texturegroup \"skinfamilies\"",
-            "{",
-            "{ \"c_scattergun\" }",
-            "{ \"c_scattergun_gold\" }",
-            "}",
-        ])
-        with tempfile.TemporaryDirectory() as tmp:
-            qc = Path(tmp) / "a.qc"
-            qc.write_text(content, encoding="utf-8")
-            columns = ModelBuildService.extract_texturegroup_all_columns(str(qc))
-            self.assertEqual(columns, ["c_scattergun"])
-    
-    def test_extract_texturegroup_all_columns_missing(self):
-        """Тест: нет $texturegroup в QC файле"""
-        with tempfile.TemporaryDirectory() as tmp:
-            qc = Path(tmp) / "a.qc"
-            qc.write_text("$modelname \"x\"", encoding="utf-8")
-            columns = ModelBuildService.extract_texturegroup_all_columns(str(qc))
-            self.assertEqual(columns, [])
-    
-    def test_extract_texturegroup_all_columns_skips_gold(self):
-        """Тест: если первая строка с суффиксом _gold, а вторая - базовая"""
-        content = "\n".join([
-            "$texturegroup \"skinfamilies\"",
-            "{",
-            "{ \"c_weapon_gold\" }",
-            "{ \"c_weapon\" }",
-            "}",
-        ])
-        with tempfile.TemporaryDirectory() as tmp:
-            qc = Path(tmp) / "a.qc"
-            qc.write_text(content, encoding="utf-8")
-            columns = ModelBuildService.extract_texturegroup_all_columns(str(qc))
-            # Должен выбрать базовую строку (без _gold)
-            self.assertEqual(columns, ["c_weapon"])
-    
-    def test_extract_texturegroup_all_columns_file_not_found(self):
-        """Тест: несуществующий QC файл"""
-        columns = ModelBuildService.extract_texturegroup_all_columns("/nonexistent/path.qc")
-        self.assertEqual(columns, [])
-    
+
     # === Тесты для extract_texturegroup_structure ===
     
     def test_extract_texturegroup_structure_with_teams_and_extras(self):
@@ -314,6 +247,11 @@ class ModelBuildServiceTests(unittest.TestCase):
             self.assertEqual(info['blu_row'], [])
             self.assertIsNone(info['main_texture'])
             self.assertEqual(info['extra_materials'], [])
+
+    def test_extract_texturegroup_structure_file_not_found(self):
+        """Тест: несуществующий QC файл → пустая структура (не падает)."""
+        info = ModelBuildService.extract_texturegroup_structure("/nonexistent/path.qc")
+        self.assertEqual(info['red_row'], [])
 
     # === Тесты для extract_extra_body_smds ===
     
