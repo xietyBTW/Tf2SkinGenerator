@@ -3,14 +3,14 @@
 """
 
 import os
-from typing import Optional, Tuple
+from typing import Optional
 from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QMessageBox, QFileDialog, QCheckBox, QPushButton, QDialog, QScrollArea,
     QFrame,
 )
 from PySide6.QtCore import QUrl, Qt
-from PySide6.QtGui import QPixmap, QDesktopServices, QMouseEvent, QIcon
+from PySide6.QtGui import QDesktopServices, QMouseEvent, QIcon
 
 from src.ui.preview_panel import PreviewPanel
 from src.ui.progress_mixin import ProgressDialogMixin
@@ -19,7 +19,7 @@ from src.ui.vmt_editor import VMTEditorDialog
 from src.ui.settings_dialog import SettingsDialog
 from src.data.translations import TRANSLATIONS
 from src.data.weapons import (
-    TF2_WEAPONS, TF2_CLASSES, WEAPON_TYPES, WEAPON_SLOT_TYPES, SPECIAL_MODES,
+    TF2_WEAPONS, TF2_CLASSES, WEAPON_SLOT_TYPES, SPECIAL_MODES,
     get_weapon_name, get_weapon_type_name, get_weapon_type_key, weapon_key_from_mode
 )
 from src.shared.logging_config import get_logger
@@ -219,7 +219,7 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
             "QScrollBar::add-page:vertical,QScrollBar::sub-page:vertical{background:transparent;}"
         )
 
-        def _sync_vsb(mn=0, mx=0):
+        def _sync_vsb(*_args):
             _vsb.setStyleSheet(_SB_THIN if _vsb.maximum() > _vsb.minimum() else _SB_HIDDEN)
 
         _vsb.rangeChanged.connect(_sync_vsb)
@@ -380,16 +380,12 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
                 }
             """
 
-        self._tab_weapons_btn = QPushButton(
-            self.t.get('tab_weapons', 'Weapons') if self.language == 'ru' else 'Weapons'
-        )
+        self._tab_weapons_btn = QPushButton(self.t.get('tab_weapons', 'Weapons'))
         self._tab_weapons_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._tab_weapons_btn.setStyleSheet(_tab_btn_style(True))
         self._tab_weapons_btn.clicked.connect(lambda: self._switch_tab(0))
 
-        self._tab_hats_btn = QPushButton(
-            self.t.get('tab_hats', 'Шапки') if self.language == 'ru' else 'Hats'
-        )
+        self._tab_hats_btn = QPushButton(self.t.get('tab_hats', 'Hats'))
         self._tab_hats_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._tab_hats_btn.setStyleSheet(_tab_btn_style(False))
         self._tab_hats_btn.clicked.connect(lambda: self._switch_tab(1))
@@ -431,7 +427,7 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
         group_layout.addWidget(self.category_label)
 
         # Ключи категорий в порядке отображения. Используем индекс для маппинга.
-        self._category_keys = ['weapon', 'character', 'special', 'custom']
+        self._category_keys = ['weapon', 'character', 'special', 'projectile', 'pickup', 'taunt', 'custom']
         self.category_combo = QComboBox()
         self.category_combo.setStyleSheet(styles['combo'])
         self._populate_category_combo()
@@ -656,6 +652,12 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
         if hasattr(self, 'settings_panel'):
             self.settings_panel.replace_model_toggled.connect(self.on_replace_model_changed)
             self.settings_panel.model_ready_toggled.connect(self._on_model_ready_toggled)
+            # Пер-текстурные карты материала: запрос из settings_panel → диалог у превью.
+            if hasattr(self, 'preview_panel'):
+                self.settings_panel.material_maps_requested.connect(
+                    self.preview_panel.open_material_maps)
+            # Пер-текстурный VMT-редактор: запрос из settings_panel → редактор материала.
+            self.settings_panel.vmt_edit_requested.connect(self._open_vmt_for_material)
 
         # Когда пользователь загрузил VPK мод в 3D — автоматически переключаем на Custom
         if hasattr(self, 'preview_panel'):
@@ -688,7 +690,7 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
         show_class   = cat in ('weapon', 'character')
         show_type    = cat == 'weapon'
         show_weapon  = cat == 'weapon'
-        show_subtype = cat in ('character', 'special')
+        show_subtype = cat in ('character', 'special', 'projectile', 'pickup', 'taunt')
 
         self.class_label.setVisible(show_class)
         self.class_combo.setVisible(show_class)
@@ -704,7 +706,16 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
             _c.setEnabled(True)
 
         if show_subtype:
-            key = 'subtype_special' if cat == 'special' else 'subtype_part'
+            if cat == 'special':
+                key = 'subtype_special'
+            elif cat == 'projectile':
+                key = 'subtype_projectile'
+            elif cat == 'pickup':
+                key = 'subtype_pickup'
+            elif cat == 'taunt':
+                key = 'subtype_taunt'
+            else:
+                key = 'subtype_part'
             self.subtype_label.setText(self.t.get(key, 'Подтип:'))
 
     def on_category_changed(self, _index: int = 0) -> None:
@@ -733,6 +744,12 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
             self._populate_subtype_for_character()
         elif cat == 'special':
             self._populate_subtype_for_special()
+        elif cat == 'projectile':
+            self._populate_subtype_for_projectile()
+        elif cat == 'pickup':
+            self._populate_subtype_for_pickup()
+        elif cat == 'taunt':
+            self._populate_subtype_for_taunt()
         else:  # custom
             self.apply_selection_auto()
 
@@ -764,16 +781,73 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
         """Заполняет subtype_combo пунктами Крит / Спрей."""
         self.subtype_combo.blockSignals(True)
         self.subtype_combo.clear()
-        self._subtype_keys = ['critHIT', 'spray']
+        self._subtype_keys = ['critHIT', 'spray', 'death_ice', 'death_gold', 'death_fire']
         self.subtype_combo.addItem(self.t.get('special_crit', 'Крит'))
         self.subtype_combo.addItem(self.t.get('special_spray', 'Спрей'))
+        self.subtype_combo.addItem(self.t.get('special_death_ice', 'Эффект смерти: Лёд'))
+        self.subtype_combo.addItem(self.t.get('special_death_gold', 'Эффект смерти: Золото'))
+        self.subtype_combo.addItem(self.t.get('special_death_fire', 'Эффект смерти: Огонь'))
         self.subtype_combo.blockSignals(False)
 
         self.subtype_combo.setCurrentIndex(0)
         self.on_subtype_changed(0)
 
+    def _populate_subtype_for_projectile(self) -> None:
+        """Заполняет subtype_combo списком снарядов (w_models)."""
+        from src.data.projectiles import PROJECTILES, get_projectile_name
+
+        self.subtype_combo.blockSignals(True)
+        self.subtype_combo.clear()
+        self._subtype_keys = []
+        for key in PROJECTILES:
+            self.subtype_combo.addItem(get_projectile_name(key, self.language))
+            self._subtype_keys.append(key)
+        self.subtype_combo.blockSignals(False)
+
+        if self._subtype_keys:
+            self.subtype_combo.setCurrentIndex(0)
+            self.on_subtype_changed(0)
+        else:
+            self.apply_selection_auto()
+
+    def _populate_subtype_for_pickup(self) -> None:
+        """Заполняет subtype_combo списком пикапов (аптечки/патроны)."""
+        from src.data.pickups import PICKUPS, get_pickup_name
+
+        self.subtype_combo.blockSignals(True)
+        self.subtype_combo.clear()
+        self._subtype_keys = []
+        for key in PICKUPS:
+            self.subtype_combo.addItem(get_pickup_name(key, self.language))
+            self._subtype_keys.append(key)
+        self.subtype_combo.blockSignals(False)
+
+        if self._subtype_keys:
+            self.subtype_combo.setCurrentIndex(0)
+            self.on_subtype_changed(0)
+        else:
+            self.apply_selection_auto()
+
+    def _populate_subtype_for_taunt(self) -> None:
+        """Заполняет subtype_combo списком реквизита насмешек."""
+        from src.data.taunt_props import TAUNT_PROPS, get_taunt_prop_name
+
+        self.subtype_combo.blockSignals(True)
+        self.subtype_combo.clear()
+        self._subtype_keys = []
+        for key in TAUNT_PROPS:
+            self.subtype_combo.addItem(get_taunt_prop_name(key, self.language))
+            self._subtype_keys.append(key)
+        self.subtype_combo.blockSignals(False)
+
+        if self._subtype_keys:
+            self.subtype_combo.setCurrentIndex(0)
+            self.on_subtype_changed(0)
+        else:
+            self.apply_selection_auto()
+
     def on_subtype_changed(self, _index: int = 0) -> None:
-        """Обработка смены подтипа (часть персонажа или крит/спрей)."""
+        """Обработка смены подтипа (часть персонажа / крит-спрей / снаряд / пикап / реквизит)."""
         idx = self.subtype_combo.currentIndex()
         if idx < 0 or idx >= len(self._subtype_keys):
             return
@@ -784,16 +858,29 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
             # Часть персонажа: тело/руки → mode = f"{class}_{key}"
             self.current_weapon = key
             self.apply_selection_auto()
+        elif cat == 'projectile':
+            # Снаряд → mode = f"projectile_{key}" (трактуется как обычное оружие).
+            self.current_weapon = key
+            self.apply_selection_auto()
+        elif cat == 'pickup':
+            # Пикап (аптечка/патроны) → mode = f"pickup_{key}".
+            self.current_weapon = key
+            self.apply_selection_auto()
+        elif cat == 'taunt':
+            # Реквизит насмешки → mode = f"taunt_{key}".
+            self.current_weapon = key
+            self.apply_selection_auto()
         elif cat == 'special':
-            # Крит/Спрей. Выставляем оба скрытых чекбокса ДЕТЕРМИНИРОВАННО.
-            # ExclusiveCheckBox снимает партнёра только по клику мыши, а резервный
-            # путь в обработчиках stateChanged ненадёжен при программном setChecked —
-            # поэтому управляем состоянием явно, через blockSignals, без гонок.
+            # Подтип special — источник истины. Крит/Спрей дополнительно
+            # синхронизируют свои скрытые чекбоксы; скины эффектов смерти
+            # (death_*) держат оба чекбокса выключенными.
+            self._special_subtype = key
             want_crit = (key == 'critHIT')
+            want_spray = (key == 'spray')
             self.crit_hit_checkbox.blockSignals(True)
             self.spray_checkbox.blockSignals(True)
             self.crit_hit_checkbox.setChecked(want_crit)
-            self.spray_checkbox.setChecked(not want_crit)
+            self.spray_checkbox.setChecked(want_spray)
             self.crit_hit_checkbox.blockSignals(False)
             self.spray_checkbox.blockSignals(False)
             # Побочные эффекты, которые раньше делали обработчики чекбоксов:
@@ -842,13 +929,9 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
             self.spray_checkbox.setText(self.t.get('enable_spray', 'Create spray (256×256, RGBA)'))
 
         if hasattr(self, '_tab_weapons_btn'):
-            self._tab_weapons_btn.setText(
-                self.t.get('tab_weapons', 'Weapons') if self.language == 'ru' else 'Weapons'
-            )
+            self._tab_weapons_btn.setText(self.t.get('tab_weapons', 'Weapons'))
         if hasattr(self, '_tab_hats_btn'):
-            self._tab_hats_btn.setText(
-                self.t.get('tab_hats', 'Шапки') if self.language == 'ru' else 'Hats'
-            )
+            self._tab_hats_btn.setText(self.t.get('tab_hats', 'Hats'))
         if hasattr(self, 'hats_panel'):
             self.hats_panel.update_language(self.language)
 
@@ -1021,15 +1104,39 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
         cat = self._current_category
 
         if cat == 'special':
-            # Крит/Спрей: источник истины — скрытые чекбоксы
-            if self.spray_checkbox.isChecked():
-                self.mode = "spray"
-            elif self.crit_hit_checkbox.isChecked():
-                self.mode = "critHIT"
-            else:
-                self.mode = None
+            # Источник истины — выбранный подтип (крит/спрей/скин эффекта смерти).
+            self.mode = getattr(self, '_special_subtype', None)
+            if self.mode is None:
+                # Fallback на чекбоксы (на случай старого состояния).
+                if self.spray_checkbox.isChecked():
+                    self.mode = "spray"
+                elif self.crit_hit_checkbox.isChecked():
+                    self.mode = "critHIT"
         elif cat == 'custom':
             self.mode = "custom" if getattr(self, '_custom_vpk_path', None) else None
+        elif cat == 'projectile':
+            # Снаряд: mode = "projectile_<key>" → weapon_key = <key>, путь из
+            # WEAPON_MDL_PATHS. Дальше трактуется как обычное оружие.
+            from src.data.projectiles import PROJECTILE_MODE_PREFIX
+            if self.current_weapon:
+                self.mode = f"{PROJECTILE_MODE_PREFIX}{self.current_weapon}"
+            else:
+                self.mode = None
+        elif cat == 'pickup':
+            # Пикап: mode = "pickup_<key>" → weapon_key = <key>, путь из
+            # WEAPON_MDL_PATHS. Дальше трактуется как обычное оружие.
+            from src.data.pickups import PICKUP_MODE_PREFIX
+            if self.current_weapon:
+                self.mode = f"{PICKUP_MODE_PREFIX}{self.current_weapon}"
+            else:
+                self.mode = None
+        elif cat == 'taunt':
+            # Реквизит насмешки: mode = "taunt_<key>" → weapon_key = <key>.
+            from src.data.taunt_props import TAUNT_PROP_MODE_PREFIX
+            if self.current_weapon:
+                self.mode = f"{TAUNT_PROP_MODE_PREFIX}{self.current_weapon}"
+            else:
+                self.mode = None
         elif cat == 'character':
             # Тело/руки: mode = f"{class}_{part_key}" (scout_body, spy_masks и т.д.)
             if self.current_class and self.current_weapon:
@@ -1073,7 +1180,7 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
         is_spy_masks = (self.mode == SPY_MASK_MODE_KEY)
         is_normal_weapon = (
             self.mode
-            and self.mode not in ("spray", "critHIT")
+            and self.mode not in SPECIAL_MODES.values()
             and not is_hand_mode
             and not is_player_body
             and not is_spy_masks
@@ -1121,6 +1228,24 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
             self.preview_panel.set_crithit_mode()
             return
 
+        # Эффекты смерти (лёд/золото/огонь): тот же персонаж, но текстура
+        # пользователя ложится на саму модель — как эффект ляжет в игре.
+        # Сначала показываем оригинальную игровую текстуру эффекта из VPK.
+        if self.mode in ("death_ice", "death_gold", "death_fire"):
+            _tex_vpk = _misc_vpk = ''
+            _root = self.settings_panel.get_settings().get('tf2_game_folder', '')
+            if _root:
+                try:
+                    from src.services.tf2_paths import TF2Paths
+                    _, _misc_vpk, _ = TF2Paths.resolve(_root)
+                    _tex_vpk = TF2Paths.resolve_textures_vpk(_root)
+                except Exception:
+                    _tex_vpk = _misc_vpk = ''
+            self.preview_panel.set_death_effect_mode(
+                mode=self.mode, textures_vpk=_tex_vpk or '', misc_vpk=_misc_vpk or ''
+            )
+            return
+
         weapon_key = self._resolve_3d_weapon_key()
         if weapon_key is None:
             return
@@ -1165,7 +1290,7 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
 
         mode = getattr(self, 'mode', None) or ''
 
-        if not mode or mode in ('spray', 'critHIT', 'custom'):
+        if not mode or mode in set(SPECIAL_MODES.values()) | {'custom'}:
             self.preview_panel.update_extra_slots('', mode='')
             return
 
@@ -1215,23 +1340,6 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
             # Remember which texture slot this image belongs to
             self.preview_panel.load_image(path)
 
-    def expert_mode_triggered(self) -> None:
-        """Открывает редактор VMT для выбранного оружия/шапки."""
-        if not hasattr(self, 'mode') or not self.mode:
-            ErrorHandler.show_warning(self, self.t.get('select_weapon_error', 'Select a weapon first'), self.t['error'])
-            return
-
-        from src.data.weapons import SPECIAL_MODES
-        if self.mode in set(SPECIAL_MODES.values()) | {"custom"}:
-            ErrorHandler.show_warning(self, self.t.get('vmt_editor_not_available', 'VMT editor is not available for this mode.'), self.t['error'])
-            return
-
-        target = self._resolve_vmt_target()
-        if target is None:
-            return
-        weapon_key, display_name = target
-        self._open_vmt_for_target(weapon_key, display_name)
-
     def _resolve_vmt_target(self):
         """(weapon_key, display_name) для VMT-редактора по текущему режиму, либо None
         (с предупреждением), если режим не поддерживается."""
@@ -1280,13 +1388,50 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
             display_name = weapon_key
         return weapon_key, display_name
 
-    def _open_vmt_for_target(self, weapon_key: str, display_name: str) -> None:
-        """Открывает сохранённый VMT либо извлекает оригинал из игры и открывает редактор."""
+    def _open_vmt_for_material(self, material: str = "") -> None:
+        """
+        Открывает VMT-редактор для КОНКРЕТНОГО материала карточки (пер-текстурно).
+        material='' → главный материал текущего превью.
+        """
+        if not hasattr(self, 'mode') or not self.mode:
+            ErrorHandler.show_warning(self, self.t.get('select_weapon_error', 'Select a weapon first'), self.t['error'])
+            return
+        from src.data.weapons import SPECIAL_MODES
+        if self.mode in set(SPECIAL_MODES.values()) | {"custom"}:
+            ErrorHandler.show_warning(self, self.t.get('vmt_editor_not_available', 'VMT editor is not available for this mode.'), self.t['error'])
+            return
+        target = self._resolve_vmt_target()
+        if target is None:
+            return
+        weapon_key, display_name = target
+
+        mat = (material or '').strip()
+        if not mat and hasattr(self, 'preview_panel'):
+            names = getattr(self.preview_panel, '_material_names', None) or []
+            mat = names[0] if names else ''
+        if not mat:
+            mat = weapon_key  # запасной ключ (как у глобальной кнопки)
+
+        # Ключ хранилища и извлекаемый файл = имя материала. Для главного материала
+        # это совпадает с texture_filename, который сборка уже ищет.
+        self._open_vmt_for_target(weapon_key, mat, edit_key=mat, material_name=mat)
+
+    def _open_vmt_for_target(self, weapon_key: str, display_name: str,
+                             edit_key: Optional[str] = None,
+                             material_name: Optional[str] = None) -> None:
+        """
+        Открывает сохранённый VMT либо извлекает оригинал из игры и открывает редактор.
+
+        edit_key      — ключ EditedVMTService (по умолч. weapon_key — главный материал).
+        material_name — имя VMT-файла для извлечения (по умолч. weapon_key).
+        """
         from src.services.edited_vmt_service import EditedVMTService
+        edit_key = edit_key or weapon_key
+        material_name = material_name or weapon_key
         # ── Открываем сохранённый VMT (если есть) ────────────────────────── #
-        edited_vmt_path = EditedVMTService.get_edited_vmt(weapon_key)
+        edited_vmt_path = EditedVMTService.get_edited_vmt(edit_key)
         if edited_vmt_path and os.path.exists(edited_vmt_path):
-            self.open_vmt_editor(edited_vmt_path, weapon_key, display_name)
+            self.open_vmt_editor(edited_vmt_path, edit_key, display_name)
             return
 
         # ── Нет сохранённого — нужен путь к TF2 для извлечения ──────────── #
@@ -1303,9 +1448,9 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
 
         # ── Извлекаем VMT из VPK ─────────────────────────────────────────── #
         if self.mode == "hat":
-            vmt_path = self._extract_hat_vmt_from_game(weapon_key, tf2_root_dir)
+            vmt_path = self._extract_hat_vmt_from_game(weapon_key, tf2_root_dir, material_name)
         else:
-            vmt_path = self.extract_original_vmt_from_game(weapon_key, tf2_root_dir)
+            vmt_path = self.extract_original_vmt_from_game(weapon_key, tf2_root_dir, material_name)
 
         if not vmt_path:
             ErrorHandler.show_warning(
@@ -1318,47 +1463,109 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
             )
             return
 
-        self.open_vmt_editor(vmt_path, weapon_key, display_name)
+        self.open_vmt_editor(vmt_path, edit_key, display_name)
 
 
-    def _extract_hat_vmt_from_game(self, hat_mdl: str, tf2_root_dir: str) -> Optional[str]:
+    def _extract_hat_vmt_from_game(self, hat_mdl: str, tf2_root_dir: str,
+                                   material_name: Optional[str] = None) -> Optional[str]:
         """
-        Извлекает VMT для шапки через цепочку QC → cdmaterials → VPK.
-        Переиспользует ту же логику что и 3D Preview.
+        Извлекает VMT для шапки через $cdmaterials из кэшированного QC
+        (тот же общий путь, что и у оружия — _extract_vmt_from_qc).
         """
-        from src.services.tf2_paths import TF2Paths
-        from src.services.preview_3d_worker import Preview3DWorker
         from src.services import decompile_cache
-        import glob, tempfile
-
-        # ── 1. Ищем QC в кэше декомпиляции ──────────────────────────────── #
-        try:
-            _, misc_vpk, _ = TF2Paths.resolve(tf2_root_dir)
-        except Exception:
-            return None
 
         qc_path = decompile_cache.find_cached_qc_for_weapon(hat_mdl)
         if not qc_path:
             # Нет кэша — пробуем без декомпиляции (быстро, не всегда работает)
             return None
 
-        cdmaterials, skin0_textures = Preview3DWorker._parse_qc_texture_info(qc_path)
-        if not cdmaterials:
+        from src.services import qc_skin_parser
+        # Конкретный материал (пер-карточная правка) — ищем именно его; иначе
+        # материалы skin0, а если их нет — стебель имени модели (минус класс).
+        if material_name:
+            mat_names = [material_name]
+        else:
+            _rows = qc_skin_parser.parse_texturegroup_rows(qc_path)
+            skin0_textures = _rows[0] if _rows else []
+            if skin0_textures:
+                mat_names = list(skin0_textures)
+            else:
+                import re as _re
+                stem = os.path.splitext(os.path.basename(hat_mdl))[0]
+                stem = _re.sub(
+                    r'_(heavy|scout|soldier|pyro|demoman|engineer|medic|sniper|spy)$',
+                    '', stem, flags=_re.IGNORECASE,
+                )
+                mat_names = [stem]
+
+        return self._extract_vmt_from_qc(qc_path, tf2_root_dir, mat_names)
+    
+    def extract_original_vmt_from_game(self, weapon_key: str, tf2_root_dir: str,
+                                       material_name: Optional[str] = None) -> Optional[str]:
+        """
+        Извлекает оригинальный VMT оружия через $cdmaterials из QC (как у шапок).
+
+        Папки материалов берём из декомпилированного QC модели (авторитетно), а не
+        угадываем хардкодом. QC обычно уже в кэше после 3D-превью; если нет —
+        декомпилируем модель на месте тем же сервисом, что и превью.
+
+        Args:
+            weapon_key:    ключ оружия (например c_scattergun).
+            tf2_root_dir:  корень TF2.
+            material_name: конкретный материал (пер-карточно) или None → skin0/ключ.
+
+        Returns:
+            Путь к извлечённому VMT или None.
+        """
+        from src.services import decompile_cache, qc_skin_parser
+
+        qc_path = decompile_cache.find_cached_qc_for_weapon(weapon_key)
+        if not qc_path:
+            # Нет кэша — декомпилируем сейчас (класс в mode не важен).
+            try:
+                import glob as _glob
+                from src.services.extract_model_service import ExtractModelService
+                ok, _msg, _cancel, data = (
+                    ExtractModelService.prepare_decompiled_model_files_with_progress(
+                        tf2_root_dir, f"scout_{weapon_key}", weapon_key, language=self.language,
+                    )
+                )
+                if ok and data and data.get("decompile_dir"):
+                    qcs = _glob.glob(os.path.join(data["decompile_dir"], "*.qc"))
+                    qc_path = qcs[0] if qcs else None
+            except Exception as e:
+                logger.debug(f"VMT: декомпиляция для {weapon_key} не удалась: {e}")
+                qc_path = None
+        if not qc_path:
             return None
 
-        # Имя материала: из $texturegroup или имя файла MDL без расширения и класса
-        mat_names = list(skin0_textures) if skin0_textures else []
-        if not mat_names:
-            import re as _re
-            stem = os.path.splitext(os.path.basename(hat_mdl))[0]
-            stem = _re.sub(
-                r'_(heavy|scout|soldier|pyro|demoman|engineer|medic|sniper|spy)$',
-                '', stem, flags=_re.IGNORECASE,
-            )
-            mat_names = [stem]
+        # Имя(имена) материала: конкретный (пер-карточно) или materials из skin0.
+        if material_name:
+            mat_names = [material_name]
+        else:
+            rows = qc_skin_parser.parse_texturegroup_rows(qc_path)
+            mat_names = list(rows[0]) if rows else [weapon_key]
+        return self._extract_vmt_from_qc(qc_path, tf2_root_dir, mat_names)
 
-        # ── 2. Открываем оба VPK и ищем VMT ─────────────────────────────── #
+    def _extract_vmt_from_qc(self, qc_path: str, tf2_root_dir: str,
+                             mat_names: list) -> Optional[str]:
+        """Извлекает VMT через $cdmaterials из QC: папки материалов берём из самой
+        модели (как делает игра), а не угадываем. Единый путь для оружия и шапок."""
+        from src.services.tf2_paths import TF2Paths
+        from src.services.preview_3d_worker import Preview3DWorker
+        from src.services import qc_skin_parser
         import vpk as vpklib
+
+        if not qc_path or not os.path.exists(qc_path):
+            return None
+        cdmaterials = qc_skin_parser.parse_cdmaterials(qc_path)
+        if not cdmaterials or not mat_names:
+            return None
+
+        try:
+            _, misc_vpk, _ = TF2Paths.resolve(tf2_root_dir)
+        except Exception:
+            misc_vpk = None
         textures_vpk = TF2Paths.resolve_textures_vpk(tf2_root_dir)
         paks: list = []
         for vp in [misc_vpk, textures_vpk]:
@@ -1367,34 +1574,31 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
                     paks.append(vpklib.open(vp))
                 except Exception:
                     pass
-
         if not paks:
             return None
 
         vmt_content: Optional[str] = None
-        vmt_filename: str = "hat.vmt"
-
+        vmt_filename: str = "material.vmt"
         for mat_name in mat_names:
             for pak in paks:
-                info = Preview3DWorker._find_vmt_content_in_vpk(pak, cdmaterials, mat_name.lower())
+                info = Preview3DWorker._find_vmt_content_in_vpk(
+                    pak, cdmaterials, mat_name.lower()
+                )
                 if info:
                     _path, _raw = info
-                    vmt_content  = _raw
+                    vmt_content = _raw
                     vmt_filename = os.path.basename(_path)
                     break
             if vmt_content:
                 break
-
         for pak in paks:
             try:
                 pak.close()
             except Exception:
                 pass
-
         if not vmt_content:
             return None
 
-        # ── 3. Сохраняем во временный файл ───────────────────────────────── #
         temp_dir = os.path.join("tools", "temp_vmt_extract")
         os.makedirs(temp_dir, exist_ok=True)
         out_path = os.path.join(temp_dir, vmt_filename)
@@ -1404,87 +1608,6 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
             return out_path
         except OSError:
             return None
-    
-    def extract_original_vmt_from_game(self, weapon_key: str, tf2_root_dir: str) -> Optional[str]:
-        """
-        Извлекает оригинальный VMT файл из игры для оружия
-        
-        Пути поиска (в VPK без префикса materials/):
-        - models/workshop_partner/weapons/c_models/{weapon_key}/ (с папкой)
-        - models/workshop_partner/weapons/c_models/ (без папки, файл напрямую)
-        - models/weapons/c_items/{weapon_key}/ (с папкой)
-        - models/weapons/c_items/ (без папки, файл напрямую)
-        
-        Args:
-            weapon_key: Ключ оружия (например, c_scattergun)
-            tf2_root_dir: Корневая директория TF2
-            
-        Returns:
-            Путь к извлеченному VMT файлу или None если не удалось извлечь
-        """
-        from src.services.tf2_vpk_extract_service import TF2VPKExtractService
-        from src.services.tf2_paths import TF2Paths
-        
-        # Создаем временную директорию для извлечения
-        temp_dir = os.path.join("tools", "temp_vmt_extract")
-        os.makedirs(temp_dir, exist_ok=True)
-        
-        # Получаем пути к VPK файлам
-        tf2_textures_vpk = TF2Paths.resolve_textures_vpk(tf2_root_dir)
-        try:
-            _, tf2_misc_vpk, _ = TF2Paths.resolve(tf2_root_dir)
-        except FileNotFoundError:
-            tf2_misc_vpk = None
-        
-        # Список путей для поиска VMT файла (в порядке приоритета)
-        # В VPK файлах VMT находятся в materials/ директории
-        search_paths = []
-        
-        if weapon_key.startswith('v_'):
-            # Для v_ оружия
-            search_paths = [
-                f"materials/models/weapons/{weapon_key}",  # materials/models/weapons/v_weapon
-                f"materials/models/workshop_partner/weapons/{weapon_key}",  # materials/models/workshop_partner/weapons/v_weapon
-                f"models/weapons/{weapon_key}",  # Fallback без materials/
-                f"models/workshop_partner/weapons/{weapon_key}",  # Fallback без materials/
-            ]
-        else:
-            # Для c_ оружия пробуем несколько путей в порядке приоритета
-            # Сначала с materials/, затем без (fallback)
-            search_paths = [
-                f"materials/models/workshop_partner/weapons/c_models/{weapon_key}",  # С папкой и materials/
-                f"materials/models/workshop_partner/weapons/c_models/{weapon_key}/{weapon_key}",  # С полным путем
-                f"materials/models/workshop/weapons/c_models/{weapon_key}",  # Альтернативный путь
-                f"materials/models/weapons/c_models/{weapon_key}",  # Стандартный путь
-                f"materials/models/weapons/c_items/{weapon_key}",  # c_items путь
-                "materials/models/workshop_partner/weapons/c_models",  # Без папки (файл напрямую)
-                "materials/models/weapons/c_items",  # Без папки в c_items
-                # Fallback пути без materials/
-                f"models/workshop_partner/weapons/c_models/{weapon_key}",  # С папкой
-                "models/workshop_partner/weapons/c_models",  # Без папки (файл напрямую)
-                f"models/weapons/c_items/{weapon_key}",  # С папкой в c_items
-                "models/weapons/c_items",  # Без папки в c_items (файл напрямую)
-            ]
-        
-        # Пробуем извлечь VMT по каждому пути
-        vpk_files = []
-        if tf2_textures_vpk:
-            vpk_files.append(tf2_textures_vpk)
-        if tf2_misc_vpk:
-            vpk_files.append(tf2_misc_vpk)
-        
-        for cdmaterials_path in search_paths:
-            for vpk_file in vpk_files:
-                vmt_file = TF2VPKExtractService.extract_vmt_file(
-                    vpk_file,
-                    cdmaterials_path,
-                    weapon_key,
-                    temp_dir
-                )
-                if vmt_file and os.path.exists(vmt_file):
-                    return vmt_file
-        
-        return None
 
     def open_vmt_editor(self, path: str, weapon_key: str = "", display_name: str = "") -> None:
         """Открывает редактор VMT файла"""
@@ -1564,6 +1687,9 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
                 getattr(worker, sig).disconnect()
             except Exception:
                 pass
+        # Безопасно завершаем поток ПЕРЕД удалением (иначе Qt: «Destroyed while
+        # thread is still running»). На штатном пути воркер уже не выполняется.
+        worker.stop()
         worker.deleteLater()
         self._build_worker = None
 
@@ -1606,21 +1732,20 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
             selected_format = settings['format']
             flags = settings['flags']
             vtf_options = settings.get('vtf_options', {})
-            is_crit_hit = (hasattr(self, 'crit_hit_checkbox') and 
+            is_crit_hit = (hasattr(self, 'crit_hit_checkbox') and
                           self.crit_hit_checkbox.isChecked())
-            if is_crit_hit and (settings.get('draw_uv_layout', False) or vtf_options.get('normal')):
+            if is_crit_hit and vtf_options.get('normal'):
                 ErrorHandler.show_warning(
                     self,
                     self.t.get(
                         'crit_hit_conflict_error',
-                        'Дополнительные настройки (UV разметка / Normal Map) конфликтуют с CritHIT. Сборка не запущена.'
+                        'Дополнительные настройки (Normal Map) конфликтуют с CritHIT. Сборка не запущена.'
                     ),
                     self.t['error']
                 )
                 return
-            # UV разметка недоступна для CritHIT режима
-            draw_uv_layout = settings.get('draw_uv_layout', False) and not is_special_mode and not is_crit_hit
-            
+            draw_uv_layout = False
+
             # Проверяем, используется ли VTF файл из preview_panel
             custom_vtf_path = self.preview_panel.get_vtf_path()
             from_path = None
@@ -1662,6 +1787,18 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
                 hasattr(self, 'settings_panel') and
                 self.settings_panel.is_model_ready_checked()
             )
+            # Кнопка 🔄: если в превью загружена кастомная модель — включаем замену
+            # автоматически (без галочки в настройках). Развязывает кнопку и настройки.
+            if (not model_ready_enabled and hasattr(self, 'preview_panel')
+                    and self.preview_panel.get_custom_smd_path()):
+                replace_model_enabled = True
+
+            # Замену модели НЕ поддерживаем для тела персонажа (сложный скелет/flex/
+            # bodygroups — подмена геометрией ломает модель). Принудительно выключаем.
+            from src.data.player_characters import PLAYER_BODY_MODE_KEYS
+            if self.mode in PLAYER_BODY_MODE_KEYS and replace_model_enabled:
+                logger.info("Замена модели недоступна для тела персонажа — выключаем.")
+                replace_model_enabled = False
 
             # Взаимоисключение с CritHIT — сбрасываем оба флага если активен CritHIT
             is_crit_hit = (hasattr(self, 'crit_hit_checkbox') and
@@ -1673,22 +1810,28 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
                 replace_model_enabled = False
                 model_ready_enabled   = False
 
-            # Если "Замена модели" — запрашиваем путь к SMD файлу ДО запуска воркера
-            # (чтобы диалог не появился позади модального диалога прогресса сборки)
+            # Если "Замена модели" — берём путь к SMD. Сначала пробуем модель,
+            # уже загруженную в 3D-превью (чтобы не просить выбрать файл повторно).
+            # Если её нет — показываем диалог выбора ДО запуска воркера.
             replace_model_smd_path: Optional[str] = None
             if replace_model_enabled and not model_ready_enabled:
-                smd_file, _ = QFileDialog.getOpenFileName(
-                    self,
-                    self.t.get(
-                        'replace_model_select_title',
-                        'Select SMD file for model replacement'
-                    ),
-                    "",
-                    "SMD Files (*.smd);;All Files (*)"
-                )
-                if not smd_file:
-                    return  # Пользователь отменил
-                replace_model_smd_path = smd_file
+                if hasattr(self, 'preview_panel'):
+                    replace_model_smd_path = self.preview_panel.get_custom_smd_path()
+                if replace_model_smd_path:
+                    logger.info(f"Замена модели: используем загруженную в превью SMD: {replace_model_smd_path}")
+                else:
+                    smd_file, _ = QFileDialog.getOpenFileName(
+                        self,
+                        self.t.get(
+                            'replace_model_select_title',
+                            'Select SMD file for model replacement'
+                        ),
+                        "",
+                        "SMD Files (*.smd);;All Files (*)"
+                    )
+                    if not smd_file:
+                        return  # Пользователь отменил
+                    replace_model_smd_path = smd_file
 
             # Если "Модель уже готова" — запрашиваем путь к .mdl файлу ДО запуска воркера
             model_ready_path: Optional[str] = None
@@ -1724,6 +1867,21 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
                     QMessageBox.Yes,
                 )
                 hat_apply_game_paints = (reply == QMessageBox.Yes)
+
+            # Мультиклассовая шапка: какие классы собирать (выбор в списке шапок).
+            # None — обычная шапка (одна общая модель) или не режим шапки.
+            hat_class_models = None
+            hat_mdl_path_for_build = getattr(self, '_hat_mdl_path', None)
+            if self.mode == "hat" and hasattr(self, 'hats_panel'):
+                hat_class_models = self.hats_panel.get_selected_class_models()
+                if hat_class_models:
+                    # Основная (primary) сборка идёт по ПЕРВОМУ выбранному классу,
+                    # остальные дособираются в тот же VPK в vpk_service.
+                    hat_mdl_path_for_build = next(iter(hat_class_models.values()))
+                    logger.info(
+                        f"[HAT multiclass] классы для сборки: "
+                        f"{list(hat_class_models.keys())}"
+                    )
 
             # Сбрасываем запомненный выбор «применить ко всем» — каждая новая
             # сборка начинается без предыдущих предпочтений пользователя.
@@ -1765,7 +1923,29 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
                 if main_key and main_key in _panel_extra_textures:
                     _panel_extra_textures.pop(main_key)
 
-            self._build_worker = BuildWorker(
+            # Стили (skinfamilies) кастомной модели: пользователь определил
+            # доп-стили в полосе стилей → генерируем $texturegroup и варианты.
+            # None, если стилей нет (обычная одно-скиновая сборка).
+            _skin_build_data = None
+            _replace_keep_materials = False
+            if replace_model_enabled and hasattr(self, 'preview_panel'):
+                _skin_build_data = self.preview_panel.get_skin_build_data()
+                if _skin_build_data:
+                    logger.info(
+                        f"[SKIN BUILD] стили: {_skin_build_data['tg_overrides']}"
+                    )
+                # «Готовая» модель со своими материалами → не схлопывать в один.
+                if hasattr(self.preview_panel, 'get_custom_keep_materials'):
+                    _replace_keep_materials = self.preview_panel.get_custom_keep_materials()
+
+            # Отредактированный пользователем QC (только для «готовой» модели).
+            _custom_qc_text = None
+            if _replace_keep_materials and hasattr(self, 'preview_panel') \
+                    and hasattr(self.preview_panel, 'get_custom_qc_text'):
+                _custom_qc_text = self.preview_panel.get_custom_qc_text()
+
+            from src.services.build_request import BuildRequest
+            _request = BuildRequest(
                 image_path=from_path,
                 mode=self.mode,
                 filename=name,
@@ -1786,12 +1966,29 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
                 blu_mode=_blu_mode,
                 blu_image_path=_blu_image,
                 custom_vpk_source_path=getattr(self, '_custom_vpk_path', None),
-                hat_mdl_path=getattr(self, '_hat_mdl_path', None),
+                hat_mdl_path=hat_mdl_path_for_build,
                 hat_apply_game_paints=hat_apply_game_paints,
+                hat_class_models=hat_class_models,
                 panel_extra_textures=_panel_extra_textures,
-                # Без parent=self ! Если дать parent=self, Qt станет владельцем
-                # и не удалит старый воркер при замене, и сигналы будут дублироваться.
+                material_maps=(self.preview_panel.get_texture_maps()
+                               if hasattr(self, 'preview_panel') else {}),
+                material_settings=(self.preview_panel.get_texture_overrides()
+                                   if hasattr(self, 'preview_panel') else {}),
+                skin_build_data=_skin_build_data,
+                replace_keep_materials=_replace_keep_materials,
+                custom_qc_text=_custom_qc_text,
+                isolate_shoulders=(
+                    self.settings_panel.is_isolate_shoulders_checked()
+                    if hasattr(self, 'settings_panel') else False
+                ),
+                panel_blu_textures=(
+                    self.preview_panel.get_blu_slot_image_paths()
+                    if hasattr(self, 'preview_panel') else None
+                ),
             )
+            # Без parent=self ! Если дать parent=self, Qt станет владельцем
+            # и не удалит старый воркер при замене, и сигналы будут дублироваться.
+            self._build_worker = BuildWorker(request=_request)
             
             # Подключаем сигналы
             self._build_worker.finished.connect(self._on_build_finished)
@@ -2088,40 +2285,50 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
             self._build_worker.set_texture_mismatch_result(decision)
 
 
+    def _resolve_extractable_weapon_key(self):
+        """
+        Резолвит weapon_key для извлечения модели / генерации UV (с показом
+        предупреждений). Возвращает строку или None, если режим не подходит.
+        """
+        if not hasattr(self, 'mode') or not self.mode:
+            ErrorHandler.show_warning(self, self.t['select_weapon_error'], self.t['error'])
+            return None
+
+        from src.data.weapons import SPECIAL_MODES
+        if self.mode in SPECIAL_MODES.values():
+            error_msg = self.t.get('extract_model_special_mode_error', 'Cannot extract model for special modes')
+            ErrorHandler.show_warning(self, error_msg, self.t['error'])
+            return None
+
+        # Для режимов рук weapon_key — это ключ arm-модели (например "c_pyro_arms"),
+        # для скинов персонажа — это ключ MDL модели (например "player_scout").
+        from src.data.player_hands import HAND_MODE_KEYS, HAND_MODES
+        from src.data.player_characters import PLAYER_BODY_MODE_KEYS, PLAYER_CHARACTERS
+        if self.mode in HAND_MODE_KEYS:
+            weapon_key = HAND_MODES[self.mode].get("arm_model", "")
+            if not weapon_key:
+                ErrorHandler.show_warning(self, self.t.get('extract_model_special_mode_error', 'Cannot extract model for this mode'), self.t['error'])
+                return None
+        elif self.mode in PLAYER_BODY_MODE_KEYS:
+            # Для персонажей weapon_key = полный MDL путь (как в 3D preview)
+            weapon_key = PLAYER_CHARACTERS[self.mode].get("mdl_path", "")
+            if not weapon_key:
+                ErrorHandler.show_warning(self, self.t.get('extract_model_special_mode_error', 'Cannot extract model for this mode'), self.t['error'])
+                return None
+        elif self.mode == "hat":
+            weapon_key = getattr(self, '_hat_mdl_path', None)
+            if not weapon_key:
+                ErrorHandler.show_warning(self, self.t.get('select_weapon_error', 'Select a hat first'), self.t['error'])
+                return None
+        else:
+            weapon_key = weapon_key_from_mode(self.mode)
+        return weapon_key
+
     def extract_original_model(self) -> None:
         try:
-            if not hasattr(self, 'mode') or not self.mode:
-                ErrorHandler.show_warning(self, self.t['select_weapon_error'], self.t['error'])
+            weapon_key = self._resolve_extractable_weapon_key()
+            if not weapon_key:
                 return
-
-            from src.data.weapons import SPECIAL_MODES
-            if self.mode in SPECIAL_MODES.values():
-                error_msg = self.t.get('extract_model_special_mode_error', 'Cannot extract model for special modes')
-                ErrorHandler.show_warning(self, error_msg, self.t['error'])
-                return
-
-            # Для режимов рук weapon_key — это ключ arm-модели (например "c_pyro_arms"),
-            # для скинов персонажа — это ключ MDL модели (например "player_scout").
-            from src.data.player_hands import HAND_MODE_KEYS, HAND_MODES
-            from src.data.player_characters import PLAYER_BODY_MODE_KEYS, PLAYER_CHARACTERS
-            if self.mode in HAND_MODE_KEYS:
-                weapon_key = HAND_MODES[self.mode].get("arm_model", "")
-                if not weapon_key:
-                    ErrorHandler.show_warning(self, self.t.get('extract_model_special_mode_error', 'Cannot extract model for this mode'), self.t['error'])
-                    return
-            elif self.mode in PLAYER_BODY_MODE_KEYS:
-                # Для персонажей weapon_key = полный MDL путь (как в 3D preview)
-                weapon_key = PLAYER_CHARACTERS[self.mode].get("mdl_path", "")
-                if not weapon_key:
-                    ErrorHandler.show_warning(self, self.t.get('extract_model_special_mode_error', 'Cannot extract model for this mode'), self.t['error'])
-                    return
-            elif self.mode == "hat":
-                weapon_key = getattr(self, '_hat_mdl_path', None)
-                if not weapon_key:
-                    ErrorHandler.show_warning(self, self.t.get('select_weapon_error', 'Select a hat first'), self.t['error'])
-                    return
-            else:
-                weapon_key = weapon_key_from_mode(self.mode)
 
             settings = self.settings_panel.get_settings()
             tf2_root_dir = settings.get('tf2_game_folder', '')
@@ -2138,11 +2345,18 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
 
             from src.services.extract_model_worker import ExtractModelWorker
 
+            # Мультиклассовая шапка → экспортируем модели ВСЕХ классов, а не только
+            # первого найденного.
+            hat_class_models = None
+            if self.mode == "hat" and hasattr(self, 'hats_panel'):
+                hat_class_models = self.hats_panel.get_all_class_models()
+
             self._extract_model_worker = ExtractModelWorker(
                 tf2_root_dir=tf2_root_dir,
                 mode=self.mode,
                 weapon_key=weapon_key,
                 language=self.language,
+                hat_class_models=hat_class_models,
                 parent=self
             )
             self._extract_model_export_folder = export_folder
@@ -2263,6 +2477,73 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
     def _on_export_model_error(self, error_message: str) -> None:
         self._close_progress('_export_model_progress_dialog', 'extract_model_button')
         ErrorHandler.show_error(self, Exception(error_message), "Ошибка экспорта модели", self.t['error'])
+
+    def export_uv_template(self) -> None:
+        """По кнопке: декомпилирует модель и рисует UV-шаблон в папку экспорта
+        (без полной сборки мода)."""
+        try:
+            weapon_key = self._resolve_extractable_weapon_key()
+            if not weapon_key:
+                return
+
+            settings = self.settings_panel.get_settings()
+            tf2_root_dir = settings.get('tf2_game_folder', '')
+            if not tf2_root_dir:
+                ErrorHandler.show_warning(self, self.t.get('tf2_path_not_specified', 'TF2 path not specified in settings'), self.t['error'])
+                return
+
+            export_folder = settings.get('export_folder', 'export')
+            image_size = settings.get('size') or (1024, 1024)
+
+            if self._worker_busy('_uv_template_worker', 'extract_model_already_running',
+                                 'Operation is already in progress. Please wait.'):
+                return
+
+            from src.services.uv_template_worker import UVTemplateWorker
+            self._uv_template_worker = UVTemplateWorker(
+                tf2_root_dir=tf2_root_dir,
+                mode=self.mode,
+                weapon_key=weapon_key,
+                image_size=image_size,
+                export_folder=export_folder,
+                language=self.language,
+                parent=self,
+            )
+            self._uv_template_worker.finished.connect(self._on_uv_template_finished)
+            self._uv_template_worker.progress.connect(self._on_uv_template_progress)
+            self._uv_template_worker.error.connect(self._on_uv_template_error)
+
+            self._launch_progress(
+                '_uv_template_progress_dialog', self._uv_template_worker,
+                self._cancel_uv_template,
+                title=self.t.get('export_uv_progress_title', 'UV Template'),
+                text=self.t.get('export_uv_progress_text', 'Generating UV template...'),
+                disable_button='export_uv_button',
+            )
+        except Exception as e:
+            ErrorHandler.show_error(self, e, "Ошибка при запуске генерации UV-шаблона", self.t['error'])
+
+    def _on_uv_template_finished(self, success: bool, message: str) -> None:
+        self._close_progress('_uv_template_progress_dialog', 'export_uv_button')
+        if success:
+            text = self.t.get('export_uv_success', 'UV template saved:') + f"\n{message}"
+            ErrorHandler.show_info(self, text, self.t.get('success', 'Success'))
+        else:
+            if message == 'no_smd':
+                message = self.t.get('export_uv_no_smd', 'Reference SMD not found for UV template.')
+            elif message == 'render_failed':
+                message = self.t.get('export_uv_failed', 'Failed to render UV template.')
+            ErrorHandler.show_warning(self, message, self.t['error'])
+
+    def _on_uv_template_progress(self, percentage: int, status: str) -> None:
+        self._update_progress('_uv_template_progress_dialog', percentage, status)
+
+    def _on_uv_template_error(self, error_message: str) -> None:
+        self._close_progress('_uv_template_progress_dialog', 'export_uv_button')
+        ErrorHandler.show_error(self, Exception(error_message), "Ошибка генерации UV-шаблона", self.t['error'])
+
+    def _cancel_uv_template(self) -> None:
+        self._cancel_worker('_uv_template_worker')
 
     def extract_original_texture(self) -> None:
         """Запускает асинхронное извлечение оригинальной текстуры оружия/рук/шапки из игры"""
@@ -2490,7 +2771,7 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
         body.addWidget(edit)
 
         err_lbl = QLabel("")
-        err_lbl.setStyleSheet(f"color:#c04040; font-size:10px;")
+        err_lbl.setStyleSheet("color:#c04040; font-size:10px;")
         body.addWidget(err_lbl)
 
         root.addLayout(body)
@@ -2528,7 +2809,6 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
         """Открывает диалог объединения VPK файлов"""
         from src.ui.merge_vpk_dialog import MergeVPKDialog
         from src.services.merge_vpk_service import MergeVPKService
-        from src.shared.validators import validate_vpk_filename
         
         # Открываем диалог выбора модов
         dialog = MergeVPKDialog(self)
@@ -2618,7 +2898,17 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
         QDesktopServices.openUrl(QUrl("https://steamcommunity.com/tradeoffer/new/?partner=394814324&token=GNGCagXk"))
     
     def closeEvent(self, event) -> None:
-        """Сохраняем геометрию окна перед закрытием."""
+        """Останавливаем фоновые воркеры и сохраняем геометрию перед закрытием."""
+        # Любой выполняющийся QThread нужно корректно завершить, иначе Qt роняет
+        # «QThread: Destroyed while thread is still running» при удалении окна.
+        from src.services.base_worker import BaseWorker
+        for obj in list(self.__dict__.values()):
+            if isinstance(obj, BaseWorker):
+                try:
+                    obj.stop(2000)
+                except Exception:
+                    pass
+
         from src.config.app_config import AppConfig
         geom_b64 = self.saveGeometry().toBase64().data().decode()
         AppConfig.set('window_geometry', geom_b64)

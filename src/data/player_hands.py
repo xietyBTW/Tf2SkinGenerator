@@ -123,32 +123,11 @@ HAND_MODES: Dict[str, dict] = {
 HAND_MODE_KEYS: frozenset = frozenset(HAND_MODES.keys())
 
 
-def get_hand_mode_name(mode_key: str, language: str = "en") -> str:
-    """Возвращает локализованное название режима рук."""
-    mode = HAND_MODES.get(mode_key)
-    if not mode:
-        return mode_key
-    return mode.get(language, mode.get("en", mode_key))
-
-
 def get_hand_textures(mode_key: str) -> List[Tuple[str, str]]:
     """Возвращает список (folder, vtf_name) текстур для режима."""
     mode = HAND_MODES.get(mode_key)
     if not mode:
         return []
     return mode.get("textures", [])
-
-
-def get_extra_textures(mode_key: str) -> List[Tuple[str, str]]:
-    """Возвращает только дополнительные текстуры (index 1+) как список (folder, vtf_name)."""
-    return get_hand_textures(mode_key)[1:]
-
-
-def get_extra_texture_label(mode_key: str, vtf_name: str, language: str = "en") -> str:
-    """Возвращает человекочитаемое название дополнительной текстуры."""
-    mode = HAND_MODES.get(mode_key, {})
-    labels = mode.get("extra_labels", {})
-    entry = labels.get(vtf_name, {})
-    return entry.get(language) or entry.get("en") or vtf_name
 
 

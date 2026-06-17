@@ -6,7 +6,7 @@
 from PySide6.QtCore import Qt, QPoint
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QWidget, QFrame, QSizePolicy,
+    QWidget, QFrame,
 )
 from PySide6.QtGui import QMouseEvent
 from src.config.app_config import AppConfig
@@ -95,15 +95,6 @@ def _divider(c: dict) -> QFrame:
     f.setFixedHeight(1)
     f.setStyleSheet(f"background: {c['border']}; border: none;")
     return f
-
-
-def _section_label(text: str, c: dict) -> QLabel:
-    lbl = QLabel(text)
-    lbl.setStyleSheet(
-        f"color: {c['text_dim']}; font-size: 9px; font-weight: 700; "
-        f"letter-spacing: 0.12em;"
-    )
-    return lbl
 
 
 class StyledDialog(QDialog):
@@ -244,6 +235,3 @@ class StyledDialog(QDialog):
 
     def divider(self) -> QFrame:
         return _divider(self._c)
-
-    def section(self, text: str) -> QLabel:
-        return _section_label(text, self._c)

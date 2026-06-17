@@ -6,11 +6,6 @@ from src.services.vmt_service import VMTService
 
 
 class VMTServiceTests(unittest.TestCase):
-    def test_cdmaterials_path_to_materials_path(self):
-        materials_path, prefix = VMTService.cdmaterials_path_to_materials_path("materials\\models\\weapons\\c_models\\")
-        self.assertEqual(materials_path, "materials/models/weapons/c_models")
-        self.assertEqual(prefix, "c_models")
-
     def test_get_weapon_relpaths_special(self):
         rel_path, vmt, vtf = VMTService.get_weapon_relpaths("critHIT")
         self.assertIn("materials", rel_path)
@@ -29,12 +24,6 @@ class VMTServiceTests(unittest.TestCase):
         self.assertIn("v_machete", rel_path)
         self.assertEqual(vmt, "v_machete.vmt")
         self.assertEqual(vtf, "v_machete.vtf")
-
-    def test_get_weapon_relpaths_from_cdmaterials(self):
-        rel_path, vmt, vtf = VMTService.get_weapon_relpaths_from_cdmaterials("vgui\\replay\\thumbnails\\models\\weapons\\c_models", "c_test")
-        self.assertEqual(rel_path, "materials/vgui/replay/thumbnails/models/weapons/c_models")
-        self.assertEqual(vmt, "c_test.vmt")
-        self.assertEqual(vtf, "c_test.vtf")
 
     def test_create_vmt_template_from_cdmaterials(self):
         with tempfile.TemporaryDirectory() as tmp:

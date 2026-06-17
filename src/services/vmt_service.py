@@ -6,7 +6,79 @@ from src.data.weapons import SPECIAL_MODES
 
 
 class VMTService:
-    """Сервис для работы с VMT файлами (материалы Source Engine, хуйня с путями и шаблонами)"""
+    """Сервис для работы с VMT файлами (материалы Source Engine: пути и шаблоны)"""
+
+    # ── Валидация синтаксиса ─────────────────────────────────────────────── #
+
+    @staticmethod
+    def validate_vmt_syntax(content: str) -> Tuple[bool, str, int]:
+        """
+        Проверяет базовый KeyValues-синтаксис VMT.
+
+        Ловит самые частые причины «невидимого материала» в игре:
+          - незакрытые/лишние фигурные скобки { };
+          - нечётные (незакрытые) кавычки в строке;
+          - отсутствие корневого блока шейдера.
+
+        Комментарии (// ...) и содержимое строк в кавычках игнорируются,
+        чтобы скобка/кавычка внутри значения не считалась структурной.
+
+        Returns:
+            (is_valid, error_message, error_line)
+            error_line — номер строки (1-based) или 0, если не привязано к строке.
+        """
+        depth = 0
+        saw_shader = False
+        saw_any_brace = False
+
+        for line_no, raw in enumerate(content.split('\n'), 1):
+            line = raw
+
+            # Обрезаем // комментарий, но только если он вне кавычек.
+            q = 0
+            cut = None
+            i = 0
+            while i < len(line):
+                ch = line[i]
+                if ch == '"':
+                    q += 1
+                elif ch == '/' and i + 1 < len(line) and line[i + 1] == '/' and q % 2 == 0:
+                    cut = i
+                    break
+                i += 1
+            if cut is not None:
+                line = line[:cut]
+
+            # Нечётное число кавычек в строке → незакрытая строка
+            if line.count('"') % 2 != 0:
+                return False, "Незакрытая кавычка", line_no
+
+            # Убираем строковые значения, чтобы скобки внутри них не считались
+            structural = re.sub(r'"[^"]*"', '', line)
+
+            # Имя шейдера/секции — токен в кавычках в начале строки до открытия блока
+            if depth == 0 and re.search(r'"[^"]+"', line):
+                saw_shader = True
+
+            for ch in structural:
+                if ch == '{':
+                    depth += 1
+                    saw_any_brace = True
+                elif ch == '}':
+                    depth -= 1
+                    if depth < 0:
+                        return False, "Лишняя закрывающая скобка }", line_no
+
+        if depth > 0:
+            return False, "Незакрытая скобка {", 0
+        if not content.strip():
+            return False, "Пустой VMT", 0
+        if not saw_any_brace:
+            return False, "Нет блока { } — VMT должен содержать тело шейдера", 0
+        if not saw_shader:
+            return False, "Не найдено имя шейдера (напр. \"VertexLitGeneric\")", 0
+
+        return True, "", 0
 
     # ── Внутренние хелперы ───────────────────────────────────────────────── #
 
@@ -38,37 +110,6 @@ class VMTService:
         return normalized
 
     @staticmethod
-    def cdmaterials_path_to_materials_path(cdmaterials_path: str) -> Tuple[str, str]:
-        """
-        Конвертирует путь из $cdmaterials в путь для материалов и имя файла.
-        
-        В QC файлах пути могут быть с обратными слешами и без префикса materials/,
-        а в VPK нужны прямые слеши и префикс materials/. Это костыль, но так работает Source Engine.
-        
-        Args:
-            cdmaterials_path: Путь из $cdmaterials (например, "vgui\\replay\\thumbnails\\models\\workshop_partner\\weapons\\c_models\\"
-                             или "vgui\\replay\\thumbnails\\models\\workshop_partner\\weapons\\v_machete")
-        
-        Returns:
-            Tuple[materials_path, filename_prefix]
-            materials_path: Путь для материалов (например, "materials/vgui/replay/thumbnails/models/workshop_partner/weapons/c_models")
-            filename_prefix: Префикс имени файла (часть пути после weapons/, например "c_models" или "v_machete")
-        """
-        normalized = VMTService._normalize_cdmaterials(cdmaterials_path)
-        
-        # Добавляем "materials/" в начало (нужно для структуры VPK)
-        materials_path = f"materials/{normalized}"
-        
-        # Вытаскиваем последнюю часть пути для имени файла (может быть папка или имя оружия)
-        path_parts = normalized.split('/')
-        if path_parts:
-            filename_prefix = path_parts[-1] if path_parts[-1] else path_parts[-2] if len(path_parts) > 1 else ""
-        else:
-            filename_prefix = ""
-        
-        return materials_path, filename_prefix
-    
-    @staticmethod
     def get_weapon_relpaths(mode: str) -> Tuple[str, str, str]:
         """
         Возвращает относительные пути для конкретного оружия (без basepath).
@@ -91,6 +132,21 @@ class VMTService:
                 rel_path = os.path.join("materials", "vgui", "logos")
                 vmt_filename = "spray.vmt"
                 vtf_filename = "spray.vtf"
+            elif mode == "death_ice":
+                # Лёд рагдолла (Sky-cicle). Override игрового материала по пути:
+                rel_path = os.path.join("materials", "models", "player", "shared")
+                vmt_filename = "ice_player.vmt"
+                vtf_filename = "ice_player.vtf"
+            elif mode == "death_gold":
+                # Золотая статуя (Golden Frying Pan / Saxxy).
+                rel_path = os.path.join("materials", "models", "player", "shared")
+                vmt_filename = "gold_player.vmt"
+                vtf_filename = "gold_player.vtf"
+            elif mode == "death_fire":
+                # Огонь горящего игрока (слоистый огонь).
+                rel_path = os.path.join("materials", "effects", "tiledfire")
+                vmt_filename = "fireLayeredSlowTiled512.vmt"
+                vtf_filename = "fireLayeredSlowTiled512.vtf"
             else:
                 # Для других специальных режимов (если будут добавлены новые)
                 rel_path = os.path.join("materials", "effects")
@@ -116,46 +172,6 @@ class VMTService:
         return rel_path, vmt_filename, vtf_filename
     
     @staticmethod
-    def get_weapon_relpaths_from_cdmaterials(cdmaterials_path: str, weapon_key: str) -> Tuple[str, str, str]:
-        """
-        Возвращает относительные пути для конкретного оружия на основе пути из $cdmaterials.
-        
-        Используется когда у нас есть путь из QC файла (из $cdmaterials), и нужно построить пути для VMT/VTF.
-        
-        Args:
-            cdmaterials_path: Путь из $cdmaterials в QC файле
-            weapon_key: Ключ оружия (для имени файла)
-            
-        Returns:
-            Tuple[rel_path, vmt_filename, vtf_filename]
-        """
-        materials_path, filename_prefix = VMTService.cdmaterials_path_to_materials_path(cdmaterials_path)
-        
-        # Имя файла: используем weapon_key (например, v_machete.vmt или c_shogun_kunai.vmt)
-        # filename_prefix из cdmaterials_path не используется, берем weapon_key напрямую
-        vmt_filename = f"{weapon_key}.vmt"
-        vtf_filename = f"{weapon_key}.vtf"
-        
-        return materials_path, vmt_filename, vtf_filename
-    
-    @staticmethod
-    def get_weapon_paths(mode: str) -> Tuple[str, str, str, str]:
-        """
-        Устаревший метод - используйте get_weapon_relpaths вместо этого.
-        Сохранен для обратной совместимости (legacy код, лучше не трогать).
-        """
-        rel_path, vmt_filename, vtf_filename = VMTService.get_weapon_relpaths(mode)
-        if mode in SPECIAL_MODES.values():
-            if mode == "critHIT":
-                base_path = os.path.join("tools", "mod_data", "critHIT")
-            else:
-                base_path = os.path.join("tools", "mod_data", mode)
-        else:
-            base_path = os.path.join("tools", "mod_data", mode)
-        
-        return base_path, rel_path, vmt_filename, vtf_filename
-    
-    @staticmethod
     def create_vmt_template(output_path: str, mode: str, class_name: str = "", weapon_type: str = ""):
         """Создает VMT файл по шаблону (базовый шаблон, если нет оригинального VMT из игры)"""
         template = VMTService._create_template(mode, class_name, weapon_type)
@@ -169,7 +185,7 @@ class VMTService:
         Формирует путь для $baseTexture на основе пути из $cdmaterials.
         
         В VMT файле путь $baseTexture должен быть БЕЗ префикса materials/ и с прямыми слешами.
-        Это путь относительно корня материалов игры. Source Engine - ебанутый, требует именно так.
+        Это путь относительно корня материалов игры — Source Engine требует именно такой формат.
         
         Args:
             cdmaterials_path: Путь из $cdmaterials в QC файле
@@ -414,6 +430,70 @@ class VMTService:
         with open(vmt_path, 'w', encoding='utf-8') as f:
             f.write(new_content)
     
+    @staticmethod
+    def _set_vmt_param(content: str, param: str, value: str) -> str:
+        """
+        Идемпотентно ставит параметр VMT в корневой блок шейдера.
+
+        Если параметр уже есть — заменяет значение; иначе вставляет новую строку
+        перед закрывающей скобкой корневого блока. Регистронезависимо
+        (Valve пишет $EnvMap/$envmap как попало).
+        """
+        pattern = re.compile(
+            r'(^[ \t]*"?' + re.escape(param) + r'"?[ \t]+)"[^"]*"',
+            re.IGNORECASE | re.MULTILINE,
+        )
+        new_content, n = pattern.subn(lambda m: f'{m.group(1)}"{value}"', content, count=1)
+        if n:
+            return new_content
+
+        open_brace = content.find('{')
+        if open_brace == -1:
+            return content
+        end = VMTService._find_block_end(content, open_brace)
+        if end is None:
+            return content
+        return content[:end] + f'\t"{param}" "{value}"\n' + content[end:]
+
+    @staticmethod
+    def add_material_map_params(vmt_path: str, cdmaterials_path: str, map_texture_key: str,
+                                path_param: str, extra_vmt: dict = None) -> bool:
+        """
+        Вписывает в VMT файловую карту материала (Фаза 2): путь к карте + скаляры.
+
+        path_param   — параметр-путь ($detail / $selfillummask / $phongexponenttexture);
+        map_texture_key — имя VTF-карты без расширения (например c_scattergun_detail);
+        extra_vmt    — сопутствующие параметры ($detailscale, $selfillum, $phong …).
+
+        Путь карты строится так же, как $basetexture/$bumpmap — от $cdmaterials.
+        Работает только на VertexLitGeneric. Возвращает True, если VMT изменён.
+        Не пишет результат, если он не прошёл валидацию синтаксиса.
+        """
+        if not os.path.exists(vmt_path):
+            return False
+
+        with open(vmt_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+
+        m = re.match(r'\s*"?([A-Za-z_]+)"?', content)
+        if not (m and m.group(1).lower() == 'vertexlitgeneric'):
+            return False
+
+        # path_param=None — карта без своей текстуры (только параметры, напр. rim light).
+        if path_param:
+            tex_path = VMTService._get_texture_path_from_cdmaterials(cdmaterials_path, map_texture_key)
+            content = VMTService._set_vmt_param(content, path_param, tex_path)
+        for param, value in (extra_vmt or {}).items():
+            content = VMTService._set_vmt_param(content, param, str(value))
+
+        is_valid, _err, _line = VMTService.validate_vmt_syntax(content)
+        if not is_valid:
+            return False
+
+        with open(vmt_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+        return True
+
     @staticmethod
     def remove_paint_proxies(vmt_path: str) -> None:
         """

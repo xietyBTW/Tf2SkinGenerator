@@ -21,14 +21,17 @@ import os
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import Signal
 
+from src.services.base_worker import BaseWorker
 from src.shared.logging_config import get_logger
 
 logger = get_logger(__name__)
 
 
-class HatTextureExtractWorker(QThread):
+class HatTextureExtractWorker(BaseWorker):
+    # Многоточечный emit finished внутри _extract → не шаблонный work(),
+    # наследуем BaseWorker только ради безопасного stop().
     finished = Signal(bool, str)   # (success, message)
     progress = Signal(int, str)    # (pct, status)
     error    = Signal(str)
@@ -63,7 +66,6 @@ class HatTextureExtractWorker(QThread):
 
     def _extract(self) -> None:
         from src.services.tf2_paths import TF2Paths
-        from src.services import decompile_cache
         from src.services.preview_3d_worker import Preview3DWorker
 
         self.progress.emit(5, "Resolving TF2 paths...")
@@ -87,7 +89,10 @@ class HatTextureExtractWorker(QThread):
             self.finished.emit(False, f"QC not found in: {decomp_dir}")
             return
 
-        cdmaterials, skin0_textures = Preview3DWorker._parse_qc_texture_info(qc_files[0])
+        from src.services import qc_skin_parser
+        cdmaterials = qc_skin_parser.parse_cdmaterials(qc_files[0])
+        rows = qc_skin_parser.parse_texturegroup_rows(qc_files[0])
+        skin0_textures = rows[0] if rows else []
         if not cdmaterials:
             self.finished.emit(False, "No $cdmaterials in QC")
             return

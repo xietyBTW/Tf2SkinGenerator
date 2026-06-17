@@ -12,7 +12,7 @@ from typing import List, Optional
 from PySide6.QtCore import Qt, Signal, QThread, QTimer, QRect, QSize
 from PySide6.QtGui import QColor, QPainter, QFont, QFontMetrics
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
+    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QLineEdit,
     QPushButton, QListWidget, QListWidgetItem,
     QStyledItemDelegate, QStyle,
 )
@@ -48,6 +48,7 @@ _I18N = {
         "all_classes": "Все классы",
         "n_items":     "{n} предметов",
         "refresh":     "Обновить",
+        "build_classes": "Классы для сборки:",
     },
     "en": {
         "title":       "COSMETICS",
@@ -59,6 +60,7 @@ _I18N = {
         "all_classes": "All classes",
         "n_items":     "{n} items",
         "refresh":     "Refresh",
+        "build_classes": "Build for classes:",
     },
 }
 
@@ -178,6 +180,13 @@ class HatsPanel(QWidget):
         self._class_filter  = "all"
         self._load_worker: Optional[_LoadWorker] = None
         self._selected_hat: Optional[HatItem]    = None
+
+        # Состояние выпадающего списка классов (мультиклассовые шапки).
+        # Раскрыт максимум у одной шапки за раз.
+        self._dropdown_item: Optional[QListWidgetItem] = None
+        self._dropdown_hat: Optional[HatItem]          = None
+        self._class_chip_btns: dict = {}      # класс → QPushButton-чип
+        self._selected_classes: dict = {}     # класс → отмечен (bool)
 
         # Таймер debounce для поиска: 150 мс после последнего ввода
         self._search_timer = QTimer(self)
@@ -465,6 +474,11 @@ class HatsPanel(QWidget):
         # Блокируем сигналы списка во время перестройки, чтобы не слать hat_deselected
         # при каждом clear() во время набора текста в поиске
         self._list.blockSignals(True)
+        # Выпадающий список классов уничтожается вместе с clear() — сбрасываем ссылки.
+        self._dropdown_item = None
+        self._dropdown_hat = None
+        self._class_chip_btns = {}
+        self._selected_classes = {}
         self._list.clear()
 
         matched = [h for h in self._all_hats if h.matches(words, cls_filter)]
@@ -499,15 +513,140 @@ class HatsPanel(QWidget):
 
     # ── Выбор предмета ────────────────────────────────────────────────────── #
 
-    def _on_item_changed(self, current, previous) -> None:
+    def _on_item_changed(self, current, _previous) -> None:
+        # При любой смене выбора убираем прежний выпадающий список классов.
+        self._remove_dropdown()
+
         if current is None:
             self._selected_hat = None
             self.hat_deselected.emit()
             return
         hat: HatItem = current.data(Qt.ItemDataRole.UserRole)
-        if hat:
-            self._selected_hat = hat
-            self.hat_selected.emit(hat.mdl_path, hat.name)
+        if not hat:
+            return  # служебный item (например, сам dropdown) — игнорируем
+        self._selected_hat = hat
+        self.hat_selected.emit(hat.mdl_path, hat.name)
+
+        # Мультиклассовая шапка → раскрываем под ней список классов.
+        if self._is_multiclass(hat):
+            row = self._list.row(current)
+            self._inject_dropdown(row, hat)
+
+    # ── Выпадающий список классов (мультиклассовые шапки) ─────────────────── #
+
+    @staticmethod
+    def _is_multiclass(hat: HatItem) -> bool:
+        """Шапка с разными моделями на класс (нужен выбор классов для сборки)."""
+        return bool(hat) and len(getattr(hat, "per_class_models", {}) or {}) > 1
+
+    def _remove_dropdown(self) -> None:
+        """Удаляет инъецированный item-аккордеон с чекбоксами классов."""
+        if self._dropdown_item is not None:
+            row = self._list.row(self._dropdown_item)
+            if row >= 0:
+                self._list.blockSignals(True)
+                self._list.takeItem(row)
+                self._list.blockSignals(False)
+        self._dropdown_item = None
+        self._dropdown_hat = None
+        self._class_chip_btns = {}
+        self._selected_classes = {}
+
+    def _inject_dropdown(self, row: int, hat: HatItem) -> None:
+        """Вставляет под строкой row item с чекбоксами классов (все отмечены)."""
+        self._dropdown_hat = hat
+        self._selected_classes = {cls: True for cls in hat.per_class_models}
+
+        widget = self._build_class_dropdown_widget(hat)
+
+        # Высоту считаем явно: sizeHint() неактивированного layout занижает её,
+        # из-за чего чипы обрезаются. 3 чипа в ряд.
+        n = len(hat.per_class_models)
+        rows = max(1, (n + 2) // 3)
+        height = 6 + 16 + 6 + rows * 20 + max(0, rows - 1) * 4 + 9
+        widget.setFixedHeight(height)
+
+        item = QListWidgetItem()
+        item.setFlags(Qt.ItemFlag.NoItemFlags)   # не выбирается, не реагирует на клик
+        item.setSizeHint(QSize(self._list.viewport().width(), height))
+
+        self._list.blockSignals(True)
+        self._list.insertItem(row + 1, item)
+        self._list.setItemWidget(item, widget)
+        self._list.blockSignals(False)
+        self._dropdown_item = item
+
+    def _build_class_dropdown_widget(self, hat: HatItem) -> QWidget:
+        """Виджет-контейнер: заголовок + сетка чипов-классов (3 в ряд)."""
+        label_map = dict(_CLASSES)
+        container = QWidget()
+        container.setStyleSheet("background: #141414; border: none;")
+        outer = QVBoxLayout(container)
+        outer.setContentsMargins(18, 6, 10, 9)
+        outer.setSpacing(6)
+
+        title = QLabel(self._t["build_classes"])
+        title.setStyleSheet(
+            "color:#777; font-size:10px; background:transparent; border:none;"
+        )
+        outer.addWidget(title)
+
+        grid = QGridLayout()
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setHorizontalSpacing(4)
+        grid.setVerticalSpacing(4)
+        self._class_chip_btns = {}
+        # Порядок классов — канонический (как в фильтре), только присутствующие.
+        ordered = [c for c, _ in _CLASSES if c != "all" and c in hat.per_class_models]
+        for i, cls in enumerate(ordered):
+            btn = QPushButton(label_map.get(cls, cls.title()))
+            btn.setCheckable(True)
+            btn.setChecked(True)
+            btn.setFixedHeight(20)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setStyleSheet(self._chip_style(active=True))
+            btn.clicked.connect(lambda checked, c=cls: self._on_class_toggled(c, checked))
+            self._class_chip_btns[cls] = btn
+            grid.addWidget(btn, i // 3, i % 3)
+        outer.addLayout(grid)
+
+        container.adjustSize()
+        return container
+
+    def _on_class_toggled(self, cls: str, checked: bool) -> None:
+        """Переключение класса. Не даём снять последний отмеченный."""
+        if not checked and sum(self._selected_classes.values()) <= 1:
+            self._class_chip_btns[cls].setChecked(True)
+            return
+        self._selected_classes[cls] = checked
+        self._class_chip_btns[cls].setStyleSheet(self._chip_style(active=checked))
+
+    def get_selected_class_models(self) -> Optional[dict]:
+        """
+        Для мультиклассовой шапки — {класс: mdl} только по отмеченным классам.
+        Для обычной (≤1 модель на класс) — None.
+        """
+        hat = self._selected_hat
+        if not self._is_multiclass(hat):
+            return None
+        # Если dropdown активен для текущей шапки — берём отмеченные;
+        # иначе (на всякий случай) — все классы.
+        if self._dropdown_hat is hat and self._selected_classes:
+            sel = {c: hat.per_class_models[c]
+                   for c, on in self._selected_classes.items()
+                   if on and c in hat.per_class_models}
+            return sel or dict(hat.per_class_models)
+        return dict(hat.per_class_models)
+
+    def get_all_class_models(self) -> Optional[dict]:
+        """
+        Все пер-классовые модели выбранной мультиклассовой шапки (для экспорта —
+        показываем все классы). None — обычная шапка.
+        """
+        hat = self._selected_hat
+        if not self._is_multiclass(hat):
+            return None
+        return dict(hat.per_class_models)
 
     def _show_placeholder(self, text: str) -> None:
         self._placeholder.setText(text)

@@ -16,7 +16,7 @@ from PySide6.QtCore import Qt, QPoint
 from PySide6.QtGui import QPixmap, QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (
     QDialog, QFrame, QHBoxLayout, QLabel, QPushButton,
-    QScrollArea, QSizePolicy, QVBoxLayout, QWidget, QFileDialog,
+    QScrollArea, QVBoxLayout, QWidget, QFileDialog,
 )
 
 from src.shared.logging_config import get_logger
@@ -411,8 +411,8 @@ class _TextureCard(QWidget):
         arrow_lbl = QLabel("→")
         arrow_lbl.setFixedWidth(40)
         arrow_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        arrow_lbl.setStyleSheet(f"""
-            QLabel {{
+        arrow_lbl.setStyleSheet("""
+            QLabel {
                 color: #333333;
                 font-size: 20px;
                 font-weight: 100;
@@ -420,7 +420,7 @@ class _TextureCard(QWidget):
                 border: none;
                 padding: 0;
                 margin-bottom: 18px;
-            }}
+            }
         """)
         preview_row.addWidget(arrow_lbl)
 

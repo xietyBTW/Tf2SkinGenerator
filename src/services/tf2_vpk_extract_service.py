@@ -26,33 +26,6 @@ class TF2VPKExtractService:
     """Сервис для работы с извлечением файлов из TF2 VPK"""
     
     @staticmethod
-    def find_tf2_misc_dir_vpk(vpk_folder: str) -> Optional[str]:
-        """
-        Находит tf2_misc_dir.vpk в указанной папке (fallback метод)
-        
-        Args:
-            vpk_folder: Путь к папке с VPK файлами
-            
-        Returns:
-            Путь к tf2_misc_dir.vpk или None если не найден
-        """
-        if not os.path.exists(vpk_folder):
-            return None
-        
-        # Сначала ищем в корне папки
-        target_name = "tf2_misc_dir.vpk"
-        root_path = os.path.join(vpk_folder, target_name)
-        if os.path.exists(root_path):
-            return root_path
-        
-        # Если не нашли в корне, ищем рекурсивно
-        for root, dirs, files in os.walk(vpk_folder):
-            if target_name in files:
-                return os.path.join(root, target_name)
-        
-        return None
-    
-    @staticmethod
     def check_mdl_exists(
         dir_vpk_path: str,
         mdl_rel_path: str,
@@ -97,7 +70,7 @@ class TF2VPKExtractService:
             if should_close and hasattr(vpk_file, 'close'):
                 try:
                     vpk_file.close()
-                except:
+                except Exception:
                     pass
     
     @staticmethod
@@ -105,18 +78,16 @@ class TF2VPKExtractService:
         dir_vpk_path: str,
         mdl_rel_path: str,
         out_dir: str,
-        vpk_exe_path: str = None  # Не используется, оставлен для совместимости
     ) -> List[str]:
         """
         Извлекает набор файлов модели из VPK (.mdl и связанные файлы)
         ОПТИМИЗИРОВАНО: Извлекает только после подтверждения существования MDL
-        
+
         Args:
             dir_vpk_path: Путь к tf2_misc_dir.vpk
             mdl_rel_path: Относительный путь к .mdl файлу внутри VPK
             out_dir: Директория для извлечения
-            vpk_exe_path: Не используется (оставлен для совместимости)
-            
+
         Returns:
             Список путей к извлеченным файлам
             
@@ -236,12 +207,12 @@ class TF2VPKExtractService:
                 
                 if not found_mdl:
                     error_msg = f"Не удалось извлечь .mdl файл: {mdl_rel_path}\n"
-                    error_msg += f"Проверьте, что путь правильный и файл существует в VPK.\n"
+                    error_msg += "Проверьте, что путь правильный и файл существует в VPK.\n"
                     error_msg += f"VPK файл: {dir_vpk_path}\n"
                     error_msg += f"Ожидаемый путь в VPK: {mdl_rel_path}\n"
                     error_msg += f"Директория извлечения: {out_dir}\n"
-                    error_msg += f"Попробуйте проверить содержимое VPK через GCFScape.\n"
-                    error_msg += f"Если библиотека vpk не установлена, установите её: pip install vpk"
+                    error_msg += "Попробуйте проверить содержимое VPK через GCFScape.\n"
+                    error_msg += "Если библиотека vpk не установлена, установите её: pip install vpk"
                     raise RuntimeError(error_msg)
                 
                 # Используем найденный файл
@@ -254,7 +225,7 @@ class TF2VPKExtractService:
             if hasattr(vpk_file, 'close'):
                 try:
                     vpk_file.close()
-                except:
+                except Exception:
                     pass
     
     @staticmethod
@@ -348,7 +319,7 @@ class TF2VPKExtractService:
                     if hasattr(vpk_file, 'close'):
                         try:
                             vpk_file.close()
-                        except:
+                        except Exception:
                             pass
                     return extracted_file_path
             
@@ -356,7 +327,7 @@ class TF2VPKExtractService:
             if hasattr(vpk_file, 'close'):
                 try:
                     vpk_file.close()
-                except:
+                except Exception:
                     pass
             
         except Exception as e:
@@ -365,182 +336,6 @@ class TF2VPKExtractService:
         
         logger.warning(f"VMT файл не найден по пути: {vmt_rel_path}")
         return None
-    
-    @staticmethod
-    def extract_texture(
-        textures_vpk_path: str,
-        weapon_key: str,
-        out_dir: str,
-        export_format: str = "VTF"
-    ) -> Optional[str]:
-        """
-        Извлекает оригинальную текстуру (VTF файл) оружия из tf2_textures_dir.vpk
-        и конвертирует в выбранный формат изображения (PNG, TGA, JPG)
-        
-        Пути поиска в порядке приоритета:
-        1. materials/models/workshop_partner/weapons/c_models/{weapon_key}/
-        2. materials/models/workshop/weapons/c_models/{weapon_key}/
-        3. materials/models/weapons/c_models/{weapon_key}/
-        4. materials/models/weapons/c_items/{weapon_key}/
-        
-        Args:
-            textures_vpk_path: Путь к tf2_textures_dir.vpk
-            weapon_key: Ключ оружия (например, c_scattergun)
-            out_dir: Директория для извлечения
-            export_format: Формат экспорта (VTF, PNG, TGA, JPG)
-            
-        Returns:
-            Путь к извлеченному/конвертированному файлу или None если не найден
-        """
-        if not VPK_AVAILABLE:
-            logger.warning("Библиотека vpk не установлена. Текстура не будет извлечена.")
-            return None
-        
-        if not os.path.exists(textures_vpk_path):
-            logger.warning(f"VPK файл не найден: {textures_vpk_path}")
-            return None
-        
-        ensure_directory_exists(out_dir)
-
-        # ── Явные переопределения (нестандартные имена/папки) ────────────────
-        if weapon_key in WEAPON_TEXTURE_PATHS:
-            try:
-                vpk_file = vpk.open(textures_vpk_path)
-                for vtf_rel_path in WEAPON_TEXTURE_PATHS[weapon_key]:
-                    if vtf_rel_path in vpk_file:
-                        vtf_filename = vtf_rel_path.split('/')[-1]
-                        try:
-                            extracted_file_path = sanitize_path(vtf_filename, out_dir)
-                        except ValueError:
-                            continue
-                        with open(extracted_file_path, 'wb') as f:
-                            f.write(vpk_file[vtf_rel_path].read())
-                        if hasattr(vpk_file, 'close'):
-                            try:
-                                vpk_file.close()
-                            except Exception:
-                                pass
-                        logger.info(f"Извлечена текстура (override): {vtf_rel_path}")
-                        if export_format.upper() != "VTF":
-                            converted = TF2VPKExtractService._convert_vtf_to_image(
-                                extracted_file_path, out_dir, export_format.upper()
-                            )
-                            if converted:
-                                try:
-                                    os.remove(extracted_file_path)
-                                except Exception:
-                                    pass
-                                return converted
-                        return extracted_file_path
-                if hasattr(vpk_file, 'close'):
-                    try:
-                        vpk_file.close()
-                    except Exception:
-                        pass
-            except Exception as e:
-                logger.warning(f"Ошибка при поиске override-текстуры для {weapon_key}: {e}")
-
-        # ── Производные имена ────────────────────────────────────────────────
-        # base_key: weapon_key без префикса c_  (c_bat → bat, w_sd_sapper → w_sd_sapper)
-        base_key = weapon_key[2:] if weapon_key.startswith('c_') else weapon_key
-
-        # parent_key: для составных ключей убираем последний суффикс через _
-        # c_minigun_natascha → c_minigun,  c_axtinguisher_pyro → c_axtinguisher
-        _parts = base_key.rsplit('_', 1)
-        parent_key = ('c_' + _parts[0]) if len(_parts) == 2 else None
-
-        # ── Пути поиска (приоритет: workshop_partner → workshop → weapons) ───
-        search_paths = [
-            # workshop_partner — высший приоритет
-            f"materials/models/workshop_partner/weapons/c_models/{weapon_key}",
-        ] + ([f"materials/models/workshop_partner/weapons/c_models/{parent_key}"] if parent_key else []) + [
-            # workshop
-            f"materials/models/workshop/weapons/c_models/{weapon_key}",
-        ] + ([f"materials/models/workshop/weapons/c_models/{parent_key}"] if parent_key else []) + [
-            # weapons — базовые пути
-            f"materials/models/weapons/c_models/{weapon_key}",
-        ] + ([f"materials/models/weapons/c_models/{parent_key}"] if parent_key else []) + [
-            f"materials/models/weapons/c_items/{weapon_key}",
-            "materials/models/weapons/c_items",     # плоский: c_items/c_shovel.vtf
-            f"materials/models/weapons/v_{base_key}",  # старый v_-viewmodel
-            f"materials/models/weapons/{weapon_key}",  # w_-world-model
-        ]
-
-        # ── Возможные имена VTF файлов ────────────────────────────────────────
-        vtf_candidates = [
-            f"{weapon_key}.vtf",
-            # Командные варианты: c_bonk_bat_red.vtf / c_bonk_bat_blue.vtf
-            f"{weapon_key}_red.vtf",
-            f"{weapon_key}_blue.vtf",
-            # Старый v_-viewmodel: v_bat.vtf для c_bat
-            f"v_{base_key}.vtf",
-        ]
-        if not weapon_key.startswith('c_'):
-            vtf_candidates.append(f"c_{weapon_key}.vtf")
-        # Убираем дубли, сохраняя порядок
-        seen_cand: set = set()
-        vtf_candidates = [c for c in vtf_candidates if not (c in seen_cand or seen_cand.add(c))]
-        
-        try:
-            vpk_file = vpk.open(textures_vpk_path)
-
-            # Пробуем найти VTF файл по каждому пути
-            for search_path in search_paths:
-                for vtf_filename in vtf_candidates:
-                    vtf_rel_path = f"{search_path}/{vtf_filename}"
-
-                    # Проверяем, существует ли файл в VPK
-                    if vtf_rel_path in vpk_file:
-                        vpk_entry = vpk_file[vtf_rel_path]
-
-                        # Определяем путь для сохранения VTF
-                        try:
-                            extracted_file_path = sanitize_path(vtf_filename, out_dir)
-                        except ValueError as e:
-                            logger.warning(f"Недопустимый путь для сохранения VTF: {vtf_filename}: {e}")
-                            return None
-
-                        # Извлекаем файл
-                        with open(extracted_file_path, 'wb') as f:
-                            f.write(vpk_entry.read())
-
-                        logger.info(f"Извлечена текстура: {vtf_rel_path} -> {extracted_file_path}")
-                        # Закрываем VPK файл если есть метод close
-                        if hasattr(vpk_file, 'close'):
-                            try:
-                                vpk_file.close()
-                            except:
-                                pass
-
-                        # Конвертируем VTF в выбранный формат, если нужно
-                        if export_format.upper() != "VTF":
-                            converted_path = TF2VPKExtractService._convert_vtf_to_image(
-                                extracted_file_path,
-                                out_dir,
-                                export_format.upper()
-                            )
-                            if converted_path:
-                                # Удаляем временный VTF файл
-                                try:
-                                    os.remove(extracted_file_path)
-                                except:
-                                    pass
-                                return converted_path
-
-                        return extracted_file_path
-
-            # Закрываем VPK файл если есть метод close
-            if hasattr(vpk_file, 'close'):
-                try:
-                    vpk_file.close()
-                except:
-                    pass
-            logger.warning(f"Текстура не найдена для оружия {weapon_key}")
-            return None
-
-        except Exception as e:
-            logger.error(f"Ошибка при извлечении текстуры: {e}", exc_info=True)
-            return None
     
     @staticmethod
     def _scan_dir_for_vtf(vpk_file, dir_path: str) -> List[Tuple[str, str]]:
@@ -1088,7 +883,6 @@ class TF2VPKExtractService:
             parser = Parser(vtf_path)
             
             # Получаем изображение (vtf2img возвращает PIL Image напрямую)
-            from PIL import Image
             image = parser.get_image()
             
             # Логируем информацию об изображении для диагностики

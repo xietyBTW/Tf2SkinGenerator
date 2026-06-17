@@ -263,40 +263,6 @@ class VTFLib:
                 pass
 
     @classmethod
-    def get_vtf_frame_count(cls, vtf_path: str) -> int:
-        """
-        Возвращает количество кадров в VTF файле.
-        Быстрее чем read_vtf_all_frames — только читает заголовок.
-        """
-        cls.initialize()
-        dll = cls._load()
-
-        vlUInt = c_uint
-        vlBool = c_int
-
-        img_id = vlUInt(0)
-        if not dll.vlCreateImage(pointer(img_id)):
-            return 1
-        try:
-            if not dll.vlBindImage(img_id.value):
-                return 1
-            path_bytes = str(vtf_path).encode("utf-8")
-            if not dll.vlImageLoad(path_bytes, vlBool(0)):
-                return 1
-            return int(dll.vlImageGetFrameCount())
-        except Exception:
-            return 1
-        finally:
-            try:
-                dll.vlImageDestroy()
-            except Exception:
-                pass
-            try:
-                dll.vlDeleteImage(img_id.value)
-            except Exception:
-                pass
-
-    @classmethod
     def read_vtf_all_frames(cls, vtf_path: str) -> tuple:
         """
         Загружает VTF и возвращает ВСЕ кадры в формате RGBA8888.

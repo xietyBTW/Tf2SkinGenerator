@@ -30,6 +30,7 @@ def setup_fake_pyside6():
 
 
 setup_fake_pyside6()
+sys.modules.pop("src.services.base_worker", None)
 sys.modules.pop("src.services.merge_vpk_worker", None)
 MergeVpkWorker = importlib.import_module("src.services.merge_vpk_worker").MergeVpkWorker
 

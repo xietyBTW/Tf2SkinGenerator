@@ -73,7 +73,64 @@ class SMDServiceTests(unittest.TestCase):
             output = out_path.read_text(encoding="utf-8")
             self.assertIn("\"orig\"", output)
             self.assertIn("orig_mat", output)
-    
+
+    def test_replace_model_sections_keep_user_materials_lowercases(self):
+        # keep_user_materials: имя материала меша сохраняется, но в нижнем
+        # регистре (иначе фиолетовые текстуры из-за рассинхрона с группой/файлами).
+        user_content = "\n".join([
+            "version 1", "nodes", "0 \"user\" -1", "end",
+            "skeleton", "time 0", "0 0 0 0 0 0 0", "end",
+            "triangles",
+            "Material.001",
+            "0 0 0 0 0 0 0 0 0",
+            "0 0 0 0 0 0 0 0 0",
+            "0 0 0 0 0 0 0 0 0",
+        ])
+        original_content = "\n".join([
+            "version 1", "nodes", "0 \"orig\" -1", "end",
+            "skeleton", "time 0", "0 0 0 0 0 0 0", "end",
+            "triangles", "orig_mat",
+            "0 0 0 0 0 0 0 0 0",
+            "0 0 0 0 0 0 0 0 0",
+            "0 0 0 0 0 0 0 0 0",
+        ])
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            user_path = base / "user.smd"
+            orig_path = base / "orig.smd"
+            out_path = base / "out.smd"
+            user_path.write_text(user_content, encoding="utf-8")
+            orig_path.write_text(original_content, encoding="utf-8")
+            SMDService.replace_model_sections(
+                str(user_path), str(orig_path), str(out_path),
+                keep_user_materials=True,
+            )
+            output = out_path.read_text(encoding="utf-8")
+            # lowercase + точка→'_' (studiomdl обрезает имя после точки)
+            self.assertIn("material_001", output)
+            self.assertNotIn("Material.001", output)     # верхнего регистра нет
+            self.assertNotIn("material.001", output)     # точки нет
+            self.assertNotIn("orig_mat", output)         # имена пользователя, не игровые
+
+    def test_ordered_unique_materials(self):
+        content = "\n".join([
+            "version 1", "nodes", "0 \"b\" -1", "end",
+            "skeleton", "time 0", "0 0 0 0 0 0 0", "end",
+            "triangles",
+            "matB", "0 0 0 0 0 0 0 0 0", "0 0 0 0 0 0 0 0 0", "0 0 0 0 0 0 0 0 0",
+            "matA", "0 0 0 0 0 0 0 0 0", "0 0 0 0 0 0 0 0 0", "0 0 0 0 0 0 0 0 0",
+            "matB", "0 0 0 0 0 0 0 0 0", "0 0 0 0 0 0 0 0 0", "0 0 0 0 0 0 0 0 0",
+            "end",
+        ])
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "m.smd"
+            p.write_text(content, encoding="utf-8")
+            # порядок первого появления, без дублей
+            self.assertEqual(SMDService.ordered_unique_materials(str(p)), ["matB", "matA"])
+
+    def test_ordered_unique_materials_missing(self):
+        self.assertEqual(SMDService.ordered_unique_materials("/no/file.smd"), [])
+
     def test_replace_model_sections_missing_files(self):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)

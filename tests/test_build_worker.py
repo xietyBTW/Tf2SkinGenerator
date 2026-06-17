@@ -35,8 +35,8 @@ def setup_fake_pyside6():
 
 
 setup_fake_pyside6()
-if "src.services.build_worker" in sys.modules:
-    del sys.modules["src.services.build_worker"]
+sys.modules.pop("src.services.base_worker", None)
+sys.modules.pop("src.services.build_worker", None)
 BuildWorker = importlib.import_module("src.services.build_worker").BuildWorker
 
 

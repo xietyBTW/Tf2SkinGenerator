@@ -1,17 +1,11 @@
-from PySide6.QtCore import QThread, Signal
+from typing import Tuple
 
 from src.data.translations import TRANSLATIONS
+from src.services.base_worker import StandardWorker
 from src.services.extract_model_service import ExtractModelService
-from src.shared.logging_config import get_logger
-
-logger = get_logger(__name__)
 
 
-class ExportModelFilesWorker(QThread):
-    finished = Signal(bool, str)
-    progress = Signal(int, str)
-    error = Signal(str)
-
+class ExportModelFilesWorker(StandardWorker):
     def __init__(
         self,
         temp_dir: str,
@@ -30,7 +24,7 @@ class ExportModelFilesWorker(QThread):
         self.weapon_key = weapon_key
         self.language = language
 
-    def run(self) -> None:
+    def work(self) -> Tuple[bool, str]:
         t = TRANSLATIONS.get(self.language, TRANSLATIONS["en"])
         try:
             self.progress.emit(10, t.get("extract_model_exporting", "Exporting model files..."))
@@ -41,11 +35,6 @@ class ExportModelFilesWorker(QThread):
                 weapon_key=self.weapon_key,
             )
             self.progress.emit(100, t.get("extract_model_completed", "Extraction completed"))
-            self.finished.emit(True, t.get("extract_model_export_success", "Export completed: {path}").format(path=out_path))
-        except Exception as e:
-            error_msg = str(e)
-            logger.error(f"Ошибка при экспорте файлов модели: {error_msg}", exc_info=True)
-            self.error.emit(error_msg)
-            self.finished.emit(False, error_msg)
+            return True, t.get("extract_model_export_success", "Export completed: {path}").format(path=out_path)
         finally:
             ExtractModelService.cleanup_temp_dir(self.temp_dir)

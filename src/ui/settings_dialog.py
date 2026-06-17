@@ -5,7 +5,7 @@
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QLineEdit, QFileDialog, QComboBox, QCheckBox, QWidget, QFrame,
-    QScrollArea,
+    QPlainTextEdit,
 )
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices
@@ -301,6 +301,38 @@ class SettingsDialog(StyledDialog):
         self.debug_mode_checkbox.setStyleSheet(_CHECK_STYLE)
         lay.addWidget(self.debug_mode_checkbox)
 
+        lay.addSpacing(14)
+
+        # ── Блэклист материалов ──────────────────────────────────────────── #
+        lay.addWidget(_field_label(self.t.get(
+            'material_blacklist_label', 'Material blacklist (extra)')))
+        lay.addSpacing(4)
+        hint = QLabel(self.t.get(
+            'material_blacklist_hint',
+            'One pattern per line. Substring match; prefix with "=" for exact name. '
+            'These materials are never shown in 2D nor written to the mod.'))
+        hint.setWordWrap(True)
+        hint.setStyleSheet(f"color: {_TEXT_DIM}; font-size: 10.5px; background: transparent; border: none;")
+        lay.addWidget(hint)
+        lay.addSpacing(5)
+        self.blacklist_edit = QPlainTextEdit()
+        self.blacklist_edit.setFixedHeight(72)
+        self.blacklist_edit.setPlaceholderText("eyeball\n=sniper_lens\n_glow")
+        self.blacklist_edit.setStyleSheet(f"""
+            QPlainTextEdit {{
+                background: rgba(255,255,255,0.03);
+                color: {_TEXT};
+                border: 1px solid {_BORDER};
+                border-radius: 4px;
+                padding: 6px 8px;
+                font-size: 12px;
+                selection-background-color: #444;
+            }}
+            QPlainTextEdit:hover {{ border-color: {_BORDER_H}; }}
+            QPlainTextEdit:focus {{ border-color: #404040; }}
+        """)
+        lay.addWidget(self.blacklist_edit)
+
         lay.addSpacing(22)
         lay.addWidget(_divider())
         lay.addSpacing(18)
@@ -314,15 +346,15 @@ class SettingsDialog(StyledDialog):
         )
         supp_btn = QPushButton(self.t.get('support', 'Open link'))
         supp_btn.setCursor(Qt.PointingHandCursor)
-        supp_btn.setStyleSheet(f"""
-            QPushButton {{
+        supp_btn.setStyleSheet("""
+            QPushButton {
                 color: #4e7baa;
                 background: transparent;
                 border: none;
                 font-size: 11.5px;
                 padding: 0;
-            }}
-            QPushButton:hover {{ color: #6a9ece; text-decoration: underline; }}
+            }
+            QPushButton:hover { color: #6a9ece; text-decoration: underline; }
         """)
         supp_btn.clicked.connect(self.open_support_link)
         supp_row.addWidget(supp_lbl)
@@ -383,6 +415,9 @@ class SettingsDialog(StyledDialog):
         self.keep_temp_checkbox.setChecked(self.config.get("keep_temp_files", False))
         self.debug_mode_checkbox.setChecked(self.config.get("debug_mode", False))
 
+        patterns = self.config.get("material_blacklist", []) or []
+        self.blacklist_edit.setPlainText("\n".join(str(p) for p in patterns))
+
     def save_settings(self):
         self.config["tf2_game_folder"]  = self.tf2_game_path.text().strip()
         self.config["export_folder"]    = self.export_folder_path.text().strip() or "export"
@@ -391,6 +426,16 @@ class SettingsDialog(StyledDialog):
         self.config["theme"]            = self.theme_combo.currentData()
         self.config["keep_temp_files"]  = self.keep_temp_checkbox.isChecked()
         self.config["debug_mode"]       = self.debug_mode_checkbox.isChecked()
+
+        # Блэклист материалов: строки/запятые → уникальный список без пустых.
+        raw = self.blacklist_edit.toPlainText().replace(",", "\n")
+        seen, patterns = set(), []
+        for line in raw.splitlines():
+            p = line.strip()
+            if p and p.lower() not in seen:
+                seen.add(p.lower())
+                patterns.append(p)
+        self.config["material_blacklist"] = patterns
 
         AppConfig.save_config(self.config)
 

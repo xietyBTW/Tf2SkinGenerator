@@ -1,17 +1,17 @@
 """
 Сервис для работы с пользовательскими VPK модами.
 Позволяет загрузить готовый VPK мод, заменить в нём текстуры и пересобрать.
-Обнаружение текстур происходит через сканирование VMT файлов (без QC).
+Обнаружение текстур происходит через сканирование VTF файлов (discover_textures).
 """
 
 import os
-import re
 import shutil
+import subprocess
 import tempfile
 from pathlib import Path
 from typing import Dict, List, Optional, Callable, Tuple
 
-from src.shared.file_utils import ensure_directory_exists
+from src.shared.constants import ToolPaths, ToolTimeouts
 from src.shared.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -58,6 +58,7 @@ class CustomVPKService:
                 capture_output=True,
                 text=True,
                 creationflags=subprocess.CREATE_NO_WINDOW,
+                timeout=ToolTimeouts.VPK,
             )
             stdout = (result.stdout or "").strip()
             stderr = (result.stderr or "").strip()
@@ -117,117 +118,96 @@ class CustomVPKService:
             logger.error(f"Ошибка при распаковке VPK (Python-vpk): {e}", exc_info=True)
             return False
 
-    # ── Сканирование VMT ─────────────────────────────────────────────────── #
-
-    # Паттерны для поиска текстур в VMT-файлах.
-    # Проверяем $basetexture, затем $detail и $bumpmap как запасные варианты.
-    _VMT_TEX_PATTERNS: List[re.Pattern] = [
-        re.compile(r'"\$basetexture"\s+"([^"]+)"', re.IGNORECASE),
-        re.compile(r'\$basetexture\s+"([^"]+)"', re.IGNORECASE),
-        re.compile(r'\$basetexture\s+(\S+)', re.IGNORECASE),
-    ]
+    # Служебные VTF (не основная текстура) — исключаем из карточек.
+    _SKIP_VTF_KEYWORDS = (
+        "lightwarp", "phongwarp", "envmap", "cubemap", "sheen",
+        "bumpmap", "_normal", "normalmap", "detail", "_spec",
+        "selfillum", "_mask", "exponent",
+    )
 
     @classmethod
-    def scan_vmt_textures(cls, extract_dir: str) -> Dict:
+    def discover_textures(cls, extract_dir: str) -> List[Dict]:
         """
-        Сканирует VMT файлы в распакованном VPK и возвращает структуру текстур.
+        Перечисляет ОСНОВНЫЕ текстуры мода по самим VTF-файлам (надёжно: не зависит
+        от того, насколько корректны/полны VMT). VMT подтягивается как доп. инфо
+        (путь VMT для возможной правки). Служебные VTF (lightwarp/bump/… ) отброшены.
 
-        Каждая запись содержит:
-            name      — имя текстуры (без расширения, из $basetexture)
-            is_blue   — True если имя заканчивается на _blue
-            vmt_path  — полный путь к VMT файлу
-            vtf_path  — полный путь к VTF файлу (None если не существует)
-            vmt_dir   — директория VMT (туда же кладётся заменённый VTF)
-
-        Returns:
-            {
-                'all_textures': list[dict],
-                'red_textures': list[dict],   # без _blue суффикса
-                'blue_textures': list[dict],  # с _blue суффиксом
-            }
+        Каждый элемент:
+            name        — уникальный ключ карточки/сборки
+            vtf_name    — реальное имя VTF-файла без расширения
+            vtf_path    — путь к VTF
+            vmt_path    — путь к парному VMT (или None)
+            vmt_dir     — папка, куда класть заменённый VTF
+            is_blue     — VTF-стебель оканчивается на _blue
+            rel_dir     — папка VTF относительно extract_dir (для дизамбигуации)
         """
         extract_path = Path(extract_dir)
-        textures: List[Dict] = []
-        seen: set = set()
+        all_files = [f for f in extract_path.rglob('*') if f.is_file()]
+        vtf_files = [f for f in all_files if f.suffix.lower() == '.vtf']
+        vmt_files = [f for f in all_files if f.suffix.lower() == '.vmt']
 
-        # Диагностика: логируем структуру распакованной директории
-        all_files = list(extract_path.rglob('*'))
-        file_count = sum(1 for f in all_files if f.is_file())
-        logger.info(f"Сканирование директории {extract_dir}: {file_count} файлов всего")
+        # Индекс VMT по стеблю имени → путь VMT (для привязки к VTF).
+        vmt_by_stem: Dict[str, str] = {}
+        for vf in vmt_files:
+            vmt_by_stem.setdefault(vf.stem.lower(), str(vf))
 
-        vmt_files = [f for f in all_files if f.is_file() and f.suffix.lower() == '.vmt']
-        logger.info(f"VMT файлов найдено: {len(vmt_files)}")
-        for vf in vmt_files[:10]:  # первые 10 для диагностики
-            logger.debug(f"  VMT: {vf.relative_to(extract_path)}")
+        def _is_service(p: Path) -> bool:
+            low = p.name.lower()
+            return any(kw in low for kw in cls._SKIP_VTF_KEYWORDS)
 
-        if not vmt_files:
-            # Подробный вывод расширений, чтобы понять, что вообще есть в VPK
-            exts: Dict[str, int] = {}
-            for f in all_files:
-                if f.is_file():
-                    exts[f.suffix.lower()] = exts.get(f.suffix.lower(), 0) + 1
-            logger.warning(f"VMT файлы не найдены. Расширения в VPK: {dict(sorted(exts.items()))}")
-
-        for vmt_file in sorted(vmt_files):
+        entries: List[Dict] = []
+        for vtf in sorted(vtf_files):
+            if _is_service(vtf):
+                continue
+            stem = vtf.stem
             try:
-                # Пробуем несколько кодировок
-                content = None
-                for enc in ('utf-8', 'cp1251', 'latin-1'):
-                    try:
-                        content = vmt_file.read_text(encoding=enc, errors='strict')
-                        break
-                    except (UnicodeDecodeError, Exception):
-                        continue
-                if content is None:
-                    content = vmt_file.read_bytes().decode('utf-8', errors='ignore')
-            except Exception as e:
-                logger.warning(f"Не удалось прочитать {vmt_file}: {e}")
-                continue
-
-            # Пробуем паттерны по очереди
-            basetexture: Optional[str] = None
-            for pat in cls._VMT_TEX_PATTERNS:
-                m = pat.search(content)
-                if m:
-                    basetexture = m.group(1).strip()
-                    break
-
-            if not basetexture:
-                logger.debug(f"$basetexture не найден в {vmt_file.name}")
-                logger.debug(f"  Содержимое (первые 200 симв): {content[:200]!r}")
-                continue
-
-            basetexture = basetexture.replace('\\', '/')
-            tex_name = Path(basetexture).name  # только имя файла без пути
-
-            if tex_name in seen:
-                continue
-            seen.add(tex_name)
-
-            is_blue = tex_name.lower().endswith('_blue')
-
-            # VTF может лежать рядом с VMT, или по пути $basetexture относительно materials/
-            vtf_candidates = [
-                vmt_file.parent / f"{tex_name}.vtf",
-                extract_path / "materials" / f"{basetexture}.vtf",
-                extract_path / f"{basetexture}.vtf",
-            ]
-            vtf_path = next((str(p) for p in vtf_candidates if p.exists()), None)
-
-            textures.append({
-                'name': tex_name,
-                'is_blue': is_blue,
-                'vmt_path': str(vmt_file),
-                'vtf_path': vtf_path,
-                'vmt_dir': str(vmt_file.parent),
-                'basetexture': basetexture,  # полный путь из VMT (для замены VTF)
+                rel_dir = os.path.relpath(str(vtf.parent), str(extract_path)).replace('\\', '/')
+            except Exception:
+                rel_dir = ''
+            entries.append({
+                'name': stem,
+                'vtf_name': stem,
+                'vtf_path': str(vtf),
+                'vmt_path': vmt_by_stem.get(stem.lower()),
+                'vmt_dir': str(vtf.parent),
+                'is_blue': stem.lower().endswith('_blue'),
+                'rel_dir': rel_dir,
             })
-            logger.debug(f"  Текстура: {tex_name}  (blue={is_blue}, vtf={'найден' if vtf_path else 'не найден'})")
 
-        red = [t for t in textures if not t['is_blue']]
-        blue = [t for t in textures if t['is_blue']]
-        logger.info(f"Итого: {len(textures)} текстур ({len(red)} RED, {len(blue)} BLU)")
-        return {'all_textures': textures, 'red_textures': red, 'blue_textures': blue}
+        if not entries:
+            logger.info(f"discover_textures: VTF не найдены в {extract_dir}")
+        else:
+            logger.info(f"discover_textures: {len(entries)} основных VTF в {extract_dir}")
+        cls._disambiguate_names(entries)
+        return entries
+
+    @staticmethod
+    def _disambiguate_names(textures: List[Dict]) -> None:
+        """Делает поле 'name' уникальным в пределах списка (in-place).
+
+        Имена не конфликтуют → не трогаем (обратная совместимость). При коллизии
+        к имени добавляется последний сегмент папки, затем — индекс, пока не
+        станет уникальным.
+        """
+        counts: Dict[str, int] = {}
+        for t in textures:
+            counts[t['vtf_name']] = counts.get(t['vtf_name'], 0) + 1
+
+        used: set = set()
+        for t in textures:
+            base = t['vtf_name']
+            if counts.get(base, 0) <= 1:
+                t['name'] = base
+                used.add(base)
+                continue
+            seg = (t.get('rel_dir') or '').split('/')[-1]
+            candidate = f"{base} [{seg}]" if seg else base
+            i = 2
+            while candidate in used:
+                candidate = f"{base} [{seg}{i}]" if seg else f"{base} ({i})"
+                i += 1
+            t['name'] = candidate
+            used.add(candidate)
 
     # ── Основной пайплайн сборки ─────────────────────────────────────────── #
 
@@ -245,6 +225,7 @@ class CustomVPKService:
         language: str = "en",
         sub_progress_callback: Optional[Callable[[int, str], None]] = None,
         custom_vtf_path: Optional[str] = None,
+        hat_mdl_path: Optional[str] = None,  # не используется в custom-режиме (для совместимости вызова)
     ) -> Tuple[bool, str]:
         """
         Полный пайплайн редактирования кастомного мода:
@@ -279,16 +260,19 @@ class CustomVPKService:
                     "Не удалось распаковать VPK. Убедитесь, что это корректный однофайловый VPK мод."
                 )
 
-            # ── 2. Сканирование VMT ────────────────────────────────────── #
+            # ── 2. Обнаружение текстур ─────────────────────────────────── #
+            # По самим VTF-файлам (как и 2D-карточки) — чтобы замена на любой
+            # карточке (включая стили) применилась; имена совпадают с карточками.
             emit(-1, "Scanning textures..." if language == "en" else "Сканирование текстур...")
-            tex_info = CustomVPKService.scan_vmt_textures(str(vpkroot_dir))
-            all_textures = tex_info['all_textures']
+            discovered = CustomVPKService.discover_textures(str(vpkroot_dir))
+            all_textures = ([t for t in discovered if not t['is_blue']]
+                            + [t for t in discovered if t['is_blue']])
 
             if not all_textures:
                 return False, (
-                    "No textures found in VPK (no VMT files with $basetexture)."
+                    "No textures found in VPK (no VTF files)."
                     if language == "en" else
-                    "В VPK не найдено текстур (нет VMT файлов с $basetexture)."
+                    "В VPK не найдено текстур (нет VTF файлов)."
                 )
 
             # ── 3. Подготовка конвертера ───────────────────────────────── #
@@ -302,7 +286,9 @@ class CustomVPKService:
             def _replace(src_img: str, tex: Dict) -> bool:
                 """Конвертирует src_img в VTF и заменяет VTF-файл текстуры."""
                 vmt_dir = Path(tex['vmt_dir'])
-                tex_name = tex['name']
+                # Имя файла — реальное имя VTF, а не уникализированный ключ карточки
+                # ('name' может содержать дискриминатор папки при коллизии стилей).
+                tex_name = tex.get('vtf_name') or tex['name']
 
                 # Если VTF уже существует — кладём рядом с ним;
                 # иначе кладём рядом с VMT (стандартное место для TF2 модов).
@@ -337,18 +323,23 @@ class CustomVPKService:
                     return False
 
             # ── 4. Замена текстур ──────────────────────────────────────── #
-            # Первая (главная) текстура — из image_path пользователя
+            from src.shared.constants import EXTRA_TEX_USE_GAME_ORIGINAL
+
+            # Первая (главная) текстура — из image_path пользователя (классический
+            # путь). Если image_path не задан (режим 2D-карточек) — главную
+            # текстуру тоже спрашиваем через callback, как и остальные.
             first = all_textures[0]
-            emit(-1,
-                 f"Converting {first['name']}..."
-                 if language == "en" else
-                 f"Конвертация {first['name']}...")
             if image_path and os.path.isfile(image_path):
+                emit(-1,
+                     f"Converting {first['name']}..."
+                     if language == "en" else
+                     f"Конвертация {first['name']}...")
                 _replace(image_path, first)
+                remaining = all_textures[1:]
+            else:
+                remaining = all_textures
 
             # Остальные текстуры — спрашиваем последовательно через callback
-            from src.shared.constants import EXTRA_TEX_USE_GAME_ORIGINAL
-            remaining = all_textures[1:]
             for tex in remaining:
                 user_img = extra_texture_callback(tex['name'], "custom") if extra_texture_callback else None
                 # «Использовать обычную» — оставляем оригинальный VTF без изменений

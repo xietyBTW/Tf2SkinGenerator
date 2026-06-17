@@ -59,6 +59,15 @@ class BuildService:
                     flags=flags,
                     vtf_options=vtf_options,
                 )
+            # ── Режимы «только VTF» (скины эффектов смерти) ──────────────────
+            # Кладём лишь текстуру по игровому пути — игровой VMT (с особым
+            # шейдером/прокси) сам её подхватит. Свой VMT тут НЕ пишем, иначе
+            # сломаем эффект (cloak/цвет/scroll).
+            from src.data.weapons import VTF_ONLY_SPECIAL_MODES
+            if mode in VTF_ONLY_SPECIAL_MODES:
+                success_msg = t.get('special_mode_success', 'Special mode textures created successfully')
+                return True, success_msg, None
+
             from src.services.edited_vmt_service import EditedVMTService
             vmt_filename_without_ext = os.path.splitext(vmt_filename)[0]
             edited_vmt_path = EditedVMTService.get_edited_vmt(vmt_filename_without_ext)

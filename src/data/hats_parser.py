@@ -11,11 +11,10 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 import time
 import logging
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, asdict, field
 from pathlib import Path
 from typing import List, Dict, Optional, Callable
 
@@ -23,7 +22,9 @@ logger = logging.getLogger(__name__)
 
 # ── Пути ─────────────────────────────────────────────────────────────────── #
 
-_CACHE_FILE = Path("cache") / "hats_cache.json"
+# v3: HatItem.per_class_models + раскрытие %s-шаблонов (basename / без used_by_classes).
+# Смена имени форсирует одноразовый перепарс старого кэша.
+_CACHE_FILE = Path("cache") / "hats_cache_v3.json"
 
 _CLASS_NAMES = [
     "scout", "soldier", "pyro", "demoman",
@@ -40,9 +41,12 @@ class HatItem:
     defindex: str
     name: str           # локализованное отображаемое имя
     internal_name: str  # поле "name" из items_game.txt
-    mdl_path: str       # models/player/items/...
+    mdl_path: str       # models/player/items/... (primary — для превью/одиночной сборки)
     classes: List[str]  # классы, которые могут носить
     slot: str           # head / misc / etc.
+    # Карта класс → mdl-путь для мультиклассовых шапок (разные модели на класс,
+    # либо %s-шаблон, раскрытый по классам). Пустой dict = одна общая модель.
+    per_class_models: Dict[str, str] = field(default_factory=dict)
 
     @property
     def classes_str(self) -> str:
@@ -158,6 +162,28 @@ def _extract_per_class_model(block: str) -> Optional[str]:
     # Ищем любую пару "class" "path.mdl"
     m = re.search(r'"[^"]+"\s+"([^"]*\.mdl)"', sub, re.IGNORECASE)
     return m.group(1) if m else None
+
+
+def _extract_per_class_models(block: str) -> Dict[str, str]:
+    """
+    Извлекает ВСЕ пары класс→MDL из блока model_player_per_class { ... }.
+
+    Возвращает {класс: нормализованный_путь} только для известных классов TF2.
+    """
+    start = block.find('"model_player_per_class"')
+    if start == -1:
+        return {}
+    brace = block.find('{', start)
+    if brace == -1:
+        return {}
+    end = _skip_to_close_brace(block, brace)
+    sub = block[brace:end]
+    result: Dict[str, str] = {}
+    for cls, path in re.findall(r'"([^"]+)"\s+"([^"]*\.mdl)"', sub, re.IGNORECASE):
+        cls_l = cls.lower()
+        if cls_l in _CLASS_NAMES and cls_l not in result:
+            result[cls_l] = path.replace("\\", "/").lower()
+    return result
 
 
 def _find_items_section(content: str) -> int:
@@ -371,6 +397,22 @@ def _parse_items_game(filepath: str,
         # Классы
         classes = _extract_classes(block)
 
+        # Пер-классовые модели (мультиклассовые шапки).
+        # %s в пути (mdl_path уже раскрыт из model_player ИЛИ из basename внутри
+        # model_player_per_class) → all-class шаблон: раскрываем по классам.
+        # Если used_by_classes пуст — значит все 9 классов.
+        # Иначе — явные пары класс→MDL из model_player_per_class.
+        per_class_models: Dict[str, str] = {}
+        if "%s" in mdl_path:
+            target_classes = classes if classes else list(_CLASS_NAMES)
+            for cls in target_classes:
+                try:
+                    per_class_models[cls] = mdl_path % cls
+                except (TypeError, ValueError):
+                    per_class_models[cls] = mdl_path.replace("%s", cls)
+        else:
+            per_class_models = _extract_per_class_models(block)
+
         results.append(HatItem(
             defindex=defindex,
             name=display_name,
@@ -378,6 +420,7 @@ def _parse_items_game(filepath: str,
             mdl_path=mdl_path,
             classes=classes,
             slot=slot or "head",
+            per_class_models=per_class_models,
         ))
 
         if progress_cb and items_parsed % 500 == 0:

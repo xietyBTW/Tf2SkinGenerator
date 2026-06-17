@@ -2,16 +2,16 @@
 Воркер для асинхронного извлечения текстуры из VPK в фоновом потоке
 """
 
-from PySide6.QtCore import QThread, Signal
 from typing import List, Optional, Tuple
+
+from src.services.base_worker import StandardWorker
 from src.services.tf2_vpk_extract_service import TF2VPKExtractService
 from src.shared.logging_config import get_logger
-from src.data.translations import TRANSLATIONS
 
 logger = get_logger(__name__)
 
 
-class ExtractTextureWorker(QThread):
+class ExtractTextureWorker(StandardWorker):
     """
     Воркер для выполнения извлечения текстуры в фоновом потоке.
 
@@ -19,11 +19,6 @@ class ExtractTextureWorker(QThread):
       • weapon_key задан, hand_textures=None → извлечение текстуры оружия
       • hand_textures задан → извлечение текстур рук (materials/models/player/...)
     """
-
-    # Сигналы для связи с UI
-    finished = Signal(bool, str)  # (success: bool, message: str)
-    progress = Signal(int, str)   # (percentage: int, status: str)
-    error = Signal(str)           # (error_message: str)
 
     def __init__(
         self,
@@ -62,50 +57,41 @@ class ExtractTextureWorker(QThread):
         self.use_explicit_list  = use_explicit_list
         self.misc_vpk_path      = misc_vpk_path
 
-    def run(self) -> None:
+    def work(self) -> Tuple[bool, str]:
         """Выполняет извлечение текстуры в фоновом потоке."""
-        try:
-            if self.hand_textures is not None:
-                # ── Режим рук / тел персонажей ─────────────────────────────── #
-                success, message, cancelled = TF2VPKExtractService.extract_hand_textures_with_progress(
-                    self.textures_vpk_path,
-                    self.hand_textures,
-                    self.export_folder,
-                    self.export_format,
-                    language=self.language,
-                    progress_callback=self.progress.emit,
-                    cancel_callback=self.isInterruptionRequested,
-                    use_explicit_list=self.use_explicit_list,
-                    misc_vpk_path=self.misc_vpk_path,
-                    arm_model_key=self.weapon_key,
-                )
-            else:
-                # ── Режим оружия ───────────────────────────────────────────── #
-                success, message, cancelled = TF2VPKExtractService.extract_texture_with_progress(
-                    self.textures_vpk_path,
-                    self.weapon_key,
-                    self.export_folder,
-                    self.export_format,
-                    language=self.language,
-                    progress_callback=self.progress.emit,
-                    cancel_callback=self.isInterruptionRequested,
-                )
+        if self.hand_textures is not None:
+            # ── Режим рук / тел персонажей ─────────────────────────────── #
+            success, message, cancelled = TF2VPKExtractService.extract_hand_textures_with_progress(
+                self.textures_vpk_path,
+                self.hand_textures,
+                self.export_folder,
+                self.export_format,
+                language=self.language,
+                progress_callback=self.progress.emit,
+                cancel_callback=self.isInterruptionRequested,
+                use_explicit_list=self.use_explicit_list,
+                misc_vpk_path=self.misc_vpk_path,
+                arm_model_key=self.weapon_key,
+            )
+        else:
+            # ── Режим оружия ───────────────────────────────────────────── #
+            success, message, cancelled = TF2VPKExtractService.extract_texture_with_progress(
+                self.textures_vpk_path,
+                self.weapon_key,
+                self.export_folder,
+                self.export_format,
+                language=self.language,
+                progress_callback=self.progress.emit,
+                cancel_callback=self.isInterruptionRequested,
+            )
 
-            if cancelled:
-                self.finished.emit(False, message)
-                return
+        if cancelled:
+            return False, message
 
-            if success:
-                label = self.weapon_key if not self.hand_textures else "hands"
-                logger.info(f"Текстура успешно извлечена [{label}]: {message}")
-                self.finished.emit(True, message)
-            else:
-                logger.error(f"Не удалось извлечь текстуру для {self.weapon_key}: {message}")
-                self.finished.emit(False, message)
-
-        except Exception as exc:
-            error_msg = str(exc)
-            logger.critical(f"Критическая ошибка при извлечении текстуры: {error_msg}", exc_info=True)
-            self.error.emit(error_msg)
-            self.finished.emit(False, error_msg)
+        if success:
+            label = self.weapon_key if not self.hand_textures else "hands"
+            logger.info(f"Текстура успешно извлечена [{label}]: {message}")
+        else:
+            logger.error(f"Не удалось извлечь текстуру для {self.weapon_key}: {message}")
+        return success, message
 

@@ -3,8 +3,8 @@ import shutil
 import subprocess
 from pathlib import Path
 from typing import List, Tuple, Optional
-from PIL import Image
-from src.shared.constants import ToolPaths
+from PIL import Image, ImageOps, ImageFilter
+from src.shared.constants import ToolPaths, ToolTimeouts
 from src.shared.logging_config import get_logger
 from src.services.vtflib_wrapper import VTFLib, VTFImageFormat, VTFImageFlags
 
@@ -23,6 +23,83 @@ class TextureService:
     @staticmethod
     def get_vtf_tool() -> Path:
         return ToolPaths.get_vtf_tool()
+
+    @staticmethod
+    def derive_effect_map(
+        base_image_path: str,
+        out_png_path: str,
+        kind: str,
+        size: Tuple[int, int],
+        threshold: Optional[int] = None,
+        contrast: bool = True,
+    ) -> str:
+        """
+        Строит карту эффекта ИЗ базовой текстуры (без участия пользователя).
+
+        kind:
+          • "phong"     → RGBA: RGB = яркость (карта экспоненты), ALPHA = маска
+                          блеска (по яркости / порогу). Светлые линии → острый
+                          блик, тёмное → матовое.
+          • "selfillum" → L (grayscale): маска свечения по яркости / порогу.
+
+        threshold: 0..255 — если задан, маска бинаризуется по этому порогу
+                   (блестит/светится только то, что ярче). None → плавно.
+        contrast:  авто-контраст яркости (растягивает динамику).
+        """
+        img = Image.open(base_image_path).convert("RGB")
+        if size:
+            img = img.resize(size, Image.LANCZOS)
+        gray = ImageOps.grayscale(img)
+        if contrast:
+            gray = ImageOps.autocontrast(gray)
+
+        def _mask(src):
+            if threshold is None:
+                return src
+            return src.point(lambda p: 255 if p >= threshold else 0)
+
+        if kind == "phong":
+            out = Image.merge("RGBA", (gray, gray, gray, _mask(gray)))
+        elif kind == "selfillum":
+            out = _mask(gray).convert("L")
+        elif kind == "envmapmask":
+            # Маска отражения кубмапа: светлое/металл (или ярче порога) блестит сильнее.
+            out = _mask(gray).convert("L")
+        else:
+            out = gray
+        out.save(out_png_path)
+        logger.info(f"Карта '{kind}' выведена из базовой текстуры: {out_png_path}")
+        return out_png_path
+
+    @staticmethod
+    def make_normal_with_alpha(
+        base_image_path: str,
+        mask_png_path: str,
+        out_png_path: str,
+        size: Tuple[int, int],
+    ) -> str:
+        """
+        Строит карту нормалей из базовой текстуры (Sobel по яркости) и кладёт
+        в её АЛЬФУ маску из mask_png_path.
+
+        Нужно для сосуществования отражения и эффектов с нормалью: при наличии
+        $bumpmap движок игнорирует отдельный $envmapmask и читает маску отражения
+        из альфы нормали ($normalmapalphaenvmapmask). Нормаль приближённая (как и
+        любая «нормаль из диффуза»), но направление здесь некритично — важна альфа.
+        """
+        base = Image.open(base_image_path).convert("RGB")
+        if size:
+            base = base.resize(size, Image.LANCZOS)
+        gray = ImageOps.grayscale(base)
+        sx = ImageFilter.Kernel((3, 3), (-1, 0, 1, -2, 0, 2, -1, 0, 1), scale=2, offset=128)
+        sy = ImageFilter.Kernel((3, 3), (-1, -2, -1, 0, 0, 0, 1, 2, 1), scale=2, offset=128)
+        r = gray.filter(sx)                      # наклон по X
+        g = gray.filter(sy)                      # наклон по Y
+        b = Image.new("L", gray.size, 255)       # Z вверх (приближённо)
+        mask = Image.open(mask_png_path).convert("L").resize(gray.size, Image.LANCZOS)
+        Image.merge("RGBA", (r, g, b, mask)).save(out_png_path)
+        logger.info(f"Нормаль с маской отражения в альфе: {out_png_path}")
+        return out_png_path
 
     @staticmethod
     def process_image(input_path: str, output_path: str, size: Tuple[int, int]) -> None:
@@ -336,19 +413,18 @@ class TextureService:
             else:
                 vtf_args.extend(["-flag", flag.lower()])
         logger.info(f"VTFCmd команда: {' '.join(vtf_args)}")
-        logger.info(f"VTFCmd аргументы (список): {vtf_args}")
-        logger.info(f"Передаваемый формат: {vtf_format} (исходный: {format_type})")
-        logger.info(f"Опции VTFCmd: {options}")
-        logger.info(f"Флаги VTF: {flags}")
-        result = subprocess.run(vtf_args, check=True, capture_output=True, text=True,
-                                creationflags=subprocess.CREATE_NO_WINDOW)
-        if result.returncode != 0:
-            from src.data.translations import TRANSLATIONS
-            t = TRANSLATIONS.get('en', TRANSLATIONS['en'])
-            raise RuntimeError(
-                t['error_vtf_creation_failed'].format(
-                    command=' '.join(vtf_args),
-                    stdout=result.stdout,
-                    stderr=result.stderr
-                )
+        logger.debug(f"Формат: {vtf_format} (исходный: {format_type}), опции: {options}, флаги: {flags}")
+        # Без check=True: при ненулевом коде формируем информативное исключение
+        # с выводом VTFCmd, а не сырой CalledProcessError.
+        from src.shared.exceptions import VTFCreationError
+        try:
+            result = subprocess.run(vtf_args, capture_output=True, text=True,
+                                    creationflags=subprocess.CREATE_NO_WINDOW,
+                                    timeout=ToolTimeouts.VTF)
+        except subprocess.TimeoutExpired:
+            raise VTFCreationError(
+                ' '.join(vtf_args), "",
+                f"VTFCmd timed out after {ToolTimeouts.VTF}s"
             )
+        if result.returncode != 0:
+            raise VTFCreationError(' '.join(vtf_args), result.stdout, result.stderr)

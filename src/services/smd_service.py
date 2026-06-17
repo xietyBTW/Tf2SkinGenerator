@@ -20,10 +20,11 @@ class SMDService:
         original_smd_path: str,
         output_smd_path: Optional[str] = None,
         progress_cb: Optional[Callable[[int], None]] = None,
+        keep_user_materials: bool = False,
     ) -> str:
         """
-        Заменяет секции nodes/skeleton и названия материалов в пользовательском SMD
-        на соответствующие из оригинального SMD игры.
+        Заменяет секции nodes/skeleton (а опц. и имена материалов) в пользовательском
+        SMD на соответствующие из оригинального SMD игры.
 
         Args:
             user_smd_path:     Путь к SMD пользователя (геометрия)
@@ -31,6 +32,10 @@ class SMDService:
             output_smd_path:   Куда записать результат (None = перезаписать user_smd_path)
             progress_cb:       Опциональный callback(pct: int 0-100). Вызывается с троттлингом
                                ~60 fps, чтобы не замедлять парсинг.
+            keep_user_materials: True — сохранить ИМЕНА материалов пользователя (для
+                               многотекстурных/«готовых» моделей; иначе все материалы
+                               схлопнутся в один материал оригинала). nodes/skeleton
+                               всё равно берутся из оригинала (риггинг под скелет TF2).
         Returns:
             Путь к записанному файлу.
         """
@@ -72,10 +77,13 @@ class SMDService:
             _wlines(out, orig_parts.get('nodes') or user_parts.get('nodes'))
             _wlines(out, orig_parts.get('skeleton') or user_parts.get('skeleton'))
             # Запись треугольников → 80..100 %
+            # keep_user_materials → передаём пустой список оригинальных имён,
+            # тогда _write_merged_triangles сохраняет материалы пользователя.
+            _orig_mat_names = [] if keep_user_materials else orig_parts.get('material_names', [])
             SMDService._write_merged_triangles(
                 out,
                 user_parts.get('triangles_data', []),
-                orig_parts.get('material_names', []),
+                _orig_mat_names,
                 progress_cb=_cb,
                 pct_start=80,
                 pct_end=100,
@@ -227,7 +235,12 @@ class SMDService:
         for idx, (user_mat, tri_lines) in enumerate(user_triangles_data):
             mat = (
                 original_material_names[idx] if idx < n_orig else original_material_names[-1]
-            ) if n_orig > 0 else user_mat
+            ) if n_orig > 0 else SMDService._sanitize_material_name(user_mat)
+            # keep_user_materials (n_orig==0): имя материала меша нормализуется
+            # (lowercase + точки→'_'). studiomdl трактует имя материала как файл и
+            # ОБРЕЗАЕТ всё после первой точки: 'material.001' → 'material',
+            # 'material.001_bloody' → 'material' → оба скина схлопываются, группа
+            # выбрасывается → текстура не находится (фиолет). Точку убираем.
 
             out.write(mat)
             out.write('\n')
@@ -315,6 +328,91 @@ class SMDService:
                 materials.add(s)
 
         return materials
+
+    @staticmethod
+    def _sanitize_material_name(name: str) -> str:
+        """
+        Нормализует имя материала под Source/studiomdl.
+
+        • lowercase — Source ищет пути материалов в нижнем регистре;
+        • точки → '_' — studiomdl трактует имя как файл и обрезает всё после
+          первой точки ('material.001' → 'material'), что ломает скины и текстуры.
+        """
+        return (name or '').strip().lower().replace('.', '_')
+
+    @staticmethod
+    def ordered_unique_materials(smd_path: str) -> List[str]:
+        """
+        Имена материалов SMD в порядке первого появления (уникальные).
+
+        Это «источник истины» для сборки: модель компилируется именно с этими
+        именами, поэтому имена VTF/VMT, $texturegroup и $basetexture должны им
+        соответствовать (иначе текстура не находится — фиолетовая).
+        """
+        result: List[str] = []
+        seen = set()
+        if not os.path.exists(smd_path):
+            return result
+        in_triangles = False
+        with open(smd_path, 'r', encoding='utf-8', errors='replace') as f:
+            for line in f:
+                s = line.strip()
+                if not s:
+                    continue
+                if not in_triangles:
+                    if s == 'triangles':
+                        in_triangles = True
+                    continue
+                if s == 'end':
+                    break
+                if s[0].isdigit() or s[0] == '-':
+                    continue
+                if s not in seen:
+                    seen.add(s)
+                    result.append(s)
+        return result
+
+    @staticmethod
+    def rename_materials_in_smd(smd_path: str, rename_map: dict) -> int:
+        """
+        Переименовывает материалы в секции triangles SMD (привязка меша).
+
+        Нужно для изоляции: studiomdl берёт имена материалов skin 0 из самого SMD,
+        поэтому чтобы модель ссылалась на новый материал (vm_engineer_red),
+        переименование надо сделать здесь, а не только в $texturegroup.
+
+        rename_map: {orig_lower: new_name}. Сопоставление без учёта регистра.
+        Возвращает число заменённых строк-материалов.
+        """
+        if not os.path.exists(smd_path) or not rename_map:
+            return 0
+        rm = {k.lower(): v for k, v in rename_map.items()}
+        out_lines: List[str] = []
+        in_triangles = False
+        changed = 0
+        with open(smd_path, 'r', encoding='utf-8', errors='replace') as f:
+            for line in f:
+                s = line.strip()
+                if not in_triangles:
+                    out_lines.append(line)
+                    if s == 'triangles':
+                        in_triangles = True
+                    continue
+                if s == 'end':
+                    in_triangles = False
+                    out_lines.append(line)
+                    continue
+                # Строка материала — не вершина (не начинается с цифры/'-') и не пустая.
+                if s and not (s[0].isdigit() or s[0] == '-') and s.lower() in rm:
+                    nl = line.replace(s, rm[s.lower()], 1)
+                    out_lines.append(nl)
+                    changed += 1
+                else:
+                    out_lines.append(line)
+        if changed:
+            with open(smd_path, 'w', encoding='utf-8') as f:
+                f.writelines(out_lines)
+        return changed
 
 
 # ---------------------------------------------------------------------------

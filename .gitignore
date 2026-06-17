@@ -15,8 +15,8 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .coverage
-.coveragerc
 coverage.json
+coverage_baseline.json
 htmlcov/
 mainTest.py
 run_test.bat
@@ -71,6 +71,5 @@ Thumbs.db
 Desktop.ini
 *.lnk
 .DS_Store
-
-# Кэш приложения (декомпиляция шапок и т.п.) — не коммитим
-cache/
+cache/hats_cache.json
+/cache

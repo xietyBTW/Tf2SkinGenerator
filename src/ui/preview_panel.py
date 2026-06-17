@@ -27,13 +27,14 @@
 import os
 from typing import Dict, List, Optional
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QThread
 from PySide6.QtGui import QPixmap, QImage
 from PySide6.QtWidgets import (
-    QFileDialog, QFrame, QGroupBox, QHBoxLayout, QLabel, QPushButton,
+    QFileDialog, QFrame, QHBoxLayout, QLabel, QPushButton,
     QScrollArea, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget,
 )
 
+from src.shared.file_utils import get_temp_file_path
 from src.shared.logging_config import get_logger
 from src.utils.themes import get_modern_styles
 
@@ -55,11 +56,32 @@ def _load_pixmap(path: str, opaque: bool = False) -> QPixmap:
     return QPixmap(path)
 
 
+def _vtf_to_temp_png(vtf_path: str) -> Optional[str]:
+    """
+    Рендерит VTF (первый кадр) во временный PNG — для превью в карточке.
+    Возвращает путь к PNG или None при ошибке чтения.
+    """
+    try:
+        from src.services.vtflib_wrapper import VTFLib
+        from PIL import Image
+        rgba, w, h = VTFLib.read_vtf_as_rgba(vtf_path)
+        png = str(get_temp_file_path(prefix='tf2_vtf_', suffix='.png'))
+        Image.frombytes("RGBA", (w, h), rgba).save(png)
+        return png
+    except Exception as exc:
+        logger.warning(f"VTF→PNG для карточки не удался ({vtf_path}): {exc}")
+        return None
+
+
 # Sentinel-ключ для главной текстуры когда у модели нет именованных материалов
 # (одноматериальный случай). Используется только внутри панели для хранения в
 # self._textures. НЕ является именем материала и НЕ должен попадать в сборку —
 # главная текстура передаётся в билд отдельно через from_path.
 SINGLE_TEX_KEY = '__single__'
+
+# Фильтр служебных материалов (глаза/зубы/sheen-оверлеи) — общий для UI и сборки.
+from src.ui.preview_mode import PreviewMode, PreviewState
+from src.ui.material_cards import editable_material_cards, spy_mask_cards
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -94,9 +116,11 @@ class _ExtraSlotCard(QWidget):
     """Карточка одного текстурного слота — drag-drop + Browse + AI + превью."""
 
     image_changed = Signal(str, str)   # (material_name, image_path)
+    settings_requested = Signal(str)   # (material_name) — открыть пер-текстурные настройки
 
     _STYLE_IDLE = "border: 1px solid #333; border-radius: 4px; background: #1a1a1a;"
     _STYLE_HOT  = "border: 1px solid #555; border-radius: 4px; background: #222;"
+    _STYLE_CUSTOM = "border: 2px solid #d8b020; border-radius: 4px; background: #1a1a1a;"
 
     CARD_H = 500
 
@@ -105,6 +129,7 @@ class _ExtraSlotCard(QWidget):
         self.material_name = material_name
         self._image_path: Optional[str] = None
         self._pix_source: Optional[QPixmap] = None
+        self._custom = False   # есть ли пер-текстурный оверрайд настроек
 
         self.setFixedWidth(380)
         self.setAcceptDrops(True)
@@ -144,6 +169,30 @@ class _ExtraSlotCard(QWidget):
         self._clear_btn.setCursor(Qt.ArrowCursor)
         self._clear_btn.clicked.connect(self._clear_image)
 
+        # ── Кнопка-шестерёнка (пер-текстурные настройки) — левый верхний угол ── #
+        from PySide6.QtCore import QSize
+        self._gear_btn = QPushButton(self._lbl)
+        self._gear_btn.setIcon(_make_gear_icon("#bbbbbb", 14))
+        self._gear_btn.setIconSize(QSize(14, 14))
+        self._gear_btn.setFixedSize(22, 22)
+        self._gear_btn.setCursor(Qt.ArrowCursor)
+        self._gear_btn.setToolTip(self.t.get('tex_settings_tip', 'Texture settings') if hasattr(self, 't') else 'Texture settings')
+        self._gear_btn.setStyleSheet(
+            "QPushButton { background: rgba(0,0,0,160); border:1px solid #555;"
+            " border-radius:3px; padding:0; }"
+            " QPushButton:hover { background: rgba(255,107,53,0.85); border-color:#ff6b35; }"
+        )
+        self._gear_btn.move(4, 4)
+        self._gear_btn.clicked.connect(lambda: self.settings_requested.emit(self.material_name))
+
+        # ── Бейдж оверрайда (левый нижний угол) ───────────────────────────── #
+        self._badge = QLabel("", self._lbl)
+        self._badge.setStyleSheet(
+            "QLabel { background: rgba(216,176,32,0.18); color:#e3c24a;"
+            " border:1px solid #8a7320; border-radius:4px; padding:1px 6px; font-size:10px; font-weight:bold; }"
+        )
+        self._badge.hide()
+
         self._name_lbl = QLabel(display_name or material_name)
         self._name_lbl.setStyleSheet("color:#888; font-size:11px;")
         self._name_lbl.setAlignment(Qt.AlignCenter)
@@ -163,16 +212,33 @@ class _ExtraSlotCard(QWidget):
             self._pix_source = None
             self._show_placeholder()
             return
-        pix = _load_pixmap(path, opaque)
+
+        # VTF рендерим в temp PNG для превью; _image_path остаётся исходным .vtf,
+        # чтобы сборка взяла VTF как есть (без переконвертации). Альфа в VTF —
+        # маска бликов, поэтому показываем непрозрачно (opaque).
+        display_path = path
+        if path.lower().endswith('.vtf'):
+            png = _vtf_to_temp_png(path)
+            if not png:
+                self._pix_source = None
+                self._show_placeholder()
+                return
+            display_path = png
+            opaque = True
+
+        pix = _load_pixmap(display_path, opaque)
         if pix.isNull():
             self._pix_source = None
             self._show_placeholder()
             return
         self._pix_source = pix
-        self._lbl.setStyleSheet(self._STYLE_IDLE)
+        self._lbl.setStyleSheet(self._border_style())
         self._refresh()
         self._clear_btn.show()
         self._clear_btn.raise_()
+        self._gear_btn.raise_()
+        if self._custom:
+            self._badge.raise_()
 
     def get_image(self) -> Optional[str]:
         return self._image_path
@@ -180,6 +246,25 @@ class _ExtraSlotCard(QWidget):
     def set_display_name(self, name: str) -> None:
         """Меняет подпись карточки (имя материала) — напр. при переключении RED/BLU."""
         self._name_lbl.setText(name)
+
+    def set_override_badge(self, text: str) -> None:
+        """Показывает бейдж пер-текстурных настроек (напр. '1024 · DXT5') и
+        акцентную рамку. Пустой текст — убрать (вернуться к обычной рамке)."""
+        self._custom = bool(text)
+        if text:
+            self._badge.setText(text)
+            self._badge.adjustSize()
+            self._badge.move(6, self._lbl.height() - self._badge.height() - 6)
+            self._badge.show()
+            self._badge.raise_()
+        else:
+            self._badge.hide()
+        # Перерисовываем рамку с учётом нового статуса (если картинка загружена).
+        if self._pix_source is not None:
+            self._lbl.setStyleSheet(self._border_style())
+
+    def _border_style(self) -> str:
+        return self._STYLE_CUSTOM if self._custom else self._STYLE_IDLE
 
     def reset(self) -> None:
         self._image_path = None
@@ -277,6 +362,32 @@ def _team_priority(active_team: str) -> list:
 # Основная панель
 # ═══════════════════════════════════════════════════════════════════════════════
 
+class _SpyMaskVtfWorker(QThread):
+    """
+    Извлекает игровые VTF масок шпиона → PNG в фоне. Один источник и для 3D-превью
+    (переключатель маски), и для 2D-карточек (массовая загрузка превью).
+    Эмитит (vtf_name, png_path) на каждую успешно извлечённую маску.
+    """
+    one = Signal(str, str)  # (vtf_name, png_path)
+
+    def __init__(self, vtf_names, vpk_paths, out_dir, parent=None):
+        super().__init__(parent)
+        self._names = list(vtf_names)
+        self._vpks = list(vpk_paths)
+        self._dir = out_dir
+
+    def run(self):
+        from src.services import vtf_preview_service as vps
+        os.makedirs(self._dir, exist_ok=True)
+        paks = vps.open_vpks(self._vpks)
+        for vtf in self._names:
+            data = vps.read_from_vpks(paks, f"materials/models/player/spy/{vtf}.vtf")
+            png = vps.vtf_bytes_to_png(
+                data, os.path.join(self._dir, f"{vtf}.png"), self._dir)
+            if png:
+                self.one.emit(vtf, png)
+
+
 class PreviewPanel(QWidget):
     """2D + 3D панель предпросмотра с чистым управлением состоянием."""
 
@@ -306,6 +417,35 @@ class PreviewPanel(QWidget):
         self._card_mode: bool = False
         self._has_blu: bool = False
 
+        # ── Стили / skinfamilies (только для кастомной замены модели) ──────── #
+        # Определяются из QC оригинальной модели через SkinDetectWorker.
+        # _skin_overrides[skin_idx][mat_name] = путь к текстуре этого стиля.
+        # Скин 0 — база; остальные наследуют скин 0, пока их не переопределят.
+        self._original_skin_info: Optional[dict] = None
+        self._active_skin: int = 0
+        self._skin_overrides: Dict[int, Dict[str, str]] = {}
+        # Материалы, которые пользователь ЯВНО добавил в вариантный стиль через
+        # «+» (карточка показывается даже пустой). Скин 0 тут не участвует.
+        self._skin_chosen: Dict[int, set] = {}
+        self._skin_worker = None
+        self._skin_buttons: List[QPushButton] = []
+        self._skin_button_indices: List[int] = []   # сырой индекс скина на кнопку
+        # Режим загруженного custom-VPK мода: карточки строятся из VTF мода
+        # (_on_vpk_mod_cards_ready). Защищает их от перетирания обычной
+        # фильтрацией материалов модели в _on_3d_multi_material.
+        self._custom_vpk_mode: bool = False
+        # Точные имена материалов модели (из SMD) — для наложения текстур мода
+        # на правильные меши в custom-VPK режиме.
+        self._custom_model_materials: List[str] = []
+        # Что сейчас реально показано в 3D по материалам — чтобы при переключении
+        # стилей перезагружать в webview ТОЛЬКО изменившиеся текстуры (меньше лагов).
+        self._applied_3d_tex: Dict[str, str] = {}
+        # Пер-текстурные оверрайды настроек: {material: {size,format,flags,options}}.
+        # Есть запись ⟺ у материала свои настройки (иначе — глобальные).
+        self._tex_overrides: Dict[str, dict] = {}
+        # Пер-текстурные файловые карты: {material: {map_id: spec}} из MaterialMapsDialog.
+        self._tex_maps: Dict[str, dict] = {}
+
         # ── 2D состояние ──────────────────────────────────────────────────── #
         # image_path — путь к активному изображению (None если не загружено)
         self.image_path: Optional[str] = None
@@ -332,15 +472,28 @@ class PreviewPanel(QWidget):
         self._mem_mode: Optional[str] = None
         self._mem_data: Optional[dict] = None
         self._restoring_memory: bool = False
-        self._custom_smd_mode: bool = False
-        self._crithit_mode: bool = False
+        # Явный режим превью вместо россыпи взаимоисключающих булевых флагов
+        # (_custom_smd_mode/_spy_mask_mode/_crithit_mode/_death_effect_mode теперь
+        # — свойства, читающие из _pstate). Источник правды по «что показываем».
+        self._pstate = PreviewState()
+        self._custom_smd_path: Optional[str] = None   # путь загруженной кастомной модели
+        # True — модель «готова»: сохранять её материалы как есть (многотекстурная).
+        # False — заменить только геометрию (адаптировать под игровой материал).
+        self._custom_keep_materials: bool = False
+        # Отредактированный пользователем QC (исправленный). None = авто-QC.
+        self._custom_qc_text: Optional[str] = None
         self._crithit_class: str = 'soldier'
-        self._spy_mask_mode: bool = False      # режим масок маскировки шпиона
+        # Режим «эффект смерти»: та же модель-персонаж, что у крита, но
+        # пользовательская текстура накладывается на саму МОДЕЛЬ (лёд/золото/огонь),
+        # а не на billboard — чтобы показать, как эффект ляжет в игре.
+        # PNG оригинальной игровой текстуры эффекта (дефолт, пока юзер не загрузил свою).
+        self._death_default_tex: str = ''
         self._active_spy_mask: Optional[str] = None  # активный класс (cls_key)
         self._australium_frame: Optional[str] = None  # PNG игрового варианта Australium/Gold
         self._australium_active: bool = False          # активен ли вариант в 3D
         self._australium_user_tex: Optional[str] = None  # своя текстура для Australium (отд. слот)
         self._australium_mat_name: Optional[str] = None   # имя gold-материала (для сборки)
+        self._aus_card = None                          # карточка «Australium» в ряду типов текстур
 
         # ── Per-mesh drag tracking ─────────────────────────────────────────── #
         # True если пользователь перетащил текстуру на конкретный меш в 3D.
@@ -378,6 +531,29 @@ class PreviewPanel(QWidget):
 
         self.setAcceptDrops(True)
         self._build_ui()
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # Режим превью (взаимоисключающие флаги → свойства поверх _pstate)
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    @property
+    def _custom_smd_mode(self) -> bool:
+        return self._pstate.is_custom
+
+    @property
+    def _spy_mask_mode(self) -> bool:
+        return self._pstate.is_spy_masks
+
+    @property
+    def _crithit_mode(self) -> bool:
+        # critHIT-сцена (персонаж+billboard) активна И в чистом critHIT, И в режиме
+        # эффекта смерти — death переиспользует крит-инфраструктуру (раньше оба
+        # булевых флага стояли True одновременно).
+        return self._pstate.is_crithit or self._pstate.is_death
+
+    @property
+    def _death_effect_mode(self) -> bool:
+        return self._pstate.is_death
 
     # ═══════════════════════════════════════════════════════════════════════════
     # UI
@@ -444,16 +620,22 @@ class PreviewPanel(QWidget):
 
         lay.addSpacing(8)
 
-        # Стили кнопок 2D/3D
-        self._btn_style_active = """
-            QPushButton { background:#2a2a2a; color:#ccc; border:1px solid #444;
-                padding:4px 16px; font-size:11px; font-weight:600; border-radius:3px; }
-        """
-        self._btn_style_inactive = """
-            QPushButton { background:transparent; color:#555; border:1px solid #2a2a2a;
-                padding:4px 16px; font-size:11px; border-radius:3px; }
-            QPushButton:hover { background:rgba(255,255,255,0.04); color:#888; border-color:#383838; }
-        """
+        # Единые стили текстовых чипов тулбара: 2D/3D и кнопки стилей
+        # (skinfamilies) выглядят одинаково — один источник вместо двух.
+        def _chip_style(active: bool, h_pad: int = 16) -> str:
+            if active:
+                return (
+                    "QPushButton { background:#2a2a2a; color:#ccc; border:1px solid #444;"
+                    f" padding:4px {h_pad}px; font-size:11px; font-weight:600; border-radius:3px; }}"
+                )
+            return (
+                "QPushButton { background:transparent; color:#555; border:1px solid #2a2a2a;"
+                f" padding:4px {h_pad}px; font-size:11px; border-radius:3px; }}"
+                " QPushButton:hover { background:rgba(255,255,255,0.04); color:#888; border-color:#383838; }"
+            )
+
+        self._btn_style_active = _chip_style(True)
+        self._btn_style_inactive = _chip_style(False)
 
         self.btn_3d = QPushButton("3D")
         self.btn_2d = QPushButton("2D")
@@ -493,6 +675,31 @@ class PreviewPanel(QWidget):
         self.btn_load_vpk.setEnabled(False)
         self.btn_load_vpk.clicked.connect(self._on_load_vpk_clicked)
         lay.addWidget(self.btn_load_vpk)
+
+        # Кнопка «Заменить модель» — выбрать свою SMD и сразу увидеть её в 3D
+        self.btn_replace_model = QPushButton()
+        self.btn_replace_model.setFixedSize(26, 26)
+        self.btn_replace_model.setIcon(_make_replace_icon("#666666"))
+        self.btn_replace_model.setStyleSheet(_icon_btn_style)
+        self.btn_replace_model.setToolTip(
+            self.t.get('3d_replace_model_tip', 'Replace model with your own (SMD)')
+        )
+        self.btn_replace_model.setVisible(False)
+        self.btn_replace_model.clicked.connect(self._on_replace_model_clicked)
+        lay.addWidget(self.btn_replace_model)
+
+        # Кнопка «Редактировать QC» — только для «готовой» модели (keep_materials).
+        self.btn_edit_qc = QPushButton("QC")
+        self.btn_edit_qc.setFixedHeight(26)
+        self.btn_edit_qc.setStyleSheet(
+            "QPushButton { background:transparent; border:1px solid #2a2a2a;"
+            " border-radius:3px; padding:0 8px; color:#888; font-size:11px; font-weight:600; }"
+            " QPushButton:hover { background:rgba(255,255,255,0.05); border-color:#555; color:#ccc; }"
+        )
+        self.btn_edit_qc.setToolTip(self.t.get('qc_edit_tip', 'Edit QC (jigglebones etc.)'))
+        self.btn_edit_qc.setVisible(False)
+        self.btn_edit_qc.clicked.connect(self._on_edit_qc_clicked)
+        lay.addWidget(self.btn_edit_qc)
 
         # Командные кнопки RED/BLU
         lay.addSpacing(8)
@@ -544,6 +751,27 @@ class PreviewPanel(QWidget):
         self.btn_aus.setVisible(False)
         self.btn_aus.clicked.connect(self._toggle_australium)
         lay.addWidget(self.btn_aus)
+
+        # ── Кнопки стилей (skinfamilies) — в том же ряду, что RED/BLU/Aus ──── #
+        # Создаются динамически при определении стилей кастомной модели и
+        # вставляются ПЕРЕД этим анкером, чтобы держаться правее aus.
+        self._skin_anchor = QWidget()
+        self._skin_anchor.setFixedWidth(0)
+        lay.addWidget(self._skin_anchor)
+        self._toolbar_layout = lay
+        # Кнопки стилей — аккуратные «пилюли» с акцентом приложения (#ff6b35):
+        # активный стиль залит акцентом, неактивные — обводка с подсветкой при наведении.
+        self._skin_btn_style_on = (
+            "QPushButton { background:#ff6b35; color:#fff; border:1px solid #ff6b35;"
+            " padding:3px 14px; font-size:11px; font-weight:600; border-radius:13px; }"
+            " QPushButton:hover { background:#ff7d4d; }"
+        )
+        self._skin_btn_style_off = (
+            "QPushButton { background:transparent; color:#aaa; border:1px solid #3a3a3a;"
+            " padding:3px 14px; font-size:11px; font-weight:500; border-radius:13px; }"
+            " QPushButton:hover { color:#fff; border-color:#ff6b35;"
+            " background:rgba(255,107,53,0.12); }"
+        )
 
         self._active_spy_mask: Optional[str] = None   # активный класс маски
 
@@ -687,6 +915,19 @@ class PreviewPanel(QWidget):
         show = self.is_3d_mode() and not self._crithit_mode
         self.btn_load_3d.setVisible(show)
         self.btn_load_vpk.setVisible(show)
+        if hasattr(self, 'btn_replace_model'):
+            # Замену модели НЕ предлагаем для тела персонажа: у игрока сложный
+            # скелет + flex + много bodygroups/LOD — подмена одной геометрией
+            # почти всегда даёт битый результат. Для оружия/рук/шапок — оставляем.
+            # Режим берём из 3D-параметров (они выставляются раньше _weapon_mode).
+            from src.data.player_characters import PLAYER_BODY_MODE_KEYS
+            cur_mode = (
+                (self._pending_3d_params[1] if self._pending_3d_params else None)
+                or (self._last_3d_params[1] if self._last_3d_params else None)
+                or self._weapon_mode
+            )
+            is_player_body = cur_mode in PLAYER_BODY_MODE_KEYS
+            self.btn_replace_model.setVisible(show and not is_player_body)
 
     def _switch_to_2d(self) -> None:
         self.view_stack.setCurrentIndex(0)
@@ -695,9 +936,13 @@ class PreviewPanel(QWidget):
         self._update_3d_buttons_visibility()
         # Командные кнопки остаются видны если есть BLU данные
         self._update_team_btn_visibility()
-        # Синхронизируем 2D с активной командой — карточки могли не обновиться
-        # пока пользователь смотрел 3D и переключал команды там
-        self._restore_team_textures_2d(self._active_team)
+        # Если активен вариантный стиль (skin > 0) — показываем его раскладку
+        # карточек (выбранные материалы + «+ Добавить стиль»), а не обычное
+        # поле загрузки. Иначе синхронизируем 2D с активной командой.
+        if self._original_skin_info and self._active_skin != 0:
+            self._rebuild_cards_for_skin(self._active_skin)
+        else:
+            self._restore_team_textures_2d(self._active_team)
 
     def _switch_to_3d(self) -> None:
         if self._3d_widget is None:
@@ -739,7 +984,13 @@ class PreviewPanel(QWidget):
         # _restore_team_textures_3d строит полную карту и правильно
         # обрабатывает очищенные (×) слоты, возвращая им VPK-оригинал.
         from PySide6.QtCore import QTimer
-        if self._card_mode and self._material_names:
+        if self._custom_vpk_mode and self._custom_model_materials:
+            if self._original_skin_info:
+                # Стили определены → показываем АКТИВНЫЙ стиль (а не базовый).
+                QTimer.singleShot(delay_ms, lambda: self._apply_skin_to_3d(self._active_skin))
+            else:
+                QTimer.singleShot(delay_ms, self._apply_custom_vpk_textures_to_3d)
+        elif self._card_mode and self._material_names:
             QTimer.singleShot(delay_ms, lambda: self._restore_team_textures_3d(self._active_team))
         elif self.image_path and os.path.exists(self.image_path):
             path = self.image_path
@@ -749,32 +1000,59 @@ class PreviewPanel(QWidget):
         return self.view_stack.currentIndex() == 1
 
     def _update_team_btn_visibility(self) -> None:
-        # Показываем кнопки RED/BLU только если у модели РЕАЛЬНО есть BLU-вариант:
-        # - _blu_frames        — BLU одним кадром (оружие/шапка с командной текстурой);
-        # - _vpk_blu_tex_map / _vpk_blu_name_map — per-material BLU (персонажи).
-        # Раньше учитывались _card_mode (любой мульти-материал) и _textures['blu']
-        # (нейтральные текстуры пишутся в обе команды) — это давало ложные кнопки
-        # у мульти-материальных шапок БЕЗ командного разделения.
-        # В режиме spy_masks скрываем RED/BLU — там своя панель масок.
+        """
+        Единая точка синхронизации командных/вариантных кнопок тулбара.
+
+        RED/BLU видимы только если у модели РЕАЛЬНО есть BLU-вариант:
+          - _blu_frames        — BLU одним кадром (оружие/шапка с командной текстурой);
+          - _vpk_blu_tex_map / _vpk_blu_name_map — per-material BLU (персонажи).
+        (учёт _card_mode / _textures['blu'] давал ложные кнопки у
+        мульти-материальных шапок без командного разделения).
+
+        Australium-кнопка видима, когда воркер извлёк вариант (_australium_frame).
+        В режиме spy_masks всё скрыто — там своя панель масок.
+        """
         if self._spy_mask_mode:
             self.btn_red.setVisible(False)
             self.btn_blu.setVisible(False)
+            self.btn_aus.setVisible(False)
             return
-        has_blu = bool(
-            self._blu_frames or self._vpk_blu_tex_map or self._vpk_blu_name_map
-        )
+        from src.data.player_hands import HAND_MODE_KEYS as _HMK_vis
+        if self._weapon_mode in _HMK_vis:
+            # Руки: переключатель только если есть РЕАЛЬНЫЙ командный материал —
+            # у которого синее имя отличается от красного (engineer_red→engineer_blue,
+            # medic_hands_red→medic_hands_blue). Чисто нейтральные руки (scout/spy/
+            # heavy) команд не имеют → переключатель не показываем (ложный).
+            has_blu = bool(self._vpk_blu_name_map) and any(
+                str(bn).lower() != str(m).lower()
+                for m, bn in self._vpk_blu_name_map.items()
+            )
+        else:
+            has_blu = bool(
+                self._blu_frames or self._vpk_blu_tex_map or self._vpk_blu_name_map
+            )
         self.btn_red.setVisible(has_blu)
         self.btn_blu.setVisible(has_blu)
+        self.btn_aus.setVisible(bool(self._australium_frame))
 
     # ═══════════════════════════════════════════════════════════════════════════
     # Маски маскировки шпиона
     # ═══════════════════════════════════════════════════════════════════════════
 
+    def _sync_spy_mask_buttons(self) -> None:
+        """Видимость селекторов масок = режим масок активен. Единая точка —
+        вызывать после любого перехода режима, чтобы кнопки не «залипали»."""
+        vis = self._pstate.is_spy_masks
+        for _cls_key, _btn in self._spy_mask_buttons:
+            _btn.setVisible(vis)
+
     def set_spy_mask_mode(self, enabled: bool) -> None:
         """Включает/выключает режим масок шпиона (показывает кнопки классов)."""
-        self._spy_mask_mode = enabled
-        for _cls_key, _btn in self._spy_mask_buttons:
-            _btn.setVisible(enabled)
+        if enabled:
+            self._pstate.enter(PreviewMode.SPY_MASKS)
+        elif self._pstate.is_spy_masks:
+            self._pstate.reset()
+        self._sync_spy_mask_buttons()
         if enabled and self._active_spy_mask is None:
             # По умолчанию активируем первую маску (Scout)
             from src.data.player_characters import SPY_DISGUISE_MASKS
@@ -817,61 +1095,16 @@ class PreviewPanel(QWidget):
                               self._3d_widget.apply_material_map({'mask_spy': p}))
             return
 
-        # Нет пользовательской текстуры — извлекаем из VPK в фоне
-        from PySide6.QtCore import QThread, Signal as _Signal
-
-        class _MaskExtractWorker(QThread):
-            done = _Signal(str)  # png_path
-
-            def __init__(self, vtf_name, misc_vpk, textures_vpk, preview_dir):
-                super().__init__()
-                self._vtf = vtf_name
-                self._misc = misc_vpk
-                self._tex = textures_vpk
-                self._dir = preview_dir
-
-            def run(self):
-                try:
-                    import vpk as vpklib
-                    from src.services.vtflib_wrapper import VTFLib
-                    from PIL import Image
-                    vtf_path_in_vpk = f"materials/models/player/spy/{self._vtf}.vtf"
-                    vtf_data = None
-                    for vp in [self._tex, self._misc]:
-                        if not vp or not os.path.exists(vp):
-                            continue
-                        try:
-                            pak = vpklib.open(vp)
-                            vtf_data = pak[vtf_path_in_vpk].read()
-                            break
-                        except (KeyError, Exception):
-                            continue
-                    if not vtf_data:
-                        return
-                    tmp = os.path.join(self._dir, f"_tmp_{self._vtf}.vtf")
-                    with open(tmp, "wb") as f:
-                        f.write(vtf_data)
-                    frames, w, h = VTFLib.read_vtf_all_frames(tmp)
-                    os.remove(tmp)
-                    if frames:
-                        img = Image.frombytes("RGBA", (w, h), frames[0])
-                        out = os.path.join(self._dir, f"{self._vtf}.png")
-                        img.save(out)
-                        self.done.emit(out)
-                except Exception:
-                    pass
-
-        # Сохраняем воркер чтобы не был удалён GC
-        w = _MaskExtractWorker(
-            vtf_name,
-            getattr(self, '_current_misc_vpk', None),
-            getattr(self, '_current_textures_vpk', None),
-            os.path.join('tools', 'temp', 'spy_mask_preview'),
+        # Нет пользовательской текстуры — извлекаем из VPK в фоне (общий воркер).
+        out_dir = os.path.join('tools', 'temp', 'spy_mask_preview')
+        w = _SpyMaskVtfWorker(
+            [vtf_name],
+            [getattr(self, '_current_textures_vpk', None),
+             getattr(self, '_current_misc_vpk', None)],
+            out_dir, parent=self,
         )
-        os.makedirs(os.path.join('tools', 'temp', 'spy_mask_preview'), exist_ok=True)
-        w.done.connect(lambda png: self._3d_widget.apply_material_map({'mask_spy': png}))
+        w.one.connect(lambda _n, png: self._3d_widget.apply_material_map({'mask_spy': png}))
         w.start()
-        # Храним ссылку
         if not hasattr(self, '_mask_workers'):
             self._mask_workers = []
         self._mask_workers.append(w)
@@ -881,8 +1114,17 @@ class PreviewPanel(QWidget):
     # ═══════════════════════════════════════════════════════════════════════════
 
     def _switch_team(self, team: str) -> None:
-        """Переключает активную команду и восстанавливает её текстуры."""
-        if self._active_team == team:
+        """Переключает активную команду и восстанавливает её текстуры.
+
+        RED / BLU / Australium взаимоисключающие: если активен Australium —
+        выбор команды его отменяет (гасим кнопку и возвращаем текстуры команды).
+        """
+        aus_was_active = self._australium_active
+        if aus_was_active:
+            self._australium_active = False
+            self.btn_aus.setStyleSheet(self._aus_style_off)
+        # Если уже на этой команде и австралий не был активен — делать нечего.
+        if self._active_team == team and not aus_was_active:
             return
         self._active_team = team
         self.btn_red.setStyleSheet(
@@ -891,9 +1133,96 @@ class PreviewPanel(QWidget):
         self.btn_blu.setStyleSheet(
             self._team_style_on if team == 'blu' else self._team_style_off
         )
+        # Руки: на BLU показываем ТОЛЬКО командные + выбранные нейтральные + «+»
+        # (общие не дублируются). Хранение нативное (_textures['blu']).
+        from src.data.player_hands import HAND_MODE_KEYS as _HMK_sw
+        if self._weapon_mode in _HMK_sw and self._card_mode and self._material_names:
+            self._rebuild_hand_team_cards(team)
+            if self._3d_available and self._3d_widget:
+                self._restore_team_textures_3d(team)
+            return
         self._restore_team_textures_2d(team)
         if self._3d_available and self._3d_widget:
             self._restore_team_textures_3d(team)
+
+    def _is_team_material(self, mat: str) -> bool:
+        """True если у материала есть СВОЙ синий вариант (командный, напр.
+        medic_hands_red→medic_hands_blue), а не нейтральный (engineer_handL)."""
+        bn = self._vpk_blu_name_map.get(mat, mat) if self._vpk_blu_name_map else mat
+        return bn.lower() != mat.lower()
+
+    def _rebuild_hand_team_cards(self, team: str) -> None:
+        """Перестраивает карточки рук под команду.
+
+        • RED — все материалы (база).
+        • BLU — только командные (свой синий) + нейтральные, которым задана синяя
+          или добавленные через «+». Остальные нейтральные скрыты (общие).
+        """
+        if team == 'red':
+            self._set_material_slots(list(self._material_names))
+            return
+
+        self._clear_cards()
+        self._card_mode = True
+        chosen = getattr(self, '_hand_blu_chosen', set())
+        blu = self._textures.get('blu', {})
+        show = [
+            m for m in self._material_names
+            if self._is_team_material(m) or (blu.get(m) and os.path.exists(blu[m])) or m in chosen
+        ]
+        for m in show:
+            disp = self._vpk_blu_name_map.get(m, m) if self._vpk_blu_name_map else m
+            img = self._resolve_card_texture(m)
+            card = self._make_card(
+                m, disp, img,
+                opaque=self._is_game_texture(img) if img else False,
+                on_change=self._on_extra_card_changed,
+            )
+            self._card_widgets[m] = card
+
+        # «+» — если есть нейтральные, ещё не показанные (можно сделать командными).
+        _hideable = [m for m in self._material_names
+                     if m not in show and not self._is_team_material(m)]
+        if _hideable:
+            from PySide6.QtWidgets import QPushButton
+            add_btn = QPushButton(self.t.get('skin_add_style', '+ Add style'))
+            add_btn.setObjectName('skin_add_btn')
+            add_btn.setCursor(Qt.PointingHandCursor)
+            add_btn.setFixedHeight(40)
+            add_btn.setStyleSheet(
+                "QPushButton#skin_add_btn { background:transparent; border:1px dashed #555;"
+                " border-radius:6px; padding:10px 18px; color:#aaa; font-size:13px; }"
+                " QPushButton#skin_add_btn:hover { border-color:#888; color:#ddd;"
+                " background:rgba(255,255,255,0.04); }"
+            )
+            add_btn.clicked.connect(self._show_hand_add_blu_menu)
+            self._cards_layout.addWidget(add_btn)
+
+        self._cards_layout.addStretch()
+        self.empty_state.hide()
+        self.preview.hide()
+        self._cards_scroll.show()
+
+    def _show_hand_add_blu_menu(self) -> None:
+        """Меню: какой нейтральный материал сделать командным (добавить на BLU)."""
+        from PySide6.QtWidgets import QMenu
+        chosen = self.__dict__.setdefault('_hand_blu_chosen', set())
+        blu = self._textures.get('blu', {})
+        avail = [
+            m for m in self._material_names
+            if not self._is_team_material(m) and m not in chosen
+            and not (blu.get(m) and os.path.exists(blu[m]))
+        ]
+        if not avail:
+            return
+        menu = QMenu(self)
+        for m in avail:
+            menu.addAction(m, lambda _=False, mat=m: self._add_hand_blu_material(mat))
+        menu.exec(self.btn_blu.mapToGlobal(self.btn_blu.rect().bottomLeft()))
+
+    def _add_hand_blu_material(self, mat: str) -> None:
+        self.__dict__.setdefault('_hand_blu_chosen', set()).add(mat)
+        self._rebuild_hand_team_cards('blu')
 
     def _restore_team_textures_2d(self, team: str) -> None:
         """Показывает в 2D карточках/большом превью текстуры выбранной команды."""
@@ -923,8 +1252,14 @@ class PreviewPanel(QWidget):
                 # (display-only, как делает 3D через _apply_vpk_frames). image_path
                 # оставляем None: сборка не должна считать это пользовательской текстурой.
                 self.image_path = None
+                # Командный одно-материальный материал (spy_hands_red): синяя в
+                # _vpk_blu_tex_map, а не в _blu_frames — берём её.
+                _gp = (self._vpk_blu_tex_map if team == 'blu'
+                       else self._vpk_red_tex_map).get(key)
                 vpk_frames = self._blu_frames if team == 'blu' else self._red_frames
-                if vpk_frames and os.path.exists(vpk_frames[0]):
+                if _gp and os.path.exists(_gp):
+                    self._show_image_in_preview(_gp)
+                elif vpk_frames and os.path.exists(vpk_frames[0]):
                     self._show_image_in_preview(vpk_frames[0])
                 else:
                     self._clear_preview_label()
@@ -952,6 +1287,9 @@ class PreviewPanel(QWidget):
             tex = self._resolve_card_texture(main_name)
             if tex and os.path.exists(tex):
                 self._main_card.set_image(tex, opaque=self._is_game_texture(tex))
+            elif self._original_skin_info and self._active_skin != 0:
+                # Вариантный стиль без переопределения — карточка должна быть пустой.
+                self._main_card.reset()
             elif not self._main_card.get_image():
                 pass  # оставляем как есть
 
@@ -987,6 +1325,14 @@ class PreviewPanel(QWidget):
             # Поверх накладываем пользовательские текстуры (только загруженные)
             for mat in self._material_names:
                 p = paths.get(mat)
+                # Руки на BLU: нейтральный материал без СВОЕЙ синей наследует
+                # RED-правку (а не игровой синий кадр).
+                if not (p and os.path.exists(p)) and team == 'blu':
+                    _bn = self._vpk_blu_name_map.get(mat, mat) if self._vpk_blu_name_map else mat
+                    if _bn.lower() == mat.lower():   # нейтральный
+                        _rp = self._textures.get('red', {}).get(mat)
+                        if _rp and os.path.exists(_rp):
+                            p = _rp
                 if p and os.path.exists(p):
                     full_map[mat] = p
                 elif mat in full_map:
@@ -1007,6 +1353,11 @@ class PreviewPanel(QWidget):
         else:
             key = self._material_names[0] if self._material_names else SINGLE_TEX_KEY
             path = paths.get(key)
+            if not (path and os.path.exists(path)):
+                # Командный одно-материальный (spy_hands_red): синяя в _vpk_blu_tex_map.
+                _gp = vpk_map.get(key) if vpk_map else None
+                if _gp and os.path.exists(_gp):
+                    path = _gp
             if path and os.path.exists(path):
                 QTimer.singleShot(50, lambda p=path: self._apply_image_to_3d(p))
             else:
@@ -1090,14 +1441,10 @@ class PreviewPanel(QWidget):
         # Пересоздаём карточки слотов (метод сам выставит _card_mode/_material_names)
         self._set_material_slots(list(data['material_names']))
 
-        # Командные кнопки (учитывают восстановленные _blu_frames)
+        # Командные и Australium кнопки (учитывают восстановленное состояние)
+        self._australium_active = False
+        self.btn_aus.setStyleSheet(self._aus_style_off)
         self._update_team_btn_visibility()
-
-        # Кнопка Australium — восстанавливаем, если вариант был доступен
-        if self._australium_frame and hasattr(self, 'btn_aus'):
-            self._australium_active = False
-            self.btn_aus.setVisible(True)
-            self.btn_aus.setStyleSheet(self._aus_style_off)
 
         # Мгновенно грузим модель — obj уже на диске, воркер не нужен
         if self._3d_widget and data['obj_path'] and os.path.exists(data['obj_path']):
@@ -1132,8 +1479,10 @@ class PreviewPanel(QWidget):
 
         self._last_3d_params = new_params
         self._pending_3d_params = new_params
-        self._custom_smd_mode = False
-        self._crithit_mode = False
+        # Обычная игровая модель — гасим спец-режимы (custom/critHIT/death).
+        if self._pstate.mode in (PreviewMode.CUSTOM, PreviewMode.CRITHIT, PreviewMode.DEATH):
+            self._pstate.reset()
+        self._death_default_tex = ''
         # Сохраняем VPK пути — нужны для _switch_spy_mask
         self._current_misc_vpk = misc_vpk_path
         self._current_textures_vpk = textures_vpk_path
@@ -1168,8 +1517,10 @@ class PreviewPanel(QWidget):
         """Полный сброс 3D (при смене режима на Spray/None)."""
         self._pending_3d_params = None
         self._last_3d_params = None
-        self._custom_smd_mode = False
-        self._crithit_mode = False
+        # Обычная игровая модель — гасим спец-режимы (custom/critHIT/death).
+        if self._pstate.mode in (PreviewMode.CUSTOM, PreviewMode.CRITHIT, PreviewMode.DEATH):
+            self._pstate.reset()
+        self._death_default_tex = ''
         self._cur_obj = None   # модель убрана — нечего запоминать
         self._stop_worker('_3d_worker')
         self._stop_worker('_vpk_mod_worker')
@@ -1181,8 +1532,10 @@ class PreviewPanel(QWidget):
     def show_3d_no_tf2_message(self) -> None:
         self._pending_3d_params = None
         self._last_3d_params = None
-        self._custom_smd_mode = False
-        self._crithit_mode = False
+        # Обычная игровая модель — гасим спец-режимы (custom/critHIT/death).
+        if self._pstate.mode in (PreviewMode.CUSTOM, PreviewMode.CRITHIT, PreviewMode.DEATH):
+            self._pstate.reset()
+        self._death_default_tex = ''
         self._stop_worker('_3d_worker')
         self._reset_team_vpk_state()
         if self._3d_widget:
@@ -1192,9 +1545,22 @@ class PreviewPanel(QWidget):
         self.btn_load_3d.setEnabled(False)
         self.btn_load_vpk.setEnabled(False)
 
+    def get_custom_smd_path(self) -> Optional[str]:
+        """Путь к кастомной модели, загруженной в превью (для сборки, чтобы не
+        просить выбрать SMD повторно). None — если не загружена."""
+        p = self._custom_smd_path
+        return p if (p and os.path.isfile(p)) else None
+
     def set_custom_model_mode(self, enabled: bool = True) -> None:
-        self._custom_smd_mode = enabled
+        if enabled:
+            self._pstate.enter(PreviewMode.CUSTOM)
+        elif self._pstate.is_custom:
+            self._pstate.reset()
+        # Кастомная модель — не режим масок: прячем селекторы масок шпиона.
+        self._sync_spy_mask_buttons()
         self._pending_3d_params = None
+        if not enabled:
+            self._custom_smd_path = None   # вышли из режима — забываем модель
         self._stop_worker('_3d_worker')
         if enabled:
             if self._3d_widget:
@@ -1209,7 +1575,10 @@ class PreviewPanel(QWidget):
             self.btn_load_3d.setEnabled(False)
             self.btn_load_vpk.setEnabled(False)
 
-    def set_crithit_mode(self) -> None:
+    def set_crithit_mode(self, _render: bool = True) -> None:
+        # _render=False — когда метод используется как подложка для эффекта смерти:
+        # рендер крит-сцены отложен до входа в DEATH (иначе первый рендер уйдёт в
+        # billboard, т.к. _death_effect_mode ещё False).
         # ── Снимок уходящего оружия в мини-память (ДО очистки состояния) ──── #
         # Переход в крит идёт через этот метод, а не set_3d_params, поэтому
         # снимок надо делать здесь — иначе возврат на оружие ничего не вернёт.
@@ -1224,8 +1593,10 @@ class PreviewPanel(QWidget):
         self.vtf_path = None
         self._cur_obj = None
 
-        self._crithit_mode = True
-        self._custom_smd_mode = False
+        self._pstate.enter(PreviewMode.CRITHIT)
+        # Маски шпиона не относятся к крит/спец-режимам — прячем их селекторы,
+        # иначе при переходе из режима масок в Special они «залипают».
+        self._sync_spy_mask_buttons()
         self._pending_3d_params = None
         # Сбрасываем кэш последних 3D-параметров: иначе возврат на то же оружие,
         # что было до крита, вызовет ранний return в set_3d_params и _crithit_mode
@@ -1240,8 +1611,75 @@ class PreviewPanel(QWidget):
             self._3d_widget.show_prompt(
                 self.t.get('3d_prompt_crithit', 'Switch to 3D tab — the soldier will appear automatically')
             )
+        if _render and self.is_3d_mode() and self._3d_available:
+            self._render_crithit_scene()
+
+    def set_death_effect_mode(self, mode: str = '',
+                              textures_vpk: str = '', misc_vpk: str = '') -> None:
+        """Режим превью эффекта смерти (лёд/золото/огонь): модель-персонаж крита,
+        но пользовательская текстура накладывается на МОДЕЛЬ — как будет в игре.
+
+        Сначала на модель кладётся ОРИГИНАЛЬНАЯ игровая текстура эффекта (лёд/
+        золото/огонь) из VPK — как у обычных моделей подтягивается игровая
+        текстура. Пользовательская заменяет её при загрузке.
+
+        Переиспользует крит-инфраструктуру (_crithit_mode = «режим сцены с
+        персонажем»), флаг _death_effect_mode меняет, куда идёт текстура."""
+        # Игровую текстуру эффекта тянем ДО set_crithit_mode (он чистит image_path).
+        self._death_default_tex = ''
+        if mode and (textures_vpk or misc_vpk):
+            self._death_default_tex = self._extract_game_texture_for_death(
+                mode, [textures_vpk, misc_vpk]
+            )
+        self.set_crithit_mode(_render=False)   # настройка крит-сцены БЕЗ рендера
+        self._pstate.enter(PreviewMode.DEATH)  # → DEATH (_crithit_mode остаётся True, см. свойство)
+        if self._3d_widget:
+            self._3d_widget.show_prompt(
+                self.t.get('3d_prompt_death_effect',
+                           'Switch to 3D tab — the effect will appear on the model')
+            )
         if self.is_3d_mode() and self._3d_available:
             self._render_crithit_scene()
+
+    def _extract_game_texture_for_death(self, mode: str, vpk_paths: list) -> str:
+        """Достаёт оригинальную VTF эффекта из игрового VPK → PNG (для дефолта).
+
+        Возвращает путь к PNG или '' если не нашли (тогда модель без текстуры)."""
+        try:
+            from src.services.vmt_service import VMTService
+            rel, _vmt, vtf = VMTService.get_weapon_relpaths(mode)
+            rel_url = rel.replace('\\', '/').rstrip('/')
+            candidates = [f"{rel_url}/{vtf}"]
+            if vtf.lower() != vtf:
+                candidates.append(f"{rel_url}/{vtf.lower()}")
+            import vpk as vpklib
+            import tempfile
+            for vpk_path in vpk_paths:
+                if not vpk_path or not os.path.exists(vpk_path):
+                    continue
+                try:
+                    pak = vpklib.open(vpk_path)
+                except Exception:
+                    continue
+                for cand in candidates:
+                    try:
+                        data = pak[cand].read()
+                    except KeyError:
+                        continue
+                    tmp = tempfile.mktemp(suffix='.vtf', prefix='tf2_deatheff_')
+                    with open(tmp, 'wb') as f:
+                        f.write(data)
+                    png = self._convert_model_vtf(tmp)
+                    try:
+                        os.remove(tmp)
+                    except OSError:
+                        pass
+                    if png:
+                        logger.info(f"[DEATH FX] игровая текстура эффекта: {cand}")
+                        return png
+        except Exception as exc:
+            logger.debug(f"[DEATH FX] не удалось достать игровую текстуру: {exc}")
+        return ''
 
     def _on_load_3d_clicked(self) -> None:
         if self._custom_smd_mode:
@@ -1259,9 +1697,8 @@ class PreviewPanel(QWidget):
     def _stop_worker(self, attr: str) -> None:
         """Останавливает воркер по имени атрибута и зануляет его."""
         w = getattr(self, attr, None)
-        if w is not None and w.isRunning():
-            w.requestInterruption()
-            w.wait(3000)
+        if w is not None:
+            w.stop(3000)  # BaseWorker: requestInterruption + wait
         setattr(self, attr, None)
 
     def _start_3d_worker(
@@ -1274,7 +1711,27 @@ class PreviewPanel(QWidget):
         if not self._3d_available or not self._3d_widget:
             return
         self._stop_worker('_3d_worker')
+        # Возврат к ИГРОВОЙ модели: сбрасываем кастомное состояние, иначе
+        # селекторы доп-стилей и их текстуры остаются от загруженной ранее
+        # кастомной модели. Останавливаем и фоновый детектор стилей, чтобы
+        # его поздний колбэк не пересоздал кнопки уже после сброса.
+        self._stop_worker('_skin_worker')
+        # Признак, что уходим ИМЕННО с кастомной модели (до сброса флагов).
+        was_custom = bool(
+            self._custom_smd_path or self._custom_keep_materials
+            or self._original_skin_info or self._custom_smd_mode
+        )
+        self._reset_skin_state()
+        self._custom_smd_path = None
+        self._custom_keep_materials = False
         self._reset_team_vpk_state()
+        # Возврат от кастомной модели: сбрасываем её карточки/материалы. Иначе их
+        # идентичность (напр. "material") остаётся, и у одно-текстурной игровой
+        # модели (где multi_material не приходит) австралий/команда привяжутся к
+        # чужой карточке. Для мульти-материальной модели карточки пересоберёт
+        # _on_3d_multi_material. На обычной смене оружия (не кастом) не трогаем.
+        if was_custom:
+            self._set_material_slots([])
         self.btn_load_3d.setEnabled(False)
         self._3d_widget.show_loading(self.t.get('3d_preparing', 'Preparing 3D model...'))
 
@@ -1298,6 +1755,52 @@ class PreviewPanel(QWidget):
         w.start()
         self._3d_worker = w
 
+    def _start_qc_cards_worker(self) -> None:
+        """Извлекает текстуры/карточки из QC игровой модели, НЕ трогая геометрию.
+
+        Режим «No, geometry only»: в 3D остаётся геометрия пользователя, но
+        карточки и текстуры берутся из игрового QC ($texturegroup). Сигнал
+        ready (геометрия оригинала) НЕ подключаем — вместо него применяем
+        главную игровую текстуру глобально к пользовательской модели.
+        """
+        if not self._3d_available or not self._3d_widget or not self._pending_3d_params:
+            return
+        weapon_key, mode, misc_vpk, textures_vpk = self._pending_3d_params
+        self._stop_worker('_3d_worker')
+        self._reset_team_vpk_state()
+
+        from src.services.preview_3d_worker import Preview3DWorker
+        w = Preview3DWorker(
+            weapon_key=weapon_key,
+            mode=mode,
+            misc_vpk_path=misc_vpk,
+            textures_vpk_path=textures_vpk,
+            lang=self._lang,
+            parent=self,
+        )
+        # НЕ подключаем ready → геометрия оригинала не загружается.
+        # Главную текстуру применяем глобально к геометрии пользователя.
+        w.ready.connect(self._on_qc_cards_ready)
+        w.animated.connect(self._on_3d_animated)
+        w.multi_material.connect(self._on_3d_multi_material)
+        w.blu_ready.connect(self._on_3d_blu_ready)
+        w.blu_multi_material.connect(self._on_3d_blu_multi_material)
+        w.australium_ready.connect(self._on_australium_ready)
+        w.failed.connect(lambda e: (self.btn_load_3d.setEnabled(True),
+                                    logger.info(f"[QC CARDS] {e}")))
+        w.start()
+        self._3d_worker = w
+
+    def _on_qc_cards_ready(self, obj_path: str, texture_path: str) -> None:
+        """ready в режиме geometry-only: геометрию НЕ перезагружаем (она
+        пользовательская), применяем игровую текстуру глобально."""
+        self.btn_load_3d.setEnabled(True)
+        if texture_path:
+            self._red_frames = [texture_path]
+            if self._3d_widget and not self._card_mode:
+                # Одно-материальная модель: показываем игровую текстуру глобально.
+                self._3d_widget.update_texture_file(texture_path)
+
     def _start_vpk_mod_worker(self, user_vpk: str) -> None:
         if not self._3d_available or not self._3d_widget:
             return
@@ -1320,6 +1823,9 @@ class PreviewPanel(QWidget):
         self._stop_worker('_3d_worker')
         self._stop_worker('_vpk_mod_worker')
         self._reset_team_vpk_state()
+        self._reset_skin_state()   # очищаем skin-бар прошлой модели
+        # Входим в режим custom-VPK ПОСЛЕ сброса (reset гасит флаг).
+        self._custom_vpk_mode = True
 
         self.btn_load_vpk.setEnabled(False)
         self.btn_load_3d.setEnabled(False)
@@ -1337,6 +1843,9 @@ class PreviewPanel(QWidget):
         w.ready.connect(self._on_vpk_mod_ready)
         w.animated.connect(self._on_3d_animated)
         w.blu_ready.connect(self._on_3d_blu_ready)
+        w.cards_ready.connect(self._on_vpk_mod_cards_ready)
+        w.materials_ready.connect(self._on_vpk_mod_materials_ready)
+        w.skins_ready.connect(self._on_vpk_mod_skins_ready)
         w.failed.connect(self._on_vpk_mod_failed)
         w.start()
         self._vpk_mod_worker = w
@@ -1370,6 +1879,132 @@ class PreviewPanel(QWidget):
         if self._3d_widget:
             self._3d_widget.load_model_files(obj_path, texture_path)
 
+    def _on_vpk_mod_cards_ready(self, cards: list) -> None:
+        """Показывает 2D-карточки всех текстур загруженного custom-VPK мода.
+
+        Превью существующих текстур регистрируется как «оригинал из мода»
+        (в _vpk_red_tex_map, opaque) — в сборку как пользовательская НЕ попадёт,
+        поэтому нетронутые карточки сохраняют исходную текстуру мода. Если
+        пользователь перетащит своё изображение на карточку, оно ляжет в
+        _textures['red'] и сборка подхватит его через get_uploaded_texture_for_mat.
+        """
+        if not cards:
+            return
+        names_display = [(c['name'], c.get('display_name') or c['name']) for c in cards]
+        self._set_material_slots_with_display(names_display)
+        for c in cards:
+            png = c.get('preview_png')
+            if png and os.path.exists(png):
+                self._vpk_red_tex_map[c['name']] = png
+                card = self._card_widgets.get(c['name'])
+                if card:
+                    card.set_image(png, opaque=True)
+
+    def _on_vpk_mod_skins_ready(self, info: dict) -> None:
+        """VPK-воркер определил стили модели (skinfamilies). Перестраивает 2D
+        под мешевые материалы и поднимает существующий поток стилей (skin-бар +
+        «+»). Базовый стиль (0) показывает текстуры мода по мешам; доп. стили
+        редактируются через «+», как при замене модели.
+        """
+        skins = (info or {}).get('skins') or []
+        if len(skins) < 2 or not self._custom_model_materials:
+            return
+        mats = list(self._custom_model_materials)
+
+        # Перекладываем превью мода с ключей-VTF на точные мешевые материалы —
+        # чтобы существующие методы стилей (_resolve_base_texture, _apply_skin_to_3d,
+        # get_skin_build_data) работали по именам материалов модели.
+        mesh_map: dict = {}
+        for m in mats:
+            p = self._lookup_ci(self._vpk_red_tex_map, m)
+            if p and os.path.exists(p):
+                mesh_map[m] = p
+        self._vpk_red_tex_map = mesh_map
+
+        # Базовые карточки = мешевые материалы (стилевые варианты уходят в skin-бар).
+        self._set_material_slots_with_display([(m, m) for m in mats])
+        for m, p in mesh_map.items():
+            card = self._card_widgets.get(m)
+            if card:
+                card.set_image(p, opaque=True)
+
+        # Поднимаем существующий UI стилей (skin-бар + «+»).
+        self._on_skins_detected(info)
+
+        # Предзаполняем доп. стили УЖЕ существующими текстурами мода — чтобы при
+        # переключении стиля карточки показывали то, что в моде, а не пустоту.
+        # (_on_skins_detected сбрасывает _skin_overrides/_skin_chosen, поэтому
+        # заполняем после него.)
+        skin_textures = (info or {}).get('skin_textures') or {}
+        for ridx, matmap in skin_textures.items():
+            if ridx == 0 or not matmap:
+                continue
+            chosen = self._skin_chosen.setdefault(ridx, set())
+            ov = self._skin_overrides.setdefault(ridx, {})
+            for base_mat, png in matmap.items():
+                mm = self._custom_material_for_card(base_mat)  # → точный меш-материал
+                if png and os.path.exists(png):
+                    ov[mm] = png
+                    chosen.add(mm)
+
+    def _on_vpk_mod_materials_ready(self, materials: list) -> None:
+        """VPK-воркер сообщил имена материалов модели → накладываем текстуры мода
+        на правильные меши (с задержкой, чтобы 3D-модель успела загрузиться в JS)."""
+        if not materials:
+            return
+        self._custom_model_materials = list(materials)
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(450, self._apply_custom_vpk_textures_to_3d)
+
+    @staticmethod
+    def _lookup_ci(d: dict, key: str):
+        """Значение по ключу с фолбэком на регистронезависимое совпадение."""
+        if key in d:
+            return d[key]
+        kl = key.lower()
+        for k, v in d.items():
+            if k.lower() == kl:
+                return v
+        return None
+
+    def _custom_material_for_card(self, card_name: str) -> str:
+        """Точное имя материала модели для карточки (по совпадению без учёта
+        регистра). Если совпадения нет — возвращает само имя карточки."""
+        cl = card_name.lower()
+        for m in self._custom_model_materials:
+            if m.lower() == cl:
+                return m
+        return card_name
+
+    def _apply_custom_vpk_textures_to_3d(self) -> None:
+        """Накладывает текстуры мода (и пользовательские правки) на правильные
+        меши 3D — по совпадению имени материала модели с именем карточки.
+
+        Пользовательская правка (в _textures['red']) имеет приоритет над
+        оригиналом мода (_vpk_red_tex_map)."""
+        if not (self._custom_model_materials and self._3d_widget and self._3d_available):
+            return
+        user_tex = self._textures.get('red', {})
+        apply: dict = {}
+        for m in self._custom_model_materials:
+            src = self._lookup_ci(user_tex, m) or self._lookup_ci(self._vpk_red_tex_map, m)
+            if src and os.path.exists(src):
+                apply[m] = src
+        self._apply_3d_delta(apply, delay=120)
+
+    def _apply_3d_delta(self, tex_map: dict, delay: int = 0) -> None:
+        """Применяет к 3D только изменившиеся относительно текущего состояния
+        текстуры — чтобы не перезагружать в webview всё подряд при переключении
+        стилей (это и давало лаги)."""
+        if not (self._3d_widget and self._3d_available):
+            return
+        changed = {m: p for m, p in tex_map.items() if self._applied_3d_tex.get(m) != p}
+        self._applied_3d_tex.update(tex_map)
+        if not changed:
+            return
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(delay, lambda m=dict(changed): self._3d_widget.apply_material_map(m))
+
     def _on_vpk_mod_failed(self, error: str) -> None:
         logger.warning(f"VPK мод Preview: {error}")
         self.btn_load_vpk.setEnabled(True)
@@ -1394,22 +2029,84 @@ class PreviewPanel(QWidget):
         self._blu_frames = frame_paths
         if framerate > 0:
             self._team_framerate = framerate
-        self.btn_red.setVisible(True)
-        self.btn_blu.setVisible(True)
+        # Видимость — единым правилом (для рук учитывает реальный командный материал).
+        self._update_team_btn_visibility()
 
     def _on_australium_ready(self, png_path: str, mat_name: str = "") -> None:
-        """Воркер нашёл Australium/Gold вариант — показываем золотую кнопку."""
+        """
+        Воркер нашёл Australium/Gold вариант: показываем золотую кнопку в
+        тулбаре И отдельную карточку «Australium» в ряду типов текстур —
+        чтобы вариант был виден и заменялся так же, как остальные типы.
+        """
         if not png_path or not os.path.exists(png_path):
             return
         self._australium_frame = png_path
         self._australium_mat_name = (mat_name or "").lower() or None
         self._australium_active = False
-        self.btn_aus.setVisible(True)
         self.btn_aus.setStyleSheet(self._aus_style_off)
+        self._update_team_btn_visibility()
         logger.info(
             f"[Panel] Australium вариант доступен: {os.path.basename(png_path)} "
             f"(материал: {self._australium_mat_name})"
         )
+
+        # Australium как отдельный тип текстуры (карточка); для кастомных
+        # моделей со стилями _append_australium_card сам ничего не сделает.
+        if self._original_skin_info or self._custom_smd_mode:
+            return
+        if self._card_mode:
+            self._append_australium_card(self._cards_layout)
+        elif self._material_names:
+            # Одиночная текстура → переключаемся на карточки, чтобы вариант
+            # был виден (основная + Australium).
+            self._set_material_slots(list(self._material_names), force_cards=True)
+
+    def _append_australium_card(self, lay) -> None:
+        """Добавляет карточку «Australium» в конец ряда карточек (если вариант есть)."""
+        if not self._australium_frame:
+            return
+        if self._aus_card is not None:
+            return  # уже есть — _set_material_slots пересоздаёт при rebuild
+        # Кастомные модели со стилями: игровой texturegroup подавляется,
+        # вариант не применяется — карточку не показываем.
+        if self._original_skin_info or self._custom_smd_mode:
+            return
+
+        card = _ExtraSlotCard(
+            '__australium__',
+            display_name='Australium',
+            parent=self._cards_bar,
+        )
+        card.setToolTip(self.t.get(
+            'australium_card_tip',
+            'Gold/Australium variant — upload your own texture or keep the game one',
+        ))
+        shown = (self._australium_user_tex
+                 if (self._australium_user_tex and os.path.exists(self._australium_user_tex))
+                 else self._australium_frame)
+        card.set_image(shown, opaque=self._is_game_texture(shown))
+        card.image_changed.connect(self._on_aus_card_changed)
+
+        # Вставляем перед хвостовым stretch, если он есть
+        idx = lay.count()
+        if idx and lay.itemAt(idx - 1).spacerItem() is not None:
+            lay.insertWidget(idx - 1, card)
+        else:
+            lay.addWidget(card)
+        self._aus_card = card
+
+    def _on_aus_card_changed(self, _mat: str, path: str) -> None:
+        """Пользователь загрузил/очистил текстуру в карточке Australium."""
+        if path and os.path.exists(path):
+            self._set_australium_user_tex(path)
+        else:
+            self._set_australium_user_tex(None)
+            # После очистки показываем игровой gold-вариант обратно
+            if self._aus_card is not None and self._australium_frame:
+                self._aus_card.set_image(
+                    self._australium_frame,
+                    opaque=self._is_game_texture(self._australium_frame),
+                )
 
     def _toggle_australium(self) -> None:
         """Переключает Australium/обычный вариант — синхронно в 3D и 2D."""
@@ -1419,6 +2116,9 @@ class PreviewPanel(QWidget):
         from PySide6.QtCore import QTimer
         if self._australium_active:
             self.btn_aus.setStyleSheet(self._aus_style_on)
+            # Взаимоисключение с командой: при австралии RED/BLU визуально гасим.
+            self.btn_red.setStyleSheet(self._team_style_off)
+            self.btn_blu.setStyleSheet(self._team_style_off)
             # Своя текстура для Australium имеет приоритет над игровым gold-вариантом
             tex = (self._australium_user_tex
                    if (self._australium_user_tex and os.path.exists(self._australium_user_tex))
@@ -1427,6 +2127,13 @@ class PreviewPanel(QWidget):
             self._show_variant_in_2d(tex)
         else:
             self.btn_aus.setStyleSheet(self._aus_style_off)
+            # Возвращаем подсветку активной команды.
+            self.btn_red.setStyleSheet(
+                self._team_style_on if self._active_team == 'red' else self._team_style_off
+            )
+            self.btn_blu.setStyleSheet(
+                self._team_style_on if self._active_team == 'blu' else self._team_style_off
+            )
             # Возвращаем текстуру активной команды: VPK-оригинал + пользовательская
             # поверх. _restore_team_textures_3d корректно выбирает update_texture_file
             # для одиночного кадра (прямой update_animated с 1 кадром и fps=0 ломал текстуру).
@@ -1464,10 +2171,18 @@ class PreviewPanel(QWidget):
                 self._textures.get('red', {}).pop(mat, None)
                 self._textures.get('blu', {}).pop(mat, None)
         shown = path if (path and os.path.exists(path)) else self._australium_frame
-        self._show_variant_in_2d(shown)
-        if self._3d_available and self._3d_widget and shown:
-            from PySide6.QtCore import QTimer
-            QTimer.singleShot(50, lambda t=shown: self._3d_widget.update_texture_file(t))
+
+        # Карточка Australium всегда отражает актуальную текстуру варианта
+        if self._aus_card is not None and shown:
+            self._aus_card.set_image(shown, opaque=self._is_game_texture(shown))
+
+        # Главное превью и 3D подменяем ТОЛЬКО при активном gold-тумблере:
+        # загрузка через карточку Australium не должна затирать основную текстуру.
+        if self._australium_active:
+            self._show_variant_in_2d(shown)
+            if self._3d_available and self._3d_widget and shown:
+                from PySide6.QtCore import QTimer
+                QTimer.singleShot(50, lambda t=shown: self._3d_widget.update_texture_file(t))
 
     def _on_3d_blu_multi_material(self, payload) -> None:
         """Воркер нашёл BLU текстуры для многоматериальной модели (персонажи).
@@ -1498,20 +2213,40 @@ class PreviewPanel(QWidget):
             f"[Panel] BLU multi-material: {len(tex_map)} текстур, "
             f"{len(name_map)} имён"
         )
-        # Кнопки RED/BLU показываем если есть хотя бы имена или текстуры
-        if name_map or tex_map:
-            self.btn_red.setVisible(True)
-            self.btn_blu.setVisible(True)
+        # Видимость кнопок RED/BLU — единым правилом (для рук учитывает, что
+        # командным считается только материал с ОТЛИЧНЫМ синим именем).
+        self._update_team_btn_visibility()
 
     def _on_3d_multi_material(self, tex_map: dict) -> None:
         """Модель многоматериальная — применяем и создаём карточки."""
         if not (self._3d_widget and tex_map):
             return
+        # В 3D применяем ВСЕ текстуры (включая глаза/зубы), иначе служебные меши
+        # останутся без текстуры.
         self._3d_widget.apply_material_map(tex_map)
         if self._active_team == 'red' and not self._vpk_red_tex_map:
             self._vpk_red_tex_map = dict(tex_map)
 
-        mat_keys = list(tex_map.keys())
+        # Режим масок шпиона: карточки уже выставлены под 9 масок
+        # (update_extra_slots_spy_masks). Материалы SMD (mask_spy + тело) НЕ должны
+        # их перетирать — иначе в 2D останутся только маска и тело. Текстуры к 3D
+        # выше уже применены, на этом выходим.
+        if self._spy_mask_mode:
+            return
+
+        # Custom-VPK мод: карточки строятся из VTF мода (cards_ready) и НЕ должны
+        # перетираться фильтром материалов модели. Здесь же накладываем текстуры
+        # мода (и пользовательские правки) на ПРАВИЛЬНЫЕ меши — по совпадению
+        # имени материала модели с именем карточки (без учёта регистра).
+        if self._custom_vpk_mode:
+            self._custom_model_materials = list(tex_map.keys())
+            self._apply_custom_vpk_textures_to_3d()
+            return
+
+        # КАРТОЧКИ — только для редактируемых материалов (служебные глаза/зубы/
+        # sheen отброшены единым правилом в material_cards; пустой результат сам
+        # откатывается на «все», чтобы не было пустоты).
+        mat_keys = [s.name for s in editable_material_cards(tex_map.keys())]
         current_all = (
             self._material_names if self._card_mode else []
         )
@@ -1543,6 +2278,11 @@ class PreviewPanel(QWidget):
                 editable = [m for m in tex_map if _is_editable(m)]
                 if editable:
                     self._3d_widget.set_editable_mesh_names(editable)
+                # Команды рук — через НАТИВНЫЙ цветной переключатель RED/BLU.
+                # Видимость по единому правилу: только если есть реальный командный
+                # материал (свой синий вариант) — чисто нейтральные руки (scout/spy/
+                # heavy) переключателя не получают.
+                self._update_team_btn_visibility()
 
     def _on_3d_failed(self, error: str) -> None:
         logger.warning(f"3D Preview: {error}")
@@ -1584,6 +2324,7 @@ class PreviewPanel(QWidget):
 
         # ── Полный сброс состояния предыдущего оружия ─────────────────────── #
         self._textures = {'red': {}, 'blu': {}}
+        self._hand_blu_chosen = set()   # выбранные через «+» нейтральные на BLU
         self._material_names = []
         self._has_blu = False
         self._active_team = 'red'
@@ -1592,6 +2333,17 @@ class PreviewPanel(QWidget):
         self._gif_cache = {}
         self._per_mesh_active = False
         self._per_mesh_base_image = None
+        self._custom_smd_path = None   # сменили оружие — забываем кастомную модель
+        self._custom_keep_materials = False
+        self._custom_qc_text = None
+        if hasattr(self, 'btn_edit_qc'):
+            self.btn_edit_qc.setVisible(False)
+        self._reset_skin_state()       # и стили оригинала
+        self._tex_overrides = {}       # и пер-текстурные настройки (материалы другие)
+        self._tex_maps = {}            # и пер-текстурные карты
+        _sp = getattr(self.parent, 'settings_panel', None)   # и выходим из режима их редактирования
+        if _sp is not None and hasattr(_sp, 'exit_texture_edit'):
+            _sp.exit_texture_edit(restore=True)
         # Сбрасываем кнопки команд
         self.btn_red.setVisible(False)
         self.btn_blu.setVisible(False)
@@ -1616,7 +2368,6 @@ class PreviewPanel(QWidget):
         Создаёт 9 карточек — по одной на маску каждого класса.
         Имена карточек соответствуют именам VTF файлов (mask_scout и т.д.).
         """
-        from src.data.player_characters import SPY_DISGUISE_MASKS
         weapon_key = '__spy_masks__'
         mode = 'spy_masks'
 
@@ -1640,18 +2391,18 @@ class PreviewPanel(QWidget):
         self.btn_blu.setVisible(False)
         self._stop_gif()
 
-        # Имена с красивыми подписями (class name как display_name)
-        display_map = {m[1]: (m[3] if self._lang == 'ru' else m[2]) for m in SPY_DISGUISE_MASKS}
-        names_with_display = [(n, display_map.get(n, n)) for n in mask_vtf_names]
+        # Спеки карточек (имя VTF + локализованная подпись класса) — единый
+        # источник в material_cards.
+        specs = spy_mask_cards(mask_vtf_names, self._lang)
+        self._set_material_slots_with_display([(s.name, s.display_name) for s in specs])
 
-        # Создаём карточки через _set_material_slots_with_display
-        self._set_material_slots_with_display(names_with_display)
+        # Подгружаем игровые превью каждой маски в карточки (как у обычного оружия) —
+        # чтобы заранее было видно оригинальные текстуры, а не пустые слоты.
+        self._load_spy_mask_previews()
 
-    def _set_material_slots_with_display(self, names_display: list) -> None:
-        """Показывает карточки для пар (mat_name, display_name).
-        Используется для масок шпиона где display_name = имя класса.
-        """
-        # Очищаем
+    def _clear_cards(self) -> None:
+        """Удаляет все карточки из ряда и сбрасывает ссылки. Общий примитив
+        для всех рендереров карточек (раньше дублировался)."""
         lay = self._cards_layout
         while lay.count():
             item = lay.takeAt(0)
@@ -1660,6 +2411,25 @@ class PreviewPanel(QWidget):
                 w.deleteLater()
         self._card_widgets.clear()
         self._main_card = None
+        self._aus_card = None
+
+    def _make_card(self, name: str, display_name: str, image, opaque: bool, on_change):
+        """Создаёт одну карточку материала, ставит текстуру (если есть), подключает
+        сигналы и добавляет в ряд. Возвращает карточку (хранение — за вызывающим).
+        Общий примитив: раскладку (главный/доп./австралий) решает вызывающий."""
+        card = _ExtraSlotCard(name, display_name=display_name, parent=self._cards_bar)
+        if image and os.path.exists(image):
+            card.set_image(image, opaque=opaque)
+        card.image_changed.connect(on_change)
+        self._wire_card(card)
+        self._cards_layout.addWidget(card)
+        return card
+
+    def _set_material_slots_with_display(self, names_display: list) -> None:
+        """Показывает карточки для пар (mat_name, display_name).
+        Используется для масок шпиона где display_name = имя класса.
+        """
+        self._clear_cards()
 
         if not names_display:
             self._card_mode = False
@@ -1673,32 +2443,67 @@ class PreviewPanel(QWidget):
         self._material_names = [n for n, _ in names_display]
 
         for mat_name, disp_name in names_display:
-            card = _ExtraSlotCard(mat_name, display_name=disp_name, parent=self._cards_bar)
-            saved = self._textures['red'].get(mat_name)
-            if saved and os.path.exists(saved):
-                card.set_image(saved)
-            card.image_changed.connect(self._on_extra_card_changed)
-            lay.addWidget(card)
+            card = self._make_card(
+                mat_name, disp_name, self._textures['red'].get(mat_name),
+                opaque=False, on_change=self._on_extra_card_changed,
+            )
             self._card_widgets[mat_name] = card
 
-        lay.addStretch()
+        self._cards_layout.addStretch()
         self.empty_state.hide()
         self.preview.hide()
         self._cards_scroll.show()
 
-    def _set_material_slots(self, names: List[str]) -> None:
-        """Показывает карточки для списка материалов (или большое превью если < 2)."""
-        # Очищаем старые виджеты
-        lay = self._cards_layout
-        while lay.count():
-            item = lay.takeAt(0)
-            w = item.widget()
-            if w:
-                w.deleteLater()
-        self._card_widgets.clear()
-        self._main_card = None
+    def _load_spy_mask_previews(self) -> None:
+        """
+        Извлекает игровые VTF всех масок в фоне и проставляет их превью в карточки
+        2D — чтобы заранее были видны оригинальные текстуры (как у обычного оружия).
 
-        if len(names) < 2:
+        Превью регистрируется в _vpk_red_tex_map (как ИГРОВАЯ текстура), а НЕ в
+        _textures['red'], поэтому в сборку как пользовательская не попадёт —
+        некастомизированные маски берут оригинал из игры.
+        """
+        if not self._spy_mask_mode or not self._card_widgets:
+            return
+        misc = getattr(self, '_current_misc_vpk', None)
+        tex = getattr(self, '_current_textures_vpk', None)
+        if not (misc or tex):
+            return
+        # Только маски без пользовательской текстуры — для них показываем оригинал.
+        names = [n for n in self._material_names
+                 if not (self._textures['red'].get(n)
+                         and os.path.exists(self._textures['red'][n]))]
+        if not names:
+            return
+        out_dir = os.path.join('tools', 'temp', 'spy_mask_preview')
+        w = _SpyMaskVtfWorker(names, [tex, misc], out_dir, parent=self)
+        w.one.connect(self._on_spy_mask_preview)
+        w.start()
+        if not hasattr(self, '_mask_workers'):
+            self._mask_workers = []
+        self._mask_workers.append(w)
+
+    def _on_spy_mask_preview(self, vtf_name: str, png: str) -> None:
+        """Проставляет извлечённое игровое превью маски в её карточку."""
+        if not png or not os.path.exists(png):
+            return
+        # Регистрируем как игровую текстуру (распознаётся _is_game_texture),
+        # не как пользовательскую — поэтому показываем opaque и в сборку не тащим.
+        self._vpk_red_tex_map[vtf_name] = png
+        card = self._card_widgets.get(vtf_name)
+        if card:
+            card.set_image(png, opaque=True)
+
+    def _set_material_slots(self, names: List[str], force_cards: bool = False) -> None:
+        """Показывает карточки для списка материалов (или большое превью если < 2).
+
+        force_cards=True строит карточку даже для одного материала — нужно для
+        кастомных моделей со стилями: чтобы у единственной текстуры была карточка
+        с плюсиком, которую можно очистить/переопределить под каждый стиль.
+        """
+        self._clear_cards()
+
+        if len(names) < 1 or (len(names) < 2 and not force_cards):
             # ── Одиночный режим ─────────────────────────────────────────────── #
             self._card_mode = False
             self._material_names = names
@@ -1722,34 +2527,420 @@ class PreviewPanel(QWidget):
                 return self._vpk_blu_name_map.get(mat_name, mat_name)
             return mat_name
 
+        # Главная текстура: восстановленная (резолв) → иначе текущая image_path.
         main_name = names[0]
-        main_card = _ExtraSlotCard(main_name, display_name=_display(main_name),
-                                   parent=self._cards_bar)
-        # Восстанавливаем уже загруженную текстуру (если была)
         saved = self._resolve_card_texture(main_name)
         if saved and os.path.exists(saved):
-            main_card.set_image(saved, opaque=self._is_game_texture(saved))
+            main_img, main_opaque = saved, self._is_game_texture(saved)
         elif self.image_path and os.path.exists(self.image_path):
-            main_card.set_image(self.image_path)
-        main_card.image_changed.connect(self._on_main_card_changed)
-        lay.addWidget(main_card)
-        self._main_card = main_card
+            main_img, main_opaque = self.image_path, False
+        else:
+            main_img, main_opaque = None, False
+        self._main_card = self._make_card(
+            main_name, _display(main_name), main_img, main_opaque,
+            on_change=self._on_main_card_changed,
+        )
 
         for name in names[1:]:
-            card = _ExtraSlotCard(name, display_name=_display(name),
-                                  parent=self._cards_bar)
             saved = self._resolve_card_texture(name)
-            if saved and os.path.exists(saved):
-                card.set_image(saved, opaque=self._is_game_texture(saved))
-            card.image_changed.connect(self._on_extra_card_changed)
-            lay.addWidget(card)
+            img = saved if (saved and os.path.exists(saved)) else None
+            card = self._make_card(
+                name, _display(name), img,
+                opaque=self._is_game_texture(saved) if img else False,
+                on_change=self._on_extra_card_changed,
+            )
             self._card_widgets[name] = card
 
-        lay.addStretch()
+        # Australium — отдельный тип текстуры в конце ряда (если вариант найден)
+        self._append_australium_card(self._cards_layout)
+
+        self._cards_layout.addStretch()
 
         self.empty_state.hide()
         self.preview.hide()
         self._cards_scroll.show()
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # Стили / skinfamilies (кастомная замена модели)
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    def _reset_skin_state(self) -> None:
+        """Убирает кнопки стилей (смена оружия / выход из кастома)."""
+        self._original_skin_info = None
+        self._active_skin = 0
+        self._skin_overrides = {}
+        self._skin_chosen = {}
+        for b in self._skin_buttons:
+            b.setParent(None)
+            b.deleteLater()
+        self._skin_buttons = []
+        self._skin_button_indices = []
+
+    def _start_skin_detection(self) -> None:
+        """Запускает фоновое определение стилей оригинальной модели.
+
+        Вызывается ТОЛЬКО при загрузке кастомной модели — дефолтный путь
+        (обычная игровая модель) этот код не трогает.
+        """
+        if not self._weapon_key or self._weapon_key == '\x00':
+            return
+        params = self._pending_3d_params
+        misc_vpk = params[2] if params else ''
+        mode = params[1] if params else (self._weapon_mode or '')
+        try:
+            from src.services.skin_detect_worker import SkinDetectWorker
+        except Exception as exc:
+            logger.debug(f"[SKIN] worker import failed: {exc}")
+            return
+        self._stop_worker('_skin_worker')
+        w = SkinDetectWorker(
+            weapon_key=self._weapon_key,
+            mode=mode,
+            misc_vpk_path=misc_vpk,
+            lang=self._lang,
+            parent=self,
+        )
+        w.detected.connect(self._on_skins_detected)
+        w.failed.connect(lambda _e: logger.info(f"[SKIN] стили не определены: {_e}"))
+        w.start()
+        self._skin_worker = w
+
+    def _on_skins_detected(self, info: dict) -> None:
+        """Получили skin-info оригинала — строим полосу стилей."""
+        # Считаем по полному списку скинов (база + команда + варианты).
+        skins = (info or {}).get('skins') or []
+        if len(skins) < 2:
+            # Один скин — полоса не нужна, кастом собирается как одно-скиновый.
+            self._reset_skin_state()
+            return
+        self._original_skin_info = info
+        self._active_skin = 0
+        self._skin_overrides = {0: {}}
+        self._skin_chosen = {}
+        # Единственная текстура → принудительно карточка, чтобы базовый стиль
+        # тоже был карточкой (для единообразия переключения стилей).
+        if not self._card_mode and self._material_names:
+            self._set_material_slots(list(self._material_names), force_cards=True)
+        self._populate_skin_bar(info)
+
+    def _populate_skin_bar(self, info: dict) -> None:
+        """Создаёт кнопки скинов в тулбаре (все группы: база/команда/варианты)."""
+        from PySide6.QtWidgets import QPushButton
+        for b in self._skin_buttons:
+            b.setParent(None)
+            b.deleteLater()
+        self._skin_buttons = []
+        self._skin_button_indices = []   # сырой индекс скина для каждой кнопки
+
+        skins = info.get('skins') or []
+        # Вставляем перед анкером — кнопки держатся правее Australium.
+        anchor_idx = self._toolbar_layout.indexOf(self._skin_anchor)
+        for pos, sk in enumerate(skins):
+            raw_idx = sk.get('index', pos)
+            label = sk.get('role') or f"Skin {raw_idx}"
+            btn = QPushButton(label)
+            btn.setFixedHeight(26)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setToolTip(self.t.get('skin_style_tip', 'Model style (skinfamilies)'))
+            btn.setStyleSheet(
+                self._skin_btn_style_on if raw_idx == self._active_skin
+                else self._skin_btn_style_off
+            )
+            btn.clicked.connect(lambda _=False, idx=raw_idx: self._switch_skin(idx))
+            self._toolbar_layout.insertWidget(anchor_idx + pos, btn)
+            self._skin_buttons.append(btn)
+            self._skin_button_indices.append(raw_idx)
+
+    def _switch_skin(self, idx: int) -> None:
+        """Переключает активный стиль и перестраивает карточки под него."""
+        if idx == self._active_skin:
+            return
+        if not self._original_skin_info:
+            return
+        self._active_skin = idx
+        self._skin_overrides.setdefault(idx, {})
+        indices = getattr(self, '_skin_button_indices', [])
+        for i, b in enumerate(self._skin_buttons):
+            b_idx = indices[i] if i < len(indices) else i
+            b.setStyleSheet(
+                self._skin_btn_style_on if b_idx == idx else self._skin_btn_style_off
+            )
+        self._rebuild_cards_for_skin(idx)
+        self._apply_skin_to_3d(idx)
+
+    def _apply_skin_to_3d(self, idx: int) -> None:
+        """Применяет текстуры активного стиля к 3D-модели.
+
+        Для каждого материала: переопределённая текстура стиля (если задана),
+        иначе — базовая (skin 0). Так стиль меняет в 3D только те материалы,
+        которым пользователь дал свою текстуру; остальные показывают базу.
+        """
+        if not (self.is_3d_mode() and self._3d_available and self._3d_widget):
+            return
+        overrides = self._skin_overrides.get(idx, {})
+        tex_map: dict = {}
+        for mat in self._material_names:
+            p = overrides.get(mat) if idx != 0 else None
+            if not (p and os.path.exists(p)):
+                p = self._resolve_base_texture(mat)
+            if p and os.path.exists(p):
+                tex_map[mat] = p
+        if tex_map:
+            if self._custom_vpk_mode:
+                # Только изменившиеся текстуры — переключение стиля не лагает.
+                self._apply_3d_delta(tex_map)
+            else:
+                from PySide6.QtCore import QTimer
+                QTimer.singleShot(0, lambda m=dict(tex_map): self._3d_widget.apply_material_map(m))
+
+    def _rebuild_cards_for_skin(self, idx: int) -> None:
+        """Полностью пересобирает полосу карточек под активный стиль.
+
+        • Базовый стиль (0): обычные карточки всех материалов модели.
+        • Доп. стиль (K>0): карточек НЕ видно. Показана кнопка «+ Добавить
+          стиль» — по ней пользователь сам выбирает, какие материалы базы
+          переопределить. Выбранный материал появляется отдельной карточкой
+          и попадает в $texturegroup; невыбранные наследуют базу.
+        """
+        if idx == 0:
+            # Базовый стиль — стандартная раскладка карточек.
+            self._set_material_slots(list(self._material_names), force_cards=True)
+            # В custom-VPK режиме вернём превью мода (они в _vpk_red_tex_map по
+            # мешевым материалам, а не в _textures['red']).
+            if self._custom_vpk_mode:
+                for m, p in self._vpk_red_tex_map.items():
+                    card = self._card_widgets.get(m)
+                    if card and p and os.path.exists(p):
+                        card.set_image(p, opaque=True)
+            return
+
+        # ── Вариантный стиль ────────────────────────────────────────────── #
+        lay = self._cards_layout
+        while lay.count():
+            item = lay.takeAt(0)
+            w = item.widget()
+            if w:
+                w.deleteLater()
+        self._card_widgets.clear()
+        self._main_card = None
+        self._card_mode = True
+
+        chosen = self._skin_chosen.setdefault(idx, set())
+        overrides = self._skin_overrides.setdefault(idx, {})
+        for mat in self._material_names:
+            if mat not in chosen:
+                continue
+            card = _ExtraSlotCard(mat, display_name=mat, parent=self._cards_bar)
+            ov = overrides.get(mat)
+            if ov and os.path.exists(ov):
+                card.set_image(ov)
+            card.image_changed.connect(self._on_extra_card_changed)
+            self._wire_card(card)
+            lay.addWidget(card)
+            self._card_widgets[mat] = card
+
+        # Кнопка «+ Добавить стиль» — если ещё есть материалы для добавления.
+        if any(m not in chosen for m in self._material_names):
+            from PySide6.QtWidgets import QPushButton
+            add_btn = QPushButton(self.t.get('skin_add_style', '+ Add style'))
+            add_btn.setObjectName('skin_add_btn')
+            add_btn.setCursor(Qt.PointingHandCursor)
+            add_btn.setFixedHeight(40)
+            add_btn.setStyleSheet(
+                "QPushButton#skin_add_btn { background:transparent; border:1px dashed #555;"
+                " border-radius:6px; padding:10px 18px; color:#aaa; font-size:13px; }"
+                " QPushButton#skin_add_btn:hover { border-color:#888; color:#ddd;"
+                " background:rgba(255,255,255,0.04); }"
+            )
+            add_btn.clicked.connect(self._show_add_style_menu)
+            lay.addWidget(add_btn)
+            self._skin_add_btn = add_btn
+
+        lay.addStretch()
+        self.empty_state.hide()
+        self.preview.hide()
+        self._cards_scroll.show()
+
+    def _show_add_style_menu(self) -> None:
+        """Меню выбора базового материала для переопределения в текущем стиле."""
+        from PySide6.QtWidgets import QMenu
+        idx = self._active_skin
+        if idx == 0:
+            return
+        chosen = self._skin_chosen.setdefault(idx, set())
+        available = [m for m in self._material_names if m not in chosen]
+        if not available:
+            return
+        menu = QMenu(self)
+        for mat in available:
+            menu.addAction(mat, lambda _=False, m=mat: self._add_material_to_style(m))
+        btn = getattr(self, '_skin_add_btn', None)
+        if btn is not None:
+            menu.exec(btn.mapToGlobal(btn.rect().bottomLeft()))
+        else:
+            menu.exec()
+
+    def _add_material_to_style(self, mat: str) -> None:
+        """Добавляет материал в текущий вариантный стиль (пустая карточка)."""
+        idx = self._active_skin
+        if idx == 0:
+            return
+        self._skin_chosen.setdefault(idx, set()).add(mat)
+        self._rebuild_cards_for_skin(idx)
+
+    def get_skin_overrides(self) -> Dict[int, Dict[str, str]]:
+        """Для сборки: {skin_idx: {mat_name: texture_path}} (без скина 0).
+
+        Скин 0 — база, в результат не входит. Возвращаем только доп. стили с
+        реально заполненными текстурами. Пустой dict → одно-скиновая сборка.
+        """
+        if not self._original_skin_info:
+            return {}
+        result: Dict[int, Dict[str, str]] = {}
+        for skin_idx, mats in self._skin_overrides.items():
+            if skin_idx == 0:
+                continue
+            cleaned = {m: p for m, p in mats.items() if p and os.path.exists(p)}
+            if cleaned:
+                result[skin_idx] = cleaned
+        return result
+
+    def get_skin_build_data(self) -> Optional[dict]:
+        """Данные для сборки $texturegroup кастомной модели.
+
+        Returns None, если стилей нет (одно-скиновая сборка — генерация группы
+        не нужна). Иначе:
+            {
+              'mesh_materials': [имена материалов меша, порядок = skin 0],
+              'tg_overrides':   {skin_idx: {mat: variant_name}},  # для группы
+              'variant_files':  {variant_name: texture_path},     # для VTF/VMT
+            }
+        Имя варианта = <материал>_<суффикс роли> (bloody/clean/… или skinN).
+        Регистр имён сохраняется как в карточках/SMD — чтобы $texturegroup,
+        имена VTF и материал модели совпадали.
+        """
+        import re as _re
+        ov = self.get_skin_overrides()   # {skin: {mat: path}}
+        if not ov:
+            return None
+        # Роль по СЫРОМУ индексу скина (из полного списка skins).
+        _skins = (self._original_skin_info or {}).get('skins', [])
+        role_by_idx = {s.get('index'): s.get('role', '') for s in _skins}
+
+        def _suffix(idx: int) -> str:
+            label = role_by_idx.get(idx, '')
+            s = _re.sub(r'[^a-z0-9]+', '_', label.strip().lower()).strip('_')
+            return s or f'skin{idx}'
+
+        tg_overrides: Dict[int, Dict[str, str]] = {}
+        variant_files: Dict[str, str] = {}
+        for skin_idx, mats in ov.items():
+            suf = _suffix(skin_idx)
+            for mat, path in mats.items():
+                vname = f"{mat}_{suf}"
+                tg_overrides.setdefault(skin_idx, {})[mat] = vname
+                variant_files[vname] = path
+        if not tg_overrides:
+            return None
+        return {
+            'mesh_materials': list(self._material_names),
+            'tg_overrides': tg_overrides,
+            'variant_files': variant_files,
+        }
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # Пер-текстурные настройки (разрешение/формат/флаги на материал)
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    def _global_build_settings(self) -> dict:
+        """Глобальные настройки сборки (size/format/flags/options) из settings_panel."""
+        try:
+            s = self.parent.settings_panel.get_settings()
+            return {
+                'size': s.get('size', (512, 512)),
+                'format': s.get('format', 'DXT1'),
+                'flags': list(s.get('flags', []) or []),
+                'options': dict(s.get('vtf_options', {}) or {}),
+            }
+        except Exception:
+            return {'size': (512, 512), 'format': 'DXT1', 'flags': [], 'options': {}}
+
+    def _wire_card(self, card) -> None:
+        """Подключает кнопку-шестерёнку карточки и выставляет бейдж оверрайда."""
+        card.settings_requested.connect(self._on_card_settings_requested)
+        ov = self._tex_overrides.get(card.material_name)
+        if ov:
+            from src.data.texture_overrides import override_badge
+            card.set_override_badge(override_badge(ov, self._global_build_settings()))
+
+    def _card_for_material(self, mat: str):
+        if self._main_card is not None and self._main_card.material_name == mat:
+            return self._main_card
+        return self._card_widgets.get(mat)
+
+    def _ensure_tex_edit_signals(self, sp) -> None:
+        """Однократно подключает сигналы режима «настройки текстуры» панели Step 2."""
+        if getattr(self, '_tex_edit_connected', False):
+            return
+        sp.texture_setting_changed.connect(self._on_tex_override_changed)
+        sp.texture_edit_reset.connect(lambda m: self._on_tex_override_changed(m, None))
+        self._tex_edit_connected = True
+
+    def _effective_for_material(self, mat: str) -> dict:
+        from src.data.texture_overrides import effective_settings
+        return effective_settings(self._global_build_settings(), self._tex_overrides.get(mat))
+
+    def _on_card_settings_requested(self, mat: str) -> None:
+        """Переводит панель Step 2 в режим редактирования настроек материала.
+
+        Простое открытие статус НЕ меняет: панель лишь показывает текущие
+        (оверрайд или глобальные) значения. Оверрайд создаётся только при
+        реальном изменении контрола (сигнал texture_setting_changed).
+        """
+        sp = getattr(self.parent, 'settings_panel', None)
+        if sp is None or not hasattr(sp, 'enter_texture_edit'):
+            return
+        self._ensure_tex_edit_signals(sp)
+        sp.enter_texture_edit(mat, self._effective_for_material(mat))
+
+    def _on_tex_override_changed(self, mat: str, override) -> None:
+        """Из Step 2: dict — записать оверрайд материала; None — вернуть глобальное."""
+        from src.data.texture_overrides import override_badge
+        card = self._card_for_material(mat)
+        if override:
+            self._tex_overrides[mat] = override
+            if card is not None:
+                card.set_override_badge(override_badge(override, self._global_build_settings()))
+        else:
+            self._tex_overrides.pop(mat, None)
+            if card is not None:
+                card.set_override_badge('')
+
+    def get_texture_overrides(self) -> Dict[str, dict]:
+        """Для сборки: {material: {size,format,flags,options}} — только кастомные."""
+        return {m: dict(s) for m, s in self._tex_overrides.items() if s}
+
+    def open_material_maps(self, material: str = '') -> None:
+        """Открывает диалог файловых карт для МАТЕРИАЛА (пер-текстурно).
+
+        material == '' → главный материал (material_names[0]). Карты сохраняются
+        в self._tex_maps[material] и применяются именно к этой текстуре при сборке.
+        """
+        # '' = главный материал (в сборке мапится на texture_filename надёжно,
+        # даже если UI не знает его точное имя).
+        mat = material or (self._material_names[0] if self._material_names else '')
+        from src.ui.material_maps_dialog import MaterialMapsDialog
+        dlg = MaterialMapsDialog(self.t, current=self._tex_maps.get(mat), parent=self)
+        if dlg.exec():
+            maps = dlg.get_maps()
+            if maps:
+                self._tex_maps[mat] = maps
+            else:
+                self._tex_maps.pop(mat, None)
+
+    def get_texture_maps(self) -> Dict[str, dict]:
+        """Для сборки: {material: {map_id: spec}} — пер-текстурные карты."""
+        return {m: dict(v) for m, v in self._tex_maps.items() if v}
 
     def _on_main_card_changed(self, mat_name: str, path: str) -> None:
         """Пользователь сменил или сбросил текстуру в главной карточке."""
@@ -1776,7 +2967,7 @@ class PreviewPanel(QWidget):
                     QTimer.singleShot(300, lambda p=path, m=mat_name: self._3d_widget.apply_material_map({m: p}))
             elif self.is_3d_mode() and self._crithit_mode and self._3d_widget:
                 from PySide6.QtCore import QTimer
-                QTimer.singleShot(300, lambda p=path: self._3d_widget.update_crithit_texture(p))
+                QTimer.singleShot(300, lambda p=path: self._update_scene_texture(p))
         else:
             # Сброс текстуры (нажат ×) — удаляем и восстанавливаем оригинал в 3D.
             # Вызываем restore независимо от текущего режима (2D или 3D) — иначе
@@ -1806,6 +2997,16 @@ class PreviewPanel(QWidget):
         Нейтральные текстуры записываются в ОБЕ команды,
         командные — только в активную.
         """
+        # ── Стили: на вариантном стиле (skin > 0) текстура принадлежит этому
+        # стилю, а не команде — пишем в _skin_overrides, _textures не трогаем. #
+        if self._original_skin_info and self._active_skin != 0:
+            slot = self._skin_overrides.setdefault(self._active_skin, {})
+            if path:
+                slot[mat_name] = path
+            else:
+                slot.pop(mat_name, None)
+            return
+
         if path:
             self._textures.setdefault(self._active_team, {})[mat_name] = path
             if self._is_neutral_texture(mat_name):
@@ -1824,18 +3025,26 @@ class PreviewPanel(QWidget):
         """Пользователь сменил или сбросил текстуру в карточке доп. слота."""
         if path:
             self._store_texture(mat_name, path)
+            # В custom-VPK режиме имя карточки (стебель VTF) переводим в точное
+            # имя материала модели, чтобы текстура легла на правильный меш.
+            apply_key = (self._custom_material_for_card(mat_name)
+                         if self._custom_vpk_mode else mat_name)
             if self.is_3d_mode() and self._3d_widget:
                 from PySide6.QtCore import QTimer
                 if path.lower().endswith('.gif'):
-                    QTimer.singleShot(300, lambda p=path, m=mat_name: self._apply_gif_to_3d(p, m))
+                    QTimer.singleShot(300, lambda p=path, m=apply_key: self._apply_gif_to_3d(p, m))
                 else:
-                    QTimer.singleShot(300, lambda p=path, m=mat_name: self._3d_widget.apply_material_map({m: p}))
+                    QTimer.singleShot(300, lambda p=path, m=apply_key: self._3d_widget.apply_material_map({m: p}))
         else:
             # Сброс — удаляем из обеих команд если нейтральная.
             self._store_texture(mat_name, None)
             if self._3d_widget and self._3d_available:
                 from PySide6.QtCore import QTimer
-                QTimer.singleShot(300, lambda: self._restore_team_textures_3d(self._active_team))
+                if self._custom_vpk_mode:
+                    # Вернуть оригинал мода на правильный меш.
+                    QTimer.singleShot(300, self._apply_custom_vpk_textures_to_3d)
+                else:
+                    QTimer.singleShot(300, lambda: self._restore_team_textures_3d(self._active_team))
 
     def get_slot_image_paths(self) -> dict:
         """Возвращает {material_name: path} для всех заполненных слотов.
@@ -1854,6 +3063,19 @@ class PreviewPanel(QWidget):
                     continue
                 if k not in result and v and os.path.exists(v):
                     result[k] = v
+        return result
+
+    def get_blu_slot_image_paths(self) -> dict:
+        """{material_name: path} только для BLU-слотов (синие команд-текстуры).
+
+        Нужно для рук: нейтральный материал с загруженной СИНЕЙ текстурой → сборка
+        делает его командным (red=база, blue=вариант)."""
+        result: dict = {}
+        for k, v in self._textures.get('blu', {}).items():
+            if k == SINGLE_TEX_KEY:
+                continue
+            if v and os.path.exists(v):
+                result[k] = v
         return result
 
     def load_image(self, path: str) -> None:
@@ -1884,7 +3106,7 @@ class PreviewPanel(QWidget):
                 and not self._from_3d_drop:
             from PySide6.QtCore import QTimer
             if self._crithit_mode:
-                QTimer.singleShot(300, lambda p=path: self._3d_widget.update_crithit_texture(p))
+                QTimer.singleShot(300, lambda p=path: self._update_scene_texture(p))
             elif self._card_mode and self._material_names:
                 mat = self._material_names[0]
                 if path.lower().endswith('.gif'):
@@ -1909,13 +3131,12 @@ class PreviewPanel(QWidget):
             from src.services.vtflib_wrapper import VTFLib
             from PIL import Image
             from PySide6.QtGui import QImage
-            import tempfile
 
             rgba, w, h = VTFLib.read_vtf_as_rgba(path)
             qimg = QImage(rgba, w, h, w * 4, QImage.Format_RGBA8888)
             if not qimg.isNull():
                 rendered = True
-                png_for_3d = tempfile.mktemp(suffix='.png')
+                png_for_3d = str(get_temp_file_path(prefix='tf2_3d_', suffix='.png'))
                 Image.frombytes("RGBA", (w, h), rgba).save(png_for_3d)
                 self.image_path = png_for_3d
 
@@ -1950,7 +3171,7 @@ class PreviewPanel(QWidget):
 
         if png_for_3d and self._3d_available and self._3d_widget and self.is_3d_mode():
             if self._crithit_mode:
-                self._3d_widget.update_crithit_texture(png_for_3d)
+                self._update_scene_texture(png_for_3d)
             elif self._card_mode and self._material_names:
                 self._3d_widget.apply_material_map({self._material_names[0]: png_for_3d})
             else:
@@ -2009,17 +3230,42 @@ class PreviewPanel(QWidget):
 
         Для командных текстур (есть в _vpk_blu_name_map) — строго активная команда.
         """
+        # ── Стили (кастомная модель) ─────────────────────────────────────── #
+        # Вариантный стиль (skin > 0) показывает ТОЛЬКО свою переопределённую
+        # текстуру — без наследования базы/игры. Нет переопределения → None
+        # (пустая карточка с плюсиком, чтобы пользователь выбрал сам).
+        # Базовый стиль (skin 0) идёт по обычному пути ниже.
+        if self._original_skin_info and self._active_skin != 0:
+            sp = self._skin_overrides.get(self._active_skin, {}).get(mat_name)
+            return sp if (sp and os.path.exists(sp)) else None
+
+        # Руки на BLU: нейтральный материал (синее имя = красного) показываем
+        # ПУСТЫМ (= «общая, наследует RED»); заполнил отдельной синей → станет
+        # командным. Командный (синее имя ≠) идёт обычным путём (показывает синюю).
+        from src.data.player_hands import HAND_MODE_KEYS as _HMK_card
+        if self._weapon_mode in _HMK_card and self._active_team == 'blu':
+            _bn = self._vpk_blu_name_map.get(mat_name, mat_name) if self._vpk_blu_name_map else mat_name
+            if _bn.lower() == mat_name.lower():   # нейтральный
+                bp = self._textures.get('blu', {}).get(mat_name)
+                return bp if (bp and os.path.exists(bp)) else None
+
+        return self._resolve_base_texture(mat_name)
+
+    def _resolve_base_texture(self, mat_name: str) -> Optional[str]:
+        """Базовая (skin 0) текстура материала: пользовательская активной
+        команды → другая команда (нейтральные) → игровой оригинал из VPK →
+        командный кадр для главного материала. Без учёта стилей (skin > 0)."""
         active = self._active_team
         # Сначала ищем в активной команде
         p = self._textures.get(active, {}).get(mat_name)
         if p and os.path.exists(p):
             return p
 
-        # Нейтральная текстура: не RED-ключ и не BLU-значение в маппинге
-        is_team_specific = (
-            mat_name in self._vpk_blu_name_map or
-            mat_name in self._vpk_blu_name_map.values()
-        ) if self._vpk_blu_name_map else False
+        # Командный материал — только если его СИНЕЕ имя отличается от красного
+        # (engineer_red→engineer_blue). Нейтральный (синее имя то же, напр.
+        # engineer_handL) НЕ командный → наследует текстуру из RED для синей команды.
+        _blu_name = self._vpk_blu_name_map.get(mat_name) if self._vpk_blu_name_map else None
+        is_team_specific = bool(_blu_name and _blu_name.lower() != mat_name.lower())
 
         if not is_team_specific:
             # Ищем в другой команде тоже
@@ -2179,7 +3425,6 @@ class PreviewPanel(QWidget):
 
         try:
             from PIL import Image
-            import tempfile
 
             gif = Image.open(gif_path)
             n = getattr(gif, 'n_frames', 1)
@@ -2195,7 +3440,7 @@ class PreviewPanel(QWidget):
             frames = []
             for i in range(n):
                 gif.seek(i)
-                tmp = tempfile.mktemp(suffix='.png', prefix=f'tf2_gif{i}_')
+                tmp = str(get_temp_file_path(prefix=f'tf2_gif{i}_', suffix='.png'))
                 gif.convert('RGBA').save(tmp)
                 frames.append(tmp)
 
@@ -2217,7 +3462,7 @@ class PreviewPanel(QWidget):
         if not data_url:
             return
         try:
-            import base64 as _b64, tempfile
+            import base64 as _b64
             if ',' not in data_url:
                 return
             header, b64data = data_url.split(',', 1)
@@ -2228,7 +3473,7 @@ class PreviewPanel(QWidget):
                        'image/webp': '.webp', 'image/bmp': '.bmp'}
             ext = ext_map.get(mime, '.png')
             img_bytes = _b64.b64decode(b64data)
-            tmp = tempfile.mktemp(suffix=ext, prefix='tf2_3ddrop_')
+            tmp = str(get_temp_file_path(prefix='tf2_3ddrop_', suffix=ext))
             with open(tmp, 'wb') as f:
                 f.write(img_bytes)
 
@@ -2249,6 +3494,16 @@ class PreviewPanel(QWidget):
                     else:
                         self._textures.setdefault('red', {})[vtf_name] = tmp
                         self._on_extra_card_changed(vtf_name, tmp)
+                return
+
+            # ── critHIT / эффект смерти ───────────────────────────────────── #
+            # Дроп ведём через обычный load_image (БЕЗ _from_3d_drop): он выставит
+            # image_path, обновит 2D и перерисует сцену с правильным роутингом
+            # (death → текстура на модель, crit → billboard). С _from_3d_drop
+            # повторное применение в 3D пропускалось, и текстура «зависала» на
+            # billboard, пока не переключишь 2D↔3D.
+            if self._crithit_mode:
+                self.load_image(tmp)
                 return
 
             _norm = material_name.lower() if material_name else ''
@@ -2284,12 +3539,30 @@ class PreviewPanel(QWidget):
     # CritHIT режим
     # ═══════════════════════════════════════════════════════════════════════════
 
+    def _update_scene_texture(self, path: str) -> None:
+        """Применяет новую текстуру к сцене-персонажу: для эффекта смерти —
+        перерисовываем модель с текстурой; для крита — обновляем billboard."""
+        if not self._3d_widget:
+            return
+        if self._death_effect_mode:
+            self._render_crithit_scene()      # текстура ложится на модель
+        else:
+            self._3d_widget.update_crithit_texture(path)   # billboard крита
+
     def _render_crithit_scene(self) -> None:
         if not self._3d_widget or not self._3d_available:
             return
-        crit_path = self.image_path or ''
         class_name = self._crithit_class
         custom_model, model_tex = self._find_crithit_custom_model(class_name)
+
+        if self._death_effect_mode:
+            # Эффект смерти: на модель — текстура пользователя, иначе оригинальная
+            # игровая текстура эффекта (лёд/золото/огонь). Billboard не показываем.
+            crit_path = ''
+            model_tex = self.image_path or self._death_default_tex or ''
+        else:
+            # Крит: текстура пользователя — billboard, модель в своей текстуре.
+            crit_path = self.image_path or ''
 
         if model_tex.lower().endswith('.vtf'):
             model_tex = self._convert_model_vtf(model_tex)
@@ -2338,12 +3611,11 @@ class PreviewPanel(QWidget):
     @staticmethod
     def _convert_model_vtf(vtf_path: str) -> str:
         try:
-            import tempfile
             from src.services.vtflib_wrapper import VTFLib
             from PIL import Image
             rgba, w, h = VTFLib.read_vtf_as_rgba(vtf_path)
             img = Image.frombytes("RGBA", (w, h), rgba)
-            png = tempfile.mktemp(suffix='.png', prefix='tf2_model_tex_')
+            png = str(get_temp_file_path(prefix='tf2_model_tex_', suffix='.png'))
             img.save(png)
             return png
         except Exception as exc:
@@ -2371,6 +3643,123 @@ class PreviewPanel(QWidget):
     # Custom SMD
     # ═══════════════════════════════════════════════════════════════════════════
 
+    def _on_replace_model_clicked(self) -> None:
+        """Кнопка «заменить модель»: выбрать свою модель и сразу показать её в 3D + карточки.
+        Не требует предварительной загрузки оригинала: данные оригинала (кости/
+        материалы) сборка тянет из игры сама. Замена включается автоматически —
+        сборка видит загруженную модель через get_custom_smd_path().
+
+        ВАЖНО: НЕ ставим self._custom_smd_mode — иначе кнопка-куб
+        (_on_load_3d_clicked) начнёт грузить кастомную SMD вместо игровой модели.
+        Эта кнопка полностью независима: грузит SMD напрямую, путь хранится в
+        _custom_smd_path (его читает сборка)."""
+        if not self._3d_available or not self._3d_widget:
+            return
+        if not self.is_3d_mode():
+            self._switch_to_3d()
+        self._load_custom_smd_via_dialog()
+
+    def _ask_model_ready(self, mat_names: list) -> bool:
+        """Спрашивает, готова ли модель (свои материалы) или это замена геометрии.
+
+        Returns True — сохранять материалы пользователя (многотекстурная/готовая
+        модель); False — заменить только геометрию, адаптировать под игровой
+        материал (старое поведение для простых решей одной текстуры).
+        """
+        from PySide6.QtWidgets import QMessageBox
+        from src.data.material_filter import filter_editable
+        n_editable = len(filter_editable(mat_names or []))
+        recommend_keep = n_editable > 1   # >1 материала → почти наверняка «готовая»
+
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Question)
+        box.setWindowTitle(self.t.get('model_ready_title', 'Model type'))
+        box.setText(self.t.get(
+            'model_ready_text',
+            'Is this model already game-ready (its own materials, rigged to the TF2 skeleton)?'
+        ))
+        info = (
+            'Yes — keep the model\'s own materials as-is (multi-texture / ready models).\n'
+            'No — replace geometry only and use the game texture (single material).'
+            if self._lang != 'ru' else
+            'Да — сохранить материалы модели как есть (многотекстурные / готовые модели).\n'
+            'Нет — заменить только геометрию и использовать игровую текстуру (один материал).'
+        )
+        box.setInformativeText(info)
+        yes = box.addButton(
+            self.t.get('model_ready_yes', 'Yes, keep materials'), QMessageBox.YesRole
+        )
+        no = box.addButton(
+            self.t.get('model_ready_no', 'No, geometry only'), QMessageBox.NoRole
+        )
+        box.setDefaultButton(yes if recommend_keep else no)
+        box.exec()
+        keep = box.clickedButton() is yes
+        logger.info(
+            f"[CUSTOM MODEL] mat_names={mat_names} editable={n_editable} "
+            f"→ keep_user_materials={keep}"
+        )
+        return keep
+
+    def get_custom_keep_materials(self) -> bool:
+        """Для сборки: сохранять ли материалы пользовательской модели."""
+        return self._custom_keep_materials
+
+    def get_custom_qc_text(self) -> Optional[str]:
+        """Для сборки: отредактированный пользователем QC (None = авто)."""
+        return self._custom_qc_text
+
+    def _current_tg_block(self) -> str:
+        """Текущий $texturegroup из стилей (или '' — группы нет)."""
+        try:
+            from src.services.model_build_service import ModelBuildService
+            data = self.get_skin_build_data()
+            if data:
+                return ModelBuildService.generate_texturegroup_block(
+                    data.get('mesh_materials', []), data.get('tg_overrides', {})
+                )
+        except Exception as exc:
+            logger.debug(f"[QC EDIT] tg_block: {exc}")
+        return ''
+
+    def _on_edit_qc_clicked(self) -> None:
+        """Открывает редактор ИСПРАВЛЕННОГО QC с замочками на важных блоках."""
+        from src.services.model_build_service import ModelBuildService
+        from src.services import decompile_cache
+        from src.ui.qc_editor_dialog import QCEditorDialog
+
+        tg_block = self._current_tg_block()
+        if self._custom_qc_text:
+            # Уже редактировали — показываем правки пользователя, но $texturegroup
+            # синхронизируем с актуальными стилями (правки человека не теряются).
+            qc_text = ModelBuildService.replace_texturegroup_in_text(
+                self._custom_qc_text, tg_block
+            )
+        else:
+            qc_path = decompile_cache.find_cached_qc_for_weapon(self._weapon_key)
+            qc_text = ModelBuildService.make_corrected_qc(
+                qc_path or '', self._weapon_key, tg_block
+            )
+        if not qc_text.strip():
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.information(
+                self,
+                self.t.get('qc_edit_title', 'QC Editor'),
+                'QC ещё не извлечён из игры. Подождите загрузку модели в 3D и попробуйте снова.'
+                if self._lang == 'ru' else
+                'QC not extracted yet. Wait for the 3D model to load and try again.',
+            )
+            return
+
+        dlg = QCEditorDialog(qc_text=qc_text, lang=self._lang, parent=self)
+        code = dlg.exec()
+        if code == 2:        # «Сбросить к исходному»
+            self._custom_qc_text = None
+            logger.info("[QC EDIT] сброс к авто-QC")
+        elif code:           # Сохранить
+            self._custom_qc_text = dlg.get_text()
+            logger.info(f"[QC EDIT] сохранён QC ({len(self._custom_qc_text)} символов)")
+
     def _load_custom_smd_via_dialog(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
             self,
@@ -2392,11 +3781,56 @@ class PreviewPanel(QWidget):
         try:
             tmp_dir = tempfile.mkdtemp(prefix="tf2_smd_preview_")
             obj_path = os.path.join(tmp_dir, "model.obj")
-            ok = SmdToObjService.convert(smd_path, obj_path)
+            ok, mat_names = SmdToObjService.convert(smd_path, obj_path)
             if not ok or not os.path.exists(obj_path):
                 self._3d_widget.show_error(self.t.get('3d_error_convert', 'SMD conversion error'))
                 return
-            self._3d_widget.load_model_files(obj_path, self.image_path or '')
+
+            # Запоминаем путь — чтобы сборка переиспользовала ту же модель,
+            # а не просила выбрать SMD повторно.
+            self._custom_smd_path = smd_path
+
+            # Спрашиваем тип модели: «готова» (свои материалы) или «замена
+            # геометрии» (игровой материал). По умолчанию рекомендуем по числу
+            # материалов: >1 → почти наверняка модель со своими материалами.
+            self._custom_keep_materials = self._ask_model_ready(mat_names or [])
+            self._reset_skin_state()
+            # Сбрасываем командное состояние (RED/BLU/Australium) от ранее
+            # загруженной ИГРОВОЙ модели — иначе её кнопки-«стили» и командная
+            # текстура остаются поверх кастомной модели. Для geometry-only
+            # фоновый QC-воркер при необходимости покажет команды заново.
+            self._reset_team_vpk_state()
+
+            if self._custom_keep_materials:
+                # ── «Готовая» модель: карточки по материалам САМОГО SMD ──────
+                # Имена из меша пользователя, служебные (глаза/sheen) отфильтрованы.
+                self._3d_widget.load_model_files(obj_path, self.image_path or '')
+                # Единый источник выбора карточек (как у игровых моделей).
+                editable = [s.name for s in editable_material_cards(mat_names or [])]
+                if len(editable) > 1:
+                    self._set_material_slots(editable)
+                elif editable:
+                    self._material_names = editable
+                    self._card_mode = False
+                logger.info(f"[CUSTOM MODEL keep] материалы из SMD → карточки: {editable}")
+                # Редактор QC доступен только для «готовой» модели.
+                self._custom_qc_text = None
+                if hasattr(self, 'btn_edit_qc'):
+                    self.btn_edit_qc.setVisible(True)
+                # Стили (skinfamilies) оригинала — для переопределения под свои текстуры.
+                self._start_skin_detection()
+            else:
+                # ── «Только геометрия»: карточки из QC игровой модели ─────────
+                # Показываем ГЕОМЕТРИЮ ПОЛЬЗОВАТЕЛЯ, но карточки/текстуры берём из
+                # QC игровой модели (там всё сводится к игровым текстурам). Воркер
+                # извлекает их в фоне, НЕ перезагружая геометрию на оригинальную.
+                logger.info("[CUSTOM MODEL geometry-only] геометрия пользователя + карточки из QC")
+                self._custom_qc_text = None
+                if hasattr(self, 'btn_edit_qc'):
+                    self.btn_edit_qc.setVisible(False)
+                self._3d_widget.load_model_files(obj_path, self.image_path or '')
+                if self._pending_3d_params:
+                    self._start_qc_cards_worker()
         except Exception as exc:
             logger.error(f"Custom SMD load: {exc}", exc_info=True)
             if self._3d_widget:
@@ -2439,6 +3873,8 @@ class PreviewPanel(QWidget):
 
     def _reset_team_vpk_state(self) -> None:
         """Сбрасывает VPK-кадры команд и скрывает кнопки переключения."""
+        self._custom_vpk_mode = False
+        self._applied_3d_tex = {}   # webview перезагружается → состояние сбрасываем
         self._red_frames = []
         self._blu_frames = []
         self._team_framerate = 0.0
@@ -2452,7 +3888,7 @@ class PreviewPanel(QWidget):
         if hasattr(self, 'btn_blu'):
             self.btn_blu.setVisible(False)
             self.btn_blu.setStyleSheet(self._team_style_off)
-        # Сбрасываем Australium
+        # Сбрасываем Australium (кнопку и карточку-тип)
         self._australium_frame = None
         self._australium_active = False
         self._australium_user_tex = None
@@ -2460,6 +3896,10 @@ class PreviewPanel(QWidget):
         if hasattr(self, 'btn_aus'):
             self.btn_aus.setVisible(False)
             self.btn_aus.setStyleSheet(self._aus_style_off)
+        if self._aus_card is not None:
+            self._aus_card.setParent(None)
+            self._aus_card.deleteLater()
+            self._aus_card = None
 
     # ═══════════════════════════════════════════════════════════════════════════
     # Drag & Drop (в 2D область)
@@ -2607,6 +4047,71 @@ def _make_cube_icon(color: str = "#666666", size: int = 16):
         QPointF(s*.94, s*.28), QPointF(s*.94, s*.72),
         QPointF(s*.50, s*.96), QPointF(s*.50, s*.52),
     ]))
+    p.end()
+    return QIcon(pix)
+
+
+def _make_replace_icon(color: str = "#666666", size: int = 16):
+    """Иконка «заменить модель» — две стрелки-swap (⇄)."""
+    from PySide6.QtGui import QIcon, QPixmap, QPainter, QPen, QColor
+    from PySide6.QtCore import Qt, QLineF
+    pix = QPixmap(size, size)
+    pix.fill(Qt.transparent)
+    p = QPainter(pix)
+    p.setRenderHint(QPainter.Antialiasing)
+    pen = QPen(QColor(color))
+    pen.setWidthF(1.2)
+    pen.setCapStyle(Qt.RoundCap)
+    pen.setJoinStyle(Qt.RoundJoin)
+    p.setPen(pen)
+    p.setBrush(Qt.NoBrush)
+    s = float(size)
+    # верхняя стрелка вправо
+    p.drawLine(QLineF(s*.16, s*.36, s*.84, s*.36))
+    p.drawLine(QLineF(s*.84, s*.36, s*.67, s*.24))
+    p.drawLine(QLineF(s*.84, s*.36, s*.67, s*.48))
+    # нижняя стрелка влево
+    p.drawLine(QLineF(s*.84, s*.64, s*.16, s*.64))
+    p.drawLine(QLineF(s*.16, s*.64, s*.33, s*.52))
+    p.drawLine(QLineF(s*.16, s*.64, s*.33, s*.76))
+    p.end()
+    return QIcon(pix)
+
+
+def _make_gear_icon(color: str = "#bbbbbb", size: int = 16):
+    """Иконка «настройки» — шестерёнка."""
+    import math
+    from PySide6.QtGui import QIcon, QPixmap, QPainter, QPen, QColor
+    from PySide6.QtCore import Qt, QPointF, QLineF
+    pix = QPixmap(size, size)
+    pix.fill(Qt.transparent)
+    p = QPainter(pix)
+    p.setRenderHint(QPainter.Antialiasing)
+    s = float(size)
+    cx = cy = s / 2.0
+    r_body = s * 0.27     # радиус «тела» шестерёнки (вершины зубьев)
+    r_out = s * 0.45      # вершина зубьев
+    r_hole = s * 0.115    # центральное отверстие
+    n_teeth = 8
+
+    # ── Зубья (толстые скруглённые нубы) ──
+    tooth_pen = QPen(QColor(color))
+    tooth_pen.setWidthF(max(1.6, s * 0.11))
+    tooth_pen.setCapStyle(Qt.RoundCap)
+    p.setPen(tooth_pen)
+    p.setBrush(Qt.NoBrush)
+    for i in range(n_teeth):
+        a = (2.0 * math.pi * i) / n_teeth
+        ca, sa = math.cos(a), math.sin(a)
+        p.drawLine(QLineF(cx + ca * r_body, cy + sa * r_body,
+                          cx + ca * r_out, cy + sa * r_out))
+
+    # ── Кольцо тела + центральное отверстие ──
+    ring_pen = QPen(QColor(color))
+    ring_pen.setWidthF(1.4)
+    p.setPen(ring_pen)
+    p.drawEllipse(QPointF(cx, cy), r_body, r_body)
+    p.drawEllipse(QPointF(cx, cy), r_hole, r_hole)
     p.end()
     return QIcon(pix)
 

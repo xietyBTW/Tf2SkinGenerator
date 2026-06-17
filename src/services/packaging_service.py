@@ -2,7 +2,7 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
-from src.shared.constants import ToolPaths
+from src.shared.constants import ToolPaths, ToolTimeouts
 from src.shared.file_utils import ensure_directory_exists
 from src.shared.logging_config import get_logger
 
@@ -58,12 +58,11 @@ class PackagingService:
             Абсолютный путь к созданному VPK файлу.
 
         Raises:
-            VPKCreationError:  vpk.exe вернул ненулевой код
-            FileNotFoundError: vpk.exe не создал файл
+            VPKCreationError:         vpk.exe вернул ненулевой код
+            RequiredFileMissingError: vpk.exe не создал файл
         """
         from src.data.translations import TRANSLATIONS
-        from src.shared.exceptions import VPKCreationError
-        from src.shared.exceptions import FileNotFoundError as TFFileNotFoundError
+        from src.shared.exceptions import VPKCreationError, RequiredFileMissingError
 
         t = TRANSLATIONS.get(language, TRANSLATIONS['en'])
 
@@ -74,13 +73,19 @@ class PackagingService:
             temp_vpk_path.unlink()
 
         logger.info("Запуск vpk.exe для создания VPK...")
-        result = subprocess.run(
-            [str(ToolPaths.get_vpk_tool()), "-v", str(vpkroot_dir.resolve())],
-            cwd=str(vpkroot_parent),
-            capture_output=True,
-            text=True,
-            creationflags=subprocess.CREATE_NO_WINDOW,
-        )
+        try:
+            result = subprocess.run(
+                [str(ToolPaths.get_vpk_tool()), "-v", str(vpkroot_dir.resolve())],
+                cwd=str(vpkroot_parent),
+                capture_output=True,
+                text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+                timeout=ToolTimeouts.VPK,
+            )
+        except subprocess.TimeoutExpired:
+            raise VPKCreationError(
+                "", f"vpk.exe timed out after {ToolTimeouts.VPK}s"
+            )
 
         logger.debug(f"vpk.exe завершился с кодом: {result.returncode}")
         if result.stdout:
@@ -100,7 +105,7 @@ class PackagingService:
                 path=vpkroot_parent,
             )
             logger.error(error_msg)
-            raise TFFileNotFoundError(temp_vpk_path, error_msg)
+            raise RequiredFileMissingError(str(temp_vpk_path), error_msg)
 
         export_folder_path = Path(export_folder)
         ensure_directory_exists(export_folder_path)

@@ -117,8 +117,9 @@ class MergeVpkServiceTests(unittest.TestCase):
             def fake_run(*args, **kwargs):
                 (base / "vpkroot.vpk").write_bytes(b"vpk")
                 return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
-            with patch("src.services.merge_vpk_service.subprocess.run", side_effect=fake_run):
-                with patch("src.services.merge_vpk_service.ToolPaths.get_vpk_tool", return_value=Path("vpk.exe")):
+            # vpk.exe вызывается в PackagingService.pack_directory — патчим там.
+            with patch("src.services.packaging_service.subprocess.run", side_effect=fake_run):
+                with patch("src.services.packaging_service.ToolPaths.get_vpk_tool", return_value=Path("vpk.exe")):
                     result = MergeVPKService._create_vpk_from_directory(vpkroot, "out.vpk", export_folder=str(base))
                     self.assertTrue(result.endswith("out.vpk"))
 
@@ -129,8 +130,9 @@ class MergeVpkServiceTests(unittest.TestCase):
             vpkroot.mkdir()
             def fake_run(*args, **kwargs):
                 return type("R", (), {"returncode": 1, "stdout": "bad", "stderr": "err"})()
-            with patch("src.services.merge_vpk_service.subprocess.run", side_effect=fake_run):
-                with patch("src.services.merge_vpk_service.ToolPaths.get_vpk_tool", return_value=Path("vpk.exe")):
+            # vpk.exe вызывается в PackagingService.pack_directory — патчим там.
+            with patch("src.services.packaging_service.subprocess.run", side_effect=fake_run):
+                with patch("src.services.packaging_service.ToolPaths.get_vpk_tool", return_value=Path("vpk.exe")):
                     with self.assertRaises(VPKCreationError):
                         MergeVPKService._create_vpk_from_directory(vpkroot, "out.vpk", export_folder=str(base))
 

@@ -4,9 +4,8 @@
 
 import os
 import re
-import traceback
-from typing import List, Tuple, Optional
-from PIL import Image, ImageDraw, ImageFont
+from typing import List, Tuple
+from PIL import Image, ImageDraw
 from src.shared.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -77,7 +76,7 @@ class UVLayoutService:
             parts = line.split()
             if len(parts) >= 9:
                 try:
-                    bone_id = int(parts[0])
+                    _bone_id = int(parts[0])  # валидируем, что строка вершины начинается с bone id
                     x = float(parts[1])
                     y = float(parts[2])
                     z = float(parts[3])

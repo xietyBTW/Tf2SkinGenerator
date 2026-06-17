@@ -2,9 +2,7 @@
 Темы для приложения - Элегантный минималистичный дизайн
 """
 
-from typing import Dict, Any
 from PySide6.QtGui import QColor, QPalette, QFont
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 
 def apply_dark_theme(app: QApplication) -> None:

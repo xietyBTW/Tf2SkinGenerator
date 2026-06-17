@@ -3,8 +3,7 @@
 """
 
 import os
-import shutil
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Tuple, List
 import time
@@ -51,20 +50,23 @@ class TextureBuildContext:
             copy_file_safe(image_path, target_vtf_path)
             return None
 
-        vtf_flags, merged = TextureService.resolve_vtf_flags_and_options(
-            self.flags, self.vtf_options, drop_normal=True
+        # Делегируем единому рендеру главной текстуры. Вторичные материалы не
+        # бывают normal-map → снимаем опцию 'normal' (тогда idёт обычная ветка
+        # PNG→VTF, без создания *_normal.vtf).
+        opts = dict(self.vtf_options) if self.vtf_options else {}
+        opts.pop("normal", None)
+        animated_fps, _ = TextureService.render_image_to_vtf(
+            image_path,
+            vtf_output_path=self.vtf_output_path,
+            out_vtf_path=target_vtf_path,
+            temp_png_path=self.vtf_output_path / png_name,
+            normal_base="",
+            size=self.size,
+            format_type=self.format_type,
+            flags=self.flags,
+            vtf_options=opts,
         )
-        if TextureService.is_animated_image(image_path):
-            return TextureService.create_animated_vtf(
-                image_path, str(target_vtf_path), self.size, self.format_type, vtf_flags, merged
-            )
-
-        png = self.vtf_output_path / png_name
-        TextureService.process_image(image_path, png, self.size)
-        TextureService.create_vtf(str(png), str(self.vtf_output_path), self.format_type, vtf_flags, merged)
-        if png.exists():
-            png.unlink()
-        return None
+        return animated_fps
 
 
 @dataclass
@@ -75,7 +77,17 @@ class BuildContext:
     mode: str
     weapon_key: str
     temp_dir: Path
-    
+    # Пользовательские предупреждения о НЕкритичных, но важных проблемах сборки
+    # (текстура/материал не найдены → в игре будет фиолет). Показываются после
+    # сборки, чтобы пользователь не искал причину «успешного» но битого мода.
+    warnings: List[str] = field(default_factory=list)
+
+    def warn(self, message: str) -> None:
+        """Добавляет предупприждение пользователю (без дублей) + лог."""
+        if message not in self.warnings:
+            self.warnings.append(message)
+        logger.warning(f"[BUILD WARN] {message}")
+
     @property
     def vpkroot_dir(self) -> Path:
         """Корень VPK для упаковки"""
@@ -196,8 +208,10 @@ class BuildContext:
         if base_temp_dir is None:
             base_temp_dir = DirectoryPaths.BASE_TEMP_DIR
         
+        # Суффикс из urandom исключает коллизию двух сборок в одну секунду
         timestamp = int(time.time())
-        build_id = f"build_{timestamp}_{mode}"
+        unique = os.urandom(3).hex()
+        build_id = f"build_{timestamp}_{unique}_{mode}"
         temp_dir = base_temp_dir / build_id
         
         ctx = BuildContext(

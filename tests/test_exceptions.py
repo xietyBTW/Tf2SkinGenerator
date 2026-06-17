@@ -1,46 +1,29 @@
 import unittest
 
 from src.shared.exceptions import (
-    FileNotFoundError,
-    DirectoryNotFoundError,
-    TF2PathNotFoundError,
-    ModelNotFoundError,
-    ModelDecompilationError,
-    ModelCompilationError,
+    ErrorPayload,
+    TF2SkinGeneratorError,
+    RequiredFileMissingError,
     VTFCreationError,
     VPKCreationError,
-    BuildError,
-    PathTooLongError,
-    InvalidFilenameError,
-    InvalidImageError,
 )
 
 
 class ExceptionsTests(unittest.TestCase):
-    def test_file_not_found_error(self):
-        err = FileNotFoundError("path.txt")
+    def test_required_file_missing_error(self):
+        err = RequiredFileMissingError("path.txt")
         self.assertIn("path.txt", str(err))
+        self.assertEqual(err.file_path, "path.txt")
 
-    def test_directory_not_found_error(self):
-        err = DirectoryNotFoundError("dir")
-        self.assertIn("dir", str(err))
+    def test_required_file_missing_error_custom_message(self):
+        err = RequiredFileMissingError("path.txt", "custom message")
+        self.assertEqual(str(err), "custom message")
 
-    def test_tf2_path_not_found_error(self):
-        err = TF2PathNotFoundError("tf2")
-        self.assertIn("tf2", str(err))
-
-    def test_model_not_found_error(self):
-        err = ModelNotFoundError("weapon", searched_paths=["a", "b"])
-        self.assertIn("weapon", str(err))
-        self.assertIn("a", str(err))
-
-    def test_model_decompilation_error(self):
-        err = ModelDecompilationError("model.mdl", "bad")
-        self.assertIn("model.mdl", str(err))
-
-    def test_model_compilation_error(self):
-        err = ModelCompilationError("model.qc", "bad")
-        self.assertIn("model.qc", str(err))
+    def test_required_file_missing_is_builtin_file_not_found(self):
+        """except FileNotFoundError должен ловить кастомный тип."""
+        err = RequiredFileMissingError("path.txt")
+        self.assertIsInstance(err, FileNotFoundError)
+        self.assertIsInstance(err, TF2SkinGeneratorError)
 
     def test_vtf_creation_error(self):
         err = VTFCreationError("cmd", stdout="out", stderr="err")
@@ -53,21 +36,11 @@ class ExceptionsTests(unittest.TestCase):
         self.assertIn("out", str(err))
         self.assertIn("err", str(err))
 
-    def test_build_error(self):
-        err = BuildError("fail", details="detail")
-        self.assertIn("detail", str(err))
-
-    def test_path_too_long_error(self):
-        err = PathTooLongError("path", max_length=10)
-        self.assertIn("10", str(err))
-
-    def test_invalid_filename_error(self):
-        err = InvalidFilenameError("file", "bad")
-        self.assertIn("file", str(err))
-
-    def test_invalid_image_error(self):
-        err = InvalidImageError("img", "bad")
-        self.assertIn("img", str(err))
+    def test_error_payload_to_text(self):
+        payload = ErrorPayload(code="x", message="msg", details="det")
+        self.assertEqual(payload.to_text(), "msg\ndet")
+        payload_no_details = ErrorPayload(code="x", message="msg")
+        self.assertEqual(payload_no_details.to_text(), "msg")
 
 
 if __name__ == "__main__":

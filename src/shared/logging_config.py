@@ -44,10 +44,14 @@ def setup_logging(
         console_handler.setFormatter(formatter)
         logger.addHandler(console_handler)
     
-    # Файловый handler (если указан)
+    # Файловый handler (если указан) — с ротацией, чтобы лог не рос бесконечно
     if log_file:
+        from logging.handlers import RotatingFileHandler
         log_file.parent.mkdir(parents=True, exist_ok=True)
-        file_handler = logging.FileHandler(log_file, encoding='utf-8')
+        file_handler = RotatingFileHandler(
+            log_file, encoding='utf-8',
+            maxBytes=2_000_000, backupCount=2,
+        )
         file_handler.setLevel(logging.DEBUG)
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)

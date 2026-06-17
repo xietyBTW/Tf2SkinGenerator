@@ -1,14 +1,12 @@
 """
-Вся хуйня с VPK файлами - распаковка, сборка, конвертация текстур.
-Если что-то сломалось - виноват не я, а Valve с их ебанутым форматом.
+Работа с VPK файлами: распаковка, сборка, конвертация текстур.
 """
 
 import os
 import shutil
-import time
 import threading
 from pathlib import Path
-from typing import Tuple, List, Optional, Dict, Any, Callable
+from typing import Tuple, List, Optional, Callable
 from .build_context import BuildContext, TextureBuildContext
 from .vmt_service import VMTService
 from .build_service import BuildService
@@ -28,37 +26,25 @@ from src.data.player_characters import (
     SPY_MASK_MODE_KEY,
     SPY_MDL_PATH,
     SPY_DISGUISE_MASKS,
-    SPY_MASK_VTF_NAMES,
 )
 from src.shared.logging_config import get_logger
-from src.shared.constants import ToolPaths, DirectoryPaths, EXTRA_TEX_USE_GAME_ORIGINAL
-from src.shared.exceptions import (
-    TF2PathNotSpecifiedError,
-    ModelNotFoundError,
-    VTFCreationError,
-    VPKCreationError,
-    BuildError,
-    PathTooLongError
-)
-from src.shared.file_utils import ensure_file_exists, ensure_directory_exists, copy_file_safe
+from src.shared.constants import DirectoryPaths, EXTRA_TEX_USE_GAME_ORIGINAL
+from src.shared.file_utils import ensure_directory_exists, copy_file_safe
 from src.shared.validators import validate_build_params
 
 logger = get_logger(__name__)
 
 
 class VPKService:
-    """Тут вся магия сборки VPK файлов. Если что-то не работает - читай логи, я не телепат."""
+    """Главный конвейер сборки VPK файлов. Детали ошибок — в логах."""
     
-    @staticmethod
-    def _get_vpk_tool() -> Path:
-        return ToolPaths.get_vpk_tool()
-
     @staticmethod
     def _build_mdl_search_paths(
         mode: str,
         weapon_key: str,
         hat_mdl_path: Optional[str],
         t: dict,
+        tf2_root: Optional[str] = None,
     ) -> Tuple[List[str], Optional[str]]:
         """
         Строит список путей-кандидатов к MDL внутри игрового VPK.
@@ -96,6 +82,17 @@ class VPKService:
         _folder_suffix = f"/{weapon_key}/{weapon_key}.mdl"
         _flat_suffix = f"/{weapon_key}.mdl"
         paths_to_try = []
+
+        # Точный путь из items_game.txt (авторитетный) — первым кандидатом.
+        # Убирает зависимость от угадывания папок/префиксов и ручных оверрайдов.
+        if tf2_root:
+            try:
+                from src.data.weapon_model_index import resolve_weapon_mdl
+                _exact = resolve_weapon_mdl(weapon_key, tf2_root)
+                if _exact:
+                    paths_to_try.append(_exact)
+            except Exception as _e:
+                logger.debug(f"weapon index: {_e}")
 
         # workshop_partner → workshop → стандарт → c_items: путь с папкой и без
         for _candidate in (
@@ -215,6 +212,79 @@ class VPKService:
         logger.info(f"Создан VMT вторичного материала: {target_vmt_path.name}")
 
     @staticmethod
+    def _render_extra_texture(
+        name: str,
+        img: str,
+        vtf_output_path: Path,
+        vmt_path: Path,
+        patched_cdmaterials_path: str,
+        size: Tuple[int, int],
+        format_type: str,
+        flags: List[str],
+        vtf_options: dict,
+    ) -> bool:
+        """
+        Универсальный рендер доп. текстуры в VPK: {name}.vtf + {name}.vmt
+        рядом с базовой текстурой.
+
+        Источник:
+          • .vtf      → копируется как есть (без переконвертации);
+          • анимация  → анимированный VTF (+ AnimatedTexture-прокси в VMT);
+          • картинка  → ресайз + обычный VTF.
+        VMT строится на основе главного (vmt_path) с $basetexture → name.
+
+        Возвращает True, если текстура создана; False — если img пуст/не файл.
+        Единая точка для panel_extra_textures и вариантов стилей (skinfamilies).
+        """
+        if not img or not os.path.isfile(img):
+            return False
+
+        # Имя в нижний регистр: Source ищет материалы/текстуры в lowercase,
+        # а лукап в VPK регистрозависим — иначе текстура не находится (фиолетовая).
+        name = name.lower()
+
+        ensure_directory_exists(vtf_output_path)
+        out_vtf = vtf_output_path / f"{name}.vtf"
+        out_vmt = vtf_output_path / f"{name}.vmt"
+
+        fps = None
+        if str(img).lower().endswith('.vtf'):
+            copy_file_safe(img, out_vtf)
+        else:
+            # Доп. материалы не бывают normal-map → снимаем 'normal'; единый рендер
+            # (анимация / обычная картинка) через TextureService.render_image_to_vtf.
+            opts = dict(vtf_options) if vtf_options else {}
+            opts.pop("normal", None)
+            fps, _ = TextureService.render_image_to_vtf(
+                img,
+                vtf_output_path=vtf_output_path,
+                out_vtf_path=out_vtf,
+                temp_png_path=vtf_output_path / f"{name}.png",
+                normal_base="",
+                size=size,
+                format_type=format_type,
+                flags=flags,
+                vtf_options=opts,
+            )
+
+        if not out_vmt.exists():
+            # Пер-материальный отредактированный VMT (если пользователь правил его
+            # для этого материала) — копируем его, затем чиним путь $basetexture
+            # под наш VTF/пропатченный cdmaterials. Иначе — обычная генерация.
+            from src.services.edited_vmt_service import EditedVMTService
+            _edited = EditedVMTService.get_edited_vmt(name)
+            if _edited and os.path.exists(_edited):
+                copy_file_safe(_edited, out_vmt)
+                VMTService.update_vmt_basetexture_path(
+                    str(out_vmt), patched_cdmaterials_path, name)
+                logger.info(f"Доп.материал '{name}': использован отредактированный VMT")
+            else:
+                VPKService._write_material_vmt(out_vmt, vmt_path, patched_cdmaterials_path, name)
+        if fps:
+            VMTService.enable_animated_basetexture(str(out_vmt), fps)
+        return True
+
+    @staticmethod
     def _build_blu_team_texture(
         blu_mode: str,
         blu_image_path: Optional[str],
@@ -227,6 +297,7 @@ class VPKService:
         format_type: str,
         flags: List[str],
         vtf_options: dict,
+        blu_texture_filename: Optional[str] = None,
     ) -> None:
         """
         Создаёт BLU-командную текстуру (и VMT) рядом с RED.
@@ -236,14 +307,20 @@ class VPKService:
         BLU VMT — копия RED VMT с обновлённым $basetexture. Ошибки не критичны
         (мод соберётся и без BLU-варианта).
 
+        blu_texture_filename — РЕАЛЬНОЕ имя синего материала из $texturegroup
+        (blu_row[0]). Нужно, т.к. col0 может уже нести суффикс _red
+        (w_grenade_red → w_grenade_blue), и «{texture}_blue» дало бы неверное
+        w_grenade_red_blue. По умолчанию — старое поведение «{texture}_blue».
+
         Примечание: BLU намеренно использует только UI-опции (vtf_options),
         не подмешивая опции из флагов — поведение сохранено как в оригинале.
         """
         if not blu_mode or blu_mode in ('none', ''):
             return
         try:
+            blu_name = blu_texture_filename or f"{texture_filename}_blue"
             red_vtf_path = vtf_output_path / vtf_filename
-            blu_vtf_name = f"{texture_filename}_blue.vtf"
+            blu_vtf_name = f"{blu_name}.vtf"
             blu_vtf_path = vtf_output_path / blu_vtf_name
             blu_created = False
 
@@ -252,8 +329,14 @@ class VPKService:
                     shutil.copy2(red_vtf_path, blu_vtf_path)
                     blu_created = True
                     logger.info(f"BLU текстура скопирована из RED: {blu_vtf_name}")
+            elif blu_image_path and str(blu_image_path).lower().endswith('.vtf'):
+                # В BLU-карточку загрузили готовый VTF — копируем как есть
+                copy_file_safe(blu_image_path, blu_vtf_path)
+                blu_created = blu_vtf_path.exists()
+                if blu_created:
+                    logger.info(f"BLU текстура: готовый VTF скопирован → {blu_vtf_name}")
             elif blu_image_path and os.path.exists(blu_image_path):
-                blu_png_tmp = vtf_output_path / f"{texture_filename}_blue.png"
+                blu_png_tmp = vtf_output_path / f"{blu_name}.png"
                 VPKService._process_image(blu_image_path, str(blu_png_tmp), size)
                 blu_vtf_flags, _ = TextureService.parse_vtf_flags_and_options(flags or [])
                 blu_opts = dict(vtf_options or {})
@@ -269,16 +352,555 @@ class VPKService:
 
             # BLU VMT — копия RED с обновлённым $basetexture
             if blu_created and vmt_path.exists():
-                blu_vmt_path = vtf_output_path / f"{texture_filename}_blue.vmt"
+                blu_vmt_path = vtf_output_path / f"{blu_name}.vmt"
                 shutil.copy2(vmt_path, blu_vmt_path)
                 VMTService.update_vmt_basetexture_path(
-                    str(blu_vmt_path), patched_cdmaterials_path, f"{texture_filename}_blue"
+                    str(blu_vmt_path), patched_cdmaterials_path, blu_name
                 )
                 logger.info(f"BLU VMT создан: {blu_vmt_path.name}")
         except Exception as _blu_exc:
             logger.warning(
                 f"Не удалось создать BLU текстуру (не критично): {_blu_exc}", exc_info=True
             )
+
+    @staticmethod
+    def _remap_skin_data_to_smd(skin_build_data: dict, smd_mats: list) -> dict:
+        """
+        Переименовывает материалы стилей под ФАКТИЧЕСКИЕ имена материалов SMD.
+
+        UI собирает имена из превью-загрузки; к моменту сборки имена меша в SMD
+        могут отличаться (другой экспорт/регистр). Сопоставляем UI↔SMD ПО ИНДЕКСУ
+        (порядок появления материалов) и переписываем mesh_materials / tg_overrides /
+        variant_files на SMD-имена. Картинки вариантов сохраняются.
+        """
+        ui_mats = skin_build_data.get('mesh_materials', [])
+        if not ui_mats or not smd_mats:
+            return skin_build_data
+
+        name_map = {um: (smd_mats[i] if i < len(smd_mats) else um)
+                    for i, um in enumerate(ui_mats)}
+
+        old_variants = skin_build_data.get('variant_files', {})
+        new_tg: dict = {}
+        new_variants: dict = {}
+        for skin_idx, mats in skin_build_data.get('tg_overrides', {}).items():
+            for ui_mat, old_vname in mats.items():
+                base = name_map.get(ui_mat, ui_mat)
+                # суффикс роли = хвост старого имени варианта после "ui_mat_"
+                prefix = (ui_mat + '_')
+                suffix = old_vname[len(prefix):] if old_vname.lower().startswith(prefix.lower()) else old_vname
+                new_vname = f"{base}_{suffix}"
+                new_tg.setdefault(skin_idx, {})[base] = new_vname
+                if old_vname in old_variants:
+                    new_variants[new_vname] = old_variants[old_vname]
+
+        return {
+            'mesh_materials': [name_map.get(m, m) for m in ui_mats],
+            'tg_overrides': new_tg,
+            'variant_files': new_variants,
+        }
+
+    @staticmethod
+    def _build_material_maps(
+        material_maps: Optional[dict],
+        vtf_output_path: Path,
+        texture_filename: str,
+        vmt_path: Path,
+        patched_cdmaterials_path: str,
+        size: Tuple[int, int],
+        base_image_path: Optional[str] = None,
+        is_normal_map: bool = False,
+        panel_extra_textures: Optional[dict] = None,
+    ) -> None:
+        """
+        Генерит файловые карты материала ПЕР-ТЕКСТУРНО.
+
+        material_maps: {material_name: {map_id: spec}} — карты для каждого выбранного
+        материала (а не глобально на главный). Карты каждого материала пишутся в
+        ЕГО VMT:
+          • главный (== texture_filename) → vmt_path, база = base_image_path;
+          • прочие → {mat}.vmt (создан extra/panel_extra), база = panel_extra_textures[mat].
+        Если есть {mat}_blue.vmt — параметры дублируются туда (команда наследует).
+        Ошибка одной карты не валит сборку.
+        """
+        if not material_maps:
+            return
+        panel_extra_textures = panel_extra_textures or {}
+        for mat, maps in material_maps.items():
+            if not maps:
+                continue
+            # Пустой ключ '' = главный материал (UI не всегда знает texture_filename).
+            if mat in ('', texture_filename):
+                real_mat = texture_filename
+                mat_vmt = vmt_path
+                mat_base = base_image_path
+            else:
+                real_mat = mat
+                mat_vmt = vtf_output_path / f"{mat}.vmt"
+                mat_base = panel_extra_textures.get(mat)
+                if not mat_vmt.exists():
+                    logger.warning(f"Карты материала '{mat}': VMT не найден ({mat_vmt.name}), пропуск")
+                    continue
+            VPKService._apply_maps_for_material(
+                maps, real_mat, mat_vmt, mat_base, vtf_output_path,
+                patched_cdmaterials_path, size, is_normal_map,
+            )
+            _blu_vmt = vtf_output_path / f"{real_mat}_blue.vmt"
+            if _blu_vmt.exists():
+                VPKService._apply_maps_for_material(
+                    maps, real_mat, _blu_vmt, mat_base, vtf_output_path,
+                    patched_cdmaterials_path, size, is_normal_map, params_only=True,
+                )
+
+    @staticmethod
+    def _apply_maps_for_material(
+        material_maps: dict,
+        mat: str,
+        vmt_path: Path,
+        base_image_path: Optional[str],
+        vtf_output_path: Path,
+        patched_cdmaterials_path: str,
+        size: Tuple[int, int],
+        is_normal_map: bool = False,
+        params_only: bool = False,
+    ) -> None:
+        """
+        Применяет набор карт к ОДНОМУ материалу: генерит VTF (имена {mat}{suffix})
+        и вписывает параметры в его VMT. params_only=True — только параметры (VTF
+        уже создан, напр. при дублировании в BLU-VMT).
+
+        Источник карты: "image" (файл) либо "derive" (из базовой текстуры material'а).
+        Для derive-phong доп. создаётся карта нормалей + $envmap («Авто-блеск»).
+        """
+        from src.data.material_maps import MATERIAL_MAPS, MAP_ORDER
+
+        # ── Pre-pass: разрешение конфликта $envmapmask + $bumpmap ──────────────
+        # Source игнорирует отдельный $envmapmask при наличии $bumpmap. Если на
+        # материале вместе с отражением активен эффект с нормалью (rim/phong) и
+        # нормаль генерим МЫ — печём маску отражения в альфу нормали и используем
+        # $normalmapalphaenvmapmask. Тогда обе фичи работают одновременно.
+        envmask_combined = False
+        envmask_spec = material_maps.get("envmapmask")
+        if envmask_spec and base_image_path and os.path.isfile(base_image_path):
+            rim_on = bool((material_maps.get("rimlight") or {}).get("enabled"))
+            phong_on = bool(material_maps.get("phongexp"))
+            try:
+                _vmt_txt0 = open(vmt_path, encoding="utf-8", errors="ignore").read().lower()
+            except OSError:
+                _vmt_txt0 = ""
+            real_normal = (is_normal_map
+                           or (vtf_output_path / f"{mat}_normal.vtf").exists()
+                           or "$bumpmap" in _vmt_txt0)
+            needs_bump = real_normal or rim_on or phong_on
+            if needs_bump and not real_normal:
+                # Нормаль генерим мы → можем запечь маску в её альфу.
+                if params_only:
+                    # BLU-дубль: VTF уже создан для RED, пишем только параметры.
+                    VMTService.add_material_map_params(
+                        str(vmt_path), patched_cdmaterials_path, None, None,
+                        {"$envmap": "env_cubemap", "$normalmapalphaenvmapmask": "1"})
+                    envmask_combined = True
+                else:
+                    mask_png = vtf_output_path / f"{mat}_envmask_src.png"
+                    ok_mask = False
+                    if envmask_spec.get("derive"):
+                        thr = envmask_spec.get("threshold")
+                        thr = int(thr) if thr not in (None, "") else None
+                        TextureService.derive_effect_map(
+                            base_image_path, str(mask_png), "envmapmask", size, threshold=thr)
+                        ok_mask = mask_png.exists()
+                    elif envmask_spec.get("image") and os.path.isfile(envmask_spec["image"]):
+                        VPKService._process_image(envmask_spec["image"], str(mask_png), size)
+                        ok_mask = mask_png.exists()
+                    if ok_mask:
+                        envmask_combined = VPKService._ensure_normal_with_envmask(
+                            base_image_path, mask_png, vtf_output_path, mat,
+                            vmt_path, patched_cdmaterials_path, size)
+                        if mask_png.exists():
+                            mask_png.unlink()
+            elif real_normal:
+                logger.warning(
+                    f"[{mat}] envmapmask + готовая нормаль: отдельный $envmapmask "
+                    f"может игнорироваться движком (есть $bumpmap)")
+
+        for map_id in MAP_ORDER:
+            spec = material_maps.get(map_id)
+            if not spec:
+                continue
+            # envmapmask уже разрешён через альфу нормали — отдельную карту не пишем.
+            if map_id == "envmapmask" and envmask_combined:
+                continue
+            cfg = MATERIAL_MAPS[map_id]
+
+            # Параметрическая карта без своей текстуры (rim light): только пишем
+            # VMT-параметры (+ числовые переопределения из UI). Работает и при
+            # params_only (дублирование в BLU-VMT) — там тоже нужны те же параметры.
+            if cfg.get("vmt_only"):
+                if not spec.get("enabled"):
+                    continue
+                extra = dict(cfg["extra_vmt"])
+                for k, v in spec.items():
+                    if isinstance(k, str) and k.startswith("$"):
+                        extra[k] = str(v)
+                # Rim/phong не считаются без $bumpmap. Если в VMT его ещё нет —
+                # генерим нормаль из базы (существующую НЕ трогаем). params_only
+                # (дубль в BLU-VMT) только пишет параметры, VTF уже создан.
+                if not params_only and cfg.get("derive_auto_normal") \
+                        and base_image_path and os.path.isfile(base_image_path):
+                    try:
+                        _vmt_txt = open(vmt_path, encoding="utf-8", errors="ignore").read().lower()
+                    except OSError:
+                        _vmt_txt = ""
+                    if "$bumpmap" not in _vmt_txt:
+                        VPKService._ensure_derived_normal(
+                            base_image_path, vtf_output_path, mat, vmt_path,
+                            patched_cdmaterials_path, size, is_normal_map,
+                        )
+                VMTService.add_material_map_params(
+                    str(vmt_path), patched_cdmaterials_path, None, None, extra
+                )
+                logger.info(f"Карта '{map_id}' [{mat}] → VMT-параметры (+нормаль при необходимости)")
+                continue
+
+            map_key = f"{mat}{cfg['suffix']}"
+            derive = bool(spec.get("derive")) and bool(cfg.get("derive_kind"))
+            image = spec.get("image")
+
+            if not derive and (not image or not os.path.isfile(image)):
+                if not params_only:
+                    logger.warning(f"Карта '{map_id}' [{mat}]: нет файла и не derive, пропуск")
+                continue
+            if derive and (not base_image_path or not os.path.isfile(base_image_path)):
+                if not params_only:
+                    logger.warning(f"Карта '{map_id}' [{mat}]: derive невозможен — нет базы, пропуск")
+                continue
+
+            if not params_only:
+                try:
+                    ensure_directory_exists(vtf_output_path)
+                    temp_png = vtf_output_path / f"{map_key}.png"
+                    _map_opts = dict(cfg.get("options", {}))
+                    # Карта может требовать фиксированный размер (warp-градиенты:
+                    # lightwarp = 256×1, phongwarp = 256×256). Иначе — глобальный.
+                    _map_size = tuple(cfg.get("size") or size)
+                    if derive:
+                        threshold = spec.get("threshold")
+                        threshold = int(threshold) if threshold not in (None, "") else None
+                        TextureService.derive_effect_map(
+                            base_image_path, str(temp_png), cfg["derive_kind"], _map_size,
+                            threshold=threshold,
+                        )
+                        VPKService._create_vtf(str(temp_png), str(vtf_output_path),
+                                               cfg["format"], list(cfg["flags"]), _map_opts)
+                    else:
+                        VPKService._process_image(image, str(temp_png), _map_size)
+                        VPKService._create_vtf(str(temp_png), str(vtf_output_path),
+                                               cfg["format"], list(cfg["flags"]), _map_opts)
+                    if temp_png.exists():
+                        temp_png.unlink()
+                except Exception as e:
+                    logger.warning(f"Не удалось создать VTF карты '{map_id}' [{mat}]: {e}", exc_info=True)
+                    continue
+
+            extra = dict(cfg["extra_vmt"])
+            for k, v in spec.items():
+                if isinstance(k, str) and k.startswith("$"):
+                    extra[k] = str(v)
+            if derive:
+                extra.update(cfg.get("derive_extra_vmt", {}))
+                if cfg.get("derive_auto_normal") and not params_only:
+                    VPKService._ensure_derived_normal(
+                        base_image_path, vtf_output_path, mat, vmt_path,
+                        patched_cdmaterials_path, size, is_normal_map,
+                    )
+
+            VMTService.add_material_map_params(
+                str(vmt_path), patched_cdmaterials_path, map_key, cfg["path_param"], extra
+            )
+            logger.info(f"Карта '{map_id}' [{mat}] → {map_key}.vtf ({'derive' if derive else 'file'})")
+
+    @staticmethod
+    def _ensure_normal_with_envmask(
+        base_image_path: str,
+        mask_png: Path,
+        vtf_output_path: Path,
+        mat: str,
+        vmt_path: Path,
+        patched_cdmaterials_path: str,
+        size: Tuple[int, int],
+    ) -> bool:
+        """
+        Создаёт {mat}_normal.vtf, у которого RGB — нормаль из базы, а АЛЬФА —
+        маска отражения. Прописывает $bumpmap + $envmap + $normalmapalphaenvmapmask.
+
+        Так отражение по маске и эффекты с нормалью (rim/phong) уживаются: движок
+        берёт маску отражения из альфы нормали, а не из отдельного $envmapmask
+        (который при наличии $bumpmap игнорируется).
+        """
+        try:
+            norm_png = vtf_output_path / f"{mat}_normal.png"
+            TextureService.make_normal_with_alpha(
+                base_image_path, str(mask_png), str(norm_png), size)
+            # DXT5 — сохраняет альфу (маску). Не -normal: RGB уже нормаль.
+            VPKService._create_vtf(str(norm_png), str(vtf_output_path), "DXT5", [], {})
+            if norm_png.exists():
+                norm_png.unlink()
+            if not (vtf_output_path / f"{mat}_normal.vtf").exists():
+                return False
+            VMTService.update_vmt_bumpmap_path(
+                str(vmt_path), patched_cdmaterials_path, f"{mat}_normal")
+            VMTService.add_material_map_params(
+                str(vmt_path), patched_cdmaterials_path, None, None,
+                {"$envmap": "env_cubemap", "$normalmapalphaenvmapmask": "1"})
+            logger.info(f"[{mat}] отражение запечено в альфу нормали ($normalmapalphaenvmapmask)")
+            return True
+        except Exception as e:
+            logger.warning(f"[{mat}] не удалось запечь маску отражения в нормаль: {e}", exc_info=True)
+            return False
+
+    @staticmethod
+    def _ensure_derived_normal(
+        base_image_path: str,
+        vtf_output_path: Path,
+        texture_filename: str,
+        vmt_path: Path,
+        patched_cdmaterials_path: str,
+        size: Tuple[int, int],
+        is_normal_map: bool,
+    ) -> None:
+        """
+        Гарантирует наличие карты нормалей для phong (без неё блик не считается).
+
+        Если normal уже сгенерирован (галочка Normal Map) или файл уже есть —
+        ничего не делает. Иначе строит {texture}_normal.vtf из базовой текстуры
+        (VTFCmd -normal, формат DXT5) и прописывает $bumpmap в VMT.
+        """
+        normal_vtf = vtf_output_path / f"{texture_filename}_normal.vtf"
+        if is_normal_map or normal_vtf.exists():
+            return
+        try:
+            norm_png = vtf_output_path / f"{texture_filename}_normal.png"
+            VPKService._process_image(base_image_path, str(norm_png), size)
+            VPKService._create_vtf(str(norm_png), str(vtf_output_path), "DXT5", [], {"normal": True})
+            if norm_png.exists():
+                norm_png.unlink()
+            if normal_vtf.exists():
+                VMTService.update_vmt_bumpmap_path(
+                    str(vmt_path), patched_cdmaterials_path, f"{texture_filename}_normal"
+                )
+                logger.info(f"Авто-нормаль для phong создана: {normal_vtf.name}")
+        except Exception as e:
+            logger.warning(f"Не удалось создать авто-нормаль для phong: {e}", exc_info=True)
+
+    @staticmethod
+    def _file_content_hash(path: str) -> Optional[str]:
+        """
+        Быстрый хэш содержимого файла (для дедупликации одинаковых картинок).
+        Возвращает hex-строку MD5 или None при ошибке чтения.
+        Сравнение по содержимому ловит идентичные картинки даже из разных файлов.
+        """
+        import hashlib
+        try:
+            h = hashlib.md5()
+            with open(path, "rb") as f:
+                for chunk in iter(lambda: f.read(1 << 16), b""):
+                    h.update(chunk)
+            return h.hexdigest()
+        except OSError:
+            return None
+
+    @staticmethod
+    def _build_fixed_extra_textures(
+        weapon_key: str,
+        panel_extra_textures: Optional[dict],
+        ctx,
+        size: Tuple[int, int],
+        format_type: str,
+        flags: List[str],
+        vtf_options: dict,
+        misc_vpk: Optional[str] = None,
+        textures_vpk: Optional[str] = None,
+    ) -> set:
+        """
+        Записывает доп. текстуры предмета, заданные ФИКСИРОВАННЫМ путём
+        (вне QC/модели) — см. WEAPON_EXTRA_TEXTURES. Пример: HUD-вставки Dead Ringer.
+
+        Схема «фикс консоль» (как у $cdmaterials):
+          • VTF пишем под materials/console/<orig vtf>  — чтобы не клобберить глобально;
+          • игровой VMT берём по оригинальному пути (туда смотрит HUD) и кладём в мод,
+            пропатчив $basetexture → console/<orig basetexture>.
+
+        Возвращает множество обработанных имён — чтобы общий цикл panel_extra_textures
+        не записал их повторно по cdmaterials-пути.
+        """
+        handled: set = set()
+        if not panel_extra_textures:
+            return handled
+        from src.data.weapons import WEAPON_EXTRA_TEXTURES
+        cfg = WEAPON_EXTRA_TEXTURES.get(weapon_key, [])
+
+        # Кэш уже сконвертированных VTF по хэшу содержимого исходной картинки.
+        # Если в fg и bg (или любые два слота) загружена ОДНА И ТА ЖЕ картинка
+        # (по содержимому, даже из разных файлов) — конвертируем один раз,
+        # для остальных просто копируем готовый VTF. Конвертация GIF→VTF дорогая
+        # (извлечение кадров), так что это заметно ускоряет сборку.
+        _vtf_cache: dict = {}   # {img_hash: (built_vtf_path, fps)}
+
+        for ex in cfg:
+            name = ex["name"]
+            img = panel_extra_textures.get(name)
+            if not img or not os.path.isfile(img):
+                continue
+            try:
+                # VTF и VMT кладём по РЕАЛЬНОМУ игровому пути (без console-схемы):
+                # так VMT лежит в той же папке, что и VTF, и нет дублей vgui.
+                vtf_rel = ex["vpk"].replace("\\", "/")               # materials/vgui/.../x.vtf
+                base_no_mat = vtf_rel[len("materials/"):] if vtf_rel.startswith("materials/") else vtf_rel
+                base_path = os.path.splitext(base_no_mat)[0]         # vgui/.../pocket_watch_fg (для $basetexture)
+
+                # 1) VTF по реальному пути
+                target_dir = ctx.vpkroot_dir
+                for part in os.path.dirname(vtf_rel).split("/"):
+                    if part:
+                        target_dir = target_dir / part
+                ensure_directory_exists(target_dir)
+                stem = os.path.splitext(os.path.basename(vtf_rel))[0]
+                dest_vtf = target_dir / f"{stem}.vtf"
+                _flags, _merged = TextureService.resolve_vtf_flags_and_options(
+                    flags, vtf_options, drop_normal=True
+                )
+
+                _img_hash = VPKService._file_content_hash(img)
+                _cached = _vtf_cache.get(_img_hash) if _img_hash else None
+                if str(img).lower().endswith('.vtf'):
+                    # Пользователь загрузил готовый VTF — копируем как есть
+                    copy_file_safe(img, dest_vtf)
+                    _ex_fps = None
+                    logger.info(f"Фикс. доп. текстура: готовый VTF скопирован → {stem}.vtf")
+                elif _cached:
+                    # Та же картинка уже сконвертирована — переиспользуем готовый VTF
+                    _src_vtf, _ex_fps = _cached
+                    copy_file_safe(_src_vtf, dest_vtf)
+                    logger.info(
+                        f"Доп. текстура переиспользована (идентичная картинка): "
+                        f"{stem}.vtf ← {Path(_src_vtf).name}"
+                    )
+                elif TextureService.is_animated_image(img):
+                    # Анимированный GIF → многокадровый VTF (циферблат Dead Ringer
+                    # анимируется через AnimatedTexture-прокси в его игровом VMT).
+                    _ex_fps = TextureService.create_animated_vtf(
+                        img, str(dest_vtf), size, format_type, _flags, _merged
+                    )
+                    logger.info(f"Фикс. доп. текстура анимирована: {stem}.vtf @ {_ex_fps}fps")
+                    if _img_hash:
+                        _vtf_cache[_img_hash] = (dest_vtf, _ex_fps)
+                else:
+                    _ex_fps = None
+                    tmp_png = target_dir / f"{stem}.png"
+                    VPKService._process_image(img, str(tmp_png), size)
+                    VPKService._create_vtf(str(tmp_png), str(target_dir), format_type, _flags, _merged)
+                    if tmp_png.exists():
+                        tmp_png.unlink()
+                    if _img_hash:
+                        _vtf_cache[_img_hash] = (dest_vtf, _ex_fps)
+
+                # 2) VMT рядом с VTF ($basetexture → реальный путь)
+                VPKService._write_fixed_extra_vmt(ex, base_path, ctx, misc_vpk, textures_vpk)
+
+                # Игровой VMT fg/bg уже содержит AnimatedTexture-прокси, но если
+                # его не нашли (минимальный шаблон) — добавляем прокси для анимации.
+                if _ex_fps:
+                    _vmt_target = ctx.vpkroot_dir
+                    for _p in ex["vmt"].replace("\\", "/").split("/"):
+                        if _p:
+                            _vmt_target = _vmt_target / _p
+                    if _vmt_target.exists():
+                        VMTService.enable_animated_basetexture(str(_vmt_target), _ex_fps)
+
+                handled.add(name)
+                logger.info(f"Фикс. доп. текстура: {vtf_rel}; vmt={ex.get('vmt')}")
+            except Exception as exc:
+                logger.warning(f"Фикс. доп. текстура '{name}' — ошибка: {exc}", exc_info=True)
+        return handled
+
+    @staticmethod
+    def _write_fixed_extra_vmt(ex: dict, base_texture_path: str, ctx,
+                               misc_vpk: Optional[str], textures_vpk: Optional[str]) -> None:
+        """
+        Кладёт VMT фиксированной доп. текстуры В ТУ ЖЕ папку, что и её VTF
+        (реальный игровой путь, без console-схемы).
+
+        Берёт игровой VMT (если найден в VPK) и патчит $basetexture →
+        base_texture_path; если игрового нет — создаёт минимальный UnlitGeneric.
+        """
+        vmt_rel = ex.get("vmt")
+        if not vmt_rel:
+            return
+        vmt_rel = vmt_rel.replace("\\", "/")
+
+        # Игровой VMT ищем по тому же пути, что и в моде (реальный путь к материалу)
+        content = None
+        try:
+            import vpk as vpklib
+            for vpk_path in (misc_vpk, textures_vpk):
+                if not vpk_path or not os.path.exists(vpk_path):
+                    continue
+                try:
+                    pak = vpklib.open(vpk_path)
+                    content = pak[vmt_rel].read().decode("utf-8", errors="replace")
+                    break
+                except Exception:
+                    continue
+        except Exception as exc:
+            logger.debug(f"Не удалось прочитать игровой VMT {vmt_rel}: {exc}")
+
+        if content:
+            content = VMTService._set_vmt_param(content, "$basetexture", base_texture_path)
+        else:
+            content = (
+                '"UnlitGeneric"\n{\n'
+                f'\t"$basetexture" "{base_texture_path}"\n'
+                '\t"$translucent" "1"\n'
+                '\t"$vertexalpha" "1"\n}\n'
+            )
+
+        target = ctx.vpkroot_dir
+        for part in vmt_rel.split("/"):
+            if part:
+                target = target / part
+        ensure_directory_exists(target.parent)
+        with open(target, "w", encoding="utf-8") as f:
+            f.write(content)
+        logger.info(f"Фикс. доп. VMT записан: {vmt_rel} ($basetexture → {base_texture_path})")
+
+    @staticmethod
+    def _write_fixed_extra_files(weapon_key: str, ctx) -> None:
+        """
+        Пишет доп. статические файлы мода (HUD-скрипты .res, метаданные info.vdf
+        и т.п.) по их зашитому пути в корень VPK — см. WEAPON_EXTRA_FILES.
+
+        Содержимое фиксированное (из конфига). Пишется независимо от того,
+        загрузил ли пользователь HUD-текстуры: эти файлы активируют мод
+        (напр. кастомный циферблат Dead Ringer).
+        """
+        from src.data.weapons import WEAPON_EXTRA_FILES
+        files = WEAPON_EXTRA_FILES.get(weapon_key, [])
+        for f in files:
+            rel = f.get("path", "").replace("\\", "/")
+            content = f.get("content", "")
+            if not rel:
+                continue
+            try:
+                target = ctx.vpkroot_dir
+                for part in rel.split("/"):
+                    if part:
+                        target = target / part
+                ensure_directory_exists(target.parent)
+                with open(target, "w", encoding="utf-8") as out:
+                    out.write(content)
+                logger.info(f"Доп. файл мода записан: {rel}")
+            except Exception as exc:
+                logger.warning(f"Не удалось записать доп. файл '{rel}': {exc}", exc_info=True)
 
     @staticmethod
     def _extract_original_vmt(
@@ -361,7 +983,6 @@ class VPKService:
             tf2_misc_vpk,
             found_mdl_path,
             str(ctx.extract_dir),
-            str(VPKService._get_vpk_tool()),
         )
 
         mdl_file = next((f for f in extracted_files if f.endswith('.mdl')), None)
@@ -387,6 +1008,7 @@ class VPKService:
         extra_model_callback,
         language: str,
         emit_sub,
+        keep_user_materials: bool = False,
     ) -> None:
         """
         Применяет пользовательскую замену модели поверх декомпилированных SMD.
@@ -422,15 +1044,26 @@ class VPKService:
                         original_smd_path,
                         original_smd_path,  # Перезаписываем оригинальный файл под тем же именем
                         progress_cb=lambda pct: emit_sub(pct, "Replacing model..." if language == "en" else "Замена модели..."),
+                        keep_user_materials=keep_user_materials,
                     )
-                    logger.info(f"Модель успешно заменена: {original_smd_path}")
+                    logger.info(
+                        f"Модель успешно заменена: {original_smd_path} "
+                        f"(keep_user_materials={keep_user_materials})"
+                    )
                 else:
-                    logger.warning(f"Не найден reference SMD файл для {weapon_key} в {ctx.decompile_dir}")
+                    ctx.warn(
+                        "Замена модели не выполнена: не найден reference SMD "
+                        f"для {weapon_key}. В мод попадёт оригинальная геометрия."
+                    )
                     if ctx.decompile_dir.exists():
                         smd_files = [f for f in os.listdir(ctx.decompile_dir) if f.endswith('.smd')]
                         logger.debug(f"Доступные SMD файлы в директории: {smd_files}")
             except Exception as e:
                 logger.error(f"Ошибка при замене модели: {e}", exc_info=True)
+                ctx.warn(
+                    "Замена модели завершилась ошибкой — в мод попадёт "
+                    f"оригинальная модель. ({e})"
+                )
                 # Не прерываем сборку, просто продолжаем с оригинальной моделью (лучше так, чем упасть)
                     
         # === Замена дополнительных частей модели (shell, scope и т.д.) ===
@@ -464,7 +1097,163 @@ class VPKService:
                     except Exception as e:
                         logger.error(f"Ошибка при замене доп. части модели {extra_smd_name}: {e}", exc_info=True)
             else:
-                logger.debug(f"Нет callback для замены доп. частей модели, пропускаем")
+                logger.debug("Нет callback для замены доп. частей модели, пропускаем")
+
+    @staticmethod
+    def _build_extra_class_hat_models(
+        ctx,
+        hat_mdl_path: str,
+        built_mdl_path: Optional[str],
+        replace_model_smd_path: Optional[str],
+        keep_user_materials: bool,
+        tf2_misc_vpk: str,
+        studiomdl_exe: str,
+        crowbar_exe: str,
+        tf_dir: str,
+        language: str,
+        emit_sub,
+        target_mdl_paths: Optional[list] = None,
+    ) -> None:
+        """
+        Собирает модель для остальных классов мультиклассовой шапки при замене модели.
+
+        Основная сборка компилирует модель только одного класса. У мультиклассовых
+        шапок каждый класс — отдельная MDL со СВОИМ скелетом (bonemerge), поэтому
+        просто скопировать модель одного класса на путь другого нельзя (съедет). Для
+        каждого ОСТАЛЬНОГО класса декомпилируем его MDL, вставляем геометрию
+        пользователя (скелет берём класса), компилируем и кладём в VPK по его
+        $modelname.
+
+        Источник списка путей:
+          • target_mdl_paths — явные MDL-пути остальных классов (model_player_per_class
+            с произвольными путями; основной режим — выбор классов в UI);
+          • иначе — legacy %s-шаблон в hat_mdl_path, раскрытый по всем классам.
+
+        Ошибки одного класса не валят сборку — этот класс просто останется с
+        оригинальной игровой моделью.
+        """
+        if not (replace_model_smd_path and os.path.exists(replace_model_smd_path)):
+            return
+        use_explicit = bool(target_mdl_paths)
+        if not use_explicit and (not hat_mdl_path or "%s" not in hat_mdl_path):
+            return
+
+        import re as _re
+        from src.services.tf2_paths import build_hat_mdl_candidates
+        from src.services.decompile_cache import (
+            get_cached_decompile, restore_from_cache, save_to_cache,
+        )
+
+        _cls_pat = _re.compile(
+            r'_(heavy|scout|soldier|pyro|demoman|engineer|medic|sniper|spy)\.mdl$',
+            _re.IGNORECASE,
+        )
+
+        def _cls_of(p: str) -> Optional[str]:
+            m = _cls_pat.search((p or '').replace('\\', '/').lower())
+            return m.group(1) if m else None
+
+        to_build: list = []
+        seen = set()
+        if use_explicit:
+            # Явные пути остальных классов (основной класс уже собран primary-сборкой).
+            # Пути из model_player_per_class авторитетны — берём как есть, без
+            # суффиксной экспансии (она могла бы подставить модель другого класса).
+            for cand in target_mdl_paths:
+                norm = (cand or '').replace('\\', '/').lower()
+                if not norm or norm in seen:
+                    continue
+                try:
+                    if TF2VPKExtractService.check_mdl_exists(tf2_misc_vpk, norm):
+                        to_build.append(norm)
+                        seen.add(norm)
+                    else:
+                        logger.warning(f"[HAT MULTI] MDL класса не найден в игре, пропуск: {norm}")
+                except Exception:
+                    continue
+        else:
+            # Legacy %s: один существующий MDL на класс (исключая уже собранный).
+            built_cls = _cls_of(built_mdl_path or '')
+            seen_cls = {built_cls} if built_cls else set()
+            for cand in build_hat_mdl_candidates(hat_mdl_path):
+                cls = _cls_of(cand)
+                if not cls or cls in seen_cls:
+                    continue
+                try:
+                    if TF2VPKExtractService.check_mdl_exists(tf2_misc_vpk, cand):
+                        to_build.append(cand)
+                        seen_cls.add(cls)
+                except Exception:
+                    continue
+
+        if not to_build:
+            return
+        logger.info(
+            f"[HAT MULTI] доп. классы для замены модели: "
+            f"{[(_cls_of(p) or Path(p).stem) for p in to_build]}"
+        )
+
+        for mdl_rel in to_build:
+            cls = _cls_of(mdl_rel)
+            wk = Path(mdl_rel).stem
+            try:
+                _lbl = cls or wk
+                emit_sub(-1, f"Class model: {_lbl}..." if language == "en"
+                         else f"Модель класса: {_lbl}...")
+                cls_root = ctx.temp_dir / f"hatcls_{wk}"
+                extract_d = cls_root / "extract"
+                decomp_d = cls_root / "decompile"
+                comp_d = cls_root / "compile"
+                for _d in (extract_d, decomp_d, comp_d):
+                    ensure_directory_exists(_d)
+
+                # QC: из кэша декомпила или свежая декомпиляция.
+                cached = get_cached_decompile(wk, tf2_misc_vpk, mdl_rel)
+                if cached:
+                    qc_p = restore_from_cache(cached, str(decomp_d))
+                else:
+                    extracted = TF2VPKExtractService.extract_file_set(
+                        tf2_misc_vpk, mdl_rel, str(extract_d)
+                    )
+                    mdl_file = next((f for f in extracted if f.endswith('.mdl')), None)
+                    if not mdl_file:
+                        logger.warning(f"[HAT MULTI] {cls}: MDL не извлёкся")
+                        continue
+                    qc_p = ModelBuildService.decompile(mdl_file, str(decomp_d), crowbar_exe)
+                    ModelBuildService.remove_lod_files(str(decomp_d))
+                    save_to_cache(wk, tf2_misc_vpk, mdl_rel, str(decomp_d))
+
+                if not qc_p or not os.path.exists(qc_p):
+                    logger.warning(f"[HAT MULTI] {cls}: QC не найден")
+                    continue
+
+                # Вставляем геометрию пользователя в reference SMD ЭТОГО класса
+                # (скелет/кости — класса, иначе bonemerge съедет).
+                ref_smd = VPKService._find_decompiled_reference_smd(qc_p, wk, decomp_d)
+                if not ref_smd:
+                    logger.warning(f"[HAT MULTI] {cls}: reference SMD не найден — пропуск")
+                    continue
+                SMDService.replace_model_sections(
+                    replace_model_smd_path, ref_smd, ref_smd,
+                    keep_user_materials=keep_user_materials,
+                )
+
+                # Патчим cdmaterials под console\ (как основная модель) — чтобы
+                # модель класса нашла нашу текстуру по тому же пути.
+                _cdmat = ModelBuildService.extract_cdmaterials_path_from_qc(qc_p)
+                ModelBuildService.patch_qc_file(qc_p, wk, _cdmat)
+
+                ModelBuildService.compile(qc_p, str(comp_d), studiomdl_exe, tf_dir)
+
+                # Копируем скомпилированные файлы в VPK по $modelname этого класса.
+                _sub = type('SubCtx', (), {'compile_dir': comp_d, 'vpkroot_dir': ctx.vpkroot_dir})()
+                VPKService._copy_compiled_models_to_vpkroot(_sub, qc_p)
+                logger.info(f"[HAT MULTI] модель класса {cls} собрана и добавлена в мод")
+            except Exception as exc:
+                logger.warning(
+                    f"[HAT MULTI] класс {cls}: ошибка сборки модели — класс останется "
+                    f"с оригинальной моделью: {exc}", exc_info=True
+                )
 
     @staticmethod
     def _copy_precompiled_model(
@@ -661,37 +1450,51 @@ class VPKService:
 
     @staticmethod
     def build_with_progress(
-        image_path: str,
-        mode: str,
-        filename: str,
-        size: Tuple[int, int],
-        format_type: str = "DXT1",
-        flags: List[str] = None,
-        vtf_options: dict = None,
-        tf2_root_dir: str = "",
-        export_folder: str = "export",
-        keep_temp_on_error: bool = False,
-        debug_mode: bool = False,
-        replace_model_enabled: bool = False,
-        model_ready_path: Optional[str] = None,
-        draw_uv_layout: bool = False,
-        replace_model_path: str = None,
+        request,
+        *,
         model_file_callback: Optional[Callable[[], Optional[str]]] = None,
         extra_texture_callback: Optional[Callable[[str, str], Optional[str]]] = None,
         extra_model_callback: Optional[Callable[[str, str], Optional[str]]] = None,
         texture_mismatch_callback: Optional[Callable[[str], bool]] = None,
-        language: str = "en",
-        custom_vtf_path: str = None,
-        blu_mode: str = "none",
-        blu_image_path: Optional[str] = None,
-        custom_vpk_source_path: Optional[str] = None,
-        hat_mdl_path: Optional[str] = None,
-        hat_apply_game_paints: bool = True,
-        panel_extra_textures: Optional[dict] = None,
         progress_callback: Optional[Callable[[int, str], None]] = None,
         sub_progress_callback: Optional[Callable[[int, str], None]] = None,
-        cancel_callback: Optional[Callable[[], bool]] = None
+        cancel_callback: Optional[Callable[[], bool]] = None,
     ) -> Tuple[bool, str, bool]:
+        # Распаковываем BuildRequest в локальные имена — тело ниже не меняется.
+        r = request
+        image_path = r.image_path
+        mode = r.mode
+        filename = r.filename
+        size = r.size
+        format_type = r.format_type
+        flags = r.flags or []
+        vtf_options = r.vtf_options or {}
+        tf2_root_dir = r.tf2_root_dir
+        export_folder = r.export_folder
+        keep_temp_on_error = r.keep_temp_on_error
+        debug_mode = r.debug_mode
+        replace_model_enabled = r.replace_model_enabled
+        model_ready_path = r.model_ready_path
+        draw_uv_layout = r.draw_uv_layout
+        replace_model_path = r.replace_model_path
+        language = r.language
+        custom_vtf_path = r.custom_vtf_path
+        blu_mode = r.blu_mode
+        blu_image_path = r.blu_image_path
+        custom_vpk_source_path = r.custom_vpk_source_path
+        hat_mdl_path = r.hat_mdl_path
+        hat_apply_game_paints = r.hat_apply_game_paints
+        hat_class_models = r.hat_class_models
+        panel_extra_textures = r.panel_extra_textures or {}
+        material_maps = r.material_maps or {}
+        material_settings = r.material_settings or {}
+        skin_build_data = r.skin_build_data
+        replace_keep_materials = r.replace_keep_materials
+        custom_qc_text = r.custom_qc_text
+        isolate_shoulders = r.isolate_shoulders
+        panel_blu_textures = r.panel_blu_textures
+        logger.info(f"[BUILD] режим={r.mode!r}, isolate_shoulders={isolate_shoulders}")
+
         from src.data.translations import TRANSLATIONS
         t = TRANSLATIONS.get(language, TRANSLATIONS['en'])
 
@@ -770,46 +1573,27 @@ class VPKService:
                 sub_progress_callback=emit_sub,
                 hat_mdl_path=hat_mdl_path,
                 hat_apply_game_paints=hat_apply_game_paints,
+                hat_class_models=hat_class_models,
                 panel_extra_textures=panel_extra_textures,
+                material_maps=material_maps,
+                material_settings=material_settings,
+                skin_build_data=skin_build_data,
+                replace_keep_materials=replace_keep_materials,
+                custom_qc_text=custom_qc_text,
+                isolate_shoulders=isolate_shoulders,
+                panel_blu_textures=panel_blu_textures,
+                progress_callback=progress_callback,
+                cancel_callback=cancel_callback,
             )
 
+            # Прогресс эмитится самим build_vpk на реальных границах стадий
+            # (декомпиляция / текстуры / компиляция / упаковка) — без
+            # потока-имитатора с фиксированными процентами.
             if is_special_mode:
                 emit_progress(20, t.get('build_processing', 'Processing texture...'))
-                success, message = VPKService.build_vpk(**build_kwargs)
-                if not is_cancelled():
-                    emit_progress(60, t.get('build_packing', 'Creating VPK file...'))
             else:
                 emit_progress(10, t.get('build_extracting', 'Extracting model...'))
-
-                build_complete = threading.Event()
-                build_result: List[Optional[object]] = [None, None]
-
-                def update_progress() -> None:
-                    stages = [
-                        (25, t.get('build_decompiling', 'Decompiling model...')),
-                        (40, t.get('build_processing', 'Processing texture...')),
-                        (60, t.get('build_compiling', 'Compiling model...')),
-                        (80, t.get('build_packing', 'Creating VPK file...')),
-                    ]
-                    for progress, status in stages:
-                        if build_complete.is_set():
-                            break
-                        time.sleep(0.5)
-                        if not is_cancelled():
-                            emit_progress(progress, status)
-
-                progress_thread = threading.Thread(target=update_progress, daemon=True)
-                progress_thread.start()
-
-                try:
-                    success, message = VPKService.build_vpk(**build_kwargs)
-                    build_result[0] = success
-                    build_result[1] = message
-                finally:
-                    build_complete.set()
-                    progress_thread.join(timeout=1.0)
-
-                success, message = build_result[0], build_result[1]
+            success, message = VPKService.build_vpk(**build_kwargs)
 
             if is_cancelled():
                 return False, t.get('build_cancelled', 'Build cancelled by user'), True
@@ -826,7 +1610,178 @@ class VPKService:
             logger.critical(f"Критическая ошибка при сборке: {error_msg}", exc_info=True)
             emit_progress(0, t.get('build_critical_error', 'Critical error'))
             return False, error_msg, False
-    
+
+    @staticmethod
+    def _ready_model_texture_mismatch(
+        model_ready_path: Optional[str],
+        qc_path: str,
+        weapon_key: str,
+        decompile_dir: str,
+        language: str,
+    ) -> Optional[str]:
+        """
+        Режим «готовая модель»: возвращает текст предупреждения, если материалы
+        пользовательского SMD не совпадают с оригиналом, иначе None.
+        Чистая проверка (только сравнение + лог) — решение продолжать/отменить
+        принимает вызывающий код через texture_mismatch_callback.
+        """
+        if not (model_ready_path and os.path.exists(model_ready_path)
+                and model_ready_path.lower().endswith('.smd')):
+            return None
+        try:
+            user_materials = SMDService.extract_unique_materials(model_ready_path)
+            if not user_materials:
+                return None
+            original_smd = VPKService._find_decompiled_reference_smd(
+                qc_path, weapon_key, decompile_dir)
+            if not original_smd:
+                return None
+            original_materials = SMDService.extract_unique_materials(original_smd)
+            if not original_materials:
+                return None
+            if user_materials == original_materials:
+                logger.info(f"[MODEL READY] Текстуры SMD совпадают с оригиналом: {user_materials}")
+                return None
+
+            missing_in_user = original_materials - user_materials
+            extra_in_user = user_materials - original_materials
+            lines = []
+            if language == "ru":
+                lines.append("Текстуры в вашем SMD файле не совпадают с оригинальной моделью.\n")
+                if missing_in_user:
+                    lines.append("Отсутствуют (есть в оригинале, нет у вас):")
+                    lines += [f"  • {m}" for m in sorted(missing_in_user)]
+                if extra_in_user:
+                    lines.append("Лишние (есть у вас, нет в оригинале):")
+                    lines += [f"  • {m}" for m in sorted(extra_in_user)]
+                lines.append("\nПродолжить сборку с этими текстурами?")
+            else:
+                lines.append("Textures in your SMD file do not match the original model.\n")
+                if missing_in_user:
+                    lines.append("Missing (in original, not in yours):")
+                    lines += [f"  • {m}" for m in sorted(missing_in_user)]
+                if extra_in_user:
+                    lines.append("Extra (in yours, not in original):")
+                    lines += [f"  • {m}" for m in sorted(extra_in_user)]
+                lines.append("\nContinue building with these textures?")
+
+            warning_msg = "\n".join(lines)
+            logger.warning(f"[MODEL READY] Несовпадение текстур SMD:\n{warning_msg}")
+            return warning_msg
+        except Exception as exc:
+            logger.warning(f"[MODEL READY] Ошибка проверки текстур SMD: {exc}", exc_info=True)
+            return None
+
+    @staticmethod
+    def _write_hand_mirror_vmts(ctx, mode: str, weapon_key: str,
+                                original_cdmaterials_path: Optional[str],
+                                vtf_output_path) -> None:
+        """
+        Для рук и MIRROR_VMT_WEAPON_KEYS дублирует VMT по ОРИГИНАЛЬНОМУ пути из
+        $cdmaterials. Причина: эти модели ссылаются на оригинальный путь
+        (materials/models/player/spy/...), а не на пропатченный console\\-путь,
+        иначе мод игнорируется. VTF не дублируются — зеркальный VMT указывает на
+        те же файлы (по console\\-пути внутри мод-VPK).
+        """
+        from src.data.player_hands import HAND_MODE_KEYS as _HAND_MODE_KEYS
+        from src.data.weapons import MIRROR_VMT_WEAPON_KEYS as _MIRROR_KEYS
+        if not ((mode in _HAND_MODE_KEYS or weapon_key in _MIRROR_KEYS)
+                and original_cdmaterials_path):
+            return
+        orig_mat_rel = "materials/" + original_cdmaterials_path.replace('\\', '/').strip().rstrip('/')
+        orig_vtf_dir = ctx.vpkroot_dir
+        for _part in orig_mat_rel.rstrip('/').split('/'):
+            orig_vtf_dir = orig_vtf_dir / _part
+        if orig_vtf_dir == vtf_output_path:
+            logger.debug("Оригинальный и пропатченный пути совпадают, зеркало не нужно")
+            return
+        ensure_directory_exists(orig_vtf_dir)
+        for _vmt_src in vtf_output_path.glob("*.vmt"):
+            _vmt_mirror = orig_vtf_dir / _vmt_src.name
+            if not _vmt_mirror.exists():
+                copy_file_safe(_vmt_src, _vmt_mirror)
+                logger.info(f"Зеркальный VMT по оригинальному пути: {_vmt_mirror.name}")
+
+    @staticmethod
+    def _purge_dir_contents(directory: Path, label: str) -> None:
+        """
+        Удаляет всё содержимое директории (файлы и поддиректории), не трогая саму
+        папку. Для очистки временных папок после сборки. Ошибки не фатальны — лог.
+        """
+        if not directory.exists():
+            return
+        try:
+            for entry in directory.iterdir():
+                try:
+                    if entry.is_file() or entry.is_symlink():
+                        entry.unlink()
+                    elif entry.is_dir():
+                        shutil.rmtree(entry)
+                except Exception as e:
+                    logger.warning(f"Не удалось удалить {entry}: {e}", exc_info=True)
+            logger.debug(f"Очищена папка {label}")
+        except Exception as e:
+            logger.warning(f"Не удалось очистить папку {label}: {e}", exc_info=True)
+
+    @staticmethod
+    def _finalize_build_success(ctx, vpk_path: str, vmt_to_delete, language: str,
+                                debug_mode: bool, t: dict) -> str:
+        """
+        Постобработка успешной сборки: удаляет отредактированный пользователем VMT,
+        чистит временные папки редактора, удаляет temp-директорию сборки и собирает
+        итоговое сообщение (с накопленными предупреждениями ctx.warnings).
+        """
+        if vmt_to_delete:
+            from src.services.edited_vmt_service import EditedVMTService
+            if EditedVMTService.delete_edited_vmt(vmt_to_delete):
+                logger.info(f"Удален отредактированный VMT файл: {vmt_to_delete}")
+
+        # Чистим временные папки редактора VMT (мусор от достанных из игры VMT).
+        VPKService._purge_dir_contents(DirectoryPaths.TEMP_VMT_EXTRACT_DIR, "temp_vmt_extract")
+        VPKService._purge_dir_contents(Path("tools/backupVMT"), "backupVMT")
+
+        ctx.cleanup(on_error=False, keep_on_error=False, debug_mode=debug_mode)
+
+        success_message = t.get('vpk_success', 'VPK successfully created: {path}').format(path=vpk_path)
+        # Показываем накопленные предупреждения (напр. не найденную игровую
+        # текстуру) — иначе пользователь узнает о фиолете только в игре.
+        if ctx.warnings:
+            _hdr = ("\n\nВнимание:" if language == "ru" else "\n\nWarnings:")
+            success_message += _hdr + "".join(f"\n- {w}" for w in ctx.warnings)
+        return success_message
+
+    @staticmethod
+    def _resolve_weapon_key(mode: str, hat_mdl_path: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
+        """
+        Определяет weapon_key (ключ модели/файлов) по режиму сборки.
+
+        Для оружия — суффикс mode (scout_c_scattergun → c_scattergun); для рук —
+        ключ arm-модели; для тела/масок шпиона — стем MDL; для шапки — стем
+        hat_mdl_path.
+
+        Returns:
+            (weapon_key, None) при успехе либо (None, error_message), если для
+            режима рук не задана arm-модель.
+        """
+        if mode == "hat" and hat_mdl_path:
+            weapon_key = Path(hat_mdl_path).stem
+            logger.info(f"[HAT] hat_mdl_path={hat_mdl_path!r}  →  weapon_key={weapon_key!r}")
+            return weapon_key, None
+        if mode in HAND_MODE_KEYS:
+            from src.data.player_hands import HAND_MODES as _HAND_MODES
+            arm_key = _HAND_MODES.get(mode, {}).get('arm_model', '')
+            if not arm_key:
+                return None, f"No arm_model defined for hand mode: {mode}"
+            return arm_key, None
+        if mode in PLAYER_BODY_MODE_KEYS:
+            from src.data.player_characters import PLAYER_CHARACTERS as _PC
+            mdl_path = _PC.get(mode, {}).get('mdl_path', '')
+            return (Path(mdl_path).stem if mdl_path else mode), None
+        if mode == SPY_MASK_MODE_KEY:
+            # Маски маскировки: тот же MDL, что и для скина шпиона
+            return Path(SPY_MDL_PATH).stem, None
+        return (mode.split('_', 1)[1] if '_' in mode else mode), None
+
     @staticmethod
     def build_vpk(
         image_path: str,
@@ -851,17 +1806,27 @@ class VPKService:
         texture_mismatch_callback=None,  # Колбэк для предупреждения о несовпадении текстур: callback(msg) -> bool
         hat_mdl_path: Optional[str] = None,  # Прямой MDL-путь для шапок (обходит WEAPON_MDL_PATHS)
         hat_apply_game_paints: bool = True,  # True = сохранить краски игры, False = убрать прокси красок из VMT
+        hat_class_models: Optional[dict] = None,  # мультиклассовая шапка: {класс: mdl} для выбранных классов
         language: str = "en",  # Язык для ошибок
         custom_vtf_path: str = None,  # Если юзер сам сделал VTF - используем его вместо генерации из картинки
         blu_mode: str = "none",       # BLU-командная текстура: 'none' | 'same' | 'upload' | 'hue_shift'
         blu_image_path: str = None,   # Путь к BLU-изображению (для 'upload' / 'hue_shift')
         sub_progress_callback: Optional[Callable[[int, str], None]] = None,
+        progress_callback: Optional[Callable[[int, str], None]] = None,  # Главный прогресс (проценты стадий)
+        cancel_callback: Optional[Callable[[], bool]] = None,  # True = пользователь запросил отмену
         panel_extra_textures: Optional[dict] = None,  # {mat_name: img_path} из 2D панели
+        material_maps: Optional[dict] = None,  # файловые карты материала (detail/selfillum/phongexp)
+        material_settings: Optional[dict] = None,  # пер-текстурные настройки {material: {size,format,flags,options}}
+        skin_build_data: Optional[dict] = None,  # стили кастомной модели → $texturegroup + варианты
+        replace_keep_materials: bool = False,  # сохранить материалы пользовательской модели (многотекстурная/«готовая»)
+        custom_qc_text: Optional[str] = None,  # отредактированный пользователем QC («готовая» модель)
+        isolate_shoulders: bool = False,  # руки: изолировать плечи/тело вьюмодели (переименование материала)
+        panel_blu_textures: Optional[dict] = None,  # {mat: path} BLU-слотов (руки: промоушен нейтральных в командные)
     ) -> Tuple[bool, str]:
         """
-        Главная функция - делает из картинки VPK файл.
-        Если что-то пойдет не так - вернет False и описание проблемы.
-        Вся эта хуйня с моделями, текстурами и VPK - тут.
+        Главная функция: делает из картинки VPK файл.
+        Возвращает (success, message); при ошибке message содержит описание.
+        Здесь весь конвейер: модель → текстуры → компиляция → упаковка.
         """
         from src.data.translations import TRANSLATIONS
         t = TRANSLATIONS.get(language, TRANSLATIONS['en'])
@@ -869,6 +1834,20 @@ class VPKService:
         def emit_sub(pct: int, label: str) -> None:
             if sub_progress_callback:
                 sub_progress_callback(pct, label)
+
+        def emit_progress(value: int, message: str) -> None:
+            if progress_callback:
+                progress_callback(value, message)
+
+        def is_cancelled() -> bool:
+            return bool(cancel_callback and cancel_callback())
+
+        def cancelled_result(ctx) -> Tuple[bool, str]:
+            """Очистка ctx и стандартный ответ при отмене пользователем."""
+            if ctx is not None:
+                ctx.cleanup(on_error=False, keep_on_error=False, debug_mode=debug_mode)
+            logger.info("Сборка отменена пользователем")
+            return False, t.get('build_cancelled', 'Build cancelled by user')
 
         ctx = None
         try:
@@ -882,29 +1861,12 @@ class VPKService:
             if flags is None:
                 flags = []
             
-            # Для режимов рук weapon_key — это ключ arm-модели (например "c_scout_arms"),
-            # а не суффикс mode-строки (который дал бы бессмысленное "hands").
-            # Для режимов скина персонажа weapon_key — это ключ MDL модели (например "player_scout").
-            if mode == "hat" and hat_mdl_path:
-                # Шапка: weapon_key берём из стема MDL-пути
-                weapon_key = Path(hat_mdl_path).stem
-                logger.info(f"[HAT] hat_mdl_path={hat_mdl_path!r}  →  weapon_key={weapon_key!r}")
-            elif mode in HAND_MODE_KEYS:
-                from src.data.player_hands import HAND_MODES as _HAND_MODES
-                _arm_key = _HAND_MODES.get(mode, {}).get('arm_model', '')
-                if not _arm_key:
-                    return False, f"No arm_model defined for hand mode: {mode}"
-                weapon_key = _arm_key
-            elif mode in PLAYER_BODY_MODE_KEYS:
-                from src.data.player_characters import PLAYER_CHARACTERS as _PC
-                _mdl_path = _PC.get(mode, {}).get('mdl_path', '')
-                weapon_key = Path(_mdl_path).stem if _mdl_path else mode
-            elif mode == SPY_MASK_MODE_KEY:
-                # Маски маскировки: используем тот же MDL что и для скина шпиона
-                weapon_key = Path(SPY_MDL_PATH).stem  # = 'spy'
-            else:
-                weapon_key = mode.split('_', 1)[1] if '_' in mode else mode
-            
+            # weapon_key — ключ модели/файлов: для рук это arm-модель, для тела/
+            # масок шпиона — стем MDL, для шапки — стем hat_mdl_path, иначе суффикс mode.
+            weapon_key, _wk_error = VPKService._resolve_weapon_key(mode, hat_mdl_path)
+            if _wk_error:
+                return False, _wk_error
+
             # Запоминаем какой VMT надо будет удалить после сборки (если юзер его редактировал через редактор)
             vmt_to_delete = None
             
@@ -954,7 +1916,7 @@ class VPKService:
                 if mode in HAND_MODE_KEYS:
                     replace_model_enabled = False
 
-                # Без пути к TF2 вообще хуй че получится - нужны VPK файлы игры
+                # Без пути к TF2 продолжать нельзя — нужны VPK файлы игры
                 if not tf2_root_dir:
                     logger.error("Путь к TF2 не указан")
                     ctx.cleanup(on_error=True, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
@@ -974,7 +1936,7 @@ class VPKService:
                 
                 # ── Строим список путей для поиска MDL ───────────────────────────── #
                 paths_to_try, _mdl_path_error = VPKService._build_mdl_search_paths(
-                    mode, weapon_key, hat_mdl_path, t
+                    mode, weapon_key, hat_mdl_path, t, tf2_root_dir
                 )
                 if _mdl_path_error:
                     ctx.cleanup(on_error=True, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
@@ -995,6 +1957,10 @@ class VPKService:
                     if mode == "hat" and hat_mdl_path and "%s" in hat_mdl_path:
                         weapon_key = Path(found_mdl_path).stem
                         logger.info(f"Hat weapon_key обновлён: {weapon_key}")
+
+                    if is_cancelled():
+                        return cancelled_result(ctx)
+                    emit_progress(25, t.get('build_decompiling', 'Decompiling model...'))
 
                     # === Кэш декомпила — проверяем ДО extraction ===
                     # Ключ: weapon_key + vpk_path + mdl_rel_path + mtime(vpk).
@@ -1017,6 +1983,10 @@ class VPKService:
                     # Сохраняем в кэш после очистки — следующая сборка пропустит extraction + decompile
                     if not cached_decompile:
                         save_to_cache(weapon_key, tf2_misc_vpk, found_mdl_path, ctx.decompile_dir)
+
+                    if is_cancelled():
+                        return cancelled_result(ctx)
+                    emit_progress(40, t.get('build_processing', 'Processing texture...'))
                     
                     # Заменяем модель, если включен режим замены
                     # Пропускаем если model_ready_path задан — пользователь уже указал готовый файл
@@ -1029,6 +1999,7 @@ class VPKService:
                     VPKService._apply_model_replacement(
                         ctx, qc_path, weapon_key, replace_model_smd_path,
                         extra_model_callback, language, emit_sub,
+                        keep_user_materials=replace_keep_materials,
                     )
                     
                     # Извлекаем путь из $cdmaterials в QC файле (до патчинга, потому что потом мы его изменим)
@@ -1069,64 +2040,242 @@ class VPKService:
                     tg_structure = ModelBuildService.extract_texturegroup_structure(qc_path)
                     blu_row = tg_structure.get('blu_row', [])
                     extra_materials = tg_structure.get('extra_materials', [])
+                    # Настоящая ли команда вторая строка (c_xxx_blue), а не вариант
+                    # (австралий/gold/festive). У вариант-онли оружия команды нет —
+                    # значит {texture}_blue не нужен.
+                    _blu_is_team = bool(tg_structure.get('blu_is_team', False))
+
+                    # Оружие с одной общей текстурой (напр. часы шпиона) — BLU не нужен.
+                    # Иначе в мод попадёт лишняя _blue текстура.
+                    from src.data.weapons import NO_BLU_WEAPON_KEYS
+                    if weapon_key in NO_BLU_WEAPON_KEYS:
+                        if blu_row:
+                            logger.info(f"[{weapon_key}] BLU-row подавлен (одиночная текстура)")
+                        blu_row = []
 
                     # ── Для режимов рук: фильтруем $texturegroup до актуальных текстур рук ─────────
                     # Проблема: QC руки инженера (c_engineer_arms) в column 0 содержит "engineer_red"
-                    # (текстуру ТЕЛА), а не текстуру руки. Аналогично у медика — "medic_red".
-                    # Без фильтрации пользовательское изображение заменяет всё тело персонажа,
-                    # а не только руки, потому что именно column 0 получает изображение пользователя.
-                    #
-                    # Решение: для hand-режимов сравниваем текстуры из QC со списком рук
-                    # из player_hands.py и оставляем только совпадающие (+ их BLU-варианты).
+                    # (текстуру ТЕЛА), а не текстуру руки — без фильтрации картинка
+                    # пользователя заменила бы всё тело персонажа.
+                    _orig_main_pre_restrict = texture_filename  # col0 (может быть плечи)
                     if mode in HAND_MODE_KEYS:
                         from src.data.player_hands import get_hand_textures as _ght_hands
+                        from src.services.qc_skin_parser import restrict_to_materials
                         _h_list = _ght_hands(mode)  # [(folder, vtf_name), ...]
-                        _h_names_lc = {n.lower() for _, n in _h_list}
 
-                        _red_row_full = tg_structure.get('red_row', [])
-                        _blu_row_full = tg_structure.get('blu_row', [])
-
-                        # Позиции в red_row, где стоят настоящие текстуры рук
-                        _hand_idx = [i for i, t in enumerate(_red_row_full)
-                                     if t.lower() in _h_names_lc]
-
-                        # Переопределяем texture_filename если column 0 — текстура тела
-                        if texture_filename.lower() not in _h_names_lc:
-                            if _hand_idx:
-                                texture_filename = _red_row_full[_hand_idx[0]]
-                            elif _h_list:
-                                texture_filename = _h_list[0][1]
-                            logger.info(
-                                f"[HANDS] texture_filename → {texture_filename!r} "
-                                f"(body texture excluded from mod)"
-                            )
-
-                        # blu_row: BLU-варианты строго на позициях hand-текстур в red_row.
-                        # Если BLU-текстура на этой позиции совпадает с RED — это нейтральная
-                        # (общая) текстура; она будет создана через путь extra_materials/main, не BLU.
-                        # Важно: вычисляем РАНЬШЕ extra_materials, чтобы избежать дублирования.
-                        _filtered_blu: list = []
-                        for _hi in _hand_idx:
-                            if _hi < len(_blu_row_full):
-                                _b = _blu_row_full[_hi]
-                                _r = _red_row_full[_hi]
-                                if _b.lower() != _r.lower():
-                                    _filtered_blu.append(_b)
-                        blu_row = _filtered_blu
-                        _filtered_blu_lc = {t.lower() for t in _filtered_blu}
-
-                        # extra_materials: hand-текстуры из red_row, кроме основной
-                        # и кроме тех, что уже попали в blu_row (иначе создадутся дважды).
-                        extra_materials = [
-                            _red_row_full[i] for i in _hand_idx
-                            if _red_row_full[i].lower() != texture_filename.lower()
-                            and _red_row_full[i].lower() not in _filtered_blu_lc
-                        ]
-
+                        texture_filename, extra_materials, blu_row = restrict_to_materials(
+                            main_texture=texture_filename,
+                            red_row=tg_structure.get('red_row', []),
+                            blu_row=tg_structure.get('blu_row', []),
+                            allowed_names=[n for _, n in _h_list],
+                        )
                         logger.info(
                             f"[HANDS] texture_filename={texture_filename!r}, "
                             f"extra_materials={extra_materials}, blu_row={blu_row}"
                         )
+
+                    # ── Изоляция плеч вьюмодели (опционально) ────────────────────
+                    # Материал плеч/тела arms-модели общий с мировым персонажем.
+                    # Переименовываем его на уникальный (engineer_red → vm_engineer_red)
+                    # в $texturegroup ДО компиляции: перекомпилированная модель станет
+                    # ссылаться на новый материал, а мир останется на старом. Позже
+                    # запишем переименованный материал отдельным блоком.
+                    _shoulder_iso = []   # [(new_name, orig_name, source_path|None)]
+                    if mode in HAND_MODE_KEYS:
+                        from src.services.qc_skin_parser import detect_shoulder_materials
+                        from src.data.material_filter import is_editable_material as _is_edit_sh
+                        _whitelist = [n for _, n in _ght_hands(mode)]
+                        # Материалы РЕАЛЬНОГО меша (из reference SMD), а не полная
+                        # skin-таблица red_row (там варианты/ганслингер/blue).
+                        _ref_smd = VPKService._find_decompiled_reference_smd(
+                            qc_path, weapon_key, ctx.decompile_dir
+                        )
+                        _mesh_mats = SMDService.ordered_unique_materials(_ref_smd) if _ref_smd else []
+                        _shoulders = detect_shoulder_materials(
+                            _mesh_mats or tg_structure.get('red_row', []), _whitelist
+                        )
+                        _shoulders = [s for s in _shoulders if _is_edit_sh(s)]
+
+                        # Источник текстуры каждого плеча: карточка из panel_extra
+                        # ИЛИ image_path (если плечи были col0/«главной» — тогда их
+                        # текстура ушла в from_path и была выкинута из panel_extra).
+                        _pet = panel_extra_textures or {}
+                        def _shoulder_src(s):
+                            v = _pet.get(s)
+                            if not v:
+                                _sl = s.lower()
+                                v = next((vv for kk, vv in _pet.items() if kk.lower() == _sl), None)
+                            if v and os.path.isfile(v):
+                                return v
+                            if (s.lower() == str(_orig_main_pre_restrict).lower()
+                                    and image_path and image_path != EXTRA_TEX_USE_GAME_ORIGINAL
+                                    and os.path.isfile(str(image_path))):
+                                return image_path
+                            return None
+                        _srcs = {s: _shoulder_src(s) for s in _shoulders}
+                        _has_user_shoulder = any(_srcs.values())
+                        _do_iso = bool(_shoulders) and (isolate_shoulders or _has_user_shoulder)
+                        logger.info(
+                            f"[SHOULDER ISO] флаг={isolate_shoulders}, плечи={_shoulders}, "
+                            f"источники={ {s: bool(p) for s, p in _srcs.items()} }, изолируем={_do_iso}"
+                        )
+                        if not _do_iso:
+                            _shoulders = []
+
+                        # ── Команд-промоушен нейтральных материалов (через RED/BLU
+                        # переключатель = групповая логика): синие переопределения
+                        # из skin_build_data → командные варианты. ──
+                        _promo = {}            # {mat_lower: variant_name}
+                        _variant_entries = []  # [(variant, orig_mat, src_path)]
+                        _shoulder_blue_user = {}  # {red_shoulder_lower: blue_path} — правка синих плеч (из главной BLU)
+                        # Промоушен: НЕЙТРАЛЬНЫЙ материал (нет своего blue-варианта в
+                        # blu_row) с загруженной СИНЕЙ текстурой → делаем командным.
+                        # Уже-командные (medic_hands_red→medic_hands_blue в blu_row) и
+                        # плечи — НЕ трогаем (их ведёт нативный BLU-блок / изоляция).
+                        if panel_blu_textures:
+                            from src.services import qc_skin_parser as _qsp
+                            _rows_now = ModelBuildService._parse_texturegroup_rows(qc_path) or []
+                            _neutral = {m.lower() for m in _qsp.neutral_materials(_rows_now)}
+                            _sh_set = {s.lower() for s in _shoulders}
+                            for _m, _bp in panel_blu_textures.items():
+                                _ml = _m.lower()
+                                if (_ml in _neutral and _ml not in _sh_set
+                                        and _bp and os.path.isfile(str(_bp))):
+                                    _var = (_m[:-4] + '_blue') if _ml.endswith('_red') else (_m + '_blue')
+                                    _var = SMDService._sanitize_material_name(_var)
+                                    _promo[_ml] = _var
+                                    _variant_entries.append((_var, _m, _bp))
+                            if _promo:
+                                logger.info(f"[TEAM PROMO] нейтральные → командные: {_promo}")
+
+                        if _shoulders or _promo:
+                            _rename = {
+                                s: SMDService._sanitize_material_name(f"vm_{s}")
+                                for s in _shoulders
+                            }
+                            # ── Синяя команда: BLU-вариант плеча по соглашению имён
+                            # (engineer_red → engineer_blue); фолбэк — та же колонка
+                            # blu-строки texturegroup. Тоже изолируем (vm_engineer_blue),
+                            # иначе синий игрок увидит оригинал/фиолет. ──
+                            _red_row = tg_structure.get('red_row', []) or []
+                            _blu_row = tg_structure.get('blu_row', []) or []
+                            _blue_iso = []   # [(vm_blue, orig_blue, is_main, red_shoulder)]
+                            for s in _shoulders:
+                                _sl = s.lower()
+                                _bv = None
+                                if _sl.endswith('_red'):
+                                    _bv = s[:-4] + '_blue'
+                                else:
+                                    _col = next((i for i, m in enumerate(_red_row) if m.lower() == _sl), None)
+                                    if _col is not None and _col < len(_blu_row):
+                                        _cand = _blu_row[_col]
+                                        if _cand and _cand.lower() != _sl:
+                                            _bv = _cand
+                                if not _bv or _bv.lower() == _sl:
+                                    continue   # команд-нейтральный материал
+                                _rename[_bv] = SMDService._sanitize_material_name(f"vm_{_bv}")
+                                _blue_iso.append((_rename[_bv], _bv,
+                                                  s.lower() == str(_orig_main_pre_restrict).lower(),
+                                                  s))
+
+                            _rows = ModelBuildService._parse_texturegroup_rows(qc_path) \
+                                or [tg_structure.get('red_row', [])]
+                            # Промоушен нейтральных в командные (синие строки → варианты),
+                            # затем переименование плеч на vm_*.
+                            if _promo:
+                                from src.services.qc_skin_parser import apply_team_promotions
+                                _rows = apply_team_promotions(_rows, _promo)
+                            _tg = ModelBuildService.generate_renamed_texturegroup(_rows, _rename)
+                            if _tg:
+                                ModelBuildService.replace_texturegroup_in_qc(qc_path, _tg)
+                            # ГЛАВНОЕ: studiomdl берёт имя материала skin 0 из SMD,
+                            # поэтому переименовываем материал в самих SMD (reference
+                            # + bodygroup), иначе модель ссылается на старое имя и
+                            # текстура становится фиолетовой.
+                            _smds = []
+                            if _ref_smd:
+                                _smds.append(_ref_smd)
+                            try:
+                                _smds += ModelBuildService.extract_extra_body_smds(qc_path, weapon_key) or []
+                            except Exception:
+                                pass
+                            _rmap_smd = {s.lower(): _rename[s] for s in _shoulders}
+                            for _sp in _smds:
+                                try:
+                                    _n = SMDService.rename_materials_in_smd(_sp, _rmap_smd)
+                                    if _n:
+                                        logger.info(f"[SHOULDER ISO] SMD {os.path.basename(_sp)}: заменено {_n} материалов")
+                                except Exception as _e:
+                                    logger.warning(f"[SHOULDER ISO] не удалось переименовать в {_sp}: {_e}")
+                            _shoulder_iso = [(_rename[s], s, _srcs[s]) for s in _shoulders]
+                            # Синие плечи: источник — пользовательская BLU-картинка
+                            # (если плечи были главной) либо оригинал {orig_blue} из игры.
+                            _blue_main_src = (
+                                blu_image_path
+                                if (blu_image_path and blu_image_path != EXTRA_TEX_USE_GAME_ORIGINAL
+                                    and os.path.isfile(str(blu_image_path)))
+                                else None
+                            )
+                            for _vm_blue, _orig_blue, _is_main, _red_sh in _blue_iso:
+                                # Приоритет: правка синих плеч из карточки (skin_build_data)
+                                # → главная BLU-картинка → оригинал {orig_blue} из игры.
+                                _bsrc = _shoulder_blue_user.get(_red_sh.lower())
+                                if not _bsrc and _is_main:
+                                    _bsrc = _blue_main_src
+                                _shoulder_iso.append((_vm_blue, _orig_blue, _bsrc))
+                            if _blue_iso:
+                                logger.info(f"[SHOULDER ISO] синие плечи: {[b[0] for b in _blue_iso]}")
+                            # Командные варианты нейтральных (из «+») — пишем их VTF/VMT.
+                            for _var, _orig_m, _vsrc in _variant_entries:
+                                _shoulder_iso.append((_var, _orig_m, _vsrc))
+                            if _variant_entries:
+                                logger.info(f"[TEAM PROMO] варианты записаны: {[v[0] for v in _variant_entries]}")
+                            logger.info(f"[SHOULDER ISO] переименованы плечи: {_rename}")
+                            # Если текстура плеч пришла как image_path (главная) —
+                            # НЕ даём записать её на руку: главная уйдёт на оригинал.
+                            if any(p is not None and p == image_path for p in _srcs.values()):
+                                image_path = EXTRA_TEX_USE_GAME_ORIGINAL
+                                logger.info("[SHOULDER ISO] главная текстура (плечи) перенаправлена в vm_*; руке — оригинал")
+
+                    # Исключаем служебные материалы (глаза/зубы/sheen-оверлеи) —
+                    # для них не нужно спрашивать текстуру при сборке. Тот же фильтр,
+                    # что и для карточек 2D (единый источник). Делаем ПОСЛЕ hands-блока,
+                    # т.к. он переназначает extra_materials/blu_row.
+                    from src.data.material_filter import is_editable_material as _is_edit
+                    _drop_extra = [m for m in extra_materials if not _is_edit(m)]
+                    if _drop_extra:
+                        logger.info(f"Служебные материалы исключены из сборки: {_drop_extra}")
+                    extra_materials = [m for m in extra_materials if _is_edit(m)]
+                    # blu_row НЕ фильтруем удалением — он индексируется по колонкам
+                    # вместе с red_row. Служебные blu-материалы пропускаются ВНУТРИ
+                    # цикла (по col_idx), чтобы не сместить выравнивание.
+
+                    # ── Стили (skinfamilies) кастомной модели ──────────────────
+                    # Если пользователь определил доп-стили, ИГРОВОЙ $texturegroup
+                    # неприменим: его имена (c_sd_cleaver_bloody, _blue …) относятся
+                    # к игровой модели, а не к мешу пользователя. Подавляем
+                    # производные из него BLU/extra-материалы и команду — мы
+                    # сгенерируем свою группу и варианты ниже. Меш-материалы базы
+                    # приходят отдельно через panel_extra_textures.
+                    # Для рук $texturegroup уже сгенерирован выше (изоляция плеч +
+                    # промоушен): vm_* для плеч + _blu варианты в синих строках.
+                    # Старый «кастомный» SKIN BUILD путь его перезатёр бы — отключаем.
+                    _has_skins = (bool(skin_build_data and skin_build_data.get('tg_overrides'))
+                                  and mode not in HAND_MODE_KEYS)
+                    # Для «готовой» кастомной модели (keep_materials) ИГРОВОЙ
+                    # $texturegroup неприменим ВСЕГДА — у меша свои материалы
+                    # (c_sd_cleaver/mouth/lefteye…), а игровые имена (c_scattergun,
+                    # c_scattergun_gold) к нему отношения не имеют. Иначе сборка
+                    # начнёт спрашивать текстуры для игровых слотов, которых нет
+                    # в карточках. Базовые меш-материалы идут через panel_extra_textures.
+                    if _has_skins or replace_keep_materials:
+                        logger.info(
+                            "[SKIN BUILD] кастомная модель → подавляем игровой "
+                            f"texturegroup (blu_row={blu_row}, extra={extra_materials})"
+                        )
+                        blu_row = []
+                        extra_materials = []
+                        blu_mode = 'none'   # не плодим {texture}_blue
 
                     if blu_row:
                         logger.info(f"Найдена BLU команда: {blu_row}")
@@ -1136,7 +2285,65 @@ class VPKService:
                     # Пропатчиваем QC файл: добавляем console\ к $cdmaterials (чтобы текстуры загружались из консольных команд),
                     # удаляем $lod (они нам не нужны, только мусорят)
                     ModelBuildService.patch_qc_file(qc_path, weapon_key, original_cdmaterials_path)
-                    
+
+                    # Игровое имя текстуры/VMT (источник ОРИГИНАЛЬНОГО кода VMT из игры).
+                    # Для кастомной модели texture_filename станет именем материала SMD,
+                    # но оригинальный VMT тащим по игровому имени (c_sd_cleaver),
+                    # затем лишь переставим $basetexture на материал модели.
+                    _game_vmt_name = texture_filename
+
+                    # ── Кастомная модель: имена ведём от ФАКТИЧЕСКИХ материалов SMD ──
+                    # Имена VTF/VMT, $texturegroup и $basetexture обязаны совпадать с
+                    # материалом, с которым реально компилируется модель (из reference-SMD).
+                    # UI-имена могли разойтись с SMD (другой экспорт/регистр) → текстура
+                    # не находилась (фиолетовая). Картинки скинов мапим по индексу.
+                    if replace_keep_materials:
+                        _ref_smd = VPKService._find_decompiled_reference_smd(
+                            qc_path, weapon_key, ctx.decompile_dir
+                        )
+                        _smd_mats = SMDService.ordered_unique_materials(_ref_smd) if _ref_smd else []
+                        if _smd_mats:
+                            logger.info(f"[SKIN BUILD] материалы SMD (истина): {_smd_mats}")
+                            if _has_skins:
+                                skin_build_data = VPKService._remap_skin_data_to_smd(
+                                    skin_build_data, _smd_mats
+                                )
+                            if texture_filename != _smd_mats[0]:
+                                logger.info(
+                                    f"[SKIN BUILD] main texture_filename: "
+                                    f"{texture_filename!r} → {_smd_mats[0]!r} (материал SMD)"
+                                )
+                                texture_filename = _smd_mats[0]
+
+                    # ── $texturegroup кастомной модели ──
+                    _tg_block = ''
+                    if _has_skins:
+                        # Свои стили: генерируем группу (имена выровнены по SMD).
+                        _tg_block = ModelBuildService.generate_texturegroup_block(
+                            skin_build_data.get('mesh_materials', []),
+                            skin_build_data.get('tg_overrides', {}),
+                        )
+                        ModelBuildService.replace_texturegroup_in_qc(qc_path, _tg_block)
+                        logger.info(f"[SKIN BUILD] $texturegroup инъектирован в QC:\n{_tg_block}")
+                    elif replace_keep_materials:
+                        # Одно-скиновая кастомная модель: убираем игровую группу — её
+                        # имена относятся к игровой модели, не к мешу (иначе пустые
+                        # skin-строки ремапят материал в пустоту → фиолет).
+                        ModelBuildService.replace_texturegroup_in_qc(qc_path, '')
+                        logger.info("[SKIN BUILD] игровой $texturegroup удалён (одно-скиновая кастомная модель)")
+
+                    # ── Отредактированный пользователем QC ───────────────────────
+                    # Заменяем QC текстом пользователя, синхронизировав $texturegroup
+                    # с актуальными стилями (правки человека не теряются). Делается
+                    # ДО извлечения cdmaterials — дальше всё читается из этого QC.
+                    if replace_keep_materials and custom_qc_text and custom_qc_text.strip():
+                        _final_qc = ModelBuildService.replace_texturegroup_in_text(
+                            custom_qc_text, _tg_block
+                        )
+                        with open(qc_path, 'w', encoding='utf-8') as _qf:
+                            _qf.write(_final_qc)
+                        logger.info("[QC EDIT] QC заменён пользовательским (texturegroup синхронизирован)")
+
                     # Извлекаем путь из $cdmaterials после патчинга (теперь с префиксом console\)
                     patched_cdmaterials_path = ModelBuildService.extract_cdmaterials_path_from_qc(qc_path)
                     if not patched_cdmaterials_path:
@@ -1172,66 +2379,21 @@ class VPKService:
                             raise
                     
                     # ── Проверка текстур в пользовательском SMD (режим «Модель уже готова») ──
-                    if (model_ready_path and os.path.exists(model_ready_path)
-                            and model_ready_path.lower().endswith('.smd')):
-                        try:
-                            user_materials = SMDService.extract_unique_materials(model_ready_path)
-                            if user_materials:
-                                # Ищем оригинальный reference SMD для сравнения
-                                original_smd_for_check = VPKService._find_decompiled_reference_smd(
-                                    qc_path, weapon_key, ctx.decompile_dir
-                                )
+                    _mismatch_msg = VPKService._ready_model_texture_mismatch(
+                        model_ready_path, qc_path, weapon_key, ctx.decompile_dir, language)
+                    if (_mismatch_msg and texture_mismatch_callback
+                            and not texture_mismatch_callback(_mismatch_msg)):
+                        logger.info("[MODEL READY] Пользователь отменил сборку из-за несовпадения текстур")
+                        ctx.cleanup(on_error=False, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
+                        return False, (
+                            "Сборка отменена: несовпадение текстур в SMD файле."
+                            if language == "ru" else
+                            "Build cancelled: texture mismatch in SMD file."
+                        )
 
-                                if original_smd_for_check:
-                                    original_materials = SMDService.extract_unique_materials(original_smd_for_check)
-                                    if original_materials and user_materials != original_materials:
-                                        # Есть расхождение — формируем сообщение
-                                        missing_in_user = original_materials - user_materials
-                                        extra_in_user = user_materials - original_materials
-
-                                        lines = []
-                                        if language == "ru":
-                                            lines.append("Текстуры в вашем SMD файле не совпадают с оригинальной моделью.\n")
-                                            if missing_in_user:
-                                                lines.append("Отсутствуют (есть в оригинале, нет у вас):")
-                                                for m in sorted(missing_in_user):
-                                                    lines.append(f"  • {m}")
-                                            if extra_in_user:
-                                                lines.append("Лишние (есть у вас, нет в оригинале):")
-                                                for m in sorted(extra_in_user):
-                                                    lines.append(f"  • {m}")
-                                            lines.append("\nПродолжить сборку с этими текстурами?")
-                                        else:
-                                            lines.append("Textures in your SMD file do not match the original model.\n")
-                                            if missing_in_user:
-                                                lines.append("Missing (in original, not in yours):")
-                                                for m in sorted(missing_in_user):
-                                                    lines.append(f"  • {m}")
-                                            if extra_in_user:
-                                                lines.append("Extra (in yours, not in original):")
-                                                for m in sorted(extra_in_user):
-                                                    lines.append(f"  • {m}")
-                                            lines.append("\nContinue building with these textures?")
-
-                                        warning_msg = "\n".join(lines)
-                                        logger.warning(f"[MODEL READY] Несовпадение текстур SMD:\n{warning_msg}")
-
-                                        if texture_mismatch_callback:
-                                            should_continue = texture_mismatch_callback(warning_msg)
-                                            if not should_continue:
-                                                logger.info("[MODEL READY] Пользователь отменил сборку из-за несовпадения текстур")
-                                                ctx.cleanup(on_error=False, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
-                                                cancel_msg = (
-                                                    "Сборка отменена: несовпадение текстур в SMD файле."
-                                                    if language == "ru" else
-                                                    "Build cancelled: texture mismatch in SMD file."
-                                                )
-                                                return False, cancel_msg
-                                    elif original_materials:
-                                        logger.info(f"[MODEL READY] Текстуры SMD совпадают с оригиналом: {user_materials}")
-                        except Exception as _tex_check_err:
-                            logger.warning(f"[MODEL READY] Ошибка проверки текстур SMD: {_tex_check_err}", exc_info=True)
-                            # Не блокируем сборку из-за ошибки проверки
+                    if is_cancelled():
+                        return cancelled_result(ctx)
+                    emit_progress(60, t.get('build_compiling', 'Compiling model...'))
 
                     # ── Компиляция модели в фоне: обычная / SMD-замена / готовый MDL ──
                     _compile_thread, _compile_exc = VPKService._start_model_compile(
@@ -1268,8 +2430,23 @@ class VPKService:
                                     _f.write(_orig_red)
                                 logger.info(f"Оригинальная RED VTF из игры: {vtf_filename}")
                             else:
-                                logger.warning(f"Не найден оригинальный RED VTF: '{texture_filename}'")
+                                ctx.warn(
+                                    f"Не найдена игровая текстура '{texture_filename}' — "
+                                    f"в игре материал может быть фиолетовым. Загрузите свою "
+                                    f"текстуру в главный слот."
+                                )
                             image_path = None  # VTF уже на месте, не передаём дальше
+
+                    # Эффективные настройки на материал: пер-текстурный оверрайд
+                    # поверх глобальных (size/format/flags/options). Нет оверрайда —
+                    # возвращаются глобальные, поведение не меняется.
+                    from src.data.texture_overrides import effective_settings as _eff_settings
+                    _global_tex = {'size': size, 'format': format_type,
+                                   'flags': flags or [], 'options': vtf_options or {}}
+
+                    def _eff(_mat):
+                        e = _eff_settings(_global_tex, (material_settings or {}).get(_mat))
+                        return e['size'], e['format'], e['flags'], e['options']
 
                     if custom_vtf_path:
                         # Если юзер сам сделал VTF - просто копируем его, не генерируем из картинки
@@ -1277,24 +2454,35 @@ class VPKService:
                         ensure_directory_exists(vtf_output_path)
                         copy_file_safe(custom_vtf_path, vtf_file_path)
                         logger.info(f"Использован пользовательский VTF файл: {custom_vtf_path} -> {vtf_file_path}")
+                    elif image_path and str(image_path).lower().endswith('.vtf'):
+                        # В карточку главного материала загрузили готовый VTF —
+                        # копируем как есть, без PIL-конвертации (иначе «cannot identify image»).
+                        ensure_directory_exists(vtf_output_path)
+                        copy_file_safe(image_path, vtf_output_path / vtf_filename)
+                        logger.info(f"Главная текстура: готовый VTF скопирован → {vtf_filename}")
                     elif image_path:
+                        _ms, _mf, _mfl, _mo = _eff(texture_filename)
                         animated_fps, is_normal_map = TextureService.render_image_to_vtf(
                             image_path,
                             vtf_output_path=vtf_output_path,
                             out_vtf_path=vtf_output_path / vtf_filename,
                             temp_png_path=vtf_temp_png,
                             normal_base=texture_filename,
-                            size=size,
-                            format_type=format_type,
-                            flags=flags,
-                            vtf_options=vtf_options,
+                            size=_ms,
+                            format_type=_mf,
+                            flags=_mfl,
+                            vtf_options=_mo,
                         )
                     
                     # Извлекаем оригинальный VMT по пути из QC (до патчинга) — в VPK он
                     # лежит по оригинальному пути. tf2_textures_vpk нужен и дальше по коду.
                     tf2_textures_vpk = TF2Paths.resolve_textures_vpk(tf2_root_dir)
+                    # Оригинальный VMT берём по ИГРОВОМУ имени (c_sd_cleaver.vmt) —
+                    # чтобы сохранить родной код материала (phong/прокси и т.п.).
+                    # _write_main_vmt затем переставит $basetexture на texture_filename
+                    # (имя материала меша).
                     vmt_file = VPKService._extract_original_vmt(
-                        original_cdmaterials_path, texture_filename,
+                        original_cdmaterials_path, _game_vmt_name,
                         tf2_textures_vpk, tf2_misc_vpk, ctx.decompile_dir,
                     )
                     
@@ -1303,11 +2491,33 @@ class VPKService:
                         mode, hat_apply_game_paints, animated_fps, is_normal_map,
                     )
 
+                    # Пер-текстурные файловые карты (detail/selfillum/phong) применяются
+                    # ПОЗЖЕ — после создания VMT доп. материалов и BLU (см. ниже),
+                    # чтобы карты ложились в VMT именно своего материала.
+
                     # ── BLU Team Texture (командная раскраска) ───────────────────────────
-                    VPKService._build_blu_team_texture(
-                        blu_mode, blu_image_path, vtf_output_path, vtf_filename, vmt_path,
-                        texture_filename, patched_cdmaterials_path, size, format_type, flags, vtf_options,
-                    )
+                    # Для оружия с одной общей текстурой (часы шпиона) BLU не создаём,
+                    # даже если в BLU-слот случайно попала картинка — иначе появится
+                    # лишний {texture}_blue.vtf/vmt.
+                    from src.data.weapons import NO_BLU_WEAPON_KEYS as _NO_BLU
+                    # Создаём {texture}_blue ТОЛЬКО если у предмета есть настоящая
+                    # команда (blu_is_team). У вариант-онли оружия (скаттерган:
+                    # обычный+австралий) команды нет — иначе появляется лишний
+                    # c_xxx_blue, который движок даже не использует.
+                    if weapon_key in _NO_BLU:
+                        logger.info(f"[{weapon_key}] BLU team texture пропущена (одиночная текстура)")
+                    elif not _blu_is_team:
+                        logger.info(f"[{weapon_key}] BLU team texture пропущена (нет командной строки в $texturegroup)")
+                    else:
+                        # Реальное имя синего материала col0 берём из blu_row[0]
+                        # (может быть w_grenade_blue при col0=w_grenade_red), иначе
+                        # дефолт «{texture}_blue» внутри функции.
+                        _blu_col0 = blu_row[0] if blu_row else None
+                        VPKService._build_blu_team_texture(
+                            blu_mode, blu_image_path, vtf_output_path, vtf_filename, vmt_path,
+                            texture_filename, patched_cdmaterials_path, size, format_type, flags, vtf_options,
+                            blu_texture_filename=_blu_col0,
+                        )
 
                     # === Создаем текстуры для дополнительных материалов модели (shell, scope и т.д.) ===
                     # Это столбцы 1+ из RED строки $texturegroup
@@ -1316,7 +2526,7 @@ class VPKService:
                     
                     for extra_mat_name in extra_materials:
                         logger.info(f"Создаем текстуры для дополнительного материала: {extra_mat_name}")
-                        
+
                         extra_vtf_filename = f"{extra_mat_name}.vtf"
                         extra_vmt_filename = f"{extra_mat_name}.vmt"
                         extra_vtf_path = vtf_output_path / extra_vtf_filename
@@ -1351,8 +2561,9 @@ class VPKService:
                             # Пользователь предоставил отдельное изображение для этого материала
                             logger.info(f"Используем отдельное изображение для {extra_mat_name}: {extra_image_path}")
 
-                            if custom_vtf_path:
-                                # Пользователь использует VTF - копируем
+                            if custom_vtf_path or extra_image_path.lower().endswith('.vtf'):
+                                # Пользователь загрузил готовый VTF (глобально или в эту
+                                # карточку) — копируем как есть, без переконвертации.
                                 copy_file_safe(extra_image_path, extra_vtf_path)
                             elif TextureService.is_animated_image(extra_image_path):
                                 vtf_flags_extra, merged_extra = TextureService.resolve_vtf_flags_and_options(flags, vtf_options)
@@ -1390,7 +2601,48 @@ class VPKService:
                             _extra_fps = animated_fps
                         if _extra_fps:
                             VMTService.enable_animated_basetexture(str(extra_vmt_path), _extra_fps)
-                    
+
+                    # === Изолированные плечи вьюмодели ===
+                    # Пишем переименованный материал плеч (vm_<orig>) под главным
+                    # console-путём. Источник: пользовательская текстура (ключ —
+                    # ОРИГИНАЛЬНОЕ имя материала) либо оригинал тела из игры.
+                    for _new_name, _orig_name, _sh_src in _shoulder_iso:
+                        _sh_vtf = vtf_output_path / f"{_new_name}.vtf"
+                        _sh_vmt = vtf_output_path / f"{_new_name}.vmt"
+                        # Источник уже разрешён при детекте (карточка/image_path/BLU);
+                        # без источника — берём оригинал из игры (без лишних диалогов).
+                        try:
+                            if _sh_src and os.path.isfile(_sh_src):
+                                if str(_sh_src).lower().endswith('.vtf'):
+                                    copy_file_safe(_sh_src, _sh_vtf)
+                                else:
+                                    _sh_png = vtf_output_path / f"{_new_name}.png"
+                                    VPKService._process_image(_sh_src, _sh_png, size)
+                                    _vf, _vo = TextureService.resolve_vtf_flags_and_options(flags, vtf_options, drop_normal=True)
+                                    VPKService._create_vtf(str(_sh_png), str(vtf_output_path), format_type, _vf, _vo)
+                                    if _sh_png.exists():
+                                        _sh_png.unlink()
+                            else:
+                                # По умолчанию — оригинальная текстура тела из игры
+                                # (по ОРИГИНАЛЬНОМУ имени), чтобы плечи не стали фиолетовыми.
+                                _orig_vtf = VPKService._get_original_vtf_bytes(
+                                    _orig_name, original_cdmaterials_paths,
+                                    tf2_textures_vpk, tf2_misc_vpk
+                                )
+                                if _orig_vtf:
+                                    with open(_sh_vtf, "wb") as _f:
+                                        _f.write(_orig_vtf)
+                                else:
+                                    ctx.warn(
+                                        f"Не найдена оригинальная текстура плеч '{_orig_name}' — "
+                                        f"плечи вьюмодели могут быть фиолетовыми."
+                                    )
+                                    continue
+                            VPKService._write_material_vmt(_sh_vmt, vmt_path, patched_cdmaterials_path, _new_name)
+                            logger.info(f"[SHOULDER ISO] записан материал плеч: {_new_name}")
+                        except Exception as _e:
+                            logger.error(f"[SHOULDER ISO] ошибка записи {_new_name}: {_e}", exc_info=True)
+
                     # === Создаем текстуры для BLU команды ===
                     # BLU - это отдельная строка (row 1) в $texturegroup
                     # Для каждого материала в BLU строке спрашиваем отдельное изображение,
@@ -1407,6 +2659,11 @@ class VPKService:
                         )
 
                         for col_idx, blu_tex_name in enumerate(blu_row):
+                            # Служебные материалы (sheen-оверлеи, глаза и т.п.) не
+                            # включаем в мод. Пропускаем по col_idx, не удаляя из
+                            # списка, чтобы сохранить выравнивание с red_row.
+                            if not _is_edit(blu_tex_name):
+                                continue
                             # Находим соответствующее RED имя для этого столбца
                             red_tex_name = red_row[col_idx] if col_idx < len(red_row) else None
 
@@ -1460,22 +2717,17 @@ class VPKService:
                             # Если BLU имя совпадает с RED — shared/нейтральная текстура.
                             #
                             # Два типа:
-                            #   1. СИСТЕМНЫЕ (eyeball, invulnfx, _invun, _zombie) — пропускаем.
-                            #      Движок найдёт сам через другой $cdmaterials (effects/).
+                            #   1. СЛУЖЕБНЫЕ (eyeball, invulnfx, _invun, _zombie, sheen…) —
+                            #      из единого блэклиста material_filter; пропускаем,
+                            #      движок найдёт оригинал сам.
                             #   2. НАСТОЯЩИЕ СКИНОВЫЕ (sniper_lens, c_arrow и т.п.) — спрашиваем
                             #      пользователя через extra_texture_callback, как для extra_materials.
                             if blu_tex_name == red_tex_name:
                                 if blu_tex_name == texture_filename:
                                     continue
 
-                                _n = blu_tex_name.lower()
-                                _is_system_tex = (
-                                    'eyeball'  in _n or
-                                    'invulnfx' in _n or
-                                    '_invun'   in _n or   # sniper_red_invun
-                                    '_invuln'  in _n or   # sniper_lens_invuln
-                                    '_zombie'  in _n
-                                )
+                                from src.data.material_filter import is_editable_material as _is_edit_shared
+                                _is_system_tex = not _is_edit_shared(blu_tex_name)
 
                                 shared_vtf_path = vtf_output_path / f"{blu_tex_name}.vtf"
                                 if not shared_vtf_path.exists():
@@ -1498,6 +2750,9 @@ class VPKService:
                                         else:
                                             logger.debug(f"Shared VTF не найден в игре, пропуск: {blu_tex_name}")
                                             continue
+                                    elif _shared_img and str(_shared_img).lower().endswith('.vtf'):
+                                        copy_file_safe(_shared_img, shared_vtf_path)
+                                        logger.info(f"Shared: готовый VTF скопирован → {blu_tex_name}.vtf")
                                     elif _shared_img and os.path.isfile(_shared_img):
                                         _sh_flags, _sh_merged = TextureService.resolve_vtf_flags_and_options(flags, vtf_options, drop_normal=True)
                                         _sh_png = vtf_output_path / f"{blu_tex_name}.png"
@@ -1580,62 +2835,11 @@ class VPKService:
                                 VMTService.update_vmt_bumpmap_path(str(blu_vmt_path), patched_cdmaterials_path, blu_normal_key)
                                 logger.info(f"Обновлен VMT $bumpmap для BLU: {blu_normal_key}")
                     
-                    # ── Зеркальные VMT по оригинальному пути (для режимов рук) ────────────
-                    # Проблема: модели оружий шпиона (Dead Ringer, Invis Watch и т.д.)
-                    # ссылаются на текстуры по оригинальному пути materials/models/player/spy/,
-                    # а не по пропатченному console\models\player\spy\. Из-за этого левая
-                    # рука шпиона (slot 1 = spy_hands_blue) игнорирует мод.
-                    # Аналогично могут быть устроены другие оружия других классов.
-                    #
-                    # Фикс: для режимов рук дополнительно создаём VMT-файлы по ОРИГИНАЛЬНОМУ
-                    # пути из $cdmaterials (до патча). VMT указывает на те же VTF что и уже
-                    # созданный мод (по console\ пути), т.е. VTF-файлы не дублируются.
-                    from src.data.player_hands import HAND_MODE_KEYS as _HAND_MODE_KEYS
-                    if mode in _HAND_MODE_KEYS and original_cdmaterials_path:
-                        orig_mat_rel = "materials/" + original_cdmaterials_path.replace('\\', '/').strip().rstrip('/')
-                        orig_vtf_dir = ctx.vpkroot_dir
-                        for _part in orig_mat_rel.rstrip('/').split('/'):
-                            orig_vtf_dir = orig_vtf_dir / _part
-
-                        if orig_vtf_dir != vtf_output_path:
-                            ensure_directory_exists(orig_vtf_dir)
-                            # Для каждого VMT в console\ пути создаём зеркало по оригинальному пути.
-                            # Содержимое зеркального VMT = копия console\ VMT:
-                            # $basetexture в нём уже ссылается на console\ VTF — это ОК,
-                            # Source Engine найдёт VTF по этому абсолютному пути в мод-VPK.
-                            for _vmt_src in vtf_output_path.glob("*.vmt"):
-                                _vmt_mirror = orig_vtf_dir / _vmt_src.name
-                                if not _vmt_mirror.exists():
-                                    copy_file_safe(_vmt_src, _vmt_mirror)
-                                    logger.info(f"Зеркальный VMT по оригинальному пути: {_vmt_mirror.name}")
-                        else:
-                            logger.debug("Оригинальный и пропатченный пути совпадают, зеркало не нужно")
-
-                    # ── Зеркальные VMT для all-class шапок ───────────────────────────────
-                    # Проблема: у all-class шапок каждый класс имеет свою модель (%s-плейсхолдер).
-                    # Инструмент компилирует модель только одного класса (первый найденный в VPK)
-                    # с пропатченным $cdmaterials (console\ путь). Модели остальных восьми классов
-                    # берутся из базового VPK игры и ссылаются на ОРИГИНАЛЬНЫЙ путь текстур.
-                    # Из-за этого только один класс видит новую текстуру.
-                    #
-                    # Фикс: создаём зеркальные VMT по оригинальному пути из $cdmaterials.
-                    # Зеркальные VMT ссылаются на те же VTF (по console\ пути) — дублировать их не нужно.
-                    # Так все классы, использующие оригинальные модели, тоже найдут кастомную текстуру.
-                    if mode == "hat" and hat_mdl_path and "%s" in hat_mdl_path and original_cdmaterials_path:
-                        _hat_orig_rel = "materials/" + original_cdmaterials_path.replace('\\', '/').strip().rstrip('/')
-                        _hat_orig_dir = ctx.vpkroot_dir
-                        for _part in _hat_orig_rel.rstrip('/').split('/'):
-                            _hat_orig_dir = _hat_orig_dir / _part
-
-                        if _hat_orig_dir != vtf_output_path:
-                            ensure_directory_exists(_hat_orig_dir)
-                            for _vmt_src in vtf_output_path.glob("*.vmt"):
-                                _vmt_mirror = _hat_orig_dir / _vmt_src.name
-                                if not _vmt_mirror.exists():
-                                    copy_file_safe(_vmt_src, _vmt_mirror)
-                                    logger.info(f"Зеркальный VMT для all-class шапки: {_vmt_mirror.name}")
-                        else:
-                            logger.debug("Пути для шапки совпадают, зеркало не нужно")
+                    # Зеркальные VMT по оригинальному пути (руки / spy-watch и т.п.).
+                    # Для all-class %s-шапок зеркало НЕ создаём (его заменила пер-классовая
+                    # сборка; иначе затёрлась бы текстура у невыбранных классов).
+                    VPKService._write_hand_mirror_vmts(
+                        ctx, mode, weapon_key, original_cdmaterials_path, vtf_output_path)
 
                     if debug_mode:
                         DebugService.save_patched_stage(ctx, ctx.decompile_dir)
@@ -1643,6 +2847,17 @@ class VPKService:
                     # ── Текстуры из 2D панели (c_arrow, sniper_lens и т.п.) ──────── #
                     # Материалы из SMD модели которые НЕ в QC skinfamilies →
                     # extra_texture_callback их не покрывает → добавляем здесь.
+                    # Фиксированные доп. текстуры (vgui-вставки и т.п.) — пишем по
+                    # их зашитому пути, не по cdmaterials. Возвращает обработанные имена.
+                    _fixed_handled = VPKService._build_fixed_extra_textures(
+                        weapon_key, panel_extra_textures, ctx, size,
+                        format_type, flags, vtf_options,
+                    )
+
+                    # Доп. статические файлы мода (HUD .res, info.vdf) — напр. для
+                    # кастомного циферблата Dead Ringer. Пишутся всегда (активируют мод).
+                    VPKService._write_fixed_extra_files(weapon_key, ctx)
+
                     if panel_extra_textures:
                         # Собираем уже созданные имена (extra_materials + BLU)
                         _processed = set()
@@ -1650,6 +2865,8 @@ class VPKService:
                             _processed.add(_f.stem)
 
                         for _pet_name, _pet_img in panel_extra_textures.items():
+                            if _pet_name in _fixed_handled:
+                                continue   # уже записан по фиксированному пути
                             # Защита от UI-sentinel: '__single__' — главная текстура,
                             # а не имя материала. Если протёк — пропускаем, иначе
                             # в VPK появятся мусорные __single__.vmt / __single__.vtf.
@@ -1657,26 +2874,43 @@ class VPKService:
                                 continue
                             if _pet_name in _processed:
                                 continue   # уже создан через skinfamilies
-                            if not _pet_img or not os.path.isfile(_pet_img):
-                                continue
                             try:
-                                ensure_directory_exists(vtf_output_path)
-                                _pet_png = vtf_output_path / f"{_pet_name}.png"
-                                _pet_vtf = vtf_output_path / f"{_pet_name}.vtf"
-                                _pet_vmt = vtf_output_path / f"{_pet_name}.vmt"
-                                VPKService._process_image(_pet_img, _pet_png, size)
-                                _pet_flags, _pet_merged = TextureService.resolve_vtf_flags_and_options(flags, vtf_options, drop_normal=True)
-                                VPKService._create_vtf(
-                                    str(_pet_png), str(vtf_output_path),
-                                    format_type, _pet_flags, _pet_merged
-                                )
-                                if _pet_png.exists():
-                                    _pet_png.unlink()
-                                if not _pet_vmt.exists():
-                                    VPKService._write_material_vmt(_pet_vmt, vmt_path, patched_cdmaterials_path, _pet_name)
-                                logger.info(f"Panel extra texture: {_pet_name}.vtf/vmt")
+                                _es, _ef, _efl, _eo = _eff(_pet_name)
+                                if VPKService._render_extra_texture(
+                                    _pet_name, _pet_img, vtf_output_path, vmt_path,
+                                    patched_cdmaterials_path, _es, _ef, _efl, _eo,
+                                ):
+                                    logger.info(f"Panel extra texture: {_pet_name}.vtf/vmt")
                             except Exception as _pet_exc:
                                 logger.warning(f"Panel extra texture ошибка '{_pet_name}': {_pet_exc}")
+
+                    # ── Пер-текстурные файловые карты (detail/selfillum/phong/warp) ──────
+                    # Теперь VMT всех материалов (главный + доп. + BLU) созданы, поэтому
+                    # карты каждого материала ложатся в его собственный VMT.
+                    VPKService._build_material_maps(
+                        material_maps, vtf_output_path, texture_filename, vmt_path,
+                        patched_cdmaterials_path, size,
+                        base_image_path=image_path, is_normal_map=is_normal_map,
+                        panel_extra_textures=panel_extra_textures,
+                    )
+
+                    # ── VTF/VMT вариантов стилей (skinfamilies) ─────────────────
+                    # Для каждой переопределённой текстуры доп-стиля (напр.
+                    # lefteye_bloody) создаём VTF + VMT рядом с базовыми. Имена
+                    # совпадают с теми, что выписаны в инъектированный $texturegroup.
+                    if _has_skins:
+                        _variant_files = skin_build_data.get('variant_files', {})
+                        for _v_name, _v_img in _variant_files.items():
+                            try:
+                                if VPKService._render_extra_texture(
+                                    _v_name, _v_img, vtf_output_path, vmt_path,
+                                    patched_cdmaterials_path, size, format_type, flags, vtf_options,
+                                ):
+                                    logger.info(f"[SKIN BUILD] вариант: {_v_name}.vtf/vmt")
+                                else:
+                                    logger.warning(f"[SKIN BUILD] нет файла варианта '{_v_name}': {_v_img}")
+                            except Exception as _v_exc:
+                                logger.warning(f"[SKIN BUILD] вариант '{_v_name}' — ошибка: {_v_exc}", exc_info=True)
 
                     # Ждём завершения компиляции (шла параллельно с текстурами)
                     _compile_thread.join()
@@ -1684,9 +2918,49 @@ class VPKService:
                         raise _compile_exc[0]
 
                     # Копируем скомпилированные файлы в vpkroot (VMT файл уже скопирован ранее)
-                    # Используем путь из $modelname в QC файле (чтобы структура папок была правильной)
-                    VPKService._copy_compiled_models_to_vpkroot(ctx, qc_path)
-                    
+                    # Используем путь из $modelname в QC файле (чтобы структура папок была правильной).
+                    # Для material-only оружия (Dead Ringer) модель в мод НЕ кладём —
+                    # его показывает родная игровая модель (viewmodel), а скин и карты
+                    # находятся через зеркальный VMT по оригинальному пути, который
+                    # ссылается на console-VTF. Папку console при этом ОСТАВЛЯЕМ.
+                    from src.data.weapons import MATERIAL_ONLY_WEAPON_KEYS as _MAT_ONLY
+                    if weapon_key in _MAT_ONLY:
+                        logger.info(f"[{weapon_key}] Material-only: модель в мод не включается (console сохраняется)")
+                    else:
+                        VPKService._copy_compiled_models_to_vpkroot(ctx, qc_path)
+
+                    # Мультиклассовая шапка с заменой модели: собираем модель для
+                    # ОСТАЛЬНЫХ выбранных классов (основная сборка делает только один).
+                    # Источник: явный список выбранных классов (model_player_per_class)
+                    # либо legacy %s-шаблон в hat_mdl_path.
+                    if mode == "hat" and replace_model_smd_path:
+                        _extra_targets = None
+                        if hat_class_models and len(hat_class_models) > 1:
+                            # Все выбранные классы, КРОМЕ primary (он уже собран).
+                            _extra_targets = [
+                                m for m in hat_class_models.values() if m != hat_mdl_path
+                            ]
+                        _is_pct_tmpl = bool(hat_mdl_path and "%s" in hat_mdl_path)
+                        if _extra_targets or _is_pct_tmpl:
+                            VPKService._build_extra_class_hat_models(
+                                ctx, hat_mdl_path, found_mdl_path, replace_model_smd_path,
+                                replace_keep_materials, tf2_misc_vpk, studiomdl_exe,
+                                crowbar_exe, tf_dir, language, emit_sub,
+                                target_mdl_paths=_extra_targets,
+                            )
+
+                    # Подстраховка: удаляем любые {texture}_blue.*, если их успел
+                    # создать другой путь, а настоящей команды у предмета нет
+                    # (одиночная текстура ИЛИ вариант-онли без c_xxx_blue в группе).
+                    from src.data.weapons import NO_BLU_WEAPON_KEYS as _NO_BLU2
+                    if weapon_key in _NO_BLU2 or not _blu_is_team:
+                        for _blue in vtf_output_path.glob(f"{texture_filename}_blue.*"):
+                            try:
+                                _blue.unlink()
+                                logger.info(f"[{weapon_key}] Удалён лишний BLU-файл: {_blue.name}")
+                            except OSError:
+                                pass
+
                 except Exception as e:
                     error_msg = str(e)
                     if hasattr(e, 'stderr') and e.stderr:
@@ -1701,6 +2975,9 @@ class VPKService:
                     return False, t['error_model_work'].format(error=error_msg)
             
             # Собираем VPK файл (финальный этап - упаковываем все в один файл)
+            if is_cancelled():
+                return cancelled_result(ctx)
+            emit_progress(80, t.get('build_packing', 'Creating VPK file...'))
             emit_sub(-1, "Packing VPK..." if language == "en" else "Упаковка VPK...")
             # Логируем все файлы в VPK root (для отладки, чтобы видеть какие файлы идут в мод)
             if ctx.vpkroot_dir.exists():
@@ -1712,48 +2989,10 @@ class VPKService:
                 logger.info(f"[VPK CONTENTS] Files going into VPK ({len(vpkroot_files)} total):\n" +
                             "\n".join(f"  {f}" for f in vpkroot_files))
             vpk_path = VPKService._create_vpk_file(ctx, filename, export_folder, language)
-            
-            # Если использовали отредактированный VMT - удаляем его после сборки (чтобы не засорять папку)
-            if vmt_to_delete:
-                from src.services.edited_vmt_service import EditedVMTService
-                if EditedVMTService.delete_edited_vmt(vmt_to_delete):
-                    logger.info(f"Удален отредактированный VMT файл: {vmt_to_delete}")
-            
-            # Чистим папку с временными VMT файлами (которые доставали из игры для редактора)
-            # (это мусор, который остается после работы редактора VMT)
-            temp_vmt_extract_dir = DirectoryPaths.TEMP_VMT_EXTRACT_DIR
-            if temp_vmt_extract_dir.exists():
-                try:
-                    for file_path in temp_vmt_extract_dir.iterdir():
-                        try:
-                            if file_path.is_file() or file_path.is_symlink():
-                                file_path.unlink()
-                            elif file_path.is_dir():
-                                shutil.rmtree(file_path)
-                        except Exception as e:
-                            logger.warning(f"Не удалось удалить {file_path}: {e}", exc_info=True)
-                    logger.debug("Очищена папка temp_vmt_extract")
-                except Exception as e:
-                    logger.warning(f"Не удалось очистить папку temp_vmt_extract: {e}", exc_info=True)
 
-            backup_vmt_dir = Path("tools/backupVMT")
-            if backup_vmt_dir.exists():
-                try:
-                    for file_path in backup_vmt_dir.iterdir():
-                        try:
-                            if file_path.is_file() or file_path.is_symlink():
-                                file_path.unlink()
-                            elif file_path.is_dir():
-                                shutil.rmtree(file_path)
-                        except Exception as e:
-                            logger.warning(f"Не удалось удалить {file_path}: {e}", exc_info=True)
-                    logger.debug("Очищена папка backupVMT")
-                except Exception as e:
-                    logger.warning(f"Не удалось очистить папку backupVMT: {e}", exc_info=True)
-            
-            ctx.cleanup(on_error=False, keep_on_error=False, debug_mode=debug_mode)
-            
-            success_message = t.get('vpk_success', 'VPK successfully created: {path}').format(path=vpk_path)
+            success_message = VPKService._finalize_build_success(
+                ctx, vpk_path, vmt_to_delete, language, debug_mode, t
+            )
             return True, success_message
             
         except Exception as e:
@@ -1765,34 +3004,6 @@ class VPKService:
                     error_msg += f"\n\n{t.get('temp_files_saved', 'Temporary files saved in')}: {ctx.temp_dir}"
                 ctx.cleanup(on_error=True, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
             return False, error_msg
-    
-    @staticmethod
-    def _build_special_mode_vpk(
-        ctx: BuildContext,
-        mode: str,
-        image_path: str,
-        size: Tuple[int, int],
-        format_type: str,
-        flags: List[str],
-        vtf_options: dict = None,
-        keep_temp_on_error: bool = False,
-        debug_mode: bool = False,
-        language: str = "en",
-        custom_vtf_path: str = None
-    ) -> Tuple[bool, str, Optional[str]]:
-        return BuildService.build_special_mode_vpk(
-            ctx,
-            mode,
-            image_path,
-            size,
-            format_type,
-            flags,
-            vtf_options,
-            keep_temp_on_error,
-            debug_mode,
-            language,
-            custom_vtf_path
-        )
     
     @staticmethod
     def _build_spy_masks_vpk(
@@ -1819,7 +3030,6 @@ class VPKService:
         Это гарантирует что body-текстуры шпиона остаются из игры.
         """
         try:
-            is_ru = (language == 'ru')
             # Папка для текстур масок внутри vpkroot
             masks_dir = ctx.vpkroot_dir / "materials" / "models" / "player" / "spy"
             ensure_directory_exists(masks_dir)
@@ -1836,7 +3046,6 @@ class VPKService:
             any_created = False
 
             for cls_key, vtf_name, name_en, name_ru, btn in SPY_DISGUISE_MASKS:
-                display = name_ru if is_ru else name_en
                 mask_vtf_path = masks_dir / f"{vtf_name}.vtf"
                 mask_vmt_path = masks_dir / f"{vtf_name}.vmt"
 
@@ -1856,6 +3065,10 @@ class VPKService:
                     else:
                         logger.debug(f"Маска не найдена в VPK, пропускаем: {vtf_name}")
                         continue
+                elif mask_img and str(mask_img).lower().endswith('.vtf'):
+                    # В карточку маски загрузили готовый VTF — копируем как есть
+                    copy_file_safe(mask_img, mask_vtf_path)
+                    logger.info(f"Маска: готовый VTF скопирован → {vtf_name}.vtf")
                 elif mask_img and os.path.isfile(mask_img):
                     # Конвертируем изображение пользователя.
                     # ВАЖНО: имя PNG должно совпадать с именем VTF (без _tmp),
