@@ -8,69 +8,10 @@ from PySide6.QtWidgets import (
     QWidget, QSizePolicy, QFrame,
 )
 from PySide6.QtCore import Qt, Signal, QTimer
-from PySide6.QtGui import QDoubleValidator, QMouseEvent
+from PySide6.QtGui import QDoubleValidator
 from src.data.translations import TRANSLATIONS
 from src.utils.themes import get_modern_styles
 from src.config.app_config import AppConfig
-
-
-class UVLayoutCheckBox(QCheckBox):
-    """Чекбокс UV разметки, который блокирует включение при активном CritHIT режиме"""
-    
-    def __init__(self, text: str, parent=None):
-        super().__init__(text, parent)
-        self.parent_panel = None
-        self._force_disable = False  # Флаг для принудительного отключения
-    
-    def set_parent_panel(self, panel) -> None:
-        """Устанавливает ссылку на панель настроек для проверки состояния CritHIT"""
-        self.parent_panel = panel
-    
-    def mousePressEvent(self, event: QMouseEvent) -> None:
-        """Перехватывает клик мыши и проверяет, можно ли изменить состояние чекбокса"""
-        if event.button() == Qt.LeftButton:
-            # Проверяем состояние CritHIT через панель настроек
-            is_crit_hit = False
-            if self.parent_panel and self.parent_panel.parent:
-                if hasattr(self.parent_panel.parent, 'crit_hit_checkbox'):
-                    is_crit_hit = self.parent_panel.parent.crit_hit_checkbox.isChecked()
-            
-            # Если CritHIT включен, блокируем любое изменение состояния
-            if is_crit_hit:
-                # Не вызываем super(), чтобы предотвратить изменение состояния
-                return
-            
-            # Если CritHIT не включен, разрешаем обычное поведение
-            super().mousePressEvent(event)
-        else:
-            super().mousePressEvent(event)
-    
-    def setChecked(self, checked: bool) -> None:
-        """Переопределяем setChecked, чтобы блокировать включение при CritHIT"""
-        # Если установлен флаг принудительного изменения, пропускаем все проверки
-        if self._force_disable:
-            self._force_disable = False
-            super().setChecked(checked)
-            return
-        
-        # Если пытаются включить чекбокс, проверяем CritHIT
-        if checked:
-            is_crit_hit = False
-            if self.parent_panel and self.parent_panel.parent:
-                if hasattr(self.parent_panel.parent, 'crit_hit_checkbox'):
-                    is_crit_hit = self.parent_panel.parent.crit_hit_checkbox.isChecked()
-            
-            # Если CritHIT включен, не позволяем включить чекбокс
-            if is_crit_hit:
-                return
-        
-        # Разрешаем изменение состояния (включая отключение)
-        super().setChecked(checked)
-    
-    def force_set_checked(self, checked: bool) -> None:
-        """Принудительно устанавливает состояние чекбокса, игнорируя проверки CritHIT"""
-        # Напрямую вызываем setChecked базового класса, минуя наш переопределенный метод
-        QCheckBox.setChecked(self, checked)
 
 
 class CollapsibleGroup(QWidget):
@@ -572,22 +513,6 @@ class SettingsPanel(QWidget):
             lambda: self.vmt_edit_requested.emit(self._edit_material or ''))
         self.advanced_group.addWidget(self.edit_vmt_button)
 
-        # UV разметка
-        uv_layout_row = QHBoxLayout()
-        uv_layout_row.setSpacing(6)
-        uv_layout_row.setContentsMargins(0, 0, 0, 0)
-        self.uv_layout_checkbox = UVLayoutCheckBox(self.t.get('draw_uv_layout', 'Нарисовать UV разметку'))
-        self.uv_layout_checkbox.set_parent_panel(self)
-        self.uv_layout_checkbox.setStyleSheet(compact_checkbox_style)
-        self.uv_resolution_label = QLabel("(512x512)")
-        self.uv_resolution_label.setStyleSheet("font-size: 11px; color: #999; padding: 0px;")
-        uv_layout_row.addWidget(self.uv_layout_checkbox)
-        uv_layout_row.addWidget(self.uv_resolution_label)
-        uv_layout_row.addStretch()
-        self.uv_layout_widget = QWidget()  # Сохраняем ссылку для скрытия/показа
-        self.uv_layout_widget.setLayout(uv_layout_row)
-        self.advanced_group.addWidget(self.uv_layout_widget)
-
         # Изоляция плеч вьюмодели (только для режимов рук)
         self.isolate_shoulders_checkbox = QCheckBox(
             self.t.get('isolate_shoulders', 'Изолировать плечи (вьюмодель)')
@@ -601,25 +526,11 @@ class SettingsPanel(QWidget):
         self.isolate_shoulders_checkbox.setVisible(False)
         self.advanced_group.addWidget(self.isolate_shoulders_checkbox)
 
-        # Обновляем разрешение UV при изменении разрешения текстуры
-        self.radio_256.toggled.connect(self._update_uv_resolution_label)
-        self.radio_512.toggled.connect(self._update_uv_resolution_label)
-        self.radio_1024.toggled.connect(self._update_uv_resolution_label)
-        self.radio_2048.toggled.connect(self._update_uv_resolution_label)
-        
         # Инструменты
         self.tools_label = QLabel(self.t['tools'])
         self.tools_label.setStyleSheet("font-weight: 500; font-size: 13px; color: #ccc; margin-top: 12px;")
         self.advanced_group.addWidget(self.tools_label)
-        
-        # Кнопка редактора VMT
-        self.expert_button = QPushButton(self.t['open_editor'])
-        self.expert_button.setStyleSheet(self.styles['button_secondary'])
-        self.expert_button.setMinimumHeight(36)
-        self.expert_button.setMinimumWidth(0)
-        self.expert_button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.advanced_group.addWidget(self.expert_button)
-        
+
         # Кнопка очистки кэша декомпилированных моделей
         self.clear_cache_button = QPushButton(self.t.get('clear_decompile_cache', 'Clear Model Cache'))
         self.clear_cache_button.setStyleSheet(self.styles['button_secondary'])
@@ -788,22 +699,9 @@ class SettingsPanel(QWidget):
             if not is_hands and self.isolate_shoulders_checkbox.isChecked():
                 self.isolate_shoulders_checkbox.setChecked(False)
 
-        # ── 4. UV Layout ─────────────────────────────────────────────────── #
-        # Видима только для обычного оружия; CritHIT, руки и скины персонажей скрывают
-        if not is_crit:
-            uv_visible = is_normal
-            if hasattr(self, 'uv_layout_widget'):
-                self.uv_layout_widget.setVisible(uv_visible)
-            if hasattr(self, 'uv_layout_checkbox'):
-                self.uv_layout_checkbox.setVisible(uv_visible)
-                if not uv_visible and self.uv_layout_checkbox.isChecked():
-                    self.uv_layout_checkbox.blockSignals(True)
-                    self.uv_layout_checkbox.force_set_checked(False)
-                    self.uv_layout_checkbox.blockSignals(False)
-            if hasattr(self, 'uv_resolution_label'):
-                self.uv_resolution_label.setVisible(uv_visible)
-            if hasattr(self, 'advanced_group'):
-                self.advanced_group.content_widget.updateGeometry()
+        # Обновляем геометрию аккордеона после изменения видимости контролов выше.
+        if not is_crit and hasattr(self, 'advanced_group'):
+            self.advanced_group.content_widget.updateGeometry()
 
         # ── 5. Normal Map ─────────────────────────────────────────────────── #
         # Доступно для моделей (VertexLitGeneric): оружие, руки, тело персонажа —
@@ -853,14 +751,6 @@ class SettingsPanel(QWidget):
             "", "",  # для рук и скинов — доступно, подсказка не нужна
         ))
 
-        # VMT редактор — только для обычного оружия
-        self.expert_button.setEnabled(is_normal)
-        self.expert_button.setToolTip(_tip(
-            "VMT спрея создаётся автоматически", "Spray VMT is auto-generated",
-            "VMT CritHIT создаётся автоматически", "CritHIT VMT is auto-generated",
-            "VMT рук управляется игрой",          "Hands VMT is controlled by the game",
-        ))
-
     def on_crit_hit_selected(self, is_crit_hit):
         """Обработка выбора CritHIT режима"""
         # Отключаем/включаем контролы в зависимости от режима
@@ -899,32 +789,13 @@ class SettingsPanel(QWidget):
                 self.option_normal.blockSignals(False)
                 self.option_normal.setEnabled(not is_crit_hit)
 
-            if hasattr(self, 'uv_layout_checkbox'):
-                self.uv_layout_checkbox.blockSignals(True)
-                if is_crit_hit:
-                    self.uv_layout_checkbox.force_set_checked(False)
-                self.uv_layout_checkbox.blockSignals(False)
-                self.uv_layout_checkbox.setEnabled(not is_crit_hit)
-
-            if hasattr(self, 'uv_resolution_label'):
-                self.uv_resolution_label.setEnabled(not is_crit_hit)
-
-            if hasattr(self, 'uv_layout_widget'):
-                self.uv_layout_widget.setEnabled(not is_crit_hit)
-                self.uv_layout_widget.setVisible(not is_crit_hit)
-                if hasattr(self, 'uv_layout_checkbox'):
-                    self.uv_layout_checkbox.setVisible(not is_crit_hit)
-                if hasattr(self, 'uv_resolution_label'):
-                    self.uv_resolution_label.setVisible(not is_crit_hit)
-                self.uv_layout_widget.updateGeometry()
-                if hasattr(self, 'advanced_group'):
-                    self.advanced_group.content_widget.updateGeometry()
+            if hasattr(self, 'advanced_group'):
+                self.advanced_group.content_widget.updateGeometry()
 
         QTimer.singleShot(0, apply_state)
     
     def setup_connections(self):
         """Настраивает соединения сигналов"""
-        self.expert_button.clicked.connect(self.expert_mode_triggered)
         self.button.clicked.connect(self.build_vpk)
         self.extract_model_button.clicked.connect(self.extract_model_triggered)
         self.export_uv_button.clicked.connect(self.export_uv_triggered)
@@ -944,9 +815,6 @@ class SettingsPanel(QWidget):
                 _w.stateChanged.connect(self._on_edit_control_changed)
         # Подключаем сигнал сворачивания/разворачивания секции "Дополнительно"
         self.advanced_group.toggled.connect(self.on_advanced_toggled)
-        # Подключаем обработчик для чекбокса UV разметки
-        if hasattr(self, 'uv_layout_checkbox'):
-            self.uv_layout_checkbox.stateChanged.connect(self._on_uv_layout_state_changed)
         if hasattr(self, 'option_normal'):
             self.option_normal.stateChanged.connect(self._on_normal_map_state_changed)
         if self.parent and hasattr(self.parent, 'crit_hit_checkbox'):
@@ -956,20 +824,6 @@ class SettingsPanel(QWidget):
             self.on_crit_hit_selected(self.parent.crit_hit_checkbox.isChecked())
         if hasattr(self, 'clear_cache_button'):
             self.clear_cache_button.clicked.connect(self._on_clear_cache_clicked)
-    
-    def _on_uv_layout_state_changed(self, state: int) -> None:
-        """Обработчик изменения состояния чекбокса UV разметки"""
-        is_checked = (state == Qt.Checked)
-        
-        # Если пытаются включить UV разметку, проверяем, не включен ли CritHIT
-        if is_checked:
-            is_crit_hit = self._get_crit_hit_state()
-            if is_crit_hit:
-                def reset_uv():
-                    self.uv_layout_checkbox.blockSignals(True)
-                    self.uv_layout_checkbox.force_set_checked(False)
-                    self.uv_layout_checkbox.blockSignals(False)
-                QTimer.singleShot(0, reset_uv)
 
     def _refresh_material_maps_button(self) -> None:
         """Подсветка кнопки + счётчик, если карты заданы."""
@@ -1155,11 +1009,6 @@ class SettingsPanel(QWidget):
                     except ValueError:
                         options['gcorrection'] = 2.2  # Значение по умолчанию
         
-        # UV разметка
-        draw_uv_layout = False
-        if hasattr(self, 'uv_layout_checkbox') and self.uv_layout_checkbox.isChecked():
-            draw_uv_layout = True
-        
         filename = self.filename_input.text().strip()
         if filename and not filename.lower().endswith(".vpk"):
             filename += ".vpk"
@@ -1176,7 +1025,6 @@ class SettingsPanel(QWidget):
             'flags': flags,
             'vtf_options': options,  # Новое поле для опций VTFCmd
             'material_maps': dict(getattr(self, '_material_maps', {})),  # файловые карты (Фаза 2)
-            'draw_uv_layout': draw_uv_layout,  # Флаг для рисования UV разметки
             'filename': filename,
             'tf2_game_folder': tf2_path,
             'export_folder': export_folder,
@@ -1191,11 +1039,6 @@ class SettingsPanel(QWidget):
         Метод сохранён, т.к. вызывается из __init__ и может снова понадобиться.
         """
         pass
-    
-    def expert_mode_triggered(self):
-        """Обработка нажатия кнопки экспертного режима"""
-        if hasattr(self.parent, 'expert_mode_triggered'):
-            self.parent.expert_mode_triggered()
     
     def build_vpk(self):
         """Обработка нажатия кнопки сборки VPK"""
@@ -1273,7 +1116,6 @@ class SettingsPanel(QWidget):
         self.t = t
         
         # Обновляем тексты
-        self.expert_button.setText(self.t.get('open_editor', 'Открыть редактор'))
         self.button.setText(self.t.get('build', 'Собрать VPK'))
         if hasattr(self, 'extract_model_button'):
             self.extract_model_button.setText(self.t.get('extract_model', 'Extract Original Model (SMD)'))
@@ -1317,12 +1159,7 @@ class SettingsPanel(QWidget):
             self.option_normal.setText(self.t.get('normal_map', 'Normal Map'))
         if hasattr(self, 'option_gamma'):
             self.option_gamma.setText(self.t.get('gamma_correction', 'Gamma Correction'))
-        # Обновляем чекбокс UV разметки
-        if hasattr(self, 'uv_layout_checkbox'):
-            self.uv_layout_checkbox.setText(self.t.get('draw_uv_layout', 'Нарисовать UV разметку'))
-        # Обновляем метку разрешения UV
-        self._update_uv_resolution_label()
-        
+
         # Обновляем заголовок Advanced
         prefix = "▼ " if self.advanced_group.is_expanded else "▶ "
         self.advanced_group.toggle_button.setText(prefix + self.t['advanced_title'])
@@ -1343,14 +1180,3 @@ class SettingsPanel(QWidget):
         if hasattr(self, 'filename_error') and self.filename_error.isVisible():
             self.validate_vpk_name()
 
-    def _update_uv_resolution_label(self):
-        """Обновляет метку разрешения UV разметки в зависимости от выбранного разрешения текстуры"""
-        if hasattr(self, 'uv_resolution_label'):
-            if self.radio_2048.isChecked():
-                self.uv_resolution_label.setText("(2048x2048)")
-            elif self.radio_1024.isChecked():
-                self.uv_resolution_label.setText("(1024x1024)")
-            elif self.radio_256.isChecked():
-                self.uv_resolution_label.setText("(256x256)")
-            else:
-                self.uv_resolution_label.setText("(512x512)")

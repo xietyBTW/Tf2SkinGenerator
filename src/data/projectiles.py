@@ -70,6 +70,39 @@ PROJECTILES: Dict[str, dict] = {
         "ru": "Энергошар", "en": "Energy Ball",
         "mdl_path": "models/weapons/w_models/w_drg_ball.mdl",
     },
+    "w_syringe_proj": {
+        "ru": "Шприц (снаряд)", "en": "Syringe (projectile)",
+        "mdl_path": "models/weapons/w_models/w_syringe_proj.mdl",
+    },
+    "w_breadmonster": {
+        "ru": "Хлебомонстр", "en": "Bread Monster",
+        "mdl_path": "models/weapons/w_models/w_breadmonster/w_breadmonster.mdl",
+    },
+    "w_repair_claw": {
+        "ru": "Коготь Спасателя", "en": "Repair Claw",
+        "mdl_path": "models/weapons/w_models/w_repair_claw.mdl",
+    },
+    "w_stickybomb2": {
+        "ru": "Липучка (вариант 2)", "en": "Stickybomb (variant 2)",
+        "mdl_path": "models/weapons/w_models/w_stickybomb2.mdl",
+    },
+    "w_stickybomb3": {
+        "ru": "Липучка (вариант 3)", "en": "Stickybomb (variant 3)",
+        "mdl_path": "models/weapons/w_models/w_stickybomb3.mdl",
+    },
+    "w_stickybomb_d": {
+        "ru": "Липучка (вариант D)", "en": "Stickybomb (variant D)",
+        "mdl_path": "models/weapons/w_models/w_stickybomb_d.mdl",
+    },
+    # Своя летящая модель через атрибут "custom projectile model" в items_game.
+    "w_quadball_grenade": {
+        "ru": "Граната Железного бомбардира", "en": "Iron Bomber Grenade",
+        "mdl_path": "models/workshop/weapons/c_models/c_quadball/w_quadball_grenade.mdl",
+    },
+    "w_kingmaker_stickybomb": {
+        "ru": "Липучка Быстромёта", "en": "Quickiebomb",
+        "mdl_path": "models/workshop/weapons/c_models/c_kingmaker_sticky/w_kingmaker_stickybomb.mdl",
+    },
 }
 
 #: Префикс mode для снарядов (mode = f"{PROJECTILE_MODE_PREFIX}{key}").

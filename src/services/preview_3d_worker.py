@@ -293,7 +293,7 @@ class Preview3DWorker(BaseWorker):
                     if len(mat_names) > 1:
                         _qcs = glob.glob(os.path.join(self._decomp_dir, "*.qc"))
                         _lay = qc_skin_parser.parse_skin_layout(_qcs[0]) if _qcs else None
-                        if _lay and _lay.blu_is_team:
+                        if _lay and qc_skin_parser.selector_spec(_lay).team:
                             try:
                                 raw = self._extract_blu_multi_textures_via_qc(mat_names)
                                 tex_map  = {k: v[0] for k, v in raw.items() if v[0]}
@@ -885,6 +885,20 @@ class Preview3DWorker(BaseWorker):
             # в геометрии (иначе материал уже показан обычным путём).
             missing = [m for m in extras
                        if m.lower() not in known and is_editable_material(m)]
+
+            # Доп. косметические стили (bloody/clean) — материалы строк-стилей,
+            # которых нет в геометрии. Показываем карточкой, чтобы стиль можно было
+            # перекрасить (сборка пакует их через blu_row). Только настоящие стили
+            # (selector_spec.styles), не команда/австралий.
+            _lay = qc_skin_parser.parse_skin_layout(qc_files[0])
+            for _lbl, _idx in qc_skin_parser.selector_spec(_lay).styles:
+                if 0 <= _idx < len(_lay.all_rows):
+                    for _m in _lay.all_rows[_idx]:
+                        ml = _m.lower()
+                        if (ml not in known and is_editable_material(_m)
+                                and _m not in missing):
+                            missing.append(_m)
+
             if not missing:
                 return {}
             logger.info(f"[3D] Доп. материалы из $texturegroup (вне геометрии): {missing}")
@@ -1058,8 +1072,9 @@ class Preview3DWorker(BaseWorker):
             return [], 0.0
 
         # Переключатель RED/BLU показываем только для настоящей команды
-        # (по именам: col0 + _blue/_blu), а не для стилей вроде bloody/clean.
-        if not layout.blu_is_team:
+        # (единый авторитет selector_spec.team — тот же, что у сборки), а не для
+        # стилей вроде bloody/clean.
+        if not qc_skin_parser.selector_spec(layout).team:
             logger.info(
                 f"[3D] второй скин не является BLU-командой: {layout.second_row} "
                 f"— стиль или вариант, переключатель команд не нужен"

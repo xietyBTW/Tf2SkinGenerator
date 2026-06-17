@@ -1,0 +1,295 @@
+label	key	cols	skins	team	variant	styles	mats	cards	note
+weapon/Scout/c_scattergun	c_scattergun	2	1		australium		1	1	
+weapon/Scout/c_double_barrel	c_double_barrel	2	1		australium		1	1	
+weapon/Scout/c_shortstop	c_shortstop	1	1				1	1	
+weapon/Scout/c_soda_popper	c_soda_popper	1	1				1	1	
+weapon/Scout/c_pep_scattergun	c_pep_scattergun	1	1				1	1	
+weapon/Scout/c_scatterdrum	c_scatterdrum	1	1				1	1	
+weapon/Scout/c_scattergun_xmas	c_scattergun_xmas	2	2	TEAM			1	1	
+weapon/Scout/c_pistol	c_pistol	1	1				1	1	
+weapon/Scout/c_ttg_max_gun	c_ttg_max_gun	1	1				1	1	
+weapon/Scout/c_invasion_pistol	c_invasion_pistol	2	2	TEAM			1	1	
+weapon/Scout/c_sd_cleaver	c_sd_cleaver	2	2			Bloody	1	1	
+weapon/Scout/c_energy_drink	c_energy_drink	3	3	TEAM			1	1	
+weapon/Scout/c_madmilk	c_madmilk	2	1				2	2	
+weapon/Scout/c_winger_pistol	c_winger_pistol	1	1				1	1	
+weapon/Scout/c_pep_pistol	c_pep_pistol	1	1				1	1	
+weapon/Scout/c_breadmonster_milk	c_breadmonster_milk	4	1				3	3	
+weapon/Scout/c_bat	c_bat	1	1				1	1	
+weapon/Scout/c_wooden_bat	c_wooden_bat	1	1				1	1	
+weapon/Scout/c_holymackerel	c_holymackerel	1	1				1	1	
+weapon/Scout/c_bonk_bat	c_bonk_bat	2	2	TEAM			1	1	
+weapon/Scout/c_candy_cane	c_candy_cane	4	2	TEAM			2	2	
+weapon/Scout/c_boston_basher	c_boston_basher	1	1				1	1	
+weapon/Scout/c_scout_sword	c_scout_sword	1	1				1	1	
+weapon/Scout/c_rift_fire_mace	c_rift_fire_mace	1	1				1	1	
+weapon/Scout/c_xms_giftwrap	c_xms_giftwrap	2	2	TEAM			1	1	
+weapon/Scout/c_invasion_bat	c_invasion_bat	5	2	TEAM			3	3	
+weapon/Scout/c_shogun_warfan	c_shogun_warfan	1	1				1	1	
+weapon/Scout/c_crossing_guard	c_crossing_guard	3	2				2	2	
+weapon/Scout/c_bat_xmas	c_bat_xmas	2	2	TEAM			1	1	
+weapon/Soldier/c_rocketlauncher	c_rocketlauncher	2	1		australium		1	1	
+weapon/Soldier/c_bet_rocketlauncher	c_bet_rocketlauncher	1	1				1	1	
+weapon/Soldier/c_directhit	c_directhit	1	1				1	1	
+weapon/Soldier/c_blackbox	c_blackbox	2	1		australium		1	1	
+weapon/Soldier/c_dumpster_device	c_dumpster_device	1	1				1	1	
+weapon/Soldier/c_liberty_launcher	c_liberty_launcher	1	1				1	1	
+weapon/Soldier/c_drg_cowmangler	c_drg_cowmangler	2	2	TEAM			1	1	
+weapon/Soldier/c_atom_launcher	c_atom_launcher	1	1				1	1	
+weapon/Soldier/c_rocketjumper	c_rocketjumper	1	1				1	1	
+weapon/Soldier/c_rocketlauncher_xmas	c_rocketlauncher_xmas	2	2	TEAM			1	1	
+weapon/Soldier/c_shotgun	c_shotgun	1	1				1	1	
+weapon/Soldier/c_reserve_shooter	c_reserve_shooter	1	1				1	1	
+weapon/Soldier/c_batt_buffpack	c_batt_buffpack	1	1				0	0	reference SMD не найден
+weapon/Soldier/c_rocketboots_soldier	c_rocketboots_soldier	1	1				1	1	
+weapon/Soldier/c_shogun_warpack	c_shogun_warpack	2	2	TEAM			1	1	
+weapon/Soldier/c_drg_righteousbison	c_drg_righteousbison	1	1				1	1	
+weapon/Soldier/tankerboots	tankerboots	1	1				1	1	
+weapon/Soldier/c_paratrooper_pack	c_paratrooper_pack	3	2	TEAM			1	1	
+weapon/Soldier/c_trenchgun	c_trenchgun	1	1				1	1	
+weapon/Soldier/c_shogun_warhorn	c_shogun_warhorn	1	1				1	1	
+weapon/Soldier/c_buffpack_xmas	c_buffpack_xmas	4	2	TEAM			2	2	
+weapon/Soldier/c_shovel	c_shovel	1	1				1	1	
+weapon/Soldier/c_pickaxe_s2	c_pickaxe_s2	2	1				1	1	
+weapon/Soldier/c_shogun_katana_soldier	c_shogun_katana_soldier	2	2				1	1	
+weapon/Soldier/c_riding_crop	c_riding_crop	1	1				1	1	
+weapon/Soldier/c_market_gardener	c_market_gardener	1	1				1	1	
+weapon/Soldier/c_pickaxe	c_pickaxe	1	1				1	1	
+weapon/Soldier/c_ham	c_ham	1	1				1	1	
+weapon/Soldier/c_paintrain	c_paintrain	1	1				1	1	
+weapon/Pyro/c_flamethrower	c_flamethrower	3	2	TEAM	australium		1	1	
+weapon/Pyro/c_rainblower	c_rainblower	3	2	TEAM			2	2	
+weapon/Pyro/c_ai_flamethrower	c_ai_flamethrower	3	2	TEAM			2	2	
+weapon/Pyro/c_backburner	c_backburner	5	2	TEAM			1	1	
+weapon/Pyro/c_degreaser	c_degreaser	2	2	TEAM			1	1	
+weapon/Pyro/c_drg_phlogistinator	c_drg_phlogistinator	4	2	TEAM			2	2	
+weapon/Pyro/c_flameball	c_flameball	2	2	TEAM			1	1	
+weapon/Pyro/c_flamethrower_xmas	c_flamethrower_xmas	2	2	TEAM			1	1	
+weapon/Pyro/c_backburner_xmas	c_backburner_xmas	11	2	TEAM			5	5	
+weapon/Pyro/c_flaregun_pyro	c_flaregun_pyro	4	2	TEAM			1	1	
+weapon/Pyro/c_detonator	c_detonator	4	2	TEAM			1	1	
+weapon/Pyro/c_scorch_shot	c_scorch_shot	2	2	TEAM			1	1	
+weapon/Pyro/c_rocketpack	c_rocketpack	2	2	TEAM			1	1	
+weapon/Pyro/c_drg_manmelter	c_drg_manmelter	3	2				2	2	
+weapon/Pyro/c_gascan	c_gascan	2	2	TEAM			1	1	
+weapon/Pyro/c_fireaxe	c_fireaxe	1	1				1	1	
+weapon/Pyro/c_axtinguisher_pyro	c_axtinguisher_pyro	2	1		australium		1	1	
+weapon/Pyro/c_mailbox	c_mailbox	1	1				1	1	
+weapon/Pyro/c_powerjack	c_powerjack	2	2	TEAM			1	1	
+weapon/Pyro/c_sledgehammer	c_sledgehammer	1	1				1	1	
+weapon/Pyro/c_back_scratcher	c_back_scratcher	1	1				1	1	
+weapon/Pyro/c_drg_thirddegree	c_drg_thirddegree	2	2	TEAM			1	1	
+weapon/Pyro/c_sd_neonsign	c_sd_neonsign	4	2	TEAM			2	2	
+weapon/Pyro/c_slapping_glove	c_slapping_glove	3	3				1	1	
+weapon/Pyro/c_lollichop	c_lollichop	2	2	TEAM			1	1	
+weapon/Pyro/c_rift_fire_axe	c_rift_fire_axe	1	1				1	1	
+weapon/Pyro/c_fireaxe_pyro_xmas	c_fireaxe_pyro_xmas	4	2	TEAM			0	0	reference SMD не найден
+weapon/Demoman/c_grenadelauncher	c_grenadelauncher	2	1		australium		1	1	
+weapon/Demoman/c_lochnload	c_lochnload	1	1				1	1	
+weapon/Demoman/demo_booties	demo_booties	1	1				1	1	
+weapon/Demoman/pegleg	pegleg	1	1				1	1	
+weapon/Demoman/c_demo_cannon	c_demo_cannon	3	2				1	1	
+weapon/Demoman/c_quadball	c_quadball	3	2				1	1	
+weapon/Demoman/c_grenadelauncher_xmas	c_grenadelauncher_xmas	4	2				3	3	
+weapon/Demoman/c_stickybomb_launcher	c_stickybomb_launcher	2	1		australium		1	1	
+weapon/Demoman/c_scottish_resistance	c_scottish_resistance	2	1				2	2	
+weapon/Demoman/c_sticky_jumper	c_sticky_jumper	1	1				1	1	
+weapon/Demoman/c_targe	c_targe	1	1				1	1	
+weapon/Demoman/c_persian_shield	c_persian_shield	1	1				1	1	
+weapon/Demoman/c_kingmaker_sticky	c_kingmaker_sticky	1	1				1	1	
+weapon/Demoman/c_wheel_shield	c_wheel_shield	1	1				1	1	
+weapon/Demoman/c_stickybomb_launcher_xmas	c_stickybomb_launcher_xmas	3	3				1	1	
+weapon/Demoman/c_targe_xmas	c_targe_xmas	7	2				5	5	
+weapon/Demoman/c_bottle	c_bottle	1	1				1	1	
+weapon/Demoman/c_claymore	c_claymore	2	1		australium		1	1	
+weapon/Demoman/c_battleaxe	c_battleaxe	1	1				1	1	
+weapon/Demoman/c_headtaker	c_headtaker	1	1				1	1	
+weapon/Demoman/c_caber	c_caber	1	1				1	1	
+weapon/Demoman/c_claidheamohmor	c_claidheamohmor	2	2	TEAM			1	1	
+weapon/Demoman/c_shogun_katana	c_shogun_katana	2	2				1	1	
+weapon/Demoman/c_demo_sultan_sword	c_demo_sultan_sword	1	1				1	1	
+weapon/Demoman/c_scotland_shard	c_scotland_shard	1	1				1	1	
+weapon/Demoman/c_golfclub	c_golfclub	1	1				1	1	
+weapon/Demoman/c_claymore_xmas	c_claymore_xmas	6	2	TEAM			4	4	
+weapon/Heavy/c_minigun	c_minigun	2	1		australium		1	1	
+weapon/Heavy/c_iron_curtain	c_iron_curtain	1	1				1	1	
+weapon/Heavy/c_minigun_natascha	c_minigun_natascha	2	1				2	2	
+weapon/Heavy/c_gatling_gun	c_gatling_gun	1	1				1	1	
+weapon/Heavy/c_tomislav	c_tomislav	2	1		australium		1	1	
+weapon/Heavy/c_canton	c_canton	2	2	TEAM			1	1	
+weapon/Heavy/c_minigun_xmas	c_minigun_xmas	2	2	TEAM			1	1	
+weapon/Heavy/c_sandwich	c_sandwich	1	1				0	0	reference SMD не найден
+weapon/Heavy/c_chocolate	c_chocolate	2	2	TEAM			0	0	reference SMD не найден
+weapon/Heavy/c_fishcake	c_fishcake	2	2	TEAM			1	1	
+weapon/Heavy/c_buffalo_steak	c_buffalo_steak	1	1				1	1	
+weapon/Heavy/c_banana	c_banana	1	1				1	1	
+weapon/Heavy/c_robo_sandwich	c_robo_sandwich	4	2	TEAM			2	2	
+weapon/Heavy/c_russian_riot	c_russian_riot	1	1				1	1	
+weapon/Heavy/c_sandwich_xmas	c_sandwich_xmas	4	2	TEAM			0	0	reference SMD не найден
+weapon/Heavy/c_sr3_punch	c_sr3_punch	2	1				2	2	
+weapon/Heavy/c_fists_of_steel	c_fists_of_steel	2	2	TEAM			1	1	
+weapon/Heavy/c_boxing_gloves	c_boxing_gloves	4	4	TEAM			1	1	
+weapon/Heavy/c_breadmonster_gloves	c_breadmonster_gloves	1	1				1	1	
+weapon/Heavy/c_bear_claw	c_bear_claw	2	2	TEAM			1	1	
+weapon/Heavy/c_eviction_notice	c_eviction_notice	1	1				1	1	
+weapon/Heavy/c_xms_gloves	c_xms_gloves	3	3	TEAM			1	1	
+weapon/Heavy/c_boxing_gloves_xmas	c_boxing_gloves_xmas	4	2	TEAM			2	2	
+weapon/Engineer/c_drg_pomson	c_drg_pomson	2	2	TEAM			1	1	
+weapon/Engineer/c_dex_shotgun	c_dex_shotgun	1	1				1	1	
+weapon/Engineer/c_tele_shotgun	c_tele_shotgun	2	2	TEAM			1	1	
+weapon/Engineer/c_frontierjustice	c_frontierjustice	3	2	TEAM	australium		1	1	
+weapon/Engineer/c_frontierjustice_xmas	c_frontierjustice_xmas	6	2				4	4	
+weapon/Engineer/c_wrangler	c_wrangler	2	2	TEAM			1	1	
+weapon/Engineer/c_invasion_wrangler	c_invasion_wrangler	5	2				3	3	
+weapon/Engineer/c_dex_arm	c_dex_arm	1	1				1	1	
+weapon/Engineer/c_wrangler_xmas	c_wrangler_xmas	5	2	TEAM			2	2	
+weapon/Engineer/c_wrench	c_wrench	2	1		australium		1	1	
+weapon/Engineer/c_spikewrench	c_spikewrench	1	1				1	1	
+weapon/Engineer/c_jag	c_jag	1	1				1	1	
+weapon/Engineer/c_drg_wrenchmotron	c_drg_wrenchmotron	2	2	TEAM			1	1	
+weapon/Engineer/c_wrench_xmas	c_wrench_xmas	2	2	TEAM			1	1	
+weapon/Engineer/c_builder	c_builder	1	1				1	1	
+weapon/Engineer/c_pda_engineer	c_pda_engineer	2	1				2	2	
+weapon/Medic/c_syringegun	c_syringegun	3	2	TEAM			2	2	
+weapon/Medic/c_leechgun	c_leechgun	3	2	TEAM	australium		1	1	
+weapon/Medic/c_crusaders_crossbow	c_crusaders_crossbow	2	2	TEAM			1	1	
+weapon/Medic/c_proto_syringegun	c_proto_syringegun	3	2	TEAM			2	2	
+weapon/Medic/c_medigun	c_medigun	3	2	TEAM	australium		1	1	
+weapon/Medic/c_proto_medigun	c_proto_medigun	3	2				2	2	
+weapon/Medic/c_medigun_defence	c_medigun_defence	5	2	TEAM			0	0	reference SMD не найден
+weapon/Medic/c_medigun_xmas	c_medigun_xmas	2	2	TEAM			1	1	
+weapon/Medic/c_bonesaw	c_bonesaw	1	1				1	1	
+weapon/Medic/c_ubersaw	c_ubersaw	2	2	TEAM			1	1	
+weapon/Medic/c_uberneedle	c_uberneedle	4	2				3	3	
+weapon/Medic/c_amputator	c_amputator	2	2	TEAM			1	1	
+weapon/Medic/c_hippocrates_bust	c_hippocrates_bust	1	1				1	1	
+weapon/Medic/c_bonesaw_xmas	c_bonesaw_xmas	6	2				3	3	
+weapon/Medic/c_ubersaw_xmas	c_ubersaw_xmas	5	2	TEAM			3	3	
+weapon/Sniper/c_sniperrifle	c_sniperrifle	2	1		australium		1	1	
+weapon/Sniper/c_csgo_awp	c_csgo_awp	2	1				2	2	
+weapon/Sniper/c_bow	c_bow	2	1				1	1	
+weapon/Sniper/c_bow_thief	c_bow_thief	2	1				1	1	
+weapon/Sniper/c_dartgun	c_dartgun	2	1				2	2	
+weapon/Sniper/c_bazaar_sniper	c_bazaar_sniper	2	1				2	2	
+weapon/Sniper/c_dex_sniperrifle	c_dex_sniperrifle	2	1				2	2	
+weapon/Sniper/c_invasion_sniperrifle	c_invasion_sniperrifle	4	2	TEAM			3	3	
+weapon/Sniper/c_pro_rifle	c_pro_rifle	2	1				2	2	
+weapon/Sniper/c_tfc_sniperrifle	c_tfc_sniperrifle	2	1				2	2	
+weapon/Sniper/c_sniperrifle_xmas	c_sniperrifle_xmas	2	2	TEAM			1	1	
+weapon/Sniper/c_bow_xmas	c_bow_xmas	5	2				3	3	
+weapon/Sniper/c_smg	c_smg	2	1		australium		1	1	
+weapon/Sniper/c_pro_smg	c_pro_smg	1	1				1	1	
+weapon/Sniper/urinejar	urinejar	3	1				3	3	
+weapon/Sniper/c_breadmonster	c_breadmonster	4	1				4	4	
+weapon/Sniper/knife_shield	knife_shield	1	1				1	1	
+weapon/Sniper/croc_shield	croc_shield	1	1				1	1	
+weapon/Sniper/xms_sniper_commandobackpack	xms_sniper_commandobackpack	3	2	TEAM			2	2	
+weapon/Sniper/c_smg_xmas	c_smg_xmas	3	2				2	2	
+weapon/Sniper/c_machete	c_machete	1	1				1	1	
+weapon/Sniper/c_wood_machete	c_wood_machete	1	1				1	1	
+weapon/Sniper/c_croc_knife	c_croc_knife	1	1				1	1	
+weapon/Sniper/c_scimitar	c_scimitar	1	1				1	1	
+weapon/Sniper/c_prinny_knife	c_prinny_knife	1	1				1	1	
+weapon/Spy/c_revolver	c_revolver	1	1				1	1	
+weapon/Spy/c_snub_nose	c_snub_nose	1	1				1	1	
+weapon/Spy/c_ambassador	c_ambassador	4	2	TEAM	australium		1	1	
+weapon/Spy/c_letranger	c_letranger	1	1				1	1	
+weapon/Spy/c_dex_revolver	c_dex_revolver	1	1				1	1	
+weapon/Spy/c_revolver_xmas	c_revolver_xmas	4	2	TEAM			3	3	
+weapon/Spy/c_ambassador_xmas	c_ambassador_xmas	6	2				2	2	
+weapon/Spy/c_sapper	c_sapper	2	1				2	2	
+weapon/Spy/c_p2rec	c_p2rec	2	1				2	2	
+weapon/Spy/c_breadmonster_sapper	c_breadmonster_sapper	2	1				2	2	
+weapon/Spy/w_sd_sapper	w_sd_sapper	1	1				1	1	
+weapon/Spy/c_ttg_sam_gun	c_ttg_sam_gun	1	1				1	1	
+weapon/Spy/c_sapper_xmas	c_sapper_xmas	4	2	TEAM			1	1	
+weapon/Spy/c_knife	c_knife	2	1		australium		1	1	
+weapon/Spy/c_acr_hookblade	c_acr_hookblade	1	1				1	1	
+weapon/Spy/c_ava_roseknife	c_ava_roseknife	3	3	TEAM			1	1	
+weapon/Spy/c_eternal_reward	c_eternal_reward	2	2	TEAM			1	1	
+weapon/Spy/c_voodoo_pin	c_voodoo_pin	1	1				1	1	
+weapon/Spy/c_shogun_kunai	c_shogun_kunai	1	1				1	1	
+weapon/Spy/c_switchblade	c_switchblade	1	1				1	1	
+weapon/Spy/c_xms_cold_shoulder	c_xms_cold_shoulder	1	1				1	1	
+weapon/Spy/c_unarmed_combat	c_unarmed_combat	2	2	TEAM			1	1	
+weapon/Spy/c_knife_xmas	c_knife_xmas	2	2	TEAM			1	1	
+weapon/Spy/c_spy_watch	c_spy_watch	1	1				1	1	
+weapon/Spy/c_leather_watch	c_leather_watch	1	1				1	1	
+weapon/Spy/c_pocket_watch	c_pocket_watch	1	1				1	1	
+weapon/All-Class/c_shotgun_xmas	c_shotgun_xmas	3	2				2	2	
+weapon/All-Class/c_frying_pan	c_frying_pan	2	1		australium		1	1	
+weapon/All-Class/c_saxxy	c_saxxy	1	1				1	1	
+weapon/All-Class/c_picket	c_picket	2	1				2	2	
+weapon/All-Class/c_carnival_mallet	c_carnival_mallet	2	2	TEAM			1	1	
+weapon/All-Class/c_skullbat	c_skullbat	1	1				1	1	
+weapon/All-Class/c_tw_eagle	c_tw_eagle	2	1				2	2	
+body/scout_body	models/player/scout.mdl	17	8	TEAM			4	2	
+body/soldier_body	models/player/soldier.mdl	20	8	TEAM			4	2	
+body/pyro_body	models/player/pyro.mdl	8	8	TEAM			1	1	
+body/demoman_body	models/player/demo.mdl	17	8	TEAM			3	2	
+body/heavy_body	models/player/heavy.mdl	21	8	TEAM			1	1	
+body/engineer_body	models/player/engineer.mdl	15	8	TEAM			2	2	
+body/medic_body	models/player/medic.mdl	21	8	TEAM			4	2	
+body/sniper_body	models/player/sniper.mdl	20	8	TEAM			5	3	
+body/spy_body	models/player/spy.mdl	31	24	TEAM			1	1	
+projectile/w_rocket	w_rocket	1	1				1	1	
+projectile/w_rocket_airstrike	w_rocket_airstrike	1	1				1	1	
+projectile/w_grenade_grenadelauncher	w_grenade_grenadelauncher	2	2	TEAM			1	1	
+projectile/w_grenade_pipebomb	w_grenade_pipebomb	2	2	TEAM			1	1	
+projectile/w_stickybomb	w_stickybomb	2	2	TEAM			1	1	
+projectile/w_stickybomb_defender	w_stickybomb_defender	1	1				1	1	
+projectile/w_arrow	w_arrow	1	1				1	1	
+projectile/w_arrow_xmas	w_arrow_xmas	2	1				2	2	
+projectile/w_cannonball	w_cannonball	2	2	TEAM			1	1	
+projectile/w_baseball	w_baseball	1	1				1	1	
+projectile/w_flaregun_shell	w_flaregun_shell	2	2	TEAM			1	1	
+projectile/w_syringe	w_syringe	2	1				2	2	
+projectile/w_drg_ball	w_drg_ball	1	1				1	1	
+projectile/w_syringe_proj	w_syringe_proj	2	2	TEAM			1	1	
+projectile/w_breadmonster	w_breadmonster	1	1				1	1	
+projectile/w_repair_claw	w_repair_claw	2	2	TEAM			1	1	
+projectile/w_stickybomb2	w_stickybomb2	2	2	TEAM			1	1	
+projectile/w_stickybomb3	w_stickybomb3	2	2	TEAM			1	1	
+projectile/w_stickybomb_d	w_stickybomb_d	2	2	TEAM			1	1	
+projectile/w_quadball_grenade	w_quadball_grenade	2	2	TEAM			1	1	
+projectile/w_kingmaker_stickybomb	w_kingmaker_stickybomb	4	2	TEAM			2	2	
+pickup/medkit_small	medkit_small	1	1				1	1	
+pickup/medkit_medium	medkit_medium	1	1				1	1	
+pickup/medkit_large	medkit_large	1	1				1	1	
+pickup/halloween_medkit_small	halloween_medkit_small	1	1				1	1	
+pickup/halloween_medkit_medium	halloween_medkit_medium	1	1				1	1	
+pickup/halloween_medkit_large	halloween_medkit_large	1	1				0	0	reference SMD не найден
+pickup/medkit_small_bday	medkit_small_bday	1	1				1	1	
+pickup/medkit_medium_bday	medkit_medium_bday	1	1				1	1	
+pickup/medkit_large_bday	medkit_large_bday	1	1				1	1	
+pickup/ammopack_small	ammopack_small	1	1				1	1	
+pickup/ammopack_medium	ammopack_medium	1	1				1	1	
+pickup/ammopack_large	ammopack_large	1	1				1	1	
+pickup/ammopack_small_bday	ammopack_small_bday	2	1				2	2	
+pickup/ammopack_medium_bday	ammopack_medium_bday	2	1				2	2	
+pickup/ammopack_large_bday	ammopack_large_bday	2	1				2	2	
+pickup/currencypack_small	currencypack_small	1	1				1	1	
+pickup/currencypack_medium	currencypack_medium	1	1				1	1	
+pickup/currencypack_large	currencypack_large	1	1				1	1	
+taunt/tank	tank	1	1				1	1	
+taunt/yeti	yeti	4	1				4	2	
+taunt/yeti_standee	yeti_standee	1	1				1	1	
+taunt/scooter	scooter	2	1				2	2	
+taunt/bumpercar	bumpercar	6	2	TEAM			3	3	
+taunt/brutal_guitar	brutal_guitar	3	2	TEAM			2	2	
+taunt/beer_crate	beer_crate	3	1				3	3	
+taunt/chicken_bucket	chicken_bucket	2	1				2	2	
+taunt/cash_wad	cash_wad	1	1				1	1	
+taunt/matchbox	matchbox	1	1				1	1	
+taunt/demo_nuke_bottle	demo_nuke_bottle	5	2	TEAM			3	3	
+taunt/dizzy_bottle1	dizzy_bottle1	0	0				0	0	reference SMD не найден
+taunt/victory_mug	victory_mug	1	1				1	1	
+taunt/wupass_mug	wupass_mug	3	2				2	2	
+taunt/medic_xray_taunt	medic_xray_taunt	1	1				0	0	reference SMD не найден
+taunt/engys_new_chair_articlulated	engys_new_chair_articlulated	7	2	TEAM			4	4	
+taunt/pyro_poolparty	pyro_poolparty	4	2				0	0	reference SMD не найден
+taunt/balloon_animal_pyro	balloon_animal_pyro	3	2	TEAM			2	2	
+taunt/taunt_burstchester_scout	taunt_burstchester_scout	4	2	TEAM			2	2	
+taunt/taunt_cheers_scout	taunt_cheers_scout	4	2	TEAM			2	2	
+taunt/taunt_killer_joke_scout	taunt_killer_joke_scout	2	2	TEAM			1	1	
+taunt/taunt_the_final_score_scout	taunt_the_final_score_scout	2	2	TEAM			1	1	

@@ -238,13 +238,16 @@ class ModelBuildService:
             }
         """
         layout = qc_skin_parser.parse_skin_layout(qc_path)
+        # Команда — через единый авторитет selector_spec (тот же, что и превью),
+        # чтобы детект не расходился между UI и сборкой.
+        spec = qc_skin_parser.selector_spec(layout)
         # Позиционная семантика для сборки: blu_row = вторая базовая строка
-        # КАК ЕСТЬ (команда или стиль — решает blu_is_team; сборка рендерит
-        # второй скин в любом случае). Column alignment с RED сохранён.
+        # КАК ЕСТЬ (команда или стиль — решает team; сборка рендерит второй скин
+        # в любом случае). Column alignment с RED сохранён.
         return {
             'red_row': layout.base_rows[0] if layout.base_rows else [],
             'blu_row': layout.second_row,
-            'blu_is_team': layout.blu_is_team,  # вторая строка — настоящая команда, а не вариант
+            'blu_is_team': spec.team,  # вторая строка — настоящая команда, а не вариант
             'main_texture': layout.main_texture,
             'extra_materials': layout.extra_materials,
             'all_rows': layout.all_rows,
@@ -350,15 +353,20 @@ class ModelBuildService:
             }
         """
         layout = qc_skin_parser.parse_skin_layout(qc_path)
+        spec = qc_skin_parser.selector_spec(layout)
         return {
             'num_skins': len(layout.unique_base_rows),
             'roles': layout.roles,
-            'is_team': layout.blu_is_team,
+            'is_team': spec.team,
             'has_australium': bool(layout.variants),
             'rows': layout.all_rows,
             # Полный список скинов (база+команда+варианты) с сырыми индексами —
             # для кастомной модели (показ всех групп как переопределяемых стилей).
             'skins': layout.skins,
+            # Доп. косметические стили (bloody/clean) — (подпись, сырой_индекс).
+            # Для стокового оружия полосу стилей показываем ТОЛЬКО когда тут не пусто
+            # (иначе у команды/австралия конфликт с их тумблерами).
+            'styles': spec.styles,
         }
 
     @staticmethod

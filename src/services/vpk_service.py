@@ -297,6 +297,7 @@ class VPKService:
         format_type: str,
         flags: List[str],
         vtf_options: dict,
+        blu_texture_filename: Optional[str] = None,
     ) -> None:
         """
         Создаёт BLU-командную текстуру (и VMT) рядом с RED.
@@ -306,14 +307,20 @@ class VPKService:
         BLU VMT — копия RED VMT с обновлённым $basetexture. Ошибки не критичны
         (мод соберётся и без BLU-варианта).
 
+        blu_texture_filename — РЕАЛЬНОЕ имя синего материала из $texturegroup
+        (blu_row[0]). Нужно, т.к. col0 может уже нести суффикс _red
+        (w_grenade_red → w_grenade_blue), и «{texture}_blue» дало бы неверное
+        w_grenade_red_blue. По умолчанию — старое поведение «{texture}_blue».
+
         Примечание: BLU намеренно использует только UI-опции (vtf_options),
         не подмешивая опции из флагов — поведение сохранено как в оригинале.
         """
         if not blu_mode or blu_mode in ('none', ''):
             return
         try:
+            blu_name = blu_texture_filename or f"{texture_filename}_blue"
             red_vtf_path = vtf_output_path / vtf_filename
-            blu_vtf_name = f"{texture_filename}_blue.vtf"
+            blu_vtf_name = f"{blu_name}.vtf"
             blu_vtf_path = vtf_output_path / blu_vtf_name
             blu_created = False
 
@@ -329,7 +336,7 @@ class VPKService:
                 if blu_created:
                     logger.info(f"BLU текстура: готовый VTF скопирован → {blu_vtf_name}")
             elif blu_image_path and os.path.exists(blu_image_path):
-                blu_png_tmp = vtf_output_path / f"{texture_filename}_blue.png"
+                blu_png_tmp = vtf_output_path / f"{blu_name}.png"
                 VPKService._process_image(blu_image_path, str(blu_png_tmp), size)
                 blu_vtf_flags, _ = TextureService.parse_vtf_flags_and_options(flags or [])
                 blu_opts = dict(vtf_options or {})
@@ -345,10 +352,10 @@ class VPKService:
 
             # BLU VMT — копия RED с обновлённым $basetexture
             if blu_created and vmt_path.exists():
-                blu_vmt_path = vtf_output_path / f"{texture_filename}_blue.vmt"
+                blu_vmt_path = vtf_output_path / f"{blu_name}.vmt"
                 shutil.copy2(vmt_path, blu_vmt_path)
                 VMTService.update_vmt_basetexture_path(
-                    str(blu_vmt_path), patched_cdmaterials_path, f"{texture_filename}_blue"
+                    str(blu_vmt_path), patched_cdmaterials_path, blu_name
                 )
                 logger.info(f"BLU VMT создан: {blu_vmt_path.name}")
         except Exception as _blu_exc:
@@ -2502,9 +2509,14 @@ class VPKService:
                     elif not _blu_is_team:
                         logger.info(f"[{weapon_key}] BLU team texture пропущена (нет командной строки в $texturegroup)")
                     else:
+                        # Реальное имя синего материала col0 берём из blu_row[0]
+                        # (может быть w_grenade_blue при col0=w_grenade_red), иначе
+                        # дефолт «{texture}_blue» внутри функции.
+                        _blu_col0 = blu_row[0] if blu_row else None
                         VPKService._build_blu_team_texture(
                             blu_mode, blu_image_path, vtf_output_path, vtf_filename, vmt_path,
                             texture_filename, patched_cdmaterials_path, size, format_type, flags, vtf_options,
+                            blu_texture_filename=_blu_col0,
                         )
 
                     # === Создаем текстуры для дополнительных материалов модели (shell, scope и т.д.) ===

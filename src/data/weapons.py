@@ -536,6 +536,16 @@ WEAPON_MDL_PATHS["pegleg"] = (
     "models/workshop/player/items/demo/pegleg/pegleg.mdl"
 )
 
+# Mantreads (Людодавы): player-item, не c_models
+WEAPON_MDL_PATHS["tankerboots"] = (
+    "models/player/items/soldier/tankerboots.mdl"
+)
+
+# Darwin's Danger Shield (Дарвинистский щит): player-item, не c_models
+WEAPON_MDL_PATHS["croc_shield"] = (
+    "models/player/items/sniper/croc_shield.mdl"
+)
+
 # Robo-Sandvich: папка c_sandwich/, файл c_robo_sandwich.mdl
 WEAPON_MDL_PATHS["c_robo_sandwich"] = (
     "models/weapons/c_models/c_sandwich/c_robo_sandwich.mdl"

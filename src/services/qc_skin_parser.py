@@ -271,11 +271,25 @@ def classify_rows(rows: List[List[str]]) -> SkinLayout:
             unique_rows.append(r)
     layout.unique_base_rows = unique_rows
 
-    # 5: командность второй уникальной строки — строго по именам
+    # 5: командность второй уникальной строки — строго по именам. Распознаём оба
+    # паттерна col0: «нейтраль → X_blue» (c_flaregun_shell → c_flaregun_shell_blue)
+    # И «X_red → X_blue» (w_grenade_red → w_grenade_blue, типично для снарядов), где
+    # база уже несёт суффикс _red. Иначе UI не показывал бы переключатель, хотя
+    # команда есть (и сборка её находит через team_reference).
     if len(unique_rows) >= 2 and unique_rows[0] and unique_rows[1]:
         b0 = unique_rows[0][0].lower()
         b1 = unique_rows[1][0].lower()
-        layout.blu_is_team = b1 in (b0 + '_blue', b0 + '_blu')
+
+        def _team_stem(name: str) -> str:
+            for suf in ('_blue', '_blu', '_red'):
+                if name.endswith(suf):
+                    return name[: -len(suf)]
+            return name
+
+        b1_is_blue = b1.endswith('_blue') or b1.endswith('_blu')
+        layout.blu_is_team = (
+            b1_is_blue and b0 != b1 and _team_stem(b0) == _team_stem(b1)
+        )
 
     # Подписи скинов для UI
     n = len(unique_rows)
@@ -338,6 +352,55 @@ def pick_preview_variant(layout: SkinLayout) -> Optional[List[str]]:
         if kind in layout.variants:
             return layout.variants[kind]
     return None
+
+
+# ── Единый «авторитет» селекторов: что показывать для любой модели ──────── #
+
+@dataclass
+class SelectorSpec:
+    """Какие селекторы должна показать UI для данной модели — ЕДИНЫЙ источник
+    истины (и для оружия, и для шапок, и для снарядов, и т.д.). Считается из
+    $texturegroup, поэтому детект одинаков для всех типов и не расходится.
+
+    team    — показывать переключатель RED/BLU.
+    variant — вид внешнего варианта ('australium'/'festive'/'botkiller') или None
+              → показывать карточку варианта.
+    styles  — доп. стили-скины (bloody/clean и т.п.), КРОМЕ базового/RED/BLU и
+              варианта: список (подпись, сырой_индекс_скина). Индекс — позиция в
+              all_rows (как в модели), чтобы сборка/превью выбирали верный скин.
+    """
+    team: bool = False
+    variant: Optional[str] = None
+    styles: List[tuple] = field(default_factory=list)
+
+
+def selector_spec(layout: SkinLayout) -> SelectorSpec:
+    """Единая классификация: команда / вариант / стили — из одного разбора QC."""
+    spec = SelectorSpec()
+    if layout is None:
+        return spec
+
+    spec.team = bool(layout.blu_is_team)
+
+    pv = pick_preview_variant(layout)
+    if pv:
+        spec.variant = variant_kind(pv[0])
+
+    # Стили: ТОЛЬКО косметические (bloody/clean/dirty — именованные).
+    # Генерик-«Skin N» НЕ включаем: у тел персонажей это функциональные скины
+    # (убер-заряд invun, маскировка mask_*, зомби), а не косметика, которую правят.
+    _base_roles = {'red', 'blu', 'skin 0'}
+    for s in layout.skins:
+        idx = s.get('index', -1)
+        role = s.get('role', '')
+        rl = role.lower()
+        if rl in _base_roles or role.startswith('Skin '):
+            continue
+        col0 = layout.all_rows[idx][0] if 0 <= idx < len(layout.all_rows) and layout.all_rows[idx] else ''
+        if variant_kind(col0):
+            continue  # это вариант (austr/festive/botkiller) — учтён в spec.variant
+        spec.styles.append((role, idx))
+    return spec
 
 
 # ── Ограничение раскладки списком разрешённых материалов (режимы рук) ───── #

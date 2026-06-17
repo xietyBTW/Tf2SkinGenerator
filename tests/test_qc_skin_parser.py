@@ -98,6 +98,59 @@ class CorpusTests(unittest.TestCase):
         self.assertIn("australium", layout.variants)
         self.assertIn("festive", layout.variants)
 
+    def test_team_with_red_suffixed_base(self):
+        """Снаряд: col0 уже с суффиксом _red (w_grenade_red → w_grenade_blue) —
+        blu_is_team должен распознать команду (раньше UI её не показывал)."""
+        layout = parse_skin_layout(_qc("projectile_team_red_base.qc"))
+        self.assertTrue(layout.blu_is_team)
+        self.assertEqual(layout.main_texture, "w_grenade_red")
+        self.assertEqual(layout.second_row, ["w_grenade_blue", "w_grenade_blue"])
+
+    def test_selector_spec_team_styles_variant(self):
+        """Единый авторитет selector_spec: команда / вариант / стили — из одного
+        разбора, одинаково для любого типа модели."""
+        from src.services.qc_skin_parser import selector_spec
+
+        # Стиль bloody, без команды/варианта
+        s = selector_spec(parse_skin_layout(_qc("cleaver_styles.qc")))
+        self.assertFalse(s.team)
+        self.assertIsNone(s.variant)
+        self.assertEqual(s.styles, [("Bloody", 1)])
+
+        # Команда + австралий, без доп. стилей (вариантные строки не стили)
+        s = selector_spec(parse_skin_layout(_qc("rocketlauncher_team_australium.qc")))
+        self.assertTrue(s.team)
+        self.assertEqual(s.variant, "australium")
+        self.assertEqual(s.styles, [])
+
+        # Команда нейтраль→blue, без варианта/стилей
+        s = selector_spec(parse_skin_layout(_qc("flaregun_team_shell.qc")))
+        self.assertTrue(s.team)
+        self.assertIsNone(s.variant)
+        self.assertEqual(s.styles, [])
+
+        # Команда X_red→X_blue (снаряд)
+        s = selector_spec(parse_skin_layout(_qc("projectile_team_red_base.qc")))
+        self.assertTrue(s.team)
+        self.assertIsNone(s.variant)
+
+        # Натив-festive: команда есть, ЛОЖНОГО варианта нет
+        s = selector_spec(parse_skin_layout(_qc("native_festive_team.qc")))
+        self.assertTrue(s.team)
+        self.assertIsNone(s.variant)
+
+        # Нет $texturegroup — всё пусто
+        s = selector_spec(parse_skin_layout(_qc("no_texturegroup.qc")))
+        self.assertFalse(s.team)
+        self.assertIsNone(s.variant)
+        self.assertEqual(s.styles, [])
+
+        # Тело персонажа: команда есть, но функциональные скины (убер invun и т.п.)
+        # НЕ должны попадать в стили (это не косметика, генерик «Skin N»).
+        s = selector_spec(parse_skin_layout(_qc("player_body_functional_skins.qc")))
+        self.assertTrue(s.team)
+        self.assertEqual(s.styles, [])
+
     def test_native_festive_no_false_variant(self):
         """Натив-праздничная модель (c_sapper_xmas): festive — база, а не
         overlay-вариант → нет ложной карточки варианта, но команда работает."""
