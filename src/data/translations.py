@@ -8,6 +8,8 @@ TRANSLATIONS = {
         # Вкладки выбора (оружие / шапки)
         'tab_weapons': 'Оружие',
         'tab_hats': 'Шапки',
+        'make_team_btn': '+ Команда',
+        'make_team_tip': 'Сделать оружие командным: добавить отдельную BLU-текстуру (RED/BLU)',
         'file_not_found': 'Файл не найден по пути:',
         'load_image': 'Сначала загрузите изображение.',
         'enter_name': 'Введите имя VPK-файла.',
@@ -397,6 +399,8 @@ TRANSLATIONS = {
         # Вкладки выбора (оружие / шапки)
         'tab_weapons': 'Weapons',
         'tab_hats': 'Hats',
+        'make_team_btn': '+ Team',
+        'make_team_tip': 'Make this weapon team-colored: add a separate BLU texture (RED/BLU)',
         'file_not_found': 'File not found at path:',
         'load_image': 'Please load an image first.',
         'enter_name': 'Please enter the VPK file name.',

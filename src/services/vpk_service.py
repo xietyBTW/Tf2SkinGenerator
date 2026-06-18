@@ -1256,6 +1256,132 @@ class VPKService:
                 )
 
     @staticmethod
+    def _build_extra_style_models(
+        ctx,
+        hat_style_builds: list,
+        tf2_misc_vpk: str,
+        studiomdl_exe: str,
+        crowbar_exe: str,
+        tf_dir: str,
+        language: str,
+        emit_sub,
+        size: Tuple[int, int],
+        format_type: str,
+        flags: List[str],
+        vtf_options: dict,
+        base_vmt_path: Path,
+    ) -> None:
+        """
+        Собирает доп. ИЗМЕНЁННЫЕ стили-модели шапки — каждый со СВОЕЙ моделью и
+        СВОЕЙ текстурой в тот же VPK (накопленные пер-стилевые правки из UI).
+
+        Для каждого стиля и каждой его MDL:
+          1. декомпилируем MDL (с кэшем);
+          2. при наличии — вставляем геометрию пользователя (replace_smd) в
+             reference SMD этого стиля (скелет берём стиля);
+          3. патчим $cdmaterials под console\\ (чтобы модель нашла нашу текстуру);
+          4. компилируем и кладём модель в vpkroot по её $modelname;
+          5. пишем текстуру стиля {texture_filename}.vtf + .vmt по console-пути.
+
+        Каждый стиль обычно несёт собственное имя текстуры из $texturegroup, так
+        что текстуры стилей не конфликтуют. Ошибки одного стиля не валят сборку.
+        """
+        if not hat_style_builds:
+            return
+        from src.services.decompile_cache import (
+            get_cached_decompile, restore_from_cache, save_to_cache,
+        )
+
+        for entry in hat_style_builds:
+            replace_smd = entry.get('replace_smd')
+            keep_mat = bool(entry.get('keep_materials'))
+            img = entry.get('vtf_path') or entry.get('image_path')
+            for mdl_rel in (entry.get('mdl_paths') or []):
+                mdl_norm = (mdl_rel or '').replace('\\', '/').lower()
+                if not mdl_norm:
+                    continue
+                wk = Path(mdl_norm).stem
+                try:
+                    if not TF2VPKExtractService.check_mdl_exists(tf2_misc_vpk, mdl_norm):
+                        logger.warning(f"[HAT STYLE] MDL стиля не найден в игре, пропуск: {mdl_norm}")
+                        continue
+                    emit_sub(-1, f"Style model: {wk}..." if language == "en"
+                             else f"Модель стиля: {wk}...")
+                    st_root = ctx.temp_dir / f"hatstyle_{wk}"
+                    extract_d = st_root / "extract"
+                    decomp_d = st_root / "decompile"
+                    comp_d = st_root / "compile"
+                    for _d in (extract_d, decomp_d, comp_d):
+                        ensure_directory_exists(_d)
+
+                    # QC: из кэша декомпила или свежая декомпиляция.
+                    cached = get_cached_decompile(wk, tf2_misc_vpk, mdl_norm)
+                    if cached:
+                        qc_p = restore_from_cache(cached, str(decomp_d))
+                    else:
+                        extracted = TF2VPKExtractService.extract_file_set(
+                            tf2_misc_vpk, mdl_norm, str(extract_d)
+                        )
+                        mdl_file = next((f for f in extracted if f.endswith('.mdl')), None)
+                        if not mdl_file:
+                            logger.warning(f"[HAT STYLE] {wk}: MDL не извлёкся")
+                            continue
+                        qc_p = ModelBuildService.decompile(mdl_file, str(decomp_d), crowbar_exe)
+                        ModelBuildService.remove_lod_files(str(decomp_d))
+                        save_to_cache(wk, tf2_misc_vpk, mdl_norm, str(decomp_d))
+
+                    if not qc_p or not os.path.exists(qc_p):
+                        logger.warning(f"[HAT STYLE] {wk}: QC не найден")
+                        continue
+
+                    # Имя текстуры и cdmaterials стиля — ДО патча console\.
+                    tex_name = ModelBuildService.extract_texturegroup_filename(qc_p)
+                    cdmat0 = ModelBuildService.extract_cdmaterials_path_from_qc(qc_p)
+                    if not tex_name or not cdmat0:
+                        logger.warning(f"[HAT STYLE] {wk}: нет texturegroup/cdmaterials — пропуск")
+                        continue
+
+                    # Замена геометрии стиля (если пользователь загрузил свою модель).
+                    if replace_smd and os.path.exists(replace_smd):
+                        ref_smd = VPKService._find_decompiled_reference_smd(qc_p, wk, decomp_d)
+                        if ref_smd:
+                            SMDService.replace_model_sections(
+                                replace_smd, ref_smd, ref_smd, keep_user_materials=keep_mat,
+                            )
+                        else:
+                            logger.warning(f"[HAT STYLE] {wk}: reference SMD не найден — геометрия оригинала")
+
+                    # Патчим cdmaterials под console\ и компилируем.
+                    ModelBuildService.patch_qc_file(qc_p, wk, cdmat0)
+                    ModelBuildService.compile(qc_p, str(comp_d), studiomdl_exe, tf_dir)
+                    _sub = type('SubCtx', (), {'compile_dir': comp_d, 'vpkroot_dir': ctx.vpkroot_dir})()
+                    VPKService._copy_compiled_models_to_vpkroot(_sub, qc_p)
+
+                    # Текстура стиля → materials/console/<cdmat0>/<tex_name>.vtf+.vmt
+                    if img and os.path.isfile(img):
+                        _lo = cdmat0.lower()
+                        if _lo.startswith('console\\') or _lo.startswith('console/'):
+                            patched_cd = cdmat0.replace('/', '\\')
+                        else:
+                            patched_cd = 'console\\' + cdmat0.lstrip('\\/')
+                        materials_rel = "materials/" + patched_cd.replace('\\', '/').strip().rstrip('/')
+                        vtf_dir = ctx.vpkroot_dir
+                        for part in materials_rel.split('/'):
+                            vtf_dir = vtf_dir / part
+                        VPKService._render_extra_texture(
+                            tex_name, img, vtf_dir, base_vmt_path, patched_cd,
+                            size, format_type, flags, vtf_options,
+                        )
+                        logger.info(f"[HAT STYLE] стиль {wk}: модель+текстура '{tex_name}' добавлены в мод")
+                    else:
+                        logger.info(f"[HAT STYLE] стиль {wk}: модель добавлена (без своей текстуры)")
+                except Exception as exc:
+                    logger.warning(
+                        f"[HAT STYLE] {wk}: ошибка сборки стиля — пропуск: {exc}",
+                        exc_info=True,
+                    )
+
+    @staticmethod
     def _copy_precompiled_model(
         model_ready_path: str,
         qc_path: str,
@@ -1485,6 +1611,7 @@ class VPKService:
         hat_mdl_path = r.hat_mdl_path
         hat_apply_game_paints = r.hat_apply_game_paints
         hat_class_models = r.hat_class_models
+        hat_style_builds = r.hat_style_builds
         panel_extra_textures = r.panel_extra_textures or {}
         material_maps = r.material_maps or {}
         material_settings = r.material_settings or {}
@@ -1493,7 +1620,8 @@ class VPKService:
         custom_qc_text = r.custom_qc_text
         isolate_shoulders = r.isolate_shoulders
         panel_blu_textures = r.panel_blu_textures
-        logger.info(f"[BUILD] режим={r.mode!r}, isolate_shoulders={isolate_shoulders}")
+        force_team = r.force_team
+        logger.info(f"[BUILD] режим={r.mode!r}, isolate_shoulders={isolate_shoulders}, force_team={force_team}")
 
         from src.data.translations import TRANSLATIONS
         t = TRANSLATIONS.get(language, TRANSLATIONS['en'])
@@ -1574,6 +1702,7 @@ class VPKService:
                 hat_mdl_path=hat_mdl_path,
                 hat_apply_game_paints=hat_apply_game_paints,
                 hat_class_models=hat_class_models,
+                hat_style_builds=hat_style_builds,
                 panel_extra_textures=panel_extra_textures,
                 material_maps=material_maps,
                 material_settings=material_settings,
@@ -1582,6 +1711,7 @@ class VPKService:
                 custom_qc_text=custom_qc_text,
                 isolate_shoulders=isolate_shoulders,
                 panel_blu_textures=panel_blu_textures,
+                force_team=force_team,
                 progress_callback=progress_callback,
                 cancel_callback=cancel_callback,
             )
@@ -1807,6 +1937,7 @@ class VPKService:
         hat_mdl_path: Optional[str] = None,  # Прямой MDL-путь для шапок (обходит WEAPON_MDL_PATHS)
         hat_apply_game_paints: bool = True,  # True = сохранить краски игры, False = убрать прокси красок из VMT
         hat_class_models: Optional[dict] = None,  # мультиклассовая шапка: {класс: mdl} для выбранных классов
+        hat_style_builds: Optional[list] = None,  # доп. изменённые стили шапки: [{mdl_paths, replace_smd, keep_materials, image_path, vtf_path}]
         language: str = "en",  # Язык для ошибок
         custom_vtf_path: str = None,  # Если юзер сам сделал VTF - используем его вместо генерации из картинки
         blu_mode: str = "none",       # BLU-командная текстура: 'none' | 'same' | 'upload' | 'hue_shift'
@@ -1822,6 +1953,7 @@ class VPKService:
         custom_qc_text: Optional[str] = None,  # отредактированный пользователем QC («готовая» модель)
         isolate_shoulders: bool = False,  # руки: изолировать плечи/тело вьюмодели (переименование материала)
         panel_blu_textures: Optional[dict] = None,  # {mat: path} BLU-слотов (руки: промоушен нейтральных в командные)
+        force_team: bool = False,  # некомандное оружие: синтезировать BLU-строку в $texturegroup
     ) -> Tuple[bool, str]:
         """
         Главная функция: делает из картинки VPK файл.
@@ -2037,6 +2169,37 @@ class VPKService:
                     # Извлекаем полную структуру $texturegroup для поддержки:
                     # 1. BLU команды (отдельная строка/row в texturegroup)
                     # 2. Дополнительных материалов (shell, scope и т.д. - столбцы/columns)
+                    # ── «Сделать командным»: синтез BLU-строки для оружия БЕЗ
+                    # нативной команды. Делаем ДО извлечения tg_structure — тогда
+                    # весь командный путь (blu_row, генерация BLU, рекомпиляция)
+                    # сработает как у нативно-командного оружия. Материалы меша
+                    # берём из reference SMD (skin 0), skin 1 = {material}_blue. ──
+                    if force_team and mode not in HAND_MODE_KEYS:
+                        try:
+                            _pre = ModelBuildService.extract_skin_info(qc_path)
+                            if not _pre.get('is_team') and not _pre.get('has_australium'):
+                                from src.services.smd_service import SMDService as _SMDft
+                                from src.data.material_filter import is_editable_material as _ed
+                                _ref = _SMDft.find_reference_smd(str(ctx.decompile_dir), weapon_key)
+                                _mesh = _SMDft.ordered_unique_materials(_ref) if _ref else []
+                                _team_mats = [m for m in _mesh if _ed(m)]
+                                if _team_mats:
+                                    _ov = {1: {m: f"{m}_blue" for m in _team_mats}}
+                                    _tgb = ModelBuildService.generate_texturegroup_block(_team_mats, _ov)
+                                    ModelBuildService.replace_texturegroup_in_qc(qc_path, _tgb)
+                                    logger.info(
+                                        f"[FORCE TEAM] добавлена BLU-строка: "
+                                        f"{[m + '_blue' for m in _team_mats]}"
+                                    )
+                                else:
+                                    logger.info("[FORCE TEAM] нет редактируемых материалов меша — пропуск")
+                            else:
+                                logger.info(
+                                    "[FORCE TEAM] оружие уже командное или с австралием — пропуск"
+                                )
+                        except Exception as _fte:
+                            logger.warning(f"[FORCE TEAM] не удалось синтезировать команду: {_fte}")
+
                     tg_structure = ModelBuildService.extract_texturegroup_structure(qc_path)
                     blu_row = tg_structure.get('blu_row', [])
                     extra_materials = tg_structure.get('extra_materials', [])
@@ -2948,6 +3111,16 @@ class VPKService:
                                 crowbar_exe, tf_dir, language, emit_sub,
                                 target_mdl_paths=_extra_targets,
                             )
+
+                    # Этап 3: доп. ИЗМЕНЁННЫЕ стили-модели шапки — каждый своей
+                    # моделью и своей текстурой в тот же мод (активный стиль уже
+                    # собран основным пайплайном выше).
+                    if mode == "hat" and hat_style_builds:
+                        VPKService._build_extra_style_models(
+                            ctx, hat_style_builds, tf2_misc_vpk, studiomdl_exe,
+                            crowbar_exe, tf_dir, language, emit_sub,
+                            size, format_type, flags, vtf_options, vmt_path,
+                        )
 
                     # Подстраховка: удаляем любые {texture}_blue.*, если их успел
                     # создать другой путь, а настоящей команды у предмета нет

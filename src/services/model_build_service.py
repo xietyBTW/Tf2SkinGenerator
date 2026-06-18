@@ -653,6 +653,20 @@ class ModelBuildService:
         return None
 
     @staticmethod
+    def _qc_has_unsafe_flex(lines) -> bool:
+        """True, если в QC есть flexcontroller с операторным символом (+ - * /) в
+        имени. Crowbar декомпилирует такие имена буквально (напр. 'CloseLidLoL+
+        CloseLidLoR'), но studiomdl парсит '+' как сложение → 'unknown controller'.
+        Любой такой контроллер делает flex-секцию некомпилируемой → её надо вырезать.
+        """
+        pat = re.compile(r'^\s*flexcontroller\s+(\S+)', re.IGNORECASE)
+        for l in lines:
+            m = pat.match(l)
+            if m and any(ch in m.group(1) for ch in '+-*/'):
+                return True
+        return False
+
+    @staticmethod
     def patch_qc_file(qc_path: str, weapon_key: str, cdmaterials_path: Optional[str] = None) -> None:
         """
         Пропатчивает QC файл после декомпиляции.
@@ -673,6 +687,17 @@ class ModelBuildService:
         with open(qc_path, 'r', encoding='utf-8') as f:
             lines = f.readlines()
 
+        # Flex-контроллеры с операторными символами (+ - * /) в имени Crowbar
+        # декомпилирует буквально, но studiomdl парсит их как выражение и падает
+        # ('unknown controller'). Если такие есть — вырезаем всю flex-секцию
+        # (flexfile/flexcontroller/localvar/%-правила); для косметики флексы не нужны.
+        strip_flex = ModelBuildService._qc_has_unsafe_flex(lines)
+        if strip_flex:
+            logger.info(
+                "[QC] Обнаружены flex-контроллеры с операторными символами в имени — "
+                "вырезаем flex-секцию (несовместима со studiomdl)"
+            )
+
         new_lines: List[str] = []
         # Индекс в new_lines ПОСЛЕ последнего записанного непустого $cdmaterials.
         # Туда вставим пустой $cdmaterials "" за один проход, без предварительного счёта.
@@ -682,6 +707,35 @@ class ModelBuildService:
         while i < len(lines):
             line = lines[i]
             stripped = line.strip()
+
+            # --- flex-секция (вырезаем только если имена контроллеров несовместимы) ---
+            if strip_flex:
+                _low = stripped.lower()
+                if (_low.startswith('flexcontroller') or _low.startswith('localvar')
+                        or stripped.startswith('%')):
+                    i += 1
+                    continue
+                if _low.startswith('flexfile'):
+                    i += 1
+                    # пропускаем пустые/коммент-строки до открывающей '{'
+                    while i < len(lines) and (not lines[i].strip()
+                                              or lines[i].strip().startswith('//')):
+                        i += 1
+                    # пропускаем сбалансированный блок { ... }
+                    if i < len(lines) and lines[i].strip().startswith('{'):
+                        depth = 0
+                        opened = False
+                        while i < len(lines):
+                            for ch in lines[i]:
+                                if ch == '{':
+                                    depth += 1
+                                    opened = True
+                                elif ch == '}':
+                                    depth -= 1
+                            i += 1
+                            if opened and depth == 0:
+                                break
+                    continue
 
             # --- $lod блок: пропускаем целиком ---
             if _RE_LOD.match(stripped):

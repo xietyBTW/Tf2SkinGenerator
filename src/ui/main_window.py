@@ -500,6 +500,7 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
         self.hats_panel = HatsPanel(hats_page, language=self.language)
         self.hats_panel.hat_selected.connect(self._on_hat_selected)
         self.hats_panel.hat_deselected.connect(self._on_hat_deselected)
+        self.hats_panel.hat_style_selected.connect(self._on_hat_style_selected)
         hats_page_layout.addWidget(self.hats_panel)
 
         self._left_stack.addWidget(weapons_page)   # index 0
@@ -511,6 +512,10 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
         self._custom_vpk_path: Optional[str] = None
         self._hat_mdl_path: Optional[str] = None
         self._hat_display_name: str = ""
+        # Память правок по стилям модели текущей шапки: {style_index: edit_state}.
+        # Активный стиль и накопленные правки; чистятся при смене шапки/выходе.
+        self._hat_style_memory: dict = {}
+        self._active_hat_style: Optional[int] = None
         self._current_tab = 0  # 0=weapons, 1=hats
 
         return container
@@ -579,6 +584,14 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
 
     def _on_hat_selected(self, mdl_path: str, display_name: str) -> None:
         """Пользователь выбрал шапку из списка."""
+        # Новая шапка → чистим память правок по стилям прошлой (подтверждение
+        # выхода с несохранёнными правками — Этап 4).
+        self._hat_style_memory = {}
+        self._active_hat_style = 0
+        if hasattr(self, 'preview_panel'):
+            self.preview_panel.set_pending_edit_state(None)
+        if hasattr(self, 'hats_panel'):
+            self.hats_panel.clear_style_edits()
         self._hat_mdl_path = mdl_path
         self._hat_display_name = display_name
         self.mode = "hat"
@@ -591,6 +604,37 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
             self.preview_panel.update_extra_slots(mdl_path, mode='hat')
         # Обновляем 3D preview и сводку
         self._update_hat_3d_preview()
+        self.update_preview_info()
+
+    def _on_hat_style_selected(self, style_index: int, model_path: str) -> None:
+        """Пользователь выбрал другой СТИЛЬ-модель шапки. Авто-сохраняем правки
+        прошлого стиля, восстанавливаем правки нового и грузим его модель."""
+        if not model_path:
+            return
+        if hasattr(self, 'preview_panel'):
+            # Снимок правок прошлого стиля → память; маркер «●» если есть правки.
+            old = self._active_hat_style
+            if old is not None:
+                st = self.preview_panel.capture_edit_state()
+                self._hat_style_memory[old] = st
+                if hasattr(self, 'hats_panel'):
+                    self.hats_panel.set_style_edited(
+                        old, self.preview_panel.edit_state_has_content(st)
+                    )
+            # Правки нового стиля применятся после загрузки его модели.
+            self.preview_panel.set_pending_edit_state(self._hat_style_memory.get(style_index))
+        self._active_hat_style = style_index
+        self._hat_mdl_path = model_path
+        self.mode = "hat"
+        logger.info(f"Стиль шапки [{style_index}] → {model_path}")
+        if hasattr(self, 'settings_panel'):
+            self.settings_panel.apply_mode_restrictions(self.mode)
+        if hasattr(self, 'preview_panel'):
+            self.preview_panel.update_extra_slots(model_path, mode='hat')
+        self._update_hat_3d_preview()
+        # Авто-загрузка модели стиля (без ручного ▶).
+        if hasattr(self, 'preview_panel'):
+            self.preview_panel.trigger_pending_load()
         self.update_preview_info()
 
     def _on_hat_deselected(self) -> None:
@@ -1873,14 +1917,44 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
             hat_class_models = None
             hat_mdl_path_for_build = getattr(self, '_hat_mdl_path', None)
             if self.mode == "hat" and hasattr(self, 'hats_panel'):
-                hat_class_models = self.hats_panel.get_selected_class_models()
+                # Полный набор моделей: стили × классы (или только классы / только
+                # стили). None — обычная шапка с одной моделью.
+                hat_class_models = self.hats_panel.get_selected_models()
                 if hat_class_models:
-                    # Основная (primary) сборка идёт по ПЕРВОМУ выбранному классу,
-                    # остальные дособираются в тот же VPK в vpk_service.
+                    # Primary-сборка по ПЕРВОЙ модели набора; остальные дособираются
+                    # в тот же VPK (vpk_service._build_extra_class_hat_models).
                     hat_mdl_path_for_build = next(iter(hat_class_models.values()))
                     logger.info(
-                        f"[HAT multiclass] классы для сборки: "
-                        f"{list(hat_class_models.keys())}"
+                        f"[HAT build] моделей в наборе: {len(hat_class_models)} "
+                        f"({list(hat_class_models.keys())})"
+                    )
+
+            # Этап 3: доп. ИЗМЕНЁННЫЕ стили-модели (кроме активного — он идёт
+            # основным пайплайном). Каждый собирается своей моделью + своей
+            # текстурой в ТОТ ЖЕ мод. Источник — пер-стилевая память.
+            hat_style_builds = None
+            if (self.mode == "hat" and hasattr(self, 'hats_panel')
+                    and getattr(self, '_hat_style_memory', None)):
+                _builds = []
+                for _idx, _st in self._hat_style_memory.items():
+                    if _idx == self._active_hat_style or not _st:
+                        continue
+                    if not self.preview_panel.edit_state_has_content(_st):
+                        continue
+                    _models = self.hats_panel.get_style_models(_idx)
+                    if not _models:
+                        continue
+                    _builds.append({
+                        'mdl_paths': list(_models.values()),
+                        'replace_smd': _st.get('custom_smd'),
+                        'keep_materials': bool(_st.get('custom_keep')),
+                        'image_path': _st.get('image_path'),
+                        'vtf_path': _st.get('vtf_path'),
+                    })
+                hat_style_builds = _builds or None
+                if hat_style_builds:
+                    logger.info(
+                        f"[HAT build] доп. изменённых стилей: {len(hat_style_builds)}"
                     )
 
             # Сбрасываем запомненный выбор «применить ко всем» — каждая новая
@@ -1969,6 +2043,7 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
                 hat_mdl_path=hat_mdl_path_for_build,
                 hat_apply_game_paints=hat_apply_game_paints,
                 hat_class_models=hat_class_models,
+                hat_style_builds=hat_style_builds,
                 panel_extra_textures=_panel_extra_textures,
                 material_maps=(self.preview_panel.get_texture_maps()
                                if hasattr(self, 'preview_panel') else {}),
@@ -1984,6 +2059,10 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
                 panel_blu_textures=(
                     self.preview_panel.get_blu_slot_image_paths()
                     if hasattr(self, 'preview_panel') else None
+                ),
+                force_team=(
+                    self.preview_panel.get_force_team()
+                    if hasattr(self, 'preview_panel') else False
                 ),
             )
             # Без parent=self ! Если дать parent=self, Qt станет владельцем

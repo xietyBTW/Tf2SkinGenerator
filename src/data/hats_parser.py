@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 # v3: HatItem.per_class_models + раскрытие %s-шаблонов (basename / без used_by_classes).
 # Смена имени форсирует одноразовый перепарс старого кэша.
-_CACHE_FILE = Path("cache") / "hats_cache_v3.json"
+_CACHE_FILE = Path("cache") / "hats_cache_v4.json"
 
 _CLASS_NAMES = [
     "scout", "soldier", "pyro", "demoman",
@@ -47,6 +47,11 @@ class HatItem:
     # Карта класс → mdl-путь для мультиклассовых шапок (разные модели на класс,
     # либо %s-шаблон, раскрытый по классам). Пустой dict = одна общая модель.
     per_class_models: Dict[str, str] = field(default_factory=dict)
+    # Модельные стили из items_game (styles { N { model_player(_per_class) } }):
+    # [{'name': str, 'per_class_models': {class: mdl}}]. Только стили, задающие СВОЮ
+    # модель (геометрию). Скиновые стили ("skin" "N") сюда НЕ входят. Пусто = без
+    # модельных стилей. У мультикласс-шапки каждый стиль несёт per-class карту.
+    styles: List[dict] = field(default_factory=list)
 
     @property
     def classes_str(self) -> str:
@@ -184,6 +189,56 @@ def _extract_per_class_models(block: str) -> Dict[str, str]:
         if cls_l in _CLASS_NAMES and cls_l not in result:
             result[cls_l] = path.replace("\\", "/").lower()
     return result
+
+
+def _extract_style_models(block: str, classes: List[str],
+                          localization: Dict[str, str]) -> List[dict]:
+    """
+    Извлекает МОДЕЛЬНЫЕ стили из блока styles { "N" { ... } }.
+
+    Берём только стили, задающие свою модель (model_player / model_player_per_class).
+    Скиновые стили ("skin" "N") пропускаем — они меняют скин, а не геометрию.
+
+    Returns:
+        [{'name': str, 'per_class_models': {class: mdl}}] в порядке индексов стилей.
+    """
+    start = block.find('"styles"')
+    if start == -1:
+        return []
+    brace = block.find('{', start)
+    if brace == -1:
+        return []
+    end = _skip_to_close_brace(block, brace)
+    sub = block[brace + 1:end - 1]   # содержимое styles { ... }
+
+    out: List[dict] = []
+    for m in re.finditer(r'"(\d+)"\s*\{', sub):
+        idx = m.group(1)
+        b = m.end() - 1                      # позиция '{' под-блока стиля
+        e = _skip_to_close_brace(sub, b)
+        styleblk = sub[b:e]
+
+        # Модели стиля: per-class → карта; иначе flat model_player (общая/%s).
+        pcm = _extract_per_class_models(styleblk)
+        if not pcm:
+            flat = _flat_value(styleblk, "model_player")
+            if flat and flat.lower().endswith(".mdl"):
+                flat = flat.replace("\\", "/").lower()
+                target = classes if classes else list(_CLASS_NAMES)
+                if "%s" in flat:
+                    pcm = {c: flat.replace("%s", c) for c in target}
+                else:
+                    pcm = {c: flat for c in target}   # одна общая модель на все классы
+        if not pcm:
+            continue   # скиновый стиль — без своей модели, пропускаем
+
+        token = _flat_value(styleblk, "name")
+        name = None
+        if token:
+            key = token[1:] if token.startswith("#") else token
+            name = localization.get(key) or localization.get(key.lower())
+        out.append({"name": name or f"Style {idx}", "per_class_models": pcm})
+    return out
 
 
 def _find_items_section(content: str) -> int:
@@ -413,6 +468,9 @@ def _parse_items_game(filepath: str,
         else:
             per_class_models = _extract_per_class_models(block)
 
+        # Модельные стили (styles { N { model_player(_per_class) } }).
+        styles = _extract_style_models(block, classes, localization)
+
         results.append(HatItem(
             defindex=defindex,
             name=display_name,
@@ -421,6 +479,7 @@ def _parse_items_game(filepath: str,
             classes=classes,
             slot=slot or "head",
             per_class_models=per_class_models,
+            styles=styles,
         ))
 
         if progress_cb and items_parsed % 500 == 0:

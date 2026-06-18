@@ -49,6 +49,7 @@ _I18N = {
         "n_items":     "{n} предметов",
         "refresh":     "Обновить",
         "build_classes": "Классы для сборки:",
+        "build_styles":  "Стили для сборки:",
     },
     "en": {
         "title":       "COSMETICS",
@@ -61,6 +62,7 @@ _I18N = {
         "n_items":     "{n} items",
         "refresh":     "Refresh",
         "build_classes": "Build for classes:",
+        "build_styles":  "Build for styles:",
     },
 }
 
@@ -170,6 +172,9 @@ class HatsPanel(QWidget):
 
     hat_selected    = Signal(str, str)  # (mdl_path, display_name)
     hat_deselected  = Signal()
+    # Пользователь выбрал другой СТИЛЬ-модель у текущей шапки: (style_index, mdl_path).
+    # main_window авто-сохраняет правки прошлого стиля и грузит превью нового.
+    hat_style_selected = Signal(int, str)
 
     def __init__(self, parent=None, language: str = "en"):
         super().__init__(parent)
@@ -187,6 +192,9 @@ class HatsPanel(QWidget):
         self._dropdown_hat: Optional[HatItem]          = None
         self._class_chip_btns: dict = {}      # класс → QPushButton-чип
         self._selected_classes: dict = {}     # класс → отмечен (bool)
+        self._style_chip_btns: dict = {}      # индекс стиля → QPushButton-чип
+        self._active_style: int = 0           # текущий редактируемый стиль (одиночный выбор)
+        self._edited_styles: set = set()      # стили с накопленными правками (для маркера)
 
         # Таймер debounce для поиска: 150 мс после последнего ввода
         self._search_timer = QTimer(self)
@@ -527,17 +535,42 @@ class HatsPanel(QWidget):
         self._selected_hat = hat
         self.hat_selected.emit(hat.mdl_path, hat.name)
 
-        # Мультиклассовая шапка → раскрываем под ней список классов.
-        if self._is_multiclass(hat):
+        # Мультикласс ИЛИ модельные стили → раскрываем выбор под шапкой.
+        if self._is_multiclass(hat) or self._has_styles(hat):
             row = self._list.row(current)
             self._inject_dropdown(row, hat)
 
-    # ── Выпадающий список классов (мультиклассовые шапки) ─────────────────── #
+    # ── Выпадающий список (классы / стили) ────────────────────────────────── #
 
     @staticmethod
     def _is_multiclass(hat: HatItem) -> bool:
         """Шапка с разными моделями на класс (нужен выбор классов для сборки)."""
         return bool(hat) and len(getattr(hat, "per_class_models", {}) or {}) > 1
+
+    @staticmethod
+    def _has_styles(hat: HatItem) -> bool:
+        """Шапка с модельными стилями (есть выбор стиля)."""
+        return bool(hat) and len(getattr(hat, "styles", None) or []) > 1
+
+    @staticmethod
+    def _style_classes(hat: HatItem) -> List[str]:
+        """Объединение классов по всем стилям (для чипов классов у styled-шапки)."""
+        out: List[str] = []
+        for s in (getattr(hat, "styles", None) or []):
+            for c in (s.get("per_class_models") or {}):
+                if c not in out:
+                    out.append(c)
+        return out
+
+    @staticmethod
+    def _styled_per_class(hat: HatItem) -> bool:
+        """True, если у хотя бы одного стиля модели РАЗНЫЕ по классам (нужны чипы
+        классов). У all-class стиля (одна модель на все классы) чипы не нужны."""
+        for s in (getattr(hat, "styles", None) or []):
+            pcm = s.get("per_class_models") or {}
+            if len(set(pcm.values())) > 1:
+                return True
+        return False
 
     def _remove_dropdown(self) -> None:
         """Удаляет инъецированный item-аккордеон с чекбоксами классов."""
@@ -551,19 +584,34 @@ class HatsPanel(QWidget):
         self._dropdown_hat = None
         self._class_chip_btns = {}
         self._selected_classes = {}
+        self._style_chip_btns = {}
+        self._active_style = 0
+        self._edited_styles = set()
 
     def _inject_dropdown(self, row: int, hat: HatItem) -> None:
-        """Вставляет под строкой row item с чекбоксами классов (все отмечены)."""
+        """Вставляет под строкой row аккордеон: стили (если есть) + классы (если
+        мультикласс). По умолчанию отмечены: первый стиль (style 0) и все классы."""
         self._dropdown_hat = hat
-        self._selected_classes = {cls: True for cls in hat.per_class_models}
+        # Классы: для styled-шапки — объединение по стилям, иначе per_class_models.
+        styled = self._has_styles(hat)
+        multiclass = self._is_multiclass(hat)
+        _classes = self._style_classes(hat) if styled else list(hat.per_class_models)
+        self._selected_classes = {cls: True for cls in _classes}
+        # Стиль — одиночный выбор; по умолчанию активен стиль 0. Маркеры
+        # «изменён» (_edited_styles) сбрасывает main_window при смене шапки.
+        self._active_style = 0
 
-        widget = self._build_class_dropdown_widget(hat)
+        widget = self._build_dropdown_widget(hat)
 
-        # Высоту считаем явно: sizeHint() неактивированного layout занижает её,
-        # из-за чего чипы обрезаются. 3 чипа в ряд.
-        n = len(hat.per_class_models)
-        rows = max(1, (n + 2) // 3)
-        height = 6 + 16 + 6 + rows * 20 + max(0, rows - 1) * 4 + 9
+        # Высоту считаем явно (sizeHint неактивированного layout занижает).
+        height = 9
+        if styled:
+            srows = max(1, (len(hat.styles) + 1) // 2)   # 2 стиля-чипа в ряд (шире)
+            height += 6 + 16 + 6 + srows * 20 + max(0, srows - 1) * 4
+        if multiclass or (styled and self._styled_per_class(hat)):
+            n = len(_classes)
+            crows = max(1, (n + 2) // 3)
+            height += 6 + 16 + 6 + crows * 20 + max(0, crows - 1) * 4
         widget.setFixedHeight(height)
 
         item = QListWidgetItem()
@@ -576,39 +624,67 @@ class HatsPanel(QWidget):
         self._list.blockSignals(False)
         self._dropdown_item = item
 
-    def _build_class_dropdown_widget(self, hat: HatItem) -> QWidget:
-        """Виджет-контейнер: заголовок + сетка чипов-классов (3 в ряд)."""
+    def _build_dropdown_widget(self, hat: HatItem) -> QWidget:
+        """Виджет-аккордеон: секция стилей (если есть) + секция классов (если
+        мультикласс/styled с >1 классом). Чипы — мультивыбор."""
         label_map = dict(_CLASSES)
+        styled = self._has_styles(hat)
+        multiclass = self._is_multiclass(hat)
+        _classes = self._style_classes(hat) if styled else list(hat.per_class_models)
+
         container = QWidget()
         container.setStyleSheet("background: #141414; border: none;")
         outer = QVBoxLayout(container)
         outer.setContentsMargins(18, 6, 10, 9)
         outer.setSpacing(6)
 
-        title = QLabel(self._t["build_classes"])
-        title.setStyleSheet(
-            "color:#777; font-size:10px; background:transparent; border:none;"
-        )
-        outer.addWidget(title)
+        def _title(text: str) -> QLabel:
+            lb = QLabel(text)
+            lb.setStyleSheet("color:#777; font-size:10px; background:transparent; border:none;")
+            return lb
 
-        grid = QGridLayout()
-        grid.setContentsMargins(0, 0, 0, 0)
-        grid.setHorizontalSpacing(4)
-        grid.setVerticalSpacing(4)
-        self._class_chip_btns = {}
-        # Порядок классов — канонический (как в фильтре), только присутствующие.
-        ordered = [c for c, _ in _CLASSES if c != "all" and c in hat.per_class_models]
-        for i, cls in enumerate(ordered):
-            btn = QPushButton(label_map.get(cls, cls.title()))
-            btn.setCheckable(True)
-            btn.setChecked(True)
-            btn.setFixedHeight(20)
-            btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setStyleSheet(self._chip_style(active=True))
-            btn.clicked.connect(lambda checked, c=cls: self._on_class_toggled(c, checked))
-            self._class_chip_btns[cls] = btn
-            grid.addWidget(btn, i // 3, i % 3)
-        outer.addLayout(grid)
+        # ── Секция стилей (2 чипа в ряд) — ОДИНОЧНЫЙ выбор (редактируем по одному).
+        # Маркер «●» у стилей с накопленными правками. ──
+        if styled:
+            outer.addWidget(_title(self._t.get("build_styles", "Стиль модели")))
+            sgrid = QGridLayout()
+            sgrid.setContentsMargins(0, 0, 0, 0)
+            sgrid.setHorizontalSpacing(4)
+            sgrid.setVerticalSpacing(4)
+            self._style_chip_btns = {}
+            for i, st in enumerate(hat.styles):
+                btn = QPushButton(self._style_label(i, st))
+                btn.setCheckable(True)
+                active = (i == self._active_style)
+                btn.setChecked(active)
+                btn.setFixedHeight(20)
+                btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                btn.setStyleSheet(self._chip_style(active=active))
+                btn.clicked.connect(lambda _=False, idx=i: self._on_style_clicked(idx))
+                self._style_chip_btns[i] = btn
+                sgrid.addWidget(btn, i // 2, i % 2)
+            outer.addLayout(sgrid)
+
+        # ── Секция классов (3 чипа в ряд) — только если модели различаются по классам ──
+        if multiclass or (styled and self._styled_per_class(hat)):
+            outer.addWidget(_title(self._t["build_classes"]))
+            grid = QGridLayout()
+            grid.setContentsMargins(0, 0, 0, 0)
+            grid.setHorizontalSpacing(4)
+            grid.setVerticalSpacing(4)
+            self._class_chip_btns = {}
+            ordered = [c for c, _ in _CLASSES if c != "all" and c in _classes]
+            for i, cls in enumerate(ordered):
+                btn = QPushButton(label_map.get(cls, cls.title()))
+                btn.setCheckable(True)
+                btn.setChecked(True)
+                btn.setFixedHeight(20)
+                btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                btn.setStyleSheet(self._chip_style(active=True))
+                btn.clicked.connect(lambda checked, c=cls: self._on_class_toggled(c, checked))
+                self._class_chip_btns[cls] = btn
+                grid.addWidget(btn, i // 3, i % 3)
+            outer.addLayout(grid)
 
         container.adjustSize()
         return container
@@ -620,6 +696,51 @@ class HatsPanel(QWidget):
             return
         self._selected_classes[cls] = checked
         self._class_chip_btns[cls].setStyleSheet(self._chip_style(active=checked))
+
+    def _style_label(self, idx: int, st: dict) -> str:
+        """Подпись чипа стиля: «● Имя» если стиль уже редактировался."""
+        name = st.get("name") or f"Style {idx}"
+        return ("● " + name) if idx in self._edited_styles else name
+
+    def _on_style_clicked(self, idx: int) -> None:
+        """Одиночный выбор стиля. Подсвечиваем активный, сообщаем наружу
+        (main_window авто-сохранит прошлый стиль и загрузит превью нового)."""
+        hat = self._dropdown_hat
+        if not hat or idx == self._active_style:
+            # Повторный клик по активному — просто держим его отмеченным.
+            if idx in self._style_chip_btns:
+                self._style_chip_btns[idx].setChecked(True)
+            return
+        self._active_style = idx
+        for i, b in self._style_chip_btns.items():
+            b.setChecked(i == idx)
+            b.setStyleSheet(self._chip_style(active=(i == idx)))
+        # Модель стиля (первая по классам — для превью).
+        pcm = hat.styles[idx].get("per_class_models") or {}
+        model = next(iter(pcm.values()), hat.mdl_path)
+        self.hat_style_selected.emit(idx, model)
+
+    def set_style_edited(self, idx: int, edited: bool = True) -> None:
+        """Помечает стиль как изменённый (●) — вызывает main_window при правках."""
+        if edited:
+            self._edited_styles.add(idx)
+        else:
+            self._edited_styles.discard(idx)
+        hat = self._dropdown_hat
+        if hat and idx in self._style_chip_btns and idx < len(hat.styles):
+            self._style_chip_btns[idx].setText(self._style_label(idx, hat.styles[idx]))
+
+    def clear_style_edits(self) -> None:
+        """Сбрасывает маркеры всех стилей (при смене шапки/очистке памяти)."""
+        self._edited_styles = set()
+        hat = self._dropdown_hat
+        if hat:
+            for i, b in self._style_chip_btns.items():
+                if i < len(hat.styles):
+                    b.setText(self._style_label(i, hat.styles[i]))
+
+    def active_style(self) -> int:
+        return self._active_style
 
     def get_selected_class_models(self) -> Optional[dict]:
         """
@@ -637,6 +758,84 @@ class HatsPanel(QWidget):
                    if on and c in hat.per_class_models}
             return sel or dict(hat.per_class_models)
         return dict(hat.per_class_models)
+
+    def get_selected_models(self) -> Optional[dict]:
+        """
+        Полный набор моделей для сборки: {уникальный_ключ: mdl_path} по выбранным
+        СТИЛЯМ × КЛАССАМ (дедуп по пути). Покрывает все варианты:
+          • styled+multiclass — отмеченные стили × отмеченные классы;
+          • только styled — отмеченные стили (по их классам/одной модели);
+          • только multiclass — отмеченные классы;
+          • обычная шапка — None (одна модель, отдельный набор не нужен).
+        """
+        hat = self._selected_hat
+        if not hat:
+            return None
+        styled = self._has_styles(hat)
+        multiclass = self._is_multiclass(hat)
+        if not styled and not multiclass:
+            return None
+
+        active = (self._dropdown_hat is hat)   # активен ли аккордеон выбора
+
+        def _class_on(c: str) -> bool:
+            return self._selected_classes.get(c, True) if active else True
+
+        raw: list = []   # [(key, path)]
+        if styled:
+            # Одиночный режим: модели АКТИВНОГО стиля (для текущей сборки/превью).
+            # Накопление по нескольким стилям делает main_window через per-style
+            # память (build_extra_targets), не панель.
+            i = self._active_style if active else 0
+            i = i if 0 <= i < len(hat.styles) else 0
+            pcm = hat.styles[i].get("per_class_models") or {}
+            cls_list = [c for c in pcm if _class_on(c)] or list(pcm)
+            for c in cls_list:
+                raw.append((f"s{i}_{c}", pcm[c]))
+        else:
+            for c, p in hat.per_class_models.items():
+                if _class_on(c):
+                    raw.append((c, p))
+
+        out: dict = {}
+        seen: set = set()
+        for k, p in raw:
+            np = (p or "").replace("\\", "/").lower()
+            if not np or np in seen:
+                continue
+            seen.add(np)
+            out[k] = p
+        return out or None
+
+    def get_style_models(self, idx: int) -> Optional[dict]:
+        """Модели КОНКРЕТНОГО стиля (по выбранным классам) — {ключ: mdl_path}.
+
+        Нужно main_window для сборки доп. изменённых стилей (Этап 3): активный
+        стиль идёт основным пайплайном, а остальные изменённые — каждый своей
+        моделью+текстурой через этот набор. None — у шапки нет такого стиля.
+        """
+        hat = self._selected_hat
+        if not hat or not self._has_styles(hat):
+            return None
+        if not (0 <= idx < len(hat.styles)):
+            return None
+        active = (self._dropdown_hat is hat)
+
+        def _class_on(c: str) -> bool:
+            return self._selected_classes.get(c, True) if active else True
+
+        pcm = hat.styles[idx].get("per_class_models") or {}
+        cls_list = [c for c in pcm if _class_on(c)] or list(pcm)
+        out: dict = {}
+        seen: set = set()
+        for c in cls_list:
+            p = pcm.get(c)
+            np = (p or "").replace("\\", "/").lower()
+            if not np or np in seen:
+                continue
+            seen.add(np)
+            out[f"s{idx}_{c}"] = p
+        return out or None
 
     def get_all_class_models(self) -> Optional[dict]:
         """

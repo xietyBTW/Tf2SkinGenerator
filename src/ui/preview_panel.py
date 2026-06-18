@@ -408,6 +408,8 @@ class PreviewPanel(QWidget):
         # ── Текстуры: {team: {mat_name: path}} ────────────────────────────── #
         self._textures: Dict[str, Dict[str, str]] = {'red': {}, 'blu': {}}
         self._active_team: str = 'red'
+        # «Сделать командным»: пользователь включил синтез BLU у некомандного оружия.
+        self._force_team: bool = False
 
         # ── Слоты материалов ──────────────────────────────────────────────── #
         # Заполняется после загрузки 3D (через _on_3d_multi_material).
@@ -472,6 +474,11 @@ class PreviewPanel(QWidget):
         self._mem_mode: Optional[str] = None
         self._mem_data: Optional[dict] = None
         self._restoring_memory: bool = False
+        # Память по стилям шапки: правки применяются ПОСЛЕ загрузки модели стиля.
+        self._pending_edit_state: Optional[dict] = None
+        # Обновить 2D после загрузки модели (смена стиля без своих правок —
+        # иначе в 2D остаётся пустое/старое окно, а текстура только в 3D).
+        self._pending_2d_refresh: bool = False
         # Явный режим превью вместо россыпи взаимоисключающих булевых флагов
         # (_custom_smd_mode/_spy_mask_mode/_crithit_mode/_death_effect_mode теперь
         # — свойства, читающие из _pstate). Источник правды по «что показываем».
@@ -752,6 +759,27 @@ class PreviewPanel(QWidget):
         self.btn_aus.clicked.connect(self._toggle_australium)
         lay.addWidget(self.btn_aus)
 
+        # «+» — сделать некомандное оружие командным (показать селектор RED/BLU).
+        # В одном ряду с RED/BLU/Aus, тот же размер 26×26 — «+» рисуем иконкой
+        # (как у остальных кнопок ряда), чтобы не зависеть от рендера текста.
+        from PySide6.QtCore import QSize as _QSize_plus
+        self.btn_make_team = QPushButton()
+        self.btn_make_team.setFixedSize(26, 26)
+        self.btn_make_team.setIcon(_make_plus_icon("#aaaaaa"))
+        self.btn_make_team.setIconSize(_QSize_plus(14, 14))
+        self.btn_make_team.setCursor(Qt.PointingHandCursor)
+        self.btn_make_team.setToolTip(self.t.get(
+            'make_team_tip',
+            'Сделать оружие командным: добавить отдельную BLU-текстуру',
+        ))
+        self.btn_make_team.setStyleSheet(
+            "QPushButton{background:transparent;border:1px solid #555;border-radius:4px;}"
+            "QPushButton:hover{border-color:#888;}"
+        )
+        self.btn_make_team.setVisible(False)
+        self.btn_make_team.clicked.connect(self._enable_force_team)
+        lay.addWidget(self.btn_make_team)
+
         # ── Кнопки стилей (skinfamilies) — в том же ряду, что RED/BLU/Aus ──── #
         # Создаются динамически при определении стилей кастомной модели и
         # вставляются ПЕРЕД этим анкером, чтобы держаться правее aus.
@@ -1031,9 +1059,51 @@ class PreviewPanel(QWidget):
             has_blu = bool(
                 self._blu_frames or self._vpk_blu_tex_map or self._vpk_blu_name_map
             )
-        self.btn_red.setVisible(has_blu)
-        self.btn_blu.setVisible(has_blu)
+        self.btn_red.setVisible(has_blu or self._force_team)
+        self.btn_blu.setVisible(has_blu or self._force_team)
         self.btn_aus.setVisible(bool(self._australium_frame))
+        # «+ Команда»: обычное оружие без нативной команды и без австралия —
+        # предлагаем сделать командным (синтез BLU-строки при сборке).
+        _can_force = (
+            not has_blu and not self._force_team and not self._australium_frame
+            and self._weapon_mode not in _HMK_vis and not self._spy_mask_mode
+            and self._is_force_team_eligible()
+        )
+        if hasattr(self, 'btn_make_team'):
+            self.btn_make_team.setVisible(bool(_can_force))
+
+    def _is_force_team_eligible(self) -> bool:
+        """Можно ли предложить «сделать командным» — обычное оружие/снаряд/пикап/
+        насмешка (не шапка/персонаж/спец-режим/кастом/руки). Модель должна быть
+        загружена (есть _weapon_key) — для одно-материального оружия _material_names
+        может быть пустым, поэтому на него не опираемся."""
+        mode = self._weapon_mode or ''
+        if not mode or not self._weapon_key or self._weapon_key == '\x00':
+            return False
+        if mode in ('hat', 'custom'):
+            return False
+        from src.data.weapons import SPECIAL_MODES
+        if mode in set(SPECIAL_MODES.values()):
+            return False
+        from src.data.player_characters import PLAYER_BODY_MODE_KEYS, SPY_MASK_MODE_KEY
+        if mode in PLAYER_BODY_MODE_KEYS or mode == SPY_MASK_MODE_KEY:
+            return False
+        return True
+
+    def _enable_force_team(self) -> None:
+        """Включает «сделать командным»: показываем RED/BLU, прячем кнопку."""
+        self._force_team = True
+        if hasattr(self, 'btn_make_team'):
+            self.btn_make_team.setVisible(False)
+        self.btn_red.setVisible(True)
+        self.btn_blu.setVisible(True)
+        self.btn_red.setStyleSheet(self._team_style_on)
+        self.btn_blu.setStyleSheet(self._team_style_off)
+        self._active_team = 'red'
+
+    def get_force_team(self) -> bool:
+        """Включён ли режим «сделать командным» (для BuildRequest.force_team)."""
+        return bool(getattr(self, '_force_team', False))
 
     # ═══════════════════════════════════════════════════════════════════════════
     # Маски маскировки шпиона
@@ -1133,10 +1203,11 @@ class PreviewPanel(QWidget):
         self.btn_blu.setStyleSheet(
             self._team_style_on if team == 'blu' else self._team_style_off
         )
-        # Руки: на BLU показываем ТОЛЬКО командные + выбранные нейтральные + «+»
-        # (общие не дублируются). Хранение нативное (_textures['blu']).
+        # Руки И force-team мульти-материал: на BLU показываем выбранные карточки +
+        # «+» для добавления (та же логика). Хранение нативное (_textures['blu']).
         from src.data.player_hands import HAND_MODE_KEYS as _HMK_sw
-        if self._weapon_mode in _HMK_sw and self._card_mode and self._material_names:
+        if ((self._weapon_mode in _HMK_sw or self._force_team)
+                and self._card_mode and self._material_names):
             self._rebuild_hand_team_cards(team)
             if self._3d_available and self._3d_widget:
                 self._restore_team_textures_3d(team)
@@ -1218,7 +1289,12 @@ class PreviewPanel(QWidget):
         menu = QMenu(self)
         for m in avail:
             menu.addAction(m, lambda _=False, mat=m: self._add_hand_blu_material(mat))
-        menu.exec(self.btn_blu.mapToGlobal(self.btn_blu.rect().bottomLeft()))
+        # Показываем под кнопкой «+ Add style», по которой кликнули (а не под
+        # верхним BLU-тумблером). sender() — это та самая кнопка.
+        from PySide6.QtWidgets import QPushButton as _QPB_menu
+        _src = self.sender()
+        _anchor = _src if isinstance(_src, _QPB_menu) else self.btn_blu
+        menu.exec(_anchor.mapToGlobal(_anchor.rect().bottomLeft()))
 
     def _add_hand_blu_material(self, mat: str) -> None:
         self.__dict__.setdefault('_hand_blu_chosen', set()).add(mat)
@@ -1375,6 +1451,114 @@ class PreviewPanel(QWidget):
     # ═══════════════════════════════════════════════════════════════════════════
     # Мини-память последнего оружия
     # ═══════════════════════════════════════════════════════════════════════════
+
+    # ── Память правок по стилям шапки (capture/restore вокруг смены модели) ── #
+
+    def capture_edit_state(self) -> dict:
+        """Снимок пользовательских правок текущего стиля (текстуры/SMD/VTF)."""
+        return {
+            'textures': {t: dict(d) for t, d in self._textures.items()},
+            'image_path': self.image_path,
+            'custom_smd': self._custom_smd_path,
+            'custom_keep': getattr(self, '_custom_keep_materials', False),
+            'vtf_path': self.vtf_path,
+        }
+
+    def edit_state_has_content(self, st: Optional[dict] = None) -> bool:
+        """Есть ли в снимке реальные правки (для маркера «●» и сборки)."""
+        st = st or self.capture_edit_state()
+        if st.get('custom_smd') or st.get('vtf_path'):
+            return True
+        for d in (st.get('textures') or {}).values():
+            if any(p and os.path.exists(p) for p in d.values()):
+                return True
+        ip = st.get('image_path')
+        return bool(ip and os.path.exists(ip))
+
+    def set_pending_edit_state(self, state: Optional[dict]) -> None:
+        """Правки стиля, которые применятся ПОСЛЕ загрузки его модели."""
+        self._pending_edit_state = state
+
+    def trigger_pending_load(self) -> None:
+        """Авто-загрузка модели текущего стиля (как клик ▶), без ручного нажатия.
+
+        Если у стиля сохранена КАСТОМНАЯ модель — грузим сразу её (без захода
+        через игровую). Иначе грузим игровую модель из отложенных параметров;
+        отложенные текстуры применятся в обработчике готовности."""
+        if not (self._3d_available and self._3d_widget):
+            return
+        st = self._pending_edit_state
+        _smd = (st or {}).get('custom_smd')
+        if st and _smd and os.path.exists(_smd):
+            # Кастомная модель стиля: применяем текстуры/картинку и грузим её напрямую.
+            self._pending_edit_state = None
+            self._textures = {t: dict(d) for t, d in (st.get('textures') or {}).items()}
+            self.image_path = st.get('image_path')
+            self.vtf_path = st.get('vtf_path')
+            self._load_custom_smd_file(_smd, keep_materials=bool(st.get('custom_keep')))
+            # Текстуры стиля поверх кастомной модели + обновление 2D.
+            self._refresh_views_after_style_restore()
+            return
+        # Свежий стиль — грузим игровую модель (правки применит _apply_pending_edit_state).
+        # Флаг ставим ПОСЛЕ старта: _start_3d_worker его сбрасывает в начале.
+        if self._pending_3d_params:
+            self._start_3d_worker(*self._pending_3d_params)
+            self._pending_2d_refresh = True
+
+    def _apply_pending_edit_state(self) -> None:
+        """Применяет отложенные правки стиля к свежезагруженной модели.
+
+        Устойчиво к обоим случаям: мульти-материал (карточки → _textures) и
+        одиночная текстура (image_path)."""
+        st = self._pending_edit_state
+        self._pending_edit_state = None
+        # Флаг НЕ потребляем здесь: метод вызывается и из _on_3d_ready, и из
+        # _on_3d_multi_material; данные текстуры (_vpk_red_tex_map) часто готовы
+        # лишь ко второму, поэтому 2D надо обновить в ОБОИХ. Флаг сбрасывает
+        # _start_3d_worker при следующей загрузке.
+        refresh_2d = self._pending_2d_refresh
+        if not st and not refresh_2d:
+            return
+        if st:
+            self._textures = {t: dict(d) for t, d in (st.get('textures') or {}).items()}
+            self.image_path = st.get('image_path')
+            self.vtf_path = st.get('vtf_path')
+
+            # Если у стиля была загружена КАСТОМНАЯ модель — перезагружаем её геометрию
+            # (тихо, без диалога), иначе в 3D осталась бы игровая модель стиля.
+            _smd = st.get('custom_smd')
+            if _smd and os.path.exists(_smd):
+                self._load_custom_smd_file(_smd, keep_materials=bool(st.get('custom_keep')))
+                self._refresh_views_after_style_restore()
+                return
+            self._custom_smd_path = None
+
+        # Единое надёжное обновление обеих вкладок (3D + 2D) из восстановленного
+        # состояния — вместо разрозненных таймеров.
+        self._refresh_views_after_style_restore()
+
+    def _refresh_views_after_style_restore(self, delay_ms: int = 450) -> None:
+        """Надёжно обновляет ОБЕ вкладки после восстановления/загрузки стиля.
+
+        Переиспользует проверенные пути: _reapply_textures_to_3d (как при входе в
+        3D) и _restore_team_textures_2d/_rebuild_cards_for_skin (как при входе в
+        2D). Применяем к обеим: активная вкладка показывает текстуры стиля сразу,
+        неактивная готова к переключению. Задержка — чтобы геометрия успела
+        подгрузиться в 3D-сцену перед наложением текстур."""
+        from PySide6.QtCore import QTimer
+
+        def _do():
+            # 3D: восстановленные текстуры поверх загруженной модели (как 2D→3D).
+            if self._3d_available and self._3d_widget:
+                self._reapply_textures_to_3d(delay_ms=0)
+            # 2D: если открыта — показываем текстуры стиля (как клик по кнопке 2D).
+            if self.view_stack.currentIndex() == 0:
+                if self._original_skin_info and self._active_skin != 0:
+                    self._rebuild_cards_for_skin(self._active_skin)
+                else:
+                    self._restore_team_textures_2d(self._active_team)
+
+        QTimer.singleShot(delay_ms, _do)
 
     def _snapshot_outgoing(self, outgoing_mode: str) -> Optional[dict]:
         """
@@ -1711,6 +1895,9 @@ class PreviewPanel(QWidget):
         if not self._3d_available or not self._3d_widget:
             return
         self._stop_worker('_3d_worker')
+        # Новая загрузка модели: сбрасываем флаг авто-обновления 2D (его заново
+        # поставит trigger_pending_load при смене стиля шапки).
+        self._pending_2d_refresh = False
         # Возврат к ИГРОВОЙ модели: сбрасываем кастомное состояние, иначе
         # селекторы доп-стилей и их текстуры остаются от загруженной ранее
         # кастомной модели. Останавливаем и фоновый детектор стилей, чтобы
@@ -1869,6 +2056,11 @@ class PreviewPanel(QWidget):
             # (он выставляет _card_mode/_material_names) и загрузки модели в JS.
             from PySide6.QtCore import QTimer
             QTimer.singleShot(400, self._reapply_textures_to_3d)
+        # Одно-материальное оружие сюда приходит без _on_3d_multi_material —
+        # синхронизируем видимость кнопок (в т.ч. «+ Команда»).
+        self._update_team_btn_visibility()
+        # Память по стилям шапки: применяем отложенные правки стиля.
+        self._apply_pending_edit_state()
 
     def _on_vpk_mod_ready(self, obj_path: str, texture_path: str) -> None:
         self.btn_load_vpk.setEnabled(True)
@@ -2284,6 +2476,9 @@ class PreviewPanel(QWidget):
                 # heavy) переключателя не получают.
                 self._update_team_btn_visibility()
 
+        # Память по стилям шапки: применяем отложенные правки после карточек.
+        self._apply_pending_edit_state()
+
     def _on_3d_failed(self, error: str) -> None:
         logger.warning(f"3D Preview: {error}")
         self.btn_load_3d.setEnabled(True)
@@ -2328,6 +2523,7 @@ class PreviewPanel(QWidget):
         self._material_names = []
         self._has_blu = False
         self._active_team = 'red'
+        self._force_team = False        # «сделать командным» сбрасываем при смене оружия
         self.image_path = None
         self.vtf_path = None
         self._gif_cache = {}
@@ -3338,14 +3534,22 @@ class PreviewPanel(QWidget):
             p = self._textures.get(_team, {}).get(mat_name)
             if p and os.path.exists(p):
                 return p
-        # Fallback: сборка спрашивает по BLU-имени материала ({weapon}_blue),
-        # а у одноматериального оружия BLU-текстура хранится под ГЛАВНЫМ ключом.
-        # Если имя похоже на BLU-вариант и BLU-текстура загружена — отдаём её,
-        # чтобы сборка не переспрашивала уже загруженную текстуру голубой команды.
-        if mat_name.lower().endswith(('_blue', '_blu')):
-            blu = self.get_blu_image_path()
-            if blu:
-                return blu
+        # Fallback: сборка спрашивает по BLU-имени материала ({mat}_blue).
+        # Force-team (синтезированная команда): BLU хранится под ИМЕНЕМ МАТЕРИАЛА
+        # без суффикса — '{m}_blue' → _textures['blu'][m] (важно для мульти-материала,
+        # иначе всем колонкам уйдёт одна главная BLU). Затем — главная BLU как fallback
+        # (одноматериальное оружие хранит BLU под главным ключом).
+        ml = mat_name.lower()
+        for _suf in ('_blue', '_blu'):
+            if ml.endswith(_suf):
+                _base = mat_name[:-len(_suf)]
+                _bp = self._textures.get('blu', {}).get(_base)
+                if _bp and os.path.exists(_bp):
+                    return _bp
+                blu = self.get_blu_image_path()
+                if blu:
+                    return blu
+                break
         return None
 
     def get_blu_image_path(self) -> Optional[str]:
@@ -3770,7 +3974,9 @@ class PreviewPanel(QWidget):
         if path:
             self._load_custom_smd_file(path)
 
-    def _load_custom_smd_file(self, smd_path: str) -> None:
+    def _load_custom_smd_file(self, smd_path: str, keep_materials: Optional[bool] = None) -> None:
+        """Загружает кастомную SMD в превью. keep_materials != None → не спрашиваем
+        диалог «готова/замена» (тихая перезагрузка при восстановлении стиля)."""
         if not self._3d_available or not self._3d_widget:
             return
         import tempfile
@@ -3793,7 +3999,10 @@ class PreviewPanel(QWidget):
             # Спрашиваем тип модели: «готова» (свои материалы) или «замена
             # геометрии» (игровой материал). По умолчанию рекомендуем по числу
             # материалов: >1 → почти наверняка модель со своими материалами.
-            self._custom_keep_materials = self._ask_model_ready(mat_names or [])
+            self._custom_keep_materials = (
+                keep_materials if keep_materials is not None
+                else self._ask_model_ready(mat_names or [])
+            )
             self._reset_skin_state()
             # Сбрасываем командное состояние (RED/BLU/Australium) от ранее
             # загруженной ИГРОВОЙ модели — иначе её кнопки-«стили» и командная
@@ -3888,6 +4097,10 @@ class PreviewPanel(QWidget):
         if hasattr(self, 'btn_blu'):
             self.btn_blu.setVisible(False)
             self.btn_blu.setStyleSheet(self._team_style_off)
+        # Сбрасываем «+ Команда» (force_team) — покажется снова при загрузке модели.
+        self._force_team = False
+        if hasattr(self, 'btn_make_team'):
+            self.btn_make_team.setVisible(False)
         # Сбрасываем Australium (кнопку и карточку-тип)
         self._australium_frame = None
         self._australium_active = False
@@ -4138,6 +4351,27 @@ def _make_vpk_icon(color: str = "#666666", size: int = 16):
     for frac in (0.48, 0.60, 0.72):
         y = s * frac
         p.drawLine(QLineF(s*.18, y, s*.82, y))
+    p.end()
+    return QIcon(pix)
+
+
+def _make_plus_icon(color: str = "#aaaaaa", size: int = 14):
+    """Иконка «+» (две линии) — для кнопки «сделать командным»."""
+    from PySide6.QtGui import QIcon, QPixmap, QPainter, QPen, QColor
+    from PySide6.QtCore import Qt, QPointF
+    pix = QPixmap(size, size)
+    pix.fill(Qt.transparent)
+    p = QPainter(pix)
+    p.setRenderHint(QPainter.Antialiasing)
+    s = float(size)
+    pen = QPen(QColor(color))
+    pen.setWidthF(2.0)
+    pen.setCapStyle(Qt.RoundCap)
+    p.setPen(pen)
+    c = s / 2.0
+    m = s * 0.20
+    p.drawLine(QPointF(c, m), QPointF(c, s - m))
+    p.drawLine(QPointF(m, c), QPointF(s - m, c))
     p.end()
     return QIcon(pix)
 

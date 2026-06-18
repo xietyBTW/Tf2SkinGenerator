@@ -38,6 +38,15 @@ class BuildRequest:
     hat_mdl_path: Optional[str] = None
     hat_apply_game_paints: bool = True
     hat_class_models: Optional[Dict[str, str]] = None
+    # Доп. изменённые СТИЛИ-модели шапки: список словарей по каждому стилю
+    # (кроме активного — он собирается основным пайплайном). Каждый со своей
+    # моделью и своей текстурой → все в один мод. Ключи элемента:
+    #   mdl_paths: List[str]      — MDL-пути стиля (по выбранным классам);
+    #   replace_smd: Optional[str]— кастомная геометрия стиля (или None);
+    #   keep_materials: bool      — «готовая» модель (свои материалы);
+    #   image_path: Optional[str] — текстура стиля (главная/RED);
+    #   vtf_path: Optional[str]   — готовый VTF стиля (приоритетнее image_path).
+    hat_style_builds: Optional[list] = None
     panel_extra_textures: Optional[Dict[str, Any]] = None
     material_maps: Optional[Dict[str, Any]] = None
     material_settings: Optional[Dict[str, Any]] = None
@@ -50,3 +59,7 @@ class BuildRequest:
     # {material: path} BLU-слотов из цветного переключателя — для рук: нейтральный
     # материал с синей текстурой делается командным (red=база, blue=вариант).
     panel_blu_textures: Optional[Dict[str, Any]] = None
+    # «Сделать командным»: у некомандного оружия синтезировать BLU-строку в
+    # $texturegroup (skin 0 = база/RED, skin 1 = {material}_blue), чтобы игра
+    # показывала BLU-команде отдельную текстуру. Только без нативной команды/австралия.
+    force_team: bool = False
