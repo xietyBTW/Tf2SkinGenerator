@@ -1596,7 +1596,7 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
         """Извлекает VMT через $cdmaterials из QC: папки материалов берём из самой
         модели (как делает игра), а не угадываем. Единый путь для оружия и шапок."""
         from src.services.tf2_paths import TF2Paths
-        from src.services.preview_3d_worker import Preview3DWorker
+        from src.services.game_vpk_reader import GameVpkReader
         from src.services import qc_skin_parser
         import vpk as vpklib
 
@@ -1625,7 +1625,7 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
         vmt_filename: str = "material.vmt"
         for mat_name in mat_names:
             for pak in paks:
-                info = Preview3DWorker._find_vmt_content_in_vpk(
+                info = GameVpkReader.find_vmt_in_pak(
                     pak, cdmaterials, mat_name.lower()
                 )
                 if info:
@@ -1771,7 +1771,6 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
                 QMessageBox.warning(self, self.t['error'], msg)
                 size = (256, 256)
 
-            is_special_mode = self.mode in SPECIAL_MODES.values()
             # Для critHIT используем настройки пользователя (формат, флаги, опции)
             selected_format = settings['format']
             flags = settings['flags']

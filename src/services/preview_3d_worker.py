@@ -22,6 +22,7 @@ from src.data.weapons import WEAPON_MDL_PATHS
 from src.services import decompile_cache
 from src.services import qc_skin_parser
 from src.services.base_worker import BaseWorker
+from src.services.game_vpk_reader import GameVpkReader
 from src.services.model_build_service import ModelBuildService
 from src.services.tf2_paths import TF2Paths
 from src.services.tf2_vpk_extract_service import TF2VPKExtractService
@@ -98,6 +99,9 @@ class Preview3DWorker(BaseWorker):
     # ── Точка входа ───────────────────────────────────────────────────────── #
 
     def run(self) -> None:
+        # Один кэширующий читатель VPK на весь прогон: vpk.open парсит весь индекс
+        # архива — раньше каждый метод открывал те же VPK заново (5-9 раз/прогон).
+        self._reader = GameVpkReader([self.textures_vpk_path, self.misc_vpk_path])
         try:
             self._preview_dir = tempfile.mkdtemp(prefix="tf2sg_3d_")
 
@@ -323,6 +327,8 @@ class Preview3DWorker(BaseWorker):
         except Exception as exc:
             logger.error(f"Preview3DWorker: {exc}", exc_info=True)
             self.failed.emit(str(exc))
+        finally:
+            self._reader.close()
 
     # ── Получение SMD ─────────────────────────────────────────────────────── #
 
@@ -600,19 +606,11 @@ class Preview3DWorker(BaseWorker):
         """
         result: dict = {}
         try:
-            import vpk as vpklib
             from src.data.player_hands import HAND_MODE_KEYS, HAND_MODES
 
-            # Открываем ОБА VPK: VTF обычно в textures, но VMT (для материалов,
-            # чья текстура задаётся через $basetexture, напр. pocket_watch_fg
-            # у Dead Ringer) — чаще в misc.
-            paks: list = []
-            for _vpk_path in [self.textures_vpk_path, self.misc_vpk_path]:
-                if _vpk_path and os.path.exists(_vpk_path):
-                    try:
-                        paks.append(vpklib.open(_vpk_path))
-                    except Exception as _exc:
-                        logger.debug(f"[3D] Ошибка открытия VPK {_vpk_path}: {_exc}")
+            # Кэширующий reader открывает оба VPK один раз: VTF обычно в textures,
+            # VMT (для материалов с $basetexture) — чаще в misc.
+            paks = self._reader.paks
             if not paks:
                 return result
 
@@ -701,15 +699,7 @@ class Preview3DWorker(BaseWorker):
 
         result: dict = {}
         try:
-            import vpk as vpklib
-
-            paks: list = []
-            for vpk_path in [self.textures_vpk_path, self.misc_vpk_path]:
-                if vpk_path and os.path.exists(vpk_path):
-                    try:
-                        paks.append(vpklib.open(vpk_path))
-                    except Exception as exc:
-                        logger.debug(f"[3D] Ошибка открытия VPK {vpk_path}: {exc}")
+            paks = self._reader.paks
             if not paks:
                 return {}
 
@@ -812,14 +802,7 @@ class Preview3DWorker(BaseWorker):
 
         result: dict = {}
         try:
-            import vpk as vpklib
-            paks: list = []
-            for _vpk_path in [self.textures_vpk_path, self.misc_vpk_path]:
-                if _vpk_path and os.path.exists(_vpk_path):
-                    try:
-                        paks.append(vpklib.open(_vpk_path))
-                    except Exception as _exc:
-                        logger.debug(f"[3D] Ошибка открытия VPK {_vpk_path}: {_exc}")
+            paks = self._reader.paks
 
             for ex in extras:
                 # 1) Прямой VTF по указанному пути.
@@ -1089,15 +1072,7 @@ class Preview3DWorker(BaseWorker):
         )
 
         try:
-            import vpk as vpklib
-
-            paks: list = []
-            for vpk_path in [self.textures_vpk_path, self.misc_vpk_path]:
-                if vpk_path and os.path.exists(vpk_path):
-                    try:
-                        paks.append(vpklib.open(vpk_path))
-                    except Exception as exc:
-                        logger.debug(f"[3D] Ошибка открытия VPK {vpk_path}: {exc}")
+            paks = self._reader.paks
             if not paks:
                 return [], 0.0
 
@@ -1194,15 +1169,7 @@ class Preview3DWorker(BaseWorker):
         logger.info(f"[3D] Обнаружен вариант оружия: {variant_tex}")
 
         try:
-            import vpk as vpklib
-
-            paks: list = []
-            for vpk_path in [self.textures_vpk_path, self.misc_vpk_path]:
-                if vpk_path and os.path.exists(vpk_path):
-                    try:
-                        paks.append(vpklib.open(vpk_path))
-                    except Exception:
-                        pass
+            paks = self._reader.paks
 
             vtf_data: Optional[bytes] = None
             for cdmat in cdmaterials:
@@ -1229,95 +1196,20 @@ class Preview3DWorker(BaseWorker):
             return None, None
 
     # ── VMT-поиск: QC → VMT → $baseTexture → VTF ────────────────────────── #
-
-    _WORKSHOP_SWAPS = [
-        ("materials/models/player/items",
-         "materials/models/workshop_partner/player/items"),
-        ("materials/models/player/items",
-         "materials/models/workshop/player/items"),
-        ("materials/models/workshop_partner/player/items",
-         "materials/models/player/items"),
-        ("materials/models/workshop/player/items",
-         "materials/models/player/items"),
-    ]
+    # Логика живёт в GameVpkReader (единый источник). Эти статики оставлены
+    # тонкими делегатами: их зовут из множества мест внутри воркера и из UI.
 
     @staticmethod
     def _find_vmt_content_in_vpk(pak, cdmaterials: list, mat_name: str) -> Optional[tuple]:
-        """
-        Ищет VMT-файл для имени материала в открытом VPK.
-
-        Проверяет все комбинации cdmaterials × workshop-вариантов.
-        Пропускает VMT, в контенте или пути которых есть «backpack»
-        (это иконки инвентаря, не модельные текстуры).
-
-        Returns:
-            (vmt_path, vmt_content_str) или None.
-        """
-        swaps = Preview3DWorker._WORKSHOP_SWAPS
-        candidates: list = []
-        for cdmat in cdmaterials:
-            base_dir = f"materials/{cdmat}"
-            candidates.append(f"{base_dir}/{mat_name}.vmt")
-            for src, dst in swaps:
-                if base_dir.startswith(src):
-                    alt = base_dir.replace(src, dst, 1)
-                    candidates.append(f"{alt}/{mat_name}.vmt")
-
-        for path in candidates:
-            try:
-                raw = pak[path].read()
-            except KeyError:
-                continue
-            try:
-                content = raw.decode("utf-8", errors="replace")
-            except Exception:
-                continue
-            if "backpack" in path.lower() or "backpack" in content.lower():
-                logger.debug(f"[3D] Пропускаем backpack VMT: {path}")
-                continue
-            return path, content
-        return None
+        return GameVpkReader.find_vmt_in_pak(pak, cdmaterials, mat_name)
 
     @staticmethod
     def _parse_basetexture_from_vmt(vmt_content: str) -> Optional[str]:
-        """Извлекает значение $baseTexture из VMT-контента.
-
-        Обрабатывает все встречающиеся форматы:
-            $baseTexture      "path/to/texture"   ← ключ без кавычек
-            "$basetexture"    "path/to/texture"   ← ключ в кавычках (TF2 workshop VMT)
-            $baseTexture      path/to/texture      ← значение без кавычек
-        """
-        import re
-        # Ключ с кавычками или без, значение с кавычками
-        m = re.search(
-            r'"?\$baseTexture"?\s+"([^"]+)"',
-            vmt_content, re.IGNORECASE,
-        )
-        if m:
-            return m.group(1).replace("\\", "/").lower()
-        # Значение без кавычек
-        m = re.search(
-            r'"?\$baseTexture"?\s+([^\s"{}]+)',
-            vmt_content, re.IGNORECASE,
-        )
-        return m.group(1).replace("\\", "/").lower() if m else None
+        return GameVpkReader.parse_basetexture(vmt_content)
 
     @staticmethod
     def _find_vtf_for_basetexture(pak, basetexture: str) -> Optional[bytes]:
-        """
-        Находит VTF-файл в открытом VPK по значению $baseTexture.
-
-        $baseTexture в VMT — путь относительно materials/ (без расширения).
-        """
-        path = basetexture.replace("\\", "/").lower().strip("/")
-        if not path.startswith("materials/"):
-            path = "materials/" + path
-        if not path.endswith(".vtf"):
-            path += ".vtf"
-        try:
-            return pak[path].read()
-        except KeyError:
-            return None
+        return GameVpkReader.find_vtf_in_pak(pak, basetexture)
 
     def _vtf_data_to_png(self, vtf_data: bytes, name: str) -> Optional[str]:
         """
@@ -1345,8 +1237,6 @@ class Preview3DWorker(BaseWorker):
         Returns:
             {mat_name: png_path}  (пустой dict если ничего не нашлось)
         """
-        import vpk as vpklib
-
         qc_files = glob.glob(os.path.join(decomp_dir, "*.qc"))
         if not qc_files:
             logger.warning(f"[3D] QC не найден в {decomp_dir}")
@@ -1359,15 +1249,9 @@ class Preview3DWorker(BaseWorker):
 
         logger.info(f"[3D] Hat QC: cdmaterials={cdmaterials}, materials={mat_names}")
 
-        # Открываем оба VPK сразу — VMT обычно в misc, VTF в textures
-        paks: list = []
-        for vpk_path in [self.misc_vpk_path, self.textures_vpk_path]:
-            if not vpk_path or not os.path.exists(vpk_path):
-                continue
-            try:
-                paks.append(vpklib.open(vpk_path))
-            except Exception as exc:
-                logger.debug(f"[3D] Ошибка открытия VPK {vpk_path}: {exc}")
+        # VMT обычно в misc, VTF в textures → reader открывает оба один раз;
+        # misc первым, чтобы сохранить прежний приоритет поиска VMT.
+        paks = list(reversed(self._reader.paks))
 
         if not paks:
             logger.warning("[3D] Не удалось открыть ни один VPK")
@@ -1432,8 +1316,6 @@ class Preview3DWorker(BaseWorker):
             (frame_paths: list[str], framerate: float)
         """
         try:
-            import vpk as vpklib
-
             _TF2_CLASSES = ["heavy", "scout", "soldier", "pyro",
                             "demoman", "engineer", "medic", "sniper", "spy"]
             mdl = self.weapon_key.replace("\\", "/").lower()
@@ -1475,24 +1357,18 @@ class Preview3DWorker(BaseWorker):
                         if v not in vtf_paths:
                             vtf_paths.append(v)
 
-            # Ищем в текстурах VPK, затем в misc VPK
+            # Ищем в текстурах VPK, затем в misc VPK (порядок reader.paks).
             vtf_data: Optional[bytes] = None
-            for vpk_path in [self.textures_vpk_path, self.misc_vpk_path]:
-                if not vpk_path or not os.path.exists(vpk_path):
-                    continue
-                try:
-                    pak = vpklib.open(vpk_path)
-                    for path in vtf_paths:
-                        try:
-                            vtf_data = pak[path].read()
-                            logger.debug(f"[3D] Hat texture: {path}")
-                            break
-                        except KeyError:
-                            continue
-                    if vtf_data:
+            for pak in self._reader.paks:
+                for path in vtf_paths:
+                    try:
+                        vtf_data = pak[path].read()
+                        logger.debug(f"[3D] Hat texture: {path}")
                         break
-                except Exception as exc:
-                    logger.debug(f"[3D] Ошибка открытия VPK {vpk_path}: {exc}")
+                    except KeyError:
+                        continue
+                if vtf_data:
+                    break
 
             if not vtf_data:
                 shown = vtf_paths[:4]
@@ -1557,7 +1433,6 @@ class Preview3DWorker(BaseWorker):
             return self._extract_spy_mask_texture("mask_spy")
 
         try:
-            import vpk as vpklib
             from src.data.weapons import WEAPON_TEXTURE_PATHS
 
             wk = self.weapon_key
@@ -1572,14 +1447,7 @@ class Preview3DWorker(BaseWorker):
             vtf_search = WEAPON_TEXTURE_PATHS.get(wk, []) + _standard
             vmt_search = [p.replace(".vtf", ".vmt") for p in vtf_search]
 
-            paks_tex: list = []
-            for vpk_path in [self.textures_vpk_path, self.misc_vpk_path]:
-                if vpk_path and os.path.exists(vpk_path):
-                    try:
-                        paks_tex.append(vpklib.open(vpk_path))
-                    except Exception as _e:
-                        logger.debug(f"[3D] Ошибка открытия VPK {vpk_path}: {_e}")
-
+            paks_tex = self._reader.paks
             pak = paks_tex[0] if paks_tex else None
             vtf_data: Optional[bytes] = None
 
@@ -1694,7 +1562,6 @@ class Preview3DWorker(BaseWorker):
         Если BLU текстура не найдена — возвращает ([], 0.0).
         """
         try:
-            import vpk as vpklib
             from src.data.weapons import WEAPON_TEXTURE_PATHS
 
             wk = self.weapon_key
@@ -1711,15 +1578,12 @@ class Preview3DWorker(BaseWorker):
             ]
             blu_vtf_search = _extra_blu + _std_blu
 
-            pak = vpklib.open(self.textures_vpk_path)
             vtf_data: Optional[bytes] = None
             for path in blu_vtf_search:
-                try:
-                    vtf_data = pak[path].read()
+                vtf_data = self._reader.read(path)
+                if vtf_data:
                     logger.debug(f"3D Preview BLU текстура: {path}")
                     break
-                except KeyError:
-                    continue
 
             if not vtf_data:
                 return [], 0.0

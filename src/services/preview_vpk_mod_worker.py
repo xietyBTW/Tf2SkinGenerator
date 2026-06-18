@@ -23,6 +23,7 @@ from typing import List, Optional
 from PySide6.QtCore import Signal
 
 from src.services.base_worker import BaseWorker
+from src.services.game_vpk_reader import GameVpkReader
 from src.shared.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -43,19 +44,6 @@ _SKIP_VTF_KEYWORDS = (
 
 
 # ── Утилиты ──────────────────────────────────────────────────────────────── #
-
-def _parse_basetexture_from_vmt(vmt_content: str) -> Optional[str]:
-    """
-    Ищет строку вида: "$basetexture" "путь/к/текстуре"
-    Возвращает значение (путь без кавычек) или None.
-    """
-    match = re.search(
-        r'"\$basetexture"\s+"([^"]+)"',
-        vmt_content,
-        re.IGNORECASE,
-    )
-    return match.group(1) if match else None
-
 
 def _weapon_key_from_path(path: str) -> Optional[str]:
     """
@@ -141,7 +129,16 @@ class PreviewVpkModWorker(BaseWorker):
         self.textures_vpk_path = textures_vpk_path
         self._preview_dir: Optional[str] = None
         self._model_materials: List[str] = []
+        # Игровой tf2_textures_dir.vpk открываем один раз за прогон (fallback-пути).
+        self._game_reader: Optional[GameVpkReader] = None
         self._p = self._PROGRESS.get(lang, self._PROGRESS['en'])
+
+    def _game_textures_pak(self):
+        """Хэндл игрового tf2_textures_dir.vpk (открыт один раз, кэш). None если нет."""
+        if self._game_reader is None:
+            self._game_reader = GameVpkReader([self.textures_vpk_path])
+        paks = self._game_reader.paks
+        return paks[0] if paks else None
 
     # ── Точка входа ───────────────────────────────────────────────────────── #
 
@@ -204,7 +201,7 @@ class PreviewVpkModWorker(BaseWorker):
                 try:
                     data = pak[vmt_rel].read()
                     vmt_content = data.decode("utf-8", errors="replace")
-                    bt = _parse_basetexture_from_vmt(vmt_content)
+                    bt = GameVpkReader.parse_basetexture(vmt_content)
                     if bt:
                         basetexture_path = bt
                         logger.info(f"$basetexture из VMT «{vmt_rel}»: {bt}")
@@ -316,6 +313,9 @@ class PreviewVpkModWorker(BaseWorker):
         except Exception as exc:
             logger.error(f"PreviewVpkModWorker: {exc}", exc_info=True)
             self.failed.emit(str(exc))
+        finally:
+            if self._game_reader is not None:
+                self._game_reader.close()
 
     # ── 2D-карточки: все основные текстуры мода из открытого pak ──────────── #
 
@@ -714,7 +714,6 @@ class PreviewVpkModWorker(BaseWorker):
     def _extract_game_texture_frames(self, weapon_key: str) -> tuple:
         """Извлекает текстуру оружия из игровых VPK (fallback). Возвращает (frames, fps)."""
         try:
-            import vpk as vpklib
             import re
             from src.data.weapons import WEAPON_TEXTURE_PATHS
 
@@ -727,7 +726,9 @@ class PreviewVpkModWorker(BaseWorker):
             vtf_search = WEAPON_TEXTURE_PATHS.get(weapon_key, []) + _standard
             vmt_search = [p.replace(".vtf", ".vmt") for p in vtf_search]
 
-            pak = vpklib.open(self.textures_vpk_path)
+            pak = self._game_textures_pak()
+            if pak is None:
+                return [], 0.0
             for path in vtf_search:
                 try:
                     vtf_data = pak[path].read()
@@ -845,9 +846,10 @@ class PreviewVpkModWorker(BaseWorker):
         # ── Приоритет 5: игровой VPK ──────────────────────────────────────────
         if not vtf_data and weapon_key and self.textures_vpk_path:
             try:
-                import vpk as vpklib
                 from src.data.weapons import WEAPON_TEXTURE_PATHS
-                game_pak = vpklib.open(self.textures_vpk_path)
+                game_pak = self._game_textures_pak()
+                if game_pak is None:
+                    raise FileNotFoundError(self.textures_vpk_path)
                 # Строим BLU-варианты: нестандартные пути (stem + _blue) + стандартные
                 _extra_blu = [
                     p.replace(".vtf", "_blue.vtf")

@@ -24,6 +24,7 @@ from typing import Optional
 from PySide6.QtCore import Signal
 
 from src.services.base_worker import BaseWorker
+from src.services.game_vpk_reader import GameVpkReader
 from src.shared.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -66,7 +67,6 @@ class HatTextureExtractWorker(BaseWorker):
 
     def _extract(self) -> None:
         from src.services.tf2_paths import TF2Paths
-        from src.services.preview_3d_worker import Preview3DWorker
 
         self.progress.emit(5, "Resolving TF2 paths...")
         _, misc_vpk, _ = TF2Paths.resolve(self._tf2_root)
@@ -107,91 +107,61 @@ class HatTextureExtractWorker(BaseWorker):
 
         logger.info(f"[hat-tex] mat_names={mat_names}")
 
-        # ── 4. Открываем оба VPK ─────────────────────────────────────────── #
+        # ── 4-5. QC → VMT → $baseTexture → VTF через кэширующий reader ────── #
+        # misc первым (VMT обычно там), textures вторым (VTF). GameVpkReader
+        # открывает каждый VPK один раз и переиспользует ту же цепочку поиска,
+        # что и 3D Preview.
         self.progress.emit(45, "Opening VPK archives...")
-        import vpk as vpklib
-        paks: list = []
-        for vp in [misc_vpk, textures_vpk]:
-            if vp and os.path.exists(vp):
-                try:
-                    paks.append(vpklib.open(vp))
-                except Exception as exc:
-                    logger.warning(f"[hat-tex] Cannot open VPK {vp}: {exc}")
-
-        if not paks:
-            self.finished.emit(False, "Could not open any VPK file")
-            return
-
-        # ── 5. QC → VMT → $baseTexture → VTF ─────────────────────────────── #
-        self.progress.emit(55, "Searching VMT/VTF in VPK...")
         os.makedirs(self._export, exist_ok=True)
 
         extracted: list[str] = []
         seen_basetex: set = set()   # избегаем дублей если несколько mat → одна VTF
-
         total = max(len(mat_names), 1)
-        for idx, mat_name in enumerate(mat_names):
-            if self.isInterruptionRequested():
-                break
 
-            pct = 55 + int(idx / total * 35)
-            self.progress.emit(pct, f"Extracting: {mat_name}...")
+        with GameVpkReader([misc_vpk, textures_vpk]) as reader:
+            if not reader.paks:
+                self.finished.emit(False, "Could not open any VPK file")
+                return
 
-            mat_lower = mat_name.lower()
-
-            # Ищем VMT
-            vmt_info = None
-            for pak in paks:
-                vmt_info = Preview3DWorker._find_vmt_content_in_vpk(pak, cdmaterials, mat_lower)
-                if vmt_info:
+            self.progress.emit(55, "Searching VMT/VTF in VPK...")
+            for idx, mat_name in enumerate(mat_names):
+                if self.isInterruptionRequested():
                     break
 
-            if not vmt_info:
-                logger.info(f"[hat-tex] VMT not found for '{mat_lower}'")
-                continue
+                pct = 55 + int(idx / total * 35)
+                self.progress.emit(pct, f"Extracting: {mat_name}...")
+                mat_lower = mat_name.lower()
 
-            vmt_path, vmt_content = vmt_info
-            basetexture = Preview3DWorker._parse_basetexture_from_vmt(vmt_content)
-            if not basetexture:
-                logger.warning(f"[hat-tex] No $baseTexture in VMT: {vmt_path}")
-                continue
+                vmt_info = reader.find_vmt(cdmaterials, mat_lower)
+                if not vmt_info:
+                    logger.info(f"[hat-tex] VMT not found for '{mat_lower}'")
+                    continue
+                vmt_path, vmt_content = vmt_info
 
-            if basetexture in seen_basetex:
-                continue
-            seen_basetex.add(basetexture)
+                basetexture = GameVpkReader.parse_basetexture(vmt_content)
+                if not basetexture:
+                    logger.warning(f"[hat-tex] No $baseTexture in VMT: {vmt_path}")
+                    continue
+                if basetexture in seen_basetex:
+                    continue
+                seen_basetex.add(basetexture)
 
-            # Ищем VTF
-            vtf_data: Optional[bytes] = None
-            for pak in paks:
-                vtf_data = Preview3DWorker._find_vtf_for_basetexture(pak, basetexture)
-                if vtf_data:
-                    break
+                vtf_data = reader.find_vtf_for_basetexture(basetexture)
+                if not vtf_data:
+                    logger.warning(f"[hat-tex] VTF not found for $baseTexture={basetexture}")
+                    continue
 
-            if not vtf_data:
-                logger.warning(f"[hat-tex] VTF not found for $baseTexture={basetexture}")
-                continue
-
-            # Сохраняем
-            out = self._save_vtf(vtf_data, basetexture)
-            if out:
-                extracted.append(out)
-                logger.info(f"[hat-tex] Extracted: {out}")
-
-        for pak in paks:
-            try:
-                pak.close()
-            except Exception:
-                pass
+                out = self._save_vtf(vtf_data, basetexture)
+                if out:
+                    extracted.append(out)
+                    logger.info(f"[hat-tex] Extracted: {out}")
 
         if not extracted:
             self.finished.emit(False, "Textures not found in VPK (VMT/VTF chain returned nothing)")
             return
 
         self.progress.emit(100, "Done")
-        if len(extracted) == 1:
-            msg = extracted[0]
-        else:
-            msg = "\n".join(extracted)
+        msg = extracted[0] if len(extracted) == 1 else "\n".join(extracted)
         self.finished.emit(True, msg)
 
     # ── Вспомогательные методы ────────────────────────────────────────────── #
