@@ -26,6 +26,11 @@ _CACHE_DIR = Path(os.path.expanduser("~")) / ".tf2skingen_cache" / "decompiled"
 _META_FILENAME = "_cache_meta.json"
 _CACHE_VERSION = 3  # v3: использует vpk_mtime вместо mdl_hash
 
+# Мягкий потолок размера кэша. После сохранения новой записи кэш само-урезается
+# до этого размера, удаляя самые давно использованные записи (LRU по mtime папки;
+# mtime «трогается» на cache hit). Без лимита кэш рос бы бесконечно. <=0 — выкл.
+_CACHE_MAX_MB = 1024
+
 
 def get_cache_dir() -> Path:
     """Возвращает папку кэша, создаёт если нет."""
@@ -106,6 +111,13 @@ def get_cached_decompile(
             logger.warning(f"QC файл в кэше не найден: {weapon_key}")
             shutil.rmtree(entry_dir, ignore_errors=True)
             return None
+
+        # Cache hit — обновляем mtime записи, чтобы LRU-эвикция
+        # (enforce_cache_limit) считала её свежеиспользованной.
+        try:
+            os.utime(entry_dir, None)
+        except OSError:
+            pass
 
         logger.info(f"✓ Кэш декомпила: {weapon_key} — пропускаем extraction + decompile")
         return str(entry_dir)
@@ -190,11 +202,64 @@ def save_to_cache(
             json.dump(meta, f, indent=2)
 
         logger.info(f"✓ Кэш декомпила сохранён: {weapon_key}")
+
+        # Само-урезание кэша до мягкого потолка (удаляем давно не used записи).
+        enforce_cache_limit()
         return str(entry_dir)
 
     except Exception as e:
         logger.warning(f"Не удалось сохранить кэш декомпила: {e}")
         return None
+
+
+def enforce_cache_limit(max_mb: float = _CACHE_MAX_MB) -> int:
+    """Удаляет самые давно использованные записи, пока кэш не уложится в max_mb.
+
+    LRU приближается через mtime папки записи (трогается на cache hit в
+    get_cached_decompile). Запись — атомарная единица удаления. Метафайл записи
+    учитывается в её размере. <=0 или None в max_mb — лимит отключён.
+
+    Returns:
+        Количество удалённых записей.
+    """
+    if not max_mb or max_mb <= 0:
+        return 0
+    try:
+        cache_dir = get_cache_dir()
+        sized = []          # (mtime, size_bytes, entry_dir)
+        total = 0
+        for entry in cache_dir.iterdir():
+            if not entry.is_dir():
+                continue
+            size = sum(f.stat().st_size for f in entry.rglob("*") if f.is_file())
+            total += size
+            sized.append((entry.stat().st_mtime, size, entry))
+
+        limit = max_mb * 1024 * 1024
+        if total <= limit:
+            return 0
+
+        # Старые (меньший mtime = давно используемые) — первыми под нож.
+        sized.sort(key=lambda x: x[0])
+        removed = 0
+        for _mtime, size, entry in sized:
+            if total <= limit:
+                break
+            shutil.rmtree(entry, ignore_errors=True)
+            total -= size
+            removed += 1
+            logger.debug(
+                f"Эвикция кэша декомпила (LRU): {entry.name}, "
+                f"освобождено {size / (1024 * 1024):.1f} МБ"
+            )
+        if removed:
+            logger.info(
+                f"Кэш декомпила превысил {max_mb:.0f} МБ — удалено записей: {removed}"
+            )
+        return removed
+    except Exception as e:
+        logger.warning(f"Ошибка эвикции кэша декомпила: {e}")
+        return 0
 
 
 def restore_from_cache(cache_dir: str, target_dir: str) -> str:

@@ -21,6 +21,13 @@ except ImportError:
     VPK_AVAILABLE = False
     vpk = None
 
+# Кэш открытых VPK теперь общий для всех потребителей — см. src/services/vpk_cache.py
+# (потоко-локальный, один open на поток; раньше извлечение и GameVpkReader держали
+# отдельные кэши и открывали один и тот же игровой VPK дважды за прогон воркера).
+# Имя с подчёркиванием сохранено как тонкий алиас: на него завязаны вызовы
+# _open_vpk_cached внутри этого файла.
+from src.services.vpk_cache import open_vpk_cached as _open_vpk_cached  # noqa: E402
+
 
 class TF2VPKExtractService:
     """Сервис для работы с извлечением файлов из TF2 VPK"""
@@ -51,27 +58,19 @@ class TF2VPKExtractService:
         # Нормализуем путь (используем прямые слеши)
         normalized_path = mdl_rel_path.replace("\\", "/")
         
-        # Открываем VPK файл если не передан
-        should_close = False
+        # Открываем VPK файл если не передан — через общий кэш (vpk.open парсит
+        # весь каталог архива). Кэшированный хэндл НЕ закрываем.
         if vpk_file is None:
             try:
-                vpk_file = vpk.open(dir_vpk_path)
-                should_close = True
+                vpk_file = _open_vpk_cached(dir_vpk_path)
             except Exception as e:
                 logger.warning(f"Не удалось открыть VPK файл для проверки: {e}", exc_info=True)
                 return False
-        
-        try:
-            # Проверяем существование файла в VPK (быстрая операция)
-            exists = normalized_path in vpk_file
-            return exists
-        finally:
-            # Закрываем VPK файл только если мы его открыли
-            if should_close and hasattr(vpk_file, 'close'):
-                try:
-                    vpk_file.close()
-                except Exception:
-                    pass
+            if vpk_file is None:
+                return False
+
+        # Проверяем существование файла в VPK (быстрая операция).
+        return normalized_path in vpk_file
     
     @staticmethod
     def extract_file_set(
@@ -139,11 +138,14 @@ class TF2VPKExtractService:
         phy_path = os.path.join(mdl_dir, f"{mdl_basename}.phy").replace("\\", "/")
         files_to_extract.append(phy_path)
         
-        # Открываем VPK файл один раз для всех извлечений
+        # Открываем VPK через общий кэш (vpk.open парсит весь каталог архива —
+        # дорого на каждую сборку). Кэшированный хэндл не закрываем.
         try:
-            vpk_file = vpk.open(dir_vpk_path)
+            vpk_file = _open_vpk_cached(dir_vpk_path)
         except Exception as e:
             raise RuntimeError(f"Не удалось открыть VPK файл {dir_vpk_path}: {e}")
+        if vpk_file is None:
+            raise RuntimeError(f"Не удалось открыть VPK файл {dir_vpk_path}")
         
         extracted_files = []
         
@@ -219,15 +221,11 @@ class TF2VPKExtractService:
                 extracted_files.append(found_mdl)
             
             return extracted_files
-        
+
         finally:
-            # Закрываем VPK файл
-            if hasattr(vpk_file, 'close'):
-                try:
-                    vpk_file.close()
-                except Exception:
-                    pass
-    
+            # VPK кэшируется (_open_vpk_cached) — общий хэндл не закрываем.
+            pass
+
     @staticmethod
     def extract_vmt_file(
         dir_vpk_path: str,
@@ -288,8 +286,10 @@ class TF2VPKExtractService:
         # Пробуем найти VMT файл в tf2_textures_dir.vpk (обычно текстуры там)
         # Но сначала проверяем tf2_misc_dir.vpk
         try:
-            vpk_file = vpk.open(dir_vpk_path)
-            
+            vpk_file = _open_vpk_cached(dir_vpk_path)
+            if vpk_file is None:
+                return None
+
             # Список путей для поиска (с разными вариантами)
             paths_to_try = []
             
@@ -315,26 +315,16 @@ class TF2VPKExtractService:
                         f.write(vpk_entry.read())
                     
                     logger.info(f"Извлечен VMT файл: {path_to_try} -> {extracted_file_path}")
-                    # Закрываем VPK файл если есть метод close
-                    if hasattr(vpk_file, 'close'):
-                        try:
-                            vpk_file.close()
-                        except Exception:
-                            pass
                     return extracted_file_path
-            
-            # Закрываем VPK файл если не нашли файл
-            if hasattr(vpk_file, 'close'):
-                try:
-                    vpk_file.close()
-                except Exception:
-                    pass
-            
+            # VPK кэшируется (_open_vpk_cached) — НЕ закрываем.
+
         except Exception as e:
             logger.warning(f"Ошибка при извлечении VMT файла: {e}", exc_info=True)
             return None
-        
-        logger.warning(f"VMT файл не найден по пути: {vmt_rel_path}")
+
+        # Не найден по этому пути — норма при переборе $cdmaterials путей/VPK.
+        # DEBUG, чтобы не спамить лог (раньше был WARNING на каждый промах).
+        logger.debug(f"VMT файл не найден по пути: {vmt_rel_path}")
         return None
     
     @staticmethod
@@ -379,11 +369,9 @@ class TF2VPKExtractService:
             return bool(cancel_callback and cancel_callback())
 
         def _close(vpk_f) -> None:
-            if hasattr(vpk_f, 'close'):
-                try:
-                    vpk_f.close()
-                except Exception:
-                    pass
+            # VPK кэшируется (_open_vpk_cached) — общий хэндл не закрываем.
+            # Оставлено как no-op, чтобы не трогать все места вызова.
+            pass
 
         def _extract_and_convert(vpk_f, rel_path: str, filename: str) -> Optional[str]:
             """Извлекает один VTF и конвертирует если нужно. Возвращает финальный путь или None."""
@@ -463,7 +451,7 @@ class TF2VPKExtractService:
             # ══════════════════════════════════════════════════════════════════
             if weapon_key in WEAPON_TEXTURE_PATHS:
                 emit_progress(50, t.get('extract_extracting', 'Extracting texture...'))
-                vpk_file = vpk.open(textures_vpk_path)
+                vpk_file = _open_vpk_cached(textures_vpk_path)
                 extracted_paths: List[str] = []
                 override_list = WEAPON_TEXTURE_PATHS[weapon_key]
                 n = max(len(override_list), 1)
@@ -511,7 +499,7 @@ class TF2VPKExtractService:
 
             if qc_texture_names:
                 emit_progress(40, t.get('extract_extracting', 'Extracting texture...'))
-                vpk_file = vpk.open(textures_vpk_path)
+                vpk_file = _open_vpk_cached(textures_vpk_path)
                 extracted_paths = []
                 n = max(len(qc_texture_names), 1)
 
@@ -557,7 +545,7 @@ class TF2VPKExtractService:
             seen_c: set = set()
             vtf_candidates = [c for c in vtf_candidates if not (c in seen_c or seen_c.add(c))]
 
-            vpk_file = vpk.open(textures_vpk_path)
+            vpk_file = _open_vpk_cached(textures_vpk_path)
             for search_path in search_paths:
                 if is_cancelled():
                     _close(vpk_file)
@@ -651,9 +639,11 @@ class TF2VPKExtractService:
         emit(30, t.get("extract_searching", "Searching for texture..."))
 
         try:
-            vpk_file = vpk.open(textures_vpk_path)
+            vpk_file = _open_vpk_cached(textures_vpk_path)
         except Exception as exc:
             return False, str(exc), False
+        if vpk_file is None:
+            return False, t.get("textures_vpk_not_found", "tf2_textures_dir.vpk not found"), False
 
         emit(40, t.get("extract_searching", "Searching for texture..."))
 
@@ -664,7 +654,7 @@ class TF2VPKExtractService:
         misc_vpk_file = None
         if misc_vpk_path and os.path.exists(misc_vpk_path) and misc_vpk_path != textures_vpk_path:
             try:
-                misc_vpk_file = vpk.open(misc_vpk_path)
+                misc_vpk_file = _open_vpk_cached(misc_vpk_path)
             except Exception as _e:
                 logger.warning(f"[extract] Не удалось открыть misc VPK {misc_vpk_path}: {_e}")
 
@@ -752,20 +742,9 @@ class TF2VPKExtractService:
                         seen_files.add(filename)
                         all_vtfs.append((rel_path, filename, vpk_file))
 
-        def _close_extra() -> None:
-            if misc_vpk_file is not None and hasattr(misc_vpk_file, "close"):
-                try:
-                    misc_vpk_file.close()
-                except Exception:
-                    pass
-
+        # VPK (textures + misc) кэшируются (_open_vpk_cached) — общие хэндлы не
+        # закрываем: их переиспользуют последующие вызовы.
         if not all_vtfs:
-            if hasattr(vpk_file, "close"):
-                try:
-                    vpk_file.close()
-                except Exception:
-                    pass
-            _close_extra()
             _weapon_name = hand_textures[0][1] if hand_textures else "unknown"
             return (
                 False,
@@ -815,12 +794,8 @@ class TF2VPKExtractService:
                 else:
                     extracted_paths.append(dest_path)
         finally:
-            if hasattr(vpk_file, "close"):
-                try:
-                    vpk_file.close()
-                except Exception:
-                    pass
-            _close_extra()
+            # VPK кэшируются (_open_vpk_cached) — общие хэндлы не закрываем.
+            pass
 
         if not extracted_paths:
             _weapon_name2 = hand_textures[0][1] if hand_textures else "unknown"

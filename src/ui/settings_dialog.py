@@ -303,6 +303,22 @@ class SettingsDialog(StyledDialog):
 
         lay.addSpacing(14)
 
+        # ── Очистка кэша декомпилированных моделей (обслуживание) ─────────────── #
+        self.clear_cache_button = QPushButton(
+            self.t.get('clear_decompile_cache', 'Clear Model Cache')
+        )
+        self.clear_cache_button.setCursor(Qt.PointingHandCursor)
+        self.clear_cache_button.setMinimumHeight(_FH)
+        self.clear_cache_button.setStyleSheet(_BROWSE_STYLE)
+        self.clear_cache_button.setToolTip(self.t.get(
+            'clear_decompile_cache_tooltip',
+            'Deletes cached decompiled models (~/.tf2skingen_cache).\n'
+            'Use if models stopped building correctly after a TF2 update.'))
+        self.clear_cache_button.clicked.connect(self._on_clear_cache_clicked)
+        lay.addWidget(self.clear_cache_button)
+
+        lay.addSpacing(14)
+
         # ── Блэклист материалов ──────────────────────────────────────────── #
         lay.addWidget(_field_label(self.t.get(
             'material_blacklist_label', 'Material blacklist (extra)')))
@@ -373,6 +389,32 @@ class SettingsDialog(StyledDialog):
         return self.make_footer([self.cancel_button, self.save_button])
 
     # ── Логика ───────────────────────────────────────────────────────────── #
+
+    def _on_clear_cache_clicked(self):
+        """Очищает кэш декомпилированных моделей с подтверждением."""
+        from src.services.decompile_cache import clear_cache, get_cache_size_mb
+        from PySide6.QtWidgets import QMessageBox
+
+        size_mb = get_cache_size_mb()
+        size_str = f"{size_mb:.1f} MB" if size_mb >= 0.1 else "< 0.1 MB"
+
+        msg = self.t.get(
+            'clear_cache_confirm',
+            'Clear the model decompile cache?\n\nCache size: {size}\n\n'
+            'The cache speeds up repeated builds of the same weapon.\n'
+            'After clearing, the first build of each weapon will be slower.'
+        ).format(size=size_str)
+
+        title = self.t.get('clear_decompile_cache', 'Clear Model Cache')
+        reply = QMessageBox.question(
+            self, title, msg,
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+        )
+        if reply == QMessageBox.Yes:
+            count = clear_cache()
+            QMessageBox.information(self, title, self.t.get(
+                'clear_cache_done', 'Cache cleared. {count} entries removed.'
+            ).format(count=count))
 
     def browse_tf2_game_folder(self):
         folder = QFileDialog.getExistingDirectory(

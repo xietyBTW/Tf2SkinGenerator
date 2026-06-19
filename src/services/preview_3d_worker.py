@@ -173,6 +173,11 @@ class Preview3DWorker(BaseWorker):
             if is_multi_tex_mode and mat_names:
                 # Режим рук / скина персонажа: мульти-материал — каждый меш получает свою текстуру
                 tex_map = self._extract_multi_textures(mat_names)
+                # Служебные материалы $texturegroup вне геометрии (eyeball_invun,
+                # *_zombie …) — для селектора «Прочее» в 2D.
+                _misc_extras = self._extract_texturegroup_misc_extras(mat_names)
+                if _misc_extras:
+                    tex_map.update(_misc_extras)
                 self.ready.emit(obj_path, "")
                 if tex_map:
                     self.multi_material.emit(tex_map)
@@ -251,6 +256,9 @@ class Preview3DWorker(BaseWorker):
                 # с тем, что предлагает сборка.
                 tg_extras = self._extract_texturegroup_extras(mat_names)
 
+                # Служебные материалы $texturegroup вне геометрии — для «Прочее».
+                misc_extras = self._extract_texturegroup_misc_extras(mat_names)
+
                 if len(mat_names) > 1:
                     # ── Мульти-материальное оружие (shell, scope и т.п.) ─────── #
                     tex_map = self._extract_multi_textures(mat_names)
@@ -258,6 +266,8 @@ class Preview3DWorker(BaseWorker):
                         tex_map.update(fixed_extras)
                     if tg_extras:
                         tex_map.update(tg_extras)
+                    if misc_extras:
+                        tex_map.update(misc_extras)
                     first_tex = next(iter(tex_map.values()), "") if tex_map else ""
                     self.ready.emit(obj_path, first_tex)
                     if tex_map:
@@ -860,14 +870,15 @@ class Preview3DWorker(BaseWorker):
             if not qc_files:
                 return {}
             from src.services.model_build_service import ModelBuildService
-            from src.data.material_filter import is_editable_material
+            from src.data.material_filter import is_editable_material, is_user_blacklisted
             tg = ModelBuildService.extract_texturegroup_structure(qc_files[0])
             extras = tg.get('extra_materials', []) or []
             known = {m.lower() for m in mat_names}
-            # Тем же блэклистом, что и сборка/карточки, и только то, чего нет
-            # в геометрии (иначе материал уже показан обычным путём).
+            # Редактируемые (не служебные) и не скрытые пользовательским ЧС,
+            # которых нет в геометрии (иначе материал уже показан обычным путём).
             missing = [m for m in extras
-                       if m.lower() not in known and is_editable_material(m)]
+                       if m.lower() not in known and is_editable_material(m)
+                       and not is_user_blacklisted(m)]
 
             # Доп. косметические стили (bloody/clean) — материалы строк-стилей,
             # которых нет в геометрии. Показываем карточкой, чтобы стиль можно было
@@ -879,7 +890,7 @@ class Preview3DWorker(BaseWorker):
                     for _m in _lay.all_rows[_idx]:
                         ml = _m.lower()
                         if (ml not in known and is_editable_material(_m)
-                                and _m not in missing):
+                                and not is_user_blacklisted(_m) and _m not in missing):
                             missing.append(_m)
 
             if not missing:
@@ -894,6 +905,50 @@ class Preview3DWorker(BaseWorker):
             return result
         except Exception as exc:
             logger.debug(f"[3D] Не удалось собрать доп. материалы $texturegroup: {exc}")
+            return {}
+
+    def _extract_texturegroup_misc_extras(self, mat_names: list) -> dict:
+        """Служебные (блэклист) материалы из QC $texturegroup по ВСЕМ строкам,
+        которых НЕТ в геометрии — напр. eyeball_invun, *_invun, *_zombie у тела
+        персонажа (они используются другими скинами, поэтому в рендер скина 0 не
+        попадают). Нужны для селектора «Прочее» в 2D: показываем их оригинальные
+        игровые текстуры как превью, чтобы пользователь мог опционально заменить.
+
+        Returns: {material_name: png_path} (с прозрачным плейсхолдером, если
+        оригинал по путям модели не нашёлся).
+        """
+        if not self._decomp_dir:
+            return {}
+        try:
+            qc_files = glob.glob(os.path.join(self._decomp_dir, "*.qc"))
+            if not qc_files:
+                return {}
+            from src.data.material_filter import is_editable_material, is_user_blacklisted
+            _lay = qc_skin_parser.parse_skin_layout(qc_files[0])
+            known = {m.lower() for m in mat_names}
+            seen: set = set()
+            misc: list = []
+            for _row in (_lay.all_rows or []):
+                for _m in _row:
+                    ml = (_m or '').lower()
+                    if not ml or ml in known or ml in seen:
+                        continue
+                    # Служебные (не основные) и НЕ скрытые пользовательским ЧС.
+                    if not is_editable_material(_m) and not is_user_blacklisted(_m):
+                        seen.add(ml)
+                        misc.append(_m)
+            if not misc:
+                return {}
+            logger.info(f"[3D] Служебные материалы $texturegroup (для «Прочее»): {misc}")
+            resolved = self._extract_multi_textures(misc)
+            result: dict = {}
+            for m in misc:
+                png = resolved.get(m) or self._make_blank_png(m)
+                if png:
+                    result[m] = png
+            return result
+        except Exception as exc:
+            logger.debug(f"[3D] Не удалось собрать служебные материалы $texturegroup: {exc}")
             return {}
 
     def _make_blank_png(self, name: str) -> Optional[str]:

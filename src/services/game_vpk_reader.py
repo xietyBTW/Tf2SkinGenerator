@@ -4,7 +4,9 @@
 Зачем: ``vpk.open()`` парсит весь индекс архива (десятки тысяч записей —
 особенно tf2_textures_dir.vpk). Раньше воркеры предпросмотра открывали одни и
 те же VPK по 5–9 раз за прогон (в каждом методе свой ``vpk.open``). Этот класс
-открывает каждый VPK ОДИН раз и переиспользует хэндлы.
+берёт хэндлы из общего потоко-локального кэша (:mod:`src.services.vpk_cache`),
+так что каждый VPK открывается один раз на поток и переиспользуется и здесь, и
+в TF2VPKExtractService (раньше у них были отдельные кэши).
 
 Плюс централизует типовую цепочку «найти VMT → распарсить $basetexture →
 найти VTF», которая дублировалась в preview-воркерах и сервисах извлечения.
@@ -53,15 +55,21 @@ class GameVpkReader:
 
     @property
     def paks(self) -> list:
-        """Лениво открывает каждый существующий VPK один раз, кэширует список."""
+        """Лениво берёт каждый существующий VPK из общего кэша (один open на поток).
+
+        Хэндлы принадлежат vpk_cache (потоко-локальный кэш) — здесь только
+        собираем список в нужном порядке приоритета.
+        """
         if self._paks is None:
-            import vpk as vpklib
+            from src.services.vpk_cache import open_vpk_cached
             self._paks = []
             for path in self._paths:
                 if not os.path.exists(path):
                     continue
                 try:
-                    self._paks.append(vpklib.open(path))
+                    pak = open_vpk_cached(path)
+                    if pak is not None:
+                        self._paks.append(pak)
                 except Exception as exc:
                     logger.debug(f"GameVpkReader: не удалось открыть {path}: {exc}")
         return self._paks
@@ -159,14 +167,12 @@ class GameVpkReader:
         return None
 
     def close(self) -> None:
-        """Закрывает все открытые VPK-хэндлы (если поддерживают close)."""
-        for pak in (self._paks or []):
-            close = getattr(pak, "close", None)
-            if callable(close):
-                try:
-                    close()
-                except Exception:
-                    pass
+        """Сбрасывает локальную ссылку на список pak.
+
+        Хэндлы НЕ закрываем — ими владеет общий потоко-локальный кэш
+        (vpk_cache), их переиспользуют последующие читатели/извлечения в этом
+        же потоке. Следующий доступ к ``paks`` перечитает их из кэша.
+        """
         self._paks = None
 
     def __enter__(self) -> "GameVpkReader":

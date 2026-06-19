@@ -419,6 +419,13 @@ class PreviewPanel(QWidget):
         self._card_mode: bool = False
         self._has_blu: bool = False
 
+        # ── «Прочее»: служебные материалы (глаза/убер/зомби), скрытые блэклистом ─ #
+        # Их можно опционально отредактировать через отдельный селектор-тоггл.
+        self._misc_materials: List[str] = []   # блэклист-материалы текущей модели
+        self._misc_mode: bool = False          # активен ли просмотр «Прочее»
+        self._cards_before_misc: List[str] = []  # нормальный набор (для возврата)
+        self._main_material_name: Optional[str] = None  # стабильный главный материал
+
         # ── Стили / skinfamilies (только для кастомной замены модели) ──────── #
         # Определяются из QC оригинальной модели через SkinDetectWorker.
         # _skin_overrides[skin_idx][mat_name] = путь к текстуре этого стиля.
@@ -780,6 +787,23 @@ class PreviewPanel(QWidget):
         self.btn_make_team.clicked.connect(self._enable_force_team)
         lay.addWidget(self.btn_make_team)
 
+        # «Прочее» — селектор служебных текстур (глаза/убер/зомби), скрытых
+        # блэклистом. Круглая кнопка-тоггл в стиле команд, иконка — глаз.
+        from PySide6.QtCore import QSize as _QSize_eye
+        self.btn_misc = QPushButton()
+        self.btn_misc.setFixedSize(26, 26)
+        self.btn_misc.setIcon(_make_eye_icon("#cccccc"))
+        self.btn_misc.setIconSize(_QSize_eye(16, 16))
+        self.btn_misc.setStyleSheet(self._team_style_off)
+        self.btn_misc.setCursor(Qt.PointingHandCursor)
+        self.btn_misc.setToolTip(self.t.get(
+            'misc_textures_tip',
+            'Служебные текстуры (глаза/убер/зомби и т.п.) — обычно скрыты. '
+            'Открыть для опциональной замены.'))
+        self.btn_misc.setVisible(False)
+        self.btn_misc.clicked.connect(self._toggle_misc)
+        lay.addWidget(self.btn_misc)
+
         # ── Кнопки стилей (skinfamilies) — в том же ряду, что RED/BLU/Aus ──── #
         # Создаются динамически при определении стилей кастомной модели и
         # вставляются ПЕРЕД этим анкером, чтобы держаться правее aus.
@@ -1044,6 +1068,8 @@ class PreviewPanel(QWidget):
             self.btn_red.setVisible(False)
             self.btn_blu.setVisible(False)
             self.btn_aus.setVisible(False)
+            if hasattr(self, 'btn_misc'):
+                self.btn_misc.setVisible(False)
             return
         from src.data.player_hands import HAND_MODE_KEYS as _HMK_vis
         if self._weapon_mode in _HMK_vis:
@@ -1071,6 +1097,14 @@ class PreviewPanel(QWidget):
         )
         if hasattr(self, 'btn_make_team'):
             self.btn_make_team.setVisible(bool(_can_force))
+        # «Прочее» — если у модели есть служебные (блэклист) материалы. Не для
+        # кастомных VPK-модов (там карточки строятся из мода) и не для рук.
+        if hasattr(self, 'btn_misc'):
+            _show_misc = bool(
+                self._misc_materials and not self._custom_vpk_mode
+                and self._weapon_mode not in _HMK_vis
+            )
+            self.btn_misc.setVisible(_show_misc)
 
     def _is_force_team_eligible(self) -> bool:
         """Можно ли предложить «сделать командным» — обычное оружие/снаряд/пикап/
@@ -1189,6 +1223,13 @@ class PreviewPanel(QWidget):
         RED / BLU / Australium взаимоисключающие: если активен Australium —
         выбор команды его отменяет (гасим кнопку и возвращаем текстуры команды).
         """
+        # Переключение команды выходит из просмотра «Прочее» (возвращаем обычные
+        # карточки), иначе команда применялась бы к служебным карточкам.
+        if self._misc_mode:
+            self._misc_mode = False
+            self.btn_misc.setStyleSheet(self._team_style_off)
+            restore = self._cards_before_misc or [self._main_material_name or '']
+            self._set_material_slots([m for m in restore if m])
         aus_was_active = self._australium_active
         if aus_was_active:
             self._australium_active = False
@@ -1215,6 +1256,42 @@ class PreviewPanel(QWidget):
         self._restore_team_textures_2d(team)
         if self._3d_available and self._3d_widget:
             self._restore_team_textures_3d(team)
+
+    def _toggle_misc(self) -> None:
+        """Переключает просмотр «Прочее» — служебные (блэклист) текстуры.
+
+        В режиме «Прочее» показываем карточки служебных материалов (их
+        оригинальные игровые текстуры как превью), чтобы пользователь мог при
+        желании заменить. Выход — возвращает обычные карточки. Главный материал
+        (_main_material_name) сохраняется отдельно, поэтому сборка не путается.
+        """
+        if not self._misc_materials:
+            return
+        self._misc_mode = not self._misc_mode
+        self.btn_misc.setStyleSheet(
+            self._team_style_on if self._misc_mode else self._team_style_off
+        )
+        if self._misc_mode:
+            # Запоминаем обычный набор и показываем служебные карточки.
+            self._cards_before_misc = list(self._material_names)
+            self._set_material_slots(self._misc_materials, force_cards=True)
+        else:
+            # Возврат к обычным карточкам и текстурам активной команды.
+            restore = self._cards_before_misc or [self._main_material_name or '']
+            self._set_material_slots([m for m in restore if m])
+            self._restore_team_textures_2d(self._active_team)
+        if self._3d_available and self._3d_widget:
+            self._restore_team_textures_3d(self._active_team)
+
+    def get_main_material(self) -> Optional[str]:
+        """Стабильное имя главного материала независимо от режима «Прочее».
+
+        Сборка использует его, чтобы исключить главную текстуру из доп-слотов
+        (она идёт отдельным from_path), даже когда в 2D открыт просмотр «Прочее»
+        и _material_names временно содержит служебные материалы."""
+        if self._main_material_name:
+            return self._main_material_name
+        return self._material_names[0] if self._material_names else None
 
     def _is_team_material(self, mat: str) -> bool:
         """True если у материала есть СВОЙ синий вариант (командный, напр.
@@ -1912,6 +1989,13 @@ class PreviewPanel(QWidget):
         self._custom_smd_path = None
         self._custom_keep_materials = False
         self._reset_team_vpk_state()
+        # Новая модель — сбрасываем «Прочее» (его пересоберёт _on_3d_multi_material).
+        self._misc_materials = []
+        self._misc_mode = False
+        self._main_material_name = None
+        if hasattr(self, 'btn_misc'):
+            self.btn_misc.setVisible(False)
+            self.btn_misc.setStyleSheet(self._team_style_off)
         # Возврат от кастомной модели: сбрасываем её карточки/материалы. Иначе их
         # идентичность (напр. "material") остаётся, и у одно-текстурной игровой
         # модели (где multi_material не приходит) австралий/команда привяжутся к
@@ -2439,17 +2523,39 @@ class PreviewPanel(QWidget):
         # sheen отброшены единым правилом в material_cards; пустой результат сам
         # откатывается на «все», чтобы не было пустоты).
         mat_keys = [s.name for s in editable_material_cards(tex_map.keys())]
+
+        # «Прочее»: служебные материалы модели, НЕ попавшие в основные карточки.
+        # Пользовательский ЧС скрывает их и отсюда (но в мод они пишутся оригиналом).
+        from src.data.material_filter import (
+            is_editable_material as _is_ed_misc,
+            is_user_blacklisted as _is_hidden_misc,
+        )
+        _seen_misc: set = set()
+        self._misc_materials = []
+        for _m in tex_map.keys():
+            _ml = (_m or '').lower()
+            if (_m and _ml not in _seen_misc and not _is_ed_misc(_m)
+                    and not _is_hidden_misc(_m) and _m not in mat_keys):
+                _seen_misc.add(_ml)
+                self._misc_materials.append(_m)
+        self._misc_mode = False
+        if hasattr(self, 'btn_misc'):
+            self.btn_misc.setStyleSheet(self._team_style_off)
+
         current_all = (
             self._material_names if self._card_mode else []
         )
         if len(mat_keys) > 1:
             if mat_keys != current_all:
                 self._set_material_slots(mat_keys)
+            self._main_material_name = mat_keys[0]
             self._update_team_btn_visibility()
         elif mat_keys:
             self._material_names = mat_keys
+            self._main_material_name = mat_keys[0]
             if self._card_mode:
                 self._set_material_slots(mat_keys)
+            self._update_team_btn_visibility()
 
 
         # Руки: говорим 3D вьюверу какие меши редактируемы
@@ -3140,6 +3246,12 @@ class PreviewPanel(QWidget):
 
     def _on_main_card_changed(self, mat_name: str, path: str) -> None:
         """Пользователь сменил или сбросил текстуру в главной карточке."""
+        # Просмотр «Прочее»: первая карточка — служебный материал, а НЕ главная
+        # текстура мода. Не трогаем глобальную image_path (она ушла бы в from_path
+        # как главная), ведём себя как обычная доп-карточка (хранение по имени).
+        if self._misc_mode:
+            self._on_extra_card_changed(mat_name, path)
+            return
         # Если активен Australium — текстура идёт в его отдельный слот,
         # не затирая обычную/командную.
         if self._australium_active:
@@ -4372,6 +4484,37 @@ def _make_plus_icon(color: str = "#aaaaaa", size: int = 14):
     m = s * 0.20
     p.drawLine(QPointF(c, m), QPointF(c, s - m))
     p.drawLine(QPointF(m, c), QPointF(s - m, c))
+    p.end()
+    return QIcon(pix)
+
+
+def _make_eye_icon(color: str = "#cccccc", size: int = 16):
+    """Иконка «глаз» — для кнопки «Прочее» (служебные текстуры: глаза/убер/зомби)."""
+    from PySide6.QtGui import QIcon, QPixmap, QPainter, QPen, QColor, QPainterPath
+    from PySide6.QtCore import Qt, QPointF
+    pix = QPixmap(size, size)
+    pix.fill(Qt.transparent)
+    p = QPainter(pix)
+    p.setRenderHint(QPainter.Antialiasing)
+    s = float(size)
+    cy = s / 2.0
+    col = QColor(color)
+    pen = QPen(col)
+    pen.setWidthF(1.4)
+    pen.setCapStyle(Qt.RoundCap)
+    pen.setJoinStyle(Qt.RoundJoin)
+    p.setPen(pen)
+    p.setBrush(Qt.NoBrush)
+    # Миндалевидный контур глаза (две дуги-века).
+    path = QPainterPath()
+    path.moveTo(s * 0.10, cy)
+    path.quadTo(s * 0.5, s * 0.16, s * 0.90, cy)
+    path.quadTo(s * 0.5, s * 0.84, s * 0.10, cy)
+    p.drawPath(path)
+    # Зрачок.
+    r = s * 0.17
+    p.setBrush(col)
+    p.drawEllipse(QPointF(s * 0.5, cy), r, r)
     p.end()
     return QIcon(pix)
 

@@ -36,8 +36,12 @@ def _user_patterns() -> list:
 
 
 def get_blacklist_patterns() -> list:
-    """Полный список паттернов: дефолтные + пользовательские."""
-    return list(DEFAULT_NON_EDITABLE_PATTERNS) + _user_patterns()
+    """Встроенный классификатор «служебных» материалов (для is_editable_material).
+
+    ВАЖНО: тут ТОЛЬКО дефолтные паттерны. Они решают, основная это текстура или
+    «Прочее». Пользовательский ЧС (настройки) сюда НЕ входит — он лишь скрывает
+    карточку, не меняя класс материала (см. is_user_blacklisted)."""
+    return list(DEFAULT_NON_EDITABLE_PATTERNS)
 
 
 def _matches(name_lower: str, pattern: str) -> bool:
@@ -48,21 +52,30 @@ def _matches(name_lower: str, pattern: str) -> bool:
 
 def is_editable_material(name: str, patterns: list = None) -> bool:
     """
-    True, если материал предназначен для редактирования (не в блэклисте).
+    True — основная (редактируемая) текстура; False — служебная («Прочее»).
+
+    Классификатор использует ТОЛЬКО встроенные дефолтные паттерны (глаза/убер/
+    зомби/оверлеи). Пользовательский ЧС из настроек сюда НЕ входит: он не меняет
+    класс материала, а лишь скрывает его карточку (is_user_blacklisted).
 
     Args:
-        patterns: Готовый список паттернов. Если None — будет загружен
-                  из конфига (один доступ к AppConfig на вызов). При проверке
-                  множества материалов передавайте get_blacklist_patterns()
-                  снаружи, чтобы не перечитывать конфиг в цикле.
+        patterns: Готовый список паттернов (по умолчанию — дефолтные).
     """
     if patterns is None:
-        patterns = get_blacklist_patterns()
+        patterns = DEFAULT_NON_EDITABLE_PATTERNS
     n = (name or '').lower()
     return not any(_matches(n, p) for p in patterns)
 
 
+def is_user_blacklisted(name: str) -> bool:
+    """True — материал в пользовательском ЧС (настройки → «Блэклист материалов»).
+
+    Такой материал НЕ показываем карточкой (ни в основных, ни в «Прочем»), но в
+    мод он пишется оригинальной игровой текстурой (как и прочие служебные)."""
+    n = (name or '').lower()
+    return any(_matches(n, p) for p in _user_patterns())
+
+
 def filter_editable(names) -> list:
-    """Оставляет только редактируемые материалы из списка имён."""
-    patterns = get_blacklist_patterns()
-    return [n for n in names if is_editable_material(n, patterns)]
+    """Оставляет только редактируемые (не служебные) материалы из списка имён."""
+    return [n for n in names if is_editable_material(n)]

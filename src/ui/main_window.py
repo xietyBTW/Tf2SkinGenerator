@@ -1987,11 +1987,14 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
                 _panel_extra_textures = dict(
                     self.preview_panel.get_slot_image_paths()
                 )
-                # Убираем главную текстуру (col 0) — она уже в from_path
+                # Убираем главную текстуру (col 0) — она уже в from_path.
+                # get_main_material() даёт стабильный главный материал даже когда в
+                # 2D открыт просмотр «Прочее» (там _material_names временно служебные).
                 main_key = (
-                    self.preview_panel._material_names[0]
-                    if self.preview_panel._material_names
-                    else None
+                    self.preview_panel.get_main_material()
+                    if hasattr(self.preview_panel, 'get_main_material')
+                    else (self.preview_panel._material_names[0]
+                          if self.preview_panel._material_names else None)
                 )
                 if main_key and main_key in _panel_extra_textures:
                     _panel_extra_textures.pop(main_key)

@@ -82,19 +82,22 @@ class GameVpkReaderTests(unittest.TestCase):
     def test_find_vtf_for_basetexture_none(self):
         self.assertIsNone(_reader({}).find_vtf_for_basetexture(""))
 
-    def test_close_clears_and_closes(self):
+    def test_close_clears_ref_but_keeps_handle_open(self):
+        # Хэндлами владеет общий потоко-локальный кэш (vpk_cache) — close() лишь
+        # сбрасывает локальную ссылку, сам pak НЕ закрывает.
         r = _reader({"a": b"b"})
         pak = r._paks[0]
         r.close()
-        self.assertTrue(pak.closed)
+        self.assertFalse(pak.closed)
         self.assertIsNone(r._paks)
 
-    def test_context_manager_closes(self):
+    def test_context_manager_does_not_close_handle(self):
         r = _reader({"a": b"b"})
         pak = r._paks[0]
         with r:
             pass
-        self.assertTrue(pak.closed)
+        self.assertFalse(pak.closed)
+        self.assertIsNone(r._paks)
 
 
 if __name__ == "__main__":

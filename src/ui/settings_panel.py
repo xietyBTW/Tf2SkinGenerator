@@ -334,41 +334,6 @@ class SettingsPanel(QWidget):
         self.button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         main_settings_layout.addWidget(self.button)
 
-        self.extract_model_button = QPushButton(
-            self.t.get('extract_model', 'Extract Original Model (SMD)')
-        )
-        self.extract_model_button.setStyleSheet(self.styles['button_secondary'])
-        self.extract_model_button.setMinimumHeight(40)
-        self.extract_model_button.setMinimumWidth(0)
-        self.extract_model_button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        main_settings_layout.addWidget(self.extract_model_button)
-
-        # Кнопка генерации UV-шаблона по запросу (без полной сборки)
-        self.export_uv_button = QPushButton(
-            self.t.get('export_uv', 'Export UV Template (PNG)')
-        )
-        self.export_uv_button.setStyleSheet(self.styles['button_secondary'])
-        self.export_uv_button.setMinimumHeight(40)
-        self.export_uv_button.setMinimumWidth(0)
-        self.export_uv_button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        main_settings_layout.addWidget(self.export_uv_button)
-
-        # Кнопка извлечения оригинальной текстуры
-        self.extract_texture_button = QPushButton(self.t.get('extract_texture', 'Extract Original Texture'))
-        self.extract_texture_button.setStyleSheet(self.styles['button_secondary'])
-        self.extract_texture_button.setMinimumHeight(40)
-        self.extract_texture_button.setMinimumWidth(0)
-        self.extract_texture_button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        main_settings_layout.addWidget(self.extract_texture_button)
-        
-        # Кнопка объединения VPK
-        self.merge_vpk_button = QPushButton(self.t.get('merge_vpk', 'Сборка в один'))
-        self.merge_vpk_button.setStyleSheet(self.styles['button_secondary'])
-        self.merge_vpk_button.setMinimumHeight(40)
-        self.merge_vpk_button.setMinimumWidth(0)
-        self.merge_vpk_button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        main_settings_layout.addWidget(self.merge_vpk_button)
-        
         # Добавляем первый контейнер в главный layout
         main_layout.addWidget(main_settings_container, 0)
         
@@ -531,20 +496,41 @@ class SettingsPanel(QWidget):
         self.tools_label.setStyleSheet("font-weight: 500; font-size: 13px; color: #ccc; margin-top: 12px;")
         self.advanced_group.addWidget(self.tools_label)
 
-        # Кнопка очистки кэша декомпилированных моделей
-        self.clear_cache_button = QPushButton(self.t.get('clear_decompile_cache', 'Clear Model Cache'))
-        self.clear_cache_button.setStyleSheet(self.styles['button_secondary'])
-        self.clear_cache_button.setMinimumHeight(36)
-        self.clear_cache_button.setMinimumWidth(0)
-        self.clear_cache_button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.clear_cache_button.setToolTip(
-            self.t.get(
-                'clear_decompile_cache_tooltip',
-                'Deletes cached decompiled models (~/.tf2skingen_cache).\n'
-                'Use if models stopped building correctly after a TF2 update.'
-            )
+        # Инструменты извлечения/слияния (перенесены из основных настроек).
+        self.extract_model_button = QPushButton(
+            self.t.get('extract_model', 'Extract Original Model (SMD)')
         )
-        self.advanced_group.addWidget(self.clear_cache_button)
+        self.extract_model_button.setStyleSheet(self.styles['button_secondary'])
+        self.extract_model_button.setMinimumHeight(40)
+        self.extract_model_button.setMinimumWidth(0)
+        self.extract_model_button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.advanced_group.addWidget(self.extract_model_button)
+
+        # Кнопка генерации UV-шаблона по запросу (без полной сборки)
+        self.export_uv_button = QPushButton(
+            self.t.get('export_uv', 'Export UV Template (PNG)')
+        )
+        self.export_uv_button.setStyleSheet(self.styles['button_secondary'])
+        self.export_uv_button.setMinimumHeight(40)
+        self.export_uv_button.setMinimumWidth(0)
+        self.export_uv_button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.advanced_group.addWidget(self.export_uv_button)
+
+        # Кнопка извлечения оригинальной текстуры
+        self.extract_texture_button = QPushButton(self.t.get('extract_texture', 'Extract Original Texture'))
+        self.extract_texture_button.setStyleSheet(self.styles['button_secondary'])
+        self.extract_texture_button.setMinimumHeight(40)
+        self.extract_texture_button.setMinimumWidth(0)
+        self.extract_texture_button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.advanced_group.addWidget(self.extract_texture_button)
+
+        # Кнопка объединения VPK
+        self.merge_vpk_button = QPushButton(self.t.get('merge_vpk', 'Сборка в один'))
+        self.merge_vpk_button.setStyleSheet(self.styles['button_secondary'])
+        self.merge_vpk_button.setMinimumHeight(40)
+        self.merge_vpk_button.setMinimumWidth(0)
+        self.merge_vpk_button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.advanced_group.addWidget(self.merge_vpk_button)
 
         # Добавляем accordion во второй контейнер
         advanced_container_layout.addWidget(self.advanced_group)
@@ -822,8 +808,6 @@ class SettingsPanel(QWidget):
                 lambda state: self.on_crit_hit_selected(state == Qt.Checked)
             )
             self.on_crit_hit_selected(self.parent.crit_hit_checkbox.isChecked())
-        if hasattr(self, 'clear_cache_button'):
-            self.clear_cache_button.clicked.connect(self._on_clear_cache_clicked)
 
     def _refresh_material_maps_button(self) -> None:
         """Подсветка кнопки + счётчик, если карты заданы."""
@@ -862,8 +846,9 @@ class SettingsPanel(QWidget):
         filename = self.filename_input.text().strip()
         
         if not filename:
-            self.filename_error.setText(self.t['enter_vpk_filename'])
-            self.filename_error.show()
+            # Пустое поле — не показываем нагательное сообщение (placeholder и так
+            # подсказывает). Просто скрываем ошибку и блокируем сборку.
+            self.filename_error.hide()
             self.button.setEnabled(False)
             return False
         
@@ -1066,41 +1051,6 @@ class SettingsPanel(QWidget):
         if hasattr(self.parent, 'merge_vpk_files'):
             self.parent.merge_vpk_files()
     
-    def _on_clear_cache_clicked(self):
-        """Очищает кэш декомпилированных моделей с подтверждением"""
-        from src.services.decompile_cache import clear_cache, get_cache_size_mb
-        from PySide6.QtWidgets import QMessageBox
-        
-        size_mb = get_cache_size_mb()
-        size_str = f"{size_mb:.1f} MB" if size_mb >= 0.1 else "< 0.1 MB"
-        
-        msg = self.t.get(
-            'clear_cache_confirm',
-            'Clear the model decompile cache?\n\nCache size: {size}\n\n'
-            'The cache speeds up repeated builds of the same weapon.\n'
-            'After clearing, the first build of each weapon will be slower.'
-        ).format(size=size_str)
-        
-        reply = QMessageBox.question(
-            self,
-            self.t.get('clear_decompile_cache', 'Clear Model Cache'),
-            msg,
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
-        )
-        
-        if reply == QMessageBox.Yes:
-            count = clear_cache()
-            ok_msg = self.t.get(
-                'clear_cache_done',
-                'Cache cleared. {count} entries removed.'
-            ).format(count=count)
-            QMessageBox.information(
-                self,
-                self.t.get('clear_decompile_cache', 'Clear Model Cache'),
-                ok_msg
-            )
-    
     def open_support_link(self):
         """Открывает ссылку поддержки"""
         if hasattr(self.parent, 'open_support_link'):
@@ -1171,11 +1121,7 @@ class SettingsPanel(QWidget):
         # Обновляем кнопку объединения VPK
         if hasattr(self, 'merge_vpk_button'):
             self.merge_vpk_button.setText(self.t.get('merge_vpk', 'Сборка в один'))
-        
-        # Обновляем кнопку очистки кэша
-        if hasattr(self, 'clear_cache_button'):
-            self.clear_cache_button.setText(self.t.get('clear_decompile_cache', 'Clear Model Cache'))
-        
+
         # Перезапускаем валидацию имени файла, если ошибка уже отображается
         if hasattr(self, 'filename_error') and self.filename_error.isVisible():
             self.validate_vpk_name()

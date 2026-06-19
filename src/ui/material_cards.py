@@ -38,10 +38,12 @@ def editable_material_cards(material_names: Iterable[str]) -> List[MaterialCardS
     после фильтра пусто (вся модель «служебная») — возвращаем все имена, чтобы
     в 2D не было пустоты. Порядок сохранён, дубли убраны.
     """
-    from src.data.material_filter import is_editable_material
+    from src.data.material_filter import is_editable_material, is_user_blacklisted
     names = _dedup_keep_order(material_names)
-    editable = [n for n in names if is_editable_material(n)]
-    chosen = editable if editable else names
+    # Пользовательский ЧС скрывает карточку полностью (даже если материал основной).
+    visible = [n for n in names if not is_user_blacklisted(n)]
+    editable = [n for n in visible if is_editable_material(n)]
+    chosen = editable if editable else (visible or names)
     return [MaterialCardSpec(n, n) for n in chosen]
 
 
