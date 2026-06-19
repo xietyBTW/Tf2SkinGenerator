@@ -6,6 +6,7 @@ import os
 import shutil
 import threading
 from pathlib import Path
+from dataclasses import dataclass
 from typing import Tuple, List, Optional, Callable
 from .build_context import BuildContext, TextureBuildContext
 from .build_request import BuildRequest
@@ -34,6 +35,25 @@ from src.shared.file_utils import ensure_directory_exists, copy_file_safe
 from src.shared.validators import validate_build_params
 
 logger = get_logger(__name__)
+
+
+@dataclass
+class _MaterialPlan:
+    """План материалов сборки: что и под какими именами строить (результат
+    анализа $texturegroup + изоляции плеч + подавления для кастомных моделей).
+    QC к этому моменту уже пропатчен/синхронизирован (side effect _plan_materials)."""
+    tg_structure: dict
+    blu_row: list
+    extra_materials: list
+    blu_is_team: bool
+    blacklisted_extra: list
+    texture_filename: str
+    blu_mode: str
+    has_skins: bool
+    shoulder_iso: list
+    image_path: object
+    skin_build_data: object
+    game_vmt_name: str
 
 
 class VPKService:
@@ -2729,6 +2749,204 @@ class VPKService:
                     logger.warning(f"[SKIN BUILD] вариант '{_v_name}' — ошибка: {_v_exc}", exc_info=True)
 
     @staticmethod
+    def _plan_materials(
+        qc_path, mode, weapon_key, ctx, texture_filename, image_path, blu_image_path,
+        panel_extra_textures, panel_blu_textures, isolate_shoulders, blu_mode,
+        skin_build_data, replace_keep_materials, custom_qc_text, original_cdmaterials_path,
+    ) -> "_MaterialPlan":
+        """
+        Анализирует $texturegroup и решает, какие материалы строить: BLU-строка,
+        доп. материалы, служебные/ЧС (пишутся оригиналом), фильтр для рук, изоляция
+        плеч, подавление игровой группы для кастомных моделей. Финализирует QC
+        (patch_qc_file, инъекция/удаление $texturegroup, пользовательский QC-текст).
+        Мутирует файл qc_path. Возвращает _MaterialPlan со всеми выходными именами.
+        """
+        tg_structure = ModelBuildService.extract_texturegroup_structure(qc_path)
+        blu_row = tg_structure.get('blu_row', [])
+        extra_materials = tg_structure.get('extra_materials', [])
+        # Настоящая ли команда вторая строка (c_xxx_blue), а не вариант
+        # (австралий/gold/festive). У вариант-онли оружия команды нет —
+        # значит {texture}_blue не нужен.
+        blu_is_team = bool(tg_structure.get('blu_is_team', False))
+
+        # Оружие с одной общей текстурой (напр. часы шпиона) — BLU не нужен.
+        # Иначе в мод попадёт лишняя _blue текстура.
+        from src.data.weapons import NO_BLU_WEAPON_KEYS
+        if weapon_key in NO_BLU_WEAPON_KEYS:
+            if blu_row:
+                logger.info(f"[{weapon_key}] BLU-row подавлен (одиночная текстура)")
+            blu_row = []
+
+        # ── Для режимов рук: фильтруем $texturegroup до актуальных текстур рук ─────────
+        # Проблема: QC руки инженера (c_engineer_arms) в column 0 содержит "engineer_red"
+        # (текстуру ТЕЛА), а не текстуру руки — без фильтрации картинка
+        # пользователя заменила бы всё тело персонажа.
+        _orig_main_pre_restrict = texture_filename  # col0 (может быть плечи)
+        if mode in HAND_MODE_KEYS:
+            from src.data.player_hands import get_hand_textures as _ght_hands
+            from src.services.qc_skin_parser import restrict_to_materials
+            _h_list = _ght_hands(mode)  # [(folder, vtf_name), ...]
+
+            texture_filename, extra_materials, blu_row = restrict_to_materials(
+                main_texture=texture_filename,
+                red_row=tg_structure.get('red_row', []),
+                blu_row=tg_structure.get('blu_row', []),
+                allowed_names=[n for _, n in _h_list],
+            )
+            logger.info(
+                f"[HANDS] texture_filename={texture_filename!r}, "
+                f"extra_materials={extra_materials}, blu_row={blu_row}"
+            )
+
+        # ── Изоляция плеч вьюмодели (опционально) ────────────────────
+        # Материал плеч/тела arms-модели общий с мировым персонажем.
+        # Переименовываем его на уникальный (engineer_red → vm_engineer_red)
+        # в $texturegroup ДО компиляции: перекомпилированная модель станет
+        # ссылаться на новый материал, а мир останется на старом. Позже
+        # запишем переименованный материал отдельным блоком.
+        shoulder_iso, image_path = VPKService._apply_shoulder_isolation(
+            ctx, mode, qc_path, weapon_key, tg_structure,
+            _orig_main_pre_restrict, image_path, blu_image_path,
+            panel_extra_textures, panel_blu_textures, isolate_shoulders,
+        )
+
+        # Исключаем служебные материалы (глаза/зубы/sheen-оверлеи) —
+        # для них не нужно спрашивать текстуру при сборке. Тот же фильтр,
+        # что и для карточек 2D (единый источник). Делаем ПОСЛЕ hands-блока,
+        # т.к. он переназначает extra_materials/blu_row.
+        from src.data.material_filter import (
+            is_editable_material as _is_edit,
+            is_user_blacklisted as _is_hidden,
+        )
+        # Служебные (глаза/зубы/убер/зомби/эффекты) И материалы из
+        # пользовательского ЧС: НЕ показываем карточками и НЕ редактируем,
+        # но ПИШЕМ в мод оригинальной игровой текстурой ниже — иначе из-за
+        # console\-cdmaterials они стали бы фиолетовыми.
+        # ВАЖНО: источник — ВЕСЬ $texturegroup (все строки/колонки), а НЕ
+        # extra_materials. Служебные варианты (invun/zombie) обычно не в
+        # геометрии и не в extra_materials, но модель ссылается на них в
+        # других скинах (убер/зомби) — без записи они фиолетовые.
+        _all_tg_mats: list = []
+        _seen_tg: set = set()
+        for _row in (tg_structure.get('all_rows') or []):
+            for _m in _row:
+                _ml = (_m or '').lower()
+                if _ml and _ml not in _seen_tg:
+                    _seen_tg.add(_ml)
+                    _all_tg_mats.append(_m)
+        blacklisted_extra = [m for m in _all_tg_mats
+                              if (not _is_edit(m)) or _is_hidden(m)]
+        if blacklisted_extra:
+            logger.info(f"Служебные/ЧС материалы (без карточек, пишем оригиналом): {blacklisted_extra}")
+        extra_materials = [m for m in extra_materials
+                           if _is_edit(m) and not _is_hidden(m)]
+        # blu_row НЕ фильтруем удалением — он индексируется по колонкам
+        # вместе с red_row. Служебные blu-материалы пропускаются ВНУТРИ
+        # цикла (по col_idx), чтобы не сместить выравнивание.
+
+        # ── Стили (skinfamilies) кастомной модели ──────────────────
+        # Если пользователь определил доп-стили, ИГРОВОЙ $texturegroup
+        # неприменим: его имена (c_sd_cleaver_bloody, _blue …) относятся
+        # к игровой модели, а не к мешу пользователя. Подавляем
+        # производные из него BLU/extra-материалы и команду — мы
+        # сгенерируем свою группу и варианты ниже. Меш-материалы базы
+        # приходят отдельно через panel_extra_textures.
+        # Для рук $texturegroup уже сгенерирован выше (изоляция плеч +
+        # промоушен): vm_* для плеч + _blu варианты в синих строках.
+        # Старый «кастомный» SKIN BUILD путь его перезатёр бы — отключаем.
+        has_skins = (bool(skin_build_data and skin_build_data.get('tg_overrides'))
+                      and mode not in HAND_MODE_KEYS)
+        # Для «готовой» кастомной модели (keep_materials) ИГРОВОЙ
+        # $texturegroup неприменим ВСЕГДА — у меша свои материалы
+        # (c_sd_cleaver/mouth/lefteye…), а игровые имена (c_scattergun,
+        # c_scattergun_gold) к нему отношения не имеют. Иначе сборка
+        # начнёт спрашивать текстуры для игровых слотов, которых нет
+        # в карточках. Базовые меш-материалы идут через panel_extra_textures.
+        if has_skins or replace_keep_materials:
+            logger.info(
+                "[SKIN BUILD] кастомная модель → подавляем игровой "
+                f"texturegroup (blu_row={blu_row}, extra={extra_materials})"
+            )
+            blu_row = []
+            extra_materials = []
+            blacklisted_extra = []  # у кастомного меша свои материалы — не пишем
+            blu_mode = 'none'   # не плодим {texture}_blue
+
+        if blu_row:
+            logger.info(f"Найдена BLU команда: {blu_row}")
+        if extra_materials:
+            logger.info(f"Найдены дополнительные материалы модели: {extra_materials}")
+
+        # Пропатчиваем QC файл: добавляем console\ к $cdmaterials (чтобы текстуры загружались из консольных команд),
+        # удаляем $lod (они нам не нужны, только мусорят)
+        ModelBuildService.patch_qc_file(qc_path, weapon_key, original_cdmaterials_path)
+
+        # Игровое имя текстуры/VMT (источник ОРИГИНАЛЬНОГО кода VMT из игры).
+        # Для кастомной модели texture_filename станет именем материала SMD,
+        # но оригинальный VMT тащим по игровому имени (c_sd_cleaver),
+        # затем лишь переставим $basetexture на материал модели.
+        game_vmt_name = texture_filename
+
+        # ── Кастомная модель: имена ведём от ФАКТИЧЕСКИХ материалов SMD ──
+        # Имена VTF/VMT, $texturegroup и $basetexture обязаны совпадать с
+        # материалом, с которым реально компилируется модель (из reference-SMD).
+        # UI-имена могли разойтись с SMD (другой экспорт/регистр) → текстура
+        # не находилась (фиолетовая). Картинки скинов мапим по индексу.
+        if replace_keep_materials:
+            _ref_smd = VPKService._find_decompiled_reference_smd(
+                qc_path, weapon_key, ctx.decompile_dir
+            )
+            _smd_mats = SMDService.ordered_unique_materials(_ref_smd) if _ref_smd else []
+            if _smd_mats:
+                logger.info(f"[SKIN BUILD] материалы SMD (истина): {_smd_mats}")
+                if has_skins:
+                    skin_build_data = VPKService._remap_skin_data_to_smd(
+                        skin_build_data, _smd_mats
+                    )
+                if texture_filename != _smd_mats[0]:
+                    logger.info(
+                        f"[SKIN BUILD] main texture_filename: "
+                        f"{texture_filename!r} → {_smd_mats[0]!r} (материал SMD)"
+                    )
+                    texture_filename = _smd_mats[0]
+
+        # ── $texturegroup кастомной модели ──
+        _tg_block = ''
+        if has_skins:
+            # Свои стили: генерируем группу (имена выровнены по SMD).
+            _tg_block = ModelBuildService.generate_texturegroup_block(
+                skin_build_data.get('mesh_materials', []),
+                skin_build_data.get('tg_overrides', {}),
+            )
+            ModelBuildService.replace_texturegroup_in_qc(qc_path, _tg_block)
+            logger.info(f"[SKIN BUILD] $texturegroup инъектирован в QC:\n{_tg_block}")
+        elif replace_keep_materials:
+            # Одно-скиновая кастомная модель: убираем игровую группу — её
+            # имена относятся к игровой модели, не к мешу (иначе пустые
+            # skin-строки ремапят материал в пустоту → фиолет).
+            ModelBuildService.replace_texturegroup_in_qc(qc_path, '')
+            logger.info("[SKIN BUILD] игровой $texturegroup удалён (одно-скиновая кастомная модель)")
+
+        # ── Отредактированный пользователем QC ───────────────────────
+        # Заменяем QC текстом пользователя, синхронизировав $texturegroup
+        # с актуальными стилями (правки человека не теряются). Делается
+        # ДО извлечения cdmaterials — дальше всё читается из этого QC.
+        if replace_keep_materials and custom_qc_text and custom_qc_text.strip():
+            _final_qc = ModelBuildService.replace_texturegroup_in_text(
+                custom_qc_text, _tg_block
+            )
+            with open(qc_path, 'w', encoding='utf-8') as _qf:
+                _qf.write(_final_qc)
+            logger.info("[QC EDIT] QC заменён пользовательским (texturegroup синхронизирован)")
+        return _MaterialPlan(
+            tg_structure=tg_structure, blu_row=blu_row, extra_materials=extra_materials,
+            blu_is_team=blu_is_team, blacklisted_extra=blacklisted_extra,
+            texture_filename=texture_filename, blu_mode=blu_mode, has_skins=has_skins,
+            shoulder_iso=shoulder_iso, image_path=image_path,
+            skin_build_data=skin_build_data, game_vmt_name=game_vmt_name,
+        )
+
+    @staticmethod
     def build_vpk(
         request: Optional[BuildRequest] = None,
         *,
@@ -3004,183 +3222,24 @@ class VPKService:
                     # берём из reference SMD (skin 0), skin 1 = {material}_blue. ──
                     VPKService._apply_force_team(force_team, mode, qc_path, weapon_key, ctx)
 
-                    tg_structure = ModelBuildService.extract_texturegroup_structure(qc_path)
-                    blu_row = tg_structure.get('blu_row', [])
-                    extra_materials = tg_structure.get('extra_materials', [])
-                    # Настоящая ли команда вторая строка (c_xxx_blue), а не вариант
-                    # (австралий/gold/festive). У вариант-онли оружия команды нет —
-                    # значит {texture}_blue не нужен.
-                    _blu_is_team = bool(tg_structure.get('blu_is_team', False))
-
-                    # Оружие с одной общей текстурой (напр. часы шпиона) — BLU не нужен.
-                    # Иначе в мод попадёт лишняя _blue текстура.
-                    from src.data.weapons import NO_BLU_WEAPON_KEYS
-                    if weapon_key in NO_BLU_WEAPON_KEYS:
-                        if blu_row:
-                            logger.info(f"[{weapon_key}] BLU-row подавлен (одиночная текстура)")
-                        blu_row = []
-
-                    # ── Для режимов рук: фильтруем $texturegroup до актуальных текстур рук ─────────
-                    # Проблема: QC руки инженера (c_engineer_arms) в column 0 содержит "engineer_red"
-                    # (текстуру ТЕЛА), а не текстуру руки — без фильтрации картинка
-                    # пользователя заменила бы всё тело персонажа.
-                    _orig_main_pre_restrict = texture_filename  # col0 (может быть плечи)
-                    if mode in HAND_MODE_KEYS:
-                        from src.data.player_hands import get_hand_textures as _ght_hands
-                        from src.services.qc_skin_parser import restrict_to_materials
-                        _h_list = _ght_hands(mode)  # [(folder, vtf_name), ...]
-
-                        texture_filename, extra_materials, blu_row = restrict_to_materials(
-                            main_texture=texture_filename,
-                            red_row=tg_structure.get('red_row', []),
-                            blu_row=tg_structure.get('blu_row', []),
-                            allowed_names=[n for _, n in _h_list],
-                        )
-                        logger.info(
-                            f"[HANDS] texture_filename={texture_filename!r}, "
-                            f"extra_materials={extra_materials}, blu_row={blu_row}"
-                        )
-
-                    # ── Изоляция плеч вьюмодели (опционально) ────────────────────
-                    # Материал плеч/тела arms-модели общий с мировым персонажем.
-                    # Переименовываем его на уникальный (engineer_red → vm_engineer_red)
-                    # в $texturegroup ДО компиляции: перекомпилированная модель станет
-                    # ссылаться на новый материал, а мир останется на старом. Позже
-                    # запишем переименованный материал отдельным блоком.
-                    _shoulder_iso, image_path = VPKService._apply_shoulder_isolation(
-                        ctx, mode, qc_path, weapon_key, tg_structure,
-                        _orig_main_pre_restrict, image_path, blu_image_path,
-                        panel_extra_textures, panel_blu_textures, isolate_shoulders,
+                    _plan = VPKService._plan_materials(
+                        qc_path, mode, weapon_key, ctx, texture_filename, image_path,
+                        blu_image_path, panel_extra_textures, panel_blu_textures,
+                        isolate_shoulders, blu_mode, skin_build_data,
+                        replace_keep_materials, custom_qc_text, original_cdmaterials_path,
                     )
-
-                    # Исключаем служебные материалы (глаза/зубы/sheen-оверлеи) —
-                    # для них не нужно спрашивать текстуру при сборке. Тот же фильтр,
-                    # что и для карточек 2D (единый источник). Делаем ПОСЛЕ hands-блока,
-                    # т.к. он переназначает extra_materials/blu_row.
-                    from src.data.material_filter import (
-                        is_editable_material as _is_edit,
-                        is_user_blacklisted as _is_hidden,
-                    )
-                    # Служебные (глаза/зубы/убер/зомби/эффекты) И материалы из
-                    # пользовательского ЧС: НЕ показываем карточками и НЕ редактируем,
-                    # но ПИШЕМ в мод оригинальной игровой текстурой ниже — иначе из-за
-                    # console\-cdmaterials они стали бы фиолетовыми.
-                    # ВАЖНО: источник — ВЕСЬ $texturegroup (все строки/колонки), а НЕ
-                    # extra_materials. Служебные варианты (invun/zombie) обычно не в
-                    # геометрии и не в extra_materials, но модель ссылается на них в
-                    # других скинах (убер/зомби) — без записи они фиолетовые.
-                    _all_tg_mats: list = []
-                    _seen_tg: set = set()
-                    for _row in (tg_structure.get('all_rows') or []):
-                        for _m in _row:
-                            _ml = (_m or '').lower()
-                            if _ml and _ml not in _seen_tg:
-                                _seen_tg.add(_ml)
-                                _all_tg_mats.append(_m)
-                    _blacklisted_extra = [m for m in _all_tg_mats
-                                          if (not _is_edit(m)) or _is_hidden(m)]
-                    if _blacklisted_extra:
-                        logger.info(f"Служебные/ЧС материалы (без карточек, пишем оригиналом): {_blacklisted_extra}")
-                    extra_materials = [m for m in extra_materials
-                                       if _is_edit(m) and not _is_hidden(m)]
-                    # blu_row НЕ фильтруем удалением — он индексируется по колонкам
-                    # вместе с red_row. Служебные blu-материалы пропускаются ВНУТРИ
-                    # цикла (по col_idx), чтобы не сместить выравнивание.
-
-                    # ── Стили (skinfamilies) кастомной модели ──────────────────
-                    # Если пользователь определил доп-стили, ИГРОВОЙ $texturegroup
-                    # неприменим: его имена (c_sd_cleaver_bloody, _blue …) относятся
-                    # к игровой модели, а не к мешу пользователя. Подавляем
-                    # производные из него BLU/extra-материалы и команду — мы
-                    # сгенерируем свою группу и варианты ниже. Меш-материалы базы
-                    # приходят отдельно через panel_extra_textures.
-                    # Для рук $texturegroup уже сгенерирован выше (изоляция плеч +
-                    # промоушен): vm_* для плеч + _blu варианты в синих строках.
-                    # Старый «кастомный» SKIN BUILD путь его перезатёр бы — отключаем.
-                    _has_skins = (bool(skin_build_data and skin_build_data.get('tg_overrides'))
-                                  and mode not in HAND_MODE_KEYS)
-                    # Для «готовой» кастомной модели (keep_materials) ИГРОВОЙ
-                    # $texturegroup неприменим ВСЕГДА — у меша свои материалы
-                    # (c_sd_cleaver/mouth/lefteye…), а игровые имена (c_scattergun,
-                    # c_scattergun_gold) к нему отношения не имеют. Иначе сборка
-                    # начнёт спрашивать текстуры для игровых слотов, которых нет
-                    # в карточках. Базовые меш-материалы идут через panel_extra_textures.
-                    if _has_skins or replace_keep_materials:
-                        logger.info(
-                            "[SKIN BUILD] кастомная модель → подавляем игровой "
-                            f"texturegroup (blu_row={blu_row}, extra={extra_materials})"
-                        )
-                        blu_row = []
-                        extra_materials = []
-                        _blacklisted_extra = []  # у кастомного меша свои материалы — не пишем
-                        blu_mode = 'none'   # не плодим {texture}_blue
-
-                    if blu_row:
-                        logger.info(f"Найдена BLU команда: {blu_row}")
-                    if extra_materials:
-                        logger.info(f"Найдены дополнительные материалы модели: {extra_materials}")
-
-                    # Пропатчиваем QC файл: добавляем console\ к $cdmaterials (чтобы текстуры загружались из консольных команд),
-                    # удаляем $lod (они нам не нужны, только мусорят)
-                    ModelBuildService.patch_qc_file(qc_path, weapon_key, original_cdmaterials_path)
-
-                    # Игровое имя текстуры/VMT (источник ОРИГИНАЛЬНОГО кода VMT из игры).
-                    # Для кастомной модели texture_filename станет именем материала SMD,
-                    # но оригинальный VMT тащим по игровому имени (c_sd_cleaver),
-                    # затем лишь переставим $basetexture на материал модели.
-                    _game_vmt_name = texture_filename
-
-                    # ── Кастомная модель: имена ведём от ФАКТИЧЕСКИХ материалов SMD ──
-                    # Имена VTF/VMT, $texturegroup и $basetexture обязаны совпадать с
-                    # материалом, с которым реально компилируется модель (из reference-SMD).
-                    # UI-имена могли разойтись с SMD (другой экспорт/регистр) → текстура
-                    # не находилась (фиолетовая). Картинки скинов мапим по индексу.
-                    if replace_keep_materials:
-                        _ref_smd = VPKService._find_decompiled_reference_smd(
-                            qc_path, weapon_key, ctx.decompile_dir
-                        )
-                        _smd_mats = SMDService.ordered_unique_materials(_ref_smd) if _ref_smd else []
-                        if _smd_mats:
-                            logger.info(f"[SKIN BUILD] материалы SMD (истина): {_smd_mats}")
-                            if _has_skins:
-                                skin_build_data = VPKService._remap_skin_data_to_smd(
-                                    skin_build_data, _smd_mats
-                                )
-                            if texture_filename != _smd_mats[0]:
-                                logger.info(
-                                    f"[SKIN BUILD] main texture_filename: "
-                                    f"{texture_filename!r} → {_smd_mats[0]!r} (материал SMD)"
-                                )
-                                texture_filename = _smd_mats[0]
-
-                    # ── $texturegroup кастомной модели ──
-                    _tg_block = ''
-                    if _has_skins:
-                        # Свои стили: генерируем группу (имена выровнены по SMD).
-                        _tg_block = ModelBuildService.generate_texturegroup_block(
-                            skin_build_data.get('mesh_materials', []),
-                            skin_build_data.get('tg_overrides', {}),
-                        )
-                        ModelBuildService.replace_texturegroup_in_qc(qc_path, _tg_block)
-                        logger.info(f"[SKIN BUILD] $texturegroup инъектирован в QC:\n{_tg_block}")
-                    elif replace_keep_materials:
-                        # Одно-скиновая кастомная модель: убираем игровую группу — её
-                        # имена относятся к игровой модели, не к мешу (иначе пустые
-                        # skin-строки ремапят материал в пустоту → фиолет).
-                        ModelBuildService.replace_texturegroup_in_qc(qc_path, '')
-                        logger.info("[SKIN BUILD] игровой $texturegroup удалён (одно-скиновая кастомная модель)")
-
-                    # ── Отредактированный пользователем QC ───────────────────────
-                    # Заменяем QC текстом пользователя, синхронизировав $texturegroup
-                    # с актуальными стилями (правки человека не теряются). Делается
-                    # ДО извлечения cdmaterials — дальше всё читается из этого QC.
-                    if replace_keep_materials and custom_qc_text and custom_qc_text.strip():
-                        _final_qc = ModelBuildService.replace_texturegroup_in_text(
-                            custom_qc_text, _tg_block
-                        )
-                        with open(qc_path, 'w', encoding='utf-8') as _qf:
-                            _qf.write(_final_qc)
-                        logger.info("[QC EDIT] QC заменён пользовательским (texturegroup синхронизирован)")
+                    tg_structure = _plan.tg_structure
+                    blu_row = _plan.blu_row
+                    extra_materials = _plan.extra_materials
+                    _blu_is_team = _plan.blu_is_team
+                    _blacklisted_extra = _plan.blacklisted_extra
+                    texture_filename = _plan.texture_filename
+                    blu_mode = _plan.blu_mode
+                    _has_skins = _plan.has_skins
+                    _shoulder_iso = _plan.shoulder_iso
+                    image_path = _plan.image_path
+                    skin_build_data = _plan.skin_build_data
+                    _game_vmt_name = _plan.game_vmt_name
 
                     # Извлекаем путь из $cdmaterials после патчинга (теперь с префиксом console\)
                     patched_cdmaterials_path = ModelBuildService.extract_cdmaterials_path_from_qc(qc_path)
