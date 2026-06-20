@@ -1616,8 +1616,8 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
             if vp and os.path.exists(vp):
                 try:
                     paks.append(vpklib.open(vp))
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Не удалось открыть VPK {vp}: {e}")
         if not paks:
             return None
 

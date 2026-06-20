@@ -3,7 +3,6 @@
 """
 
 import os
-import time
 from pathlib import Path
 from typing import List, Optional, Callable, Tuple
 from src.shared.logging_config import get_logger
@@ -407,7 +406,6 @@ class TF2VPKExtractService:
 
         # ── Базовые проверки ──────────────────────────────────────────────────
         emit_progress(10, t.get('extract_init', 'Initializing extraction...'))
-        time.sleep(0.1)
 
         if is_cancelled():
             return False, t.get('extract_cancelled', 'Extraction cancelled by user'), True
@@ -416,7 +414,6 @@ class TF2VPKExtractService:
             return False, t.get('vpk_library_not_available', 'VPK library not available'), False
 
         emit_progress(20, t.get('extract_checking', 'Checking VPK file...'))
-        time.sleep(0.1)
 
         if not os.path.exists(textures_vpk_path):
             return False, t.get('textures_vpk_not_found', 'tf2_textures_dir.vpk not found'), False
@@ -608,7 +605,6 @@ class TF2VPKExtractService:
         Returns:
             (success, message, cancelled)
         """
-        import time
         t = TRANSLATIONS.get(language, TRANSLATIONS["en"])
 
         def emit(pct: int, msg: str) -> None:
@@ -619,7 +615,6 @@ class TF2VPKExtractService:
             return bool(cancel_callback and cancel_callback())
 
         emit(10, t.get("extract_init", "Initializing extraction..."))
-        time.sleep(0.05)
 
         if is_cancelled():
             return False, t.get("extract_cancelled", "Extraction cancelled by user"), True

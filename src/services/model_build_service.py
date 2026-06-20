@@ -9,6 +9,7 @@ import shutil
 import subprocess
 from typing import List, Optional
 from src.services import qc_skin_parser
+from src.services.smd_service import NON_REFERENCE_SMD_KEYWORDS
 from src.shared.constants import ToolTimeouts
 from src.shared.logging_config import get_logger
 
@@ -556,7 +557,7 @@ class ModelBuildService:
                 continue
             
             # Пропускаем physics и animation файлы
-            if any(skip in smd_lower for skip in ['physics', 'phys', 'anim', 'idle', 'pose']):
+            if any(skip in smd_lower for skip in NON_REFERENCE_SMD_KEYWORDS):
                 continue
             
             # Пропускаем дубли

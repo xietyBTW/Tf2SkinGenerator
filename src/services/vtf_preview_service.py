@@ -7,12 +7,15 @@
 """
 
 import os
+import re
 import tempfile
 from typing import List, Optional
 
 from src.shared.logging_config import get_logger
 
 logger = get_logger(__name__)
+
+_RE_ANIM_FPS = re.compile(r'"animatedtextureframerate"\s+"?([0-9.]+)"?', re.IGNORECASE)
 
 
 def open_vpks(paths: List[Optional[str]]) -> list:
@@ -38,6 +41,34 @@ def read_from_vpks(paks: list, vpk_path: str) -> Optional[bytes]:
         except Exception:
             continue
     return None
+
+
+def parse_animated_framerate(vmt_content: str) -> Optional[float]:
+    """Парсит animatedtextureframerate из текста VMT (None если ключа нет)."""
+    m = _RE_ANIM_FPS.search(vmt_content)
+    return max(0.1, float(m.group(1))) if m else None
+
+
+def read_vmt_framerate(pak, vmt_paths: List[str], default: float = 15.0) -> float:
+    """animatedtextureframerate из первого ЧИТАЕМОГО VMT в pak; default если нет.
+
+    Раньше эта связка («перебрать VMT-пути в паке → найти framerate») повторялась
+    в preview_3d_worker и preview_vpk_mod_worker (в т.ч. инлайн) — теперь один
+    источник. Первый успешно прочитанный VMT определяет результат (как и раньше:
+    нашли framerate → он; VMT есть, но без ключа → default).
+    """
+    if pak is None:
+        return default
+    for path in vmt_paths:
+        try:
+            content = pak[path].read().decode("utf-8", errors="replace")
+        except KeyError:
+            continue
+        except Exception:
+            continue
+        fps = parse_animated_framerate(content)
+        return fps if fps is not None else default
+    return default
 
 
 def vtf_bytes_to_png(data: Optional[bytes], out_png_path: str,

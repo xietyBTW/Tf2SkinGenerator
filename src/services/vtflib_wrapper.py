@@ -1,7 +1,7 @@
 import os
 from ctypes import POINTER, c_char_p, c_float, c_int, c_uint, c_ubyte, c_void_p, pointer, windll
 from pathlib import Path
-from threading import Lock
+from threading import RLock
 
 from src.shared.logging_config import get_logger
 
@@ -63,7 +63,7 @@ class VTFImageFlags:
 
 
 class VTFLib:
-    _lock = Lock()
+    _lock = RLock()
     _initialized = False
     _dll = None
 
@@ -190,77 +190,78 @@ class VTFLib:
         output_file: str,
         generate_thumbnail: bool = True,
     ) -> None:
-        cls.initialize()
-        dll = cls._load()
+        with cls._lock:
+            cls.initialize()
+            dll = cls._load()
 
-        vlUInt = c_uint
-        vlByte = c_ubyte
-        vlBool = c_int
+            vlUInt = c_uint
+            vlByte = c_ubyte
+            vlBool = c_int
 
-        img_id = vlUInt(0)
-        if not dll.vlCreateImage(pointer(img_id)):
-            raise RuntimeError(cls._last_error())
-        try:
-            if not dll.vlBindImage(img_id.value):
+            img_id = vlUInt(0)
+            if not dll.vlCreateImage(pointer(img_id)):
                 raise RuntimeError(cls._last_error())
-
-            if not dll.vlImageCreate(
-                vlUInt(width),
-                vlUInt(height),
-                vlUInt(len(frames_rgba8888)),
-                vlUInt(1),
-                vlUInt(1),
-                c_int(dest_format),
-                vlBool(0),
-                vlBool(0),
-                vlBool(1),
-            ):
-                raise RuntimeError(cls._last_error())
-
-            if flags:
-                dll.vlImageSetFlags(vlUInt(flags))
-
-            keepalive_buffers: list[c_void_p] = []
-            for i, frame in enumerate(frames_rgba8888):
-                if len(frame) != width * height * 4:
-                    raise ValueError("Frame size mismatch")
-
-                src = (vlByte * len(frame)).from_buffer_copy(frame)
-                if dest_format == VTFImageFormat.RGBA8888:
-                    dll.vlImageSetData(vlUInt(i), vlUInt(0), vlUInt(0), vlUInt(0), src)
-                    keepalive_buffers.append(src)
-                    continue
-
-                dest_size = int(dll.vlImageComputeMipmapSize(vlUInt(width), vlUInt(height), vlUInt(1), vlUInt(0), c_int(dest_format)))
-                if dest_size <= 0:
-                    raise RuntimeError("Failed to compute dest buffer size")
-                dest = (vlByte * dest_size)()
-                ok = bool(dll.vlImageConvertFromRGBA8888(src, dest, vlUInt(width), vlUInt(height), c_int(dest_format)))
-                if not ok:
+            try:
+                if not dll.vlBindImage(img_id.value):
                     raise RuntimeError(cls._last_error())
-                dll.vlImageSetData(vlUInt(i), vlUInt(0), vlUInt(0), vlUInt(0), dest)
-                keepalive_buffers.append(src)
-                keepalive_buffers.append(dest)
 
-            if generate_thumbnail:
+                if not dll.vlImageCreate(
+                    vlUInt(width),
+                    vlUInt(height),
+                    vlUInt(len(frames_rgba8888)),
+                    vlUInt(1),
+                    vlUInt(1),
+                    c_int(dest_format),
+                    vlBool(0),
+                    vlBool(0),
+                    vlBool(1),
+                ):
+                    raise RuntimeError(cls._last_error())
+
+                if flags:
+                    dll.vlImageSetFlags(vlUInt(flags))
+
+                keepalive_buffers: list[c_void_p] = []
+                for i, frame in enumerate(frames_rgba8888):
+                    if len(frame) != width * height * 4:
+                        raise ValueError("Frame size mismatch")
+
+                    src = (vlByte * len(frame)).from_buffer_copy(frame)
+                    if dest_format == VTFImageFormat.RGBA8888:
+                        dll.vlImageSetData(vlUInt(i), vlUInt(0), vlUInt(0), vlUInt(0), src)
+                        keepalive_buffers.append(src)
+                        continue
+
+                    dest_size = int(dll.vlImageComputeMipmapSize(vlUInt(width), vlUInt(height), vlUInt(1), vlUInt(0), c_int(dest_format)))
+                    if dest_size <= 0:
+                        raise RuntimeError("Failed to compute dest buffer size")
+                    dest = (vlByte * dest_size)()
+                    ok = bool(dll.vlImageConvertFromRGBA8888(src, dest, vlUInt(width), vlUInt(height), c_int(dest_format)))
+                    if not ok:
+                        raise RuntimeError(cls._last_error())
+                    dll.vlImageSetData(vlUInt(i), vlUInt(0), vlUInt(0), vlUInt(0), dest)
+                    keepalive_buffers.append(src)
+                    keepalive_buffers.append(dest)
+
+                if generate_thumbnail:
+                    try:
+                        dll.vlImageGenerateThumbnail()
+                    except Exception:
+                        pass
+
+                out_bytes = str(Path(output_file)).encode("utf-8")
+                if not dll.vlImageSave(out_bytes):
+                    raise RuntimeError(cls._last_error())
+                _ = keepalive_buffers
+            finally:
                 try:
-                    dll.vlImageGenerateThumbnail()
+                    dll.vlImageDestroy()
                 except Exception:
                     pass
-
-            out_bytes = str(Path(output_file)).encode("utf-8")
-            if not dll.vlImageSave(out_bytes):
-                raise RuntimeError(cls._last_error())
-            _ = keepalive_buffers
-        finally:
-            try:
-                dll.vlImageDestroy()
-            except Exception:
-                pass
-            try:
-                dll.vlDeleteImage(img_id.value)
-            except Exception:
-                pass
+                try:
+                    dll.vlDeleteImage(img_id.value)
+                except Exception:
+                    pass
 
     @classmethod
     def read_vtf_all_frames(cls, vtf_path: str) -> tuple:
@@ -274,73 +275,74 @@ class VTFLib:
         Raises:
             RuntimeError: если загрузка не удалась.
         """
-        cls.initialize()
-        dll = cls._load()
+        with cls._lock:
+            cls.initialize()
+            dll = cls._load()
 
-        vlUInt  = c_uint
-        vlByte  = c_ubyte
-        vlBool  = c_int
+            vlUInt  = c_uint
+            vlByte  = c_ubyte
+            vlBool  = c_int
 
-        img_id = vlUInt(0)
-        if not dll.vlCreateImage(pointer(img_id)):
-            raise RuntimeError(cls._last_error())
-        try:
-            if not dll.vlBindImage(img_id.value):
+            img_id = vlUInt(0)
+            if not dll.vlCreateImage(pointer(img_id)):
                 raise RuntimeError(cls._last_error())
+            try:
+                if not dll.vlBindImage(img_id.value):
+                    raise RuntimeError(cls._last_error())
 
-            path_bytes = str(vtf_path).encode("utf-8")
-            if not dll.vlImageLoad(path_bytes, vlBool(0)):
-                raise RuntimeError(cls._last_error())
+                path_bytes = str(vtf_path).encode("utf-8")
+                if not dll.vlImageLoad(path_bytes, vlBool(0)):
+                    raise RuntimeError(cls._last_error())
 
-            width       = int(dll.vlImageGetWidth())
-            height      = int(dll.vlImageGetHeight())
-            frame_count = int(dll.vlImageGetFrameCount())
-            src_format  = int(dll.vlImageGetFormat())
-            vtf_flags   = int(dll.vlImageGetFlags())
-            dest_size   = width * height * 4
+                width       = int(dll.vlImageGetWidth())
+                height      = int(dll.vlImageGetHeight())
+                frame_count = int(dll.vlImageGetFrameCount())
+                src_format  = int(dll.vlImageGetFormat())
+                vtf_flags   = int(dll.vlImageGetFlags())
+                dest_size   = width * height * 4
 
-            _fmt_name = {v: k for k, v in vars(VTFImageFormat).items() if not k.startswith('_')}.get(src_format, str(src_format))
-            _flag_names = [k for k, v in vars(VTFImageFlags).items()
-                           if not k.startswith('_') and (vtf_flags & v)]
-            logger.info(
-                f"VTF '{os.path.basename(vtf_path)}': "
-                f"{width}x{height} {frame_count}fr  "
-                f"format={_fmt_name}({src_format})  "
-                f"flags={_flag_names}"
-            )
+                _fmt_name = {v: k for k, v in vars(VTFImageFormat).items() if not k.startswith('_')}.get(src_format, str(src_format))
+                _flag_names = [k for k, v in vars(VTFImageFlags).items()
+                               if not k.startswith('_') and (vtf_flags & v)]
+                logger.info(
+                    f"VTF '{os.path.basename(vtf_path)}': "
+                    f"{width}x{height} {frame_count}fr  "
+                    f"format={_fmt_name}({src_format})  "
+                    f"flags={_flag_names}"
+                )
 
-            frames: list[bytes] = []
-            for fi in range(frame_count):
-                src_ptr = dll.vlImageGetData(vlUInt(fi), vlUInt(0), vlUInt(0), vlUInt(0))
-                if not src_ptr:
-                    break
-
-                dest = (vlByte * dest_size)()
-                if src_format == VTFImageFormat.RGBA8888:
-                    import ctypes
-                    ctypes.memmove(dest, src_ptr, dest_size)
-                else:
-                    ok = bool(dll.vlImageConvertToRGBA8888(
-                        src_ptr, dest, vlUInt(width), vlUInt(height), c_int(src_format)
-                    ))
-                    if not ok:
-                        # Если один кадр не конвертировался — пропускаем
+                frames: list[bytes] = []
+                for fi in range(frame_count):
+                    src_ptr = dll.vlImageGetData(vlUInt(fi), vlUInt(0), vlUInt(0), vlUInt(0))
+                    if not src_ptr:
                         break
-                frames.append(bytes(dest))
 
-            if not frames:
-                raise RuntimeError("Не удалось извлечь ни одного кадра из VTF")
+                    dest = (vlByte * dest_size)()
+                    if src_format == VTFImageFormat.RGBA8888:
+                        import ctypes
+                        ctypes.memmove(dest, src_ptr, dest_size)
+                    else:
+                        ok = bool(dll.vlImageConvertToRGBA8888(
+                            src_ptr, dest, vlUInt(width), vlUInt(height), c_int(src_format)
+                        ))
+                        if not ok:
+                            # Если один кадр не конвертировался — пропускаем
+                            break
+                    frames.append(bytes(dest))
 
-            return frames, width, height
-        finally:
-            try:
-                dll.vlImageDestroy()
-            except Exception:
-                pass
-            try:
-                dll.vlDeleteImage(img_id.value)
-            except Exception:
-                pass
+                if not frames:
+                    raise RuntimeError("Не удалось извлечь ни одного кадра из VTF")
+
+                return frames, width, height
+            finally:
+                try:
+                    dll.vlImageDestroy()
+                except Exception:
+                    pass
+                try:
+                    dll.vlDeleteImage(img_id.value)
+                except Exception:
+                    pass
 
     @classmethod
     def read_vtf_as_rgba(cls, vtf_path: str) -> tuple:
@@ -353,54 +355,55 @@ class VTFLib:
         Raises:
             RuntimeError: если загрузка или конвертация не удалась
         """
-        cls.initialize()
-        dll = cls._load()
+        with cls._lock:
+            cls.initialize()
+            dll = cls._load()
 
-        vlUInt = c_uint
-        vlByte = c_ubyte
-        vlBool = c_int
+            vlUInt = c_uint
+            vlByte = c_ubyte
+            vlBool = c_int
 
-        img_id = vlUInt(0)
-        if not dll.vlCreateImage(pointer(img_id)):
-            raise RuntimeError(cls._last_error())
-        try:
-            if not dll.vlBindImage(img_id.value):
+            img_id = vlUInt(0)
+            if not dll.vlCreateImage(pointer(img_id)):
                 raise RuntimeError(cls._last_error())
-
-            path_bytes = str(vtf_path).encode("utf-8")
-            if not dll.vlImageLoad(path_bytes, vlBool(0)):
-                raise RuntimeError(cls._last_error())
-
-            width  = int(dll.vlImageGetWidth())
-            height = int(dll.vlImageGetHeight())
-            src_format = int(dll.vlImageGetFormat())
-
-            # Получаем указатель на сырые данные первого кадра (frame=0, face=0, slice=0, mip=0)
-            src_ptr = dll.vlImageGetData(vlUInt(0), vlUInt(0), vlUInt(0), vlUInt(0))
-            if not src_ptr:
-                raise RuntimeError("vlImageGetData returned NULL")
-
-            dest_size = width * height * 4
-            dest = (vlByte * dest_size)()
-
-            if src_format == VTFImageFormat.RGBA8888:
-                # Уже в нужном формате — просто копируем
-                import ctypes
-                ctypes.memmove(dest, src_ptr, dest_size)
-            else:
-                ok = bool(dll.vlImageConvertToRGBA8888(
-                    src_ptr, dest, vlUInt(width), vlUInt(height), c_int(src_format)
-                ))
-                if not ok:
+            try:
+                if not dll.vlBindImage(img_id.value):
                     raise RuntimeError(cls._last_error())
 
-            return bytes(dest), width, height
-        finally:
-            try:
-                dll.vlImageDestroy()
-            except Exception:
-                pass
-            try:
-                dll.vlDeleteImage(img_id.value)
-            except Exception:
-                pass
+                path_bytes = str(vtf_path).encode("utf-8")
+                if not dll.vlImageLoad(path_bytes, vlBool(0)):
+                    raise RuntimeError(cls._last_error())
+
+                width  = int(dll.vlImageGetWidth())
+                height = int(dll.vlImageGetHeight())
+                src_format = int(dll.vlImageGetFormat())
+
+                # Получаем указатель на сырые данные первого кадра (frame=0, face=0, slice=0, mip=0)
+                src_ptr = dll.vlImageGetData(vlUInt(0), vlUInt(0), vlUInt(0), vlUInt(0))
+                if not src_ptr:
+                    raise RuntimeError("vlImageGetData returned NULL")
+
+                dest_size = width * height * 4
+                dest = (vlByte * dest_size)()
+
+                if src_format == VTFImageFormat.RGBA8888:
+                    # Уже в нужном формате — просто копируем
+                    import ctypes
+                    ctypes.memmove(dest, src_ptr, dest_size)
+                else:
+                    ok = bool(dll.vlImageConvertToRGBA8888(
+                        src_ptr, dest, vlUInt(width), vlUInt(height), c_int(src_format)
+                    ))
+                    if not ok:
+                        raise RuntimeError(cls._last_error())
+
+                return bytes(dest), width, height
+            finally:
+                try:
+                    dll.vlImageDestroy()
+                except Exception:
+                    pass
+                try:
+                    dll.vlDeleteImage(img_id.value)
+                except Exception:
+                    pass

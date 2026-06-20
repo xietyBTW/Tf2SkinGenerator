@@ -2036,8 +2036,8 @@ class VPKService:
                 _smds.append(_ref_smd)
             try:
                 _smds += ModelBuildService.extract_extra_body_smds(qc_path, weapon_key) or []
-            except Exception:
-                pass
+            except Exception as _e:
+                logger.debug(f"[SHOULDER ISO] не удалось собрать доп. body-SMD: {_e}")
             _rmap_smd = {s.lower(): _rename[s] for s in _shoulders}
             for _sp in _smds:
                 try:
@@ -2673,6 +2673,45 @@ class VPKService:
             )
 
     @staticmethod
+    def _run_extra_render_jobs(
+        jobs, vtf_output_path, vmt_path, patched_cdmaterials_path, log_prefix,
+    ) -> None:
+        """Параллельно рендерит независимые доп. текстуры (panel-extra / варианты стилей).
+
+        jobs: список ``(name, img, size, format_type, flags, vtf_options)``. Каждая
+        задача пишет свои ``{name}.vtf/.vmt`` — без shared-файлов, без чтения игрового
+        VPK и без UI-callback, поэтому безопасна в пуле потоков. VTFCmd — внешний
+        CPU-bound процесс, так что параллелизм реально ускоряет многоматериальные и
+        многостилевые сборки. Результаты логируются; функция ничего не возвращает.
+        """
+        if not jobs:
+            return
+        import concurrent.futures as _cf
+
+        def _one(job):
+            name, img, _size, _fmt, _flags, _opts = job
+            try:
+                ok = VPKService._render_extra_texture(
+                    name, img, vtf_output_path, vmt_path,
+                    patched_cdmaterials_path, _size, _fmt, _flags, _opts,
+                )
+                return name, ok, None
+            except Exception as exc:
+                return name, False, exc
+
+        max_workers = min(len(jobs), (os.cpu_count() or 4))
+        with _cf.ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="vtf") as ex:
+            results = list(ex.map(_one, jobs))
+
+        for name, ok, err in results:
+            if err is not None:
+                logger.warning(f"{log_prefix} '{name}' — ошибка: {err}", exc_info=False)
+            elif ok:
+                logger.info(f"{log_prefix}: {name}.vtf/vmt")
+            else:
+                logger.warning(f"{log_prefix} нет файла '{name}'")
+
+    @staticmethod
     def _build_secondary_textures(
         weapon_key, panel_extra_textures, ctx, vtf_output_path, vmt_path,
         patched_cdmaterials_path, size, format_type, flags, vtf_options,
@@ -2696,10 +2735,12 @@ class VPKService:
 
         if panel_extra_textures:
             # Собираем уже созданные имена (extra_materials + BLU)
-            _processed = set()
-            for _f in vtf_output_path.glob("*.vtf"):
-                _processed.add(_f.stem)
+            _processed = {_f.stem for _f in vtf_output_path.glob("*.vtf")}
 
+            # Каждый panel-extra независим (своё имя → свои файлы, без callback и
+            # без чтения игрового VPK) → рендерим параллельно. Скип-логику и
+            # пер-текстурные настройки (_eff) считаем серийно при сборе задач.
+            _pet_jobs = []
             for _pet_name, _pet_img in panel_extra_textures.items():
                 if _pet_name in _fixed_handled:
                     continue   # уже записан по фиксированному пути
@@ -2710,15 +2751,13 @@ class VPKService:
                     continue
                 if _pet_name in _processed:
                     continue   # уже создан через skinfamilies
-                try:
-                    _es, _ef, _efl, _eo = _eff(_pet_name)
-                    if VPKService._render_extra_texture(
-                        _pet_name, _pet_img, vtf_output_path, vmt_path,
-                        patched_cdmaterials_path, _es, _ef, _efl, _eo,
-                    ):
-                        logger.info(f"Panel extra texture: {_pet_name}.vtf/vmt")
-                except Exception as _pet_exc:
-                    logger.warning(f"Panel extra texture ошибка '{_pet_name}': {_pet_exc}")
+                _es, _ef, _efl, _eo = _eff(_pet_name)
+                _pet_jobs.append((_pet_name, _pet_img, _es, _ef, _efl, _eo))
+
+            VPKService._run_extra_render_jobs(
+                _pet_jobs, vtf_output_path, vmt_path, patched_cdmaterials_path,
+                "Panel extra texture",
+            )
 
         # ── Пер-текстурные файловые карты (detail/selfillum/phong/warp) ──────
         # Теперь VMT всех материалов (главный + доп. + BLU) созданы, поэтому
@@ -2735,18 +2774,16 @@ class VPKService:
         # lefteye_bloody) создаём VTF + VMT рядом с базовыми. Имена
         # совпадают с теми, что выписаны в инъектированный $texturegroup.
         if has_skins:
+            # Варианты стилей независимы между собой → тоже параллельно.
             _variant_files = skin_build_data.get('variant_files', {})
-            for _v_name, _v_img in _variant_files.items():
-                try:
-                    if VPKService._render_extra_texture(
-                        _v_name, _v_img, vtf_output_path, vmt_path,
-                        patched_cdmaterials_path, size, format_type, flags, vtf_options,
-                    ):
-                        logger.info(f"[SKIN BUILD] вариант: {_v_name}.vtf/vmt")
-                    else:
-                        logger.warning(f"[SKIN BUILD] нет файла варианта '{_v_name}': {_v_img}")
-                except Exception as _v_exc:
-                    logger.warning(f"[SKIN BUILD] вариант '{_v_name}' — ошибка: {_v_exc}", exc_info=True)
+            _var_jobs = [
+                (_v_name, _v_img, size, format_type, flags, vtf_options)
+                for _v_name, _v_img in _variant_files.items()
+            ]
+            VPKService._run_extra_render_jobs(
+                _var_jobs, vtf_output_path, vmt_path, patched_cdmaterials_path,
+                "[SKIN BUILD] вариант",
+            )
 
     @staticmethod
     def _plan_materials(

@@ -24,6 +24,7 @@ from src.services import qc_skin_parser
 from src.services.base_worker import BaseWorker
 from src.services.game_vpk_reader import GameVpkReader
 from src.services.model_build_service import ModelBuildService
+from src.services.smd_service import NON_REFERENCE_SMD_KEYWORDS
 from src.services.tf2_paths import TF2Paths
 from src.services.tf2_vpk_extract_service import TF2VPKExtractService
 from src.shared.logging_config import get_logger
@@ -462,10 +463,8 @@ class Preview3DWorker(BaseWorker):
 
     def _find_reference_smd(self, directory: str) -> Optional[str]:
         """Находит reference SMD (исключая physics/anim) в директории."""
-        _SKIP = ("physics", "phys", "anim", "idle", "pose")
-
         def skip(path: str) -> bool:
-            return any(kw in os.path.basename(path).lower() for kw in _SKIP)
+            return any(kw in os.path.basename(path).lower() for kw in NON_REFERENCE_SMD_KEYWORDS)
 
         # ── Персонажи TF2: проверяем ДО *_reference.smd ───────────────────── #
         # Причина: у персонажей bodygroup'ы (рюкзак медика medipack_reference.smd,
@@ -573,7 +572,31 @@ class Preview3DWorker(BaseWorker):
         # Не включаем сам reference (он уже основной)
         found.discard(os.path.abspath(reference_smd_path))
         found.discard(reference_smd_path)
-        return sorted(found)
+
+        # Тело шпиона: маска маскировки объявлена в QC как $bodygroup и иначе
+        # попала бы в превью тела. Но у маски своя секция (режим spy_masks /
+        # SPY_MASK_MODE_KEY), поэтому из тела её исключаем.
+        return sorted(self._strip_spy_disguise_mask(found, self.mode))
+
+    @staticmethod
+    def _strip_spy_disguise_mask(smd_paths, mode: str) -> list:
+        """Убирает SMD маски маскировки из bodygroup'ов ТЕЛА шпиона.
+
+        Маска шпиона (``spy_mask.smd`` / ``*mask*.smd``) — отдельная секция
+        (SPY_MASK_MODE_KEY), в превью тела (mode == "spy_body") её быть не должно.
+        Для остальных режимов список не меняется.
+        """
+        paths = list(smd_paths)
+        if mode != "spy_body":
+            return paths
+        kept = [p for p in paths if "mask" not in os.path.basename(p).lower()]
+        removed = [p for p in paths if p not in kept]
+        if removed:
+            logger.info(
+                "[3D] Тело шпиона: маска исключена из bodygroup'ов "
+                f"({[os.path.basename(p) for p in removed]}) — у неё своя секция"
+            )
+        return kept
 
     @staticmethod
     def _scan_smd_mat_names(smd_paths: list) -> set:
@@ -690,7 +713,6 @@ class Preview3DWorker(BaseWorker):
         if not self._decomp_dir or not mat_names:
             return {}
 
-        import glob
         qc_files = glob.glob(os.path.join(self._decomp_dir, "*.qc"))
         if not qc_files:
             return {}
@@ -996,7 +1018,6 @@ class Preview3DWorker(BaseWorker):
             return self._cached_cdmaterials
         cdmats: list = []
         try:
-            import glob
             decomp = getattr(self, '_decomp_dir', None)
             if decomp:
                 qcs = glob.glob(os.path.join(decomp, "*.qc"))
@@ -1205,7 +1226,6 @@ class Preview3DWorker(BaseWorker):
         Returns:
             Путь к PNG-файлу варианта или None если нет.
         """
-        import glob
         qc_files = glob.glob(os.path.join(decomp_dir, "*.qc"))
         if not qc_files:
             return None, None
@@ -1662,22 +1682,6 @@ class Preview3DWorker(BaseWorker):
             return [], 0.0
 
     def _read_vmt_framerate(self, pak, vmt_search: list) -> float:
-        """Ищет animatedtextureframerate в VMT файле из VPK."""
-        import re
-        DEFAULT_FPS = 15.0
-        if pak is None:
-            return DEFAULT_FPS
-        for path in vmt_search:
-            try:
-                content = pak[path].read().decode("utf-8", errors="replace")
-                m = re.search(
-                    r'"animatedtextureframerate"\s+"?([0-9.]+)"?',
-                    content,
-                    re.IGNORECASE,
-                )
-                if m:
-                    return max(0.1, float(m.group(1)))
-                break   # VMT найден, но без framerate — используем дефолт
-            except KeyError:
-                continue
-        return DEFAULT_FPS
+        """Ищет animatedtextureframerate в VMT файле из VPK (общий парсер)."""
+        from src.services import vtf_preview_service as _vps
+        return _vps.read_vmt_framerate(pak, vmt_search)

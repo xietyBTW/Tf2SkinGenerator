@@ -11,6 +11,10 @@ import os
 import time
 from typing import Callable, List, Optional, Tuple
 
+#: Подстроки в имени SMD, по которым файл НЕ является видимым reference-мешем
+#: (физика, анимации, позы). Единый источник для всех мест, что ищут reference SMD.
+NON_REFERENCE_SMD_KEYWORDS: Tuple[str, ...] = ("physics", "phys", "anim", "idle", "pose")
+
 
 class SMDService:
 

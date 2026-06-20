@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
     QScrollArea, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget,
 )
 
+from src.shared.constants import Team
 from src.shared.file_utils import get_temp_file_path
 from src.shared.logging_config import get_logger
 from src.utils.themes import get_modern_styles
@@ -353,9 +354,9 @@ def _team_priority(active_team: str) -> list:
     Активная команда идёт первой — позволяет начать сборку с любой загруженной
     текстуры (RED или BLU), а не только с RED.
     """
-    if active_team == 'blu':
-        return ['blu', 'red']
-    return ['red', 'blu']
+    if active_team == Team.BLU:
+        return [Team.BLU, Team.RED]
+    return [Team.RED, Team.BLU]
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -406,8 +407,8 @@ class PreviewPanel(QWidget):
         self._weapon_mode: str = ''
 
         # ── Текстуры: {team: {mat_name: path}} ────────────────────────────── #
-        self._textures: Dict[str, Dict[str, str]] = {'red': {}, 'blu': {}}
-        self._active_team: str = 'red'
+        self._textures: Dict[str, Dict[str, str]] = {Team.RED: {}, Team.BLU: {}}
+        self._active_team: str = Team.RED
         # «Сделать командным»: пользователь включил синтез BLU у некомандного оружия.
         self._force_team: bool = False
 
@@ -734,7 +735,7 @@ class PreviewPanel(QWidget):
         self.btn_red.setStyleSheet(self._team_style_on)   # RED активен по умолчанию
         self.btn_red.setToolTip(self.t.get('3d_team_red_tip', 'RED team texture'))
         self.btn_red.setVisible(False)
-        self.btn_red.clicked.connect(lambda: self._switch_team('red'))
+        self.btn_red.clicked.connect(lambda: self._switch_team(Team.RED))
         lay.addWidget(self.btn_red)
 
         self.btn_blu = QPushButton()
@@ -743,7 +744,7 @@ class PreviewPanel(QWidget):
         self.btn_blu.setStyleSheet(self._team_style_off)
         self.btn_blu.setToolTip(self.t.get('3d_team_blu_tip', 'BLU team texture'))
         self.btn_blu.setVisible(False)
-        self.btn_blu.clicked.connect(lambda: self._switch_team('blu'))
+        self.btn_blu.clicked.connect(lambda: self._switch_team(Team.BLU))
         lay.addWidget(self.btn_blu)
 
         # ── Кнопка Australium/Gold variant ───────────────────────────────── #
@@ -1058,7 +1059,7 @@ class PreviewPanel(QWidget):
         RED/BLU видимы только если у модели РЕАЛЬНО есть BLU-вариант:
           - _blu_frames        — BLU одним кадром (оружие/шапка с командной текстурой);
           - _vpk_blu_tex_map / _vpk_blu_name_map — per-material BLU (персонажи).
-        (учёт _card_mode / _textures['blu'] давал ложные кнопки у
+        (учёт _card_mode / _textures[Team.BLU] давал ложные кнопки у
         мульти-материальных шапок без командного разделения).
 
         Australium-кнопка видима, когда воркер извлёк вариант (_australium_frame).
@@ -1133,7 +1134,7 @@ class PreviewPanel(QWidget):
         self.btn_blu.setVisible(True)
         self.btn_red.setStyleSheet(self._team_style_on)
         self.btn_blu.setStyleSheet(self._team_style_off)
-        self._active_team = 'red'
+        self._active_team = Team.RED
 
     def get_force_team(self) -> bool:
         """Включён ли режим «сделать командным» (для BuildRequest.force_team)."""
@@ -1191,7 +1192,7 @@ class PreviewPanel(QWidget):
             return
 
         # Если пользователь загрузил свою текстуру — используем её
-        user_tex = self._textures.get('red', {}).get(vtf_name)
+        user_tex = self._textures.get(Team.RED, {}).get(vtf_name)
         if user_tex and os.path.exists(user_tex):
             from PySide6.QtCore import QTimer
             # Маска в SMD называется "mask_spy" — применяем к этому слоту
@@ -1239,13 +1240,13 @@ class PreviewPanel(QWidget):
             return
         self._active_team = team
         self.btn_red.setStyleSheet(
-            self._team_style_on if team == 'red' else self._team_style_off
+            self._team_style_on if team == Team.RED else self._team_style_off
         )
         self.btn_blu.setStyleSheet(
-            self._team_style_on if team == 'blu' else self._team_style_off
+            self._team_style_on if team == Team.BLU else self._team_style_off
         )
         # Руки И force-team мульти-материал: на BLU показываем выбранные карточки +
-        # «+» для добавления (та же логика). Хранение нативное (_textures['blu']).
+        # «+» для добавления (та же логика). Хранение нативное (_textures[Team.BLU]).
         from src.data.player_hands import HAND_MODE_KEYS as _HMK_sw
         if ((self._weapon_mode in _HMK_sw or self._force_team)
                 and self._card_mode and self._material_names):
@@ -1306,14 +1307,14 @@ class PreviewPanel(QWidget):
         • BLU — только командные (свой синий) + нейтральные, которым задана синяя
           или добавленные через «+». Остальные нейтральные скрыты (общие).
         """
-        if team == 'red':
+        if team == Team.RED:
             self._set_material_slots(list(self._material_names))
             return
 
         self._clear_cards()
         self._card_mode = True
         chosen = getattr(self, '_hand_blu_chosen', set())
-        blu = self._textures.get('blu', {})
+        blu = self._textures.get(Team.BLU, {})
         show = [
             m for m in self._material_names
             if self._is_team_material(m) or (blu.get(m) and os.path.exists(blu[m])) or m in chosen
@@ -1355,7 +1356,7 @@ class PreviewPanel(QWidget):
         """Меню: какой нейтральный материал сделать командным (добавить на BLU)."""
         from PySide6.QtWidgets import QMenu
         chosen = self.__dict__.setdefault('_hand_blu_chosen', set())
-        blu = self._textures.get('blu', {})
+        blu = self._textures.get(Team.BLU, {})
         avail = [
             m for m in self._material_names
             if not self._is_team_material(m) and m not in chosen
@@ -1375,7 +1376,7 @@ class PreviewPanel(QWidget):
 
     def _add_hand_blu_material(self, mat: str) -> None:
         self.__dict__.setdefault('_hand_blu_chosen', set()).add(mat)
-        self._rebuild_hand_team_cards('blu')
+        self._rebuild_hand_team_cards(Team.BLU)
 
     def _restore_team_textures_2d(self, team: str) -> None:
         """Показывает в 2D карточках/большом превью текстуры выбранной команды."""
@@ -1407,9 +1408,9 @@ class PreviewPanel(QWidget):
                 self.image_path = None
                 # Командный одно-материальный материал (spy_hands_red): синяя в
                 # _vpk_blu_tex_map, а не в _blu_frames — берём её.
-                _gp = (self._vpk_blu_tex_map if team == 'blu'
+                _gp = (self._vpk_blu_tex_map if team == Team.BLU
                        else self._vpk_red_tex_map).get(key)
-                vpk_frames = self._blu_frames if team == 'blu' else self._red_frames
+                vpk_frames = self._blu_frames if team == Team.BLU else self._red_frames
                 if _gp and os.path.exists(_gp):
                     self._show_image_in_preview(_gp)
                 elif vpk_frames and os.path.exists(vpk_frames[0]):
@@ -1429,7 +1430,7 @@ class PreviewPanel(QWidget):
         """
         # Для BLU обновляем label карточки если есть маппинг имён
         def _display(mat_name: str) -> str:
-            if team == 'blu' and self._vpk_blu_name_map:
+            if team == Team.BLU and self._vpk_blu_name_map:
                 return self._vpk_blu_name_map.get(mat_name, mat_name)
             return mat_name
 
@@ -1468,8 +1469,8 @@ class PreviewPanel(QWidget):
         """
         from PySide6.QtCore import QTimer
         paths = self._textures.get(team, {})
-        vpk_frames = self._red_frames if team == 'red' else self._blu_frames
-        vpk_map = self._vpk_red_tex_map if team == 'red' else self._vpk_blu_tex_map
+        vpk_frames = self._red_frames if team == Team.RED else self._blu_frames
+        vpk_map = self._vpk_red_tex_map if team == Team.RED else self._vpk_blu_tex_map
 
         if self._card_mode and self._material_names:
             # Начинаем с VPK-оригиналов (база для всех слотов)
@@ -1480,10 +1481,10 @@ class PreviewPanel(QWidget):
                 p = paths.get(mat)
                 # Руки на BLU: нейтральный материал без СВОЕЙ синей наследует
                 # RED-правку (а не игровой синий кадр).
-                if not (p and os.path.exists(p)) and team == 'blu':
+                if not (p and os.path.exists(p)) and team == Team.BLU:
                     _bn = self._vpk_blu_name_map.get(mat, mat) if self._vpk_blu_name_map else mat
                     if _bn.lower() == mat.lower():   # нейтральный
-                        _rp = self._textures.get('red', {}).get(mat)
+                        _rp = self._textures.get(Team.RED, {}).get(mat)
                         if _rp and os.path.exists(_rp):
                             p = _rp
                 if p and os.path.exists(p):
@@ -2127,7 +2128,7 @@ class PreviewPanel(QWidget):
         self.btn_load_3d.setEnabled(True)
         self._per_mesh_active = False
         self._per_mesh_base_image = None
-        self._active_team = 'red'   # всегда синхронизируем (кнопки уже сброшены)
+        self._active_team = Team.RED   # всегда синхронизируем (кнопки уже сброшены)
         if texture_path:
             self._red_frames = [texture_path]
         # Запоминаем загруженную модель для мини-памяти (мгновенное восстановление)
@@ -2149,7 +2150,7 @@ class PreviewPanel(QWidget):
     def _on_vpk_mod_ready(self, obj_path: str, texture_path: str) -> None:
         self.btn_load_vpk.setEnabled(True)
         self.btn_load_3d.setEnabled(bool(self._pending_3d_params or self._custom_smd_mode))
-        self._active_team = 'red'   # всегда синхронизируем (кнопки уже сброшены)
+        self._active_team = Team.RED   # всегда синхронизируем (кнопки уже сброшены)
         if texture_path:
             self._red_frames = [texture_path]
         if self._3d_widget:
@@ -2162,7 +2163,7 @@ class PreviewPanel(QWidget):
         (в _vpk_red_tex_map, opaque) — в сборку как пользовательская НЕ попадёт,
         поэтому нетронутые карточки сохраняют исходную текстуру мода. Если
         пользователь перетащит своё изображение на карточку, оно ляжет в
-        _textures['red'] и сборка подхватит его через get_uploaded_texture_for_mat.
+        _textures[Team.RED] и сборка подхватит его через get_uploaded_texture_for_mat.
         """
         if not cards:
             return
@@ -2256,11 +2257,11 @@ class PreviewPanel(QWidget):
         """Накладывает текстуры мода (и пользовательские правки) на правильные
         меши 3D — по совпадению имени материала модели с именем карточки.
 
-        Пользовательская правка (в _textures['red']) имеет приоритет над
+        Пользовательская правка (в _textures[Team.RED]) имеет приоритет над
         оригиналом мода (_vpk_red_tex_map)."""
         if not (self._custom_model_materials and self._3d_widget and self._3d_available):
             return
-        user_tex = self._textures.get('red', {})
+        user_tex = self._textures.get(Team.RED, {})
         apply: dict = {}
         for m in self._custom_model_materials:
             src = self._lookup_ci(user_tex, m) or self._lookup_ci(self._vpk_red_tex_map, m)
@@ -2405,10 +2406,10 @@ class PreviewPanel(QWidget):
             self.btn_aus.setStyleSheet(self._aus_style_off)
             # Возвращаем подсветку активной команды.
             self.btn_red.setStyleSheet(
-                self._team_style_on if self._active_team == 'red' else self._team_style_off
+                self._team_style_on if self._active_team == Team.RED else self._team_style_off
             )
             self.btn_blu.setStyleSheet(
-                self._team_style_on if self._active_team == 'blu' else self._team_style_off
+                self._team_style_on if self._active_team == Team.BLU else self._team_style_off
             )
             # Возвращаем текстуру активной команды: VPK-оригинал + пользовательская
             # поверх. _restore_team_textures_3d корректно выбирает update_texture_file
@@ -2441,11 +2442,11 @@ class PreviewPanel(QWidget):
         mat = self._australium_mat_name
         if mat:
             if path and os.path.exists(path):
-                self._textures.setdefault('red', {})[mat] = path
-                self._textures.setdefault('blu', {})[mat] = path
+                self._textures.setdefault(Team.RED, {})[mat] = path
+                self._textures.setdefault(Team.BLU, {})[mat] = path
             else:
-                self._textures.get('red', {}).pop(mat, None)
-                self._textures.get('blu', {}).pop(mat, None)
+                self._textures.get(Team.RED, {}).pop(mat, None)
+                self._textures.get(Team.BLU, {}).pop(mat, None)
         shown = path if (path and os.path.exists(path)) else self._australium_frame
 
         # Карточка Australium всегда отражает актуальную текстуру варианта
@@ -2500,7 +2501,7 @@ class PreviewPanel(QWidget):
         # В 3D применяем ВСЕ текстуры (включая глаза/зубы), иначе служебные меши
         # останутся без текстуры.
         self._3d_widget.apply_material_map(tex_map)
-        if self._active_team == 'red' and not self._vpk_red_tex_map:
+        if self._active_team == Team.RED and not self._vpk_red_tex_map:
             self._vpk_red_tex_map = dict(tex_map)
 
         # Режим масок шпиона: карточки уже выставлены под 9 масок
@@ -2624,11 +2625,11 @@ class PreviewPanel(QWidget):
         self._weapon_mode = mode
 
         # ── Полный сброс состояния предыдущего оружия ─────────────────────── #
-        self._textures = {'red': {}, 'blu': {}}
+        self._textures = {Team.RED: {}, Team.BLU: {}}
         self._hand_blu_chosen = set()   # выбранные через «+» нейтральные на BLU
         self._material_names = []
         self._has_blu = False
-        self._active_team = 'red'
+        self._active_team = Team.RED
         self._force_team = False        # «сделать командным» сбрасываем при смене оружия
         self.image_path = None
         self.vtf_path = None
@@ -2680,10 +2681,10 @@ class PreviewPanel(QWidget):
         self._weapon_mode = mode
 
         # Сброс состояния
-        self._textures = {'red': {}, 'blu': {}}
+        self._textures = {Team.RED: {}, Team.BLU: {}}
         self._material_names = []
         self._has_blu = False
-        self._active_team = 'red'
+        self._active_team = Team.RED
         self.image_path = None
         self.vtf_path = None
         self._gif_cache = {}
@@ -2746,7 +2747,7 @@ class PreviewPanel(QWidget):
 
         for mat_name, disp_name in names_display:
             card = self._make_card(
-                mat_name, disp_name, self._textures['red'].get(mat_name),
+                mat_name, disp_name, self._textures[Team.RED].get(mat_name),
                 opaque=False, on_change=self._on_extra_card_changed,
             )
             self._card_widgets[mat_name] = card
@@ -2762,7 +2763,7 @@ class PreviewPanel(QWidget):
         2D — чтобы заранее были видны оригинальные текстуры (как у обычного оружия).
 
         Превью регистрируется в _vpk_red_tex_map (как ИГРОВАЯ текстура), а НЕ в
-        _textures['red'], поэтому в сборку как пользовательская не попадёт —
+        _textures[Team.RED], поэтому в сборку как пользовательская не попадёт —
         некастомизированные маски берут оригинал из игры.
         """
         if not self._spy_mask_mode or not self._card_widgets:
@@ -2773,8 +2774,8 @@ class PreviewPanel(QWidget):
             return
         # Только маски без пользовательской текстуры — для них показываем оригинал.
         names = [n for n in self._material_names
-                 if not (self._textures['red'].get(n)
-                         and os.path.exists(self._textures['red'][n]))]
+                 if not (self._textures[Team.RED].get(n)
+                         and os.path.exists(self._textures[Team.RED][n]))]
         if not names:
             return
         out_dir = os.path.join('tools', 'temp', 'spy_mask_preview')
@@ -2825,7 +2826,7 @@ class PreviewPanel(QWidget):
         # Для BLU команды лейбл карточки показывает BLU-имя текстуры (из QC skinfamilies),
         # а не RED-имя из SMD. Так пользователь видит реальное имя заменяемой текстуры.
         def _display(mat_name: str) -> str:
-            if self._active_team == 'blu' and self._vpk_blu_name_map:
+            if self._active_team == Team.BLU and self._vpk_blu_name_map:
                 return self._vpk_blu_name_map.get(mat_name, mat_name)
             return mat_name
 
@@ -2834,7 +2835,10 @@ class PreviewPanel(QWidget):
         saved = self._resolve_card_texture(main_name)
         if saved and os.path.exists(saved):
             main_img, main_opaque = saved, self._is_game_texture(saved)
-        elif self.image_path and os.path.exists(self.image_path):
+        elif self.image_path and os.path.exists(self.image_path) and not self._misc_mode:
+            # В режиме «Прочее» первая карточка — служебный материал, а не главная
+            # текстура: не подставляем сюда self.image_path (иначе главная «прилетит»
+            # на misc-слот).
             main_img, main_opaque = self.image_path, False
         else:
             main_img, main_opaque = None, False
@@ -3008,7 +3012,7 @@ class PreviewPanel(QWidget):
             # Базовый стиль — стандартная раскладка карточек.
             self._set_material_slots(list(self._material_names), force_cards=True)
             # В custom-VPK режиме вернём превью мода (они в _vpk_red_tex_map по
-            # мешевым материалам, а не в _textures['red']).
+            # мешевым материалам, а не в _textures[Team.RED]).
             if self._custom_vpk_mode:
                 for m, p in self._vpk_red_tex_map.items():
                     card = self._card_widgets.get(m)
@@ -3318,7 +3322,7 @@ class PreviewPanel(QWidget):
         if path:
             self._textures.setdefault(self._active_team, {})[mat_name] = path
             if self._is_neutral_texture(mat_name):
-                other = 'blu' if self._active_team == 'red' else 'red'
+                other = Team.BLU if self._active_team == Team.RED else Team.RED
                 self._textures.setdefault(other, {})[mat_name] = path
                 logger.debug(f"[neutral tex] '{mat_name}' → both teams: {path}")
             else:
@@ -3326,7 +3330,7 @@ class PreviewPanel(QWidget):
         else:
             self._textures.get(self._active_team, {}).pop(mat_name, None)
             if self._is_neutral_texture(mat_name):
-                other = 'blu' if self._active_team == 'red' else 'red'
+                other = Team.BLU if self._active_team == Team.RED else Team.RED
                 self._textures.get(other, {}).pop(mat_name, None)
 
     def _on_extra_card_changed(self, mat_name: str, path: str) -> None:
@@ -3379,7 +3383,7 @@ class PreviewPanel(QWidget):
         Нужно для рук: нейтральный материал с загруженной СИНЕЙ текстурой → сборка
         делает его командным (red=база, blue=вариант)."""
         result: dict = {}
-        for k, v in self._textures.get('blu', {}).items():
+        for k, v in self._textures.get(Team.BLU, {}).items():
             if k == SINGLE_TEX_KEY:
                 continue
             if v and os.path.exists(v):
@@ -3504,11 +3508,11 @@ class PreviewPanel(QWidget):
         и покажет диалог выбора.
         """
         key = self._material_names[0] if self._material_names else SINGLE_TEX_KEY
-        p = self._textures.get('red', {}).get(key)
+        p = self._textures.get(Team.RED, {}).get(key)
         if p and os.path.exists(p):
             return p
         # image_path как fallback только в RED-режиме (в BLU он содержит BLU-текстуру)
-        if self._active_team != 'blu' and self.image_path and os.path.exists(self.image_path):
+        if self._active_team != Team.BLU and self.image_path and os.path.exists(self.image_path):
             return self.image_path
         return None
 
@@ -3551,10 +3555,10 @@ class PreviewPanel(QWidget):
         # ПУСТЫМ (= «общая, наследует RED»); заполнил отдельной синей → станет
         # командным. Командный (синее имя ≠) идёт обычным путём (показывает синюю).
         from src.data.player_hands import HAND_MODE_KEYS as _HMK_card
-        if self._weapon_mode in _HMK_card and self._active_team == 'blu':
+        if self._weapon_mode in _HMK_card and self._active_team == Team.BLU:
             _bn = self._vpk_blu_name_map.get(mat_name, mat_name) if self._vpk_blu_name_map else mat_name
             if _bn.lower() == mat_name.lower():   # нейтральный
-                bp = self._textures.get('blu', {}).get(mat_name)
+                bp = self._textures.get(Team.BLU, {}).get(mat_name)
                 return bp if (bp and os.path.exists(bp)) else None
 
         return self._resolve_base_texture(mat_name)
@@ -3577,7 +3581,7 @@ class PreviewPanel(QWidget):
 
         if not is_team_specific:
             # Ищем в другой команде тоже
-            other = 'blu' if active == 'red' else 'red'
+            other = Team.BLU if active == Team.RED else Team.RED
             p = self._textures.get(other, {}).get(mat_name)
             if p and os.path.exists(p):
                 return p
@@ -3586,16 +3590,25 @@ class PreviewPanel(QWidget):
         # заменяем). Так при переключении RED↔BLU карточка показывает текстуру
         # соответствующей команды, даже если пользователь свою не загружал.
         # Карты _vpk_*_tex_map ключуются по RED-имени материала — как и карточки.
-        vpk_map = self._vpk_red_tex_map if active == 'red' else self._vpk_blu_tex_map
+        vpk_map = self._vpk_red_tex_map if active == Team.RED else self._vpk_blu_tex_map
         g = vpk_map.get(mat_name)
         if g and os.path.exists(g):
             return g
+
+        # Нейтральные/служебные («Прочее») материалы не зависят от команды: их
+        # игровой оригинал лежит только в RED-карте. На BLU без собственной BLU-
+        # записи показываем RED-оригинал — иначе в «Прочее» на синей команде
+        # карточки оказывались бы пустыми.
+        if active != Team.RED and not is_team_specific:
+            g = self._vpk_red_tex_map.get(mat_name)
+            if g and os.path.exists(g):
+                return g
 
         # Fallback для ГЛАВНОГО материала: если per-material карты команды нет
         # (BLU пришёл одним кадром через _blu_frames, как у некоторых шапок),
         # показываем кадр команды — так же, как 3D применяет его глобально.
         if self._material_names and mat_name == self._material_names[0]:
-            frames = self._blu_frames if active == 'blu' else self._red_frames
+            frames = self._blu_frames if active == Team.BLU else self._red_frames
             if frames and os.path.exists(frames[0]):
                 return frames[0]
 
@@ -3608,33 +3621,33 @@ class PreviewPanel(QWidget):
         Логика (важно — не смешиваем RED и BLU):
 
         1. Если mat_name — RED-имя (ключ в _vpk_blu_name_map, напр. 'medic_head_red'):
-           → смотрим ТОЛЬКО в _textures['red']. Не fallback-аем на BLU.
+           → смотрим ТОЛЬКО в _textures[Team.RED]. Не fallback-аем на BLU.
            Это гарантирует, что build спросит диалог когда RED не загружена,
            а не молча подставит BLU-текстуру.
 
         2. Если mat_name — BLU-имя (значение в _vpk_blu_name_map, напр. 'medic_head_blue'):
-           → обратный поиск: BLU-имя → RED-ключ → _textures['blu'][RED-ключ].
+           → обратный поиск: BLU-имя → RED-ключ → _textures[Team.BLU][RED-ключ].
            (Карточки хранят BLU-текстуры под RED-ключами.)
 
         3. Иначе (оружие/шапка без явного маппинга, руки):
            → прямой поиск в обеих командах.
         """
         if self._vpk_blu_name_map:
-            # Случай 1: RED-имя (ключ в маппинге) → только _textures['red']
+            # Случай 1: RED-имя (ключ в маппинге) → только _textures[Team.RED]
             if mat_name in self._vpk_blu_name_map:
-                p = self._textures.get('red', {}).get(mat_name)
+                p = self._textures.get(Team.RED, {}).get(mat_name)
                 return p if (p and os.path.exists(p)) else None
 
             # Случай 2: BLU-имя (значение в маппинге) → обратный поиск
             for red_key, blu_name in self._vpk_blu_name_map.items():
                 if blu_name == mat_name:
-                    p = self._textures.get('blu', {}).get(red_key)
+                    p = self._textures.get(Team.BLU, {}).get(red_key)
                     return p if (p and os.path.exists(p)) else None
 
             # Случай 3: нейтральная текстура — не RED и не BLU в маппинге
             # (например sniper_lens, c_arrow, eyeball_r и т.п.).
             # Проверяем ОБЕ команды — текстура могла быть загружена в любой.
-            for _team in ('red', 'blu'):
+            for _team in (Team.RED, Team.BLU):
                 p = self._textures.get(_team, {}).get(mat_name)
                 if p and os.path.exists(p):
                     return p
@@ -3642,20 +3655,20 @@ class PreviewPanel(QWidget):
 
         # Случай 4: маппинг пуст (одноматериальное оружие / 3D не загружалась).
         # Нейтральные текстуры ищем в обеих командах по прямому ключу.
-        for _team in ('red', 'blu'):
+        for _team in (Team.RED, Team.BLU):
             p = self._textures.get(_team, {}).get(mat_name)
             if p and os.path.exists(p):
                 return p
         # Fallback: сборка спрашивает по BLU-имени материала ({mat}_blue).
         # Force-team (синтезированная команда): BLU хранится под ИМЕНЕМ МАТЕРИАЛА
-        # без суффикса — '{m}_blue' → _textures['blu'][m] (важно для мульти-материала,
+        # без суффикса — '{m}_blue' → _textures[Team.BLU][m] (важно для мульти-материала,
         # иначе всем колонкам уйдёт одна главная BLU). Затем — главная BLU как fallback
         # (одноматериальное оружие хранит BLU под главным ключом).
         ml = mat_name.lower()
         for _suf in ('_blue', '_blu'):
             if ml.endswith(_suf):
                 _base = mat_name[:-len(_suf)]
-                _bp = self._textures.get('blu', {}).get(_base)
+                _bp = self._textures.get(Team.BLU, {}).get(_base)
                 if _bp and os.path.exists(_bp):
                     return _bp
                 blu = self.get_blu_image_path()
@@ -3666,7 +3679,7 @@ class PreviewPanel(QWidget):
 
     def get_blu_image_path(self) -> Optional[str]:
         """Возвращает путь к пользовательской BLU текстуре (главный слот) или None."""
-        blu = self._textures.get('blu', {})
+        blu = self._textures.get(Team.BLU, {})
         key = self._material_names[0] if self._material_names else SINGLE_TEX_KEY
         p = blu.get(key)
         if p and os.path.exists(p):
@@ -3808,7 +3821,7 @@ class PreviewPanel(QWidget):
                         card.set_image(tmp)
                         card.image_changed.emit(vtf_name, tmp)
                     else:
-                        self._textures.setdefault('red', {})[vtf_name] = tmp
+                        self._textures.setdefault(Team.RED, {})[vtf_name] = tmp
                         self._on_extra_card_changed(vtf_name, tmp)
                 return
 
@@ -4202,7 +4215,7 @@ class PreviewPanel(QWidget):
         self._vpk_red_tex_map = {}
         self._vpk_blu_tex_map = {}
         self._vpk_blu_name_map = {}
-        self._active_team = 'red'   # сброс синхронизируем со стилями кнопок
+        self._active_team = Team.RED   # сброс синхронизируем со стилями кнопок
         if hasattr(self, 'btn_red'):
             self.btn_red.setVisible(False)
             self.btn_red.setStyleSheet(self._team_style_on)

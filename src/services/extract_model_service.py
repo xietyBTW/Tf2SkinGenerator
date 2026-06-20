@@ -55,8 +55,8 @@ class ExtractModelService:
                 _exact = resolve_weapon_mdl(weapon_key, tf2_root)
                 if _exact and _exact not in paths_to_try:
                     paths_to_try.append(_exact)
-            except Exception:
-                pass
+            except Exception as _e:
+                logger.debug(f"resolve_weapon_mdl({weapon_key}) не сработал: {_e}")
 
         workshop_partner_path_with_folder = base_path_from_config.replace(
             "models/weapons/", "models/workshop_partner/weapons/"
