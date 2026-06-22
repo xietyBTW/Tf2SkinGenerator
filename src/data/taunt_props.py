@@ -118,8 +118,3 @@ TAUNT_PROP_MODE_PREFIX = "taunt_"
 TAUNT_PROP_MDL_PATHS: Dict[str, str] = {
     key: data["mdl_path"] for key, data in TAUNT_PROPS.items()
 }
-
-
-def get_taunt_prop_name(key: str, language: str = "ru") -> str:
-    data = TAUNT_PROPS.get(key, {})
-    return data.get(language, data.get("ru", key))

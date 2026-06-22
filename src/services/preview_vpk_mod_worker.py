@@ -566,7 +566,7 @@ class PreviewVpkModWorker(BaseWorker):
             mdl_dir = tempfile.mkdtemp(prefix="tf2sg_mdl_")
             try:
                 extracted = TF2VPKExtractService.extract_file_set(
-                    self.misc_vpk_path, found_rel, mdl_dir, None
+                    self.misc_vpk_path, found_rel, mdl_dir
                 )
                 mdl_file = next((f for f in extracted if f.endswith(".mdl")), None)
                 if not mdl_file:

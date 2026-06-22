@@ -788,12 +788,8 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
             self._populate_subtype_for_character()
         elif cat == 'special':
             self._populate_subtype_for_special()
-        elif cat == 'projectile':
-            self._populate_subtype_for_projectile()
-        elif cat == 'pickup':
-            self._populate_subtype_for_pickup()
-        elif cat == 'taunt':
-            self._populate_subtype_for_taunt()
+        elif cat in ('projectile', 'pickup', 'taunt'):
+            self._populate_simple_subtype(cat)
         else:  # custom
             self.apply_selection_auto()
 
@@ -836,51 +832,19 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
         self.subtype_combo.setCurrentIndex(0)
         self.on_subtype_changed(0)
 
-    def _populate_subtype_for_projectile(self) -> None:
-        """Заполняет subtype_combo списком снарядов (w_models)."""
-        from src.data.projectiles import PROJECTILES, get_projectile_name
+    def _populate_simple_subtype(self, category: str) -> None:
+        """Заполняет subtype_combo для «простой» категории (снаряды/пикапы/реквизит).
+
+        У всех трёх одинаковая форма данных и pipeline — единый populate вместо
+        трёх копий (реестр в src.data.simple_models)."""
+        from src.data.simple_models import SIMPLE_MODEL_CATEGORIES, model_display_name
+        table = SIMPLE_MODEL_CATEGORIES[category].table
 
         self.subtype_combo.blockSignals(True)
         self.subtype_combo.clear()
         self._subtype_keys = []
-        for key in PROJECTILES:
-            self.subtype_combo.addItem(get_projectile_name(key, self.language))
-            self._subtype_keys.append(key)
-        self.subtype_combo.blockSignals(False)
-
-        if self._subtype_keys:
-            self.subtype_combo.setCurrentIndex(0)
-            self.on_subtype_changed(0)
-        else:
-            self.apply_selection_auto()
-
-    def _populate_subtype_for_pickup(self) -> None:
-        """Заполняет subtype_combo списком пикапов (аптечки/патроны)."""
-        from src.data.pickups import PICKUPS, get_pickup_name
-
-        self.subtype_combo.blockSignals(True)
-        self.subtype_combo.clear()
-        self._subtype_keys = []
-        for key in PICKUPS:
-            self.subtype_combo.addItem(get_pickup_name(key, self.language))
-            self._subtype_keys.append(key)
-        self.subtype_combo.blockSignals(False)
-
-        if self._subtype_keys:
-            self.subtype_combo.setCurrentIndex(0)
-            self.on_subtype_changed(0)
-        else:
-            self.apply_selection_auto()
-
-    def _populate_subtype_for_taunt(self) -> None:
-        """Заполняет subtype_combo списком реквизита насмешек."""
-        from src.data.taunt_props import TAUNT_PROPS, get_taunt_prop_name
-
-        self.subtype_combo.blockSignals(True)
-        self.subtype_combo.clear()
-        self._subtype_keys = []
-        for key in TAUNT_PROPS:
-            self.subtype_combo.addItem(get_taunt_prop_name(key, self.language))
+        for key in table:
+            self.subtype_combo.addItem(model_display_name(table, key, self.language))
             self._subtype_keys.append(key)
         self.subtype_combo.blockSignals(False)
 
@@ -1158,27 +1122,12 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
                     self.mode = "critHIT"
         elif cat == 'custom':
             self.mode = "custom" if getattr(self, '_custom_vpk_path', None) else None
-        elif cat == 'projectile':
-            # Снаряд: mode = "projectile_<key>" → weapon_key = <key>, путь из
+        elif cat in ('projectile', 'pickup', 'taunt'):
+            # Простые категории: mode = f"{prefix}{key}" → weapon_key = key, путь из
             # WEAPON_MDL_PATHS. Дальше трактуется как обычное оружие.
-            from src.data.projectiles import PROJECTILE_MODE_PREFIX
+            from src.data.simple_models import SIMPLE_MODEL_CATEGORIES
             if self.current_weapon:
-                self.mode = f"{PROJECTILE_MODE_PREFIX}{self.current_weapon}"
-            else:
-                self.mode = None
-        elif cat == 'pickup':
-            # Пикап: mode = "pickup_<key>" → weapon_key = <key>, путь из
-            # WEAPON_MDL_PATHS. Дальше трактуется как обычное оружие.
-            from src.data.pickups import PICKUP_MODE_PREFIX
-            if self.current_weapon:
-                self.mode = f"{PICKUP_MODE_PREFIX}{self.current_weapon}"
-            else:
-                self.mode = None
-        elif cat == 'taunt':
-            # Реквизит насмешки: mode = "taunt_<key>" → weapon_key = <key>.
-            from src.data.taunt_props import TAUNT_PROP_MODE_PREFIX
-            if self.current_weapon:
-                self.mode = f"{TAUNT_PROP_MODE_PREFIX}{self.current_weapon}"
+                self.mode = f"{SIMPLE_MODEL_CATEGORIES[cat].mode_prefix}{self.current_weapon}"
             else:
                 self.mode = None
         elif cat == 'character':
