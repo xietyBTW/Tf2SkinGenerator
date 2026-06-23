@@ -179,6 +179,10 @@ class TextureService:
                 result |= VTFImageFlags.NOMIP
             elif f == "NOLOD":
                 result |= VTFImageFlags.NOLOD
+            elif f == "NOMINMIP":
+                # «No Minimum Mipmap» = TEXTUREFLAGS_ALL_MIPS (0x400). Раньше в
+                # VTFLib-пути не обрабатывался → галка была пустышкой.
+                result |= VTFImageFlags.ALL_MIPS
             elif f == "POINTSAMPLE":
                 result |= VTFImageFlags.POINTSAMPLE
             elif f == "TRILINEAR":
