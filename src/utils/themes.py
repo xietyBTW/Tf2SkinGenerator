@@ -600,6 +600,22 @@ THEMES = {
     'blue': 'Синяя'
 }
 
+# Акцентные цвета тем (кнопки, активные табы, ссылки)
+ACCENT_COLORS = {
+    'dark': '#ff6b35',
+    'blue': '#4a90e2',
+}
+
+
+def get_accent_color() -> str:
+    """Акцентный цвет текущей темы приложения (из конфига; дефолт — dark)."""
+    try:
+        from src.config.app_config import AppConfig
+        theme = AppConfig.load_config().get("theme")
+    except Exception:
+        theme = None
+    return ACCENT_COLORS.get(theme, ACCENT_COLORS['dark'])
+
 
 def apply_blue_theme(app: QApplication) -> None:
     """Применяет синюю тему к приложению"""

@@ -172,174 +172,182 @@ class Preview3DWorker(BaseWorker):
             from src.data.player_characters import PLAYER_BODY_MODE_KEYS
             is_multi_tex_mode = self.mode in HAND_MODE_KEYS or self.mode in PLAYER_BODY_MODE_KEYS
             if is_multi_tex_mode and mat_names:
-                # Режим рук / скина персонажа: мульти-материал — каждый меш получает свою текстуру
-                tex_map = self._extract_multi_textures(mat_names)
-                # Служебные материалы $texturegroup вне геометрии (eyeball_invun,
-                # *_zombie …) — для селектора «Прочее» в 2D.
-                _misc_extras = self._extract_texturegroup_misc_extras(mat_names)
-                if _misc_extras:
-                    tex_map.update(_misc_extras)
-                self.ready.emit(obj_path, "")
-                if tex_map:
-                    self.multi_material.emit(tex_map)
-                # BLU detection для персонажей:
-                # Для многоматериальных моделей — строим полную карту {mat: blu_png}.
-                # Если не удалось — пробуем одиночный BLU (старый путь как fallback).
-                if self._decomp_dir and mat_names:
-                    try:
-                        raw = self._extract_blu_multi_textures_via_qc(mat_names)
-                        if raw:
-                            # raw: {red_mat_name: (blu_png_path | None, blu_display_name)}
-                            # tex_map — только записи с реальным PNG (для 3D-превью)
-                            # name_map — все записи где BLU-имя отличается от RED (для лейблов карточек)
-                            tex_map  = {k: v[0] for k, v in raw.items() if v[0]}
-                            name_map = {k: v[1] for k, v in raw.items()}
-                            self.blu_multi_material.emit((tex_map, name_map))
-                            logger.info(
-                                f"[3D] BLU multi-tex: {len(tex_map)} текстур, "
-                                f"{len(name_map)} имён"
-                            )
-                        else:
-                            # Fallback: ищем единственный BLU VTF через QC
-                            blu_paths, blu_fps = self._extract_blu_via_qc(
-                                self._decomp_dir, 0.0
-                            )
-                            if blu_paths:
-                                self.blu_ready.emit(blu_paths, blu_fps)
-                    except Exception as _exc:
-                        logger.debug(f"[3D] BLU detection (multi-tex): {_exc}")
-
+                self._emit_multi_tex_mode(obj_path, mat_names)
             elif self.mode == "hat":
-                # ── Шапки: QC → VMT → $baseTexture → VTF ─────────────────── #
-                _qc_dir = self._hat_decomp_dir
-                if not _qc_dir:
-                    from src.services import decompile_cache as _dc
-                    _cached_qc = _dc.find_cached_qc_for_weapon(self.weapon_key)
-                    if _cached_qc:
-                        _qc_dir = os.path.dirname(_cached_qc)
-
-                hat_tex_map: dict = {}
-                if _qc_dir and mat_names:
-                    try:
-                        hat_tex_map = self._extract_hat_textures_via_qc_vmt(
-                            _qc_dir, mat_names
-                        )
-                    except Exception as exc:
-                        logger.warning(f"[3D] Ошибка QC→VMT→VTF: {exc}")
-
-                if hat_tex_map:
-                    first_tex = next(iter(hat_tex_map.values()))
-                    self.ready.emit(obj_path, first_tex)
-                    if len(hat_tex_map) > 1:
-                        self.multi_material.emit(hat_tex_map)
-                else:
-                    # Fallback: угадываем VTF по имени MDL
-                    logger.debug("[3D] QC→VMT не дал результата, используем fallback")
-                    frame_paths, _ = self._extract_hat_texture_frames()
-                    self.ready.emit(obj_path, frame_paths[0] if frame_paths else "")
-
-                if self.isInterruptionRequested():
-                    return
-
-                # ── BLU для шапки (через QC skinfamilies skin 1) ─────────── #
-                if _qc_dir:
-                    blu_paths, blu_fps = self._extract_blu_via_qc(_qc_dir, 0.0)
-                    if blu_paths:
-                        self.blu_ready.emit(blu_paths, blu_fps)
-
+                self._emit_hat_textures(obj_path, mat_names)
             else:
-                # Обычное оружие
-                # Доп. текстуры по фиксированному пути (вне QC/модели), напр.
-                # HUD-вставки Dead Ringer (pocket_watch_fg/bg).
-                fixed_extras = self._extract_fixed_extra_textures()
-                # Материалы из QC $texturegroup, которых нет в геометрии
-                # (напр. smiley у гранатомёта) — чтобы карточки 2D совпадали
-                # с тем, что предлагает сборка.
-                tg_extras = self._extract_texturegroup_extras(mat_names)
-
-                # Служебные материалы $texturegroup вне геометрии — для «Прочее».
-                misc_extras = self._extract_texturegroup_misc_extras(mat_names)
-
-                if len(mat_names) > 1:
-                    # ── Мульти-материальное оружие (shell, scope и т.п.) ─────── #
-                    tex_map = self._extract_multi_textures(mat_names)
-                    if fixed_extras:
-                        tex_map.update(fixed_extras)
-                    if tg_extras:
-                        tex_map.update(tg_extras)
-                    if misc_extras:
-                        tex_map.update(misc_extras)
-                    first_tex = next(iter(tex_map.values()), "") if tex_map else ""
-                    self.ready.emit(obj_path, first_tex)
-                    if tex_map:
-                        self.multi_material.emit(tex_map)
-                    framerate = 0.0
-                else:
-                    # ── Одиночная текстура (возможно анимированная) ──────────── #
-                    frame_paths, framerate = self._extract_texture_frames()
-                    first_tex = frame_paths[0] if frame_paths else ""
-                    self.ready.emit(obj_path, first_tex)
-                    # Главная текстура + доп. (фиксированные и из $texturegroup) → карточки 2D
-                    extra_cards: dict = {}
-                    extra_cards.update(fixed_extras)
-                    extra_cards.update(tg_extras)
-                    if extra_cards:
-                        combined: dict = {}
-                        main_name = mat_names[0] if mat_names else self.weapon_key
-                        if first_tex:
-                            combined[main_name] = first_tex
-                        combined.update(extra_cards)
-                        if len(combined) > 1:
-                            self.multi_material.emit(combined)
-                    elif len(frame_paths) > 1:
-                        self.animated.emit(frame_paths, framerate)
-
-                if self.isInterruptionRequested():
-                    return
-
-                # ── BLU + Australium через QC skinfamilies ───────────────────── #
-                blu_paths, blu_fps = [], 0.0
-                blu_multi_done = False
-                if self._decomp_dir:
-                    # Мульти-материальное командное оружие (напр. праздничное:
-                    # клинок и lights меняются по команде в РАЗНЫХ колонках
-                    # $texturegroup) — BLU строим как карту {материал: blu_png}.
-                    # Одиночный BLU тут наложил бы одну текстуру на всю модель.
-                    if len(mat_names) > 1:
-                        _qcs = glob.glob(os.path.join(self._decomp_dir, "*.qc"))
-                        _lay = qc_skin_parser.parse_skin_layout(_qcs[0]) if _qcs else None
-                        if _lay and qc_skin_parser.selector_spec(_lay).team:
-                            try:
-                                raw = self._extract_blu_multi_textures_via_qc(mat_names)
-                                tex_map  = {k: v[0] for k, v in raw.items() if v[0]}
-                                name_map = {k: v[1] for k, v in raw.items()}
-                                if name_map:
-                                    self.blu_multi_material.emit((tex_map, name_map))
-                                    blu_multi_done = True
-                            except Exception as _exc:
-                                logger.debug(f"[3D] BLU multi (оружие): {_exc}")
-                    if not blu_multi_done:
-                        blu_paths, blu_fps = self._extract_blu_via_qc(
-                            self._decomp_dir, framerate
-                        )
-                    # Вариантные строки (Australium/Gold/Festive) проверяем
-                    # НЕЗАВИСИМО от BLU: у большинства австралиум-оружий
-                    # (ракетница и т.п.) есть И команды, И gold-строки —
-                    # раньше «if not blu_paths» полностью скрывал вариант.
-                    aus_path, aus_mat = self._extract_variant_via_qc(self._decomp_dir)
-                    if aus_path:
-                        self.australium_ready.emit(aus_path, aus_mat or "")
-                # Fallback: прямой поиск {wk}_blue.vtf
-                if not blu_multi_done and not blu_paths:
-                    blu_paths, blu_fps = self._extract_blu_texture_frames(framerate)
-                if blu_paths:
-                    self.blu_ready.emit(blu_paths, blu_fps)
+                self._emit_weapon_textures(obj_path, mat_names)
 
         except Exception as exc:
             logger.error(f"Preview3DWorker: {exc}", exc_info=True)
             self.failed.emit(str(exc))
         finally:
             self._reader.close()
+
+    # ── Ветки извлечения текстур (по режиму) ────────────────────────────── #
+
+    def _emit_multi_tex_mode(self, obj_path: str, mat_names: list) -> None:
+        """Руки / тело персонажа: мульти-материал — каждый меш получает свою текстуру."""
+        tex_map = self._extract_multi_textures(mat_names)
+        # Служебные материалы $texturegroup вне геометрии (eyeball_invun,
+        # *_zombie …) — для селектора «Прочее» в 2D.
+        _misc_extras = self._extract_texturegroup_misc_extras(mat_names)
+        if _misc_extras:
+            tex_map.update(_misc_extras)
+        self.ready.emit(obj_path, "")
+        if tex_map:
+            self.multi_material.emit(tex_map)
+        # BLU detection для персонажей:
+        # Для многоматериальных моделей — строим полную карту {mat: blu_png}.
+        # Если не удалось — пробуем одиночный BLU (старый путь как fallback).
+        if self._decomp_dir and mat_names:
+            try:
+                raw = self._extract_blu_multi_textures_via_qc(mat_names)
+                if raw:
+                    # raw: {red_mat_name: (blu_png_path | None, blu_display_name)}
+                    # tex_map — только записи с реальным PNG (для 3D-превью)
+                    # name_map — все записи где BLU-имя отличается от RED (для лейблов карточек)
+                    tex_map  = {k: v[0] for k, v in raw.items() if v[0]}
+                    name_map = {k: v[1] for k, v in raw.items()}
+                    self.blu_multi_material.emit((tex_map, name_map))
+                    logger.info(
+                        f"[3D] BLU multi-tex: {len(tex_map)} текстур, "
+                        f"{len(name_map)} имён"
+                    )
+                else:
+                    # Fallback: ищем единственный BLU VTF через QC
+                    blu_paths, blu_fps = self._extract_blu_via_qc(
+                        self._decomp_dir, 0.0
+                    )
+                    if blu_paths:
+                        self.blu_ready.emit(blu_paths, blu_fps)
+            except Exception as _exc:
+                logger.debug(f"[3D] BLU detection (multi-tex): {_exc}")
+
+    def _emit_hat_textures(self, obj_path: str, mat_names: list) -> None:
+        """Шапки: QC → VMT → $baseTexture → VTF (+ BLU через skinfamilies skin 1)."""
+        _qc_dir = self._hat_decomp_dir
+        if not _qc_dir:
+            from src.services import decompile_cache as _dc
+            _cached_qc = _dc.find_cached_qc_for_weapon(self.weapon_key)
+            if _cached_qc:
+                _qc_dir = os.path.dirname(_cached_qc)
+
+        hat_tex_map: dict = {}
+        if _qc_dir and mat_names:
+            try:
+                hat_tex_map = self._extract_hat_textures_via_qc_vmt(
+                    _qc_dir, mat_names
+                )
+            except Exception as exc:
+                logger.warning(f"[3D] Ошибка QC→VMT→VTF: {exc}")
+
+        if hat_tex_map:
+            first_tex = next(iter(hat_tex_map.values()))
+            self.ready.emit(obj_path, first_tex)
+            if len(hat_tex_map) > 1:
+                self.multi_material.emit(hat_tex_map)
+        else:
+            # Fallback: угадываем VTF по имени MDL
+            logger.debug("[3D] QC→VMT не дал результата, используем fallback")
+            frame_paths, _ = self._extract_hat_texture_frames()
+            self.ready.emit(obj_path, frame_paths[0] if frame_paths else "")
+
+        if self.isInterruptionRequested():
+            return
+
+        if _qc_dir:
+            blu_paths, blu_fps = self._extract_blu_via_qc(_qc_dir, 0.0)
+            if blu_paths:
+                self.blu_ready.emit(blu_paths, blu_fps)
+
+    def _emit_weapon_textures(self, obj_path: str, mat_names: list) -> None:
+        """Обычное оружие: текстуры + BLU/Australium через QC skinfamilies."""
+        # Доп. текстуры по фиксированному пути (вне QC/модели), напр.
+        # HUD-вставки Dead Ringer (pocket_watch_fg/bg).
+        fixed_extras = self._extract_fixed_extra_textures()
+        # Материалы из QC $texturegroup, которых нет в геометрии
+        # (напр. smiley у гранатомёта) — чтобы карточки 2D совпадали
+        # с тем, что предлагает сборка.
+        tg_extras = self._extract_texturegroup_extras(mat_names)
+
+        # Служебные материалы $texturegroup вне геометрии — для «Прочее».
+        misc_extras = self._extract_texturegroup_misc_extras(mat_names)
+
+        if len(mat_names) > 1:
+            # ── Мульти-материальное оружие (shell, scope и т.п.) ─────── #
+            tex_map = self._extract_multi_textures(mat_names)
+            if fixed_extras:
+                tex_map.update(fixed_extras)
+            if tg_extras:
+                tex_map.update(tg_extras)
+            if misc_extras:
+                tex_map.update(misc_extras)
+            first_tex = next(iter(tex_map.values()), "") if tex_map else ""
+            self.ready.emit(obj_path, first_tex)
+            if tex_map:
+                self.multi_material.emit(tex_map)
+            framerate = 0.0
+        else:
+            # ── Одиночная текстура (возможно анимированная) ──────────── #
+            frame_paths, framerate = self._extract_texture_frames()
+            first_tex = frame_paths[0] if frame_paths else ""
+            self.ready.emit(obj_path, first_tex)
+            # Главная текстура + доп. (фиксированные и из $texturegroup) → карточки 2D
+            extra_cards: dict = {}
+            extra_cards.update(fixed_extras)
+            extra_cards.update(tg_extras)
+            if extra_cards:
+                combined: dict = {}
+                main_name = mat_names[0] if mat_names else self.weapon_key
+                if first_tex:
+                    combined[main_name] = first_tex
+                combined.update(extra_cards)
+                if len(combined) > 1:
+                    self.multi_material.emit(combined)
+            elif len(frame_paths) > 1:
+                self.animated.emit(frame_paths, framerate)
+
+        if self.isInterruptionRequested():
+            return
+
+        # ── BLU + Australium через QC skinfamilies ───────────────────── #
+        blu_paths, blu_fps = [], 0.0
+        blu_multi_done = False
+        if self._decomp_dir:
+            # Мульти-материальное командное оружие (напр. праздничное:
+            # клинок и lights меняются по команде в РАЗНЫХ колонках
+            # $texturegroup) — BLU строим как карту {материал: blu_png}.
+            # Одиночный BLU тут наложил бы одну текстуру на всю модель.
+            if len(mat_names) > 1:
+                _qcs = glob.glob(os.path.join(self._decomp_dir, "*.qc"))
+                _lay = qc_skin_parser.parse_skin_layout(_qcs[0]) if _qcs else None
+                if _lay and qc_skin_parser.selector_spec(_lay).team:
+                    try:
+                        raw = self._extract_blu_multi_textures_via_qc(mat_names)
+                        tex_map  = {k: v[0] for k, v in raw.items() if v[0]}
+                        name_map = {k: v[1] for k, v in raw.items()}
+                        if name_map:
+                            self.blu_multi_material.emit((tex_map, name_map))
+                            blu_multi_done = True
+                    except Exception as _exc:
+                        logger.debug(f"[3D] BLU multi (оружие): {_exc}")
+            if not blu_multi_done:
+                blu_paths, blu_fps = self._extract_blu_via_qc(
+                    self._decomp_dir, framerate
+                )
+            # Вариантные строки (Australium/Gold/Festive) проверяем
+            # НЕЗАВИСИМО от BLU: у большинства австралиум-оружий
+            # (ракетница и т.п.) есть И команды, И gold-строки —
+            # раньше «if not blu_paths» полностью скрывал вариант.
+            aus_path, aus_mat = self._extract_variant_via_qc(self._decomp_dir)
+            if aus_path:
+                self.australium_ready.emit(aus_path, aus_mat or "")
+        # Fallback: прямой поиск {wk}_blue.vtf
+        if not blu_multi_done and not blu_paths:
+            blu_paths, blu_fps = self._extract_blu_texture_frames(framerate)
+        if blu_paths:
+            self.blu_ready.emit(blu_paths, blu_fps)
 
     # ── Получение SMD ─────────────────────────────────────────────────────── #
 

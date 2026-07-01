@@ -445,10 +445,10 @@ class ModelBuildService:
         Нужен для редактора QC: пользователь видит ИСПРАВЛЕННЫЙ QC, а не сырой
         декомпилированный из игры.
         """
-        import tempfile
+        from src.shared.file_utils import get_temp_file_path
         if not src_qc_path or not os.path.exists(src_qc_path):
             return ''
-        tmp = tempfile.mktemp(suffix='.qc', prefix='tf2sg_qcedit_')
+        tmp = str(get_temp_file_path(prefix='tf2sg_qcedit_', suffix='.qc'))
         try:
             shutil.copy2(src_qc_path, tmp)
             cdmat = ModelBuildService.extract_cdmaterials_path_from_qc(tmp)

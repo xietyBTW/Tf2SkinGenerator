@@ -521,11 +521,8 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
         return container
 
     def _get_accent_color(self) -> str:
-        try:
-            from src.config.app_config import AppConfig
-            return "#4a90e2" if AppConfig.load_config().get("theme") == "blue" else "#ff6b35"
-        except Exception:
-            return "#ff6b35"
+        from src.utils.themes import get_accent_color
+        return get_accent_color()
 
     def _switch_tab(self, index: int) -> None:
         """Переключает вкладку Weapons / Hats."""
@@ -1547,7 +1544,6 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
         from src.services.tf2_paths import TF2Paths
         from src.services.game_vpk_reader import GameVpkReader
         from src.services import qc_skin_parser
-        import vpk as vpklib
 
         if not qc_path or not os.path.exists(qc_path):
             return None
@@ -1560,35 +1556,21 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
         except Exception:
             misc_vpk = None
         textures_vpk = TF2Paths.resolve_textures_vpk(tf2_root_dir)
-        paks: list = []
-        for vp in [misc_vpk, textures_vpk]:
-            if vp and os.path.exists(vp):
-                try:
-                    paks.append(vpklib.open(vp))
-                except Exception as e:
-                    logger.debug(f"Не удалось открыть VPK {vp}: {e}")
-        if not paks:
-            return None
 
+        # GameVpkReader берёт хэндлы из общего потоко-локального кэша: индекс
+        # каждого VPK парсится один раз на поток, повторные открытия редактора
+        # VMT мгновенны. Закрывать хэндлы нельзя — ими владеет кэш.
         vmt_content: Optional[str] = None
         vmt_filename: str = "material.vmt"
-        for mat_name in mat_names:
-            for pak in paks:
-                info = GameVpkReader.find_vmt_in_pak(
-                    pak, cdmaterials, mat_name.lower()
-                )
+        with GameVpkReader([misc_vpk, textures_vpk]) as reader:
+            if not reader.paks:
+                return None
+            for mat_name in mat_names:
+                info = reader.find_vmt(cdmaterials, mat_name.lower())
                 if info:
-                    _path, _raw = info
-                    vmt_content = _raw
-                    vmt_filename = os.path.basename(_path)
+                    vmt_content = info[1]
+                    vmt_filename = os.path.basename(info[0])
                     break
-            if vmt_content:
-                break
-        for pak in paks:
-            try:
-                pak.close()
-            except Exception:
-                pass
         if not vmt_content:
             return None
 
@@ -1793,8 +1775,6 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
                 replace_model_enabled = False
 
             # Взаимоисключение с CritHIT — сбрасываем оба флага если активен CritHIT
-            is_crit_hit = (hasattr(self, 'crit_hit_checkbox') and
-                           self.crit_hit_checkbox.isChecked())
             if is_crit_hit and (replace_model_enabled or model_ready_enabled):
                 logger.warning("CritHIT + model options conflict — resetting model options.")
                 if hasattr(self, 'settings_panel'):

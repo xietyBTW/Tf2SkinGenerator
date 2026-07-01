@@ -208,11 +208,8 @@ class HatsPanel(QWidget):
 
     @staticmethod
     def _get_accent() -> str:
-        try:
-            from src.config.app_config import AppConfig
-            return "#4a90e2" if AppConfig.load_config().get("theme") == "blue" else "#ff6b35"
-        except Exception:
-            return "#ff6b35"
+        from src.utils.themes import get_accent_color
+        return get_accent_color()
 
     # ── Построение UI ─────────────────────────────────────────────────────── #
 

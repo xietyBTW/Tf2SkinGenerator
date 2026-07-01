@@ -36,8 +36,8 @@ def _load_config() -> dict:
 
 
 def _accent() -> str:
-    cfg = _load_config()
-    return "#4a90e2" if cfg.get("theme") == "blue" else "#ff6b35"
+    from src.utils.themes import get_accent_color
+    return get_accent_color()
 
 
 def _bg() -> str:

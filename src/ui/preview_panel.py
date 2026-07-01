@@ -1914,21 +1914,17 @@ class PreviewPanel(QWidget):
             candidates = [f"{rel_url}/{vtf}"]
             if vtf.lower() != vtf:
                 candidates.append(f"{rel_url}/{vtf.lower()}")
-            import vpk as vpklib
-            import tempfile
-            for vpk_path in vpk_paths:
-                if not vpk_path or not os.path.exists(vpk_path):
-                    continue
-                try:
-                    pak = vpklib.open(vpk_path)
-                except Exception:
-                    continue
+            # Игровые VPK — через общий потоко-локальный кэш (vpk.open парсит
+            # весь индекс, повторные переключения эффекта смерти мгновенны).
+            from src.services import vtf_preview_service as vps
+            paks = vps.open_vpks(vpk_paths)
+            for pak in paks:
                 for cand in candidates:
                     try:
                         data = pak[cand].read()
                     except KeyError:
                         continue
-                    tmp = tempfile.mktemp(suffix='.vtf', prefix='tf2_deatheff_')
+                    tmp = str(get_temp_file_path(prefix='tf2_deatheff_', suffix='.vtf'))
                     with open(tmp, 'wb') as f:
                         f.write(data)
                     png = self._convert_model_vtf(tmp)

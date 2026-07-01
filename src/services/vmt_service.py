@@ -8,6 +8,19 @@ from src.data.weapons import SPECIAL_MODES
 class VMTService:
     """Сервис для работы с VMT файлами (материалы Source Engine: пути и шаблоны)"""
 
+    # Спец-режимы: (относительный путь, имя файла без расширения).
+    # Режимы вне таблицы получают дефолт materials/effects/{mode}.
+    _SPECIAL_MODE_RELPATHS: dict = {
+        "critHIT": (("materials", "effects"), "crit"),
+        "spray": (("materials", "vgui", "logos"), "spray"),
+        # Лёд рагдолла (Sky-cicle). Override игрового материала по пути:
+        "death_ice": (("materials", "models", "player", "shared"), "ice_player"),
+        # Золотая статуя (Golden Frying Pan / Saxxy).
+        "death_gold": (("materials", "models", "player", "shared"), "gold_player"),
+        # Огонь горящего игрока (слоистый огонь).
+        "death_fire": (("materials", "effects", "tiledfire"), "fireLayeredSlowTiled512"),
+    }
+
     # ── Валидация синтаксиса ─────────────────────────────────────────────── #
 
     @staticmethod
@@ -124,34 +137,12 @@ class VMTService:
             Tuple[rel_path, vmt_filename, vtf_filename]
         """
         if mode in SPECIAL_MODES.values():
-            if mode == "critHIT":
-                rel_path = os.path.join("materials", "effects")
-                vmt_filename = "crit.vmt"
-                vtf_filename = "crit.vtf"
-            elif mode == "spray":
-                rel_path = os.path.join("materials", "vgui", "logos")
-                vmt_filename = "spray.vmt"
-                vtf_filename = "spray.vtf"
-            elif mode == "death_ice":
-                # Лёд рагдолла (Sky-cicle). Override игрового материала по пути:
-                rel_path = os.path.join("materials", "models", "player", "shared")
-                vmt_filename = "ice_player.vmt"
-                vtf_filename = "ice_player.vtf"
-            elif mode == "death_gold":
-                # Золотая статуя (Golden Frying Pan / Saxxy).
-                rel_path = os.path.join("materials", "models", "player", "shared")
-                vmt_filename = "gold_player.vmt"
-                vtf_filename = "gold_player.vtf"
-            elif mode == "death_fire":
-                # Огонь горящего игрока (слоистый огонь).
-                rel_path = os.path.join("materials", "effects", "tiledfire")
-                vmt_filename = "fireLayeredSlowTiled512.vmt"
-                vtf_filename = "fireLayeredSlowTiled512.vtf"
-            else:
-                # Для других специальных режимов (если будут добавлены новые)
-                rel_path = os.path.join("materials", "effects")
-                vmt_filename = f"{mode}.vmt"
-                vtf_filename = f"{mode}.vtf"
+            path_parts, stem = VMTService._SPECIAL_MODE_RELPATHS.get(
+                mode, (("materials", "effects"), mode)
+            )
+            rel_path = os.path.join(*path_parts)
+            vmt_filename = f"{stem}.vmt"
+            vtf_filename = f"{stem}.vtf"
         else:
             # Для обычного оружия - всегда используем VGUI структуру (костыль, но так работает в TF2)
             weapon_key = mode.split('_', 1)[1] if '_' in mode else mode

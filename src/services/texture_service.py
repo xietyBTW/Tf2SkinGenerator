@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import List, Tuple, Optional
 from PIL import Image, ImageOps, ImageFilter
 from src.shared.constants import ToolPaths, ToolTimeouts
+from src.shared.exceptions import VTFCreationError
 from src.shared.logging_config import get_logger
 from src.services.vtflib_wrapper import VTFLib, VTFImageFormat, VTFImageFlags
 
@@ -18,6 +19,35 @@ class TextureService:
         "RGB888 Bluescreen":    "RGB888_BLUESCREEN",
         "BGR888 Bluescreen":    "BGR888_BLUESCREEN",
         "DXT1 With One Bit Alpha": "DXT1_ONEBITALPHA",
+    }
+
+    # UI-имя флага → бит VTFImageFlags (VTFLib-путь). Флаги вне таблицы
+    # игнорируются — как и раньше в elif-цепочке.
+    _VTFLIB_FLAG_BITS: dict = {
+        "CLAMPS": VTFImageFlags.CLAMPS,
+        "CLAMPT": VTFImageFlags.CLAMPT,
+        "NOMIP": VTFImageFlags.NOMIP,
+        "NOLOD": VTFImageFlags.NOLOD,
+        # «No Minimum Mipmap» = TEXTUREFLAGS_ALL_MIPS (0x400). Раньше в
+        # VTFLib-пути не обрабатывался → галка была пустышкой.
+        "NOMINMIP": VTFImageFlags.ALL_MIPS,
+        "POINTSAMPLE": VTFImageFlags.POINTSAMPLE,
+        "TRILINEAR": VTFImageFlags.TRILINEAR,
+        "ANISOTROPIC": VTFImageFlags.ANISOTROPIC,
+        "SRGB": VTFImageFlags.SRGB,
+        "NODEBUGOVERRIDE": VTFImageFlags.NODEBUGOVERRIDE,
+        "SINGLECOPY": VTFImageFlags.SINGLECOPY,
+        "NODEPTHBUFFER": VTFImageFlags.NODEPTHBUFFER,
+        "CLAMPU": VTFImageFlags.CLAMPU,
+        "VERTEXTEXTURE": VTFImageFlags.VERTEXTEXTURE,
+        "SSBUMP": VTFImageFlags.SSBUMP,
+        "BORDER": VTFImageFlags.BORDER,
+    }
+
+    # UI-имя флага → аргумент VTFCmd -flag. Всё, чего нет в таблице,
+    # передаётся как flag.lower() (совпадает для остальных флагов).
+    _VTFCMD_FLAG_ALIASES: dict = {
+        "NOMINMIP": "minmip",
     }
 
     @staticmethod
@@ -166,45 +196,9 @@ class TextureService:
 
     @staticmethod
     def _map_flags_to_vtflib(flags: List[str], options: dict) -> int:
-        if flags is None:
-            flags = []
         result = 0
-        for flag in flags:
-            f = (flag or "").upper()
-            if f == "CLAMPS":
-                result |= VTFImageFlags.CLAMPS
-            elif f == "CLAMPT":
-                result |= VTFImageFlags.CLAMPT
-            elif f == "NOMIP":
-                result |= VTFImageFlags.NOMIP
-            elif f == "NOLOD":
-                result |= VTFImageFlags.NOLOD
-            elif f == "NOMINMIP":
-                # «No Minimum Mipmap» = TEXTUREFLAGS_ALL_MIPS (0x400). Раньше в
-                # VTFLib-пути не обрабатывался → галка была пустышкой.
-                result |= VTFImageFlags.ALL_MIPS
-            elif f == "POINTSAMPLE":
-                result |= VTFImageFlags.POINTSAMPLE
-            elif f == "TRILINEAR":
-                result |= VTFImageFlags.TRILINEAR
-            elif f == "ANISOTROPIC":
-                result |= VTFImageFlags.ANISOTROPIC
-            elif f == "SRGB":
-                result |= VTFImageFlags.SRGB
-            elif f == "NODEBUGOVERRIDE":
-                result |= VTFImageFlags.NODEBUGOVERRIDE
-            elif f == "SINGLECOPY":
-                result |= VTFImageFlags.SINGLECOPY
-            elif f == "NODEPTHBUFFER":
-                result |= VTFImageFlags.NODEPTHBUFFER
-            elif f == "CLAMPU":
-                result |= VTFImageFlags.CLAMPU
-            elif f == "VERTEXTEXTURE":
-                result |= VTFImageFlags.VERTEXTEXTURE
-            elif f == "SSBUMP":
-                result |= VTFImageFlags.SSBUMP
-            elif f == "BORDER":
-                result |= VTFImageFlags.BORDER
+        for flag in flags or []:
+            result |= TextureService._VTFLIB_FLAG_BITS.get((flag or "").upper(), 0)
 
         if options and options.get("nomipmaps", False):
             result |= VTFImageFlags.NOMIP | VTFImageFlags.NOLOD
@@ -390,37 +384,16 @@ class TextureService:
                 vtf_args.append("-nwrap")
         if "bumpscale" in options:
             vtf_args.extend(["-bumpscale", str(options["bumpscale"])])
-        flag_mapping = {
-            "CLAMPS": "clamps",
-            "CLAMPT": "clampt",
-            "NOLOD": "nolod",
-            "NOMIP": "nomip",
-            "NOMINMIP": "minmip",
-            "POINTSAMPLE": "pointsample",
-            "TRILINEAR": "trilinear",
-            "ANISOTROPIC": "anisotropic",
-            "SRGB": "srgb",
-            "NOCOMPRESS": "nocompress",
-            "NODEBUGOVERRIDE": "nodebugoverride",
-            "SINGLECOPY": "singlecopy",
-            "NODEPTHBUFFER": "nodepthbuffer",
-            "CLAMPU": "clampu",
-            "VERTEXTEXTURE": "vertextexture",
-            "SSBUMP": "ssbump",
-            "BORDER": "border"
-        }
         for flag in flags:
-            if flag.upper() == "NOMIP":
+            name = flag.upper()
+            if name == "NOMIP":
                 continue
-            if flag in flag_mapping:
-                vtf_args.extend(["-flag", flag_mapping[flag]])
-            else:
-                vtf_args.extend(["-flag", flag.lower()])
+            cmd_flag = TextureService._VTFCMD_FLAG_ALIASES.get(name, flag.lower())
+            vtf_args.extend(["-flag", cmd_flag])
         logger.info(f"VTFCmd команда: {' '.join(vtf_args)}")
         logger.debug(f"Формат: {vtf_format} (исходный: {format_type}), опции: {options}, флаги: {flags}")
         # Без check=True: при ненулевом коде формируем информативное исключение
         # с выводом VTFCmd, а не сырой CalledProcessError.
-        from src.shared.exceptions import VTFCreationError
         try:
             result = subprocess.run(vtf_args, capture_output=True, text=True,
                                     creationflags=subprocess.CREATE_NO_WINDOW,

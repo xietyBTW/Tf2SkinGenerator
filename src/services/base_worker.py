@@ -14,11 +14,69 @@ BaseWorker ради безопасного stop(), а сигналы и run() о
 
 from typing import Tuple
 
-from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import QMutex, QThread, QWaitCondition, Signal
 
 from src.shared.logging_config import get_logger
 
 logger = get_logger(__name__)
+
+# Sentinel «ответ ещё не получен». None — допустимый ответ пользователя
+# (отказался), поэтому None как sentinel не годится.
+_NO_ANSWER = object()
+
+
+class UiRequest:
+    """
+    Синхронный запрос данных из воркера в UI-поток: emit сигнала → ожидание ответа.
+
+    Воркер (фоновый поток) вызывает ask(*args):
+      1. Под мьютексом сбрасывает результат в sentinel.
+      2. Эмитит сигнал (НЕ под мьютексом — иначе дедлок, если UI ответит сразу).
+      3. Берёт мьютекс и ждёт (condition.wait атомарно отпускает мьютекс).
+
+    UI-поток (слот сигнала, QueuedConnection) вызывает answer(value):
+      4. Показывает диалог, берёт мьютекс (свободен — воркер в wait).
+      5. Записывает результат, wakeAll() → воркер просыпается и читает ответ.
+
+    Гонка «UI ответил между emit и wait» безопасна: ask() проверяет sentinel
+    в while перед wait — если ответ уже записан, в wait не входит.
+    """
+
+    def __init__(self, signal, timeout_ms: int = 300_000):
+        self._signal = signal
+        self._timeout_ms = timeout_ms
+        self._mutex = QMutex()
+        self._condition = QWaitCondition()
+        self._result: object = _NO_ANSWER
+
+    def ask(self, *args):
+        """Эмитит сигнал и блокируется до answer() или таймаута. None при таймауте."""
+        self._mutex.lock()
+        try:
+            self._result = _NO_ANSWER
+        finally:
+            self._mutex.unlock()
+
+        self._signal.emit(*args)
+
+        self._mutex.lock()
+        try:
+            while self._result is _NO_ANSWER:
+                if not self._condition.wait(self._mutex, self._timeout_ms):
+                    logger.warning(f"UiRequest: таймаут ожидания ответа от UI ({self._timeout_ms} мс)")
+                    break
+            return self._result if self._result is not _NO_ANSWER else None
+        finally:
+            self._mutex.unlock()
+
+    def answer(self, value) -> None:
+        """Передаёт ответ ждущему воркеру (вызывается из UI-потока)."""
+        self._mutex.lock()
+        try:
+            self._result = value
+            self._condition.wakeAll()
+        finally:
+            self._mutex.unlock()
 
 
 class BaseWorker(QThread):

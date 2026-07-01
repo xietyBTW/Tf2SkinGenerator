@@ -2,6 +2,7 @@
 Работа с VPK файлами: распаковка, сборка, конвертация текстур.
 """
 
+import hashlib
 import os
 import shutil
 import threading
@@ -506,7 +507,7 @@ class VPKService:
             rim_on = bool((material_maps.get("rimlight") or {}).get("enabled"))
             phong_on = bool(material_maps.get("phongexp"))
             try:
-                _vmt_txt0 = open(vmt_path, encoding="utf-8", errors="ignore").read().lower()
+                _vmt_txt0 = Path(vmt_path).read_text(encoding="utf-8", errors="ignore").lower()
             except OSError:
                 _vmt_txt0 = ""
             real_normal = (is_normal_map
@@ -569,7 +570,7 @@ class VPKService:
                 if not params_only and cfg.get("derive_auto_normal") \
                         and base_image_path and os.path.isfile(base_image_path):
                     try:
-                        _vmt_txt = open(vmt_path, encoding="utf-8", errors="ignore").read().lower()
+                        _vmt_txt = Path(vmt_path).read_text(encoding="utf-8", errors="ignore").lower()
                     except OSError:
                         _vmt_txt = ""
                     if "$bumpmap" not in _vmt_txt:
@@ -720,13 +721,9 @@ class VPKService:
         Возвращает hex-строку MD5 или None при ошибке чтения.
         Сравнение по содержимому ловит идентичные картинки даже из разных файлов.
         """
-        import hashlib
         try:
-            h = hashlib.md5()
             with open(path, "rb") as f:
-                for chunk in iter(lambda: f.read(1 << 16), b""):
-                    h.update(chunk)
-            return h.hexdigest()
+                return hashlib.file_digest(f, "md5").hexdigest()
         except OSError:
             return None
 
@@ -3295,10 +3292,7 @@ class VPKService:
                     vtf_filename = f"{texture_filename}.vtf"
                     
                     # Подготавливаем пути в vpkroot (создаем структуру папок как в VPK)
-                    materials_path_parts = materials_rel_path.rstrip('/').split('/')
-                    vtf_output_path = ctx.vpkroot_dir
-                    for part in materials_path_parts:
-                        vtf_output_path = vtf_output_path / part
+                    vtf_output_path = ctx.vpkroot_dir.joinpath(*materials_rel_path.rstrip('/').split('/'))
                     vmt_path = vtf_output_path / vmt_filename
                     vtf_temp_png = vtf_output_path / vtf_filename.replace(".vtf", ".png")
                     

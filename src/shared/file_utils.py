@@ -94,6 +94,55 @@ def copy_file_safe(source: str | Path, destination: str | Path) -> Path:
     return dest_path
 
 
+# Префиксы наших временных файлов/папок в системной temp (3D-превью, VTF-превью,
+# декомпиляция и т.п.). Файлы нужны UI и после завершения воркеров, поэтому
+# удаляются не сразу, а отложенно — cleanup_stale_temp_artifacts при старте.
+_TEMP_ARTIFACT_PREFIXES = (
+    "tf2sg_",
+    "tf2_crithit_", "tf2_smd_preview_", "tf2_3d_", "tf2_3ddrop_",
+    "tf2_deatheff_", "tf2_model_tex_", "tf2_vtf_",
+)
+
+
+def cleanup_stale_temp_artifacts(max_age_hours: float = 24.0,
+                                 temp_dir: Optional[Path] = None) -> int:
+    """
+    Удаляет из системной temp-папки устаревшие артефакты приложения
+    (папки/файлы с нашими префиксами старше max_age_hours).
+
+    Раньше temp-папки превью (tf2sg_3d_* и др.) не удалялись вовсе и копились
+    бесконечно. Порог по возрасту защищает файлы текущего и параллельного
+    запусков. Ошибки удаления (файл занят) молча пропускаются.
+
+    Returns:
+        Количество удалённых записей.
+    """
+    import tempfile
+    import time
+
+    root = Path(temp_dir) if temp_dir else Path(tempfile.gettempdir())
+    cutoff = time.time() - max_age_hours * 3600
+    removed = 0
+    try:
+        entries = list(os.scandir(root))
+    except OSError:
+        return 0
+    for entry in entries:
+        if not entry.name.startswith(_TEMP_ARTIFACT_PREFIXES):
+            continue
+        try:
+            if entry.stat().st_mtime >= cutoff:
+                continue
+            if entry.is_dir():
+                shutil.rmtree(entry.path, ignore_errors=True)
+            else:
+                os.unlink(entry.path)
+            removed += 1
+        except OSError:
+            continue
+    return removed
+
+
 def get_temp_file_path(prefix: str = "temp", suffix: str = ".tmp", directory: Optional[Path] = None) -> Path:
     """
     Генерирует путь к временному файлу (безопасная замена tempfile.mktemp)

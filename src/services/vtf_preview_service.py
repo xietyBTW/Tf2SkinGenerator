@@ -19,13 +19,21 @@ _RE_ANIM_FPS = re.compile(r'"animatedtextureframerate"\s+"?([0-9.]+)"?', re.IGNO
 
 
 def open_vpks(paths: List[Optional[str]]) -> list:
-    """Открывает существующие VPK из списка путей (несуществующие/битые пропускает)."""
-    import vpk as vpklib
+    """Открывает существующие VPK из списка путей (несуществующие/битые пропускает).
+
+    Хэндлы берутся из общего потоко-локального кэша (один парсинг индекса на
+    поток) и принадлежат ему — закрывать их нельзя. Использовать только для
+    ИГРОВЫХ VPK: кэш держит файл открытым до конца потока, для временных
+    пользовательских VPK это мешало бы их удалению.
+    """
+    from src.services.vpk_cache import open_vpk_cached
     paks: list = []
     for p in paths:
         if p and os.path.exists(p):
             try:
-                paks.append(vpklib.open(p))
+                pak = open_vpk_cached(p)
+                if pak is not None:
+                    paks.append(pak)
             except Exception as exc:
                 logger.debug(f"[VTF] не удалось открыть VPK {p}: {exc}")
     return paks

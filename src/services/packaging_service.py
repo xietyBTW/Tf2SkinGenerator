@@ -1,3 +1,4 @@
+import logging
 import os
 import shutil
 import subprocess
@@ -18,15 +19,17 @@ class PackagingService:
     @staticmethod
     def create_vpk_file(ctx, filename: str, export_folder: str = "export", language: str = "en") -> str:
         """Создаёт VPK из ctx.vpkroot_dir и перемещает в export_folder/filename."""
-        if ctx.vpkroot_dir.exists():
+        if not ctx.vpkroot_dir.exists():
+            logger.warning(f"vpkroot_dir не существует: {ctx.vpkroot_dir}")
+        elif logger.isEnabledFor(logging.DEBUG):
+            # Дамп дерева vpkroot — только когда debug-лог реально включён,
+            # чтобы не обходить всё дерево впустую на обычных сборках.
             logger.debug(f"Создание VPK из: {ctx.vpkroot_dir}")
-            for root, dirs, files in os.walk(ctx.vpkroot_dir):
+            for root, _dirs, files in os.walk(ctx.vpkroot_dir):
                 level = root.replace(str(ctx.vpkroot_dir), '').count(os.sep)
                 logger.debug(f"{'  ' * level}{os.path.basename(root)}/")
                 for file in files:
                     logger.debug(f"{'  ' * (level + 1)}{file}")
-        else:
-            logger.warning(f"vpkroot_dir не существует: {ctx.vpkroot_dir}")
 
         return PackagingService.pack_directory(
             vpkroot_dir=ctx.vpkroot_dir,
