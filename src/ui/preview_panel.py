@@ -982,6 +982,21 @@ class PreviewPanel(QWidget):
             is_player_body = cur_mode in PLAYER_BODY_MODE_KEYS
             self.btn_replace_model.setVisible(show and not is_player_body)
 
+    def _variant_display_texture(self) -> Optional[str]:
+        """
+        Текстура активного ВАРИАНТА (Australium/Gold) или None, если вариант
+        не активен. Своя загруженная текстура приоритетнее игрового кадра.
+
+        Единственный источник ответа «что показывает вариант» — им пользуются
+        и тумблер, и переключатели видов 2D/3D, чтобы вид не расходился с
+        состоянием (раньше 2D↔3D игнорировали активный австралий).
+        """
+        if not self._australium_active:
+            return None
+        if self._australium_user_tex and os.path.exists(self._australium_user_tex):
+            return self._australium_user_tex
+        return self._australium_frame
+
     def _switch_to_2d(self) -> None:
         self.view_stack.setCurrentIndex(0)
         self.btn_2d.setStyleSheet(self._btn_style_active)
@@ -989,10 +1004,12 @@ class PreviewPanel(QWidget):
         self._update_3d_buttons_visibility()
         # Командные кнопки остаются видны если есть BLU данные
         self._update_team_btn_visibility()
-        # Если активен вариантный стиль (skin > 0) — показываем его раскладку
-        # карточек (выбранные материалы + «+ Добавить стиль»), а не обычное
-        # поле загрузки. Иначе синхронизируем 2D с активной командой.
-        if self._original_skin_info and self._active_skin != 0:
+        # Приоритет отображения: активный вариант (Australium) → вариантный
+        # стиль (skin > 0, раскладка карточек стиля) → текстуры активной команды.
+        aus_tex = self._variant_display_texture()
+        if aus_tex:
+            self._show_variant_in_2d(aus_tex)
+        elif self._original_skin_info and self._active_skin != 0:
             self._rebuild_cards_for_skin(self._active_skin)
         else:
             self._restore_team_textures_2d(self._active_team)
@@ -1033,6 +1050,14 @@ class PreviewPanel(QWidget):
         if skip or not self._3d_available or not self._3d_widget:
             return
 
+        # Активный вариант (Australium) приоритетнее командных текстур — иначе
+        # возврат в 3D перекрашивал золотую модель обратно в команду.
+        aus_tex = self._variant_display_texture()
+        if aus_tex:
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(delay_ms, lambda t=aus_tex: self._3d_widget.update_texture_file(t))
+            return
+
         # Восстанавливаем текстуры: VPK-оригиналы + пользовательские поверх.
         # _restore_team_textures_3d строит полную карту и правильно
         # обрабатывает очищенные (×) слоты, возвращая им VPK-оригинал.
@@ -1048,6 +1073,32 @@ class PreviewPanel(QWidget):
         elif self.image_path and os.path.exists(self.image_path):
             path = self.image_path
             QTimer.singleShot(delay_ms, lambda p=path: self._apply_image_to_3d(p))
+
+    def _schedule_3d(self, fn, delay_ms: int = 300) -> None:
+        """Отложенный вызов обновления 3D-виджета.
+
+        Задержка даёт WebEngine время дорендерить сцену/применить предыдущее
+        обновление — иначе часть команд теряется. Единая точка вместо россыпи
+        QTimer.singleShot(300, ...) по обработчикам карточек.
+        """
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(delay_ms, fn)
+
+    def _apply_tex_to_3d_later(self, mat_name: str, path: str) -> None:
+        """Единая точка наложения текстуры на 3D после смены в карточке/загрузки.
+
+        Маршрутизация: critHIT-сцена → текстура сцены; GIF → анимированное
+        наложение; иначе — обычная карта материала. Ничего не делает вне
+        3D-режима.
+        """
+        if not (self.is_3d_mode() and self._3d_widget):
+            return
+        if self._crithit_mode:
+            self._schedule_3d(lambda p=path: self._update_scene_texture(p))
+        elif path.lower().endswith('.gif'):
+            self._schedule_3d(lambda p=path, m=mat_name: self._apply_gif_to_3d(p, m))
+        else:
+            self._schedule_3d(lambda p=path, m=mat_name: self._3d_widget.apply_material_map({m: p}))
 
     def is_3d_mode(self) -> bool:
         return self.view_stack.currentIndex() == 1
@@ -1107,6 +1158,33 @@ class PreviewPanel(QWidget):
             )
             self.btn_misc.setVisible(_show_misc)
 
+    def _sync_variant_buttons(self) -> None:
+        """
+        Единая точка ПОДСВЕТКИ тулбара вариантов (RED/BLU/Australium/Прочее).
+
+        Стили выводятся из состояния (_active_team / _australium_active /
+        _misc_mode), а не мутируются каждым обработчиком по отдельности —
+        иначе кнопки «залипали» при переходах команда↔австралий↔прочее.
+        Видимостью кнопок управляет _update_team_btn_visibility.
+        """
+        if not hasattr(self, 'btn_red'):
+            return   # тулбар ещё не построен
+        aus = self._australium_active
+        self.btn_red.setStyleSheet(
+            self._team_style_on if (not aus and self._active_team == Team.RED)
+            else self._team_style_off
+        )
+        self.btn_blu.setStyleSheet(
+            self._team_style_on if (not aus and self._active_team == Team.BLU)
+            else self._team_style_off
+        )
+        if hasattr(self, 'btn_aus'):
+            self.btn_aus.setStyleSheet(self._aus_style_on if aus else self._aus_style_off)
+        if hasattr(self, 'btn_misc'):
+            self.btn_misc.setStyleSheet(
+                self._team_style_on if self._misc_mode else self._team_style_off
+            )
+
     def _is_force_team_eligible(self) -> bool:
         """Можно ли предложить «сделать командным» — обычное оружие/снаряд/пикап/
         насмешка (не шапка/персонаж/спец-режим/кастом/руки). Модель должна быть
@@ -1132,9 +1210,8 @@ class PreviewPanel(QWidget):
             self.btn_make_team.setVisible(False)
         self.btn_red.setVisible(True)
         self.btn_blu.setVisible(True)
-        self.btn_red.setStyleSheet(self._team_style_on)
-        self.btn_blu.setStyleSheet(self._team_style_off)
         self._active_team = Team.RED
+        self._sync_variant_buttons()
 
     def get_force_team(self) -> bool:
         """Включён ли режим «сделать командным» (для BuildRequest.force_team)."""
@@ -1228,23 +1305,16 @@ class PreviewPanel(QWidget):
         # карточки), иначе команда применялась бы к служебным карточкам.
         if self._misc_mode:
             self._misc_mode = False
-            self.btn_misc.setStyleSheet(self._team_style_off)
             restore = self._cards_before_misc or [self._main_material_name or '']
             self._set_material_slots([m for m in restore if m])
         aus_was_active = self._australium_active
-        if aus_was_active:
-            self._australium_active = False
-            self.btn_aus.setStyleSheet(self._aus_style_off)
+        self._australium_active = False
         # Если уже на этой команде и австралий не был активен — делать нечего.
         if self._active_team == team and not aus_was_active:
+            self._sync_variant_buttons()
             return
         self._active_team = team
-        self.btn_red.setStyleSheet(
-            self._team_style_on if team == Team.RED else self._team_style_off
-        )
-        self.btn_blu.setStyleSheet(
-            self._team_style_on if team == Team.BLU else self._team_style_off
-        )
+        self._sync_variant_buttons()
         # Руки И force-team мульти-материал: на BLU показываем выбранные карточки +
         # «+» для добавления (та же логика). Хранение нативное (_textures[Team.BLU]).
         from src.data.player_hands import HAND_MODE_KEYS as _HMK_sw
@@ -1269,9 +1339,10 @@ class PreviewPanel(QWidget):
         if not self._misc_materials:
             return
         self._misc_mode = not self._misc_mode
-        self.btn_misc.setStyleSheet(
-            self._team_style_on if self._misc_mode else self._team_style_off
-        )
+        # «Прочее» — просмотр обычных (не вариантных) текстур: активный
+        # австралий гасим, как это делает и переключение команды.
+        self._australium_active = False
+        self._sync_variant_buttons()
         if self._misc_mode:
             # Запоминаем обычный набор и показываем служебные карточки.
             self._cards_before_misc = list(self._material_names)
@@ -1705,7 +1776,7 @@ class PreviewPanel(QWidget):
 
         # Командные и Australium кнопки (учитывают восстановленное состояние)
         self._australium_active = False
-        self.btn_aus.setStyleSheet(self._aus_style_off)
+        self._sync_variant_buttons()
         self._update_team_btn_visibility()
 
         # Мгновенно грузим модель — obj уже на диске, воркер не нужен
@@ -1992,7 +2063,7 @@ class PreviewPanel(QWidget):
         self._main_material_name = None
         if hasattr(self, 'btn_misc'):
             self.btn_misc.setVisible(False)
-            self.btn_misc.setStyleSheet(self._team_style_off)
+        self._sync_variant_buttons()
         # Возврат от кастомной модели: сбрасываем её карточки/материалы. Иначе их
         # идентичность (напр. "material") остаётся, и у одно-текстурной игровой
         # модели (где multi_material не приходит) австралий/команда привяжутся к
@@ -2316,7 +2387,7 @@ class PreviewPanel(QWidget):
         self._australium_frame = png_path
         self._australium_mat_name = (mat_name or "").lower() or None
         self._australium_active = False
-        self.btn_aus.setStyleSheet(self._aus_style_off)
+        self._sync_variant_buttons()
         self._update_team_btn_visibility()
         logger.info(
             f"[Panel] Australium вариант доступен: {os.path.basename(png_path)} "
@@ -2386,27 +2457,15 @@ class PreviewPanel(QWidget):
         if not self._australium_frame or not self._3d_widget:
             return
         self._australium_active = not self._australium_active
+        # Подсветка (австралий гасит команды и наоборот) — из единой точки.
+        self._sync_variant_buttons()
         from PySide6.QtCore import QTimer
         if self._australium_active:
-            self.btn_aus.setStyleSheet(self._aus_style_on)
-            # Взаимоисключение с командой: при австралии RED/BLU визуально гасим.
-            self.btn_red.setStyleSheet(self._team_style_off)
-            self.btn_blu.setStyleSheet(self._team_style_off)
-            # Своя текстура для Australium имеет приоритет над игровым gold-вариантом
-            tex = (self._australium_user_tex
-                   if (self._australium_user_tex and os.path.exists(self._australium_user_tex))
-                   else self._australium_frame)
+            # Своя текстура приоритетнее игрового gold-кадра (единый резолвер).
+            tex = self._variant_display_texture()
             QTimer.singleShot(50, lambda t=tex: self._3d_widget.update_texture_file(t))
             self._show_variant_in_2d(tex)
         else:
-            self.btn_aus.setStyleSheet(self._aus_style_off)
-            # Возвращаем подсветку активной команды.
-            self.btn_red.setStyleSheet(
-                self._team_style_on if self._active_team == Team.RED else self._team_style_off
-            )
-            self.btn_blu.setStyleSheet(
-                self._team_style_on if self._active_team == Team.BLU else self._team_style_off
-            )
             # Возвращаем текстуру активной команды: VPK-оригинал + пользовательская
             # поверх. _restore_team_textures_3d корректно выбирает update_texture_file
             # для одиночного кадра (прямой update_animated с 1 кадром и fps=0 ломал текстуру).
@@ -2536,8 +2595,7 @@ class PreviewPanel(QWidget):
                 _seen_misc.add(_ml)
                 self._misc_materials.append(_m)
         self._misc_mode = False
-        if hasattr(self, 'btn_misc'):
-            self.btn_misc.setStyleSheet(self._team_style_off)
+        self._sync_variant_buttons()
 
         current_all = (
             self._material_names if self._card_mode else []
@@ -2643,11 +2701,12 @@ class PreviewPanel(QWidget):
         _sp = getattr(self.parent, 'settings_panel', None)   # и выходим из режима их редактирования
         if _sp is not None and hasattr(_sp, 'exit_texture_edit'):
             _sp.exit_texture_edit(restore=True)
-        # Сбрасываем кнопки команд
+        # Сбрасываем кнопки команд. Australium предыдущего оружия тоже гасим
+        # явно (раньше полагались на порядок вызова set_3d_params).
+        self._australium_active = False
         self.btn_red.setVisible(False)
         self.btn_blu.setVisible(False)
-        self.btn_red.setStyleSheet(self._team_style_on)
-        self.btn_blu.setStyleSheet(self._team_style_off)
+        self._sync_variant_buttons()
         self._stop_gif()
 
         from src.data.player_hands import HAND_MODE_KEYS, HAND_MODES
@@ -3267,15 +3326,7 @@ class PreviewPanel(QWidget):
             self.image_path = path
             self._store_texture(mat_name, path)
             self.update_info_summary()
-            if self.is_3d_mode() and self._3d_widget and not self._crithit_mode:
-                from PySide6.QtCore import QTimer
-                if path.lower().endswith('.gif'):
-                    QTimer.singleShot(300, lambda p=path, m=mat_name: self._apply_gif_to_3d(p, m))
-                else:
-                    QTimer.singleShot(300, lambda p=path, m=mat_name: self._3d_widget.apply_material_map({m: p}))
-            elif self.is_3d_mode() and self._crithit_mode and self._3d_widget:
-                from PySide6.QtCore import QTimer
-                QTimer.singleShot(300, lambda p=path: self._update_scene_texture(p))
+            self._apply_tex_to_3d_later(mat_name, path)
         else:
             # Сброс текстуры (нажат ×) — удаляем и восстанавливаем оригинал в 3D.
             # Вызываем restore независимо от текущего режима (2D или 3D) — иначе
@@ -3284,8 +3335,7 @@ class PreviewPanel(QWidget):
             self._store_texture(mat_name, None)
             self.update_info_summary()
             if self._3d_widget and self._3d_available:
-                from PySide6.QtCore import QTimer
-                QTimer.singleShot(300, lambda: self._restore_team_textures_3d(self._active_team))
+                self._schedule_3d(lambda: self._restore_team_textures_3d(self._active_team))
 
     def _is_neutral_texture(self, mat_name: str) -> bool:
         """True если текстура не относится к конкретной команде (RED/BLU).
@@ -3294,10 +3344,20 @@ class PreviewPanel(QWidget):
         одинаковы для обеих команд — их нужно хранить в обоих словарях
         чтобы карточка не пропадала при переключении команды.
         """
-        if not self._vpk_blu_name_map:
-            return True   # нет маппинга → считаем нейтральной
-        return (mat_name not in self._vpk_blu_name_map and
-                mat_name not in self._vpk_blu_name_map.values())
+        if self._vpk_blu_name_map:
+            return (mat_name not in self._vpk_blu_name_map and
+                    mat_name not in self._vpk_blu_name_map.values())
+        # Нет per-material маппинга. Но если у оружия есть одиночный BLU-кадр
+        # (_blu_frames) — его ГЛАВНАЯ текстура командная: хранение RED/BLU
+        # раздельное, иначе загрузка на BLU затирала бы RED (и наоборот).
+        # Остальные слоты (fixed/tg-extras) при этом нейтральны.
+        if self._blu_frames:
+            main_key = (self._main_material_name
+                        or (self._material_names[0] if self._material_names
+                            else SINGLE_TEX_KEY))
+            if mat_name in (main_key, SINGLE_TEX_KEY):
+                return False
+        return True   # нет командных данных → нейтральная
 
     def _store_texture(self, mat_name: str, path: Optional[str]) -> None:
         """Сохраняет текстуру в _textures.
@@ -3337,22 +3397,16 @@ class PreviewPanel(QWidget):
             # имя материала модели, чтобы текстура легла на правильный меш.
             apply_key = (self._custom_material_for_card(mat_name)
                          if self._custom_vpk_mode else mat_name)
-            if self.is_3d_mode() and self._3d_widget:
-                from PySide6.QtCore import QTimer
-                if path.lower().endswith('.gif'):
-                    QTimer.singleShot(300, lambda p=path, m=apply_key: self._apply_gif_to_3d(p, m))
-                else:
-                    QTimer.singleShot(300, lambda p=path, m=apply_key: self._3d_widget.apply_material_map({m: p}))
+            self._apply_tex_to_3d_later(apply_key, path)
         else:
             # Сброс — удаляем из обеих команд если нейтральная.
             self._store_texture(mat_name, None)
             if self._3d_widget and self._3d_available:
-                from PySide6.QtCore import QTimer
                 if self._custom_vpk_mode:
                     # Вернуть оригинал мода на правильный меш.
-                    QTimer.singleShot(300, self._apply_custom_vpk_textures_to_3d)
+                    self._schedule_3d(self._apply_custom_vpk_textures_to_3d)
                 else:
-                    QTimer.singleShot(300, lambda: self._restore_team_textures_3d(self._active_team))
+                    self._schedule_3d(lambda: self._restore_team_textures_3d(self._active_team))
 
     def get_slot_image_paths(self) -> dict:
         """Возвращает {material_name: path} для всех заполненных слотов.
@@ -3400,9 +3454,12 @@ class PreviewPanel(QWidget):
         self.image_path = path
         self.vtf_path = None
 
-        # Сохраняем под активной командой
+        # Через _store_texture — как карточки: нейтральные текстуры попадают в
+        # обе команды, на вариантном стиле (skin > 0) — в _skin_overrides.
+        # Раньше писали в _textures напрямую, и стиль/команда рассинхранивались
+        # с загрузкой через 2D-окно.
         key = self._material_names[0] if self._material_names else SINGLE_TEX_KEY
-        self._textures.setdefault(self._active_team, {})[key] = path
+        self._store_texture(key, path)
 
         if self._card_mode and self._main_card is not None:
             self._main_card.set_image(path)
@@ -3412,17 +3469,12 @@ class PreviewPanel(QWidget):
         # Обновляем 3D если видно
         if self.is_3d_mode() and self._3d_available and self._3d_widget \
                 and not self._from_3d_drop:
-            from PySide6.QtCore import QTimer
-            if self._crithit_mode:
-                QTimer.singleShot(300, lambda p=path: self._update_scene_texture(p))
-            elif self._card_mode and self._material_names:
-                mat = self._material_names[0]
-                if path.lower().endswith('.gif'):
-                    QTimer.singleShot(300, lambda p=path, m=mat: self._apply_gif_to_3d(p, m))
-                else:
-                    QTimer.singleShot(300, lambda p=path, m=mat: self._3d_widget.apply_material_map({m: p}))
+            if self._card_mode and self._material_names and not self._crithit_mode:
+                self._apply_tex_to_3d_later(self._material_names[0], path)
+            elif self._crithit_mode:
+                self._schedule_3d(lambda p=path: self._update_scene_texture(p))
             else:
-                QTimer.singleShot(300, lambda p=path: self._apply_image_to_3d(p))
+                self._schedule_3d(lambda p=path: self._apply_image_to_3d(p))
 
         self.update_info_summary()
 
@@ -3448,9 +3500,10 @@ class PreviewPanel(QWidget):
                 Image.frombytes("RGBA", (w, h), rgba).save(png_for_3d)
                 self.image_path = png_for_3d
 
-                # Сохраняем под активной командой
+                # Через _store_texture — та же маршрутизация (команды/стили),
+                # что и у карточек/load_image.
                 key = self._material_names[0] if self._material_names else SINGLE_TEX_KEY
-                self._textures.setdefault(self._active_team, {})[key] = png_for_3d
+                self._store_texture(key, png_for_3d)
 
                 if self._card_mode and self._main_card:
                     self._main_card.set_image(png_for_3d)
@@ -4214,10 +4267,8 @@ class PreviewPanel(QWidget):
         self._active_team = Team.RED   # сброс синхронизируем со стилями кнопок
         if hasattr(self, 'btn_red'):
             self.btn_red.setVisible(False)
-            self.btn_red.setStyleSheet(self._team_style_on)
         if hasattr(self, 'btn_blu'):
             self.btn_blu.setVisible(False)
-            self.btn_blu.setStyleSheet(self._team_style_off)
         # Сбрасываем «+ Команда» (force_team) — покажется снова при загрузке модели.
         self._force_team = False
         if hasattr(self, 'btn_make_team'):
@@ -4229,7 +4280,7 @@ class PreviewPanel(QWidget):
         self._australium_mat_name = None
         if hasattr(self, 'btn_aus'):
             self.btn_aus.setVisible(False)
-            self.btn_aus.setStyleSheet(self._aus_style_off)
+        self._sync_variant_buttons()
         if self._aus_card is not None:
             self._aus_card.setParent(None)
             self._aus_card.deleteLater()
