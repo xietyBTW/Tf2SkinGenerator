@@ -2981,38 +2981,146 @@ class VPKService:
         )
 
     @staticmethod
-    def build_vpk(
-        request: Optional[BuildRequest] = None,
+    def _stage_locate_tools(
+        ctx, mode: str, weapon_key: str, hat_mdl_path, tf2_root_dir, t: dict,
+        keep_temp_on_error: bool, debug_mode: bool,
+    ):
+        """
+        Стадия 1 модельного конвейера: инструменты и пути.
+
+        Проверяет TF2/Crowbar, резолвит studiomdl/misc-VPK/tf-папку и строит
+        список кандидатов MDL.
+
+        Returns:
+            (error_result, None) — ошибка, ctx очищен; error_result — готовый
+            ответ build_vpk (False, message);
+            (None, (studiomdl_exe, tf2_misc_vpk, tf_dir, crowbar_exe,
+                    paths_to_try)) — успех.
+        """
+        def _fail(message: str):
+            ctx.cleanup(on_error=True, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
+            return (False, message), None
+
+        # Без пути к TF2 продолжать нельзя — нужны VPK файлы игры
+        if not tf2_root_dir:
+            logger.error("Путь к TF2 не указан")
+            return _fail(t['error_tf2_not_specified'])
+
+        # Crowbar нужен для декомпиляции, без него никак
+        crowbar_exists, crowbar_error = TF2Paths.check_crowbar()
+        if not crowbar_exists:
+            return _fail(crowbar_error)
+
+        try:
+            studiomdl_exe, tf2_misc_vpk, tf_dir = TF2Paths.resolve(tf2_root_dir)
+        except FileNotFoundError as e:
+            return _fail(str(e))
+
+        paths_to_try, _mdl_path_error = VPKService._build_mdl_search_paths(
+            mode, weapon_key, hat_mdl_path, t, tf2_root_dir
+        )
+        if _mdl_path_error:
+            return _fail(_mdl_path_error)
+
+        crowbar_exe = TF2Paths.get_crowbar_path()
+        return None, (studiomdl_exe, tf2_misc_vpk, tf_dir, crowbar_exe, paths_to_try)
+
+    @staticmethod
+    def _stage_find_and_decompile(
+        ctx, mode: str, weapon_key: str, hat_mdl_path, paths_to_try,
+        tf2_misc_vpk: str, crowbar_exe: str, draw_uv_layout: bool, size,
+        export_folder: str, keep_temp_on_error: bool, debug_mode: bool,
+        language: str, t: dict, emit_progress, emit_sub, is_cancelled,
+        cancelled_result,
+    ):
+        """
+        Стадия 2 модельного конвейера: MDL в игровом VPK + декомпиляция.
+
+        Находит MDL по кандидатам, для %s-шапок обновляет weapon_key на
+        реальный стем, получает декомпилированный QC (через кэш декомпиляции),
+        рисует UV-шаблон (по запросу), чистит LOD и пополняет кэш.
+
+        Returns:
+            (error_result, '', weapon_key, '') — ошибка/отмена, ctx очищен
+            (для отмены — cancelled_result);
+            (None, found_mdl_path, weapon_key, qc_path) — успех.
+        """
+        def _fail(message_result):
+            return message_result, '', weapon_key, ''
+
+        found_mdl_path, _mdl_find_error = VPKService._find_existing_mdl(
+            paths_to_try, tf2_misc_vpk, weapon_key, t
+        )
+        if _mdl_find_error:
+            ctx.cleanup(on_error=True, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
+            return _fail((False, _mdl_find_error))
+
+        # Для шапок с %s-плейсхолдером: обновляем weapon_key на реальный стем
+        # (all_domination_%s → all_domination_heavy), иначе кэш и имена файлов сломаются
+        if mode == "hat" and hat_mdl_path and "%s" in hat_mdl_path:
+            weapon_key = Path(found_mdl_path).stem
+            logger.info(f"Hat weapon_key обновлён: {weapon_key}")
+
+        if is_cancelled():
+            return _fail(cancelled_result(ctx))
+        emit_progress(25, t.get('build_decompiling', 'Decompiling model...'))
+
+        # === Кэш декомпила — проверяем ДО extraction ===
+        # Ключ: weapon_key + vpk_path + mdl_rel_path + mtime(vpk).
+        # mtime VPK меняется при каждом обновлении TF2 → авто-инвалидация.
+        # При cache hit: пропускаем extract_file_set (3-10 сек) + Crowbar (10-30 сек).
+        qc_path, cached_decompile, _decomp_error = VPKService._obtain_decompiled_qc(
+            ctx, found_mdl_path, weapon_key, tf2_misc_vpk, crowbar_exe,
+            debug_mode, language, t, emit_sub,
+        )
+        if _decomp_error:
+            ctx.cleanup(on_error=True, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
+            return _fail((False, _decomp_error))
+
+        if draw_uv_layout:
+            VPKService._generate_uv_layout(ctx, weapon_key, size, export_folder, language)
+
+        # Удаляем LOD файлы до кэширования — чтобы в кэше лежали уже чистые файлы
+        ModelBuildService.remove_lod_files(ctx.decompile_dir)
+
+        # Сохраняем в кэш после очистки — следующая сборка пропустит extraction + decompile
+        if not cached_decompile:
+            save_to_cache(weapon_key, tf2_misc_vpk, found_mdl_path, ctx.decompile_dir)
+
+        return None, found_mdl_path, weapon_key, qc_path
+
+    @staticmethod
+    def _build_model_mode_vpk(
+        ctx: BuildContext,
+        r: BuildRequest,
+        weapon_key: str,
+        t: dict,
         *,
-        parent_window=None,  # Окно для диалогов (если нужно показать что-то юзеру)
-        model_file_callback=None,  # Колбэк для запроса файла из UI потока (потому что Qt не любит мультипоточность)
-        extra_texture_callback=None,  # Колбэк для запроса одной доп. текстуры: callback(material_name, weapon_key) -> Optional[str]
-        extra_model_callback=None,  # Колбэк для запроса доп. модели: callback(smd_name, weapon_key) -> Optional[str]
-        texture_mismatch_callback=None,  # Колбэк для предупреждения о несовпадении текстур: callback(msg) -> bool
-        sub_progress_callback: Optional[Callable[[int, str], None]] = None,
-        progress_callback: Optional[Callable[[int, str], None]] = None,  # Главный прогресс (проценты стадий)
-        cancel_callback: Optional[Callable[[], bool]] = None,  # True = пользователь запросил отмену
-        **legacy_kwargs,  # Совместимость: build_vpk(image_path=..., mode=...) собирает BuildRequest
+        model_file_callback=None,
+        extra_texture_callback=None,
+        extra_model_callback=None,
+        texture_mismatch_callback=None,
+        parent_window=None,
+        emit_progress,
+        emit_sub,
+        is_cancelled,
+        cancelled_result,
     ) -> Tuple[bool, str]:
         """
-        Главная функция: делает из картинки VPK файл.
-        Возвращает (success, message); при ошибке message содержит описание.
-        Здесь весь конвейер: модель → текстуры → компиляция → упаковка.
+        Конвейер МОДЕЛЬНОГО мода (оружие/шапка/руки/тело): поиск MDL в игровом
+        VPK -> декомпиляция (cache-aware) -> замена модели -> план материалов ->
+        рендер всех текстур (параллельно с компиляцией) -> сборка доп. моделей
+        (классы/стили шапок). Спец-режимы (critHIT/спрей/маски) сюда не заходят.
 
-        Параметры сборки берутся из ``request`` (BuildRequest). Для обратной
-        совместимости (и тестов) допускается старый вызов через kwargs —
-        тогда BuildRequest собирается из них. Колбэки и parent_window — это
-        runtime-функции UI-потока, они всегда передаются отдельно.
+        Returns:
+            (False, error_message)  — ошибка/отмена, ctx уже очищен;
+            (True, vmt_to_delete)   — успех; vmt_to_delete — имя
+                                      отредактированного VMT ('' если нет),
+                                      упаковку VPK выполняет вызывающий.
         """
-        if request is None:
-            request = BuildRequest(**legacy_kwargs)
-
-        # Распаковываем BuildRequest в локальные имена (тело ниже работает с ними).
-        # Нормализуем «пустые» коллекции к [] / {}, как раньше делал build_with_progress.
-        r = request
-        image_path = r.image_path
+        # Локальные имена = поля запроса (тело стадий работает с ними).
         mode = r.mode
-        filename = r.filename
+        image_path = r.image_path
         size = r.size
         format_type = r.format_type
         flags = r.flags or []
@@ -3042,6 +3150,393 @@ class VPKService:
         isolate_shoulders = r.isolate_shoulders
         panel_blu_textures = r.panel_blu_textures
         force_team = r.force_team
+
+        # Для рук замена SMD-модели не поддерживается.
+        if mode in HAND_MODE_KEYS:
+            replace_model_enabled = False
+
+        # ── Стадия 1: инструменты и пути (TF2/Crowbar/studiomdl/кандидаты MDL) ──
+        err, tools = VPKService._stage_locate_tools(
+            ctx, mode, weapon_key, hat_mdl_path, tf2_root_dir, t,
+            keep_temp_on_error, debug_mode,
+        )
+        if err is not None:
+            return err
+        studiomdl_exe, tf2_misc_vpk, tf_dir, crowbar_exe, paths_to_try = tools
+
+        try:
+            # ── Стадия 2: поиск MDL в игровом VPK + декомпиляция (cache-aware) ──
+            err, found_mdl_path, weapon_key, qc_path = VPKService._stage_find_and_decompile(
+                ctx, mode, weapon_key, hat_mdl_path, paths_to_try,
+                tf2_misc_vpk, crowbar_exe, draw_uv_layout, size, export_folder,
+                keep_temp_on_error, debug_mode, language, t,
+                emit_progress, emit_sub, is_cancelled, cancelled_result,
+            )
+            if err is not None:
+                return err
+
+            if is_cancelled():
+                return cancelled_result(ctx)
+            emit_progress(40, t.get('build_processing', 'Processing texture...'))
+
+            # Заменяем модель, если включен режим замены
+            # Пропускаем если model_ready_path задан — пользователь уже указал готовый файл
+            # Диалог выбора файла показываем здесь, после декомпиляции (чтобы знать куда копировать)
+            replace_model_smd_path = VPKService._resolve_replace_model_smd(
+                replace_model_enabled, model_ready_path, replace_model_path,
+                model_file_callback, parent_window,
+            )
+
+            VPKService._apply_model_replacement(
+                ctx, qc_path, weapon_key, replace_model_smd_path,
+                extra_model_callback, language, emit_sub,
+                keep_user_materials=replace_keep_materials,
+            )
+
+            # Извлекаем путь из $cdmaterials в QC файле (до патчинга, потому что потом мы его изменим)
+            original_cdmaterials_path = ModelBuildService.extract_cdmaterials_path_from_qc(qc_path)
+            # Все $cdmaterials пути (для поиска оригинальных VTF в VPK игры)
+            original_cdmaterials_paths = ModelBuildService.extract_all_cdmaterials_paths_from_qc(qc_path)
+
+            if not original_cdmaterials_path:
+                ctx.cleanup(on_error=True, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
+                return False, t['error_cdmaterials_not_extracted'].format(qc_path=qc_path)
+
+            # Извлекаем имя файла из $texturegroup (до патчинга, потому что потом мы его изменим)
+            texture_filename = ModelBuildService.extract_texturegroup_filename(qc_path)
+            if not texture_filename:
+                ctx.cleanup(on_error=True, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
+                return False, t['error_texturegroup_not_extracted'].format(qc_path=qc_path)
+
+            if mode == "hat":
+                logger.info(
+                    f"[HAT BUILD NAMES]  qc={qc_path!r}\n"
+                    f"  weapon_key          = {weapon_key!r}\n"
+                    f"  texture_filename    = {texture_filename!r}\n"
+                    f"  cdmaterials_path    = {original_cdmaterials_path!r}\n"
+                    f"  replace_smd_path    = {replace_model_smd_path!r}"
+                )
+                # Показываем пользователю оригинальные имена из игры (не имена файла-замены)
+                _repl_name = os.path.basename(replace_model_smd_path) if replace_model_smd_path else None
+                if _repl_name:
+                    emit_sub(-1,
+                        f"Original game names: model={weapon_key}, texture={texture_filename}"
+                        if language == "en" else
+                        f"Оригинальные имена из игры: модель={weapon_key}, текстура={texture_filename}"
+                    )
+
+            # Извлекаем полную структуру $texturegroup для поддержки:
+            # 1. BLU команды (отдельная строка/row в texturegroup)
+            # 2. Дополнительных материалов (shell, scope и т.д. - столбцы/columns)
+            # ── «Сделать командным»: синтез BLU-строки для оружия БЕЗ
+            # нативной команды. Делаем ДО извлечения tg_structure — тогда
+            # весь командный путь (blu_row, генерация BLU, рекомпиляция)
+            # сработает как у нативно-командного оружия. Материалы меша
+            # берём из reference SMD (skin 0), skin 1 = {material}_blue. ──
+            VPKService._apply_force_team(force_team, mode, qc_path, weapon_key, ctx)
+
+            _plan = VPKService._plan_materials(
+                qc_path, mode, weapon_key, ctx, texture_filename, image_path,
+                blu_image_path, panel_extra_textures, panel_blu_textures,
+                isolate_shoulders, blu_mode, skin_build_data,
+                replace_keep_materials, custom_qc_text, original_cdmaterials_path,
+            )
+            tg_structure = _plan.tg_structure
+            blu_row = _plan.blu_row
+            extra_materials = _plan.extra_materials
+            _blu_is_team = _plan.blu_is_team
+            _blacklisted_extra = _plan.blacklisted_extra
+            texture_filename = _plan.texture_filename
+            blu_mode = _plan.blu_mode
+            _has_skins = _plan.has_skins
+            _shoulder_iso = _plan.shoulder_iso
+            image_path = _plan.image_path
+            skin_build_data = _plan.skin_build_data
+            _game_vmt_name = _plan.game_vmt_name
+
+            # Извлекаем путь из $cdmaterials после патчинга (теперь с префиксом console\)
+            patched_cdmaterials_path = ModelBuildService.extract_cdmaterials_path_from_qc(qc_path)
+            if not patched_cdmaterials_path:
+                ctx.cleanup(on_error=True, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
+                return False, t['error_cdmaterials_patched_not_extracted'].format(qc_path=qc_path)
+
+            # Конвертируем путь из $cdmaterials в путь для материалов
+            # Путь теперь в формате: console\models\weapons\v_bonesaw
+            # Конвертируем в: materials/console/models/weapons/v_bonesaw/ (потому что VPK требует такую структуру)
+            materials_rel_path = "materials/" + patched_cdmaterials_path.replace('\\', '/').strip().rstrip('/')
+            if not materials_rel_path.endswith('/'):
+                materials_rel_path += '/'
+
+            vmt_filename = f"{texture_filename}.vmt"
+            vtf_filename = f"{texture_filename}.vtf"
+
+            # Подготавливаем пути в vpkroot (создаем структуру папок как в VPK)
+            vtf_output_path = ctx.vpkroot_dir.joinpath(*materials_rel_path.rstrip('/').split('/'))
+            vmt_path = vtf_output_path / vmt_filename
+            vtf_temp_png = vtf_output_path / vtf_filename.replace(".vtf", ".png")
+
+            try:
+                ensure_directory_exists(vtf_output_path)
+            except OSError as e:
+                if "path too long" in str(e).lower():
+                    logger.error(f"Путь слишком длинный для режима {mode}")
+                    ctx.cleanup(on_error=True, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
+                    return False, t['error_path_too_long'].format(mode=mode)
+                else:
+                    raise
+
+            # ── Проверка текстур в пользовательском SMD (режим «Модель уже готова») ──
+            _mismatch_msg = VPKService._ready_model_texture_mismatch(
+                model_ready_path, qc_path, weapon_key, ctx.decompile_dir, language)
+            if (_mismatch_msg and texture_mismatch_callback
+                    and not texture_mismatch_callback(_mismatch_msg)):
+                logger.info("[MODEL READY] Пользователь отменил сборку из-за несовпадения текстур")
+                ctx.cleanup(on_error=False, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
+                return False, (
+                    "Сборка отменена: несовпадение текстур в SMD файле."
+                    if language == "ru" else
+                    "Build cancelled: texture mismatch in SMD file."
+                )
+
+            if is_cancelled():
+                return cancelled_result(ctx)
+            emit_progress(60, t.get('build_compiling', 'Compiling model...'))
+
+            # ── Компиляция модели в фоне: обычная / SMD-замена / готовый MDL ──
+            _compile_thread, _compile_exc = VPKService._start_model_compile(
+                model_ready_path, qc_path, weapon_key, ctx,
+                studiomdl_exe, tf_dir, debug_mode, language, emit_sub,
+            )
+
+            # Эффективные настройки на материал: пер-текстурный оверрайд
+            # поверх глобальных (size/format/flags/options); без оверрайда —
+            # глобальные. Замыкание нужно и для главной текстуры, и для
+            # panel-extra текстур дальше по коду.
+            from src.data.texture_overrides import effective_settings as _eff_settings
+            _global_tex = {'size': size, 'format': format_type,
+                           'flags': flags or [], 'options': vtf_options or {}}
+
+            def _eff(_mat):
+                e = _eff_settings(_global_tex, (material_settings or {}).get(_mat))
+                return e['size'], e['format'], e['flags'], e['options']
+
+            # Игровой tf2_textures_dir.vpk — резолвим один раз (RED-оригинал
+            # и извлечение оригинального VMT).
+            tf2_textures_vpk = TF2Paths.resolve_textures_vpk(tf2_root_dir)
+
+            # Главная текстура: RED-резолв → VTF (custom/готовый/рендер) →
+            # оригинальный VMT с перенаправлением $basetexture.
+            image_path, animated_fps, is_normal_map, vmt_to_delete = (
+                VPKService._build_main_material(
+                    image_path, texture_filename, vtf_filename, vtf_temp_png,
+                    vmt_path, original_cdmaterials_path, original_cdmaterials_paths,
+                    _game_vmt_name, patched_cdmaterials_path, mode, hat_apply_game_paints,
+                    ctx, vtf_output_path, tf2_textures_vpk, tf2_misc_vpk,
+                    extra_texture_callback, weapon_key, custom_vtf_path, _eff,
+                )
+            )
+
+            # Пер-текстурные файловые карты (detail/selfillum/phong) применяются
+            # ПОЗЖЕ — после создания VMT доп. материалов и BLU (см. ниже),
+            # чтобы карты ложились в VMT именно своего материала.
+
+            # ── BLU Team Texture (командная раскраска) ───────────────────────────
+            # Для оружия с одной общей текстурой (часы шпиона) BLU не создаём,
+            # даже если в BLU-слот случайно попала картинка — иначе появится
+            # лишний {texture}_blue.vtf/vmt.
+            VPKService._maybe_build_blu_team_texture(
+                weapon_key, blu_row, _blu_is_team, blu_mode, blu_image_path,
+                vtf_output_path, vtf_filename, vmt_path, texture_filename,
+                patched_cdmaterials_path, size, format_type, flags, vtf_options,
+            )
+
+            # === Создаем текстуры для дополнительных материалов модели (shell, scope и т.д.) ===
+            # Это столбцы 1+ из RED строки $texturegroup
+            # Словарь для хранения путей к VTF дополнительных материалов (нужно для BLU копий)
+            extra_materials_vtf_paths = VPKService._build_extra_material_textures(
+                extra_materials, weapon_key, ctx, vtf_output_path, vmt_path,
+                patched_cdmaterials_path, original_cdmaterials_paths,
+                tf2_textures_vpk, tf2_misc_vpk, extra_texture_callback,
+                custom_vtf_path, size, format_type, flags, vtf_options, animated_fps,
+            )
+
+            # === Блэклист/служебные материалы: запись ОРИГИНАЛЬНОГО VMT ===
+            # Глаза/убер/зомби и т.п. не редактируются (нет карточек), но из-за
+            # console\-cdmaterials модель ищет их VMT по новому пути — без него
+            # материал фиолетовый. Копируем оригинальный VMT материала в
+            # console\-путь: его текстурные ссылки АБСОЛЮТНЫЕ (eyeball→shared,
+            # invun/zombie→models/player/...), поэтому отдельный VTF не нужен —
+            # игровые текстуры находятся по абсолютным путям. На случай
+            # относительного $basetexture дополнительно кладём VTF, если он есть.
+            VPKService._write_blacklisted_materials(
+                _blacklisted_extra, panel_extra_textures, ctx, vtf_output_path,
+                vmt_path, patched_cdmaterials_path, original_cdmaterials_paths,
+                tf2_textures_vpk, tf2_misc_vpk,
+            )
+
+            # === Изолированные плечи вьюмодели ===
+            # Пишем переименованный материал плеч (vm_<orig>) под главным
+            # console-путём. Источник: пользовательская текстура (ключ —
+            # ОРИГИНАЛЬНОЕ имя материала) либо оригинал тела из игры.
+            VPKService._write_shoulder_iso_materials(
+                _shoulder_iso, ctx, vtf_output_path, vmt_path,
+                patched_cdmaterials_path, original_cdmaterials_paths,
+                tf2_textures_vpk, tf2_misc_vpk, size, format_type, flags, vtf_options,
+            )
+
+            # === Создаем текстуры для BLU команды ===
+            # BLU - это отдельная строка (row 1) в $texturegroup
+            # Для каждого материала в BLU строке спрашиваем отдельное изображение,
+            # если пользователь отказывается — копируем соответствующую RED текстуру
+            VPKService._build_blu_row_textures(
+                blu_row, tg_structure, texture_filename, vtf_filename, ctx,
+                vtf_output_path, vmt_path, patched_cdmaterials_path,
+                original_cdmaterials_paths, tf2_textures_vpk, tf2_misc_vpk,
+                extra_texture_callback, weapon_key, custom_vtf_path,
+                size, format_type, flags, vtf_options, animated_fps,
+                is_normal_map, extra_materials_vtf_paths,
+            )
+
+            # Зеркальные VMT по оригинальному пути (руки / spy-watch и т.п.).
+            # Для all-class %s-шапок зеркало НЕ создаём (его заменила пер-классовая
+            # сборка; иначе затёрлась бы текстура у невыбранных классов).
+            VPKService._write_hand_mirror_vmts(
+                ctx, mode, weapon_key, original_cdmaterials_path, vtf_output_path)
+
+            if debug_mode:
+                DebugService.save_patched_stage(ctx, ctx.decompile_dir)
+
+            # ── Текстуры из 2D панели (c_arrow, sniper_lens и т.п.) ──────── #
+            # Материалы из SMD модели которые НЕ в QC skinfamilies →
+            # extra_texture_callback их не покрывает → добавляем здесь.
+            # Фиксированные доп. текстуры (vgui-вставки и т.п.) — пишем по
+            # их зашитому пути, не по cdmaterials. Возвращает обработанные имена.
+            VPKService._build_secondary_textures(
+                weapon_key, panel_extra_textures, ctx, vtf_output_path, vmt_path,
+                patched_cdmaterials_path, size, format_type, flags, vtf_options,
+                material_maps, texture_filename, image_path, is_normal_map,
+                _has_skins, skin_build_data, _eff,
+            )
+
+            # Ждём завершения компиляции (шла параллельно с текстурами)
+            _compile_thread.join()
+            if _compile_exc[0] is not None:
+                raise _compile_exc[0]
+
+            # Копируем скомпилированные файлы в vpkroot (VMT файл уже скопирован ранее)
+            # Используем путь из $modelname в QC файле (чтобы структура папок была правильной).
+            # Для material-only оружия (Dead Ringer) модель в мод НЕ кладём —
+            # его показывает родная игровая модель (viewmodel), а скин и карты
+            # находятся через зеркальный VMT по оригинальному пути, который
+            # ссылается на console-VTF. Папку console при этом ОСТАВЛЯЕМ.
+            from src.data.weapons import MATERIAL_ONLY_WEAPON_KEYS as _MAT_ONLY
+            if weapon_key in _MAT_ONLY:
+                logger.info(f"[{weapon_key}] Material-only: модель в мод не включается (console сохраняется)")
+            else:
+                VPKService._copy_compiled_models_to_vpkroot(ctx, qc_path)
+
+            # Мультиклассовая шапка с заменой модели: собираем модель для
+            # ОСТАЛЬНЫХ выбранных классов (основная сборка делает только один).
+            # Источник: явный список выбранных классов (model_player_per_class)
+            # либо legacy %s-шаблон в hat_mdl_path.
+            if mode == "hat" and replace_model_smd_path:
+                _extra_targets = None
+                if hat_class_models and len(hat_class_models) > 1:
+                    # Все выбранные классы, КРОМЕ primary (он уже собран).
+                    _extra_targets = [
+                        m for m in hat_class_models.values() if m != hat_mdl_path
+                    ]
+                _is_pct_tmpl = bool(hat_mdl_path and "%s" in hat_mdl_path)
+                if _extra_targets or _is_pct_tmpl:
+                    VPKService._build_extra_class_hat_models(
+                        ctx, hat_mdl_path, found_mdl_path, replace_model_smd_path,
+                        replace_keep_materials, tf2_misc_vpk, studiomdl_exe,
+                        crowbar_exe, tf_dir, language, emit_sub,
+                        target_mdl_paths=_extra_targets,
+                    )
+
+            # Этап 3: доп. ИЗМЕНЁННЫЕ стили-модели шапки — каждый своей
+            # моделью и своей текстурой в тот же мод (активный стиль уже
+            # собран основным пайплайном выше).
+            if mode == "hat" and hat_style_builds:
+                VPKService._build_extra_style_models(
+                    ctx, hat_style_builds, tf2_misc_vpk, studiomdl_exe,
+                    crowbar_exe, tf_dir, language, emit_sub,
+                    size, format_type, flags, vtf_options, vmt_path,
+                )
+
+            # Подстраховка: удаляем любые {texture}_blue.*, если их успел
+            # создать другой путь, а настоящей команды у предмета нет
+            # (одиночная текстура ИЛИ вариант-онли без c_xxx_blue в группе).
+            from src.data.weapons import NO_BLU_WEAPON_KEYS as _NO_BLU2
+            if weapon_key in _NO_BLU2 or not _blu_is_team:
+                for _blue in vtf_output_path.glob(f"{texture_filename}_blue.*"):
+                    try:
+                        _blue.unlink()
+                        logger.info(f"[{weapon_key}] Удалён лишний BLU-файл: {_blue.name}")
+                    except OSError:
+                        pass
+
+        except Exception as e:
+            error_msg = str(e)
+            if hasattr(e, 'stderr') and e.stderr:
+                error_msg += f"\nSTDERR: {e.stderr}"
+            if hasattr(e, 'stdout') and e.stdout:
+                error_msg += f"\nSTDOUT: {e.stdout}"
+
+            if keep_temp_on_error:
+                error_msg += f"\n\nВременные файлы сохранены в: {ctx.temp_dir}"
+
+            ctx.cleanup(on_error=True, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
+            return False, t['error_model_work'].format(error=error_msg)
+
+        return True, vmt_to_delete or ''
+
+    @staticmethod
+    def build_vpk(
+        request: Optional[BuildRequest] = None,
+        *,
+        parent_window=None,  # Окно для диалогов (если нужно показать что-то юзеру)
+        model_file_callback=None,  # Колбэк для запроса файла из UI потока (потому что Qt не любит мультипоточность)
+        extra_texture_callback=None,  # Колбэк для запроса одной доп. текстуры: callback(material_name, weapon_key) -> Optional[str]
+        extra_model_callback=None,  # Колбэк для запроса доп. модели: callback(smd_name, weapon_key) -> Optional[str]
+        texture_mismatch_callback=None,  # Колбэк для предупреждения о несовпадении текстур: callback(msg) -> bool
+        sub_progress_callback: Optional[Callable[[int, str], None]] = None,
+        progress_callback: Optional[Callable[[int, str], None]] = None,  # Главный прогресс (проценты стадий)
+        cancel_callback: Optional[Callable[[], bool]] = None,  # True = пользователь запросил отмену
+        **legacy_kwargs,  # Совместимость: build_vpk(image_path=..., mode=...) собирает BuildRequest
+    ) -> Tuple[bool, str]:
+        """
+        Главная функция: делает из картинки VPK файл.
+        Возвращает (success, message); при ошибке message содержит описание.
+        Здесь весь конвейер: модель → текстуры → компиляция → упаковка.
+
+        Параметры сборки берутся из ``request`` (BuildRequest). Для обратной
+        совместимости (и тестов) допускается старый вызов через kwargs —
+        тогда BuildRequest собирается из них. Колбэки и parent_window — это
+        runtime-функции UI-потока, они всегда передаются отдельно.
+        """
+        if request is None:
+            request = BuildRequest(**legacy_kwargs)
+
+        # Распаковываем только то, что нужно оркестратору (валидация, спец-режимы,
+        # упаковка). Модельный конвейер распаковывает запрос сам —
+        # см. _build_model_mode_vpk.
+        r = request
+        image_path = r.image_path
+        mode = r.mode
+        filename = r.filename
+        size = r.size
+        format_type = r.format_type
+        flags = r.flags or []
+        vtf_options = r.vtf_options or {}
+        tf2_root_dir = r.tf2_root_dir
+        export_folder = r.export_folder
+        keep_temp_on_error = r.keep_temp_on_error
+        debug_mode = r.debug_mode
+        hat_mdl_path = r.hat_mdl_path
+        language = r.language
+        custom_vtf_path = r.custom_vtf_path
 
         from src.data.translations import TRANSLATIONS
         t = TRANSLATIONS.get(language, TRANSLATIONS['en'])
@@ -3123,408 +3618,40 @@ class VPKService:
                     vmt_to_delete = None
 
             else:
-                # Для обычного оружия и рук — декомпиляция + патч QC + компиляция.
-                # Для рук замена SMD-модели не поддерживается.
-                if mode in HAND_MODE_KEYS:
-                    replace_model_enabled = False
-
-                # Без пути к TF2 продолжать нельзя — нужны VPK файлы игры
-                if not tf2_root_dir:
-                    logger.error("Путь к TF2 не указан")
-                    ctx.cleanup(on_error=True, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
-                    return False, t['error_tf2_not_specified']
-                
-                # Crowbar нужен для декомпиляции, без него никак
-                crowbar_exists, crowbar_error = TF2Paths.check_crowbar()
-                if not crowbar_exists:
-                    ctx.cleanup(on_error=True, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
-                    return False, crowbar_error
-                
-                try:
-                    studiomdl_exe, tf2_misc_vpk, tf_dir = TF2Paths.resolve(tf2_root_dir)
-                except FileNotFoundError as e:
-                    ctx.cleanup(on_error=True, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
-                    return False, str(e)
-                
-                # ── Строим список путей для поиска MDL ───────────────────────────── #
-                paths_to_try, _mdl_path_error = VPKService._build_mdl_search_paths(
-                    mode, weapon_key, hat_mdl_path, t, tf2_root_dir
+                ok, payload = VPKService._build_model_mode_vpk(
+                    ctx, request, weapon_key, t,
+                    model_file_callback=model_file_callback,
+                    extra_texture_callback=extra_texture_callback,
+                    extra_model_callback=extra_model_callback,
+                    texture_mismatch_callback=texture_mismatch_callback,
+                    parent_window=parent_window,
+                    emit_progress=emit_progress,
+                    emit_sub=emit_sub,
+                    is_cancelled=is_cancelled,
+                    cancelled_result=cancelled_result,
                 )
-                if _mdl_path_error:
-                    ctx.cleanup(on_error=True, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
-                    return False, _mdl_path_error
+                if not ok:
+                    return False, payload
+                vmt_to_delete = payload or None
 
-                crowbar_exe = TF2Paths.get_crowbar_path()
-                
-                try:
-                    found_mdl_path, _mdl_find_error = VPKService._find_existing_mdl(
-                        paths_to_try, tf2_misc_vpk, weapon_key, t
-                    )
-                    if _mdl_find_error:
-                        ctx.cleanup(on_error=True, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
-                        return False, _mdl_find_error
-                    
-                    # Для шапок с %s-плейсхолдером: обновляем weapon_key на реальный стем
-                    # (all_domination_%s → all_domination_heavy), иначе кэш и имена файлов сломаются
-                    if mode == "hat" and hat_mdl_path and "%s" in hat_mdl_path:
-                        weapon_key = Path(found_mdl_path).stem
-                        logger.info(f"Hat weapon_key обновлён: {weapon_key}")
-
-                    if is_cancelled():
-                        return cancelled_result(ctx)
-                    emit_progress(25, t.get('build_decompiling', 'Decompiling model...'))
-
-                    # === Кэш декомпила — проверяем ДО extraction ===
-                    # Ключ: weapon_key + vpk_path + mdl_rel_path + mtime(vpk).
-                    # mtime VPK меняется при каждом обновлении TF2 → авто-инвалидация.
-                    # При cache hit: пропускаем extract_file_set (3-10 сек) + Crowbar (10-30 сек).
-                    qc_path, cached_decompile, _decomp_error = VPKService._obtain_decompiled_qc(
-                        ctx, found_mdl_path, weapon_key, tf2_misc_vpk, crowbar_exe,
-                        debug_mode, language, t, emit_sub,
-                    )
-                    if _decomp_error:
-                        ctx.cleanup(on_error=True, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
-                        return False, _decomp_error
-
-                    if draw_uv_layout:
-                        VPKService._generate_uv_layout(ctx, weapon_key, size, export_folder, language)
-
-                    # Удаляем LOD файлы до кэширования — чтобы в кэше лежали уже чистые файлы
-                    ModelBuildService.remove_lod_files(ctx.decompile_dir)
-
-                    # Сохраняем в кэш после очистки — следующая сборка пропустит extraction + decompile
-                    if not cached_decompile:
-                        save_to_cache(weapon_key, tf2_misc_vpk, found_mdl_path, ctx.decompile_dir)
-
-                    if is_cancelled():
-                        return cancelled_result(ctx)
-                    emit_progress(40, t.get('build_processing', 'Processing texture...'))
-                    
-                    # Заменяем модель, если включен режим замены
-                    # Пропускаем если model_ready_path задан — пользователь уже указал готовый файл
-                    # Диалог выбора файла показываем здесь, после декомпиляции (чтобы знать куда копировать)
-                    replace_model_smd_path = VPKService._resolve_replace_model_smd(
-                        replace_model_enabled, model_ready_path, replace_model_path,
-                        model_file_callback, parent_window,
-                    )
-                    
-                    VPKService._apply_model_replacement(
-                        ctx, qc_path, weapon_key, replace_model_smd_path,
-                        extra_model_callback, language, emit_sub,
-                        keep_user_materials=replace_keep_materials,
-                    )
-                    
-                    # Извлекаем путь из $cdmaterials в QC файле (до патчинга, потому что потом мы его изменим)
-                    original_cdmaterials_path = ModelBuildService.extract_cdmaterials_path_from_qc(qc_path)
-                    # Все $cdmaterials пути (для поиска оригинальных VTF в VPK игры)
-                    original_cdmaterials_paths = ModelBuildService.extract_all_cdmaterials_paths_from_qc(qc_path)
-
-                    if not original_cdmaterials_path:
-                        ctx.cleanup(on_error=True, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
-                        return False, t['error_cdmaterials_not_extracted'].format(qc_path=qc_path)
-                    
-                    # Извлекаем имя файла из $texturegroup (до патчинга, потому что потом мы его изменим)
-                    texture_filename = ModelBuildService.extract_texturegroup_filename(qc_path)
-                    if not texture_filename:
-                        ctx.cleanup(on_error=True, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
-                        return False, t['error_texturegroup_not_extracted'].format(qc_path=qc_path)
-
-                    if mode == "hat":
-                        logger.info(
-                            f"[HAT BUILD NAMES]  qc={qc_path!r}\n"
-                            f"  weapon_key          = {weapon_key!r}\n"
-                            f"  texture_filename    = {texture_filename!r}\n"
-                            f"  cdmaterials_path    = {original_cdmaterials_path!r}\n"
-                            f"  replace_smd_path    = {replace_model_smd_path!r}"
-                        )
-                        # Показываем пользователю оригинальные имена из игры (не имена файла-замены)
-                        _repl_name = os.path.basename(replace_model_smd_path) if replace_model_smd_path else None
-                        if _repl_name:
-                            emit_sub(-1,
-                                f"Original game names: model={weapon_key}, texture={texture_filename}"
-                                if language == "en" else
-                                f"Оригинальные имена из игры: модель={weapon_key}, текстура={texture_filename}"
-                            )
-                    
-                    # Извлекаем полную структуру $texturegroup для поддержки:
-                    # 1. BLU команды (отдельная строка/row в texturegroup)
-                    # 2. Дополнительных материалов (shell, scope и т.д. - столбцы/columns)
-                    # ── «Сделать командным»: синтез BLU-строки для оружия БЕЗ
-                    # нативной команды. Делаем ДО извлечения tg_structure — тогда
-                    # весь командный путь (blu_row, генерация BLU, рекомпиляция)
-                    # сработает как у нативно-командного оружия. Материалы меша
-                    # берём из reference SMD (skin 0), skin 1 = {material}_blue. ──
-                    VPKService._apply_force_team(force_team, mode, qc_path, weapon_key, ctx)
-
-                    _plan = VPKService._plan_materials(
-                        qc_path, mode, weapon_key, ctx, texture_filename, image_path,
-                        blu_image_path, panel_extra_textures, panel_blu_textures,
-                        isolate_shoulders, blu_mode, skin_build_data,
-                        replace_keep_materials, custom_qc_text, original_cdmaterials_path,
-                    )
-                    tg_structure = _plan.tg_structure
-                    blu_row = _plan.blu_row
-                    extra_materials = _plan.extra_materials
-                    _blu_is_team = _plan.blu_is_team
-                    _blacklisted_extra = _plan.blacklisted_extra
-                    texture_filename = _plan.texture_filename
-                    blu_mode = _plan.blu_mode
-                    _has_skins = _plan.has_skins
-                    _shoulder_iso = _plan.shoulder_iso
-                    image_path = _plan.image_path
-                    skin_build_data = _plan.skin_build_data
-                    _game_vmt_name = _plan.game_vmt_name
-
-                    # Извлекаем путь из $cdmaterials после патчинга (теперь с префиксом console\)
-                    patched_cdmaterials_path = ModelBuildService.extract_cdmaterials_path_from_qc(qc_path)
-                    if not patched_cdmaterials_path:
-                        ctx.cleanup(on_error=True, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
-                        return False, t['error_cdmaterials_patched_not_extracted'].format(qc_path=qc_path)
-                    
-                    # Конвертируем путь из $cdmaterials в путь для материалов
-                    # Путь теперь в формате: console\models\weapons\v_bonesaw
-                    # Конвертируем в: materials/console/models/weapons/v_bonesaw/ (потому что VPK требует такую структуру)
-                    materials_rel_path = "materials/" + patched_cdmaterials_path.replace('\\', '/').strip().rstrip('/')
-                    if not materials_rel_path.endswith('/'):
-                        materials_rel_path += '/'
-                    
-                    vmt_filename = f"{texture_filename}.vmt"
-                    vtf_filename = f"{texture_filename}.vtf"
-                    
-                    # Подготавливаем пути в vpkroot (создаем структуру папок как в VPK)
-                    vtf_output_path = ctx.vpkroot_dir.joinpath(*materials_rel_path.rstrip('/').split('/'))
-                    vmt_path = vtf_output_path / vmt_filename
-                    vtf_temp_png = vtf_output_path / vtf_filename.replace(".vtf", ".png")
-                    
-                    try:
-                        ensure_directory_exists(vtf_output_path)
-                    except OSError as e:
-                        if "path too long" in str(e).lower():
-                            logger.error(f"Путь слишком длинный для режима {mode}")
-                            ctx.cleanup(on_error=True, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
-                            return False, t['error_path_too_long'].format(mode=mode)
-                        else:
-                            raise
-                    
-                    # ── Проверка текстур в пользовательском SMD (режим «Модель уже готова») ──
-                    _mismatch_msg = VPKService._ready_model_texture_mismatch(
-                        model_ready_path, qc_path, weapon_key, ctx.decompile_dir, language)
-                    if (_mismatch_msg and texture_mismatch_callback
-                            and not texture_mismatch_callback(_mismatch_msg)):
-                        logger.info("[MODEL READY] Пользователь отменил сборку из-за несовпадения текстур")
-                        ctx.cleanup(on_error=False, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
-                        return False, (
-                            "Сборка отменена: несовпадение текстур в SMD файле."
-                            if language == "ru" else
-                            "Build cancelled: texture mismatch in SMD file."
-                        )
-
-                    if is_cancelled():
-                        return cancelled_result(ctx)
-                    emit_progress(60, t.get('build_compiling', 'Compiling model...'))
-
-                    # ── Компиляция модели в фоне: обычная / SMD-замена / готовый MDL ──
-                    _compile_thread, _compile_exc = VPKService._start_model_compile(
-                        model_ready_path, qc_path, weapon_key, ctx,
-                        studiomdl_exe, tf_dir, debug_mode, language, emit_sub,
-                    )
-
-                    # Эффективные настройки на материал: пер-текстурный оверрайд
-                    # поверх глобальных (size/format/flags/options); без оверрайда —
-                    # глобальные. Замыкание нужно и для главной текстуры, и для
-                    # panel-extra текстур дальше по коду.
-                    from src.data.texture_overrides import effective_settings as _eff_settings
-                    _global_tex = {'size': size, 'format': format_type,
-                                   'flags': flags or [], 'options': vtf_options or {}}
-
-                    def _eff(_mat):
-                        e = _eff_settings(_global_tex, (material_settings or {}).get(_mat))
-                        return e['size'], e['format'], e['flags'], e['options']
-
-                    # Игровой tf2_textures_dir.vpk — резолвим один раз (RED-оригинал
-                    # и извлечение оригинального VMT).
-                    tf2_textures_vpk = TF2Paths.resolve_textures_vpk(tf2_root_dir)
-
-                    # Главная текстура: RED-резолв → VTF (custom/готовый/рендер) →
-                    # оригинальный VMT с перенаправлением $basetexture.
-                    image_path, animated_fps, is_normal_map, vmt_to_delete = (
-                        VPKService._build_main_material(
-                            image_path, texture_filename, vtf_filename, vtf_temp_png,
-                            vmt_path, original_cdmaterials_path, original_cdmaterials_paths,
-                            _game_vmt_name, patched_cdmaterials_path, mode, hat_apply_game_paints,
-                            ctx, vtf_output_path, tf2_textures_vpk, tf2_misc_vpk,
-                            extra_texture_callback, weapon_key, custom_vtf_path, _eff,
-                        )
-                    )
-
-                    # Пер-текстурные файловые карты (detail/selfillum/phong) применяются
-                    # ПОЗЖЕ — после создания VMT доп. материалов и BLU (см. ниже),
-                    # чтобы карты ложились в VMT именно своего материала.
-
-                    # ── BLU Team Texture (командная раскраска) ───────────────────────────
-                    # Для оружия с одной общей текстурой (часы шпиона) BLU не создаём,
-                    # даже если в BLU-слот случайно попала картинка — иначе появится
-                    # лишний {texture}_blue.vtf/vmt.
-                    VPKService._maybe_build_blu_team_texture(
-                        weapon_key, blu_row, _blu_is_team, blu_mode, blu_image_path,
-                        vtf_output_path, vtf_filename, vmt_path, texture_filename,
-                        patched_cdmaterials_path, size, format_type, flags, vtf_options,
-                    )
-
-                    # === Создаем текстуры для дополнительных материалов модели (shell, scope и т.д.) ===
-                    # Это столбцы 1+ из RED строки $texturegroup
-                    # Словарь для хранения путей к VTF дополнительных материалов (нужно для BLU копий)
-                    extra_materials_vtf_paths = VPKService._build_extra_material_textures(
-                        extra_materials, weapon_key, ctx, vtf_output_path, vmt_path,
-                        patched_cdmaterials_path, original_cdmaterials_paths,
-                        tf2_textures_vpk, tf2_misc_vpk, extra_texture_callback,
-                        custom_vtf_path, size, format_type, flags, vtf_options, animated_fps,
-                    )
-
-                    # === Блэклист/служебные материалы: запись ОРИГИНАЛЬНОГО VMT ===
-                    # Глаза/убер/зомби и т.п. не редактируются (нет карточек), но из-за
-                    # console\-cdmaterials модель ищет их VMT по новому пути — без него
-                    # материал фиолетовый. Копируем оригинальный VMT материала в
-                    # console\-путь: его текстурные ссылки АБСОЛЮТНЫЕ (eyeball→shared,
-                    # invun/zombie→models/player/...), поэтому отдельный VTF не нужен —
-                    # игровые текстуры находятся по абсолютным путям. На случай
-                    # относительного $basetexture дополнительно кладём VTF, если он есть.
-                    VPKService._write_blacklisted_materials(
-                        _blacklisted_extra, panel_extra_textures, ctx, vtf_output_path,
-                        vmt_path, patched_cdmaterials_path, original_cdmaterials_paths,
-                        tf2_textures_vpk, tf2_misc_vpk,
-                    )
-
-                    # === Изолированные плечи вьюмодели ===
-                    # Пишем переименованный материал плеч (vm_<orig>) под главным
-                    # console-путём. Источник: пользовательская текстура (ключ —
-                    # ОРИГИНАЛЬНОЕ имя материала) либо оригинал тела из игры.
-                    VPKService._write_shoulder_iso_materials(
-                        _shoulder_iso, ctx, vtf_output_path, vmt_path,
-                        patched_cdmaterials_path, original_cdmaterials_paths,
-                        tf2_textures_vpk, tf2_misc_vpk, size, format_type, flags, vtf_options,
-                    )
-
-                    # === Создаем текстуры для BLU команды ===
-                    # BLU - это отдельная строка (row 1) в $texturegroup
-                    # Для каждого материала в BLU строке спрашиваем отдельное изображение,
-                    # если пользователь отказывается — копируем соответствующую RED текстуру
-                    VPKService._build_blu_row_textures(
-                        blu_row, tg_structure, texture_filename, vtf_filename, ctx,
-                        vtf_output_path, vmt_path, patched_cdmaterials_path,
-                        original_cdmaterials_paths, tf2_textures_vpk, tf2_misc_vpk,
-                        extra_texture_callback, weapon_key, custom_vtf_path,
-                        size, format_type, flags, vtf_options, animated_fps,
-                        is_normal_map, extra_materials_vtf_paths,
-                    )
-                    
-                    # Зеркальные VMT по оригинальному пути (руки / spy-watch и т.п.).
-                    # Для all-class %s-шапок зеркало НЕ создаём (его заменила пер-классовая
-                    # сборка; иначе затёрлась бы текстура у невыбранных классов).
-                    VPKService._write_hand_mirror_vmts(
-                        ctx, mode, weapon_key, original_cdmaterials_path, vtf_output_path)
-
-                    if debug_mode:
-                        DebugService.save_patched_stage(ctx, ctx.decompile_dir)
-
-                    # ── Текстуры из 2D панели (c_arrow, sniper_lens и т.п.) ──────── #
-                    # Материалы из SMD модели которые НЕ в QC skinfamilies →
-                    # extra_texture_callback их не покрывает → добавляем здесь.
-                    # Фиксированные доп. текстуры (vgui-вставки и т.п.) — пишем по
-                    # их зашитому пути, не по cdmaterials. Возвращает обработанные имена.
-                    VPKService._build_secondary_textures(
-                        weapon_key, panel_extra_textures, ctx, vtf_output_path, vmt_path,
-                        patched_cdmaterials_path, size, format_type, flags, vtf_options,
-                        material_maps, texture_filename, image_path, is_normal_map,
-                        _has_skins, skin_build_data, _eff,
-                    )
-
-                    # Ждём завершения компиляции (шла параллельно с текстурами)
-                    _compile_thread.join()
-                    if _compile_exc[0] is not None:
-                        raise _compile_exc[0]
-
-                    # Копируем скомпилированные файлы в vpkroot (VMT файл уже скопирован ранее)
-                    # Используем путь из $modelname в QC файле (чтобы структура папок была правильной).
-                    # Для material-only оружия (Dead Ringer) модель в мод НЕ кладём —
-                    # его показывает родная игровая модель (viewmodel), а скин и карты
-                    # находятся через зеркальный VMT по оригинальному пути, который
-                    # ссылается на console-VTF. Папку console при этом ОСТАВЛЯЕМ.
-                    from src.data.weapons import MATERIAL_ONLY_WEAPON_KEYS as _MAT_ONLY
-                    if weapon_key in _MAT_ONLY:
-                        logger.info(f"[{weapon_key}] Material-only: модель в мод не включается (console сохраняется)")
-                    else:
-                        VPKService._copy_compiled_models_to_vpkroot(ctx, qc_path)
-
-                    # Мультиклассовая шапка с заменой модели: собираем модель для
-                    # ОСТАЛЬНЫХ выбранных классов (основная сборка делает только один).
-                    # Источник: явный список выбранных классов (model_player_per_class)
-                    # либо legacy %s-шаблон в hat_mdl_path.
-                    if mode == "hat" and replace_model_smd_path:
-                        _extra_targets = None
-                        if hat_class_models and len(hat_class_models) > 1:
-                            # Все выбранные классы, КРОМЕ primary (он уже собран).
-                            _extra_targets = [
-                                m for m in hat_class_models.values() if m != hat_mdl_path
-                            ]
-                        _is_pct_tmpl = bool(hat_mdl_path and "%s" in hat_mdl_path)
-                        if _extra_targets or _is_pct_tmpl:
-                            VPKService._build_extra_class_hat_models(
-                                ctx, hat_mdl_path, found_mdl_path, replace_model_smd_path,
-                                replace_keep_materials, tf2_misc_vpk, studiomdl_exe,
-                                crowbar_exe, tf_dir, language, emit_sub,
-                                target_mdl_paths=_extra_targets,
-                            )
-
-                    # Этап 3: доп. ИЗМЕНЁННЫЕ стили-модели шапки — каждый своей
-                    # моделью и своей текстурой в тот же мод (активный стиль уже
-                    # собран основным пайплайном выше).
-                    if mode == "hat" and hat_style_builds:
-                        VPKService._build_extra_style_models(
-                            ctx, hat_style_builds, tf2_misc_vpk, studiomdl_exe,
-                            crowbar_exe, tf_dir, language, emit_sub,
-                            size, format_type, flags, vtf_options, vmt_path,
-                        )
-
-                    # Подстраховка: удаляем любые {texture}_blue.*, если их успел
-                    # создать другой путь, а настоящей команды у предмета нет
-                    # (одиночная текстура ИЛИ вариант-онли без c_xxx_blue в группе).
-                    from src.data.weapons import NO_BLU_WEAPON_KEYS as _NO_BLU2
-                    if weapon_key in _NO_BLU2 or not _blu_is_team:
-                        for _blue in vtf_output_path.glob(f"{texture_filename}_blue.*"):
-                            try:
-                                _blue.unlink()
-                                logger.info(f"[{weapon_key}] Удалён лишний BLU-файл: {_blue.name}")
-                            except OSError:
-                                pass
-
-                except Exception as e:
-                    error_msg = str(e)
-                    if hasattr(e, 'stderr') and e.stderr:
-                        error_msg += f"\nSTDERR: {e.stderr}"
-                    if hasattr(e, 'stdout') and e.stdout:
-                        error_msg += f"\nSTDOUT: {e.stdout}"
-                    
-                    if keep_temp_on_error:
-                        error_msg += f"\n\nВременные файлы сохранены в: {ctx.temp_dir}"
-                    
-                    ctx.cleanup(on_error=True, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
-                    return False, t['error_model_work'].format(error=error_msg)
             
             # Собираем VPK файл (финальный этап - упаковываем все в один файл)
             if is_cancelled():
                 return cancelled_result(ctx)
             emit_progress(80, t.get('build_packing', 'Creating VPK file...'))
             emit_sub(-1, "Packing VPK..." if language == "en" else "Упаковка VPK...")
-            # Логируем все файлы в VPK root (для отладки, чтобы видеть какие файлы идут в мод)
+            # Содержимое vpkroot: краткая сводка всегда, полный список — только в
+            # debug-режиме (сотни строк на сборку засоряли tf2sg.log).
             if ctx.vpkroot_dir.exists():
                 vpkroot_files = []
                 for _root, _dirs, _files in os.walk(ctx.vpkroot_dir):
                     for _f in _files:
                         rel = os.path.relpath(os.path.join(_root, _f), ctx.vpkroot_dir).replace('\\', '/')
                         vpkroot_files.append(rel)
-                logger.info(f"[VPK CONTENTS] Files going into VPK ({len(vpkroot_files)} total):\n" +
-                            "\n".join(f"  {f}" for f in vpkroot_files))
+                logger.info(f"[VPK CONTENTS] файлов в VPK: {len(vpkroot_files)}")
+                if debug_mode:
+                    logger.info("[VPK CONTENTS]\n" +
+                                "\n".join(f"  {f}" for f in vpkroot_files))
             vpk_path = VPKService._create_vpk_file(ctx, filename, export_folder, language)
 
             success_message = VPKService._finalize_build_success(
