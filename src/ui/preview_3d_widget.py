@@ -38,6 +38,7 @@ def _make_js_bridge():
         # data-URL + имя материала (пустая строка = дроп на пустое место)
         texture_dropped  = Signal(str, str)
         per_mesh_applied = Signal()     # дроп на конкретный меш (per-mesh drag)
+        model_loaded     = Signal()     # OBJ добавлен в сцену (можно класть текстуры)
 
         @Slot(str, str)
         def notifyTextureDrop(self, data_url: str, material_name: str = '') -> None:  # noqa: N802
@@ -48,6 +49,12 @@ def _make_js_bridge():
         def notifyPerMeshApplied(self) -> None:  # noqa: N802
             """Вызывается из JS когда текстура применена к конкретному мешу (per-mesh drag)."""
             self.per_mesh_applied.emit()
+
+        @Slot()
+        def notifyModelLoaded(self) -> None:  # noqa: N802
+            """Вызывается из JS когда модель добавлена в сцену — подтверждение
+            вместо угадывания задержки таймером на Python-стороне."""
+            self.model_loaded.emit()
 
     return JsBridge()
 

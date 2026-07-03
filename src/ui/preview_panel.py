@@ -74,15 +74,11 @@ def _vtf_to_temp_png(vtf_path: str) -> Optional[str]:
         return None
 
 
-# Sentinel-ключ для главной текстуры когда у модели нет именованных материалов
-# (одноматериальный случай). Используется только внутри панели для хранения в
-# self._textures. НЕ является именем материала и НЕ должен попадать в сборку —
-# главная текстура передаётся в билд отдельно через from_path.
-SINGLE_TEX_KEY = '__single__'
-
 # Фильтр служебных материалов (глаза/зубы/sheen-оверлеи) — общий для UI и сборки.
 from src.ui.preview_mode import PreviewMode, PreviewState
 from src.ui.material_cards import editable_material_cards, spy_mask_cards
+# Единый источник правды о текстурах превью (команды/стили/вариант) — см. модуль.
+from src.ui.texture_state import PreviewTextureState, SINGLE_TEX_KEY
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -348,17 +344,6 @@ class _ExtraSlotCard(QWidget):
 # Утилиты
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _team_priority(active_team: str) -> list:
-    """Возвращает порядок проверки команд для поиска текстуры.
-
-    Активная команда идёт первой — позволяет начать сборку с любой загруженной
-    текстуры (RED или BLU), а не только с RED.
-    """
-    if active_team == Team.BLU:
-        return [Team.BLU, Team.RED]
-    return [Team.RED, Team.BLU]
-
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # Основная панель
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -406,17 +391,17 @@ class PreviewPanel(QWidget):
         self._weapon_key: str = '\x00'   # sentinel — не совпадёт с реальным ключом
         self._weapon_mode: str = ''
 
-        # ── Текстуры: {team: {mat_name: path}} ────────────────────────────── #
-        self._textures: Dict[str, Dict[str, str]] = {Team.RED: {}, Team.BLU: {}}
-        self._active_team: str = Team.RED
+        # ── ЕДИНЫЙ источник правды о текстурах (команды/стили/вариант) ─────── #
+        # Хранение, маршрутизация и разрешение — в PreviewTextureState
+        # (src/ui/texture_state.py). Старые поля (_textures, _skin_overrides,
+        # _vpk_*_tex_map, австралий-слоты и т.п.) — property-делегаты ниже.
+        self._state = PreviewTextureState()
         # «Сделать командным»: пользователь включил синтез BLU у некомандного оружия.
         self._force_team: bool = False
 
-        # ── Слоты материалов ──────────────────────────────────────────────── #
-        # Заполняется после загрузки 3D (через _on_3d_multi_material).
-        # Для рук — заполняется сразу из HAND_MODES.
-        # [0] = главный материал, [1:] = дополнительные.
-        self._material_names: List[str] = []
+        # ── Слоты материалов (виджеты) ─────────────────────────────────────── #
+        # _material_names заполняется после загрузки 3D (_on_3d_multi_material);
+        # для рук — сразу из HAND_MODES. [0] = главный, [1:] = дополнительные.
         self._card_mode: bool = False
         self._has_blu: bool = False
 
@@ -425,15 +410,6 @@ class PreviewPanel(QWidget):
         self._misc_materials: List[str] = []   # блэклист-материалы текущей модели
         self._misc_mode: bool = False          # активен ли просмотр «Прочее»
         self._cards_before_misc: List[str] = []  # нормальный набор (для возврата)
-        self._main_material_name: Optional[str] = None  # стабильный главный материал
-
-        # ── Стили / skinfamilies (только для кастомной замены модели) ──────── #
-        # Определяются из QC оригинальной модели через SkinDetectWorker.
-        # _skin_overrides[skin_idx][mat_name] = путь к текстуре этого стиля.
-        # Скин 0 — база; остальные наследуют скин 0, пока их не переопределят.
-        self._original_skin_info: Optional[dict] = None
-        self._active_skin: int = 0
-        self._skin_overrides: Dict[int, Dict[str, str]] = {}
         # Материалы, которые пользователь ЯВНО добавил в вариантный стиль через
         # «+» (карточка показывается даже пустой). Скин 0 тут не участвует.
         self._skin_chosen: Dict[int, set] = {}
@@ -470,18 +446,23 @@ class PreviewPanel(QWidget):
         self._3d_available: bool = False
         self._pending_3d_params: Optional[tuple] = None   # (key, mode, vpk, tex_vpk)
         self._last_3d_params: Optional[tuple] = None      # для обнаружения изменений
+        # Отложенное применение после подтверждения загрузки модели из JS
+        # (см. _run_after_model_load / _on_3d_model_loaded).
+        self._model_load_cb = None
+        self._model_load_token = None
+        self._model_load_settle_ms: int = 50
 
         # ── Мини-память последнего оружия (1 слот) ────────────────────────── #
         # _cur_obj — (mode, obj_path, texture_path) сейчас загруженной модели,
         #            заполняется в _on_3d_ready (None если модель не загружена).
         # _mem_mode/_mem_data — снимок ПРЕДЫДУЩЕГО загруженного оружия для
         #            мгновенного восстановления при возврате (без воркера).
-        # _restoring_memory — флаг координации с update_extra_slots (чтобы он
-        #            не затёр восстановленное состояние).
+        #            Данные текстур — snapshot() модели; _restore_from_memory
+        #            выставляет и _weapon_key/_weapon_mode, поэтому последующий
+        #            update_extra_slots видит «то же оружие» и ничего не трогает.
         self._cur_obj: Optional[tuple] = None
         self._mem_mode: Optional[str] = None
         self._mem_data: Optional[dict] = None
-        self._restoring_memory: bool = False
         # Память по стилям шапки: правки применяются ПОСЛЕ загрузки модели стиля.
         self._pending_edit_state: Optional[dict] = None
         # Обновить 2D после загрузки модели (смена стиля без своих правок —
@@ -504,10 +485,6 @@ class PreviewPanel(QWidget):
         # PNG оригинальной игровой текстуры эффекта (дефолт, пока юзер не загрузил свою).
         self._death_default_tex: str = ''
         self._active_spy_mask: Optional[str] = None  # активный класс (cls_key)
-        self._australium_frame: Optional[str] = None  # PNG игрового варианта Australium/Gold
-        self._australium_active: bool = False          # активен ли вариант в 3D
-        self._australium_user_tex: Optional[str] = None  # своя текстура для Australium (отд. слот)
-        self._australium_mat_name: Optional[str] = None   # имя gold-материала (для сборки)
         self._aus_card = None                          # карточка «Australium» в ряду типов текстур
 
         # ── Per-mesh drag tracking ─────────────────────────────────────────── #
@@ -517,15 +494,8 @@ class PreviewPanel(QWidget):
         self._per_mesh_base_image: Optional[str] = None
 
         # ── Командные кадры из VPK ────────────────────────────────────────── #
-        self._red_frames: List[str] = []
-        self._blu_frames: List[str] = []
+        # Данные (кадры/карты/маппинг) — в self._state; здесь только framerate.
         self._team_framerate: float = 0.0
-        # Для мульти-материальных моделей (персонажи): исходные tex_map'ы из VPK
-        # используются для восстановления командных текстур (т.к. _red/_blu_frames = [])
-        self._vpk_red_tex_map: dict = {}
-        self._vpk_blu_tex_map: dict = {}
-        # Маппинг {red_mat_name: blu_display_name} для лейблов карточек BLU команды
-        self._vpk_blu_name_map: dict = {}
 
         # ── GIF кэш {gif_path: (frame_paths, fps)} ───────────────────────── #
         self._gif_cache: Dict[str, tuple] = {}
@@ -569,6 +539,142 @@ class PreviewPanel(QWidget):
     @property
     def _death_effect_mode(self) -> bool:
         return self._pstate.is_death
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # Делегаты состояния текстур (единый источник — self._state)
+    #
+    # Существующий код панели обращается к этим полям напрямую (~50 точек);
+    # property-делегаты позволяют мигрировать на PreviewTextureState без
+    # одновременной правки всех точек: чтение/мутация словарей идут в модель.
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    @property
+    def _textures(self) -> Dict[str, Dict[str, str]]:
+        return self._state.textures
+
+    @_textures.setter
+    def _textures(self, value: Dict[str, Dict[str, str]]) -> None:
+        self._state.textures = value
+
+    @property
+    def _skin_overrides(self) -> Dict[int, Dict[str, str]]:
+        return self._state.skin_overrides
+
+    @_skin_overrides.setter
+    def _skin_overrides(self, value: Dict[int, Dict[str, str]]) -> None:
+        self._state.skin_overrides = value
+
+    @property
+    def _active_team(self) -> str:
+        return self._state.active_team
+
+    @_active_team.setter
+    def _active_team(self, value: str) -> None:
+        self._state.active_team = value
+
+    @property
+    def _active_skin(self) -> int:
+        return self._state.active_skin
+
+    @_active_skin.setter
+    def _active_skin(self, value: int) -> None:
+        self._state.active_skin = value
+
+    @property
+    def _original_skin_info(self) -> Optional[dict]:
+        return self._state.skin_info
+
+    @_original_skin_info.setter
+    def _original_skin_info(self, value: Optional[dict]) -> None:
+        self._state.skin_info = value
+
+    @property
+    def _material_names(self) -> List[str]:
+        return self._state.material_names
+
+    @_material_names.setter
+    def _material_names(self, value: List[str]) -> None:
+        self._state.material_names = value
+
+    @property
+    def _main_material_name(self) -> Optional[str]:
+        return self._state.main_material
+
+    @_main_material_name.setter
+    def _main_material_name(self, value: Optional[str]) -> None:
+        self._state.main_material = value
+
+    @property
+    def _vpk_blu_name_map(self) -> dict:
+        return self._state.blu_name_map
+
+    @_vpk_blu_name_map.setter
+    def _vpk_blu_name_map(self, value: dict) -> None:
+        self._state.blu_name_map = value
+
+    @property
+    def _vpk_red_tex_map(self) -> dict:
+        return self._state.vpk_red_tex_map
+
+    @_vpk_red_tex_map.setter
+    def _vpk_red_tex_map(self, value: dict) -> None:
+        self._state.vpk_red_tex_map = value
+
+    @property
+    def _vpk_blu_tex_map(self) -> dict:
+        return self._state.vpk_blu_tex_map
+
+    @_vpk_blu_tex_map.setter
+    def _vpk_blu_tex_map(self, value: dict) -> None:
+        self._state.vpk_blu_tex_map = value
+
+    @property
+    def _red_frames(self) -> List[str]:
+        return self._state.red_frames
+
+    @_red_frames.setter
+    def _red_frames(self, value: List[str]) -> None:
+        self._state.red_frames = value
+
+    @property
+    def _blu_frames(self) -> List[str]:
+        return self._state.blu_frames
+
+    @_blu_frames.setter
+    def _blu_frames(self, value: List[str]) -> None:
+        self._state.blu_frames = value
+
+    @property
+    def _australium_frame(self) -> Optional[str]:
+        return self._state.australium_frame
+
+    @_australium_frame.setter
+    def _australium_frame(self, value: Optional[str]) -> None:
+        self._state.australium_frame = value
+
+    @property
+    def _australium_active(self) -> bool:
+        return self._state.australium_active
+
+    @_australium_active.setter
+    def _australium_active(self, value: bool) -> None:
+        self._state.australium_active = value
+
+    @property
+    def _australium_user_tex(self) -> Optional[str]:
+        return self._state.australium_user_tex
+
+    @_australium_user_tex.setter
+    def _australium_user_tex(self, value: Optional[str]) -> None:
+        self._state.australium_user_tex = value
+
+    @property
+    def _australium_mat_name(self) -> Optional[str]:
+        return self._state.australium_mat_name
+
+    @_australium_mat_name.setter
+    def _australium_mat_name(self, value: Optional[str]) -> None:
+        self._state.australium_mat_name = value
 
     # ═══════════════════════════════════════════════════════════════════════════
     # UI
@@ -953,6 +1059,45 @@ class PreviewPanel(QWidget):
                 bridge.per_mesh_applied.connect(self._on_3d_per_mesh_applied)
             except Exception as exc:
                 logger.warning(f"3D bridge per_mesh_applied: {exc}")
+            try:
+                bridge.model_loaded.connect(self._on_3d_model_loaded)
+            except Exception as exc:
+                logger.warning(f"3D bridge model_loaded: {exc}")
+
+    # ── Подтверждение загрузки модели из JS (вместо магических задержек) ──── #
+
+    def _run_after_model_load(self, fn, fallback_ms: int = 800,
+                              settle_ms: int = 50) -> None:
+        """Выполняет fn после подтверждения из JS, что модель добавлена в сцену.
+
+        Один отложенный слот (последняя регистрация выигрывает — более поздний
+        вызов всегда надмножество раннего). После подтверждения ждём settle_ms,
+        чтобы уже поставленные в очередь Qt-сигналы воркера (multi_material →
+        _card_mode/_material_names) успели обработаться. Fallback-таймер
+        страхует случаи без подтверждения: fallback-виджет без WebEngine или
+        подтверждение пришло раньше регистрации. Выполняется ровно один раз.
+        """
+        from PySide6.QtCore import QTimer
+        token = object()
+        self._model_load_token = token
+
+        def _fire():
+            if self._model_load_token is token:
+                self._model_load_token = None
+                self._model_load_cb = None   # не держим замыкание до следующей регистрации
+                fn()
+
+        self._model_load_cb = _fire
+        QTimer.singleShot(fallback_ms, _fire)
+        self._model_load_settle_ms = settle_ms
+
+    def _on_3d_model_loaded(self) -> None:
+        """JS подтвердил: модель в сцене — выполняем отложенное применение."""
+        cb = self._model_load_cb
+        if cb is None:
+            return
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(self._model_load_settle_ms, cb)
 
     # ═══════════════════════════════════════════════════════════════════════════
     # Переключение 2D / 3D
@@ -991,11 +1136,7 @@ class PreviewPanel(QWidget):
         и тумблер, и переключатели видов 2D/3D, чтобы вид не расходился с
         состоянием (раньше 2D↔3D игнорировали активный австралий).
         """
-        if not self._australium_active:
-            return None
-        if self._australium_user_tex and os.path.exists(self._australium_user_tex):
-            return self._australium_user_tex
-        return self._australium_frame
+        return self._state.variant_display_texture()
 
     def _switch_to_2d(self) -> None:
         self.view_stack.setCurrentIndex(0)
@@ -1361,15 +1502,11 @@ class PreviewPanel(QWidget):
         Сборка использует его, чтобы исключить главную текстуру из доп-слотов
         (она идёт отдельным from_path), даже когда в 2D открыт просмотр «Прочее»
         и _material_names временно содержит служебные материалы."""
-        if self._main_material_name:
-            return self._main_material_name
-        return self._material_names[0] if self._material_names else None
+        return self._state.stable_main()
 
     def _is_team_material(self, mat: str) -> bool:
-        """True если у материала есть СВОЙ синий вариант (командный, напр.
-        medic_hands_red→medic_hands_blue), а не нейтральный (engineer_handL)."""
-        bn = self._vpk_blu_name_map.get(mat, mat) if self._vpk_blu_name_map else mat
-        return bn.lower() != mat.lower()
+        """True если у материала есть СВОЙ синий вариант (см. модель)."""
+        return self._state.is_team_material(mat)
 
     def _rebuild_hand_team_cards(self, team: str) -> None:
         """Перестраивает карточки рук под команду.
@@ -1692,9 +1829,8 @@ class PreviewPanel(QWidget):
         Переиспользует проверенные пути: _reapply_textures_to_3d (как при входе в
         3D) и _restore_team_textures_2d/_rebuild_cards_for_skin (как при входе в
         2D). Применяем к обеим: активная вкладка показывает текстуры стиля сразу,
-        неактивная готова к переключению. Задержка — чтобы геометрия успела
-        подгрузиться в 3D-сцену перед наложением текстур."""
-        from PySide6.QtCore import QTimer
+        неактивная готова к переключению. Выполняется по подтверждению загрузки
+        модели из JS; delay_ms — fallback-предел (как старая фикс-задержка)."""
 
         def _do():
             # 3D: восстановленные текстуры поверх загруженной модели (как 2D→3D).
@@ -1707,7 +1843,7 @@ class PreviewPanel(QWidget):
                 else:
                     self._restore_team_textures_2d(self._active_team)
 
-        QTimer.singleShot(delay_ms, _do)
+        self._run_after_model_load(_do, fallback_ms=delay_ms)
 
     def _snapshot_outgoing(self, outgoing_mode: str) -> Optional[dict]:
         """
@@ -1725,57 +1861,46 @@ class PreviewPanel(QWidget):
             return None
         if self._spy_mask_mode or self._australium_active or self._custom_smd_mode:
             return None
+        # Состояние панели уже не принадлежит уходящему режиму (напр. выбор
+        # шапки вызывает update_extra_slots → _begin_new_weapon ДО set_3d_params,
+        # и _state уже вычищен) — снимать нечего, иначе запомним пустоту.
+        if self._weapon_mode != outgoing_mode:
+            return None
         obj_path = self._cur_obj[1]
         if not obj_path or not os.path.exists(obj_path):
             return None
 
+        # Данные текстур — снимком модели; остальное — виджетные поля.
         return {
             'mode': outgoing_mode,
+            'weapon_key': self._weapon_key,
             'obj_path': obj_path,
             'texture_path': self._cur_obj[2],
-            'material_names': list(self._material_names),
-            'card_mode': self._card_mode,
             'has_blu': self._has_blu,
-            'active_team': self._active_team,
             'image_path': self.image_path,
-            'textures': {t: dict(d) for t, d in self._textures.items()},
-            'vpk_red_tex_map': dict(self._vpk_red_tex_map or {}),
-            'vpk_blu_tex_map': dict(self._vpk_blu_tex_map or {}),
-            'vpk_blu_name_map': dict(self._vpk_blu_name_map or {}),
-            # VPK-кадры команд и вариант Australium — нужны для восстановления
-            # кнопок RED/BLU и золотой кнопки без перезагрузки модели.
-            'red_frames': list(self._red_frames or []),
-            'blu_frames': list(self._blu_frames or []),
             'team_framerate': self._team_framerate,
-            'australium_frame': self._australium_frame,
-            'australium_mat_name': self._australium_mat_name,
-            'australium_user_tex': self._australium_user_tex,
+            'state': self._state.snapshot(),
         }
 
     def _restore_from_memory(self, data: dict) -> None:
         """Мгновенно восстанавливает оружие из снимка (без перезапуска воркера)."""
-        # Сначала восстанавливаем текстуры/команды — _set_material_slots читает
-        # их через _resolve_card_texture при пересоздании карточек.
-        self._textures = {t: dict(d) for t, d in data['textures'].items()}
+        # Сначала восстанавливаем модель текстур — _set_material_slots читает
+        # её через _resolve_card_texture при пересоздании карточек.
+        # (restore() выключает австралий — после возврата вариант неактивен.)
+        self._state.restore(data['state'])
         self.image_path = data['image_path']
-        self._active_team = data['active_team']
         self._has_blu = data['has_blu']
-        self._vpk_red_tex_map = dict(data.get('vpk_red_tex_map') or {})
-        self._vpk_blu_tex_map = dict(data.get('vpk_blu_tex_map') or {})
-        self._vpk_blu_name_map = dict(data.get('vpk_blu_name_map') or {})
-        # VPK-кадры команд и вариант Australium (сброшены в _reset_team_vpk_state)
-        self._red_frames = list(data.get('red_frames') or [])
-        self._blu_frames = list(data.get('blu_frames') or [])
         self._team_framerate = data.get('team_framerate', 0.0)
-        self._australium_frame = data.get('australium_frame')
-        self._australium_mat_name = data.get('australium_mat_name')
-        self._australium_user_tex = data.get('australium_user_tex')
+
+        # Ключ/режим оружия — как в снимке: последующий update_extra_slots
+        # увидит «то же оружие» и не затрёт восстановленное состояние.
+        self._weapon_key = data.get('weapon_key', self._weapon_key)
+        self._weapon_mode = data['mode']
 
         # Пересоздаём карточки слотов (метод сам выставит _card_mode/_material_names)
-        self._set_material_slots(list(data['material_names']))
+        self._set_material_slots(list(data['state'].get('material_names') or []))
 
         # Командные и Australium кнопки (учитывают восстановленное состояние)
-        self._australium_active = False
         self._sync_variant_buttons()
         self._update_team_btn_visibility()
 
@@ -1783,9 +1908,10 @@ class PreviewPanel(QWidget):
         if self._3d_widget and data['obj_path'] and os.path.exists(data['obj_path']):
             self._3d_widget.load_model_files(data['obj_path'], data['texture_path'])
             self._cur_obj = (data['mode'], data['obj_path'], data['texture_path'])
-            # Переприменяем пользовательские текстуры поверх (после загрузки в JS)
-            from PySide6.QtCore import QTimer
-            QTimer.singleShot(300, lambda: self._restore_team_textures_3d(self._active_team))
+            # Пользовательские текстуры поверх — по подтверждению загрузки из JS.
+            self._run_after_model_load(
+                lambda: self._restore_team_textures_3d(self._active_team),
+                fallback_ms=300)
 
     # ═══════════════════════════════════════════════════════════════════════════
     # Публичный API — управление 3D
@@ -1825,7 +1951,6 @@ class PreviewPanel(QWidget):
 
         # ── Возврат на запомненное оружие → мгновенное восстановление ─────── #
         if self._mem_mode is not None and self._mem_mode == mode and self._mem_data is not None:
-            self._restoring_memory = True
             self._restore_from_memory(self._mem_data)
             self._mem_mode = None
             self._mem_data = None   # 1 слот — извлекли
@@ -2203,11 +2328,11 @@ class PreviewPanel(QWidget):
         self._cur_obj = (_loaded_mode, obj_path, texture_path)
         if self._3d_widget:
             self._3d_widget.load_model_files(obj_path, texture_path)
-            # Применяем уже загруженную в 2D текстуру к свежей модели.
-            # Задержка 400мс — чтобы выполниться после _on_3d_multi_material
-            # (он выставляет _card_mode/_material_names) и загрузки модели в JS.
-            from PySide6.QtCore import QTimer
-            QTimer.singleShot(400, self._reapply_textures_to_3d)
+            # Применяем уже загруженную в 2D текстуру к свежей модели — по
+            # подтверждению из JS (settle-пауза даёт _on_3d_multi_material
+            # выставить _card_mode/_material_names); fallback 400мс — как раньше.
+            self._run_after_model_load(
+                lambda: self._reapply_textures_to_3d(delay_ms=0), fallback_ms=400)
         # Одно-материальное оружие сюда приходит без _on_3d_multi_material —
         # синхронизируем видимость кнопок (в т.ч. «+ Команда»).
         self._update_team_btn_visibility()
@@ -2656,35 +2781,30 @@ class PreviewPanel(QWidget):
     # Материальные слоты (карточки в 2D)
     # ═══════════════════════════════════════════════════════════════════════════
 
-    def update_extra_slots(self, weapon_key: str, mode: str = '') -> None:
+    def _begin_new_weapon(self, weapon_key: str, mode: str) -> None:
+        """ЕДИНАЯ точка полного сброса состояния при смене оружия.
+
+        Идемпотентна и не зависит от порядка вызова set_3d_params /
+        update_extra_slots: сбрасывает и пользовательское состояние
+        (текстуры/стили/оверрайды), и командные VPK-данные с вариантом
+        (через _reset_team_vpk_state — повторный вызов безвреден).
         """
-        Сбрасывает и перенастраивает слоты при смене оружия/шапки.
-
-        Сброс происходит ТОЛЬКО если weapon_key или mode изменились.
-        Для оружий карточки появятся позже через _on_3d_multi_material.
-        Для рук карточки определяются сразу из HAND_MODES (без 3D).
-        """
-        # Восстановление из мини-памяти уже выставило всё состояние в
-        # set_3d_params/_restore_from_memory — не затираем его.
-        if self._restoring_memory:
-            self._restoring_memory = False
-            self._weapon_key = weapon_key
-            self._weapon_mode = mode
-            return
-
-        if weapon_key == self._weapon_key and mode == self._weapon_mode:
-            return   # то же самое — ничего не сбрасываем
-
         self._weapon_key = weapon_key
         self._weapon_mode = mode
 
-        # ── Полный сброс состояния предыдущего оружия ─────────────────────── #
+        # ── Пользовательское состояние предыдущего оружия ─────────────────── #
         self._textures = {Team.RED: {}, Team.BLU: {}}
         self._hand_blu_chosen = set()   # выбранные через «+» нейтральные на BLU
         self._material_names = []
+        self._main_material_name = None
         self._has_blu = False
-        self._active_team = Team.RED
-        self._force_team = False        # «сделать командным» сбрасываем при смене оружия
+        # «Прочее» предыдущего оружия недействительно (пересоберёт
+        # _on_3d_multi_material после загрузки новой модели).
+        self._misc_materials = []
+        self._misc_mode = False
+        self._cards_before_misc = []
+        if hasattr(self, 'btn_misc'):
+            self.btn_misc.setVisible(False)
         self.image_path = None
         self.vtf_path = None
         self._gif_cache = {}
@@ -2701,13 +2821,27 @@ class PreviewPanel(QWidget):
         _sp = getattr(self.parent, 'settings_panel', None)   # и выходим из режима их редактирования
         if _sp is not None and hasattr(_sp, 'exit_texture_edit'):
             _sp.exit_texture_edit(restore=True)
-        # Сбрасываем кнопки команд. Australium предыдущего оружия тоже гасим
-        # явно (раньше полагались на порядок вызова set_3d_params).
-        self._australium_active = False
-        self.btn_red.setVisible(False)
-        self.btn_blu.setVisible(False)
-        self._sync_variant_buttons()
+
+        # ── Командные VPK-данные, вариант Australium, кнопки ──────────────── #
+        # Раньше это делал только set_3d_params и update_extra_slots полагался
+        # на порядок вызова (отсюда залипал австралий/кнопки при смене оружия).
+        self._reset_team_vpk_state()
         self._stop_gif()
+
+    def update_extra_slots(self, weapon_key: str, mode: str = '') -> None:
+        """
+        Сбрасывает и перенастраивает слоты при смене оружия/шапки.
+
+        Сброс происходит ТОЛЬКО если weapon_key или mode изменились.
+        Для оружий карточки появятся позже через _on_3d_multi_material.
+        Для рук карточки определяются сразу из HAND_MODES (без 3D).
+        """
+        # Восстановление из мини-памяти уже выставило _weapon_key/_weapon_mode
+        # (см. _restore_from_memory) — попадаем в ранний выход и не затираем его.
+        if weapon_key == self._weapon_key and mode == self._weapon_mode:
+            return   # то же самое — ничего не сбрасываем
+
+        self._begin_new_weapon(weapon_key, mode)
 
         from src.data.player_hands import HAND_MODE_KEYS, HAND_MODES
 
@@ -2927,9 +3061,7 @@ class PreviewPanel(QWidget):
 
     def _reset_skin_state(self) -> None:
         """Убирает кнопки стилей (смена оружия / выход из кастома)."""
-        self._original_skin_info = None
-        self._active_skin = 0
-        self._skin_overrides = {}
+        self._state.reset_skins()
         self._skin_chosen = {}
         for b in self._skin_buttons:
             b.setParent(None)
@@ -3338,56 +3470,15 @@ class PreviewPanel(QWidget):
                 self._schedule_3d(lambda: self._restore_team_textures_3d(self._active_team))
 
     def _is_neutral_texture(self, mat_name: str) -> bool:
-        """True если текстура не относится к конкретной команде (RED/BLU).
-
-        Нейтральные текстуры (sniper_lens, c_arrow, eyeball_r и т.п.)
-        одинаковы для обеих команд — их нужно хранить в обоих словарях
-        чтобы карточка не пропадала при переключении команды.
-        """
-        if self._vpk_blu_name_map:
-            return (mat_name not in self._vpk_blu_name_map and
-                    mat_name not in self._vpk_blu_name_map.values())
-        # Нет per-material маппинга. Но если у оружия есть одиночный BLU-кадр
-        # (_blu_frames) — его ГЛАВНАЯ текстура командная: хранение RED/BLU
-        # раздельное, иначе загрузка на BLU затирала бы RED (и наоборот).
-        # Остальные слоты (fixed/tg-extras) при этом нейтральны.
-        if self._blu_frames:
-            main_key = (self._main_material_name
-                        or (self._material_names[0] if self._material_names
-                            else SINGLE_TEX_KEY))
-            if mat_name in (main_key, SINGLE_TEX_KEY):
-                return False
-        return True   # нет командных данных → нейтральная
+        """True если текстура не относится к конкретной команде (см. модель)."""
+        return self._state.is_neutral(mat_name)
 
     def _store_texture(self, mat_name: str, path: Optional[str]) -> None:
-        """Сохраняет текстуру в _textures.
-
-        Нейтральные текстуры записываются в ОБЕ команды,
-        командные — только в активную.
-        """
-        # ── Стили: на вариантном стиле (skin > 0) текстура принадлежит этому
-        # стилю, а не команде — пишем в _skin_overrides, _textures не трогаем. #
-        if self._original_skin_info and self._active_skin != 0:
-            slot = self._skin_overrides.setdefault(self._active_skin, {})
-            if path:
-                slot[mat_name] = path
-            else:
-                slot.pop(mat_name, None)
-            return
-
-        if path:
-            self._textures.setdefault(self._active_team, {})[mat_name] = path
-            if self._is_neutral_texture(mat_name):
-                other = Team.BLU if self._active_team == Team.RED else Team.RED
-                self._textures.setdefault(other, {})[mat_name] = path
-                logger.debug(f"[neutral tex] '{mat_name}' → both teams: {path}")
-            else:
-                logger.debug(f"[team tex] '{mat_name}' → {self._active_team} only: {path}")
-        else:
-            self._textures.get(self._active_team, {}).pop(mat_name, None)
-            if self._is_neutral_texture(mat_name):
-                other = Team.BLU if self._active_team == Team.RED else Team.RED
-                self._textures.get(other, {}).pop(mat_name, None)
+        """Сохраняет пользовательскую текстуру (маршрутизация — в модели:
+        вариантный стиль → skin_overrides, нейтральная → обе команды)."""
+        self._state.set_texture(mat_name, path)
+        logger.debug(f"[store tex] '{mat_name}' team={self._active_team} "
+                     f"skin={self._active_skin}: {path}")
 
     def _on_extra_card_changed(self, mat_name: str, path: str) -> None:
         """Пользователь сменил или сбросил текстуру в карточке доп. слота."""
@@ -3409,36 +3500,13 @@ class PreviewPanel(QWidget):
                     self._schedule_3d(lambda: self._restore_team_textures_3d(self._active_team))
 
     def get_slot_image_paths(self) -> dict:
-        """Возвращает {material_name: path} для всех заполненных слотов.
-
-        Для каждого слота берётся первая найденная текстура в порядке:
-          активная команда → RED → BLU.
-        Позволяет начать сборку с любой загруженной текстуры.
-        """
-        result: dict = {}
-        for team in _team_priority(self._active_team):
-            for k, v in self._textures.get(team, {}).items():
-                # SINGLE_TEX_KEY — это главная текстура (идёт в сборку через
-                # from_path), а не именованный материал. Пропускаем, иначе в VPK
-                # появятся мусорные __single__.vmt / __single__.vtf.
-                if k == SINGLE_TEX_KEY:
-                    continue
-                if k not in result and v and os.path.exists(v):
-                    result[k] = v
-        return result
+        """{material_name: path} всех заполненных слотов (для сборки).
+        Порядок команд и пропуск SINGLE_TEX_KEY — в модели."""
+        return self._state.uploaded_slot_paths()
 
     def get_blu_slot_image_paths(self) -> dict:
-        """{material_name: path} только для BLU-слотов (синие команд-текстуры).
-
-        Нужно для рук: нейтральный материал с загруженной СИНЕЙ текстурой → сборка
-        делает его командным (red=база, blue=вариант)."""
-        result: dict = {}
-        for k, v in self._textures.get(Team.BLU, {}).items():
-            if k == SINGLE_TEX_KEY:
-                continue
-            if v and os.path.exists(v):
-                result[k] = v
-        return result
+        """{material_name: path} только BLU-слотов (командность рук при сборке)."""
+        return self._state.blu_uploaded_paths()
 
     def load_image(self, path: str) -> None:
         """Загружает изображение (или GIF) в 2D Preview."""
@@ -3556,9 +3624,8 @@ class PreviewPanel(QWidget):
         Возвращает None если RED не загружена → build_vpk поставит sentinel
         и покажет диалог выбора.
         """
-        key = self._material_names[0] if self._material_names else SINGLE_TEX_KEY
-        p = self._textures.get(Team.RED, {}).get(key)
-        if p and os.path.exists(p):
+        p = self._state.red_main()
+        if p:
             return p
         # image_path как fallback только в RED-режиме (в BLU он содержит BLU-текстуру)
         if self._active_team != Team.BLU and self.image_path and os.path.exists(self.image_path):
@@ -3583,85 +3650,16 @@ class PreviewPanel(QWidget):
         return False
 
     def _resolve_card_texture(self, mat_name: str) -> Optional[str]:
-        """Возвращает путь к текстуре для отображения в карточке при текущей команде.
-
-        Для нейтральных текстур (не относящихся ни к RED ни к BLU команде,
-        например sniper_lens, c_arrow) — показываем текстуру из любой команды
-        где она была загружена, чтобы она не исчезала при переключении команды.
-
-        Для командных текстур (есть в _vpk_blu_name_map) — строго активная команда.
-        """
-        # ── Стили (кастомная модель) ─────────────────────────────────────── #
-        # Вариантный стиль (skin > 0) показывает ТОЛЬКО свою переопределённую
-        # текстуру — без наследования базы/игры. Нет переопределения → None
-        # (пустая карточка с плюсиком, чтобы пользователь выбрал сам).
-        # Базовый стиль (skin 0) идёт по обычному пути ниже.
-        if self._original_skin_info and self._active_skin != 0:
-            sp = self._skin_overrides.get(self._active_skin, {}).get(mat_name)
-            return sp if (sp and os.path.exists(sp)) else None
-
-        # Руки на BLU: нейтральный материал (синее имя = красного) показываем
-        # ПУСТЫМ (= «общая, наследует RED»); заполнил отдельной синей → станет
-        # командным. Командный (синее имя ≠) идёт обычным путём (показывает синюю).
+        """Текстура для карточки при текущей команде/стиле (правила — в модели)."""
         from src.data.player_hands import HAND_MODE_KEYS as _HMK_card
-        if self._weapon_mode in _HMK_card and self._active_team == Team.BLU:
-            _bn = self._vpk_blu_name_map.get(mat_name, mat_name) if self._vpk_blu_name_map else mat_name
-            if _bn.lower() == mat_name.lower():   # нейтральный
-                bp = self._textures.get(Team.BLU, {}).get(mat_name)
-                return bp if (bp and os.path.exists(bp)) else None
-
-        return self._resolve_base_texture(mat_name)
+        hands_blu_view = (self._weapon_mode in _HMK_card
+                          and self._active_team == Team.BLU)
+        return self._state.resolve_card(mat_name, hands_blu_view=hands_blu_view)
 
     def _resolve_base_texture(self, mat_name: str) -> Optional[str]:
-        """Базовая (skin 0) текстура материала: пользовательская активной
-        команды → другая команда (нейтральные) → игровой оригинал из VPK →
-        командный кадр для главного материала. Без учёта стилей (skin > 0)."""
-        active = self._active_team
-        # Сначала ищем в активной команде
-        p = self._textures.get(active, {}).get(mat_name)
-        if p and os.path.exists(p):
-            return p
-
-        # Командный материал — только если его СИНЕЕ имя отличается от красного
-        # (engineer_red→engineer_blue). Нейтральный (синее имя то же, напр.
-        # engineer_handL) НЕ командный → наследует текстуру из RED для синей команды.
-        _blu_name = self._vpk_blu_name_map.get(mat_name) if self._vpk_blu_name_map else None
-        is_team_specific = bool(_blu_name and _blu_name.lower() != mat_name.lower())
-
-        if not is_team_specific:
-            # Ищем в другой команде тоже
-            other = Team.BLU if active == Team.RED else Team.RED
-            p = self._textures.get(other, {}).get(mat_name)
-            if p and os.path.exists(p):
-                return p
-
-        # Fallback: игровой оригинал текущей команды из VPK (превью того, что
-        # заменяем). Так при переключении RED↔BLU карточка показывает текстуру
-        # соответствующей команды, даже если пользователь свою не загружал.
-        # Карты _vpk_*_tex_map ключуются по RED-имени материала — как и карточки.
-        vpk_map = self._vpk_red_tex_map if active == Team.RED else self._vpk_blu_tex_map
-        g = vpk_map.get(mat_name)
-        if g and os.path.exists(g):
-            return g
-
-        # Нейтральные/служебные («Прочее») материалы не зависят от команды: их
-        # игровой оригинал лежит только в RED-карте. На BLU без собственной BLU-
-        # записи показываем RED-оригинал — иначе в «Прочее» на синей команде
-        # карточки оказывались бы пустыми.
-        if active != Team.RED and not is_team_specific:
-            g = self._vpk_red_tex_map.get(mat_name)
-            if g and os.path.exists(g):
-                return g
-
-        # Fallback для ГЛАВНОГО материала: если per-material карты команды нет
-        # (BLU пришёл одним кадром через _blu_frames, как у некоторых шапок),
-        # показываем кадр команды — так же, как 3D применяет его глобально.
-        if self._material_names and mat_name == self._material_names[0]:
-            frames = self._blu_frames if active == Team.BLU else self._red_frames
-            if frames and os.path.exists(frames[0]):
-                return frames[0]
-
-        return None
+        """Базовая (skin 0) текстура: пользовательская → другая команда для
+        нейтральных → VPK-оригинал → командный кадр (приоритеты — в модели)."""
+        return self._state.resolve_base(mat_name)
 
     def get_uploaded_texture_for_mat(self, mat_name: str) -> Optional[str]:
         """Возвращает путь к уже загруженной пользователем текстуре для данного
@@ -3681,62 +3679,11 @@ class PreviewPanel(QWidget):
         3. Иначе (оружие/шапка без явного маппинга, руки):
            → прямой поиск в обеих командах.
         """
-        if self._vpk_blu_name_map:
-            # Случай 1: RED-имя (ключ в маппинге) → только _textures[Team.RED]
-            if mat_name in self._vpk_blu_name_map:
-                p = self._textures.get(Team.RED, {}).get(mat_name)
-                return p if (p and os.path.exists(p)) else None
-
-            # Случай 2: BLU-имя (значение в маппинге) → обратный поиск
-            for red_key, blu_name in self._vpk_blu_name_map.items():
-                if blu_name == mat_name:
-                    p = self._textures.get(Team.BLU, {}).get(red_key)
-                    return p if (p and os.path.exists(p)) else None
-
-            # Случай 3: нейтральная текстура — не RED и не BLU в маппинге
-            # (например sniper_lens, c_arrow, eyeball_r и т.п.).
-            # Проверяем ОБЕ команды — текстура могла быть загружена в любой.
-            for _team in (Team.RED, Team.BLU):
-                p = self._textures.get(_team, {}).get(mat_name)
-                if p and os.path.exists(p):
-                    return p
-            return None
-
-        # Случай 4: маппинг пуст (одноматериальное оружие / 3D не загружалась).
-        # Нейтральные текстуры ищем в обеих командах по прямому ключу.
-        for _team in (Team.RED, Team.BLU):
-            p = self._textures.get(_team, {}).get(mat_name)
-            if p and os.path.exists(p):
-                return p
-        # Fallback: сборка спрашивает по BLU-имени материала ({mat}_blue).
-        # Force-team (синтезированная команда): BLU хранится под ИМЕНЕМ МАТЕРИАЛА
-        # без суффикса — '{m}_blue' → _textures[Team.BLU][m] (важно для мульти-материала,
-        # иначе всем колонкам уйдёт одна главная BLU). Затем — главная BLU как fallback
-        # (одноматериальное оружие хранит BLU под главным ключом).
-        ml = mat_name.lower()
-        for _suf in ('_blue', '_blu'):
-            if ml.endswith(_suf):
-                _base = mat_name[:-len(_suf)]
-                _bp = self._textures.get(Team.BLU, {}).get(_base)
-                if _bp and os.path.exists(_bp):
-                    return _bp
-                blu = self.get_blu_image_path()
-                if blu:
-                    return blu
-                break
-        return None
+        return self._state.uploaded_for_mat(mat_name)
 
     def get_blu_image_path(self) -> Optional[str]:
         """Возвращает путь к пользовательской BLU текстуре (главный слот) или None."""
-        blu = self._textures.get(Team.BLU, {})
-        key = self._material_names[0] if self._material_names else SINGLE_TEX_KEY
-        p = blu.get(key)
-        if p and os.path.exists(p):
-            return p
-        for p in blu.values():
-            if p and os.path.exists(p):
-                return p
-        return None
+        return self._state.blu_main()
 
     # ── Вспомогательные методы 2D ─────────────────────────────────────────────
 
@@ -4258,13 +4205,10 @@ class PreviewPanel(QWidget):
         """Сбрасывает VPK-кадры команд и скрывает кнопки переключения."""
         self._custom_vpk_mode = False
         self._applied_3d_tex = {}   # webview перезагружается → состояние сбрасываем
-        self._red_frames = []
-        self._blu_frames = []
         self._team_framerate = 0.0
-        self._vpk_red_tex_map = {}
-        self._vpk_blu_tex_map = {}
-        self._vpk_blu_name_map = {}
-        self._active_team = Team.RED   # сброс синхронизируем со стилями кнопок
+        # Данные команд и вариант — одним сбросом в модели.
+        self._state.reset_team_data()
+        self._state.reset_australium()
         if hasattr(self, 'btn_red'):
             self.btn_red.setVisible(False)
         if hasattr(self, 'btn_blu'):
@@ -4273,11 +4217,6 @@ class PreviewPanel(QWidget):
         self._force_team = False
         if hasattr(self, 'btn_make_team'):
             self.btn_make_team.setVisible(False)
-        # Сбрасываем Australium (кнопку и карточку-тип)
-        self._australium_frame = None
-        self._australium_active = False
-        self._australium_user_tex = None
-        self._australium_mat_name = None
         if hasattr(self, 'btn_aus'):
             self.btn_aus.setVisible(False)
         self._sync_variant_buttons()

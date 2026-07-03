@@ -1668,6 +1668,370 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
         worker.deleteLater()
         self._build_worker = None
 
+    # ------------------------------------------------------------------
+    # Фазы подготовки сборки (вызываются из build_vpk по порядку)
+    # ------------------------------------------------------------------
+
+    def _validate_build_inputs(self, settings: dict) -> Optional[tuple]:
+        """Проверяет входные данные сборки (имя, размер, конфликты опций).
+
+        Returns:
+            (name, size, format, flags, vtf_options, is_crit_hit) или None,
+            если запускать нельзя (предупреждение уже показано).
+        """
+        name = settings['filename']
+        if not name:
+            ErrorHandler.show_warning(self, self.t['enter_name'], self.t['error'])
+            return None
+        is_valid, error_msg = validate_vpk_filename(name)
+        if not is_valid:
+            ErrorHandler.show_warning(self, error_msg, self.t['error'])
+            return None
+
+        size = settings['size']
+        # Спрей поддерживает максимум 256×256 — предупреждаем и принудительно уменьшаем
+        if self.mode == "spray" and (size[0] > 256 or size[1] > 256):
+            if self.language == 'ru':
+                msg = (f"Спрей поддерживает максимум 256×256.\n"
+                       f"Выбранное разрешение {size[0]}×{size[1]} будет уменьшено до 256×256.\n\n"
+                       f"Совет: выберите «256×256 (Спрей)» в разделе Разрешение.")
+            else:
+                msg = (f"Spray supports a maximum of 256×256.\n"
+                       f"The selected resolution {size[0]}×{size[1]} will be downscaled to 256×256.\n\n"
+                       f"Tip: select '256×256 (Spray)' in the Resolution section.")
+            QMessageBox.warning(self, self.t['error'], msg)
+            size = (256, 256)
+
+        # Для critHIT используем настройки пользователя (формат, флаги, опции)
+        selected_format = settings['format']
+        flags = settings['flags']
+        vtf_options = settings.get('vtf_options', {})
+        is_crit_hit = (hasattr(self, 'crit_hit_checkbox') and
+                       self.crit_hit_checkbox.isChecked())
+        if is_crit_hit and vtf_options.get('normal'):
+            ErrorHandler.show_warning(
+                self,
+                self.t.get(
+                    'crit_hit_conflict_error',
+                    'Дополнительные настройки (Normal Map) конфликтуют с CritHIT. Сборка не запущена.'
+                ),
+                self.t['error']
+            )
+            return None
+        return name, size, selected_format, flags, vtf_options, is_crit_hit
+
+    def _resolve_main_texture(self) -> Optional[tuple]:
+        """Определяет главную текстуру сборки (пользовательская / sentinel).
+
+        Returns:
+            (from_path, custom_vtf_path) или None — собирать не из чего
+            (предупреждение уже показано).
+        """
+        custom_vtf_path = self.preview_panel.get_vtf_path()
+        from_path = None
+
+        if not custom_vtf_path:
+            from src.shared.constants import EXTRA_TEX_USE_GAME_ORIGINAL
+            from src.data.player_characters import SPY_MASK_MODE_KEY as _SPY_MASK_MODE
+            if self.mode == _SPY_MASK_MODE:
+                # Маски маскировки: нет «главной» текстуры — все маски через callback.
+                # Передаём sentinel как placeholder, vpk_service обработает маски отдельно.
+                from_path = EXTRA_TEX_USE_GAME_ORIGINAL
+            else:
+                # get_red_image_path() не делает fallback на BLU — возвращает
+                # None если RED не загружен.
+                from_path = self.preview_panel.get_red_image_path()
+                # В custom режиме изображение необязательно
+                if not from_path and self.mode != "custom":
+                    # Главный слот пуст, но мод всё равно можно собрать, если
+                    # пользователь загрузил текстуры в другие слоты (доп. карточки,
+                    # 3D-дроп на не-главный меш) или BLU-команду. В этом случае
+                    # главную текстуру берём оригинальную из игры (sentinel),
+                    # а загруженные слоты применяются поверх.
+                    has_other_textures = bool(
+                        self.preview_panel.get_blu_image_path()
+                        or self.preview_panel.get_slot_image_paths()
+                    )
+                    if has_other_textures:
+                        from_path = EXTRA_TEX_USE_GAME_ORIGINAL
+                    else:
+                        ErrorHandler.show_warning(self, self.t['load_image_error'], self.t['error'])
+                        return None
+        return from_path, custom_vtf_path
+
+    def _resolve_model_options(self, is_crit_hit: bool) -> Optional[tuple]:
+        """Опции замены/готовой модели (+ диалоги выбора файлов).
+
+        Returns:
+            (replace_model_enabled, model_ready_enabled,
+             replace_model_smd_path, model_ready_path)
+            или None — пользователь отменил диалог выбора файла.
+        """
+        # Читаем опции замены/готовой модели из меню шестерёнки
+        replace_model_enabled = (
+            hasattr(self, 'settings_panel') and
+            self.settings_panel.is_replace_model_checked()
+        )
+        model_ready_enabled = (
+            hasattr(self, 'settings_panel') and
+            self.settings_panel.is_model_ready_checked()
+        )
+        # Кнопка 🔄: если в превью загружена кастомная модель — включаем замену
+        # автоматически (без галочки в настройках). Развязывает кнопку и настройки.
+        if (not model_ready_enabled and hasattr(self, 'preview_panel')
+                and self.preview_panel.get_custom_smd_path()):
+            replace_model_enabled = True
+
+        # Замену модели НЕ поддерживаем для тела персонажа (сложный скелет/flex/
+        # bodygroups — подмена геометрией ломает модель). Принудительно выключаем.
+        from src.data.player_characters import PLAYER_BODY_MODE_KEYS
+        if self.mode in PLAYER_BODY_MODE_KEYS and replace_model_enabled:
+            logger.info("Замена модели недоступна для тела персонажа — выключаем.")
+            replace_model_enabled = False
+
+        # Взаимоисключение с CritHIT — сбрасываем оба флага если активен CritHIT
+        if is_crit_hit and (replace_model_enabled or model_ready_enabled):
+            logger.warning("CritHIT + model options conflict — resetting model options.")
+            if hasattr(self, 'settings_panel'):
+                self.settings_panel.reset_build_options(emit=False)
+            replace_model_enabled = False
+            model_ready_enabled   = False
+
+        # Если "Замена модели" — берём путь к SMD. Сначала пробуем модель,
+        # уже загруженную в 3D-превью (чтобы не просить выбрать файл повторно).
+        # Если её нет — показываем диалог выбора ДО запуска воркера.
+        replace_model_smd_path: Optional[str] = None
+        if replace_model_enabled and not model_ready_enabled:
+            if hasattr(self, 'preview_panel'):
+                replace_model_smd_path = self.preview_panel.get_custom_smd_path()
+            if replace_model_smd_path:
+                logger.info(f"Замена модели: используем загруженную в превью SMD: {replace_model_smd_path}")
+            else:
+                smd_file, _ = QFileDialog.getOpenFileName(
+                    self,
+                    self.t.get(
+                        'replace_model_select_title',
+                        'Select SMD file for model replacement'
+                    ),
+                    "",
+                    "SMD Files (*.smd);;All Files (*)"
+                )
+                if not smd_file:
+                    return None  # Пользователь отменил
+                replace_model_smd_path = smd_file
+
+        # Если "Модель уже готова" — запрашиваем путь к .mdl файлу ДО запуска воркера
+        model_ready_path: Optional[str] = None
+        if model_ready_enabled:
+            mdl_file, _ = QFileDialog.getOpenFileName(
+                self,
+                self.t.get(
+                    'model_ready_select_title',
+                    'Select pre-compiled model file (.mdl)'
+                ),
+                "",
+                "Model Files (*.mdl *.smd);;MDL Files (*.mdl);;SMD Files (*.smd);;All Files (*)"
+            )
+            if not mdl_file:
+                return None  # Пользователь отменил
+            model_ready_path = mdl_file
+
+        return (replace_model_enabled, model_ready_enabled,
+                replace_model_smd_path, model_ready_path)
+
+    def _resolve_hat_options(self) -> tuple:
+        """Опции сборки шапки: краски, набор моделей классов, доп. стили.
+
+        Returns:
+            (hat_apply_game_paints, hat_mdl_path_for_build,
+             hat_class_models, hat_style_builds)
+        """
+        # Для шапок — спрашиваем, нужны ли краски из игры
+        hat_apply_game_paints = True
+        if self.mode == "hat":
+            paints_title = self.t.get('hat_game_paints_title', 'Game Paints')
+            paints_question = self.t.get(
+                'hat_game_paints_question',
+                'Do you want game paints to apply to your texture?\n\n'
+                'If "Yes" — the VMT file will be loaded with original paint settings.\n'
+                'If "No" — paints will be disabled, your texture will display without game coloring.'
+            )
+            reply = QMessageBox.question(
+                self,
+                paints_title,
+                paints_question,
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes,
+            )
+            hat_apply_game_paints = (reply == QMessageBox.Yes)
+
+        # Мультиклассовая шапка: какие классы собирать (выбор в списке шапок).
+        # None — обычная шапка (одна общая модель) или не режим шапки.
+        hat_class_models = None
+        hat_mdl_path_for_build = getattr(self, '_hat_mdl_path', None)
+        if self.mode == "hat" and hasattr(self, 'hats_panel'):
+            # Полный набор моделей: стили × классы (или только классы / только
+            # стили). None — обычная шапка с одной моделью.
+            hat_class_models = self.hats_panel.get_selected_models()
+            if hat_class_models:
+                # Primary-сборка по ПЕРВОЙ модели набора; остальные дособираются
+                # в тот же VPK (vpk_service._build_extra_class_hat_models).
+                hat_mdl_path_for_build = next(iter(hat_class_models.values()))
+                logger.info(
+                    f"[HAT build] моделей в наборе: {len(hat_class_models)} "
+                    f"({list(hat_class_models.keys())})"
+                )
+
+        # Этап 3: доп. ИЗМЕНЁННЫЕ стили-модели (кроме активного — он идёт
+        # основным пайплайном). Каждый собирается своей моделью + своей
+        # текстурой в ТОТ ЖЕ мод. Источник — пер-стилевая память.
+        hat_style_builds = None
+        if (self.mode == "hat" and hasattr(self, 'hats_panel')
+                and getattr(self, '_hat_style_memory', None)):
+            _builds = []
+            for _idx, _st in self._hat_style_memory.items():
+                if _idx == self._active_hat_style or not _st:
+                    continue
+                if not self.preview_panel.edit_state_has_content(_st):
+                    continue
+                _models = self.hats_panel.get_style_models(_idx)
+                if not _models:
+                    continue
+                _builds.append({
+                    'mdl_paths': list(_models.values()),
+                    'replace_smd': _st.get('custom_smd'),
+                    'keep_materials': bool(_st.get('custom_keep')),
+                    'image_path': _st.get('image_path'),
+                    'vtf_path': _st.get('vtf_path'),
+                })
+            hat_style_builds = _builds or None
+            if hat_style_builds:
+                logger.info(
+                    f"[HAT build] доп. изменённых стилей: {len(hat_style_builds)}"
+                )
+
+        return (hat_apply_game_paints, hat_mdl_path_for_build,
+                hat_class_models, hat_style_builds)
+
+    def _collect_build_request(
+        self, *,
+        name: str,
+        size: tuple,
+        format_type: str,
+        flags: list,
+        vtf_options: dict,
+        settings: dict,
+        from_path: Optional[str],
+        custom_vtf_path: Optional[str],
+        replace_model_enabled: bool,
+        replace_model_smd_path: Optional[str],
+        model_ready_path: Optional[str],
+        draw_uv_layout: bool,
+        hat_apply_game_paints: bool,
+        hat_mdl_path: Optional[str],
+        hat_class_models: Optional[dict],
+        hat_style_builds: Optional[list],
+    ):
+        """ЧИСТЫЙ сбор BuildRequest из состояния панелей — без диалогов и
+        side-effect'ов, тестируется с заглушкой preview_panel."""
+        from src.services.build_request import BuildRequest
+
+        # Если пользователь загрузил BLU-текстуру в 2D панели — используем её
+        # автоматически, без лишних вопросов.
+        _blu_image = None
+        if hasattr(self, 'preview_panel'):
+            _blu_image = self.preview_panel.get_blu_image_path()
+        _blu_mode = 'upload' if _blu_image else 'none'
+
+        # Собираем все загруженные пользователем текстуры из 2D карточек.
+        # Некоторые материалы (c_arrow, sniper_lens и т.п.) есть в 3D модели
+        # но НЕ в QC skinfamilies → extra_texture_callback их не покрывает.
+        # Передаём эти текстуры напрямую чтобы они попали в VPK.
+        _panel_extra_textures: dict = {}
+        if hasattr(self, 'preview_panel'):
+            _panel_extra_textures = dict(
+                self.preview_panel.get_slot_image_paths()
+            )
+            # Убираем главную текстуру (col 0) — она уже в from_path.
+            # get_main_material() даёт стабильный главный материал даже когда в
+            # 2D открыт просмотр «Прочее» (там _material_names временно служебные).
+            main_key = (
+                self.preview_panel.get_main_material()
+                if hasattr(self.preview_panel, 'get_main_material')
+                else (self.preview_panel._material_names[0]
+                      if self.preview_panel._material_names else None)
+            )
+            if main_key and main_key in _panel_extra_textures:
+                _panel_extra_textures.pop(main_key)
+
+        # Стили (skinfamilies) кастомной модели: пользователь определил
+        # доп-стили в полосе стилей → генерируем $texturegroup и варианты.
+        # None, если стилей нет (обычная одно-скиновая сборка).
+        _skin_build_data = None
+        _replace_keep_materials = False
+        if replace_model_enabled and hasattr(self, 'preview_panel'):
+            _skin_build_data = self.preview_panel.get_skin_build_data()
+            if _skin_build_data:
+                logger.info(
+                    f"[SKIN BUILD] стили: {_skin_build_data['tg_overrides']}"
+                )
+            # «Готовая» модель со своими материалами → не схлопывать в один.
+            if hasattr(self.preview_panel, 'get_custom_keep_materials'):
+                _replace_keep_materials = self.preview_panel.get_custom_keep_materials()
+
+        # Отредактированный пользователем QC (только для «готовой» модели).
+        _custom_qc_text = None
+        if _replace_keep_materials and hasattr(self, 'preview_panel') \
+                and hasattr(self.preview_panel, 'get_custom_qc_text'):
+            _custom_qc_text = self.preview_panel.get_custom_qc_text()
+
+        return BuildRequest(
+            image_path=from_path,
+            mode=self.mode,
+            filename=name,
+            size=size,
+            format_type=format_type,
+            flags=flags,
+            vtf_options=vtf_options,
+            tf2_root_dir=settings.get('tf2_game_folder', ''),
+            export_folder=settings.get('export_folder', 'export'),
+            keep_temp_on_error=settings.get('keep_temp_on_error', False),
+            debug_mode=settings.get('debug_mode', False),
+            replace_model_enabled=replace_model_enabled,
+            replace_model_path=replace_model_smd_path,
+            model_ready_path=model_ready_path,
+            draw_uv_layout=draw_uv_layout,
+            language=self.language,
+            custom_vtf_path=custom_vtf_path,
+            blu_mode=_blu_mode,
+            blu_image_path=_blu_image,
+            custom_vpk_source_path=getattr(self, '_custom_vpk_path', None),
+            hat_mdl_path=hat_mdl_path,
+            hat_apply_game_paints=hat_apply_game_paints,
+            hat_class_models=hat_class_models,
+            hat_style_builds=hat_style_builds,
+            panel_extra_textures=_panel_extra_textures,
+            material_maps=(self.preview_panel.get_texture_maps()
+                           if hasattr(self, 'preview_panel') else {}),
+            material_settings=(self.preview_panel.get_texture_overrides()
+                               if hasattr(self, 'preview_panel') else {}),
+            skin_build_data=_skin_build_data,
+            replace_keep_materials=_replace_keep_materials,
+            custom_qc_text=_custom_qc_text,
+            isolate_shoulders=(
+                self.settings_panel.is_isolate_shoulders_checked()
+                if hasattr(self, 'settings_panel') else False
+            ),
+            panel_blu_textures=(
+                self.preview_panel.get_blu_slot_image_paths()
+                if hasattr(self, 'preview_panel') else None
+            ),
+            force_team=(
+                self.preview_panel.get_force_team()
+                if hasattr(self, 'preview_panel') else False
+            ),
+        )
+
     def build_vpk(self):
         """Запускает асинхронную сборку VPK"""
         try:
@@ -1676,214 +2040,25 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
                 return
                 
             settings = self.settings_panel.get_settings()
-            name = settings['filename']
-            if not name:
-                ErrorHandler.show_warning(self, self.t['enter_name'], self.t['error'])
+            inputs = self._validate_build_inputs(settings)
+            if inputs is None:
                 return
-            
-            # Валидация имени файла
-            is_valid, error_msg = validate_vpk_filename(name)
-            if not is_valid:
-                ErrorHandler.show_warning(self, error_msg, self.t['error'])
-                return
-
-            size = settings['size']
-
-            # Спрей поддерживает максимум 256×256 — предупреждаем и принудительно уменьшаем
-            if self.mode == "spray" and (size[0] > 256 or size[1] > 256):
-                if self.language == 'ru':
-                    msg = (f"Спрей поддерживает максимум 256×256.\n"
-                           f"Выбранное разрешение {size[0]}×{size[1]} будет уменьшено до 256×256.\n\n"
-                           f"Совет: выберите «256×256 (Спрей)» в разделе Разрешение.")
-                else:
-                    msg = (f"Spray supports a maximum of 256×256.\n"
-                           f"The selected resolution {size[0]}×{size[1]} will be downscaled to 256×256.\n\n"
-                           f"Tip: select '256×256 (Spray)' in the Resolution section.")
-                QMessageBox.warning(self, self.t['error'], msg)
-                size = (256, 256)
-
-            # Для critHIT используем настройки пользователя (формат, флаги, опции)
-            selected_format = settings['format']
-            flags = settings['flags']
-            vtf_options = settings.get('vtf_options', {})
-            is_crit_hit = (hasattr(self, 'crit_hit_checkbox') and
-                          self.crit_hit_checkbox.isChecked())
-            if is_crit_hit and vtf_options.get('normal'):
-                ErrorHandler.show_warning(
-                    self,
-                    self.t.get(
-                        'crit_hit_conflict_error',
-                        'Дополнительные настройки (Normal Map) конфликтуют с CritHIT. Сборка не запущена.'
-                    ),
-                    self.t['error']
-                )
-                return
+            name, size, selected_format, flags, vtf_options, is_crit_hit = inputs
             draw_uv_layout = False
 
-            # Проверяем, используется ли VTF файл из preview_panel
-            custom_vtf_path = self.preview_panel.get_vtf_path()
-            from_path = None
+            tex = self._resolve_main_texture()
+            if tex is None:
+                return
+            from_path, custom_vtf_path = tex
 
-            if not custom_vtf_path:
-                from src.shared.constants import EXTRA_TEX_USE_GAME_ORIGINAL
-                from src.data.player_characters import SPY_MASK_MODE_KEY as _SPY_MASK_MODE
-                if self.mode == _SPY_MASK_MODE:
-                    # Маски маскировки: нет «главной» текстуры — все маски через callback.
-                    # Передаём sentinel как placeholder, vpk_service обработает маски отдельно.
-                    from_path = EXTRA_TEX_USE_GAME_ORIGINAL
-                else:
-                    # get_red_image_path() не делает fallback на BLU — возвращает
-                    # None если RED не загружен.
-                    from_path = self.preview_panel.get_red_image_path()
-                    # В custom режиме изображение необязательно
-                    if not from_path and self.mode != "custom":
-                        # Главный слот пуст, но мод всё равно можно собрать, если
-                        # пользователь загрузил текстуры в другие слоты (доп. карточки,
-                        # 3D-дроп на не-главный меш) или BLU-команду. В этом случае
-                        # главную текстуру берём оригинальную из игры (sentinel),
-                        # а загруженные слоты применяются поверх.
-                        has_other_textures = bool(
-                            self.preview_panel.get_blu_image_path()
-                            or self.preview_panel.get_slot_image_paths()
-                        )
-                        if has_other_textures:
-                            from_path = EXTRA_TEX_USE_GAME_ORIGINAL
-                        else:
-                            ErrorHandler.show_warning(self, self.t['load_image_error'], self.t['error'])
-                            return
-            
-            # Читаем опции замены/готовой модели из меню шестерёнки
-            replace_model_enabled = (
-                hasattr(self, 'settings_panel') and
-                self.settings_panel.is_replace_model_checked()
-            )
-            model_ready_enabled = (
-                hasattr(self, 'settings_panel') and
-                self.settings_panel.is_model_ready_checked()
-            )
-            # Кнопка 🔄: если в превью загружена кастомная модель — включаем замену
-            # автоматически (без галочки в настройках). Развязывает кнопку и настройки.
-            if (not model_ready_enabled and hasattr(self, 'preview_panel')
-                    and self.preview_panel.get_custom_smd_path()):
-                replace_model_enabled = True
+            model_opts = self._resolve_model_options(is_crit_hit)
+            if model_opts is None:
+                return  # пользователь отменил диалог выбора файла
+            (replace_model_enabled, model_ready_enabled,
+             replace_model_smd_path, model_ready_path) = model_opts
 
-            # Замену модели НЕ поддерживаем для тела персонажа (сложный скелет/flex/
-            # bodygroups — подмена геометрией ломает модель). Принудительно выключаем.
-            from src.data.player_characters import PLAYER_BODY_MODE_KEYS
-            if self.mode in PLAYER_BODY_MODE_KEYS and replace_model_enabled:
-                logger.info("Замена модели недоступна для тела персонажа — выключаем.")
-                replace_model_enabled = False
-
-            # Взаимоисключение с CritHIT — сбрасываем оба флага если активен CritHIT
-            if is_crit_hit and (replace_model_enabled or model_ready_enabled):
-                logger.warning("CritHIT + model options conflict — resetting model options.")
-                if hasattr(self, 'settings_panel'):
-                    self.settings_panel.reset_build_options(emit=False)
-                replace_model_enabled = False
-                model_ready_enabled   = False
-
-            # Если "Замена модели" — берём путь к SMD. Сначала пробуем модель,
-            # уже загруженную в 3D-превью (чтобы не просить выбрать файл повторно).
-            # Если её нет — показываем диалог выбора ДО запуска воркера.
-            replace_model_smd_path: Optional[str] = None
-            if replace_model_enabled and not model_ready_enabled:
-                if hasattr(self, 'preview_panel'):
-                    replace_model_smd_path = self.preview_panel.get_custom_smd_path()
-                if replace_model_smd_path:
-                    logger.info(f"Замена модели: используем загруженную в превью SMD: {replace_model_smd_path}")
-                else:
-                    smd_file, _ = QFileDialog.getOpenFileName(
-                        self,
-                        self.t.get(
-                            'replace_model_select_title',
-                            'Select SMD file for model replacement'
-                        ),
-                        "",
-                        "SMD Files (*.smd);;All Files (*)"
-                    )
-                    if not smd_file:
-                        return  # Пользователь отменил
-                    replace_model_smd_path = smd_file
-
-            # Если "Модель уже готова" — запрашиваем путь к .mdl файлу ДО запуска воркера
-            model_ready_path: Optional[str] = None
-            if model_ready_enabled:
-                mdl_file, _ = QFileDialog.getOpenFileName(
-                    self,
-                    self.t.get(
-                        'model_ready_select_title',
-                        'Select pre-compiled model file (.mdl)'
-                    ),
-                    "",
-                    "Model Files (*.mdl *.smd);;MDL Files (*.mdl);;SMD Files (*.smd);;All Files (*)"
-                )
-                if not mdl_file:
-                    return  # Пользователь отменил
-                model_ready_path = mdl_file
-
-            # Для шапок — спрашиваем, нужны ли краски из игры
-            hat_apply_game_paints = True
-            if self.mode == "hat":
-                paints_title = self.t.get('hat_game_paints_title', 'Game Paints')
-                paints_question = self.t.get(
-                    'hat_game_paints_question',
-                    'Do you want game paints to apply to your texture?\n\n'
-                    'If "Yes" — the VMT file will be loaded with original paint settings.\n'
-                    'If "No" — paints will be disabled, your texture will display without game coloring.'
-                )
-                reply = QMessageBox.question(
-                    self,
-                    paints_title,
-                    paints_question,
-                    QMessageBox.Yes | QMessageBox.No,
-                    QMessageBox.Yes,
-                )
-                hat_apply_game_paints = (reply == QMessageBox.Yes)
-
-            # Мультиклассовая шапка: какие классы собирать (выбор в списке шапок).
-            # None — обычная шапка (одна общая модель) или не режим шапки.
-            hat_class_models = None
-            hat_mdl_path_for_build = getattr(self, '_hat_mdl_path', None)
-            if self.mode == "hat" and hasattr(self, 'hats_panel'):
-                # Полный набор моделей: стили × классы (или только классы / только
-                # стили). None — обычная шапка с одной моделью.
-                hat_class_models = self.hats_panel.get_selected_models()
-                if hat_class_models:
-                    # Primary-сборка по ПЕРВОЙ модели набора; остальные дособираются
-                    # в тот же VPK (vpk_service._build_extra_class_hat_models).
-                    hat_mdl_path_for_build = next(iter(hat_class_models.values()))
-                    logger.info(
-                        f"[HAT build] моделей в наборе: {len(hat_class_models)} "
-                        f"({list(hat_class_models.keys())})"
-                    )
-
-            # Этап 3: доп. ИЗМЕНЁННЫЕ стили-модели (кроме активного — он идёт
-            # основным пайплайном). Каждый собирается своей моделью + своей
-            # текстурой в ТОТ ЖЕ мод. Источник — пер-стилевая память.
-            hat_style_builds = None
-            if (self.mode == "hat" and hasattr(self, 'hats_panel')
-                    and getattr(self, '_hat_style_memory', None)):
-                _builds = []
-                for _idx, _st in self._hat_style_memory.items():
-                    if _idx == self._active_hat_style or not _st:
-                        continue
-                    if not self.preview_panel.edit_state_has_content(_st):
-                        continue
-                    _models = self.hats_panel.get_style_models(_idx)
-                    if not _models:
-                        continue
-                    _builds.append({
-                        'mdl_paths': list(_models.values()),
-                        'replace_smd': _st.get('custom_smd'),
-                        'keep_materials': bool(_st.get('custom_keep')),
-                        'image_path': _st.get('image_path'),
-                        'vtf_path': _st.get('vtf_path'),
-                    })
-                hat_style_builds = _builds or None
-                if hat_style_builds:
-                    logger.info(
-                        f"[HAT build] доп. изменённых стилей: {len(hat_style_builds)}"
-                    )
+            (hat_apply_game_paints, hat_mdl_path_for_build,
+             hat_class_models, hat_style_builds) = self._resolve_hat_options()
 
             # Сбрасываем запомненный выбор «применить ко всем» — каждая новая
             # сборка начинается без предыдущих предпочтений пользователя.
@@ -1900,101 +2075,23 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
             # Создаем и запускаем воркер для асинхронной сборки
             from src.services.build_worker import BuildWorker
 
-            # Если пользователь загрузил BLU-текстуру в 2D панели — используем её
-            # автоматически, без лишних вопросов.
-            _blu_image = None
-            if hasattr(self, 'preview_panel'):
-                _blu_image = self.preview_panel.get_blu_image_path()
-            _blu_mode = 'upload' if _blu_image else 'none'
-
-            # Собираем все загруженные пользователем текстуры из 2D карточек.
-            # Некоторые материалы (c_arrow, sniper_lens и т.п.) есть в 3D модели
-            # но НЕ в QC skinfamilies → extra_texture_callback их не покрывает.
-            # Передаём эти текстуры напрямую чтобы они попали в VPK.
-            _panel_extra_textures: dict = {}
-            if hasattr(self, 'preview_panel'):
-                _panel_extra_textures = dict(
-                    self.preview_panel.get_slot_image_paths()
-                )
-                # Убираем главную текстуру (col 0) — она уже в from_path.
-                # get_main_material() даёт стабильный главный материал даже когда в
-                # 2D открыт просмотр «Прочее» (там _material_names временно служебные).
-                main_key = (
-                    self.preview_panel.get_main_material()
-                    if hasattr(self.preview_panel, 'get_main_material')
-                    else (self.preview_panel._material_names[0]
-                          if self.preview_panel._material_names else None)
-                )
-                if main_key and main_key in _panel_extra_textures:
-                    _panel_extra_textures.pop(main_key)
-
-            # Стили (skinfamilies) кастомной модели: пользователь определил
-            # доп-стили в полосе стилей → генерируем $texturegroup и варианты.
-            # None, если стилей нет (обычная одно-скиновая сборка).
-            _skin_build_data = None
-            _replace_keep_materials = False
-            if replace_model_enabled and hasattr(self, 'preview_panel'):
-                _skin_build_data = self.preview_panel.get_skin_build_data()
-                if _skin_build_data:
-                    logger.info(
-                        f"[SKIN BUILD] стили: {_skin_build_data['tg_overrides']}"
-                    )
-                # «Готовая» модель со своими материалами → не схлопывать в один.
-                if hasattr(self.preview_panel, 'get_custom_keep_materials'):
-                    _replace_keep_materials = self.preview_panel.get_custom_keep_materials()
-
-            # Отредактированный пользователем QC (только для «готовой» модели).
-            _custom_qc_text = None
-            if _replace_keep_materials and hasattr(self, 'preview_panel') \
-                    and hasattr(self.preview_panel, 'get_custom_qc_text'):
-                _custom_qc_text = self.preview_panel.get_custom_qc_text()
-
-            from src.services.build_request import BuildRequest
-            _request = BuildRequest(
-                image_path=from_path,
-                mode=self.mode,
-                filename=name,
+            _request = self._collect_build_request(
+                name=name,
                 size=size,
                 format_type=selected_format,
                 flags=flags,
                 vtf_options=vtf_options,
-                tf2_root_dir=settings.get('tf2_game_folder', ''),
-                export_folder=settings.get('export_folder', 'export'),
-                keep_temp_on_error=settings.get('keep_temp_on_error', False),
-                debug_mode=settings.get('debug_mode', False),
+                settings=settings,
+                from_path=from_path,
+                custom_vtf_path=custom_vtf_path,
                 replace_model_enabled=replace_model_enabled,
-                replace_model_path=replace_model_smd_path,
+                replace_model_smd_path=replace_model_smd_path,
                 model_ready_path=model_ready_path,
                 draw_uv_layout=draw_uv_layout,
-                language=self.language,
-                custom_vtf_path=custom_vtf_path,
-                blu_mode=_blu_mode,
-                blu_image_path=_blu_image,
-                custom_vpk_source_path=getattr(self, '_custom_vpk_path', None),
-                hat_mdl_path=hat_mdl_path_for_build,
                 hat_apply_game_paints=hat_apply_game_paints,
+                hat_mdl_path=hat_mdl_path_for_build,
                 hat_class_models=hat_class_models,
                 hat_style_builds=hat_style_builds,
-                panel_extra_textures=_panel_extra_textures,
-                material_maps=(self.preview_panel.get_texture_maps()
-                               if hasattr(self, 'preview_panel') else {}),
-                material_settings=(self.preview_panel.get_texture_overrides()
-                                   if hasattr(self, 'preview_panel') else {}),
-                skin_build_data=_skin_build_data,
-                replace_keep_materials=_replace_keep_materials,
-                custom_qc_text=_custom_qc_text,
-                isolate_shoulders=(
-                    self.settings_panel.is_isolate_shoulders_checked()
-                    if hasattr(self, 'settings_panel') else False
-                ),
-                panel_blu_textures=(
-                    self.preview_panel.get_blu_slot_image_paths()
-                    if hasattr(self, 'preview_panel') else None
-                ),
-                force_team=(
-                    self.preview_panel.get_force_team()
-                    if hasattr(self, 'preview_panel') else False
-                ),
             )
             # Без parent=self ! Если дать parent=self, Qt станет владельцем
             # и не удалит старый воркер при замене, и сигналы будут дублироваться.

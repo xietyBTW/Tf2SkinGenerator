@@ -277,6 +277,13 @@ function _notifyPerMeshApplied() {
   catch (_) { /* ignore */ }
 }
 
+function _notifyModelLoaded() {
+  // Подтверждение Python-стороне: модель добавлена в сцену, можно накладывать
+  // текстуры (вместо угадывания задержки таймером).
+  try { if (_pyBridge && _pyBridge.notifyModelLoaded) _pyBridge.notifyModelLoaded(); }
+  catch (_) { /* ignore */ }
+}
+
 // ── Slot selector API (called from Python via runJavaScript) ──────────────── //
 
 window.showSlotSelector = function(slots, labelText) {
@@ -382,6 +389,7 @@ let _animTimer    = null;
 let _animFrames   = [];
 let _pendingAnim        = null;
 let _pendingMaterialMap = null;  // {mat_name: dataUrl} — ожидает загрузки OBJ
+let _pendingTexUrl      = null;  // одиночная текстура — ожидает загрузки OBJ
 // null  → обновляем все меши (обычный режим)
 // Set   → обновляем только меши с именами из множества (режим рук)
 let _editableMeshNames  = null;
@@ -435,6 +443,7 @@ function stopAnimation() {
   _animMeshNames      = null;
   _pendingAnim        = null;
   _pendingMaterialMap = null;
+  _pendingTexUrl      = null;
   if (_critAnimTimer !== null) { clearInterval(_critAnimTimer); _critAnimTimer = null; }
   ++_animGeneration;   // делаем все незавершённые _loadTextureThen-коллбэки устаревшими
 }
@@ -835,6 +844,17 @@ window.loadModelFromContent = function(objContent, texDataUrl, cx, cy, cz, scale
         _pendingMaterialMap = null;
         window.applyMaterialMap(map);
       }
+
+      if (_pendingTexUrl) {
+        // Одиночная текстура, запрошенная во время загрузки OBJ. Применяем
+        // ПОСЛЕ texDataUrl самой загрузки: запрос пришёл позже → он новее.
+        const url = _pendingTexUrl;
+        _pendingTexUrl = null;
+        window.updateTextureFromDataUrl(url);
+      }
+
+      // Модель в сцене, отложенные применения выполнены — сообщаем Python.
+      _notifyModelLoaded();
     },
     undefined,
     err => {
@@ -853,7 +873,13 @@ window.setEditableMeshNames = function(names) {
 
 window.updateTextureFromDataUrl = function(texDataUrl) {
   stopAnimation();
-  if (!currentModel) return;
+  if (!currentModel) {
+    // Модель ещё грузится (напр. back-to-back смена оружия) — очередируем,
+    // как applyMaterialMap: success-колбэк загрузки применит. Раньше вызов
+    // молча терялся и текстура пропадала до следующего действия пользователя.
+    _pendingTexUrl = texDataUrl;
+    return;
+  }
   const target  = currentModel;
   const animGen = _animGeneration;   // зафиксировали поколение после stopAnimation
   _loadTextureThen(texDataUrl, tex => {
