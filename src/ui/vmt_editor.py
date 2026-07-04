@@ -1,5 +1,6 @@
 import os
 import re
+from typing import Optional
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QTextEdit,
     QLabel, QMessageBox, QToolButton, QMenu, QCompleter, QToolTip,
@@ -241,32 +242,43 @@ class VMTEditorDialog(QDialog):
         self,
         parent=None,
         vmt_path: str = "",
-        weapon_key: str = "",
+        edit_key: str = "",
         t=None,
         display_name: str = "",
+        original_content: Optional[str] = None,
     ):
         super().__init__(parent)
         self.t           = t or TRANSLATIONS['en']
         self.vmt_path    = vmt_path
-        self.weapon_key  = weapon_key
-        self._display    = display_name or weapon_key or os.path.basename(vmt_path)
+        self.edit_key  = edit_key
+        self._display    = display_name or edit_key or os.path.basename(vmt_path)
         self._modified   = False
         self._is_valid   = True       # результат последней проверки синтаксиса
         self._error_line = 0
         self._error_msg  = ""
 
-        # ── Бэкап игрового оригинала ─────────────────────────────────────── #
-        # Сохраняем «чистую» игровую копию ОДИН РАЗ — только если ещё нет
-        # сохранённого отредактированного VMT для этого ключа.
-        # Это позволяет кнопке «Reset to original» восстановить именно
-        # оригинал из игры, а не случайно закешированную правку.
-        self._orig_content: str = ""
+        # Текущее содержимое (что показываем/редактируем): открытый файл — это
+        # либо игровой оригинал, либо ранее сохранённая правка.
+        self._current_content: str = ""
         if vmt_path and os.path.exists(vmt_path):
             with open(vmt_path, "r", encoding="utf-8", errors="replace") as f:
-                self._orig_content = f.read()
+                self._current_content = f.read()
+
+        # «Чистый» игровой оригинал для кнопки «Reset to game original».
+        # Если открыли уже сохранённую правку, оригинал приходит отдельным
+        # параметром (из бэкапа .orig); иначе оригинал == открытый файл.
+        self._orig_content: str = (
+            original_content if original_content is not None else self._current_content
+        )
 
         self._setup_ui()
         self._load_content()
+
+    def _set_text_silently(self, text: str) -> None:
+        """setPlainText, не поднимая флаг «изменено» (трекинг на время отключаем)."""
+        self.text_edit.document().contentsChanged.disconnect(self._on_content_changed)
+        self.text_edit.setPlainText(text)
+        self.text_edit.document().contentsChanged.connect(self._on_content_changed)
 
     # ── UI ────────────────────────────────────────────────────────────────── #
 
@@ -359,7 +371,7 @@ class VMTEditorDialog(QDialog):
         )
         self.reset_btn.clicked.connect(self._reset_to_original)
         # Кнопка активна только если есть сохранённый вариант (т.е. было что сбрасывать)
-        self.reset_btn.setEnabled(EditedVMTService.has_edited_vmt(self.weapon_key))
+        self.reset_btn.setEnabled(EditedVMTService.has_edited_vmt(self.edit_key))
 
         self.close_btn = QPushButton(self.t.get('close', 'Close'))
         self.close_btn.setStyleSheet(_btn_style)
@@ -423,12 +435,8 @@ class VMTEditorDialog(QDialog):
     # ── Загрузка контента ─────────────────────────────────────────────────── #
 
     def _load_content(self) -> None:
-        """Загружает контент в редактор."""
-        # Временно отключаем трекинг изменений при первоначальной загрузке
-        self.text_edit.document().contentsChanged.disconnect(self._on_content_changed)
-        self.text_edit.setPlainText(self._orig_content)
-        self.text_edit.document().contentsChanged.connect(self._on_content_changed)
-
+        """Загружает в редактор текущее содержимое (правку или оригинал)."""
+        self._set_text_silently(self._current_content)
         self._modified = False
         self._validate()
         self._update_title()
@@ -465,7 +473,7 @@ class VMTEditorDialog(QDialog):
                 self.t.get('vmt_unsaved_changes', '● Unsaved changes')
             )
             self._status_label.setStyleSheet("color: #d08030; font-size: 11px;")
-        elif EditedVMTService.has_edited_vmt(self.weapon_key):
+        elif EditedVMTService.has_edited_vmt(self.edit_key):
             self._status_label.setText(
                 self.t.get('vmt_custom_active', '✓ Custom VMT active')
             )
@@ -499,9 +507,7 @@ class VMTEditorDialog(QDialog):
         if watermark.strip() not in content:
             content = content.rstrip() + "\n" + watermark + "\n"
             # Обновляем редактор тоже (чтобы не было расхождения)
-            self.text_edit.document().contentsChanged.disconnect(self._on_content_changed)
-            self.text_edit.setPlainText(content)
-            self.text_edit.document().contentsChanged.connect(self._on_content_changed)
+            self._set_text_silently(content)
 
         # Сохраняем во временный файл (для текущего сеанса)
         if self.vmt_path:
@@ -512,8 +518,12 @@ class VMTEditorDialog(QDialog):
                 pass
 
         # Сохраняем в постоянный кэш (tools/edited_vmt/)
-        if self.weapon_key:
-            EditedVMTService.save_edited_vmt(self.weapon_key, content)
+        if self.edit_key:
+            # Один раз фиксируем чистый игровой оригинал — чтобы «Reset to game
+            # original» после повторного открытия правки вернул именно его.
+            if not EditedVMTService.has_original_backup(self.edit_key):
+                EditedVMTService.save_original_backup(self.edit_key, self._orig_content)
+            EditedVMTService.save_edited_vmt(self.edit_key, content)
 
         self._modified = False
         self._update_title()
@@ -536,15 +546,13 @@ class VMTEditorDialog(QDialog):
         if reply != QMessageBox.Yes:
             return
 
-        # Удаляем сохранённый VMT
-        if self.weapon_key:
-            EditedVMTService.delete_edited_vmt(self.weapon_key)
+        # Удаляем сохранённый VMT (и бэкап оригинала)
+        if self.edit_key:
+            EditedVMTService.delete_edited_vmt(self.edit_key)
 
-        # Загружаем оригинальный контент обратно
-        self.text_edit.document().contentsChanged.disconnect(self._on_content_changed)
-        self.text_edit.setPlainText(self._orig_content)
-        self.text_edit.document().contentsChanged.connect(self._on_content_changed)
-
+        # Возвращаем в редактор именно игровой оригинал
+        self._set_text_silently(self._orig_content)
+        self._current_content = self._orig_content
         self._modified = False
         self.reset_btn.setEnabled(False)
         self._update_title()

@@ -1421,7 +1421,15 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
         # ── Открываем сохранённый VMT (если есть) ────────────────────────── #
         edited_vmt_path = EditedVMTService.get_edited_vmt(edit_key)
         if edited_vmt_path and os.path.exists(edited_vmt_path):
-            self.open_vmt_editor(edited_vmt_path, edit_key, display_name)
+            # Игровой оригинал берём из бэкапа (.orig) — чтобы «Reset to game
+            # original» вернул именно его, а не текущую правку. Если бэкапа нет
+            # (правка сделана до появления этого механизма) — доизвлекаем оригинал
+            # из игры, иначе Reset вернул бы саму правку.
+            original = EditedVMTService.read_original_backup(edit_key)
+            if original is None:
+                original = self._extract_game_vmt_content(weapon_key, material_name)
+            self.open_vmt_editor(edited_vmt_path, edit_key, display_name,
+                                 original_content=original)
             return
 
         # ── Нет сохранённого — нужен путь к TF2 для извлечения ──────────── #
@@ -1456,6 +1464,28 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
         self.open_vmt_editor(vmt_path, edit_key, display_name)
 
 
+    def _extract_game_vmt_content(self, weapon_key: str,
+                                  material_name: Optional[str] = None) -> Optional[str]:
+        """Извлекает игровой оригинал VMT и возвращает его СОДЕРЖИМОЕ (не путь).
+
+        Нужно для бэкапа «Reset to game original», когда открываем уже сохранённую
+        правку. None — если путь к TF2 не задан или оригинал не найден."""
+        settings     = self.settings_panel.get_settings()
+        tf2_root_dir = settings.get('tf2_game_folder', '')
+        if not tf2_root_dir:
+            return None
+        if self.mode == "hat":
+            path = self._extract_hat_vmt_from_game(weapon_key, tf2_root_dir, material_name)
+        else:
+            path = self.extract_original_vmt_from_game(weapon_key, tf2_root_dir, material_name)
+        if path and os.path.exists(path):
+            try:
+                with open(path, "r", encoding="utf-8", errors="replace") as f:
+                    return f.read()
+            except OSError:
+                return None
+        return None
+
     def _extract_hat_vmt_from_game(self, hat_mdl: str, tf2_root_dir: str,
                                    material_name: Optional[str] = None) -> Optional[str]:
         """
@@ -1470,23 +1500,26 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
             return None
 
         from src.services import qc_skin_parser
-        # Конкретный материал (пер-карточная правка) — ищем именно его; иначе
-        # материалы skin0, а если их нет — стебель имени модели (минус класс).
+        # Материалы skin0, а если их нет — стебель имени модели (минус класс).
+        _rows = qc_skin_parser.parse_texturegroup_rows(qc_path)
+        skin0_textures = list(_rows[0]) if _rows else []
+        if not skin0_textures:
+            import re as _re
+            stem = os.path.splitext(os.path.basename(hat_mdl))[0]
+            stem = _re.sub(
+                r'_(heavy|scout|soldier|pyro|demoman|engineer|medic|sniper|spy)$',
+                '', stem, flags=_re.IGNORECASE,
+            )
+            skin0_textures = [stem]
+
+        # Конкретный материал (пер-карточная правка) — ищем именно его; если у
+        # добавленной текстуры нет своего VMT в игре, наследуем от главного
+        # материала skin0 (правило #2).
         if material_name:
-            mat_names = [material_name]
+            fallback = [m for m in skin0_textures if m.lower() != material_name.lower()]
+            mat_names = [material_name] + fallback
         else:
-            _rows = qc_skin_parser.parse_texturegroup_rows(qc_path)
-            skin0_textures = _rows[0] if _rows else []
-            if skin0_textures:
-                mat_names = list(skin0_textures)
-            else:
-                import re as _re
-                stem = os.path.splitext(os.path.basename(hat_mdl))[0]
-                stem = _re.sub(
-                    r'_(heavy|scout|soldier|pyro|demoman|engineer|medic|sniper|spy)$',
-                    '', stem, flags=_re.IGNORECASE,
-                )
-                mat_names = [stem]
+            mat_names = skin0_textures
 
         return self._extract_vmt_from_qc(qc_path, tf2_root_dir, mat_names)
     
@@ -1530,11 +1563,16 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
             return None
 
         # Имя(имена) материала: конкретный (пер-карточно) или materials из skin0.
+        rows = qc_skin_parser.parse_texturegroup_rows(qc_path)
+        skin0 = list(rows[0]) if rows else []
         if material_name:
-            mat_names = [material_name]
+            # Специфичный материал первым; если у добавленной текстуры нет своего
+            # VMT в игре — берём VMT главного материала (skin0) как основу
+            # (правило #2: наследуем от основного оружия и правим).
+            fallback = [m for m in skin0 if m.lower() != material_name.lower()]
+            mat_names = [material_name] + fallback + ([weapon_key] if not skin0 else [])
         else:
-            rows = qc_skin_parser.parse_texturegroup_rows(qc_path)
-            mat_names = list(rows[0]) if rows else [weapon_key]
+            mat_names = skin0 or [weapon_key]
         return self._extract_vmt_from_qc(qc_path, tf2_root_dir, mat_names)
 
     def _extract_vmt_from_qc(self, qc_path: str, tf2_root_dir: str,
@@ -1584,9 +1622,15 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
         except OSError:
             return None
 
-    def open_vmt_editor(self, path: str, weapon_key: str = "", display_name: str = "") -> None:
-        """Открывает редактор VMT файла"""
-        dialog = VMTEditorDialog(self, path, weapon_key, self.t, display_name=display_name)
+    def open_vmt_editor(self, path: str, edit_key: str = "", display_name: str = "",
+                        original_content: Optional[str] = None) -> None:
+        """Открывает редактор VMT файла.
+
+        edit_key — ключ EditedVMTService (имя материала/текстуры, а не оружия).
+        original_content — «чистый» игровой оригинал для кнопки сброса, когда
+        открываем уже сохранённую правку (иначе оригинал = открытый файл)."""
+        dialog = VMTEditorDialog(self, path, edit_key, self.t, display_name=display_name,
+                                 original_content=original_content)
         dialog.exec()
 
     def _launch_progress(

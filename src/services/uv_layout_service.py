@@ -15,7 +15,7 @@ class UVLayoutService:
     """Сервис для создания UV разметки из SMD файлов"""
     
     @staticmethod
-    def parse_smd_uv_coordinates(smd_path: str) -> List[Tuple[float, float, float, float, float, float]]:
+    def parse_smd_uv_coordinates(smd_path: str) -> List[Tuple[float, ...]]:
         """
         Парсит SMD файл и извлекает UV координаты и позиции вершин
         
@@ -97,12 +97,12 @@ class UVLayoutService:
     
     @staticmethod
     def draw_uv_layout(
-        uv_coords: List[Tuple[float, float, float, float, float, float]],
+        uv_coords: List[Tuple[float, ...]],
         output_path: str,
         image_size: Tuple[int, int] = (1024, 1024),
         line_color: str = "red",
         line_width: int = 1,
-        point_size: int = 2
+        point_size: int = 0
     ) -> None:
         """
         Рисует UV разметку на изображении
@@ -113,78 +113,49 @@ class UVLayoutService:
             image_size: Размер выходного изображения
             line_color: Цвет линий
             line_width: Толщина линий
-            point_size: Размер точек вершин
+            point_size: Радиус точек на вершинах. По умолчанию 0 — только линии
+                        (точки мешают при рисовании текстуры по разметке).
         """
         if not uv_coords:
             raise ValueError("Нет UV координат для отрисовки")
-        
+
         # Создаем изображение
+        w, h = image_size
         img = Image.new('RGB', image_size, color='white')
         draw = ImageDraw.Draw(img)
-        
-        # Конвертируем UV координаты в пиксели
-        # UV координаты обычно в диапазоне [0, 1], но могут быть и вне этого диапазона
-        # Находим минимальные и максимальные значения для нормализации
-        u_values = [coord[0] for coord in uv_coords]
-        v_values = [coord[1] for coord in uv_coords]
-        
-        u_min, u_max = min(u_values), max(u_values)
-        v_min, v_max = min(v_values), max(v_values)
-        
-        # Добавляем небольшой отступ
-        u_range = u_max - u_min if u_max != u_min else 1.0
-        v_range = v_max - v_min if v_max != v_min else 1.0
-        
-        padding = 0.05  # 5% отступ
-        u_min -= u_range * padding
-        u_max += u_range * padding
-        v_min -= v_range * padding
-        v_max += v_range * padding
-        
-        u_range = u_max - u_min if u_max != u_min else 1.0
-        v_range = v_max - v_min if v_max != v_min else 1.0
-        
-        # Функция для конвертации UV в пиксели
+
+        # UV → пиксель в ТЕКСТУРНОМ пространстве: всё поле [0,1]² соответствует
+        # всей картинке — ровно так же, как игра семплит текстуру. НИКАКОЙ
+        # нормализации по bounding box и НИКАКИХ отступов: иначе разметка
+        # масштабируется/смещается и не ложится на текстуру (это и был баг).
+        # V инвертируем: в UV V растёт вверх, в изображении Y — вниз.
+        # UV вне [0,1] (тайлинг) прижимаем к границам кадра.
         def uv_to_pixel(u: float, v: float) -> Tuple[int, int]:
-            # Инвертируем V координату (в UV координатах V растет вниз, в изображениях - вверх)
-            normalized_u = (u - u_min) / u_range
-            normalized_v = (v - v_min) / v_range
-            
-            x = int(normalized_u * image_size[0])
-            y = int((1 - normalized_v) * image_size[1])  # Инвертируем Y
-            
-            # Ограничиваем координаты границами изображения
-            x = max(0, min(image_size[0] - 1, x))
-            y = max(0, min(image_size[1] - 1, y))
-            
+            x = int(round(u * w))
+            y = int(round((1.0 - v) * h))
+            x = max(0, min(w - 1, x))
+            y = max(0, min(h - 1, y))
             return x, y
-        
-        # Рисуем треугольники (по 3 вершины)
+
+        # Рисуем треугольники (по 3 вершины подряд).
         for i in range(0, len(uv_coords) - 2, 3):
-            if i + 2 < len(uv_coords):
-                # Получаем координаты трех вершин треугольника
-                u1, v1 = uv_coords[i][0], uv_coords[i][1]
-                u2, v2 = uv_coords[i + 1][0], uv_coords[i + 1][1]
-                u3, v3 = uv_coords[i + 2][0], uv_coords[i + 2][1]
-                
-                # Конвертируем в пиксели
-                p1 = uv_to_pixel(u1, v1)
-                p2 = uv_to_pixel(u2, v2)
-                p3 = uv_to_pixel(u3, v3)
-                
-                # Рисуем треугольник (три линии)
-                draw.line([p1, p2], fill=line_color, width=line_width)
-                draw.line([p2, p3], fill=line_color, width=line_width)
-                draw.line([p3, p1], fill=line_color, width=line_width)
-                
-                # Рисуем точки вершин
-                if point_size > 0:
-                    for point in [p1, p2, p3]:
-                        draw.ellipse(
-                            [point[0] - point_size, point[1] - point_size,
-                             point[0] + point_size, point[1] + point_size],
-                            fill=line_color
-                        )
+            p1 = uv_to_pixel(uv_coords[i][0],     uv_coords[i][1])
+            p2 = uv_to_pixel(uv_coords[i + 1][0], uv_coords[i + 1][1])
+            p3 = uv_to_pixel(uv_coords[i + 2][0], uv_coords[i + 2][1])
+
+            # Рисуем треугольник (три линии)
+            draw.line([p1, p2], fill=line_color, width=line_width)
+            draw.line([p2, p3], fill=line_color, width=line_width)
+            draw.line([p3, p1], fill=line_color, width=line_width)
+
+            # Рисуем точки вершин
+            if point_size > 0:
+                for point in (p1, p2, p3):
+                    draw.ellipse(
+                        [point[0] - point_size, point[1] - point_size,
+                         point[0] + point_size, point[1] + point_size],
+                        fill=line_color
+                    )
         
         # Сохраняем изображение
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
