@@ -1080,6 +1080,10 @@ class PreviewPanel(QWidget):
         from PySide6.QtCore import QTimer
         token = object()
         self._model_load_token = token
+        # Ожидаемый номер загрузки: ack с другим номером (устаревшая модель
+        # при back-to-back смене) игнорируется — сработает fallback или ack
+        # актуальной загрузки.
+        self._model_load_seq = getattr(self._3d_widget, 'load_seq', None)
 
         def _fire():
             if self._model_load_token is token:
@@ -1091,10 +1095,15 @@ class PreviewPanel(QWidget):
         QTimer.singleShot(fallback_ms, _fire)
         self._model_load_settle_ms = settle_ms
 
-    def _on_3d_model_loaded(self) -> None:
-        """JS подтвердил: модель в сцене — выполняем отложенное применение."""
+    def _on_3d_model_loaded(self, load_seq: int = 0) -> None:
+        """JS подтвердил: модель в сцене — выполняем отложенное применение.
+        Устаревший ack (номер не совпал с ожидаемым) пропускаем."""
         cb = self._model_load_cb
         if cb is None:
+            return
+        expected = getattr(self, '_model_load_seq', None)
+        if expected is not None and load_seq != expected:
+            logger.debug(f"[3D ack] устаревший ack #{load_seq}, ждём #{expected}")
             return
         from PySide6.QtCore import QTimer
         QTimer.singleShot(self._model_load_settle_ms, cb)
@@ -1176,12 +1185,15 @@ class PreviewPanel(QWidget):
         # (например, пользователь переключился в 2D, загрузил текстуру, вернулся в 3D)
         self._reapply_textures_to_3d()
 
-    def _reapply_textures_to_3d(self, delay_ms: int = 300) -> None:
+    def _reapply_textures_to_3d(self, delay_ms: int = 50) -> None:
         """
         Повторно применяет пользовательские текстуры к 3D-модели поверх
         VPK-оригиналов. Вызывается при переключении в 3D и сразу после
         загрузки модели из игры (чтобы уже загруженная в 2D текстура
         применилась без повторного 2D→3D).
+
+        delay_ms — короткая пауза очереди событий; «модель ещё грузится»
+        страхуют JS-очереди сцены (см. _schedule_3d).
         """
         skip = (
             self._per_mesh_active
@@ -1215,12 +1227,14 @@ class PreviewPanel(QWidget):
             path = self.image_path
             QTimer.singleShot(delay_ms, lambda p=path: self._apply_image_to_3d(p))
 
-    def _schedule_3d(self, fn, delay_ms: int = 300) -> None:
+    def _schedule_3d(self, fn, delay_ms: int = 50) -> None:
         """Отложенный вызов обновления 3D-виджета.
 
-        Задержка даёт WebEngine время дорендерить сцену/применить предыдущее
-        обновление — иначе часть команд теряется. Единая точка вместо россыпи
-        QTimer.singleShot(300, ...) по обработчикам карточек.
+        Небольшая пауза даёт очереди Qt-событий устаканиться. Исторические
+        300мс были страховкой «модель ещё грузится» — теперь это закрывает
+        сама JS-сцена: applyMaterialMap/updateTextureFromDataUrl/loadAnimated-
+        Texture очередируют вызовы до готовности модели, а generation-guard'ы
+        отменяют устаревшие async-колбэки.
         """
         from PySide6.QtCore import QTimer
         QTimer.singleShot(delay_ms, fn)

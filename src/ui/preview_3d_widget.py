@@ -38,7 +38,7 @@ def _make_js_bridge():
         # data-URL + имя материала (пустая строка = дроп на пустое место)
         texture_dropped  = Signal(str, str)
         per_mesh_applied = Signal()     # дроп на конкретный меш (per-mesh drag)
-        model_loaded     = Signal()     # OBJ добавлен в сцену (можно класть текстуры)
+        model_loaded     = Signal(int)  # OBJ добавлен в сцену; int = номер загрузки
 
         @Slot(str, str)
         def notifyTextureDrop(self, data_url: str, material_name: str = '') -> None:  # noqa: N802
@@ -50,11 +50,12 @@ def _make_js_bridge():
             """Вызывается из JS когда текстура применена к конкретному мешу (per-mesh drag)."""
             self.per_mesh_applied.emit()
 
-        @Slot()
-        def notifyModelLoaded(self) -> None:  # noqa: N802
+        @Slot(int)
+        def notifyModelLoaded(self, load_seq: int = 0) -> None:  # noqa: N802
             """Вызывается из JS когда модель добавлена в сцену — подтверждение
-            вместо угадывания задержки таймером на Python-стороне."""
-            self.model_loaded.emit()
+            вместо угадывания задержки таймером на Python-стороне. load_seq —
+            номер загрузки (выдан _Real3DWidget), отсеивает устаревшие ack'и."""
+            self.model_loaded.emit(int(load_seq))
 
     return JsBridge()
 
@@ -123,6 +124,9 @@ class _Real3DWidget:
         self._ready = False
         self._pending: Optional[tuple] = None          # (obj_path, tex_path)
         self._lang: str = 'en'
+        # Номер загрузки модели: инкрементируется на каждый loadModelFromContent,
+        # JS возвращает его в notifyModelLoaded — приёмник отсеивает устаревшие.
+        self.load_seq: int = 0
 
         settings = self._view.settings()
         # Разрешаем CDN из локального файла
@@ -377,11 +381,13 @@ class _Real3DWidget:
         cx: float, cy: float, cz: float,
         scale: float,
     ) -> None:
+        self.load_seq += 1
         js = (
             f"window.loadModelFromContent("
             f"{json.dumps(obj_content)}, "
             f"{json.dumps(tex_data_url)}, "
-            f"{cx:.6f}, {cy:.6f}, {cz:.6f}, {scale:.6f}"
+            f"{cx:.6f}, {cy:.6f}, {cz:.6f}, {scale:.6f}, "
+            f"{self.load_seq}"
             f")"
         )
         self._view.page().runJavaScript(js)

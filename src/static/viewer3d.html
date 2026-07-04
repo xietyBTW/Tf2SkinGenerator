@@ -277,10 +277,12 @@ function _notifyPerMeshApplied() {
   catch (_) { /* ignore */ }
 }
 
-function _notifyModelLoaded() {
+function _notifyModelLoaded(loadSeq) {
   // Подтверждение Python-стороне: модель добавлена в сцену, можно накладывать
-  // текстуры (вместо угадывания задержки таймером).
-  try { if (_pyBridge && _pyBridge.notifyModelLoaded) _pyBridge.notifyModelLoaded(); }
+  // текстуры (вместо угадывания задержки таймером). loadSeq — номер загрузки,
+  // выданный Python-стороной: по нему отбрасываются устаревшие подтверждения
+  // при back-to-back сменах модели.
+  try { if (_pyBridge && _pyBridge.notifyModelLoaded) _pyBridge.notifyModelLoaded(loadSeq | 0); }
   catch (_) { /* ignore */ }
 }
 
@@ -402,6 +404,10 @@ let _animGeneration     = 0;
 
 let _critSprite   = null;   // THREE.Sprite — CritHIT billboard
 let _isCritHitMode = false; // Режим CritHIT (персонаж + billboard)
+// Последняя ЗАПРОШЕННАЯ текстура billboard'а: async-колбэк загрузки OBJ ставит
+// её, а не значение, захваченное на момент старта — иначе смена текстуры во
+// время парсинга модели перезатиралась бы устаревшей.
+let _lastCritTexUrl = '';
 
 // CritHIT billboard animation (GIF / animated VTF)
 let _critAnimTimer  = null;   // setInterval для анимации billboard'а
@@ -788,8 +794,9 @@ function _animateCritHitGif(dataUrls, fps) {
 
 // ── Public API ───────────────────────────────────────────────────────────── //
 
-window.loadModelFromContent = function(objContent, texDataUrl, cx, cy, cz, scale) {
+window.loadModelFromContent = function(objContent, texDataUrl, cx, cy, cz, scale, loadSeq) {
   const gen = ++_sceneGeneration;   // все предыдущие async-колбэки теперь устарели
+  const seqForAck = loadSeq | 0;    // номер загрузки для подтверждения Python-стороне
   _isCritHitMode    = false;
   _editableMeshNames = null;   // сбрасываем при каждой новой модели
   setStatus(_t.loading, false, true);
@@ -854,7 +861,7 @@ window.loadModelFromContent = function(objContent, texDataUrl, cx, cy, cz, scale
       }
 
       // Модель в сцене, отложенные применения выполнены — сообщаем Python.
-      _notifyModelLoaded();
+      _notifyModelLoaded(seqForAck);
     },
     undefined,
     err => {
@@ -1112,6 +1119,7 @@ function _applyModelTexture(group, modelTexDataUrl) {
 window.loadCritHitScene = function(critTexDataUrl, modelTexDataUrl) {
   ++_sceneGeneration;   // отменяет любой параллельный loadCritHitSceneWithModel
   _isCritHitMode = true;
+  _lastCritTexUrl = critTexDataUrl || '';
   setStatus(_t.loading, false, true);
   stopAnimation();
 
@@ -1146,7 +1154,7 @@ window.loadCritHitScene = function(critTexDataUrl, modelTexDataUrl) {
 
   // Billboard над головой: макушка в мировых координатах = (solHeight - cy)*scale = 1.0
   const headTopWorld = (solHeight - cy) * scale; // ≈ 1.0
-  _placeCritSprite(critTexDataUrl, headTopWorld);
+  _placeCritSprite(_lastCritTexUrl, headTopWorld);
 
   hideStatus();
 };
@@ -1157,6 +1165,7 @@ window.loadCritHitScene = function(critTexDataUrl, modelTexDataUrl) {
 window.loadCritHitSceneWithModel = function(objContent, critTexDataUrl, cx, cy, cz, scale, modelTexDataUrl) {
   const gen = ++_sceneGeneration;   // все предыдущие async-колбэки теперь устарели
   _isCritHitMode = true;
+  _lastCritTexUrl = critTexDataUrl || '';
   setStatus(_t.loading, false, true);
   stopAnimation();
 
@@ -1200,8 +1209,9 @@ window.loadCritHitSceneWithModel = function(objContent, critTexDataUrl, cx, cy, 
       controls.target.set(0, 0.35, 0);
       controls.update();
 
-      // Billboard: после нормализации top ≈ 1.0 (модель в диапазоне [-1, 1])
-      _placeCritSprite(critTexDataUrl, 1.0);
+      // Billboard: последняя ЗАПРОШЕННАЯ текстура (могла смениться за время
+      // парсинга OBJ через updateCritHitTexture), а не захваченная при старте.
+      _placeCritSprite(_lastCritTexUrl, 1.0);
 
       hideStatus();
         },
@@ -1211,7 +1221,7 @@ window.loadCritHitSceneWithModel = function(objContent, critTexDataUrl, cx, cy, 
       console.error('Custom model OBJ load error:', err);
       // Fallback: строим процедурного солдата (только если запрос ещё актуален)
       if (_sceneGeneration === gen) {
-        window.loadCritHitScene(critTexDataUrl, modelTexDataUrl);
+        window.loadCritHitScene(_lastCritTexUrl, modelTexDataUrl);
       }
     }
   );
@@ -1221,9 +1231,10 @@ window.loadCritHitSceneWithModel = function(objContent, critTexDataUrl, cx, cy, 
 // Публичная функция: обновляет только текстуру CritHIT billboard.
 window.updateCritHitTexture = function(critTexDataUrl) {
   if (!_isCritHitMode) return;
+  _lastCritTexUrl = critTexDataUrl || '';
   const solHeight    = 88;
   const headTopWorld = (solHeight - solHeight / 2) * (2.0 / solHeight); // 1.0
-  _placeCritSprite(critTexDataUrl, headTopWorld);
+  _placeCritSprite(_lastCritTexUrl, headTopWorld);
 };
 
 // ── Drag & Drop (текстура прямо в 3D) ────────────────────────────────────── //
