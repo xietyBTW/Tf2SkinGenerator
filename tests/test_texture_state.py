@@ -416,5 +416,88 @@ class ResetTests(TextureStateBase):
         self.assertEqual(self.state.storage_main_key(), "c_gun")
 
 
+class ForceTeamTests(TextureStateBase):
+    """«Сделать командным» (+ Команда) для оружия без нативной команды.
+
+    Регрессия: у такого оружия нет blu_name_map/blu_frames → материал считается
+    нейтральным, и set_texture дублировал загрузку в ОБЕ команды. Из-за этого
+    загрузка BLU затирала RED, и 2D/3D показывали одинаковые текстуры.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.state.material_names = ["c_gun"]
+        self.state.force_team = True
+
+    def test_blu_upload_does_not_overwrite_red(self):
+        red = self.png("red")
+        blu = self.png("blu")
+        # Загружаем RED, затем переключаемся на BLU и загружаем ДРУГУЮ текстуру.
+        self.state.active_team = Team.RED
+        self.state.set_texture("c_gun", red)
+        self.state.active_team = Team.BLU
+        self.state.set_texture("c_gun", blu)
+        # Ключевая проверка: команды РАЗНЫЕ (раньше обе были = blu).
+        self.assertEqual(self.state.textures[Team.RED].get("c_gun"), red)
+        self.assertEqual(self.state.textures[Team.BLU].get("c_gun"), blu)
+        # Резолв каждой команды возвращает свою текстуру.
+        self.state.active_team = Team.RED
+        self.assertEqual(self.state.resolve_base("c_gun"), red)
+        self.state.active_team = Team.BLU
+        self.assertEqual(self.state.resolve_base("c_gun"), blu)
+
+    def test_red_only_blu_defaults_to_red(self):
+        # Пока своя синяя не задана, BLU наследует RED (дефолт «как RED»).
+        red = self.png("red")
+        self.state.active_team = Team.RED
+        self.state.set_texture("c_gun", red)
+        self.assertNotIn("c_gun", self.state.textures[Team.BLU])  # не продублировано
+        self.state.active_team = Team.BLU
+        self.assertEqual(self.state.resolve_base("c_gun"), red)   # но показывается RED
+
+    def test_without_force_team_dual_write_preserved(self):
+        # Контроль: без force_team нейтральная по-прежнему пишется в обе команды.
+        self.state.force_team = False
+        tex = self.png("t")
+        self.state.active_team = Team.RED
+        self.state.set_texture("c_gun", tex)
+        self.assertEqual(self.state.textures[Team.BLU].get("c_gun"), tex)
+
+    def test_uploaded_for_mat_blue_defaults_to_red_under_force_team(self):
+        # Сборка синего скина: своей синей нет → берём базовую RED («как RED»),
+        # иначе {mat}_blue остался бы без VTF (фиолетовый в игре).
+        red = self.png("red")
+        self.state.active_team = Team.RED
+        self.state.set_texture("c_gun", red)
+        self.assertEqual(self.state.uploaded_for_mat("c_gun_blue"), red)
+
+    def test_uploaded_for_mat_blue_prefers_own_blue(self):
+        red, blu = self.png("red"), self.png("blu")
+        self.state.active_team = Team.RED
+        self.state.set_texture("c_gun", red)
+        self.state.active_team = Team.BLU
+        self.state.set_texture("c_gun", blu)
+        # Своя синяя задана → она приоритетнее RED-дефолта.
+        self.assertEqual(self.state.uploaded_for_mat("c_gun_blue"), blu)
+
+    def test_reset_team_data_clears_force_team(self):
+        self.assertTrue(self.state.force_team)
+        self.state.reset_team_data()
+        self.assertFalse(self.state.force_team)
+
+    def test_snapshot_restore_roundtrips_force_team(self):
+        red, blu = self.png("red"), self.png("blu")
+        self.state.active_team = Team.RED
+        self.state.set_texture("c_gun", red)
+        self.state.active_team = Team.BLU
+        self.state.set_texture("c_gun", blu)
+        snap = self.state.snapshot()
+        fresh = PreviewTextureState()
+        fresh.restore(snap)
+        self.assertTrue(fresh.force_team)
+        self.assertEqual(fresh.textures[Team.RED].get("c_gun"), red)
+        self.assertEqual(fresh.textures[Team.BLU].get("c_gun"), blu)
+
+
 if __name__ == "__main__":
     unittest.main()

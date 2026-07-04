@@ -62,6 +62,12 @@ class PreviewTextureState:
     active_skin: int = 0
     #: dict из SkinDetectWorker (num_skins, roles, …) или None — стили не определены.
     skin_info: Optional[dict] = None
+    #: «Сделать командным» (+ Команда): оружие БЕЗ нативной команды, которому
+    #: пользователь синтезирует RED/BLU. У таких материалов нет blu_name_map/
+    #: blu_frames, поэтому is_neutral() их считает нейтральными — но при force_team
+    #: загрузка НЕ должна дублироваться в обе команды (иначе BLU затирает RED и
+    #: 2D/3D показывают одинаковое). См. set_texture().
+    force_team: bool = False
 
     # ── Данные модели (заполняются воркерами превью) ──────────────────────── #
     #: Имена материалов геометрии; [0] — главный. ВНИМАНИЕ: в режиме «Прочее»
@@ -153,8 +159,13 @@ class PreviewTextureState:
                 slot.pop(mat, None)
             return
 
+        # Нейтральная текстура пишется в обе команды, чтобы карточка не пропадала
+        # при переключении команды. ИСКЛЮЧЕНИЕ — force_team: там пользователь
+        # намеренно задаёт РАЗНЫЕ текстуры RED/BLU, поэтому дублирование запрещено
+        # (иначе загрузка на BLU затирает RED). Дефолт «BLU как RED» до задания
+        # своей синей обеспечивает симметричный fallback в resolve_base().
         teams = [self.active_team]
-        if self.is_neutral(mat):
+        if self.is_neutral(mat) and not self.force_team:
             teams.append(Team.BLU if self.active_team == Team.RED else Team.RED)
         for team in teams:
             if path:
@@ -281,6 +292,14 @@ class PreviewTextureState:
                 p = _existing(self.textures.get(Team.BLU, {}).get(base))
                 if p:
                     return p
+                # force_team без своей синей → «как RED»: берём базовую RED-текстуру
+                # (раньше это обеспечивал дубль в set_texture; теперь дубля нет,
+                # поэтому дефолт восстанавливаем здесь, в резолве сборки — иначе
+                # синий скин остался бы без VTF = фиолетовый в игре).
+                if self.force_team:
+                    r = _existing(self.textures.get(Team.RED, {}).get(base))
+                    if r:
+                        return r
                 return self.blu_main()
         return None
 
@@ -317,6 +336,7 @@ class PreviewTextureState:
             'material_names': list(self.material_names),
             'main_material': self.main_material,
             'active_team': self.active_team,
+            'force_team': self.force_team,
             'blu_name_map': dict(self.blu_name_map),
             'vpk_red_tex_map': dict(self.vpk_red_tex_map),
             'vpk_blu_tex_map': dict(self.vpk_blu_tex_map),
@@ -337,6 +357,7 @@ class PreviewTextureState:
         self.material_names = list(snap.get('material_names') or [])
         self.main_material = snap.get('main_material')
         self.active_team = snap.get('active_team', Team.RED)
+        self.force_team = snap.get('force_team', False)
         self.blu_name_map = dict(snap.get('blu_name_map') or {})
         self.vpk_red_tex_map = dict(snap.get('vpk_red_tex_map') or {})
         self.vpk_blu_tex_map = dict(snap.get('vpk_blu_tex_map') or {})
@@ -365,6 +386,7 @@ class PreviewTextureState:
         self.vpk_blu_tex_map = {}
         self.blu_name_map = {}
         self.active_team = Team.RED
+        self.force_team = False
 
     def reset_australium(self) -> None:
         """Сброс варианта Australium (кадр, своя текстура, активность)."""

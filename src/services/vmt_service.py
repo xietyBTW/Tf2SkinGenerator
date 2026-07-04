@@ -637,11 +637,22 @@ class VMTService:
     def _create_special_template(mode: str) -> str:
         """Создает шаблон для специальных режимов (critHIT и т.д., используют UnlitGeneric шейдер)"""
         if mode == "critHIT":
+            # Анимированная crit-текстура: AnimatedTexture-прокси листает кадры
+            # ($frame) со скоростью 33 к/с. Раньше этот VMT копировался из
+            # tools/mod_data/crit.vmt — теперь генерируется здесь.
             return '''"UnlitGeneric"
 {
-\t"$basetexture" "effects/crit"
-\t"$additive" 1
+\t"$baseTexture" "effects\\crit"
 \t"$translucent" 1
+\t"Proxies"
+\t{
+\t\t"AnimatedTexture"
+\t\t{
+\t\t\t"animatedTextureVar" "$basetexture"
+\t\t\t"animatedTextureFrameNumVar" "$frame"
+\t\t\t"animatedTextureFrameRate" "33"
+\t\t}
+\t}
 }'''
         if mode == "spray":
             return '''"UnlitGeneric"

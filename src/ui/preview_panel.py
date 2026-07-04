@@ -573,6 +573,17 @@ class PreviewPanel(QWidget):
         self._state.active_team = value
 
     @property
+    def _force_team(self) -> bool:
+        """«Сделать командным» — единый источник правды в модели (влияет на
+        маршрутизацию set_texture: под force_team загрузка не дублируется в обе
+        команды)."""
+        return self._state.force_team
+
+    @_force_team.setter
+    def _force_team(self, value: bool) -> None:
+        self._state.force_team = bool(value)
+
+    @property
     def _active_skin(self) -> int:
         return self._state.active_skin
 
@@ -1341,14 +1352,20 @@ class PreviewPanel(QWidget):
             )
 
     def _is_force_team_eligible(self) -> bool:
-        """Можно ли предложить «сделать командным» — обычное оружие/снаряд/пикап/
-        насмешка (не шапка/персонаж/спец-режим/кастом/руки). Модель должна быть
+        """Можно ли предложить «сделать командным» — обычное оружие/снаряд/насмешка
+        (не шапка/персонаж/спец-режим/кастом/руки/пикап). Модель должна быть
         загружена (есть _weapon_key) — для одно-материального оружия _material_names
-        может быть пустым, поэтому на него не опираемся."""
+        может быть пустым, поэтому на него не опираемся.
+
+        Пикапы (Health & Ammo) исключены: аптечки/патроны — нейтральные мировые
+        предметы, командного варианта у них нет и синтезировать его нельзя."""
         mode = self._weapon_mode or ''
         if not mode or not self._weapon_key or self._weapon_key == '\x00':
             return False
         if mode in ('hat', 'custom'):
+            return False
+        from src.data.pickups import PICKUP_MODE_PREFIX
+        if mode.startswith(PICKUP_MODE_PREFIX):
             return False
         from src.data.weapons import SPECIAL_MODES
         if mode in set(SPECIAL_MODES.values()):
@@ -1628,12 +1645,19 @@ class PreviewPanel(QWidget):
                 # (display-only, как делает 3D через _apply_vpk_frames). image_path
                 # оставляем None: сборка не должна считать это пользовательской текстурой.
                 self.image_path = None
+                # force_team на BLU без своей синей → дефолт «как RED» (display-only).
+                # У force_team нет игрового оригинала, поэтому без этого превью было
+                # бы пустым (раньше RED показывался за счёт дубля в set_texture).
+                _ft_red = (self._textures.get(Team.RED, {}).get(key)
+                           if (self._force_team and team == Team.BLU) else None)
                 # Командный одно-материальный материал (spy_hands_red): синяя в
                 # _vpk_blu_tex_map, а не в _blu_frames — берём её.
                 _gp = (self._vpk_blu_tex_map if team == Team.BLU
                        else self._vpk_red_tex_map).get(key)
                 vpk_frames = self._blu_frames if team == Team.BLU else self._red_frames
-                if _gp and os.path.exists(_gp):
+                if _ft_red and os.path.exists(_ft_red):
+                    self._show_image_in_preview(_ft_red)
+                elif _gp and os.path.exists(_gp):
                     self._show_image_in_preview(_gp)
                 elif vpk_frames and os.path.exists(vpk_frames[0]):
                     self._show_image_in_preview(vpk_frames[0])
@@ -1734,6 +1758,12 @@ class PreviewPanel(QWidget):
                 _gp = vpk_map.get(key) if vpk_map else None
                 if _gp and os.path.exists(_gp):
                     path = _gp
+                elif self._force_team and team == Team.BLU:
+                    # force_team на BLU без своей синей → дефолт «как RED»
+                    # (у force_team нет игрового оригинала).
+                    _rp = self._textures.get(Team.RED, {}).get(key)
+                    if _rp and os.path.exists(_rp):
+                        path = _rp
             if path and os.path.exists(path):
                 QTimer.singleShot(50, lambda p=path: self._apply_image_to_3d(p))
             else:

@@ -48,9 +48,23 @@ tools/edited_vmt/
 tools/backupVMT/
 
 # ── Инструменты: сторонние бинари (скачиваются отдельно) ──────
+# Лицензии/источники см. THIRD_PARTY_LICENSES.md
 tools/crowbar/
 tools/VPK/
 tools/VTF/
+
+# ── Ассеты Valve/TF2: НЕ распространяются (чужой copyright) ────
+# Модели/текстуры берутся из локальной установки игры пользователя.
+# Папки-заглушки сохраняются через .gitkeep.
+tools/Model/**/*.vtf
+tools/Model/**/*.obj
+tools/Model/**/*.smd
+tools/Model/**/*.dmx
+tools/Model/**/*.mdl
+tools/Model/**/*.qc
+tools/mod_data/*.pcf
+tools/mod_data/*.vmt
+tools/mod_data/*.vtf
 
 # ── Логи и мусорные файлы ────────────────────────────────────
 *.log
