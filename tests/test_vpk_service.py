@@ -153,17 +153,21 @@ class VPKServiceTests(unittest.TestCase):
                 temp_vpk.write_bytes(b"vpk")
                 return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
 
-            with patch("src.services.packaging_service.PackagingService.get_vpk_tool", return_value=Path("vpk.exe")):
+            # pack_directory резолвит vpk.exe через ToolPaths.get_vpk_tool и делает
+            # pre-flight .exists() — патчим этот символ и даём реально существующий stub.
+            vpk_tool = base / "vpk.exe"; vpk_tool.write_bytes(b"stub")
+
+            with patch("src.services.packaging_service.ToolPaths.get_vpk_tool", return_value=vpk_tool):
                 with patch("src.services.packaging_service.subprocess.run", side_effect=fake_run):
                     output = VPKService._create_vpk_file(ctx, "out.vpk", export_folder=str(base))
                     self.assertTrue(Path(output).exists())
 
-            with patch("src.services.packaging_service.PackagingService.get_vpk_tool", return_value=Path("vpk.exe")):
+            with patch("src.services.packaging_service.ToolPaths.get_vpk_tool", return_value=vpk_tool):
                 with patch("src.services.packaging_service.subprocess.run", return_value=type("R", (), {"returncode": 1, "stdout": "bad", "stderr": "err"})()):
                     with self.assertRaises(VPKCreationError):
                         VPKService._create_vpk_file(ctx, "out2.vpk", export_folder=str(base))
-            
-            with patch("src.services.packaging_service.PackagingService.get_vpk_tool", return_value=Path("vpk.exe")):
+
+            with patch("src.services.packaging_service.ToolPaths.get_vpk_tool", return_value=vpk_tool):
                 with patch("src.services.packaging_service.subprocess.run", return_value=type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()):
                     with self.assertRaises(SharedFileNotFoundError):
                         VPKService._create_vpk_file(ctx, "out3.vpk", export_folder=str(base))

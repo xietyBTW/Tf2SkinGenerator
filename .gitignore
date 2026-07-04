@@ -49,7 +49,9 @@ tools/backupVMT/
 
 # ── Инструменты: сторонние бинари (скачиваются отдельно) ──────
 # Лицензии/источники см. THIRD_PARTY_LICENSES.md
-tools/crowbar/
+# crowbar (CC BY-SA 3.0) распространять можно с указанием авторства —
+# он в репозитории. VPK/VTF — вне репо: vpk.exe берётся из bin установленной
+# TF2, VTFCmd (LGPL/GPL) скачивается отдельно.
 tools/VPK/
 tools/VTF/
 

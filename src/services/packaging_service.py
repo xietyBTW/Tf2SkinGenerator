@@ -75,10 +75,19 @@ class PackagingService:
         if temp_vpk_path.exists():
             temp_vpk_path.unlink()
 
+        # vpk.exe берётся из bin установленной TF2 (или из бандла). Если ни того,
+        # ни другого нет — сразу понятная ошибка «укажите папку TF2», а не сырой
+        # FileNotFoundError из subprocess. У упаковки python-fallback'а нет.
+        vpk_tool = ToolPaths.get_vpk_tool()
+        if not Path(vpk_tool).exists():
+            msg = t.get('error_vpk_tool_not_found', 'vpk.exe tool not found')
+            logger.error(msg)
+            raise RequiredFileMissingError(str(vpk_tool), msg)
+
         logger.info("Запуск vpk.exe для создания VPK...")
         try:
             result = subprocess.run(
-                [str(ToolPaths.get_vpk_tool()), "-v", str(vpkroot_dir.resolve())],
+                [str(vpk_tool), "-v", str(vpkroot_dir.resolve())],
                 cwd=str(vpkroot_parent),
                 capture_output=True,
                 text=True,

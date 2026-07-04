@@ -8,9 +8,16 @@ The Software invokes several third-party command-line tools and libraries as
 **not** part of this project's source code and are **not** relicensed under MIT.
 Each retains its own license, listed below.
 
-These tools are **not distributed in this repository** — they must be obtained
-separately from their official sources (see `.gitignore`: `tools/crowbar/`,
-`tools/VPK/`, `tools/VTF/`).
+Distribution of these tools:
+
+- **Crowbar** (`tools/crowbar/`) **is included** in this repository under CC BY-SA 3.0
+  with attribution (see below) — its license permits redistribution.
+- **VPK** (`vpk.exe`): **not** shipped. At runtime the app uses Valve's official
+  `vpk.exe` from the user's own installed *Team Fortress 2* (`<TF2>/bin/vpk.exe`),
+  falling back to an optional local `tools/VPK/` bundle if present. No proprietary
+  Valve binaries are redistributed.
+- **VTF tools** (`tools/VTF/`: VTFCmd/VTFLib/HLLib/DevIL) — obtained separately from
+  their official sources (see `.gitignore`).
 
 This project is an **unofficial** fan tool. It is **not affiliated with, endorsed
 by, or sponsored by Valve Corporation**. *Team Fortress 2*, the Source engine, and

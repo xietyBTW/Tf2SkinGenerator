@@ -3,6 +3,7 @@
 """
 
 from pathlib import Path
+from typing import Optional
 
 
 # ============================================================================
@@ -41,8 +42,37 @@ class ToolPaths:
 
     @classmethod
     def get_vpk_tool(cls) -> Path:
-        """Возвращает абсолютный путь к VPK инструменту"""
-        return cls.VPK_TOOL.resolve() if cls.VPK_TOOL.exists() else cls.VPK_TOOL
+        """Абсолютный путь к vpk.exe. Приоритет:
+
+          1. Бандл ``tools/VPK/vpk.exe`` (если положили рядом).
+          2. ``vpk.exe`` из ``bin`` установленной у пользователя TF2 — это тот же
+             официальный инструмент Valve, причём его DLL (tier0/vstdlib/
+             FileSystem_Stdio) лежат рядом в bin, поэтому он запускается без
+             бандла. Так проприетарные бинарники Valve не нужно носить в репо.
+          3. Иначе — бандл-путь (вызов упадёт с понятной ошибкой; у распаковки
+             есть резервный путь через python-библиотеку vpk).
+        """
+        if cls.VPK_TOOL.exists():
+            return cls.VPK_TOOL.resolve()
+        bin_vpk = cls._tf2_bin_tool("vpk.exe")
+        if bin_vpk is not None:
+            return bin_vpk
+        return cls.VPK_TOOL
+
+    @staticmethod
+    def _tf2_bin_tool(exe_name: str) -> Optional[Path]:
+        """Путь к инструменту из ``<TF2>/bin`` или None. Папку TF2 берём из
+        настроек приложения. Пригодно и для других инструментов Valve из bin
+        (vtex.exe, vtf2tga.exe, studiomdl.exe …)."""
+        try:
+            from src.config.app_config import AppConfig
+            tf2_root = AppConfig.get_tf2_game_folder()
+        except Exception:
+            return None
+        if not tf2_root:
+            return None
+        p = Path(tf2_root) / "bin" / exe_name
+        return p.resolve() if p.exists() else None
 
 
 # ============================================================================

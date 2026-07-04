@@ -4,7 +4,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from src.services.merge_vpk_service import MergeVPKService
-from src.shared.exceptions import VPKCreationError
+from src.shared.exceptions import VPKCreationError, RequiredFileMissingError
 
 
 class FakeEntry:
@@ -117,9 +117,10 @@ class MergeVpkServiceTests(unittest.TestCase):
             def fake_run(*args, **kwargs):
                 (base / "vpkroot.vpk").write_bytes(b"vpk")
                 return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+            vpk_tool = base / "vpk.exe"; vpk_tool.write_bytes(b"stub")  # pack_directory проверяет .exists()
             # vpk.exe вызывается в PackagingService.pack_directory — патчим там.
             with patch("src.services.packaging_service.subprocess.run", side_effect=fake_run):
-                with patch("src.services.packaging_service.ToolPaths.get_vpk_tool", return_value=Path("vpk.exe")):
+                with patch("src.services.packaging_service.ToolPaths.get_vpk_tool", return_value=vpk_tool):
                     result = MergeVPKService._create_vpk_from_directory(vpkroot, "out.vpk", export_folder=str(base))
                     self.assertTrue(result.endswith("out.vpk"))
 
@@ -130,11 +131,24 @@ class MergeVpkServiceTests(unittest.TestCase):
             vpkroot.mkdir()
             def fake_run(*args, **kwargs):
                 return type("R", (), {"returncode": 1, "stdout": "bad", "stderr": "err"})()
+            vpk_tool = base / "vpk.exe"; vpk_tool.write_bytes(b"stub")  # pack_directory проверяет .exists()
             # vpk.exe вызывается в PackagingService.pack_directory — патчим там.
             with patch("src.services.packaging_service.subprocess.run", side_effect=fake_run):
-                with patch("src.services.packaging_service.ToolPaths.get_vpk_tool", return_value=Path("vpk.exe")):
+                with patch("src.services.packaging_service.ToolPaths.get_vpk_tool", return_value=vpk_tool):
                     with self.assertRaises(VPKCreationError):
                         MergeVPKService._create_vpk_from_directory(vpkroot, "out.vpk", export_folder=str(base))
+
+    def test_create_vpk_missing_tool_raises_friendly(self):
+        # Нет ни бандла, ни vpk.exe из TF2 → понятная RequiredFileMissingError
+        # (а не сырой FileNotFoundError из subprocess). pre-flight в pack_directory.
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            vpkroot = base / "vpkroot"
+            vpkroot.mkdir()
+            missing = base / "nope" / "vpk.exe"   # не существует
+            with patch("src.services.packaging_service.ToolPaths.get_vpk_tool", return_value=missing):
+                with self.assertRaises(RequiredFileMissingError):
+                    MergeVPKService._create_vpk_from_directory(vpkroot, "out.vpk", export_folder=str(base))
 
 
 if __name__ == "__main__":

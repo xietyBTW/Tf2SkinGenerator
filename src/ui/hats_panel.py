@@ -131,15 +131,30 @@ class _HatDelegate(QStyledItemDelegate):
         pad_l = 18 if is_selected else 14
         pad_t = 7
 
+        # Маркер «есть модельные стили» — минималистичная точка акцентного цвета
+        # справа от названия. Резервируем под неё место, чтобы текст не наезжал.
+        has_styles = len(getattr(hat, "styles", None) or []) > 1
+        marker_reserve = 16 if has_styles else 0
+
         # Название
         name_font = QFont()
         name_font.setPointSize(10)
         name_font.setWeight(QFont.Weight.Medium)
         painter.setFont(name_font)
         painter.setPen(QColor("#ffffff" if is_selected else "#cccccc"))
-        name_rect = QRect(rect.x() + pad_l, rect.y() + pad_t, rect.width() - pad_l - 8, 20)
+        name_rect = QRect(rect.x() + pad_l, rect.y() + pad_t,
+                          rect.width() - pad_l - 8 - marker_reserve, 20)
         elided = QFontMetrics(name_font).elidedText(hat.name, Qt.TextElideMode.ElideRight, name_rect.width())
         painter.drawText(name_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, elided)
+
+        if has_styles:
+            dot_d = 6
+            dot_x = rect.right() - 8 - dot_d
+            dot_y = rect.y() + pad_t + (20 - dot_d) // 2
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(self._accent))
+            painter.drawEllipse(dot_x, dot_y, dot_d, dot_d)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
 
         # Классы
         cls_font = QFont()
@@ -186,9 +201,10 @@ class HatsPanel(QWidget):
         self._load_worker: Optional[_LoadWorker] = None
         self._selected_hat: Optional[HatItem]    = None
 
-        # Состояние выпадающего списка классов (мультиклассовые шапки).
-        # Раскрыт максимум у одной шапки за раз.
-        self._dropdown_item: Optional[QListWidgetItem] = None
+        # Состояние панели выбора стилей/классов (мультиклассовые/styled шапки).
+        # Показывается максимум для одной шапки за раз, в отдельной панели под
+        # списком (не инъекцией item'а в QListWidget — та «съезжала» при
+        # ресайзе/скролле; см. _show_selector).
         self._dropdown_hat: Optional[HatItem]          = None
         self._class_chip_btns: dict = {}      # класс → QPushButton-чип
         self._selected_classes: dict = {}     # класс → отмечен (bool)
@@ -356,6 +372,21 @@ class HatsPanel(QWidget):
         self._list.currentItemChanged.connect(self._on_item_changed)
         lay.addWidget(self._list, 1)
 
+        # Панель выбора стилей/классов — стабильная замена инъекции item'а в список.
+        # Живёт в общем layout'е под списком: её геометрия управляется Qt-layout'ом,
+        # поэтому она не «съезжает» при ресайзе окна/появлении скроллбара.
+        self._selector_container = QWidget()
+        self._selector_container.setObjectName("hats_selector")
+        self._selector_container.setStyleSheet(
+            "QWidget#hats_selector { background: #141414; border: none;"
+            " border-top: 1px solid #1e1e1e; }"
+        )
+        self._selector_layout = QVBoxLayout(self._selector_container)
+        self._selector_layout.setContentsMargins(0, 0, 0, 0)
+        self._selector_layout.setSpacing(0)
+        self._selector_container.hide()
+        lay.addWidget(self._selector_container)
+
         # Статусная строка
         self._status_lbl = QLabel("")
         self._status_lbl.setObjectName("hats_status")
@@ -479,11 +510,13 @@ class HatsPanel(QWidget):
         # Блокируем сигналы списка во время перестройки, чтобы не слать hat_deselected
         # при каждом clear() во время набора текста в поиске
         self._list.blockSignals(True)
-        # Выпадающий список классов уничтожается вместе с clear() — сбрасываем ссылки.
-        self._dropdown_item = None
+        # Панель выбора относится к прежнему выбору — прячем и сбрасываем ссылки
+        # (выбор всё равно теряется при clear()).
+        self._clear_selector_widgets()
         self._dropdown_hat = None
         self._class_chip_btns = {}
         self._selected_classes = {}
+        self._style_chip_btns = {}
         self._list.clear()
 
         matched = [h for h in self._all_hats if h.matches(words, cls_filter)]
@@ -519,7 +552,7 @@ class HatsPanel(QWidget):
     # ── Выбор предмета ────────────────────────────────────────────────────── #
 
     def _on_item_changed(self, current, _previous) -> None:
-        # При любой смене выбора убираем прежний выпадающий список классов.
+        # При любой смене выбора убираем прежнюю панель выбора стилей/классов.
         self._remove_dropdown()
 
         if current is None:
@@ -528,14 +561,13 @@ class HatsPanel(QWidget):
             return
         hat: HatItem = current.data(Qt.ItemDataRole.UserRole)
         if not hat:
-            return  # служебный item (например, сам dropdown) — игнорируем
+            return  # служебный item — игнорируем
         self._selected_hat = hat
         self.hat_selected.emit(hat.mdl_path, hat.name)
 
-        # Мультикласс ИЛИ модельные стили → раскрываем выбор под шапкой.
+        # Мультикласс ИЛИ модельные стили → показываем панель выбора под списком.
         if self._is_multiclass(hat) or self._has_styles(hat):
-            row = self._list.row(current)
-            self._inject_dropdown(row, hat)
+            self._show_selector(hat)
 
     # ── Выпадающий список (классы / стили) ────────────────────────────────── #
 
@@ -569,15 +601,23 @@ class HatsPanel(QWidget):
                 return True
         return False
 
+    def _clear_selector_widgets(self) -> None:
+        """Убирает виджеты панели выбора и прячет её (без сброса полей-состояния)."""
+        lay = getattr(self, "_selector_layout", None)
+        if lay is not None:
+            while lay.count():
+                it = lay.takeAt(0)
+                w = it.widget()
+                if w is not None:
+                    w.setParent(None)
+                    w.deleteLater()
+        cont = getattr(self, "_selector_container", None)
+        if cont is not None:
+            cont.hide()
+
     def _remove_dropdown(self) -> None:
-        """Удаляет инъецированный item-аккордеон с чекбоксами классов."""
-        if self._dropdown_item is not None:
-            row = self._list.row(self._dropdown_item)
-            if row >= 0:
-                self._list.blockSignals(True)
-                self._list.takeItem(row)
-                self._list.blockSignals(False)
-        self._dropdown_item = None
+        """Скрывает панель выбора стилей/классов и сбрасывает её состояние."""
+        self._clear_selector_widgets()
         self._dropdown_hat = None
         self._class_chip_btns = {}
         self._selected_classes = {}
@@ -585,41 +625,25 @@ class HatsPanel(QWidget):
         self._active_style = 0
         self._edited_styles = set()
 
-    def _inject_dropdown(self, row: int, hat: HatItem) -> None:
-        """Вставляет под строкой row аккордеон: стили (если есть) + классы (если
-        мультикласс). По умолчанию отмечены: первый стиль (style 0) и все классы."""
+    def _show_selector(self, hat: HatItem) -> None:
+        """Показывает под списком панель выбора: стили (если есть) + классы (если
+        мультикласс). По умолчанию отмечены: первый стиль (style 0) и все классы.
+
+        Виджет живёт в обычном layout'е (не item в QListWidget), поэтому Qt сам
+        отвечает за его размер/позицию — ничего не «съезжает»."""
         self._dropdown_hat = hat
         # Классы: для styled-шапки — объединение по стилям, иначе per_class_models.
         styled = self._has_styles(hat)
-        multiclass = self._is_multiclass(hat)
         _classes = self._style_classes(hat) if styled else list(hat.per_class_models)
         self._selected_classes = {cls: True for cls in _classes}
         # Стиль — одиночный выбор; по умолчанию активен стиль 0. Маркеры
         # «изменён» (_edited_styles) сбрасывает main_window при смене шапки.
         self._active_style = 0
 
+        self._clear_selector_widgets()
         widget = self._build_dropdown_widget(hat)
-
-        # Высоту считаем явно (sizeHint неактивированного layout занижает).
-        height = 9
-        if styled:
-            srows = max(1, (len(hat.styles) + 1) // 2)   # 2 стиля-чипа в ряд (шире)
-            height += 6 + 16 + 6 + srows * 20 + max(0, srows - 1) * 4
-        if multiclass or (styled and self._styled_per_class(hat)):
-            n = len(_classes)
-            crows = max(1, (n + 2) // 3)
-            height += 6 + 16 + 6 + crows * 20 + max(0, crows - 1) * 4
-        widget.setFixedHeight(height)
-
-        item = QListWidgetItem()
-        item.setFlags(Qt.ItemFlag.NoItemFlags)   # не выбирается, не реагирует на клик
-        item.setSizeHint(QSize(self._list.viewport().width(), height))
-
-        self._list.blockSignals(True)
-        self._list.insertItem(row + 1, item)
-        self._list.setItemWidget(item, widget)
-        self._list.blockSignals(False)
-        self._dropdown_item = item
+        self._selector_layout.addWidget(widget)
+        self._selector_container.show()
 
     def _build_dropdown_widget(self, hat: HatItem) -> QWidget:
         """Виджет-аккордеон: секция стилей (если есть) + секция классов (если
@@ -688,6 +712,10 @@ class HatsPanel(QWidget):
 
     def _on_class_toggled(self, cls: str, checked: bool) -> None:
         """Переключение класса. Не даём снять последний отмеченный."""
+        # Защита от отложенного сигнала уже удалённой кнопки (панель могла быть
+        # очищена _remove_dropdown между кликом и доставкой) — как в _on_style_clicked.
+        if cls not in self._class_chip_btns:
+            return
         if not checked and sum(self._selected_classes.values()) <= 1:
             self._class_chip_btns[cls].setChecked(True)
             return
