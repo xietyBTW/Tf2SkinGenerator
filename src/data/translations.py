@@ -8,6 +8,7 @@ TRANSLATIONS = {
         # Вкладки выбора (оружие / шапки)
         'tab_weapons': 'Оружие',
         'tab_hats': 'Шапки',
+        'tab_diagnostics': 'Диагностика',
         'make_team_btn': '+ Команда',
         'make_team_tip': 'Сделать оружие командным: добавить отдельную BLU-текстуру (RED/BLU)',
         'misc_textures': 'Прочее',
@@ -402,6 +403,7 @@ TRANSLATIONS = {
         # Вкладки выбора (оружие / шапки)
         'tab_weapons': 'Weapons',
         'tab_hats': 'Hats',
+        'tab_diagnostics': 'Diagnostics',
         'make_team_btn': '+ Team',
         'make_team_tip': 'Make this weapon team-colored: add a separate BLU texture (RED/BLU)',
         'misc_textures': 'Other',

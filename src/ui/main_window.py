@@ -390,8 +390,14 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
         self._tab_hats_btn.setStyleSheet(_tab_btn_style(False))
         self._tab_hats_btn.clicked.connect(lambda: self._switch_tab(1))
 
+        self._tab_diag_btn = QPushButton(self.t.get('tab_diagnostics', 'Diagnostics'))
+        self._tab_diag_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._tab_diag_btn.setStyleSheet(_tab_btn_style(False))
+        self._tab_diag_btn.clicked.connect(lambda: self._switch_tab(2))
+
         tab_row.addWidget(self._tab_weapons_btn)
         tab_row.addWidget(self._tab_hats_btn)
+        tab_row.addWidget(self._tab_diag_btn)
         tab_row.addStretch()
 
         # Разделитель под таб-баром
@@ -503,8 +509,18 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
         self.hats_panel.hat_style_selected.connect(self._on_hat_style_selected)
         hats_page_layout.addWidget(self.hats_panel)
 
+        # ── Страница 2: диагностика VPK-модов ─────────────────────────────── #
+        from src.ui.diagnostics_panel import DiagnosticsPanel
+        diag_page = QWidget()
+        diag_page_layout = QVBoxLayout(diag_page)
+        diag_page_layout.setContentsMargins(0, 8, 0, 0)
+        diag_page_layout.setSpacing(0)
+        self.diagnostics_panel = DiagnosticsPanel(diag_page, language=self.language)
+        diag_page_layout.addWidget(self.diagnostics_panel)
+
         self._left_stack.addWidget(weapons_page)   # index 0
         self._left_stack.addWidget(hats_page)      # index 1
+        self._left_stack.addWidget(diag_page)      # index 2
 
         layout.addWidget(self._left_stack, 1)
 
@@ -562,6 +578,7 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
 
         self._tab_weapons_btn.setStyleSheet(active_style if index == 0 else inactive_style)
         self._tab_hats_btn.setStyleSheet(active_style if index == 1 else inactive_style)
+        self._tab_diag_btn.setStyleSheet(active_style if index == 2 else inactive_style)
 
         if index == 1:
             # Загружаем шапки если ещё не загружены
@@ -937,8 +954,12 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
             self._tab_weapons_btn.setText(self.t.get('tab_weapons', 'Weapons'))
         if hasattr(self, '_tab_hats_btn'):
             self._tab_hats_btn.setText(self.t.get('tab_hats', 'Hats'))
+        if hasattr(self, '_tab_diag_btn'):
+            self._tab_diag_btn.setText(self.t.get('tab_diagnostics', 'Diagnostics'))
         if hasattr(self, 'hats_panel'):
             self.hats_panel.update_language(self.language)
+        if hasattr(self, 'diagnostics_panel'):
+            self.diagnostics_panel.update_language(self.language)
 
         # Обновляем категорию и зависимые списки с учётом нового языка
         if hasattr(self, 'category_combo'):
