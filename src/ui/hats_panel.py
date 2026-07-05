@@ -9,13 +9,82 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from PySide6.QtCore import Qt, Signal, QThread, QTimer, QRect, QSize
-from PySide6.QtGui import QColor, QPainter, QFont, QFontMetrics
+from PySide6.QtCore import Qt, Signal, QThread, QTimer, QRect, QSize, QPoint, QPointF
+from PySide6.QtGui import (
+    QColor, QPainter, QFont, QFontMetrics, QAction, QIcon, QPixmap, QPolygonF,
+)
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QLineEdit,
     QPushButton, QListWidget, QListWidgetItem,
-    QStyledItemDelegate, QStyle,
+    QStyledItemDelegate, QStyle, QLayout, QToolButton, QMenu, QSizePolicy,
 )
+
+
+class FlowLayout(QLayout):
+    """Раскладка-поток: виджеты идут в ряд и переносятся на новую строку по
+    доступной ширине (стандартный приём Qt). Используем для чипов классов —
+    чтобы они адаптировались к ширине панели, а не висели фиксированными рядами."""
+
+    def __init__(self, parent=None, hspacing=4, vspacing=4):
+        super().__init__(parent)
+        self._items: list = []
+        self._hspace = hspacing
+        self._vspace = vspacing
+        self.setContentsMargins(0, 0, 0, 0)
+
+    def addItem(self, item):
+        self._items.append(item)
+
+    def count(self):
+        return len(self._items)
+
+    def itemAt(self, i):
+        return self._items[i] if 0 <= i < len(self._items) else None
+
+    def takeAt(self, i):
+        return self._items.pop(i) if 0 <= i < len(self._items) else None
+
+    def expandingDirections(self):
+        return Qt.Orientation(0)
+
+    def hasHeightForWidth(self):
+        return True
+
+    def heightForWidth(self, width):
+        return self._do_layout(QRect(0, 0, width, 0), test_only=True)
+
+    def setGeometry(self, rect):
+        super().setGeometry(rect)
+        self._do_layout(rect, test_only=False)
+
+    def sizeHint(self):
+        return self.minimumSize()
+
+    def minimumSize(self):
+        size = QSize()
+        for item in self._items:
+            size = size.expandedTo(item.minimumSize())
+        m = self.contentsMargins()
+        size += QSize(m.left() + m.right(), m.top() + m.bottom())
+        return size
+
+    def _do_layout(self, rect, test_only):
+        x, y = rect.x(), rect.y()
+        line_height = 0
+        for item in self._items:
+            w = item.sizeHint().width()
+            h = item.sizeHint().height()
+            next_x = x + w + self._hspace
+            if next_x - self._hspace > rect.right() and line_height > 0:
+                x = rect.x()
+                y = y + line_height + self._vspace
+                next_x = x + w + self._hspace
+                line_height = 0
+            if not test_only:
+                item.setGeometry(QRect(QPoint(x, y), item.sizeHint()))
+            x = next_x
+            line_height = max(line_height, h)
+        return y + line_height - rect.y()
 
 from src.data.hats_parser import HatItem, parse_hats, get_items_game_path
 from src.shared.logging_config import get_logger
@@ -40,31 +109,67 @@ _CLASSES = [
 _I18N = {
     "ru": {
         "title":       "КОСМЕТИКА",
-        "subtitle":    "Выберите шапку или аксессуар",
         "search_hint": "Поиск по названию...",
         "loading":     "Загрузка предметов из TF2...",
         "no_tf2":      "Укажите путь к TF2 в настройках",
         "no_results":  "Ничего не найдено",
         "all_classes": "Все классы",
+        "n_classes":   "{n} классов",
         "n_items":     "{n} предметов",
         "refresh":     "Обновить",
         "build_classes": "Классы для сборки:",
         "build_styles":  "Стили для сборки:",
+        "filter":         "Фильтр",
+        "filter_tip":     "Скрыть категории предметов",
+        "hide_medals":    "Скрыть медали",
+        "hide_halloween": "Скрыть Halloween",
+        "hide_holiday":   "Скрыть сезонные (Christmas и др.)",
     },
     "en": {
         "title":       "COSMETICS",
-        "subtitle":    "Select a hat or accessory",
         "search_hint": "Search by name...",
         "loading":     "Loading items from TF2...",
         "no_tf2":      "Set TF2 path in Settings",
         "no_results":  "No results found",
         "all_classes": "All classes",
+        "n_classes":   "{n} classes",
         "n_items":     "{n} items",
         "refresh":     "Refresh",
         "build_classes": "Build for classes:",
         "build_styles":  "Build for styles:",
+        "filter":         "Filter",
+        "filter_tip":     "Hide item categories",
+        "hide_medals":    "Hide medals",
+        "hide_halloween": "Hide Halloween",
+        "hide_holiday":   "Hide seasonal (Christmas etc.)",
     },
 }
+
+# Категории для фильтра «скрыть».
+_FILTER_TAGS = ("medals", "halloween", "holiday")
+
+
+def _funnel_icon(color: str, size: int = 16) -> QIcon:
+    """Рисует минималистичную иконку-воронку (фильтр) заданного цвета."""
+    pm = QPixmap(size, size)
+    pm.fill(Qt.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing, True)
+    p.setPen(Qt.NoPen)
+    p.setBrush(QColor(color))
+    m = 2.0
+    s = float(size)
+    cx = s / 2.0
+    sh = 1.6           # половина ширины «ножки»
+    mid_y = s * 0.52   # где широкая часть переходит в ножку
+    poly = QPolygonF([
+        QPointF(m, m), QPointF(s - m, m),
+        QPointF(cx + sh, mid_y), QPointF(cx + sh, s - m),
+        QPointF(cx - sh, s - m), QPointF(cx - sh, mid_y),
+    ])
+    p.drawPolygon(poly)
+    p.end()
+    return QIcon(pm)
 
 
 # ── Фоновая загрузка ──────────────────────────────────────────────────────── #
@@ -100,9 +205,13 @@ class _LoadWorker(QThread):
 class _HatDelegate(QStyledItemDelegate):
     """Рисует каждый элемент шапки: название + классы."""
 
-    def __init__(self, accent: str, parent=None):
+    def __init__(self, accent: str, t: dict, parent=None):
         super().__init__(parent)
         self._accent = accent
+        self._t = t
+
+    def set_translations(self, t: dict) -> None:
+        self._t = t
 
     def paint(self, painter: QPainter, option, index) -> None:
         hat: Optional[HatItem] = index.data(Qt.ItemDataRole.UserRole)
@@ -113,65 +222,72 @@ class _HatDelegate(QStyledItemDelegate):
         painter.save()
         rect = option.rect
 
-        # Фон
         is_selected = bool(option.state & QStyle.State_Selected)
         is_hover    = bool(option.state & QStyle.State_MouseOver)
 
+        # Фон: мягкая подсветка выбранного (не плотная заливка) + левый акцент.
         if is_selected:
-            painter.fillRect(rect, QColor(self._accent + "22"))
-        elif is_hover:
-            painter.fillRect(rect, QColor("#ffffff10"))
-        else:
-            painter.fillRect(rect, QColor("#00000000"))
-
-        # Левая акцентная полоска при выборе
-        if is_selected:
+            painter.fillRect(rect, QColor(self._accent + "18"))
             painter.fillRect(QRect(rect.x(), rect.y(), 3, rect.height()), QColor(self._accent))
+        elif is_hover:
+            painter.fillRect(rect, QColor("#ffffff0d"))
 
         pad_l = 18 if is_selected else 14
-        pad_t = 7
-
-        # Маркер «есть модельные стили» — минималистичная точка акцентного цвета
-        # справа от названия. Резервируем под неё место, чтобы текст не наезжал.
+        pad_r = 12
         has_styles = len(getattr(hat, "styles", None) or []) > 1
-        marker_reserve = 16 if has_styles else 0
 
-        # Название
-        name_font = QFont()
-        name_font.setPointSize(10)
-        name_font.setWeight(QFont.Weight.Medium)
-        painter.setFont(name_font)
-        painter.setPen(QColor("#ffffff" if is_selected else "#cccccc"))
-        name_rect = QRect(rect.x() + pad_l, rect.y() + pad_t,
-                          rect.width() - pad_l - 8 - marker_reserve, 20)
-        elided = QFontMetrics(name_font).elidedText(hat.name, Qt.TextElideMode.ElideRight, name_rect.width())
-        painter.drawText(name_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, elided)
+        # ── Класс — приглушённым тегом справа (одна строка вместо второй).
+        # Название в приоритете: тег класса ограничен по ширине, а длинный список
+        # классов сворачивается в «N классов», чтобы не сжимать имя до «M…». ──
+        cls_font = QFont()
+        cls_font.setPointSize(9)
+        cfm = QFontMetrics(cls_font)
+        inner_w = rect.width() - pad_l - pad_r
+        max_cls_w = max(40, int(inner_w * 0.42))
+        cls_text = "All" if hat.classes_str == "All classes" else hat.classes_str
+        cls_w = cfm.horizontalAdvance(cls_text)
+        if cls_w > max_cls_w and len(hat.classes) > 1:
+            cls_text = self._t.get("n_classes", "{n} classes").format(n=len(hat.classes))
+            cls_w = cfm.horizontalAdvance(cls_text)
+        if cls_w > max_cls_w:
+            cls_text = cfm.elidedText(cls_text, Qt.TextElideMode.ElideRight, max_cls_w)
+            cls_w = cfm.horizontalAdvance(cls_text)
+        painter.setFont(cls_font)
+        painter.setPen(QColor(self._accent + "bb" if is_selected else "#565656"))
+        cls_rect = QRect(rect.right() - pad_r - cls_w, rect.y(), cls_w, rect.height())
+        painter.drawText(cls_rect, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, cls_text)
 
+        # ── Маркер модельных стилей — точка слева от тега класса ──
+        marker_reserve = 14 if has_styles else 0
         if has_styles:
             dot_d = 6
-            dot_x = rect.right() - 8 - dot_d
-            dot_y = rect.y() + pad_t + (20 - dot_d) // 2
+            dot_x = cls_rect.left() - 8 - dot_d
+            dot_y = rect.y() + (rect.height() - dot_d) // 2
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(QColor(self._accent))
             painter.drawEllipse(dot_x, dot_y, dot_d, dot_d)
             painter.setBrush(Qt.BrushStyle.NoBrush)
 
-        # Классы
-        cls_font = QFont()
-        cls_font.setPointSize(9)
-        painter.setFont(cls_font)
-        painter.setPen(QColor(self._accent + "aa" if is_selected else "#555555"))
-        cls_rect = QRect(rect.x() + pad_l, rect.y() + pad_t + 20, rect.width() - pad_l - 8, 16)
-        painter.drawText(cls_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, hat.classes_str)
+        # ── Название (по центру строки) ──
+        name_font = QFont()
+        name_font.setPointSize(10)
+        name_font.setWeight(QFont.Weight.Medium)
+        painter.setFont(name_font)
+        painter.setPen(QColor("#f2f2f2" if is_selected else "#cfcfcf"))
+        name_left = rect.x() + pad_l
+        name_right = cls_rect.left() - 8 - marker_reserve
+        name_rect = QRect(name_left, rect.y(), max(10, name_right - name_left), rect.height())
+        elided = QFontMetrics(name_font).elidedText(hat.name, Qt.TextElideMode.ElideRight, name_rect.width())
+        painter.drawText(name_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, elided)
 
         # Разделитель
-        painter.setPen(QColor("#1e1e1e"))
+        painter.setPen(QColor("#191919"))
         painter.drawLine(rect.x(), rect.bottom(), rect.right(), rect.bottom())
 
         painter.restore()
 
     def sizeHint(self, option, index) -> QSize:
-        return QSize(0, 52)
+        return QSize(0, 38)
 
 
 # ── Главная панель ────────────────────────────────────────────────────────── #
@@ -200,6 +316,10 @@ class HatsPanel(QWidget):
         self._class_filter  = "all"
         self._load_worker: Optional[_LoadWorker] = None
         self._selected_hat: Optional[HatItem]    = None
+
+        # Скрытые категории (медали/сезонное). По умолчанию ничего не скрыто;
+        # выбор сохраняется в конфиге и переживает перезапуск.
+        self._hidden_tags: set = self._load_hidden_tags()
 
         # Состояние панели выбора стилей/классов (мультиклассовые/styled шапки).
         # Показывается максимум для одной шапки за раз, в отдельной панели под
@@ -234,7 +354,13 @@ class HatsPanel(QWidget):
         lay.setSpacing(10)
         lay.setContentsMargins(0, 4, 0, 0)
 
-        # Заголовок
+        # Заголовок-секция + счётчик справа (подзаголовок убран как избыточный:
+        # активная вкладка «HATS» и так объясняет назначение; счётчик перенесён
+        # сюда из нижней статусной строки, освобождая место под список).
+        header_row = QHBoxLayout()
+        header_row.setContentsMargins(0, 0, 0, 4)
+        header_row.setSpacing(6)
+
         title = QLabel(self._t["title"])
         title.setObjectName("hats_title")
         title.setStyleSheet(f"""
@@ -248,21 +374,22 @@ class HatsPanel(QWidget):
                 padding: 0;
             }}
         """)
-        lay.addWidget(title)
+        header_row.addWidget(title)
+        header_row.addStretch()
 
-        sub = QLabel(self._t["subtitle"])
-        sub.setObjectName("hats_sub")
-        sub.setStyleSheet("""
-            QLabel#hats_sub {
-                color: #444;
+        self._count_lbl = QLabel("")
+        self._count_lbl.setObjectName("hats_count")
+        self._count_lbl.setStyleSheet("""
+            QLabel#hats_count {
+                color: #5a5a5a;
                 font-size: 11px;
                 background: transparent;
                 border: none;
                 padding: 0;
-                margin-bottom: 4px;
             }
         """)
-        lay.addWidget(sub)
+        header_row.addWidget(self._count_lbl)
+        lay.addLayout(header_row)
 
         # Строка поиска
         search_row = QHBoxLayout()
@@ -314,41 +441,44 @@ class HatsPanel(QWidget):
             }}
         """)
         self._refresh_btn.clicked.connect(self._force_reload)
+
+        # Кнопка «Фильтр» — меню категорий для скрытия (медали/сезонное).
+        self._filter_btn = QToolButton()
+        self._filter_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._filter_btn.setObjectName("hats_filter")
+        self._filter_btn.setPopupMode(QToolButton.InstantPopup)
+        self._filter_btn.setToolTip(self._t.get("filter_tip", "Hide item categories"))
+        self._build_filter_menu()
+        search_row.addWidget(self._filter_btn)
         search_row.addWidget(self._refresh_btn)
 
+        self._update_filter_btn_style()
         lay.addLayout(search_row)
 
-        # Фильтр по классу — две строки по 5 кнопок (All+Scout+Soldier+Pyro+Demo / Heavy+Engi+Medic+Sniper+Spy)
+        # Фильтр по классу — чипы в flow-раскладке: переносятся по ширине панели.
         self._class_btns: dict = {}
         class_outer = QWidget()
         class_outer.setStyleSheet("background: transparent;")
-        class_vlay = QVBoxLayout(class_outer)
-        class_vlay.setContentsMargins(0, 0, 0, 0)
-        class_vlay.setSpacing(4)
+        class_flow = FlowLayout(class_outer, hspacing=4, vspacing=4)
 
-        for row_slice in (_CLASSES[:5], _CLASSES[5:]):
-            row_hlay = QHBoxLayout()
-            row_hlay.setContentsMargins(0, 0, 0, 0)
-            row_hlay.setSpacing(4)
-            for key, label in row_slice:
-                btn = QPushButton(label)
-                btn.setCheckable(True)
-                btn.setChecked(key == "all")
-                btn.setFixedHeight(26)
-                btn.setCursor(Qt.CursorShape.PointingHandCursor)
-                btn.setStyleSheet(self._chip_style(active=(key == "all")))
-                btn.clicked.connect(lambda checked, k=key: self._set_class_filter(k))
-                self._class_btns[key] = btn
-                row_hlay.addWidget(btn)
-            row_hlay.addStretch()
-            class_vlay.addLayout(row_hlay)
+        for key, label in _CLASSES:
+            btn = QPushButton(label)
+            btn.setCheckable(True)
+            btn.setChecked(key == "all")
+            btn.setFixedHeight(26)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setStyleSheet(self._chip_style(active=(key == "all")))
+            btn.clicked.connect(lambda checked, k=key: self._set_class_filter(k))
+            self._class_btns[key] = btn
+            class_flow.addWidget(btn)
 
         lay.addWidget(class_outer)
 
         # Список шапок
         self._list = QListWidget()
         self._list.setMouseTracking(True)   # нужно для State_MouseOver в делегате
-        self._list.setItemDelegate(_HatDelegate(self._accent, self._list))
+        self._delegate = _HatDelegate(self._accent, self._t, self._list)
+        self._list.setItemDelegate(self._delegate)
         self._list.setStyleSheet("""
             QListWidget {
                 background: transparent;
@@ -387,20 +517,6 @@ class HatsPanel(QWidget):
         self._selector_container.hide()
         lay.addWidget(self._selector_container)
 
-        # Статусная строка
-        self._status_lbl = QLabel("")
-        self._status_lbl.setObjectName("hats_status")
-        self._status_lbl.setStyleSheet("""
-            QLabel#hats_status {
-                color: #333;
-                font-size: 10px;
-                background: transparent;
-                border: none;
-                padding: 0;
-            }
-        """)
-        lay.addWidget(self._status_lbl)
-
         # Placeholder (загрузка / ошибка / нет результатов)
         self._placeholder = QLabel(self._t["loading"])
         self._placeholder.setObjectName("hats_placeholder")
@@ -415,11 +531,15 @@ class HatsPanel(QWidget):
             }
         """)
         self._placeholder.setWordWrap(True)
-        lay.addWidget(self._placeholder)
+        # Placeholder занимает ту же область контента, что и список (stretch=1 +
+        # Expanding): при скрытом списке сообщение центрируется под чипами, а
+        # шапка/поиск/чипы остаются на месте — без «разъезда» пустого состояния.
+        self._placeholder.setSizePolicy(QSizePolicy.Policy.Expanding,
+                                        QSizePolicy.Policy.Expanding)
+        lay.addWidget(self._placeholder, 1)
 
         # Изначально — только placeholder; список скрыт
         self._list.hide()
-        self._status_lbl.hide()
 
     def _chip_style(self, active: bool = False) -> str:
         if active:
@@ -519,7 +639,8 @@ class HatsPanel(QWidget):
         self._style_chip_btns = {}
         self._list.clear()
 
-        matched = [h for h in self._all_hats if h.matches(words, cls_filter)]
+        matched = [h for h in self._all_hats
+                   if h.matches(words, cls_filter) and not self._is_hidden(h)]
 
         # Сортировка по релевантности когда есть запрос
         if words:
@@ -528,13 +649,21 @@ class HatsPanel(QWidget):
         for hat in matched:
             item = QListWidgetItem(hat.name)              # текст как fallback
             item.setData(Qt.ItemDataRole.UserRole, hat)   # основные данные для делегата
-            item.setSizeHint(QSize(0, 52))
+            item.setSizeHint(QSize(0, 38))
             self._list.addItem(item)
 
         self._list.blockSignals(False)
 
+        # Выбранная шапка отфильтрована/скрыта → снимаем выбор и уведомляем
+        # (иначе _selected_hat и сборка держались бы за невидимый предмет).
+        if self._selected_hat is not None and not any(
+                h is self._selected_hat for h in matched):
+            self._selected_hat = None
+            self._remove_dropdown()
+            self.hat_deselected.emit()
+
         count = len(matched)
-        self._status_lbl.setText(self._t["n_items"].format(n=count))
+        self._count_lbl.setText(self._t["n_items"].format(n=count))
 
         # Если нет результатов при активном поиске — показываем подсказку
         if count == 0 and (words or cls_filter != "all"):
@@ -548,6 +677,77 @@ class HatsPanel(QWidget):
             btn.setStyleSheet(self._chip_style(active=(key == class_key)))
             btn.setChecked(key == class_key)
         self._apply_filter()
+
+    # ── Фильтр категорий (медали/сезонное) ────────────────────────────────── #
+
+    @staticmethod
+    def _load_hidden_tags() -> set:
+        """Читает сохранённые в конфиге скрытые категории (пусто по умолчанию)."""
+        try:
+            from src.config.app_config import AppConfig
+            saved = AppConfig.get("hats_hidden_tags", []) or []
+            return {t for t in saved if t in _FILTER_TAGS}
+        except Exception:
+            return set()
+
+    def _build_filter_menu(self) -> None:
+        """Строит меню кнопки «Фильтр»: чекбоксы категорий для скрытия."""
+        old = self._filter_btn.menu()
+        if old is not None:
+            old.deleteLater()
+        menu = QMenu(self)
+        self._filter_actions: dict = {}
+        for key in _FILTER_TAGS:
+            act = QAction(self._t.get(f"hide_{key}", key), self)
+            act.setCheckable(True)
+            act.setChecked(key in self._hidden_tags)
+            act.toggled.connect(lambda on, k=key: self._on_filter_toggled(k, on))
+            menu.addAction(act)
+            self._filter_actions[key] = act
+        self._filter_btn.setMenu(menu)
+
+    def _on_filter_toggled(self, key: str, on: bool) -> None:
+        if on:
+            self._hidden_tags.add(key)
+        else:
+            self._hidden_tags.discard(key)
+        try:
+            from src.config.app_config import AppConfig
+            AppConfig.set("hats_hidden_tags", sorted(self._hidden_tags))
+        except Exception as e:
+            logger.warning(f"Не удалось сохранить фильтр шапок: {e}")
+        self._update_filter_btn_style()
+        self._apply_filter()
+
+    def _update_filter_btn_style(self) -> None:
+        """Компактная кнопка-иконка: воронка акцентного цвета + акцентная рамка,
+        когда активна хотя бы одна категория; иначе приглушённая."""
+        active = bool(self._hidden_tags)
+        self._filter_btn.setIcon(_funnel_icon(self._accent if active else "#888"))
+        self._filter_btn.setIconSize(QSize(15, 15))
+        border = self._accent if active else "#252525"
+        self._filter_btn.setStyleSheet(f"""
+            QToolButton#hats_filter {{
+                background: transparent;
+                border: 1px solid {border};
+                border-radius: 4px;
+                padding: 0;
+            }}
+            QToolButton#hats_filter:hover {{ border-color: {self._accent}; }}
+            QToolButton#hats_filter::menu-indicator {{ image: none; width: 0; }}
+        """)
+        self._filter_btn.setFixedSize(32, 32)
+
+    def _is_hidden(self, hat: HatItem) -> bool:
+        """True, если предмет попадает под активную категорию-фильтр."""
+        if "medals" in self._hidden_tags and hat.is_medal:
+            return True
+        if "halloween" in self._hidden_tags and hat.is_halloween:
+            return True
+        # «Сезонные» = прочие праздники (Christmas/birthday), Halloween — своя галка.
+        if "holiday" in self._hidden_tags and hat.is_holiday and not hat.is_halloween:
+            return True
+        return False
 
     # ── Выбор предмета ────────────────────────────────────────────────────── #
 
@@ -876,22 +1076,28 @@ class HatsPanel(QWidget):
         self._placeholder.setText(text)
         self._placeholder.show()
         self._list.hide()
-        self._status_lbl.hide()
 
     def _show_list(self) -> None:
         self._placeholder.hide()
         self._list.show()
-        self._status_lbl.show()
 
     def _show_no_results(self) -> None:
-        """Показывает пустой список + статус 'ничего не найдено', убирает placeholder."""
-        self._placeholder.hide()
-        self._list.show()
-        self._status_lbl.show()
-        self._status_lbl.setText(self._t["no_results"])
+        """Нет совпадений: прячем список и показываем подсказку в placeholder
+        (раньше была отдельная нижняя статусная строка — убрана)."""
+        self._list.hide()
+        self._placeholder.setText(self._t["no_results"])
+        self._placeholder.show()
 
     def update_language(self, language: str) -> None:
         self._language = language if language in _I18N else "en"
         self._t = _I18N[self._language]
         self._search_input.setPlaceholderText(self._t["search_hint"])
         self._refresh_btn.setToolTip(self._t["refresh"])
+        # Фильтр — перестраиваем подписи меню под новый язык.
+        self._filter_btn.setToolTip(self._t.get("filter_tip", "Hide item categories"))
+        self._build_filter_menu()
+        self._update_filter_btn_style()
+        # Делегат использует _t для «N классов» — обновляем и перерисовываем.
+        if hasattr(self, "_delegate"):
+            self._delegate.set_translations(self._t)
+            self._list.viewport().update()

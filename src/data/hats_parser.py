@@ -5,7 +5,8 @@
   {tf2_root}/tf/scripts/items/items_game.txt  — данные предметов + MDL-пути
   {tf2_root}/tf/resource/tf_english.txt       — локализованные названия
 
-Результат кэшируется в cache/hats_cache.json и инвалидируется по mtime.
+Результат кэшируется в cache/ (имя файла — в _CACHE_FILE) и инвалидируется
+по mtime.
 """
 
 from __future__ import annotations
@@ -22,9 +23,9 @@ logger = logging.getLogger(__name__)
 
 # ── Пути ─────────────────────────────────────────────────────────────────── #
 
-# v3: HatItem.per_class_models + раскрытие %s-шаблонов (basename / без used_by_classes).
+# v7: исключение кейсов/ящиков/крафт-инструментов из списка (не носибельные).
 # Смена имени форсирует одноразовый перепарс старого кэша.
-_CACHE_FILE = Path("cache") / "hats_cache_v4.json"
+_CACHE_FILE = Path("cache") / "hats_cache_v7.json"
 
 _CLASS_NAMES = [
     "scout", "soldier", "pyro", "demoman",
@@ -52,6 +53,34 @@ class HatItem:
     # модель (геометрию). Скиновые стили ("skin" "N") сюда НЕ входят. Пусто = без
     # модельных стилей. У мультикласс-шапки каждый стиль несёт per-class карту.
     styles: List[dict] = field(default_factory=list)
+    # Токен типа предмета ("item_type_name"), напр. "#TF_Wearable_CommunityMedal".
+    item_type: str = ""
+    # "prefab" из блока — у турнирных медалей это "tournament_medal" (сам
+    # item_type_name наследуется от prefab и в блоке отсутствует).
+    prefab: str = ""
+    # Токен "item_name", напр. "#TF_TournamentMedal_AFC_Div1_1st".
+    item_name_token: str = ""
+    # Праздничное ограничение ("holiday_restriction"), напр.
+    # "halloween_or_fullmoon" / "christmas" — по нему фильтруем сезонное.
+    holiday: str = ""
+
+    @property
+    def is_medal(self) -> bool:
+        """Медаль/турнирный значок. Признак ищем по нескольким полям, т.к.
+        item_type_name часто наследуется через prefab и в блоке отсутствует:
+        prefab (tournament_medal), item_name (#TF_TournamentMedal…), item_type.
+        Подстрока «medal» покрывает и Medal, и Medallion, и TournamentMedal."""
+        blob = f"{self.item_type} {self.prefab} {self.item_name_token}".lower()
+        return "medal" in blob
+
+    @property
+    def is_halloween(self) -> bool:
+        return "halloween" in self.holiday.lower()
+
+    @property
+    def is_holiday(self) -> bool:
+        """Любое сезонное ограничение (Halloween, Christmas, birthday…)."""
+        return bool(self.holiday)
 
     @property
     def classes_str(self) -> str:
@@ -346,6 +375,7 @@ def _parse_items_game(filepath: str,
     skipped_path   = 0
     skipped_slot   = 0
     skipped_class  = 0
+    skipped_case   = 0
 
     while pos < n:
         # Пропускаем пробелы и комментарии
@@ -436,6 +466,19 @@ def _parse_items_game(filepath: str,
             skipped_slot += 1
             continue
 
+        # Кейсы/ящики/крафт-инструменты — это НЕ носибельные предметы (их открывают,
+        # а не носят). Признаки: prefab с «case»/«crate», блок "tool" { … } или
+        # модель в crafting/. Прячем их из списка шапок.
+        prefab = (_flat_value(block, "prefab") or "").lower()
+        is_case = (
+            "case" in prefab or "crate" in prefab
+            or '"tool"' in block
+            or "/crafting/" in mdl_path
+        )
+        if is_case:
+            skipped_case += 1
+            continue
+
         # Внутреннее имя
         internal_name = _flat_value(block, "name") or defindex
 
@@ -471,6 +514,11 @@ def _parse_items_game(filepath: str,
         # Модельные стили (styles { N { model_player(_per_class) } }).
         styles = _extract_style_models(block, classes, localization)
 
+        # Метки для фильтрации: тип предмета (медали) и сезонность (Halloween).
+        item_type = _flat_value(block, "item_type_name") or ""
+        prefab = _flat_value(block, "prefab") or ""
+        holiday = _flat_value(block, "holiday_restriction") or ""
+
         results.append(HatItem(
             defindex=defindex,
             name=display_name,
@@ -480,6 +528,10 @@ def _parse_items_game(filepath: str,
             slot=slot or "head",
             per_class_models=per_class_models,
             styles=styles,
+            item_type=item_type,
+            prefab=prefab,
+            item_name_token=item_name_token,
+            holiday=holiday,
         ))
 
         if progress_cb and items_parsed % 500 == 0:
@@ -493,7 +545,8 @@ def _parse_items_game(filepath: str,
         f"(пропущено: нет MDL={skipped_no_mdl}, "
         f"не player/items={skipped_path}, "
         f"не косметика slot={skipped_slot}, "
-        f"класс не wearable={skipped_class})"
+        f"класс не wearable={skipped_class}, "
+        f"кейсы/крафт={skipped_case})"
     )
     return results
 

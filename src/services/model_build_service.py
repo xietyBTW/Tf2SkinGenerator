@@ -451,9 +451,8 @@ class ModelBuildService:
         tmp = str(get_temp_file_path(prefix='tf2sg_qcedit_', suffix='.qc'))
         try:
             shutil.copy2(src_qc_path, tmp)
-            cdmat = ModelBuildService.extract_cdmaterials_path_from_qc(tmp)
             try:
-                ModelBuildService.patch_qc_file(tmp, weapon_key, cdmat)
+                ModelBuildService.patch_qc_file(tmp)
             except Exception as exc:
                 logger.debug(f"[QC EDIT] patch_qc_file для превью не удался: {exc}")
             ModelBuildService.replace_texturegroup_in_qc(tmp, tg_block)
@@ -668,19 +667,17 @@ class ModelBuildService:
         return False
 
     @staticmethod
-    def patch_qc_file(qc_path: str, weapon_key: str, cdmaterials_path: Optional[str] = None) -> None:
+    def patch_qc_file(qc_path: str) -> None:
         """
         Пропатчивает QC файл после декомпиляции.
-        
+
         Нужно чтобы модель правильно компилировалась и текстуры загружались:
         - НЕ трогаем $modelname (оставляем как есть, путь модели должен быть правильным)
         - Добавляем префикс console\\ к $cdmaterials (чтобы текстуры загружались из консольных команд)
         - Удаляем все блоки $lod (LOD нам не нужны, только мусорят)
-        
+
         Args:
             qc_path: Путь к QC файлу
-            weapon_key: Не используется, оставлен для совместимости (legacy)
-            cdmaterials_path: Не используется, оставлен для совместимости (legacy)
         """
         if not os.path.exists(qc_path):
             raise FileNotFoundError(f"QC file not found: {qc_path}")

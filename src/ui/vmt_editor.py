@@ -11,7 +11,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtCore import QRegularExpression, Qt, QEvent, QStringListModel
 from src.data.translations import TRANSLATIONS
-from src.data.vmt_snippets import VMT_SNIPPETS, VMT_FULL_TEMPLATES, VMT_PARAM_DOCS, all_param_names
+from src.data.vmt_snippets import VMT_SNIPPETS, VMT_FULL_TEMPLATES, param_doc, all_param_names
 from src.services.edited_vmt_service import EditedVMTService
 from src.services.vmt_service import VMTService
 
@@ -65,8 +65,9 @@ class VMTTextEdit(QTextEdit):
 
     _TOKEN_RE = re.compile(r'\$\w+')
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, language: str = "en"):
         super().__init__(parent)
+        self._lang = "ru" if language == "ru" else "en"
         self.setMouseTracking(True)
 
         self._completer = QCompleter(self)
@@ -218,9 +219,14 @@ class VMTTextEdit(QTextEdit):
 
     def event(self, e) -> bool:
         if e.type() == QEvent.ToolTip:
-            tc = self.cursorForPosition(e.pos())
+            # ВАЖНО: cursorForPosition ждёт координаты ВЬЮПОРТА, а pos() события
+            # (после проброса от вьюпорта к виджету) смещён на рамку+padding.
+            # Из-за этого детект токена промахивался у краёв → тултип «через раз».
+            # Через globalPos → viewport().mapFromGlobal позиция всегда корректна.
+            pos = self.viewport().mapFromGlobal(e.globalPos())
+            tc = self.cursorForPosition(pos)
             token = self._token_at(tc.block().text(), tc.positionInBlock())
-            doc = VMT_PARAM_DOCS.get(token)
+            doc = param_doc(token, self._lang) if token else ""
             if doc:
                 QToolTip.showText(e.globalPos(), f'{token} — {doc}', self)
             else:
@@ -246,9 +252,11 @@ class VMTEditorDialog(QDialog):
         t=None,
         display_name: str = "",
         original_content: Optional[str] = None,
+        language: str = "en",
     ):
         super().__init__(parent)
         self.t           = t or TRANSLATIONS['en']
+        self._lang       = "ru" if language == "ru" else "en"
         self.vmt_path    = vmt_path
         self.edit_key  = edit_key
         self._display    = display_name or edit_key or os.path.basename(vmt_path)
@@ -297,7 +305,7 @@ class VMTEditorDialog(QDialog):
         layout.addWidget(self._status_label)
 
         # ── Редактор ─────────────────────────────────────────────────────── #
-        self.text_edit = VMTTextEdit(self)
+        self.text_edit = VMTTextEdit(self, language=self._lang)
         mono_font = QFont("Consolas", 11)
         mono_font.setStyleHint(QFont.Monospace)
         self.text_edit.setFont(mono_font)

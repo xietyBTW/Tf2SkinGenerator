@@ -1630,7 +1630,7 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
         original_content — «чистый» игровой оригинал для кнопки сброса, когда
         открываем уже сохранённую правку (иначе оригинал = открытый файл)."""
         dialog = VMTEditorDialog(self, path, edit_key, self.t, display_name=display_name,
-                                 original_content=original_content)
+                                 original_content=original_content, language=self.language)
         dialog.exec()
 
     def _launch_progress(

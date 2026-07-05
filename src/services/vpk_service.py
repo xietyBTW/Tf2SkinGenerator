@@ -1274,8 +1274,7 @@ class VPKService:
 
                 # Патчим cdmaterials под console\ (как основная модель) — чтобы
                 # модель класса нашла нашу текстуру по тому же пути.
-                _cdmat = ModelBuildService.extract_cdmaterials_path_from_qc(qc_p)
-                ModelBuildService.patch_qc_file(qc_p, wk, _cdmat)
+                ModelBuildService.patch_qc_file(qc_p)
 
                 ModelBuildService.compile(qc_p, str(comp_d), studiomdl_exe, tf_dir)
 
@@ -1386,7 +1385,7 @@ class VPKService:
                             logger.warning(f"[HAT STYLE] {wk}: reference SMD не найден — геометрия оригинала")
 
                     # Патчим cdmaterials под console\ и компилируем.
-                    ModelBuildService.patch_qc_file(qc_p, wk, cdmat0)
+                    ModelBuildService.patch_qc_file(qc_p)
                     ModelBuildService.compile(qc_p, str(comp_d), studiomdl_exe, tf_dir)
                     _sub = type('SubCtx', (), {'compile_dir': comp_d, 'vpkroot_dir': ctx.vpkroot_dir})()
                     VPKService._copy_compiled_models_to_vpkroot(_sub, qc_p)
@@ -2913,7 +2912,7 @@ class VPKService:
 
         # Пропатчиваем QC файл: добавляем console\ к $cdmaterials (чтобы текстуры загружались из консольных команд),
         # удаляем $lod (они нам не нужны, только мусорят)
-        ModelBuildService.patch_qc_file(qc_path, weapon_key, original_cdmaterials_path)
+        ModelBuildService.patch_qc_file(qc_path)
 
         # Игровое имя текстуры/VMT (источник ОРИГИНАЛЬНОГО кода VMT из игры).
         # Для кастомной модели texture_filename станет именем материала SMD,

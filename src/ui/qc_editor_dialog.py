@@ -23,10 +23,6 @@ LOCK_DIRECTIVES = (
     '$collisionjoints', '$lod', '$shadowlod',
 )
 
-# Модифицирующие текст клавиши (для проверки защиты).
-_EDIT_KEYS = None  # заполняется лениво из Qt
-
-
 class _LockGutter(QWidget):
     """Полоса слева с замочками напротив защищённых блоков."""
 
