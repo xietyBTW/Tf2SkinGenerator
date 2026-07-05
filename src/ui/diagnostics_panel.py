@@ -84,8 +84,19 @@ class DiagnosticsPanel(QWidget):
     # ── UI ───────────────────────────────────────────────────────────────── #
 
     def _build_ui(self) -> None:
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(0, 4, 0, 0)
+        # На всю ширину вкладки, но содержимое — в читаемой колонке по центру
+        # (иначе на широком экране находки растянулись бы неудобно широко).
+        outer = QHBoxLayout(self)
+        outer.setContentsMargins(0, 4, 0, 0)
+        outer.addStretch(1)
+        content = QWidget()
+        content.setMaximumWidth(860)
+        content.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        outer.addWidget(content, 6)
+        outer.addStretch(1)
+
+        lay = QVBoxLayout(content)
+        lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(10)
 
         title = QLabel(self._t["title"])
@@ -200,7 +211,7 @@ class DiagnosticsPanel(QWidget):
         # Каждый воркер сам себя удаляет по завершении; результат применяем только
         # если это САМЫЙ свежий запрос — быстрый повторный drop не должен
         # отрисовать устаревший отчёт и не течёт потоками.
-        worker = DiagnosticsWorker(self._vpk_path, self)
+        worker = DiagnosticsWorker(self._vpk_path, self._lang, self)
         worker.finished.connect(lambda rep, t=token, w=worker: self._on_finished(rep, t, w))
         worker.error.connect(lambda msg, t=token, w=worker: self._on_error(msg, t, w))
         self._worker = worker
@@ -289,11 +300,14 @@ class DiagnosticsPanel(QWidget):
     def update_language(self, language: str) -> None:
         self._lang = language if language in _I18N else "en"
         self._t = _I18N[self._lang]
-        # Перестраивать содержимое на лету не требуется — обновим статичные подписи.
-        if not self._vpk_path:
+        self._drop_label.setText(
+            os.path.basename(self._vpk_path) if self._vpk_path else self._t["drop"])
+        self._choose_btn.setText(self._t["recheck"] if self._vpk_path else self._t["choose"])
+        if self._vpk_path:
+            # Тексты находок локализуются в бэкенде → переосматриваем с новым языком.
+            self._run()
+        else:
             self._status.setText(self._t["no_report"])
-            self._drop_label.setText(self._t["drop"])
-            self._choose_btn.setText(self._t["choose"])
 
 
 def _esc(s: str) -> str:

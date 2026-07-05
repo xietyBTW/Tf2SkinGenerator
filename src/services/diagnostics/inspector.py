@@ -122,15 +122,18 @@ def _gather_other_mod_paths(inspected_vpk: str) -> set:
     return paths
 
 
-def inspect_vpk(vpk_path: str) -> DiagnosticReport:
+def inspect_vpk(vpk_path: str, language: str = "en") -> DiagnosticReport:
     """Полный осмотр VPK-файла. Возвращает DiagnosticReport (никогда не бросает —
     ошибку распаковки оформляет как ERROR-находку)."""
     report = DiagnosticReport()
+    ru = (language == "ru")
 
     if not vpk_path or not os.path.exists(vpk_path):
         report.add(Finding(
-            Severity.ERROR, "vpk.not_found", "Файл VPK не найден",
-            detail=f"Путь не существует: {vpk_path}",
+            Severity.ERROR, "vpk.not_found",
+            "Файл VPK не найден" if ru else "VPK file not found",
+            detail=(f"Путь не существует: {vpk_path}" if ru
+                    else f"Path does not exist: {vpk_path}"),
         ))
         return report
 
@@ -142,20 +145,24 @@ def inspect_vpk(vpk_path: str) -> DiagnosticReport:
         ok = CustomVPKService.extract_vpk_to_dir(vpk_path, str(extract_dir))
         if not ok:
             report.add(Finding(
-                Severity.ERROR, "vpk.extract_failed", "Не удалось распаковать VPK",
-                detail="Файл повреждён или это не однофайловый VPK-мод.",
-                fix_hint="Проверьте, что это корректный .vpk (не _dir/_000).",
+                Severity.ERROR, "vpk.extract_failed",
+                "Не удалось распаковать VPK" if ru else "Couldn't extract the VPK",
+                detail=("Файл повреждён или это не однофайловый VPK-мод." if ru
+                        else "The file is damaged or not a single-file VPK mod."),
+                fix_hint=("Проверьте, что это корректный .vpk (не _dir/_000)." if ru
+                          else "Make sure it's a valid .vpk (not a _dir/_000 part)."),
             ))
             return report
 
         mod = build_inspected_mod(extract_dir)
         mod.external_paths = _gather_other_mod_paths(vpk_path)
-        report.extend(run_all_checks(mod))
+        report.extend(run_all_checks(mod, language))
         return report
     except Exception as e:                       # noqa: BLE001 — диагностика не должна падать
         logger.error(f"Диагностика VPK упала: {e}", exc_info=True)
         report.add(Finding(
-            Severity.ERROR, "diag.crashed", "Ошибка при диагностике",
+            Severity.ERROR, "diag.crashed",
+            "Ошибка при диагностике" if ru else "Diagnostics error",
             detail=str(e),
         ))
         return report

@@ -16,7 +16,7 @@ from src.shared.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-CheckFn = Callable[[InspectedMod], List[Finding]]
+CheckFn = Callable[..., List[Finding]]   # (InspectedMod, lang) → List[Finding]
 
 # Порядок не важен — находки сортируются по серьёзности в DiagnosticReport.
 CHECKS: List[CheckFn] = [
@@ -31,12 +31,12 @@ CHECKS: List[CheckFn] = [
 ]
 
 
-def run_all_checks(mod: InspectedMod) -> List[Finding]:
+def run_all_checks(mod: InspectedMod, lang: str = "en") -> List[Finding]:
     """Прогоняет все проверки; сбой одной не мешает остальным."""
     out: List[Finding] = []
     for check in CHECKS:
         try:
-            out.extend(check(mod))
+            out.extend(check(mod, lang))
         except Exception as e:                   # noqa: BLE001 — изолируем проверки
             logger.error(f"Проверка {check.__name__} упала: {e}", exc_info=True)
     return out

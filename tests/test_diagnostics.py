@@ -166,6 +166,33 @@ class ChecksTests(unittest.TestCase):
 
 # ── Интеграция: сборка из папки + прогон всех проверок ───────────────────── #
 
+class LocalizationTests(unittest.TestCase):
+    def test_render_selects_language_with_params(self):
+        from src.services.diagnostics.messages import render, MESSAGES
+        t_en, _, _ = render("summary", "en", nv=2, nt=3, nm=1)
+        t_ru, _, _ = render("summary", "ru", nv=2, nt=3, nm=1)
+        self.assertIn("Inspected: 2 VMT, 3 VTF, 1 models", t_en)
+        self.assertNotEqual(t_en, t_ru)             # реально переведено
+        # неизвестный язык → фолбэк на en, неизвестный код → пусто
+        self.assertEqual(render("summary", "xx", nv=0, nt=0, nm=0)[0],
+                         render("summary", "en", nv=0, nt=0, nm=0)[0])
+        self.assertEqual(render("nope", "en"), ("", "", ""))
+        # у каждого кода есть и en, и ru
+        for code, langs in MESSAGES.items():
+            self.assertIn("en", langs, code)
+            self.assertIn("ru", langs, code)
+
+    def test_findings_localized(self):
+        from src.services.diagnostics.context import InspectedMod, parse_vmt
+        vmt = parse_vmt("materials/m/gun.vmt",
+                        '"VertexLitGeneric"\n{\n\t"$basetexture" "m/gun"\n}')
+        mod = InspectedMod(root=Path("."), vmts=[vmt])
+        en = {f.title for f in checks.check_vmt_textures_exist(mod, "en")}
+        ru = {f.title for f in checks.check_vmt_textures_exist(mod, "ru")}
+        self.assertTrue(any("Missing texture" in t for t in en))
+        self.assertNotEqual(en, ru)
+
+
 class BuildInspectedModTests(unittest.TestCase):
     def test_build_and_run(self):
         with tempfile.TemporaryDirectory() as tmp:

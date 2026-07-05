@@ -580,6 +580,15 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
         self._tab_hats_btn.setStyleSheet(active_style if index == 1 else inactive_style)
         self._tab_diag_btn.setStyleSheet(active_style if index == 2 else inactive_style)
 
+        # Превью и панель сборки нужны только для создания скина (Weapons/Hats).
+        # На «Диагностике» — самодостаточный осмотр VPK: прячем их, чтобы список
+        # находок занял всю ширину (там длинные тексты).
+        is_diag = (index == 2)
+        if hasattr(self, 'preview_panel'):
+            self.preview_panel.setVisible(not is_diag)
+        if hasattr(self, 'settings_scroll'):
+            self.settings_scroll.setVisible(not is_diag)
+
         if index == 1:
             # Загружаем шапки если ещё не загружены
             from src.config.app_config import AppConfig
@@ -590,11 +599,12 @@ class MainWindow(QMainWindow, ProgressDialogMixin):
             self._hat_mdl_path = None
             if hasattr(self, 'settings_panel'):
                 self.settings_panel.apply_mode_restrictions(None)
-        else:
+        elif index == 0:
             # Возвращаемся к оружию — сбрасываем hat mode
             self._hat_mdl_path = None
             self._hat_display_name = ""
             self.apply_selection_auto()
+        # index == 2 (диагностика) — превью/сборка скрыты, доп. логики не нужно
 
     def _on_hat_selected(self, mdl_path: str, display_name: str) -> None:
         """Пользователь выбрал шапку из списка."""
