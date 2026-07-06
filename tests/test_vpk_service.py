@@ -12,6 +12,7 @@ from src.data.translations import TRANSLATIONS
 from src.services.build_context import BuildContext
 from src.services.build_service import BuildService
 from src.services.vpk_service import VPKService
+from src.services.vpk_texture_builder import VpkTextureBuilder
 from src.shared.exceptions import VPKCreationError, RequiredFileMissingError as SharedFileNotFoundError
 
 
@@ -764,9 +765,9 @@ class VPKServiceTests(unittest.TestCase):
                 patch(P + "ModelBuildService.replace_texturegroup_in_qc"),
                 patch(P + "ModelBuildService.compile"),
                 patch(P + "ModelBuildService.remove_lod_files"),
-                patch(P + "VPKService._resolve_replace_model_smd", return_value=str(user_smd)),
-                patch(P + "VPKService._apply_model_replacement"),
-                patch(P + "VPKService._find_decompiled_reference_smd", return_value=str(user_smd)),
+                patch("src.services.vpk_model_pipeline.VpkModelPipeline._resolve_replace_model_smd", return_value=str(user_smd)),
+                patch("src.services.vpk_model_pipeline.VpkModelPipeline._apply_model_replacement"),
+                patch("src.services.vpk_model_pipeline.VpkModelPipeline._find_decompiled_reference_smd", return_value=str(user_smd)),
                 patch(P + "SMDService.ordered_unique_materials", return_value=["c_scattergun"]),
                 patch(P + "TF2Paths.resolve_textures_vpk", return_value="tf2_textures_dir.vpk"),
                 patch(P + "TF2VPKExtractService.extract_vmt_file", return_value=str(vmt_source)),
@@ -841,10 +842,10 @@ class VPKServiceTests(unittest.TestCase):
                 patch(P + "ModelBuildService.generate_texturegroup_block", return_value='$texturegroup "skinfamilies" {}'),
                 patch(P + "ModelBuildService.compile"),
                 patch(P + "ModelBuildService.remove_lod_files"),
-                patch(P + "VPKService._resolve_replace_model_smd", return_value=str(user_smd)),
-                patch(P + "VPKService._apply_model_replacement"),
-                patch(P + "VPKService._find_decompiled_reference_smd", return_value=str(user_smd)),
-                patch(P + "VPKService._remap_skin_data_to_smd", side_effect=lambda sbd, mats: sbd),
+                patch("src.services.vpk_model_pipeline.VpkModelPipeline._resolve_replace_model_smd", return_value=str(user_smd)),
+                patch("src.services.vpk_model_pipeline.VpkModelPipeline._apply_model_replacement"),
+                patch("src.services.vpk_model_pipeline.VpkModelPipeline._find_decompiled_reference_smd", return_value=str(user_smd)),
+                patch("src.services.vpk_texture_builder.VpkTextureBuilder._remap_skin_data_to_smd", side_effect=lambda sbd, mats: sbd),
                 patch(P + "SMDService.ordered_unique_materials", return_value=["c_scattergun"]),
                 patch(P + "TF2Paths.resolve_textures_vpk", return_value="tf2_textures_dir.vpk"),
                 patch(P + "TF2VPKExtractService.extract_vmt_file", return_value=str(vmt_source)),
@@ -1002,7 +1003,8 @@ class VPKServiceTests(unittest.TestCase):
                     with patch("src.services.vpk_service.TF2Paths.check_crowbar", return_value=(True, "")):
                         with patch("src.services.vpk_service.TF2Paths.resolve", return_value=("studiomdl.exe", "tf2_misc_dir.vpk", str(base))):
                             with patch("src.services.vpk_service.TF2VPKExtractService.check_mdl_exists", return_value=True):
-                                with patch("src.services.vpk_service.TF2VPKExtractService.extract_file_set", return_value=[str(base / "c_scattergun.vvd")]):
+                                with patch("src.services.vpk_service.TF2VPKExtractService.extract_file_set", return_value=[str(base / "c_scattergun.vvd")]), \
+                                     patch("src.services.vpk_model_pipeline.get_cached_decompile", return_value=None):
                                     ok, msg = VPKService.build_vpk(
                                         image_path=str(img),
                                         mode="scout_c_scattergun",
@@ -1038,7 +1040,7 @@ class VPKServiceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp)
             for bad in (None, "", os.path.join(tmp, "nope.png")):
-                self.assertFalse(VPKService._render_extra_texture(
+                self.assertFalse(VpkTextureBuilder._render_extra_texture(
                     "mat", bad, out, out / "main.vmt",
                     "models/weapons/c_models", (4, 4), "DXT1", [], {},
                 ))
@@ -1050,7 +1052,7 @@ class VPKServiceTests(unittest.TestCase):
             out = Path(tmp)
             src_vtf = out / "src.vtf"
             src_vtf.write_bytes(b"VTF\x00fake")
-            ok = VPKService._render_extra_texture(
+            ok = VpkTextureBuilder._render_extra_texture(
                 "lefteye_bloody", str(src_vtf), out, out / "main.vmt",
                 "models/weapons/c_models", (4, 4), "DXT1", [], {},
             )
@@ -1069,7 +1071,7 @@ class VPKServiceTests(unittest.TestCase):
             with patch("src.services.texture_service.TextureService.is_animated_image", return_value=False), \
                  patch("src.services.texture_service.TextureService.process_image") as m_proc, \
                  patch("src.services.texture_service.TextureService.create_vtf") as m_vtf:
-                ok = VPKService._render_extra_texture(
+                ok = VpkTextureBuilder._render_extra_texture(
                     "shell", str(img), out, out / "main.vmt",
                     "models/weapons/c_models", (4, 4), "DXT1", [], {},
                 )
@@ -1086,7 +1088,7 @@ class VPKServiceTests(unittest.TestCase):
             'tg_overrides': {1: {'Material.001': 'Material.001_bloody'}},
             'variant_files': {'Material.001_bloody': '/img/bloody.png'},
         }
-        out = VPKService._remap_skin_data_to_smd(sbd, ['material'])
+        out = VpkTextureBuilder._remap_skin_data_to_smd(sbd, ['material'])
         self.assertEqual(out['mesh_materials'], ['material'])
         self.assertEqual(out['tg_overrides'], {1: {'material': 'material_bloody'}})
         self.assertEqual(out['variant_files'], {'material_bloody': '/img/bloody.png'})
@@ -1094,7 +1096,7 @@ class VPKServiceTests(unittest.TestCase):
     def test_remap_skin_data_to_smd_empty_smd_noop(self):
         sbd = {'mesh_materials': ['a'], 'tg_overrides': {1: {'a': 'a_x'}},
                'variant_files': {'a_x': '/p'}}
-        self.assertIs(VPKService._remap_skin_data_to_smd(sbd, []), sbd)
+        self.assertIs(VpkTextureBuilder._remap_skin_data_to_smd(sbd, []), sbd)
 
 
 class BuildVpkCharacterizationTests(unittest.TestCase):
@@ -1154,8 +1156,8 @@ class BuildVpkCharacterizationTests(unittest.TestCase):
             # Герметичность: не читаем и не пишем глобальный кэш декомпиляции,
             # иначе соседние тесты поймают кэш-хит на c_scattergun. Патчим имена
             # в namespace vpk_service (там импорт на уровне модуля).
-            m(patch(P + "get_cached_decompile", return_value=None))
-            m(patch(P + "save_to_cache"))
+            m(patch("src.services.vpk_model_pipeline.get_cached_decompile", return_value=None))
+            m(patch("src.services.vpk_model_pipeline.save_to_cache"))
             m(patch(P + "TF2VPKExtractService.extract_vmt_file", return_value=str(vmt_source)))
             m(patch(P + "ModelBuildService.decompile", return_value=str(qc)))
             m(patch(P + "ModelBuildService.extract_cdmaterials_path_from_qc", return_value="models/weapons/c_scattergun"))
