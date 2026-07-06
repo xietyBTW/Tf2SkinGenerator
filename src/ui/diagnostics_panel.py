@@ -8,7 +8,7 @@ UI-слой: вся логика проверок — в src/services/diagnostic
 from __future__ import annotations
 
 import os
-from typing import List, Optional
+from typing import Optional
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
