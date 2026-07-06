@@ -45,7 +45,7 @@ logger = get_logger(__name__)
 from src.ui.preview_mode import PreviewMode, PreviewState
 from src.ui.material_cards import spy_mask_cards
 # Единый источник правды о текстурах превью (команды/стили/вариант) — см. модуль.
-from src.ui.texture_state import PreviewTextureState, SINGLE_TEX_KEY
+from src.ui.texture_state import PreviewTextureState
 
 # Вынесенные из этого модуля строительные блоки панели превью
 # (векторные иконки, карточка слота, скролл-область, воркер масок шпиона).
@@ -54,16 +54,19 @@ from src.ui.preview_icons import (
     _make_plus_icon, _make_eye_icon, _make_team_icon,
 )
 from src.ui.preview_widgets import (
-    _load_pixmap, _HWheelScrollArea, _ExtraSlotCard, _SpyMaskVtfWorker,
+    _HWheelScrollArea, _ExtraSlotCard, _SpyMaskVtfWorker,
 )
 from src.ui.preview_3d_mixin import Preview3DMixin
 from src.ui.preview_skins_mixin import PreviewSkinsMixin
 from src.ui.preview_custom_model_mixin import PreviewCustomModelMixin
 from src.ui.preview_team_mixin import PreviewTeamMixin
+from src.ui.preview_2d_image_mixin import Preview2DImageMixin
+from src.ui.preview_crithit_mixin import PreviewCritHitMixin
 
 
 class PreviewPanel(Preview3DMixin, PreviewSkinsMixin, PreviewCustomModelMixin,
-                   PreviewTeamMixin, QWidget):
+                   PreviewTeamMixin, Preview2DImageMixin, PreviewCritHitMixin,
+                   QWidget):
     """2D + 3D панель предпросмотра с чистым управлением состоянием."""
 
     vpk_mod_loaded = Signal(str)   # путь к VPK моду
@@ -1486,108 +1489,6 @@ class PreviewPanel(Preview3DMixin, PreviewSkinsMixin, PreviewCustomModelMixin,
             self.btn_load_3d.setEnabled(False)
             self.btn_load_vpk.setEnabled(False)
 
-    def set_crithit_mode(self, _render: bool = True) -> None:
-        # _render=False — когда метод используется как подложка для эффекта смерти:
-        # рендер крит-сцены отложен до входа в DEATH (иначе первый рендер уйдёт в
-        # billboard, т.к. _death_effect_mode ещё False).
-        # ── Снимок уходящего оружия в мини-память (ДО очистки состояния) ──── #
-        # Переход в крит идёт через этот метод, а не set_3d_params, поэтому
-        # снимок надо делать здесь — иначе возврат на оружие ничего не вернёт.
-        snap = self._snapshot_outgoing(self._weapon_mode)
-        if snap:
-            self._mem_mode = snap['mode']
-            self._mem_data = snap
-
-        # Текстура/изображение оружия НЕ должны протекать в крит-сцену
-        # (_render_crithit_scene использует self.image_path как текстуру биллборда).
-        self.image_path = None
-        self.vtf_path = None
-        self._cur_obj = None
-
-        self._pstate.enter(PreviewMode.CRITHIT)
-        # Маски шпиона не относятся к крит/спец-режимам — прячем их селекторы,
-        # иначе при переходе из режима масок в Special они «залипают».
-        self._sync_spy_mask_buttons()
-        self._pending_3d_params = None
-        # Сбрасываем кэш последних 3D-параметров: иначе возврат на то же оружие,
-        # что было до крита, вызовет ранний return в set_3d_params и _crithit_mode
-        # останется True (кнопки не вернутся, крит-сцена зависнет).
-        self._last_3d_params = None
-        self._stop_worker('_3d_worker')
-        self._stop_worker('_vpk_mod_worker')
-        self._reset_team_vpk_state()
-        # Прячем кнопки загрузки модели/VPK (крит-режим)
-        self._update_3d_buttons_visibility()
-        if self._3d_widget:
-            self._3d_widget.show_prompt(
-                self.t.get('3d_prompt_crithit', 'Switch to 3D tab — the soldier will appear automatically')
-            )
-        if _render and self.is_3d_mode() and self._3d_available:
-            self._render_crithit_scene()
-
-    def set_death_effect_mode(self, mode: str = '',
-                              textures_vpk: str = '', misc_vpk: str = '') -> None:
-        """Режим превью эффекта смерти (лёд/золото/огонь): модель-персонаж крита,
-        но пользовательская текстура накладывается на МОДЕЛЬ — как будет в игре.
-
-        Сначала на модель кладётся ОРИГИНАЛЬНАЯ игровая текстура эффекта (лёд/
-        золото/огонь) из VPK — как у обычных моделей подтягивается игровая
-        текстура. Пользовательская заменяет её при загрузке.
-
-        Переиспользует крит-инфраструктуру (_crithit_mode = «режим сцены с
-        персонажем»), флаг _death_effect_mode меняет, куда идёт текстура."""
-        # Игровую текстуру эффекта тянем ДО set_crithit_mode (он чистит image_path).
-        self._death_default_tex = ''
-        if mode and (textures_vpk or misc_vpk):
-            self._death_default_tex = self._extract_game_texture_for_death(
-                mode, [textures_vpk, misc_vpk]
-            )
-        self.set_crithit_mode(_render=False)   # настройка крит-сцены БЕЗ рендера
-        self._pstate.enter(PreviewMode.DEATH)  # → DEATH (_crithit_mode остаётся True, см. свойство)
-        if self._3d_widget:
-            self._3d_widget.show_prompt(
-                self.t.get('3d_prompt_death_effect',
-                           'Switch to 3D tab — the effect will appear on the model')
-            )
-        if self.is_3d_mode() and self._3d_available:
-            self._render_crithit_scene()
-
-    def _extract_game_texture_for_death(self, mode: str, vpk_paths: list) -> str:
-        """Достаёт оригинальную VTF эффекта из игрового VPK → PNG (для дефолта).
-
-        Возвращает путь к PNG или '' если не нашли (тогда модель без текстуры)."""
-        try:
-            from src.services.vmt_service import VMTService
-            rel, _vmt, vtf = VMTService.get_weapon_relpaths(mode)
-            rel_url = rel.replace('\\', '/').rstrip('/')
-            candidates = [f"{rel_url}/{vtf}"]
-            if vtf.lower() != vtf:
-                candidates.append(f"{rel_url}/{vtf.lower()}")
-            # Игровые VPK — через общий потоко-локальный кэш (vpk.open парсит
-            # весь индекс, повторные переключения эффекта смерти мгновенны).
-            from src.services import vtf_preview_service as vps
-            paks = vps.open_vpks(vpk_paths)
-            for pak in paks:
-                for cand in candidates:
-                    try:
-                        data = pak[cand].read()
-                    except KeyError:
-                        continue
-                    tmp = str(get_temp_file_path(prefix='tf2_deatheff_', suffix='.vtf'))
-                    with open(tmp, 'wb') as f:
-                        f.write(data)
-                    png = self._convert_model_vtf(tmp)
-                    try:
-                        os.remove(tmp)
-                    except OSError:
-                        pass
-                    if png:
-                        logger.info(f"[DEATH FX] игровая текстура эффекта: {cand}")
-                        return png
-        except Exception as exc:
-            logger.debug(f"[DEATH FX] не удалось достать игровую текстуру: {exc}")
-        return ''
-
     def _on_australium_ready(self, png_path: str, mat_name: str = "") -> None:
         """
         Воркер нашёл Australium/Gold вариант: показываем золотую кнопку в
@@ -2164,225 +2065,6 @@ class PreviewPanel(Preview3DMixin, PreviewSkinsMixin, PreviewCustomModelMixin,
                 else:
                     self._schedule_3d(lambda: self._restore_team_textures_3d(self._active_team))
 
-    def get_slot_image_paths(self) -> dict:
-        """{material_name: path} всех заполненных слотов (для сборки).
-        Порядок команд и пропуск SINGLE_TEX_KEY — в модели."""
-        return self._state.uploaded_slot_paths()
-
-    def get_blu_slot_image_paths(self) -> dict:
-        """{material_name: path} только BLU-слотов (командность рук при сборке)."""
-        return self._state.blu_uploaded_paths()
-
-    def load_image(self, path: str) -> None:
-        """Загружает изображение (или GIF) в 2D Preview."""
-        # Australium активен — грузим в его отдельный слот, не трогая обычную.
-        if self._australium_active:
-            self._set_australium_user_tex(path or None)
-            return
-        self._stop_gif()
-        if path != self._per_mesh_base_image:
-            self._per_mesh_active = False
-            self._per_mesh_base_image = None
-
-        self.image_path = path
-        self.vtf_path = None
-
-        # Через _store_texture — как карточки: нейтральные текстуры попадают в
-        # обе команды, на вариантном стиле (skin > 0) — в _skin_overrides.
-        # Раньше писали в _textures напрямую, и стиль/команда рассинхранивались
-        # с загрузкой через 2D-окно.
-        key = self._material_names[0] if self._material_names else SINGLE_TEX_KEY
-        self._store_texture(key, path)
-
-        if self._card_mode and self._main_card is not None:
-            self._main_card.set_image(path)
-        else:
-            self._show_image_in_preview(path)
-
-        # Обновляем 3D если видно
-        if self.is_3d_mode() and self._3d_available and self._3d_widget \
-                and not self._from_3d_drop:
-            if self._card_mode and self._material_names and not self._crithit_mode:
-                self._apply_tex_to_3d_later(self._material_names[0], path)
-            elif self._crithit_mode:
-                self._schedule_3d(lambda p=path: self._update_scene_texture(p))
-            else:
-                self._schedule_3d(lambda p=path: self._apply_image_to_3d(p))
-
-        self.update_info_summary()
-
-    def load_vtf(self, path: str) -> None:
-        """Загружает VTF файл и отображает первый кадр."""
-        if not os.path.exists(path):
-            return
-        self.vtf_path = path
-        self.image_path = None
-        png_for_3d: Optional[str] = None
-        rendered = False
-
-        try:
-            from src.services.vtflib_wrapper import VTFLib
-            from PIL import Image
-            from PySide6.QtGui import QImage
-
-            rgba, w, h = VTFLib.read_vtf_as_rgba(path)
-            qimg = QImage(rgba, w, h, w * 4, QImage.Format_RGBA8888)
-            if not qimg.isNull():
-                rendered = True
-                png_for_3d = str(get_temp_file_path(prefix='tf2_3d_', suffix='.png'))
-                Image.frombytes("RGBA", (w, h), rgba).save(png_for_3d)
-                self.image_path = png_for_3d
-
-                # Через _store_texture — та же маршрутизация (команды/стили),
-                # что и у карточек/load_image.
-                key = self._material_names[0] if self._material_names else SINGLE_TEX_KEY
-                self._store_texture(key, png_for_3d)
-
-                if self._card_mode and self._main_card:
-                    self._main_card.set_image(png_for_3d)
-                else:
-                    self.empty_state.hide()
-                    self.preview.show()
-                    self.preview.clear()
-                    self.preview.setStyleSheet(self._preview_style)
-                    pw = max(self.preview.width(), 600)
-                    self.preview.setPixmap(
-                        QPixmap.fromImage(qimg).scaled(pw, 500, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-                    )
-        except Exception as e:
-            logger.warning(f"VTF рендер: {e}")
-
-        if not rendered and not (self._card_mode and self._main_card):
-            self.empty_state.hide()
-            self.preview.show()
-            self.preview.clear()
-            self.preview.setStyleSheet(self._preview_style)
-            self.preview.setText(f"VTF: {os.path.basename(path)}")
-            self.preview.setStyleSheet(
-                self._preview_style + "QLabel { color:#ccc; font-size:14px; }"
-            )
-            self.preview.setAlignment(Qt.AlignCenter)
-
-        if png_for_3d and self._3d_available and self._3d_widget and self.is_3d_mode():
-            if self._crithit_mode:
-                self._update_scene_texture(png_for_3d)
-            elif self._card_mode and self._material_names:
-                self._3d_widget.apply_material_map({self._material_names[0]: png_for_3d})
-            else:
-                self._3d_widget.update_texture_file(png_for_3d)
-
-        self.update_info_summary()
-
-    def get_vtf_path(self) -> Optional[str]:
-        return self.vtf_path
-
-    def get_red_image_path(self) -> Optional[str]:
-        """Возвращает путь к RED текстуре для сборки.
-
-        НЕ делает fallback на BLU — чтобы не подставлять BLU-текстуру как
-        основную (RED) в BuildWorker.
-
-        self.image_path используется как fallback только когда активна RED
-        команда: в BLU-режиме он уже содержит BLU-текстуру (обновляется в
-        _restore_team_textures_2d при переключении команды).
-
-        Возвращает None если RED не загружена → build_vpk поставит sentinel
-        и покажет диалог выбора.
-        """
-        p = self._state.red_main()
-        if p:
-            return p
-        # image_path как fallback только в RED-режиме (в BLU он содержит BLU-текстуру)
-        if self._active_team != Team.BLU and self.image_path and os.path.exists(self.image_path):
-            return self.image_path
-        return None
-
-    def _is_game_texture(self, path: Optional[str]) -> bool:
-        """
-        True, если path — извлечённая из игры текстура (VPK-кадр команды /
-        вариант Australium), а не пользовательская. Для таких в 2D-превью
-        отбрасываем альфу (она у VTF — маска бликов, а не прозрачность).
-        """
-        if not path:
-            return False
-        if path == self._australium_frame:
-            return True
-        if path in self._red_frames or path in self._blu_frames:
-            return True
-        if (path in self._vpk_red_tex_map.values()
-                or path in self._vpk_blu_tex_map.values()):
-            return True
-        return False
-
-    def _resolve_card_texture(self, mat_name: str) -> Optional[str]:
-        """Текстура для карточки при текущей команде/стиле (правила — в модели)."""
-        from src.data.player_hands import HAND_MODE_KEYS as _HMK_card
-        hands_blu_view = (self._weapon_mode in _HMK_card
-                          and self._active_team == Team.BLU)
-        return self._state.resolve_card(mat_name, hands_blu_view=hands_blu_view)
-
-    def _resolve_base_texture(self, mat_name: str) -> Optional[str]:
-        """Базовая (skin 0) текстура: пользовательская → другая команда для
-        нейтральных → VPK-оригинал → командный кадр (приоритеты — в модели)."""
-        return self._state.resolve_base(mat_name)
-
-    def get_uploaded_texture_for_mat(self, mat_name: str) -> Optional[str]:
-        """Возвращает путь к уже загруженной пользователем текстуре для данного
-        материала, или None если не загружена.
-
-        Логика (важно — не смешиваем RED и BLU):
-
-        1. Если mat_name — RED-имя (ключ в _vpk_blu_name_map, напр. 'medic_head_red'):
-           → смотрим ТОЛЬКО в _textures[Team.RED]. Не fallback-аем на BLU.
-           Это гарантирует, что build спросит диалог когда RED не загружена,
-           а не молча подставит BLU-текстуру.
-
-        2. Если mat_name — BLU-имя (значение в _vpk_blu_name_map, напр. 'medic_head_blue'):
-           → обратный поиск: BLU-имя → RED-ключ → _textures[Team.BLU][RED-ключ].
-           (Карточки хранят BLU-текстуры под RED-ключами.)
-
-        3. Иначе (оружие/шапка без явного маппинга, руки):
-           → прямой поиск в обеих командах.
-        """
-        return self._state.uploaded_for_mat(mat_name)
-
-    def get_blu_image_path(self) -> Optional[str]:
-        """Возвращает путь к пользовательской BLU текстуре (главный слот) или None."""
-        return self._state.blu_main()
-
-    # ── Вспомогательные методы 2D ─────────────────────────────────────────────
-
-    def _show_image_in_preview(self, path: str) -> None:
-        """Показывает изображение в большом превью (не card_mode)."""
-        from PySide6.QtCore import QTimer
-        self.empty_state.hide()
-        self.preview.show()
-        self.preview.clear()
-        self.preview.setStyleSheet(self._preview_style)
-        self.preview.updateGeometry()
-
-        opaque = self._is_game_texture(path)
-        if path.lower().endswith('.gif'):
-            def _try_gif():
-                if self._gif_movie is not None:
-                    return
-                w = max(self.preview.width(), self.width(), 600)
-                if not self._start_gif(path, w):
-                    pix = _load_pixmap(path, opaque).scaled(w, 500, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-                    self.preview.setPixmap(pix)
-            QTimer.singleShot(50, _try_gif)
-        else:
-            def _scale():
-                w = max(self.preview.width(), self.width(), 600)
-                pix = _load_pixmap(path, opaque).scaled(w, 500, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-                self.preview.setPixmap(pix)
-            QTimer.singleShot(50, _scale)
-
-    def _clear_preview_label(self) -> None:
-        self.preview.clear()
-        self.preview.hide()
-        self.empty_state.show()
-
     # ═══════════════════════════════════════════════════════════════════════════
     # Роутинг текстур в 3D
     # ═══════════════════════════════════════════════════════════════════════════
@@ -2524,93 +2206,6 @@ class PreviewPanel(Preview3DMixin, PreviewSkinsMixin, PreviewCustomModelMixin,
                     self._from_3d_drop = False
         except Exception as exc:
             logger.warning(f"3D texture drop: {exc}")
-
-    # ═══════════════════════════════════════════════════════════════════════════
-    # CritHIT режим
-    # ═══════════════════════════════════════════════════════════════════════════
-
-    def _update_scene_texture(self, path: str) -> None:
-        """Применяет новую текстуру к сцене-персонажу: для эффекта смерти —
-        перерисовываем модель с текстурой; для крита — обновляем billboard."""
-        if not self._3d_widget:
-            return
-        if self._death_effect_mode:
-            self._render_crithit_scene()      # текстура ложится на модель
-        else:
-            self._3d_widget.update_crithit_texture(path)   # billboard крита
-
-    def _render_crithit_scene(self) -> None:
-        if not self._3d_widget or not self._3d_available:
-            return
-        class_name = self._crithit_class
-        custom_model, model_tex = self._find_crithit_custom_model(class_name)
-
-        if self._death_effect_mode:
-            # Эффект смерти: на модель — текстура пользователя, иначе оригинальная
-            # игровая текстура эффекта (лёд/золото/огонь). Billboard не показываем.
-            crit_path = ''
-            model_tex = self.image_path or self._death_default_tex or ''
-        else:
-            # Крит: текстура пользователя — billboard, модель в своей текстуре.
-            crit_path = self.image_path or ''
-
-        if model_tex.lower().endswith('.vtf'):
-            model_tex = self._convert_model_vtf(model_tex)
-
-        if custom_model:
-            if custom_model.lower().endswith('.smd'):
-                import tempfile
-                from src.services.smd_to_obj_service import SmdToObjService
-                self._3d_widget.show_loading("Converting custom model...")
-                tmp = tempfile.mkdtemp(prefix="tf2_crithit_")
-                obj = os.path.join(tmp, "model.obj")
-                ok = SmdToObjService.convert(custom_model, obj)
-                if ok and os.path.exists(obj):
-                    self._3d_widget.load_crithit_scene_with_model(obj, crit_path, model_tex)
-                else:
-                    self._3d_widget.load_crithit_scene(crit_path, model_tex)
-            else:
-                self._3d_widget.load_crithit_scene_with_model(custom_model, crit_path, model_tex)
-        else:
-            self._3d_widget.load_crithit_scene(crit_path, model_tex)
-
-    @staticmethod
-    def _find_crithit_custom_model(class_name: str = 'soldier') -> tuple:
-        here = os.path.dirname(os.path.abspath(__file__))
-        model_root = os.path.join(os.path.dirname(os.path.dirname(here)), "tools", "Model")
-        MODEL_EXTS = ('.obj', '.smd')
-        TEX_EXTS   = ('.png', '.jpg', '.jpeg', '.bmp', '.tga', '.vtf', '.webp')
-
-        def _scan(folder):
-            if not os.path.isdir(folder):
-                return '', ''
-            m = t = ''
-            for name in sorted(os.listdir(folder)):
-                if name.startswith('.'):
-                    continue
-                lo, full = name.lower(), os.path.join(folder, name)
-                if not m and lo.endswith(MODEL_EXTS): m = full
-                if not t and lo.endswith(TEX_EXTS):   t = full
-            return m, t
-
-        m, t = _scan(os.path.join(model_root, class_name.lower()))
-        if m:
-            return m, t
-        return _scan(model_root)
-
-    @staticmethod
-    def _convert_model_vtf(vtf_path: str) -> str:
-        try:
-            from src.services.vtflib_wrapper import VTFLib
-            from PIL import Image
-            rgba, w, h = VTFLib.read_vtf_as_rgba(vtf_path)
-            img = Image.frombytes("RGBA", (w, h), rgba)
-            png = str(get_temp_file_path(prefix='tf2_model_tex_', suffix='.png'))
-            img.save(png)
-            return png
-        except Exception as exc:
-            logger.warning(f"VTF→PNG модели: {exc}")
-            return ''
 
     # ═══════════════════════════════════════════════════════════════════════════
     # GIF helpers
