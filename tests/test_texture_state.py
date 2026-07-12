@@ -499,5 +499,47 @@ class ForceTeamTests(TextureStateBase):
         self.assertEqual(fresh.textures[Team.BLU].get("c_gun"), blu)
 
 
+class SkyboxStateTests(TextureStateBase):
+    def test_resolve_priority_user_over_split_over_stock(self):
+        user = self.png("user_up")
+        split = self.png("split_up")
+        stock = self.png("stock_up")
+        self.state.skybox_stock_faces = {"up": stock}
+        self.assertEqual(self.state.resolve_skybox_face("up"), stock)
+        self.state.skybox_split_faces = {"up": split}
+        self.assertEqual(self.state.resolve_skybox_face("up"), split)
+        self.state.set_texture("up", user)
+        self.assertEqual(self.state.resolve_skybox_face("up"), user)
+
+    def test_resolve_skips_missing_files(self):
+        self.state.skybox_split_faces = {"up": str(self.dir / "gone.png")}
+        stock = self.png("stock_up2")
+        self.state.skybox_stock_faces = {"up": stock}
+        self.assertEqual(self.state.resolve_skybox_face("up"), stock)
+
+    def test_build_data_contains_pano_and_overrides_only(self):
+        from src.data.skyboxes import SKY_PANO_KEY
+        pano = self.png("pano")
+        face = self.png("face_lf")
+        split = self.png("split_lf")
+        self.state.set_texture(SKY_PANO_KEY, pano)
+        self.state.set_texture("lf", face)
+        self.state.skybox_split_faces = {"rt": split}   # нарезка НЕ в сборку
+        data = self.state.skybox_build_data()
+        self.assertEqual(data["equirect"], pano)
+        self.assertEqual(data["face_overrides"], {"lf": face})
+
+    def test_reset_skybox_clears_derived_but_keeps_user(self):
+        face = self.png("face_up")
+        self.state.set_texture("up", face)
+        self.state.skybox_stock_faces = {"up": self.png("stock_up3")}
+        self.state.skybox_split_faces = {"up": self.png("split_up3")}
+        self.state.reset_skybox()
+        self.assertEqual(self.state.skybox_stock_faces, {})
+        self.assertEqual(self.state.skybox_split_faces, {})
+        # Пользовательская грань живёт в textures — её чистит общий сброс.
+        self.assertEqual(self.state.resolve_skybox_face("up"), face)
+
+
 if __name__ == "__main__":
     unittest.main()

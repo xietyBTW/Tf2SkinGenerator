@@ -61,12 +61,13 @@ from src.ui.preview_custom_model_mixin import PreviewCustomModelMixin
 from src.ui.preview_team_mixin import PreviewTeamMixin
 from src.ui.preview_2d_image_mixin import Preview2DImageMixin
 from src.ui.preview_crithit_mixin import PreviewCritHitMixin
+from src.ui.preview_skybox_mixin import PreviewSkyboxMixin
 from src.ui.preview_material_cards_mixin import PreviewMaterialCardsMixin
 
 
 class PreviewPanel(Preview3DMixin, PreviewSkinsMixin, PreviewCustomModelMixin,
                    PreviewTeamMixin, Preview2DImageMixin, PreviewCritHitMixin,
-                   PreviewMaterialCardsMixin, QWidget):
+                   PreviewSkyboxMixin, PreviewMaterialCardsMixin, QWidget):
     """2D + 3D панель предпросмотра с чистым управлением состоянием."""
 
     vpk_mod_loaded = Signal(str)   # путь к VPK моду
@@ -822,7 +823,7 @@ class PreviewPanel(Preview3DMixin, PreviewSkinsMixin, PreviewCustomModelMixin,
         вида (2D/3D), и при смене 3D-состояния (set_3d_params/set_crithit_mode),
         иначе после крита кнопки не возвращаются.
         """
-        show = self.is_3d_mode() and not self._crithit_mode
+        show = self.is_3d_mode() and not self._crithit_mode and not self._pstate.is_skybox
         self.btn_load_3d.setVisible(show)
         self.btn_load_vpk.setVisible(show)
         if hasattr(self, 'btn_replace_model'):
@@ -879,6 +880,12 @@ class PreviewPanel(Preview3DMixin, PreviewSkinsMixin, PreviewCustomModelMixin,
             if self._3d_available:
                 from PySide6.QtCore import QTimer
                 QTimer.singleShot(200, self._render_crithit_scene)
+            return
+
+        if self._pstate.is_skybox:
+            if self._3d_available:
+                from PySide6.QtCore import QTimer
+                QTimer.singleShot(200, self._render_skybox_scene)
             return
 
         self.btn_load_vpk.setEnabled(True)
@@ -1313,7 +1320,8 @@ class PreviewPanel(Preview3DMixin, PreviewSkinsMixin, PreviewCustomModelMixin,
         """
         if not self._cur_obj or self._cur_obj[0] != outgoing_mode:
             return None
-        if not outgoing_mode or outgoing_mode in ('hat', 'spray', 'critHIT', 'custom'):
+        if not outgoing_mode or outgoing_mode in ('hat', 'spray', 'critHIT',
+                                                  'custom', 'skybox'):
             return None
         if self._spy_mask_mode or self._australium_active or self._custom_smd_mode:
             return None
@@ -1394,8 +1402,11 @@ class PreviewPanel(Preview3DMixin, PreviewSkinsMixin, PreviewCustomModelMixin,
 
         self._last_3d_params = new_params
         self._pending_3d_params = new_params
-        # Обычная игровая модель — гасим спец-режимы (custom/critHIT/death).
-        if self._pstate.mode in (PreviewMode.CUSTOM, PreviewMode.CRITHIT, PreviewMode.DEATH):
+        # Обычная игровая модель — гасим спец-режимы (custom/critHIT/death/skybox).
+        if self._pstate.is_skybox:
+            self._exit_skybox_mode()
+        if self._pstate.mode in (PreviewMode.CUSTOM, PreviewMode.CRITHIT,
+                                 PreviewMode.DEATH, PreviewMode.SKYBOX):
             self._pstate.reset()
         self._death_default_tex = ''
         # Сохраняем VPK пути — нужны для _switch_spy_mask
@@ -1431,8 +1442,11 @@ class PreviewPanel(Preview3DMixin, PreviewSkinsMixin, PreviewCustomModelMixin,
         """Полный сброс 3D (при смене режима на Spray/None)."""
         self._pending_3d_params = None
         self._last_3d_params = None
-        # Обычная игровая модель — гасим спец-режимы (custom/critHIT/death).
-        if self._pstate.mode in (PreviewMode.CUSTOM, PreviewMode.CRITHIT, PreviewMode.DEATH):
+        # Обычная игровая модель — гасим спец-режимы (custom/critHIT/death/skybox).
+        if self._pstate.is_skybox:
+            self._exit_skybox_mode()
+        if self._pstate.mode in (PreviewMode.CUSTOM, PreviewMode.CRITHIT,
+                                 PreviewMode.DEATH, PreviewMode.SKYBOX):
             self._pstate.reset()
         self._death_default_tex = ''
         self._cur_obj = None   # модель убрана — нечего запоминать
@@ -1446,8 +1460,11 @@ class PreviewPanel(Preview3DMixin, PreviewSkinsMixin, PreviewCustomModelMixin,
     def show_3d_no_tf2_message(self) -> None:
         self._pending_3d_params = None
         self._last_3d_params = None
-        # Обычная игровая модель — гасим спец-режимы (custom/critHIT/death).
-        if self._pstate.mode in (PreviewMode.CUSTOM, PreviewMode.CRITHIT, PreviewMode.DEATH):
+        # Обычная игровая модель — гасим спец-режимы (custom/critHIT/death/skybox).
+        if self._pstate.is_skybox:
+            self._exit_skybox_mode()
+        if self._pstate.mode in (PreviewMode.CUSTOM, PreviewMode.CRITHIT,
+                                 PreviewMode.DEATH, PreviewMode.SKYBOX):
             self._pstate.reset()
         self._death_default_tex = ''
         self._stop_worker('_3d_worker')
@@ -1467,6 +1484,9 @@ class PreviewPanel(Preview3DMixin, PreviewSkinsMixin, PreviewCustomModelMixin,
 
     def set_custom_model_mode(self, enabled: bool = True) -> None:
         if enabled:
+            # Переход из скайбокса: стоп его воркеров + снять фон-кубмапу.
+            if self._pstate.is_skybox:
+                self._exit_skybox_mode()
             self._pstate.enter(PreviewMode.CUSTOM)
         elif self._pstate.is_custom:
             self._pstate.reset()
@@ -1668,6 +1688,7 @@ class PreviewPanel(Preview3DMixin, PreviewSkinsMixin, PreviewCustomModelMixin,
         if hasattr(self, 'btn_edit_qc'):
             self.btn_edit_qc.setVisible(False)
         self._reset_skin_state()       # и стили оригинала
+        self._state.reset_skybox()     # и грани скайбокса (стоковые/нарезанные)
         self._tex_overrides = {}       # и пер-текстурные настройки (материалы другие)
         self._tex_maps = {}            # и пер-текстурные карты
         _sp = getattr(self.parent, 'settings_panel', None)   # и выходим из режима их редактирования

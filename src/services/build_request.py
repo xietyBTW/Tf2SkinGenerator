@@ -63,3 +63,10 @@ class BuildRequest:
     # $texturegroup (skin 0 = база/RED, skin 1 = {material}_blue), чтобы игра
     # показывала BLU-команде отдельную текстуру. Только без нативной команды/австралия.
     force_team: bool = False
+    # ── Режим «Скайбокс» (mode == SKYBOX_MODE) ──────────────────────────────
+    # Имена стоковых небес, чьи материалы перекрываем (уже развёрнуто из
+    # «Все карты»). Панорама едет в image_path (может быть None, если пользователь
+    # задал все 6 граней вручную).
+    skybox_sky_names: Optional[list] = None
+    # {грань: путь} ручные грани — приоритетнее нарезки панорамы.
+    skybox_face_overrides: Optional[Dict[str, str]] = None

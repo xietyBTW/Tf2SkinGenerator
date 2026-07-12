@@ -434,7 +434,7 @@ class MainWindow(QMainWindow, ProgressDialogMixin, MainWindowVmtMixin,
         group_layout.addWidget(self.category_label)
 
         # Ключи категорий в порядке отображения. Используем индекс для маппинга.
-        self._category_keys = ['weapon', 'character', 'special', 'projectile', 'pickup', 'taunt', 'custom']
+        self._category_keys = ['weapon', 'character', 'special', 'projectile', 'pickup', 'taunt', 'skybox', 'custom']
         self.category_combo = QComboBox()
         self.category_combo.setStyleSheet(styles['combo'])
         self._populate_category_combo()
@@ -759,7 +759,7 @@ class MainWindow(QMainWindow, ProgressDialogMixin, MainWindowVmtMixin,
         show_class   = cat in ('weapon', 'character')
         show_type    = cat == 'weapon'
         show_weapon  = cat == 'weapon'
-        show_subtype = cat in ('character', 'special', 'projectile', 'pickup', 'taunt')
+        show_subtype = cat in ('character', 'special', 'projectile', 'pickup', 'taunt', 'skybox')
 
         self.class_label.setVisible(show_class)
         self.class_combo.setVisible(show_class)
@@ -783,6 +783,8 @@ class MainWindow(QMainWindow, ProgressDialogMixin, MainWindowVmtMixin,
                 key = 'subtype_pickup'
             elif cat == 'taunt':
                 key = 'subtype_taunt'
+            elif cat == 'skybox':
+                key = 'subtype_sky'
             else:
                 key = 'subtype_part'
             self.subtype_label.setText(self.t.get(key, 'Подтип:'))
@@ -813,6 +815,8 @@ class MainWindow(QMainWindow, ProgressDialogMixin, MainWindowVmtMixin,
             self._populate_subtype_for_character()
         elif cat == 'special':
             self._populate_subtype_for_special()
+        elif cat == 'skybox':
+            self._populate_subtype_for_skybox()
         elif cat in ('projectile', 'pickup', 'taunt'):
             self._populate_simple_subtype(cat)
         else:  # custom
@@ -852,6 +856,30 @@ class MainWindow(QMainWindow, ProgressDialogMixin, MainWindowVmtMixin,
         self.subtype_combo.addItem(self.t.get('special_death_ice', 'Эффект смерти: Лёд'))
         self.subtype_combo.addItem(self.t.get('special_death_gold', 'Эффект смерти: Золото'))
         self.subtype_combo.addItem(self.t.get('special_death_fire', 'Эффект смерти: Огонь'))
+        self.subtype_combo.blockSignals(False)
+
+        self.subtype_combo.setCurrentIndex(0)
+        self.on_subtype_changed(0)
+
+    def _populate_subtype_for_skybox(self) -> None:
+        """Заполняет subtype_combo списком небес: «Все карты» + стоковые имена.
+
+        Список — из установленной игры (скан VPK, кэшируется) с фолбэком на
+        встроенный; имена небес показываются как есть (не локализуются)."""
+        from src.data.skyboxes import SKY_ALL_MAPS_KEY
+        from src.services.skybox_service import SkyboxService
+
+        tf2_root = ''
+        if hasattr(self, 'settings_panel'):
+            tf2_root = self.settings_panel.get_settings().get('tf2_game_folder', '')
+
+        self.subtype_combo.blockSignals(True)
+        self.subtype_combo.clear()
+        self._subtype_keys = [SKY_ALL_MAPS_KEY]
+        self.subtype_combo.addItem(self.t.get('sky_all_maps', 'Все карты'))
+        for name in SkyboxService.enumerate_sky_names(tf2_root):
+            self.subtype_combo.addItem(name)
+            self._subtype_keys.append(name)
         self.subtype_combo.blockSignals(False)
 
         self.subtype_combo.setCurrentIndex(0)
@@ -903,6 +931,10 @@ class MainWindow(QMainWindow, ProgressDialogMixin, MainWindowVmtMixin,
             # Реквизит насмешки → mode = f"taunt_{key}".
             self.current_weapon = key
             self.apply_selection_auto()
+        elif cat == 'skybox':
+            # Небо для замены (или SKY_ALL_MAPS_KEY — все стоковые сразу).
+            self._skybox_sky_name = key
+            self.apply_selection_auto()
         elif cat == 'special':
             # Подтип special — источник истины. Крит/Спрей дополнительно
             # синхронизируют свои скрытые чекбоксы; скины эффектов смерти
@@ -937,7 +969,8 @@ class MainWindow(QMainWindow, ProgressDialogMixin, MainWindowVmtMixin,
         if hasattr(self, 'type_label'):
             self.type_label.setText(self.t['weapon_type'])
         if hasattr(self, 'subtype_label'):
-            _sub_key = 'subtype_special' if self._current_category == 'special' else 'subtype_part'
+            _sub_keys = {'special': 'subtype_special', 'skybox': 'subtype_sky'}
+            _sub_key = _sub_keys.get(self._current_category, 'subtype_part')
             self.subtype_label.setText(self.t.get(_sub_key, 'Подтип:'))
         if hasattr(self, 'weapon_label'):
             self.weapon_label.setText(self.t['weapon'])
@@ -1149,6 +1182,9 @@ class MainWindow(QMainWindow, ProgressDialogMixin, MainWindowVmtMixin,
                     self.mode = "spray"
                 elif self.crit_hit_checkbox.isChecked():
                     self.mode = "critHIT"
+        elif cat == 'skybox':
+            from src.data.skyboxes import SKYBOX_MODE
+            self.mode = SKYBOX_MODE
         elif cat == 'custom':
             self.mode = "custom" if getattr(self, '_custom_vpk_path', None) else None
         elif cat in ('projectile', 'pickup', 'taunt'):
@@ -1250,6 +1286,33 @@ class MainWindow(QMainWindow, ProgressDialogMixin, MainWindowVmtMixin,
             self.preview_panel.set_crithit_mode()
             return
 
+        # Скайбокс: фон-кубмапа выбранного неба (для «Все карты» — превью
+        # дефолтного неба). Без TF2 стоковые грани недоступны — превью появится
+        # после загрузки панорамы/граней пользователем.
+        from src.data.skyboxes import SKYBOX_MODE as _SKYBOX
+        if self.mode == _SKYBOX:
+            from src.data.skyboxes import SKY_ALL_MAPS_KEY, SKY_PREVIEW_DEFAULT
+            sky = getattr(self, '_skybox_sky_name', SKY_ALL_MAPS_KEY)
+            if sky == SKY_ALL_MAPS_KEY:
+                sky = SKY_PREVIEW_DEFAULT
+            _tex_vpk = _misc_vpk = ''
+            _root = self.settings_panel.get_settings().get('tf2_game_folder', '')
+            if _root:
+                try:
+                    import os
+                    from src.services.tf2_paths import TF2Paths
+                    # Не TF2Paths.resolve: он требует studiomdl.exe, который
+                    # для чтения граней неба не нужен.
+                    _misc_vpk = os.path.join(_root, 'tf', 'tf2_misc_dir.vpk')
+                    if not os.path.exists(_misc_vpk):
+                        _misc_vpk = ''
+                    _tex_vpk = TF2Paths.resolve_textures_vpk(_root) or ''
+                except Exception:
+                    _tex_vpk = _misc_vpk = ''
+            self.preview_panel.set_skybox_mode(
+                sky, textures_vpk=_tex_vpk, misc_vpk=_misc_vpk)
+            return
+
         # Эффекты смерти (лёд/золото/огонь): тот же персонаж, но текстура
         # пользователя ложится на саму модель — как эффект ляжет в игре.
         # Сначала показываем оригинальную игровую текстуру эффекта из VPK.
@@ -1311,6 +1374,12 @@ class MainWindow(QMainWindow, ProgressDialogMixin, MainWindowVmtMixin,
         from src.data.player_characters import SPY_MASK_MODE_KEY as _SMK2, SPY_MASK_VTF_NAMES
 
         mode = getattr(self, 'mode', None) or ''
+
+        from src.data.skyboxes import SKYBOX_MODE as _SKYBOX2
+        if mode == _SKYBOX2:
+            # Скайбокс: карточки панорамы и 6 граней.
+            self.preview_panel.update_extra_slots_skybox()
+            return
 
         if not mode or mode in set(SPECIAL_MODES.values()) | {'custom'}:
             self.preview_panel.update_extra_slots('', mode='')

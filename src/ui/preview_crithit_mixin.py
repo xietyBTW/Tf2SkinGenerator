@@ -38,6 +38,10 @@ class PreviewCritHitMixin:
         self.vtf_path = None
         self._cur_obj = None
 
+        # Переход из скайбокса: стоп его воркеров + снять фон-кубмапу.
+        if self._pstate.is_skybox:
+            self._exit_skybox_mode()
+
         self._pstate.enter(PreviewMode.CRITHIT)
         # Маски шпиона не относятся к крит/спец-режимам — прячем их селекторы,
         # иначе при переходе из режима масок в Special они «залипают».

@@ -390,6 +390,11 @@ class PreviewMaterialCardsMixin:
 
     def _on_extra_card_changed(self, mat_name: str, path: str) -> None:
         """Пользователь сменил или сбросил текстуру в карточке доп. слота."""
+        if self._pstate.is_skybox:
+            # Скайбокс: карточки — панорама/грани, своя маршрутизация (без
+            # командной логики и наложения на модель).
+            self._on_skybox_card_changed(mat_name, path)
+            return
         if path:
             self._store_texture(mat_name, path)
             # В custom-VPK режиме имя карточки (стебель VTF) переводим в точное

@@ -615,11 +615,14 @@ class SettingsPanel(QWidget):
         except ImportError:
             PLAYER_BODY_MODE_KEYS = frozenset()
 
+        from src.data.skyboxes import SKYBOX_MODE
         is_spray       = (mode == "spray")
         is_crit        = (mode == "critHIT")
+        is_skybox      = (mode == SKYBOX_MODE)
         is_hands       = bool(mode and mode in HAND_MODE_KEYS)
         is_player_body = bool(mode and mode in PLAYER_BODY_MODE_KEYS)
-        is_normal = bool(mode and not is_spray and not is_crit and not is_hands and not is_player_body)
+        is_normal = bool(mode and not is_spray and not is_crit and not is_skybox
+                         and not is_hands and not is_player_body)
 
         lang = 'ru'
         if self.parent and hasattr(self.parent, 'language'):
@@ -647,6 +650,16 @@ class SettingsPanel(QWidget):
                 if lang == 'ru' else
                 "Spray requires an alpha-capable format (DXT5)"
             )
+        elif is_skybox:
+            # Скайбокс: формат фиксирован (DXT1, без альфы); разрешение
+            # остаётся на выбор — это размер каждой грани куба.
+            self.format_combo.setCurrentText("DXT1")
+            self.format_combo.setEnabled(False)
+            self.format_combo.setToolTip(
+                "Скайбокс использует DXT1 (без альфа-канала)"
+                if lang == 'ru' else
+                "Skybox uses DXT1 (no alpha channel)"
+            )
         elif not is_crit:
             # CritHIT управляется через on_crit_hit_selected — не трогаем
             self.format_combo.setEnabled(True)
@@ -660,7 +673,9 @@ class SettingsPanel(QWidget):
             self.flag_nomipmaps, self.flag_nolod, self.flag_nominmipmaps,
         ]
         _opt_attrs = ('option_nothumbnail', 'option_noreflectivity', 'option_gamma')
-        if is_spray:
+        if is_spray or is_skybox:
+            # Skybox: флаги принудительные (CLAMPS/CLAMPT/NOLOD + nomipmaps
+            # внутри SkyboxService) — пользовательские галки не участвуют.
             for w in _flag_widgets:
                 w.setEnabled(False)
             for attr in _opt_attrs:
@@ -717,6 +732,9 @@ class SettingsPanel(QWidget):
                 return spray_ru if lang == 'ru' else spray_en
             if is_crit:
                 return crit_ru if lang == 'ru' else crit_en
+            if is_skybox:
+                return ("Режим скайбокса: модели нет" if lang == 'ru'
+                        else "Skybox mode: no model")
             if is_hands or is_player_body:
                 return hands_ru if lang == 'ru' else hands_en
             return ""

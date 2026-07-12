@@ -41,6 +41,18 @@ class Preview2DImageMixin:
         if self._australium_active:
             self._set_australium_user_tex(path or None)
             return
+        # Скайбокс: любое «загрузить изображение» (дроп в 3D-окно, дроп в 2D,
+        # диалог) — это панорама. Роутим в карточку панорамы и единый
+        # обработчик (нарезка на грани + перерисовка неба); общий путь ниже
+        # загрязнил бы image_path и никогда не запустил бы нарезку.
+        if self._pstate.is_skybox:
+            from src.data.skyboxes import SKY_PANO_KEY
+            card = self._card_widgets.get(SKY_PANO_KEY)
+            if card:
+                card.set_image(path)
+            self._on_skybox_card_changed(SKY_PANO_KEY, path)
+            self.update_info_summary()
+            return
         self._stop_gif()
         if path != self._per_mesh_base_image:
             self._per_mesh_active = False

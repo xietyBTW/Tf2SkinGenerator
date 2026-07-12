@@ -156,6 +156,42 @@ class CollectBuildRequestTests(unittest.TestCase):
         self.assertFalse(r2.replace_keep_materials)
         self.assertIsNone(r2.custom_qc_text)
 
+    def test_non_skybox_mode_has_no_skybox_fields(self):
+        w = _StubWindow(_StubPanel())
+        r = _collect(w)
+        self.assertIsNone(r.skybox_sky_names)
+        self.assertIsNone(r.skybox_face_overrides)
+
+
+class _SkyboxStubPanel(_StubPanel):
+    def get_skybox_build_data(self):
+        return {'equirect': 'pano.png', 'face_overrides': {'up': 'up.png'}}
+
+
+class CollectSkyboxRequestTests(unittest.TestCase):
+    def _window(self, sky_sel):
+        w = _StubWindow(_SkyboxStubPanel(
+            slots={'__pano__': 'pano.png', 'up': 'up.png'}))
+        w.mode = 'skybox'
+        w._skybox_sky_name = sky_sel
+        return w
+
+    def test_specific_sky_and_overrides(self):
+        r = _collect(self._window('sky_upward'), from_path='pano.png')
+        self.assertEqual(r.skybox_sky_names, ['sky_upward'])
+        self.assertEqual(r.skybox_face_overrides, {'up': 'up.png'})
+        # Карточки панорамы/граней не утекают в модельные доп. слоты.
+        self.assertEqual(r.panel_extra_textures, {})
+
+    def test_all_maps_expands_via_enumerate(self):
+        from unittest.mock import patch
+        from src.data.skyboxes import SKY_ALL_MAPS_KEY
+        with patch('src.services.skybox_service.SkyboxService.enumerate_sky_names',
+                   return_value=['sky_a', 'sky_b']) as m:
+            r = _collect(self._window(SKY_ALL_MAPS_KEY), from_path='pano.png')
+        self.assertEqual(r.skybox_sky_names, ['sky_a', 'sky_b'])
+        m.assert_called_once_with('C:/TF2')
+
 
 if __name__ == "__main__":
     unittest.main()

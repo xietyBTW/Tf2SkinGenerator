@@ -241,6 +241,25 @@ class VPKService:
                               else t.get('build_error_status', 'Build error'))
                 return success, message, False
 
+            # ── Скайбокс: свой пайплайн (панорама/грани → materials/skybox) ─ #
+            # Ранняя ветка как у custom: _validate_build_params требует
+            # image_path/TF2 и не знает про 6 граней — валидация своя.
+            from src.data.skyboxes import SKYBOX_MODE
+            if mode == SKYBOX_MODE:
+                from src.services.skybox_service import SkyboxService
+                emit_progress(10, t.get('build_skybox_faces', 'Building sky faces...'))
+                success, message = SkyboxService.build_skybox_vpk(
+                    request,
+                    sub_progress_callback=emit_sub,
+                    cancel_callback=cancel_callback,
+                )
+                if is_cancelled():
+                    return False, t.get('build_cancelled', 'Build cancelled by user'), True
+                emit_progress(100 if success else 0,
+                              t.get('build_completed', 'Build completed') if success
+                              else t.get('build_error_status', 'Build error'))
+                return success, message, False
+
             is_special_mode = mode in SPECIAL_MODES.values()
 
             _sub_label_init = "Preparing..." if language == "en" else "Подготовка..."

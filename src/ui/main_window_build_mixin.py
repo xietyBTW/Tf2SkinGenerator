@@ -107,6 +107,21 @@ class MainWindowBuildMixin:
             (from_path, custom_vtf_path) или None — собирать не из чего
             (предупреждение уже показано).
         """
+        from src.data.skyboxes import SKYBOX_MODE as _SKYBOX_MODE
+        if self.mode == _SKYBOX_MODE:
+            # Скайбокс: «главная текстура» — панорама (может отсутствовать,
+            # если пользователь задал все 6 граней вручную).
+            data = self.preview_panel.get_skybox_build_data()
+            from src.data.skyboxes import SKY_FACES
+            if not data['equirect'] and len(data['face_overrides']) < len(SKY_FACES):
+                ErrorHandler.show_warning(
+                    self,
+                    self.t.get('error_skybox_no_input',
+                               'Load a panorama or all 6 face textures.'),
+                    self.t['error'])
+                return None
+            return data['equirect'], None
+
         custom_vtf_path = self.preview_panel.get_vtf_path()
         from_path = None
 
@@ -323,12 +338,29 @@ class MainWindowBuildMixin:
             _blu_image = self.preview_panel.get_blu_image_path()
         _blu_mode = 'upload' if _blu_image else 'none'
 
+        # ── Скайбокс: свои поля; карточки панорамы/граней НЕ должны утекать в
+        # panel_extra_textures (это слоты модельного пайплайна).
+        from src.data.skyboxes import SKY_ALL_MAPS_KEY, SKYBOX_MODE
+        _is_skybox = (self.mode == SKYBOX_MODE)
+        _skybox_sky_names = None
+        _skybox_face_overrides = None
+        if _is_skybox and hasattr(self, 'preview_panel'):
+            _sky_data = self.preview_panel.get_skybox_build_data()
+            _skybox_face_overrides = _sky_data['face_overrides']
+            _sel = getattr(self, '_skybox_sky_name', None) or SKY_ALL_MAPS_KEY
+            if _sel == SKY_ALL_MAPS_KEY:
+                from src.services.skybox_service import SkyboxService
+                _skybox_sky_names = SkyboxService.enumerate_sky_names(
+                    settings.get('tf2_game_folder', ''))
+            else:
+                _skybox_sky_names = [_sel]
+
         # Собираем все загруженные пользователем текстуры из 2D карточек.
         # Некоторые материалы (c_arrow, sniper_lens и т.п.) есть в 3D модели
         # но НЕ в QC skinfamilies → extra_texture_callback их не покрывает.
         # Передаём эти текстуры напрямую чтобы они попали в VPK.
         _panel_extra_textures: dict = {}
-        if hasattr(self, 'preview_panel'):
+        if not _is_skybox and hasattr(self, 'preview_panel'):
             _panel_extra_textures = dict(
                 self.preview_panel.get_slot_image_paths()
             )
@@ -410,6 +442,8 @@ class MainWindowBuildMixin:
                 self.preview_panel.get_force_team()
                 if hasattr(self, 'preview_panel') else False
             ),
+            skybox_sky_names=_skybox_sky_names,
+            skybox_face_overrides=_skybox_face_overrides,
         )
 
     def build_vpk(self):

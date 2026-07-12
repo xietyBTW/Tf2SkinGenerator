@@ -349,6 +349,30 @@ class _Real3DWidget:
         js = f"window.updateCritHitTexture({json.dumps(data_url)})"
         self._view.page().runJavaScript(js)
 
+    def load_skybox(self, face_paths: dict) -> None:
+        """Показывает скайбокс фоном сцены (режим «Скайбокс»).
+
+        Args:
+            face_paths: {face: путь к изображению} — все 6 граней из SKY_FACES
+                        (up/dn/lf/rt/ft/bk). VTF/TGA конвертируются автоматически
+                        (_file_to_data_url).
+        """
+        if not self._ready or not face_paths:
+            return
+        faces = {}
+        for face, path in face_paths.items():
+            if path and os.path.exists(path):
+                faces[face] = _file_to_data_url(path)
+        if len(faces) < 6:
+            logger.debug(f"load_skybox: не все грани готовы ({sorted(faces)})")
+            return
+        self._view.page().runJavaScript(f"window.loadSkybox({json.dumps(faces)})")
+
+    def clear_skybox(self) -> None:
+        """Убирает фон-скайбокс (выход из режима «Скайбокс»)."""
+        if self._ready:
+            self._view.page().runJavaScript("window.clearSkybox()")
+
     def show_prompt(self, text: str = "") -> None:
         """Показывает подсказку без спиннера (режим ожидания действия)."""
         if self._ready:
@@ -436,6 +460,8 @@ class _Fallback3DWidget:
     def load_crithit_scene(self, crit_tex_path: str = "", model_tex_path: str = ""): pass
     def load_crithit_scene_with_model(self, obj_path: str, crit_tex_path: str = "", model_tex_path: str = ""): pass
     def update_crithit_texture(self, *_): pass
+    def load_skybox(self, *_): pass
+    def clear_skybox(self): pass
     def show_loading(self, *_): pass
     def show_error(self, text=""): pass
     def reset(self): pass
@@ -461,6 +487,22 @@ def _file_to_data_url(path: str) -> str:
         '.webp': 'image/webp',
         '.gif':  'image/gif',
     }
+
+    if ext == '.vtf':
+        # PIL не читает VTF — конвертируем через VTFLib (иначе сырые байты
+        # ушли бы в браузер как «PNG» и загрузка упала бы в img.onerror).
+        try:
+            import io
+            from PIL import Image
+            from src.services.vtflib_wrapper import VTFLib
+            rgba, w, h = VTFLib.read_vtf_as_rgba(path)
+            buf = io.BytesIO()
+            Image.frombytes("RGBA", (w, h), rgba).save(buf, format="PNG")
+            b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+            return f"data:image/png;base64,{b64}"
+        except Exception as exc:
+            logger.warning(f"VTF→PNG для 3D viewer не удался ({path}): {exc}")
+            # Падаем в общий PIL-путь ниже (последний шанс).
 
     if ext in _NATIVE:
         mime = _NATIVE[ext]

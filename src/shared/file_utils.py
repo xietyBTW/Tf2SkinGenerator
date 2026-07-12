@@ -101,6 +101,7 @@ _TEMP_ARTIFACT_PREFIXES = (
     "tf2sg_",
     "tf2_crithit_", "tf2_smd_preview_", "tf2_3d_", "tf2_3ddrop_",
     "tf2_deatheff_", "tf2_model_tex_", "tf2_vtf_",
+    "tf2_sky_",   # грани скайбокса: нарезка панорамы + стоковые превью
 )
 
 

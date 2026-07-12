@@ -65,6 +65,20 @@ class PreviewStateTests(unittest.TestCase):
         with self.assertRaises(TypeError):
             s.enter("custom")
 
+    def test_skybox_mode_mutually_exclusive(self):
+        s = PreviewState()
+        s.enter(PreviewMode.SKYBOX)
+        self.assertTrue(s.is_skybox)
+        self.assertFalse(s.is_weapon)
+        self.assertFalse(s.is_crithit)
+        self.assertFalse(s.is_special)   # скайбокс — не крит/death
+        s.enter(PreviewMode.CRITHIT)
+        self.assertFalse(s.is_skybox)    # не «залип»
+        s.enter(PreviewMode.SKYBOX)
+        s.reset()
+        self.assertTrue(s.is_weapon)
+        self.assertFalse(s.is_skybox)
+
 
 if __name__ == "__main__":
     unittest.main()

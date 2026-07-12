@@ -90,6 +90,15 @@ class PreviewTextureState:
     australium_mat_name: Optional[str] = None   # имя gold-материала (для сборки)
     australium_active: bool = False             # активен ли вариант в превью
 
+    # ── Режим «Скайбокс» ──────────────────────────────────────────────────── #
+    # Пользовательские грани/панорама живут в textures (ключи — грани из
+    # SKY_FACES и SKY_PANO_KEY, нейтральные → обе команды); здесь — данные,
+    # которые панель получает от воркеров.
+    #: Стоковые грани выбранного неба из VPK игры: {face: png}.
+    skybox_stock_faces: Dict[str, str] = field(default_factory=dict)
+    #: Грани, нарезанные из загруженной панорамы: {face: png}.
+    skybox_split_faces: Dict[str, str] = field(default_factory=dict)
+
     # ═══════════════════════════════════════════════════════════════════════ #
     # Ключи / классификация материалов
     # ═══════════════════════════════════════════════════════════════════════ #
@@ -394,3 +403,37 @@ class PreviewTextureState:
         self.australium_active = False
         self.australium_user_tex = None
         self.australium_mat_name = None
+
+    # ═══════════════════════════════════════════════════════════════════════ #
+    # Режим «Скайбокс»
+    # ═══════════════════════════════════════════════════════════════════════ #
+
+    def resolve_skybox_face(self, face: str) -> Optional[str]:
+        """Что показывает грань скайбокса: своя загруженная → нарезка из
+        панорамы → стоковая грань выбранного неба."""
+        return (_existing(self.textures.get(Team.RED, {}).get(face))
+                or _existing(self.skybox_split_faces.get(face))
+                or _existing(self.skybox_stock_faces.get(face)))
+
+    def skybox_pano(self) -> Optional[str]:
+        """Загруженная пользователем панорама (или None)."""
+        from src.data.skyboxes import SKY_PANO_KEY
+        return _existing(self.textures.get(Team.RED, {}).get(SKY_PANO_KEY))
+
+    def skybox_build_data(self) -> dict:
+        """Что уходит в сборку скайбокса: панорама + ручные оверрайды граней.
+        Нарезанные превью-грани НЕ входят — сборка режет панораму заново в
+        выбранном разрешении."""
+        from src.data.skyboxes import SKY_FACES
+        overrides = {}
+        for face in SKY_FACES:
+            p = _existing(self.textures.get(Team.RED, {}).get(face))
+            if p:
+                overrides[face] = p
+        return {'equirect': self.skybox_pano(), 'face_overrides': overrides}
+
+    def reset_skybox(self) -> None:
+        """Сброс данных скайбокса (стоковые/нарезанные грани; загрузки
+        пользователя живут в textures и чистятся общим сбросом слотов)."""
+        self.skybox_stock_faces = {}
+        self.skybox_split_faces = {}
