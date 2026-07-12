@@ -442,6 +442,7 @@ class MainWindowBuildMixin:
                 self.preview_panel.get_force_team()
                 if hasattr(self, 'preview_panel') else False
             ),
+            bypass_method=settings.get('bypass_method', 'console'),
             skybox_sky_names=_skybox_sky_names,
             skybox_face_overrides=_skybox_face_overrides,
         )

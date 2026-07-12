@@ -16,6 +16,45 @@ from src.services.vpk_texture_builder import VpkTextureBuilder
 from src.shared.exceptions import VPKCreationError, RequiredFileMissingError as SharedFileNotFoundError
 
 
+class PlanMaterialsBypassTests(unittest.TestCase):
+    """_plan_materials должен прокинуть выбранную папку обхода в patch_qc_file."""
+
+    def _minimal_qc(self, tmp: str) -> str:
+        qc = Path(tmp) / "m.qc"
+        qc.write_text(
+            '$modelname "weapons/c_x.mdl"\n'
+            '$cdmaterials "models\\weapons\\c_items"\n'
+            '$texturegroup "skinfamilies"\n{\n\t{ "c_x" }\n}\n',
+            encoding="utf-8")
+        return str(qc)
+
+    def _run(self, bypass_prefix):
+        captured = {}
+
+        def fake_patch(qc_path, prefix="console"):
+            captured["prefix"] = prefix
+
+        with tempfile.TemporaryDirectory() as tmp:
+            qc = self._minimal_qc(tmp)
+            ctx = BuildContext("id", "scout_c_x", "c_x", Path(tmp) / "ctx")
+            ctx.create_directories()
+            with patch("src.services.model_build_service.ModelBuildService.patch_qc_file",
+                       side_effect=fake_patch):
+                VPKService._plan_materials(
+                    qc, "scout_c_x", "c_x", ctx, "c_x", None, None,
+                    {}, None, False, "none", None, False, None, None,
+                    bypass_prefix=bypass_prefix,
+                )
+        return captured.get("prefix")
+
+    def test_console_default_forwarded(self):
+        self.assertEqual(self._run("console"), "console")
+
+    def test_vgui_prefix_forwarded(self):
+        self.assertEqual(
+            self._run("vgui\\replay\\thumbnails"), "vgui\\replay\\thumbnails")
+
+
 class VPKServiceTests(unittest.TestCase):
     def test_resolve_weapon_key_weapon(self):
         # Обычное оружие: weapon_key = суффикс после первого '_'

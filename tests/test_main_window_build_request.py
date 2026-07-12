@@ -162,6 +162,17 @@ class CollectBuildRequestTests(unittest.TestCase):
         self.assertIsNone(r.skybox_sky_names)
         self.assertIsNone(r.skybox_face_overrides)
 
+    def test_bypass_method_defaults_to_console(self):
+        w = _StubWindow(_StubPanel())
+        self.assertEqual(_collect(w).bypass_method, 'console')
+
+    def test_bypass_method_from_settings(self):
+        w = _StubWindow(_StubPanel())
+        r = _collect(w, settings={'tf2_game_folder': 'C:/TF2',
+                                  'export_folder': 'exp',
+                                  'bypass_method': 'vgui'})
+        self.assertEqual(r.bypass_method, 'vgui')
+
 
 class _SkyboxStubPanel(_StubPanel):
     def get_skybox_build_data(self):

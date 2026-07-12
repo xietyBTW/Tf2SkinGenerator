@@ -1364,6 +1364,7 @@ class VPKService:
         qc_path, mode, weapon_key, ctx, texture_filename, image_path, blu_image_path,
         panel_extra_textures, panel_blu_textures, isolate_shoulders, blu_mode,
         skin_build_data, replace_keep_materials, custom_qc_text, original_cdmaterials_path,
+        bypass_prefix: str = "console",
     ) -> "_MaterialPlan":
         """
         Анализирует $texturegroup и решает, какие материалы строить: BLU-строка,
@@ -1488,9 +1489,9 @@ class VPKService:
         if extra_materials:
             logger.info(f"Найдены дополнительные материалы модели: {extra_materials}")
 
-        # Пропатчиваем QC файл: добавляем console\ к $cdmaterials (чтобы текстуры загружались из консольных команд),
-        # удаляем $lod (они нам не нужны, только мусорят)
-        ModelBuildService.patch_qc_file(qc_path)
+        # Пропатчиваем QC файл: перенаправляем $cdmaterials в whitelisted-папку
+        # обхода sv_pure (console\ или vgui\replay\thumbnails\), удаляем $lod.
+        ModelBuildService.patch_qc_file(qc_path, bypass_prefix)
 
         # Игровое имя текстуры/VMT (источник ОРИГИНАЛЬНОГО кода VMT из игры).
         # Для кастомной модели texture_filename станет именем материала SMD,
@@ -1717,6 +1718,9 @@ class VPKService:
         language = r.language
         custom_vtf_path = r.custom_vtf_path
         blu_mode = r.blu_mode
+        # Папка обхода sv_pure для $cdmaterials (console\ или vgui\replay\thumbnails\).
+        from src.shared.constants import bypass_prefix as _resolve_bypass_prefix
+        _bypass_prefix = _resolve_bypass_prefix(getattr(r, 'bypass_method', 'console'))
         blu_image_path = r.blu_image_path
         panel_extra_textures = r.panel_extra_textures or {}
         material_maps = r.material_maps or {}
@@ -1817,6 +1821,7 @@ class VPKService:
                 blu_image_path, panel_extra_textures, panel_blu_textures,
                 isolate_shoulders, blu_mode, skin_build_data,
                 replace_keep_materials, custom_qc_text, original_cdmaterials_path,
+                bypass_prefix=_bypass_prefix,
             )
             tg_structure = _plan.tg_structure
             blu_row = _plan.blu_row
@@ -2030,6 +2035,7 @@ class VPKService:
                         replace_keep_materials, tf2_misc_vpk, studiomdl_exe,
                         crowbar_exe, tf_dir, language, emit_sub,
                         target_mdl_paths=_extra_targets,
+                        bypass_prefix=_bypass_prefix,
                     )
 
             # Этап 3: доп. ИЗМЕНЁННЫЕ стили-модели шапки — каждый своей
@@ -2040,6 +2046,7 @@ class VPKService:
                     ctx, hat_style_builds, tf2_misc_vpk, studiomdl_exe,
                     crowbar_exe, tf_dir, language, emit_sub,
                     size, format_type, flags, vtf_options, vmt_path,
+                    bypass_prefix=_bypass_prefix,
                 )
 
             # Подстраховка: удаляем любые {texture}_blue.*, если их успел

@@ -169,6 +169,43 @@ class ModelBuildServiceTests(unittest.TestCase):
             self.assertIn("console\\models\\c_models", updated)
             self.assertNotIn("$lod", updated.lower())
 
+    def test_patch_qc_file_vgui_bypass(self):
+        content = "$cdmaterials \"models\\c_models\"\n"
+        with tempfile.TemporaryDirectory() as tmp:
+            qc = Path(tmp) / "a.qc"
+            qc.write_text(content, encoding="utf-8")
+            ModelBuildService.patch_qc_file(
+                str(qc), "vgui\\replay\\thumbnails")
+            updated = qc.read_text(encoding="utf-8")
+            self.assertIn(
+                "vgui\\replay\\thumbnails\\models\\c_models", updated)
+            self.assertNotIn("console", updated.lower())
+
+    def test_apply_cdmaterials_prefix_console_is_identity_for_prefixed(self):
+        # console default: путь уже под console\ остаётся как есть.
+        self.assertEqual(
+            ModelBuildService.apply_cdmaterials_prefix("console\\models\\x"),
+            "console\\models\\x")
+        # forward-слеши нормализуются к backslash.
+        self.assertEqual(
+            ModelBuildService.apply_cdmaterials_prefix("models/x"),
+            "console\\models\\x")
+
+    def test_apply_cdmaterials_prefix_vgui_reroots_console(self):
+        # Crowbar-console → пере-корневание в vgui-папку (без двойного console).
+        out = ModelBuildService.apply_cdmaterials_prefix(
+            "console\\models\\weapons\\c_x", "vgui\\replay\\thumbnails")
+        self.assertEqual(out, "vgui\\replay\\thumbnails\\models\\weapons\\c_x")
+        # Уже под vgui-папкой — не удваиваем.
+        again = ModelBuildService.apply_cdmaterials_prefix(
+            out, "vgui\\replay\\thumbnails")
+        self.assertEqual(again, out)
+
+    def test_apply_cdmaterials_prefix_strips_leading_slash(self):
+        self.assertEqual(
+            ModelBuildService.apply_cdmaterials_prefix("\\models\\x"),
+            "console\\models\\x")
+
     # === Тесты для extract_texturegroup_structure ===
     
     def test_extract_texturegroup_structure_with_teams_and_extras(self):

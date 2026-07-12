@@ -283,6 +283,20 @@ class SettingsDialog(StyledDialog):
         self.theme_combo.addItem(self.t.get('theme_dark', 'Dark'), "dark")
         self.theme_combo.addItem(self.t.get('theme_blue', 'Blue'), "blue")
         lay.addLayout(_pref_row(self.t.get('theme_label', 'Theme'), self.theme_combo))
+        lay.addSpacing(10)
+
+        # Способ обхода sv_pure (казуал): в какую whitelisted-папку кладём материалы.
+        self.bypass_combo = _combo()
+        self.bypass_combo.addItem(
+            self.t.get('bypass_console', 'console\\ (default)'), "console")
+        self.bypass_combo.addItem(
+            self.t.get('bypass_vgui', 'vgui\\replay\\thumbnails\\'), "vgui")
+        self.bypass_combo.setToolTip(self.t.get(
+            'bypass_tooltip',
+            'Folder used to sneak model materials past sv_pure in casual.\n'
+            'Both work; switch if one gets blocked. Skybox is unaffected.'))
+        lay.addLayout(_pref_row(
+            self.t.get('bypass_label', 'sv_pure bypass'), self.bypass_combo))
 
         lay.addSpacing(22)
         lay.addWidget(_divider())
@@ -454,6 +468,12 @@ class SettingsDialog(StyledDialog):
         if idx >= 0:
             self.theme_combo.setCurrentIndex(idx)
 
+        from src.shared.constants import SVPURE_BYPASS_DEFAULT
+        idx = self.bypass_combo.findData(
+            self.config.get("sv_pure_bypass", SVPURE_BYPASS_DEFAULT))
+        if idx >= 0:
+            self.bypass_combo.setCurrentIndex(idx)
+
         self.keep_temp_checkbox.setChecked(self.config.get("keep_temp_files", False))
         self.debug_mode_checkbox.setChecked(self.config.get("debug_mode", False))
 
@@ -466,6 +486,7 @@ class SettingsDialog(StyledDialog):
         self.config["export_image_format"] = self.export_format_combo.currentData()
         self.config["language"]         = self.language_combo.currentData()
         self.config["theme"]            = self.theme_combo.currentData()
+        self.config["sv_pure_bypass"]   = self.bypass_combo.currentData()
         self.config["keep_temp_files"]  = self.keep_temp_checkbox.isChecked()
         self.config["debug_mode"]       = self.debug_mode_checkbox.isChecked()
 

@@ -450,9 +450,13 @@ class ModelBuildService:
             return ''
         tmp = str(get_temp_file_path(prefix='tf2sg_qcedit_', suffix='.qc'))
         try:
+            # Превью показывает QC с реальной папкой обхода (как в сборке).
+            from src.config.app_config import AppConfig
+            from src.shared.constants import bypass_prefix
+            _bp = bypass_prefix(AppConfig.load_config().get('sv_pure_bypass', 'console'))
             shutil.copy2(src_qc_path, tmp)
             try:
-                ModelBuildService.patch_qc_file(tmp)
+                ModelBuildService.patch_qc_file(tmp, _bp)
             except Exception as exc:
                 logger.debug(f"[QC EDIT] patch_qc_file для превью не удался: {exc}")
             ModelBuildService.replace_texturegroup_in_qc(tmp, tg_block)
@@ -667,17 +671,40 @@ class ModelBuildService:
         return False
 
     @staticmethod
-    def patch_qc_file(qc_path: str) -> None:
+    def apply_cdmaterials_prefix(original_path: str, bypass_prefix: str = "console") -> str:
+        """Перенаправляет один путь $cdmaterials в whitelisted-папку обхода sv_pure.
+
+        bypass_prefix — папка обхода ('console' или 'vgui\\replay\\thumbnails').
+        Если путь уже под этой папкой — оставляем как есть; если под console\\
+        (его добавляет Crowbar при декомпиляции), но целевая папка другая —
+        пере-корневаем в целевую. Результат всегда с обратными слешами.
+        """
+        prefix = bypass_prefix.rstrip("\\/") + "\\"
+        norm = original_path.replace("/", "\\")
+        body = norm.lstrip("\\")
+        low = body.lower()
+        pref_low = prefix.lower()
+        if low.startswith(pref_low):
+            return body                              # уже под нашей папкой
+        if low.startswith("console\\"):
+            body = body[len("console\\"):]           # Crowbar-console → в целевую
+        return prefix + body
+
+    @staticmethod
+    def patch_qc_file(qc_path: str, bypass_prefix: str = "console") -> None:
         """
         Пропатчивает QC файл после декомпиляции.
 
         Нужно чтобы модель правильно компилировалась и текстуры загружались:
         - НЕ трогаем $modelname (оставляем как есть, путь модели должен быть правильным)
-        - Добавляем префикс console\\ к $cdmaterials (чтобы текстуры загружались из консольных команд)
+        - Перенаправляем $cdmaterials в whitelisted-папку обхода sv_pure
+          (console\\ по умолчанию, либо vgui\\replay\\thumbnails\\ — см.
+          apply_cdmaterials_prefix и SVPURE_BYPASS_PREFIXES)
         - Удаляем все блоки $lod (LOD нам не нужны, только мусорят)
 
         Args:
             qc_path: Путь к QC файлу
+            bypass_prefix: Папка обхода sv_pure ('console' или 'vgui\\replay\\thumbnails')
         """
         if not os.path.exists(qc_path):
             raise FileNotFoundError(f"QC file not found: {qc_path}")
@@ -766,14 +793,8 @@ class ModelBuildService:
                         i += 1
                         continue  # пустой путь — пропускаем
 
-                    prefix = 'console\\'
-                    lo = original_path.lower()
-                    if lo.startswith('console\\') or lo.startswith('console/'):
-                        modified_path = original_path.replace('/', '\\')
-                    elif original_path.startswith(('\\', '/')):
-                        modified_path = prefix + original_path.lstrip('\\/')
-                    else:
-                        modified_path = prefix + original_path
+                    modified_path = ModelBuildService.apply_cdmaterials_prefix(
+                        original_path, bypass_prefix)
 
                     new_lines.append(f'$cdmaterials "{modified_path}"\n')
                     last_cdmat_insert_pos = len(new_lines)  # позиция после этой строки

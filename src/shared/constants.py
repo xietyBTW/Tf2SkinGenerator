@@ -27,6 +27,29 @@ class Team:
 EXTRA_TEX_USE_GAME_ORIGINAL = "__USE_GAME_ORIGINAL__"
 
 # ============================================================================
+# Обход sv_pure (казуал): в какую «белую» папку перенаправляем текстуры модели
+# ============================================================================
+#
+# sv_pure всегда читает с диска материалы из некоторых whitelisted-папок
+# (иначе бы не работали кастомные HUD'ы). Мы перенаправляем $cdmaterials
+# модели в такую папку — VTF/VMT грузятся из мода, а не из игры.
+#   • console               — исторический способ (папка console\);
+#   • vgui\replay\thumbnails — альтернатива (в whitelist по vgui-ветке);
+# оба работают в казуале, переключатель — страховка, если одну папку прикроют.
+SVPURE_BYPASS_METHODS = ("console", "vgui")
+SVPURE_BYPASS_PREFIXES = {
+    "console": "console",
+    "vgui": "vgui\\replay\\thumbnails",
+}
+SVPURE_BYPASS_DEFAULT = "console"
+
+
+def bypass_prefix(method: Optional[str]) -> str:
+    """Папка-обход для метода ('console' → 'console', 'vgui' → 'vgui\\replay\\thumbnails').
+    Неизвестный/None → исторический console (безопасный дефолт)."""
+    return SVPURE_BYPASS_PREFIXES.get(method or "", "console")
+
+# ============================================================================
 # Пути к инструментам
 # ============================================================================
 

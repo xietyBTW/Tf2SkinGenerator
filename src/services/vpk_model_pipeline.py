@@ -377,6 +377,7 @@ class VpkModelPipeline:
         language: str,
         emit_sub,
         target_mdl_paths: Optional[list] = None,
+        bypass_prefix: str = "console",
     ) -> None:
         """
         Собирает модель для остальных классов мультиклассовой шапки при замене модели.
@@ -502,9 +503,9 @@ class VpkModelPipeline:
                     keep_user_materials=keep_user_materials,
                 )
 
-                # Патчим cdmaterials под console\ (как основная модель) — чтобы
-                # модель класса нашла нашу текстуру по тому же пути.
-                ModelBuildService.patch_qc_file(qc_p)
+                # Патчим cdmaterials в ту же папку обхода, что и основная модель —
+                # чтобы модель класса нашла нашу текстуру по тому же пути.
+                ModelBuildService.patch_qc_file(qc_p, bypass_prefix)
 
                 ModelBuildService.compile(qc_p, str(comp_d), studiomdl_exe, tf_dir)
 
@@ -533,6 +534,7 @@ class VpkModelPipeline:
         flags: List[str],
         vtf_options: dict,
         base_vmt_path: Path,
+        bypass_prefix: str = "console",
     ) -> None:
         """
         Собирает доп. ИЗМЕНЁННЫЕ стили-модели шапки — каждый со СВОЕЙ моделью и
@@ -614,19 +616,16 @@ class VpkModelPipeline:
                         else:
                             logger.warning(f"[HAT STYLE] {wk}: reference SMD не найден — геометрия оригинала")
 
-                    # Патчим cdmaterials под console\ и компилируем.
-                    ModelBuildService.patch_qc_file(qc_p)
+                    # Патчим cdmaterials в папку обхода и компилируем.
+                    ModelBuildService.patch_qc_file(qc_p, bypass_prefix)
                     ModelBuildService.compile(qc_p, str(comp_d), studiomdl_exe, tf_dir)
                     _sub = type('SubCtx', (), {'compile_dir': comp_d, 'vpkroot_dir': ctx.vpkroot_dir})()
                     ModelService.copy_compiled_models_to_vpkroot(_sub, qc_p)
 
-                    # Текстура стиля → materials/console/<cdmat0>/<tex_name>.vtf+.vmt
+                    # Текстура стиля → materials/<папка обхода>/<cdmat0>/<tex_name>.vtf+.vmt
                     if img and os.path.isfile(img):
-                        _lo = cdmat0.lower()
-                        if _lo.startswith('console\\') or _lo.startswith('console/'):
-                            patched_cd = cdmat0.replace('/', '\\')
-                        else:
-                            patched_cd = 'console\\' + cdmat0.lstrip('\\/')
+                        patched_cd = ModelBuildService.apply_cdmaterials_prefix(
+                            cdmat0, bypass_prefix)
                         materials_rel = "materials/" + patched_cd.replace('\\', '/').strip().rstrip('/')
                         vtf_dir = ctx.vpkroot_dir
                         for part in materials_rel.split('/'):

@@ -362,9 +362,10 @@ renderer.setClearColor(0x1a1a1a);
 document.getElementById('canvas-container').appendChild(renderer.domElement);
 
 // ── Scene / Camera ───────────────────────────────────────────────────────── //
+const DEFAULT_FOV = 45;
 const scene  = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(
-  45, window.innerWidth / window.innerHeight, 0.001, 1000
+  DEFAULT_FOV, window.innerWidth / window.innerHeight, 0.001, 1000
 );
 camera.position.set(0, 0.5, 3);
 
@@ -803,7 +804,7 @@ window.loadModelFromContent = function(objContent, texDataUrl, cx, cy, cz, scale
   _editableMeshNames = null;   // сбрасываем при каждой новой модели
   setStatus(_t.loading, false, true);
   stopAnimation();
-  _disposeSkybox();
+  _exitSkyboxView();
   if (currentModel) { scene.remove(currentModel); currentModel = null; }
   if (_critSprite)  { scene.remove(_critSprite);  _critSprite  = null; }
 
@@ -1032,7 +1033,7 @@ window.resetViewer = function() {
   _isCritHitMode    = false;
   _editableMeshNames = null;
   stopAnimation();
-  _disposeSkybox();
+  _exitSkyboxView();
   if (currentModel) { scene.remove(currentModel); currentModel = null; }
   if (_critSprite)  { scene.remove(_critSprite);  _critSprite  = null; }
   setStatus(_t.select_weapon);
@@ -1061,11 +1062,38 @@ const SRC_FACE_MAP = [
 ];
 
 let _skyboxTexture = null;
+let _isSkyboxMode  = false;   // колесо мыши меняет FOV вместо долли-зума
 
 function _disposeSkybox() {
   if (_skyboxTexture) { _skyboxTexture.dispose(); _skyboxTexture = null; }
   scene.background = null;
 }
+
+// Полный выход из режима скайбокса: снять фон + вернуть камеру/контролы.
+// Смена неба ВНУТРИ режима зовёт _disposeSkybox напрямую — FOV сохраняется.
+function _exitSkyboxView() {
+  _disposeSkybox();
+  if (_isSkyboxMode) {
+    _isSkyboxMode = false;
+    controls.enableZoom = true;
+    camera.fov = DEFAULT_FOV;
+    camera.updateProjectionMatrix();
+  }
+}
+
+// ── FOV-зум колесом (только скайбокс) ────────────────────────────────────── //
+// Фон-кубмапа бесконечно далёкая: долли-зум OrbitControls для неё ничего не
+// меняет, поэтому в режиме скайбокса колесо крутит угол обзора камеры
+// (скролл вверх = приблизить). Вне режима — обычный зум OrbitControls.
+const SKY_FOV_MIN = 20;
+const SKY_FOV_MAX = 110;
+renderer.domElement.addEventListener('wheel', (e) => {
+  if (!_isSkyboxMode) return;
+  e.preventDefault();
+  camera.fov = Math.min(SKY_FOV_MAX,
+                Math.max(SKY_FOV_MIN, camera.fov + e.deltaY * 0.05));
+  camera.updateProjectionMatrix();
+}, { passive: false });
 
 // Грань на квадратном канвасе с поворотом. Размер нормализуется (у стоковых
 // небес грань dn часто крошечная — растягиваем до общего размера куба).
@@ -1098,6 +1126,8 @@ window.loadSkybox = function(faces) {
   const gen = ++_sceneGeneration;   // отменяет параллельные загрузки моделей
   _isCritHitMode     = false;
   _editableMeshNames = null;
+  _isSkyboxMode      = true;
+  controls.enableZoom = false;   // колесо теперь крутит FOV (см. wheel-listener)
   stopAnimation();
   if (currentModel) { scene.remove(currentModel); currentModel = null; }
   if (_critSprite)  { scene.remove(_critSprite);  _critSprite  = null; }
@@ -1138,7 +1168,7 @@ window.loadSkybox = function(faces) {
 // Публичная функция: убирает фон-скайбокс (выход из режима «Скайбокс»).
 window.clearSkybox = function() {
   ++_sceneGeneration;   // гасим летящие onload параллельного loadSkybox
-  _disposeSkybox();
+  _exitSkyboxView();
 };
 
 // ── CritHIT scene ────────────────────────────────────────────────────────── //
@@ -1229,7 +1259,7 @@ window.loadCritHitScene = function(critTexDataUrl, modelTexDataUrl) {
   _lastCritTexUrl = critTexDataUrl || '';
   setStatus(_t.loading, false, true);
   stopAnimation();
-  _disposeSkybox();
+  _exitSkyboxView();
 
   // Очищаем предыдущую сцену
   if (currentModel) { scene.remove(currentModel); currentModel = null; }
@@ -1276,7 +1306,7 @@ window.loadCritHitSceneWithModel = function(objContent, critTexDataUrl, cx, cy, 
   _lastCritTexUrl = critTexDataUrl || '';
   setStatus(_t.loading, false, true);
   stopAnimation();
-  _disposeSkybox();
+  _exitSkyboxView();
 
   if (currentModel) { scene.remove(currentModel); currentModel = null; }
   if (_critSprite)  { scene.remove(_critSprite);  _critSprite  = null; }

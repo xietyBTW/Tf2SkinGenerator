@@ -63,6 +63,9 @@ class BuildRequest:
     # $texturegroup (skin 0 = база/RED, skin 1 = {material}_blue), чтобы игра
     # показывала BLU-команде отдельную текстуру. Только без нативной команды/австралия.
     force_team: bool = False
+    # Способ обхода sv_pure для казуала: 'console' (по умолчанию) или 'vgui'
+    # (перенаправление $cdmaterials в whitelisted-папку). См. bypass_prefix().
+    bypass_method: str = "console"
     # ── Режим «Скайбокс» (mode == SKYBOX_MODE) ──────────────────────────────
     # Имена стоковых небес, чьи материалы перекрываем (уже развёрнуто из
     # «Все карты»). Панорама едет в image_path (может быть None, если пользователь

@@ -163,6 +163,11 @@ TRANSLATIONS = {
         'theme_label': 'Тема оформления',
         'theme_dark': 'Темная',
         'theme_blue': 'Синяя',
+        'bypass_label': 'Обход sv_pure',
+        'bypass_console': 'console\\ (по умолчанию)',
+        'bypass_vgui': 'vgui\\replay\\thumbnails\\',
+        'bypass_tooltip': ('Папка, через которую материалы модели обходят sv_pure в казуале.\n'
+                           'Оба способа работают; смени, если один прикроют. Скайбокс не затрагивается.'),
         'keep_temp_files': 'Сохранить временные файлы при ошибке',
         'debug_mode': 'Режим отладки',
         'cancel': 'Отмена',
@@ -575,6 +580,11 @@ TRANSLATIONS = {
         'theme_label': 'Theme',
         'theme_dark': 'Dark',
         'theme_blue': 'Blue',
+        'bypass_label': 'sv_pure bypass',
+        'bypass_console': 'console\\ (default)',
+        'bypass_vgui': 'vgui\\replay\\thumbnails\\',
+        'bypass_tooltip': ('Folder used to sneak model materials past sv_pure in casual.\n'
+                           'Both work; switch if one gets blocked. Skybox is unaffected.'),
         'keep_temp_files': 'Keep temporary files on error',
         'debug_mode': 'Debug mode',
         'cancel': 'Cancel',

@@ -1032,7 +1032,8 @@ class SettingsPanel(QWidget):
             'tf2_game_folder': tf2_path,
             'export_folder': export_folder,
             'keep_temp_on_error': config.get('keep_temp_files', False),
-            'debug_mode': config.get('debug_mode', False)
+            'debug_mode': config.get('debug_mode', False),
+            'bypass_method': config.get('sv_pure_bypass', 'console'),
         }
     
     def load_config(self):
