@@ -26,7 +26,7 @@ Model Cache** if a TF2 update breaks compilation).
 1. **Select the weapon** you're replacing (Weapons tab → Class → Slot → Weapon). Your custom model
    takes this weapon's slot and paths.
 
-2. **Load your model.** In the preview toolbar click **🔄** (*Replace model*) and pick your `.smd`.
+2. **Load your model.** In the preview toolbar click the **Replace model** button and pick your `.smd`.
    The app asks how to treat its materials:
 
    | Choice | Use when |

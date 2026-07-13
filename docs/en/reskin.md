@@ -27,7 +27,7 @@ kind of mod and the best place to start.
    | **3D / 2D** | Switch between the 3D model and the flat 2D texture view |
    | **Cube** (*Load 3D model*) | Renders the current weapon in 3D — press it after selecting |
    | **VPK** | Load an existing `.vpk` mod into the 3D view |
-   | **🔄** | Replace the model with your own (see [Custom models](custom-models.md)) |
+   | **Replace model** | Swap in your own model (see [Custom models](custom-models.md)) |
 
 3. **Load your texture.** Drag your image onto the **main texture slot** (or use the Browse
    button on the slot). The preview reflects it right away.

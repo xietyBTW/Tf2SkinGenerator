@@ -48,6 +48,22 @@ class TF2Paths:
         return studiomdl_exe, tf2_misc_dir_vpk, tf_dir
     
     @staticmethod
+    def is_valid(tf2_root_dir: str) -> bool:
+        """Быстрая (без исключений) проверка, что путь TF2 указан и пригоден.
+
+        True только если каталог существует и содержит те же файлы, что нужны
+        resolve() — bin\\studiomdl.exe и tf\\tf2_misc_dir.vpk. Используется для
+        подсказки-баннера в UI.
+        """
+        if not tf2_root_dir or not os.path.isdir(tf2_root_dir):
+            return False
+        if not os.path.isfile(os.path.join(tf2_root_dir, "bin", "studiomdl.exe")):
+            return False
+        if not os.path.isfile(os.path.join(tf2_root_dir, "tf", "tf2_misc_dir.vpk")):
+            return False
+        return True
+
+    @staticmethod
     def resolve_textures_vpk(tf2_root_dir: str) -> Optional[str]:
         """
         Разрешает путь к tf2_textures_dir.vpk для извлечения VMT файлов

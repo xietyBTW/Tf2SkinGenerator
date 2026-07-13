@@ -51,7 +51,7 @@ The middle column has a toolbar:
 | **3D / 2D** | Switch between the 3D model and the flat texture view |
 | **Cube** — *Load 3D model* | **Renders the current weapon in 3D. The 3D view does not load by itself — press this after selecting.** |
 | **VPK** | Load an existing `.vpk` mod into the 3D view |
-| **🔄** | Replace the model with your own (see [Custom models](custom-models.md)) |
+| **Replace model** | Swap in your own model (see [Custom models](custom-models.md)) |
 | **QC** | Edit the model's QC script (advanced, for custom models) |
 | **RED / BLU** | Appear when the item has team skins — switch team and load a per‑team texture |
 | **`+`** | Appears for weapons with **no** team variant — click to add a separate BLU texture |

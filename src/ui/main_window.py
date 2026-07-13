@@ -118,6 +118,9 @@ class MainWindow(QMainWindow, ProgressDialogMixin, MainWindowVmtMixin,
         self.init_ui()
         self.setup_connections()
 
+        # Подсказка о пути до TF2 при старте (если не указан/неверен)
+        self._refresh_tf2_warning()
+
         # Запускаем проверку обновлений в фоне (не блокирует UI)
         self._start_update_check()
 
@@ -175,6 +178,12 @@ class MainWindow(QMainWindow, ProgressDialogMixin, MainWindowVmtMixin,
         self._update_banner = self._create_update_banner()
         self._update_banner.hide()
         main_vertical_layout.addWidget(self._update_banner)
+
+        # Баннер-подсказка: путь до TF2 не указан/неверен — скрыт по умолчанию,
+        # показывается через _refresh_tf2_warning() при старте и после настроек.
+        self._tf2_warning_banner = self._create_tf2_warning_banner()
+        self._tf2_warning_banner.hide()
+        main_vertical_layout.addWidget(self._tf2_warning_banner)
 
         main_layout = QHBoxLayout()
         main_layout.setSpacing(20)
@@ -315,6 +324,78 @@ class MainWindow(QMainWindow, ProgressDialogMixin, MainWindowVmtMixin,
         url = getattr(self, '_release_url', '')
         if url:
             QDesktopServices.openUrl(QUrl(url))
+
+    # ── Подсказка о пути до TF2 ─────────────────────────────────────────────── #
+
+    def _create_tf2_warning_banner(self) -> QWidget:
+        """Создаёт скрытый баннер-подсказку «путь до TF2 не указан/неверен»."""
+        from PySide6.QtWidgets import QLabel
+        banner = QWidget()
+        banner.setObjectName("tf2warn")
+        banner.setFixedHeight(40)
+        banner.setStyleSheet("""
+            QWidget#tf2warn {
+                background-color: #2a1500;
+                border-bottom: 1px solid #5a3000;
+            }
+        """)
+        layout = QHBoxLayout(banner)
+        layout.setContentsMargins(16, 0, 12, 0)
+        layout.setSpacing(8)
+
+        self._tf2_warning_label = QLabel()
+        self._tf2_warning_label.setStyleSheet(
+            "color: #e0b070; font-size: 12px; background: transparent; border: none;")
+        self._tf2_warning_label.setWordWrap(True)
+        layout.addWidget(self._tf2_warning_label, 1)
+
+        self._tf2_warning_btn = QPushButton()
+        self._tf2_warning_btn.setCursor(Qt.PointingHandCursor)
+        self._tf2_warning_btn.setStyleSheet("""
+            QPushButton {
+                background: rgba(224,144,42,0.15);
+                border: 1px solid #7a4a10;
+                border-radius: 4px;
+                color: #f0c080;
+                font-size: 12px;
+                font-weight: 600;
+                padding: 5px 12px;
+            }
+            QPushButton:hover { background: rgba(224,144,42,0.25); border-color: #a0651a; }
+        """)
+        self._tf2_warning_btn.clicked.connect(self.open_settings_dialog)
+        layout.addWidget(self._tf2_warning_btn)
+
+        return banner
+
+    def _refresh_tf2_warning(self) -> None:
+        """Показывает/прячет баннер-подсказку в зависимости от валидности пути TF2."""
+        if not hasattr(self, '_tf2_warning_banner'):
+            return
+        from src.config.app_config import AppConfig
+        from src.services.tf2_paths import TF2Paths
+        path = (AppConfig.load_config().get('tf2_game_folder', '') or '').strip()
+        if TF2Paths.is_valid(path):
+            self._tf2_warning_banner.hide()
+            return
+        # Разный текст для «не указан» и «указан, но неверен».
+        if self.language == 'ru':
+            msg = (
+                "Папка игры TF2 не указана — сборка и превью недоступны."
+                if not path else
+                "Папка игры TF2 указана неверно (не найдены bin\\studiomdl.exe или tf\\tf2_misc_dir.vpk)."
+            )
+            btn = "Открыть настройки"
+        else:
+            msg = (
+                "TF2 game folder is not set — building and preview won't work."
+                if not path else
+                "TF2 game folder is invalid (bin\\studiomdl.exe or tf\\tf2_misc_dir.vpk not found)."
+            )
+            btn = "Open Settings"
+        self._tf2_warning_label.setText(msg)
+        self._tf2_warning_btn.setText(btn)
+        self._tf2_warning_banner.show()
 
     def create_weapon_selection_panel(self) -> QWidget:
         from PySide6.QtWidgets import (
@@ -1010,6 +1091,9 @@ class MainWindow(QMainWindow, ProgressDialogMixin, MainWindowVmtMixin,
             self._populate_category_combo()
             self.on_category_changed(self.category_combo.currentIndex())
 
+        # Текст баннера-подсказки о TF2 зависит от языка — обновляем.
+        self._refresh_tf2_warning()
+
     def _find_weapon_type_index(self, type_key: str) -> int:
         """Возвращает индекс в weapon_type_combo для заданного ключа типа оружия, или -1."""
         target = get_weapon_type_name(type_key, self.language)
@@ -1508,6 +1592,8 @@ class MainWindow(QMainWindow, ProgressDialogMixin, MainWindowVmtMixin,
         """Открывает диалог настроек"""
         dialog = SettingsDialog(self)
         dialog.exec()
+        # Пользователь мог поправить путь до TF2 — перепроверяем подсказку.
+        self._refresh_tf2_warning()
 
     def set_language(self, lang):
         self.language = lang
