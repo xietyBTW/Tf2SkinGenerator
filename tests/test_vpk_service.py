@@ -1219,7 +1219,7 @@ class BuildVpkCharacterizationTests(unittest.TestCase):
             m(patch(P + "TextureService.process_image", side_effect=fake_process_image))
             if red_not_found:
                 # Имитируем «игровая RED-текстура не найдена» → должно дать warning.
-                m(patch(P + "VPKService._get_original_vtf_bytes", return_value=None))
+                m(patch("src.services.vpk_texture_builder.VpkTextureBuilder._get_original_vtf_bytes", return_value=None))
             ok, msg = VPKService.build_vpk(
                 image_path=(EXTRA_TEX_USE_GAME_ORIGINAL if red_not_found else str(img)),
                 mode="scout_c_scattergun",
