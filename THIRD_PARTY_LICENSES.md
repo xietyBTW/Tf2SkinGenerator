@@ -16,8 +16,10 @@ Distribution of these tools:
   `vpk.exe` from the user's own installed *Team Fortress 2* (`<TF2>/bin/vpk.exe`),
   falling back to an optional local `tools/VPK/` bundle if present. No proprietary
   Valve binaries are redistributed.
-- **VTF tools** (`tools/VTF/`: VTFCmd/VTFLib/HLLib/DevIL) — obtained separately from
-  their official sources (see `.gitignore`).
+- **VTF tools** (`tools/VTF/`: VTFCmd/VTFLib/HLLib/DevIL) **are included** in this
+  repository. Their licenses permit redistribution: VTFLib/HLLib/DevIL are LGPL and
+  VTFCmd is GPL — both are shipped **unmodified** as separate programs, with their
+  corresponding source available at the official links in the table below.
 
 This project is an **unofficial** fan tool. It is **not affiliated with, endorsed
 by, or sponsored by Valve Corporation**. *Team Fortress 2*, the Source engine, and
