@@ -283,6 +283,20 @@ class SettingsDialog(StyledDialog):
         self.theme_combo.addItem(self.t.get('theme_dark', 'Dark'), "dark")
         self.theme_combo.addItem(self.t.get('theme_blue', 'Blue'), "blue")
         lay.addLayout(_pref_row(self.t.get('theme_label', 'Theme'), self.theme_combo))
+        lay.addSpacing(10)
+
+        # Способ обхода sv_pure (казуал): в какую whitelisted-папку кладём материалы.
+        self.bypass_combo = _combo()
+        self.bypass_combo.addItem(
+            self.t.get('bypass_console', 'console\\ (default)'), "console")
+        self.bypass_combo.addItem(
+            self.t.get('bypass_vgui', 'vgui\\replay\\thumbnails\\'), "vgui")
+        self.bypass_combo.setToolTip(self.t.get(
+            'bypass_tooltip',
+            'Folder used to sneak model materials past sv_pure in casual.\n'
+            'Both work; switch if one gets blocked. Skybox is unaffected.'))
+        lay.addLayout(_pref_row(
+            self.t.get('bypass_label', 'sv_pure bypass'), self.bypass_combo))
 
         lay.addSpacing(22)
         lay.addWidget(_divider())
@@ -300,6 +314,22 @@ class SettingsDialog(StyledDialog):
         self.debug_mode_checkbox = QCheckBox(self.t.get('debug_mode', 'Debug mode'))
         self.debug_mode_checkbox.setStyleSheet(_CHECK_STYLE)
         lay.addWidget(self.debug_mode_checkbox)
+
+        lay.addSpacing(14)
+
+        # ── Очистка кэша декомпилированных моделей (обслуживание) ─────────────── #
+        self.clear_cache_button = QPushButton(
+            self.t.get('clear_decompile_cache', 'Clear Model Cache')
+        )
+        self.clear_cache_button.setCursor(Qt.PointingHandCursor)
+        self.clear_cache_button.setMinimumHeight(_FH)
+        self.clear_cache_button.setStyleSheet(_BROWSE_STYLE)
+        self.clear_cache_button.setToolTip(self.t.get(
+            'clear_decompile_cache_tooltip',
+            'Deletes cached decompiled models (~/.tf2skingen_cache).\n'
+            'Use if models stopped building correctly after a TF2 update.'))
+        self.clear_cache_button.clicked.connect(self._on_clear_cache_clicked)
+        lay.addWidget(self.clear_cache_button)
 
         lay.addSpacing(14)
 
@@ -374,6 +404,32 @@ class SettingsDialog(StyledDialog):
 
     # ── Логика ───────────────────────────────────────────────────────────── #
 
+    def _on_clear_cache_clicked(self):
+        """Очищает кэш декомпилированных моделей с подтверждением."""
+        from src.services.decompile_cache import clear_cache, get_cache_size_mb
+        from PySide6.QtWidgets import QMessageBox
+
+        size_mb = get_cache_size_mb()
+        size_str = f"{size_mb:.1f} MB" if size_mb >= 0.1 else "< 0.1 MB"
+
+        msg = self.t.get(
+            'clear_cache_confirm',
+            'Clear the model decompile cache?\n\nCache size: {size}\n\n'
+            'The cache speeds up repeated builds of the same weapon.\n'
+            'After clearing, the first build of each weapon will be slower.'
+        ).format(size=size_str)
+
+        title = self.t.get('clear_decompile_cache', 'Clear Model Cache')
+        reply = QMessageBox.question(
+            self, title, msg,
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+        )
+        if reply == QMessageBox.Yes:
+            count = clear_cache()
+            QMessageBox.information(self, title, self.t.get(
+                'clear_cache_done', 'Cache cleared. {count} entries removed.'
+            ).format(count=count))
+
     def browse_tf2_game_folder(self):
         folder = QFileDialog.getExistingDirectory(
             self,
@@ -412,6 +468,12 @@ class SettingsDialog(StyledDialog):
         if idx >= 0:
             self.theme_combo.setCurrentIndex(idx)
 
+        from src.shared.constants import SVPURE_BYPASS_DEFAULT
+        idx = self.bypass_combo.findData(
+            self.config.get("sv_pure_bypass", SVPURE_BYPASS_DEFAULT))
+        if idx >= 0:
+            self.bypass_combo.setCurrentIndex(idx)
+
         self.keep_temp_checkbox.setChecked(self.config.get("keep_temp_files", False))
         self.debug_mode_checkbox.setChecked(self.config.get("debug_mode", False))
 
@@ -424,6 +486,7 @@ class SettingsDialog(StyledDialog):
         self.config["export_image_format"] = self.export_format_combo.currentData()
         self.config["language"]         = self.language_combo.currentData()
         self.config["theme"]            = self.theme_combo.currentData()
+        self.config["sv_pure_bypass"]   = self.bypass_combo.currentData()
         self.config["keep_temp_files"]  = self.keep_temp_checkbox.isChecked()
         self.config["debug_mode"]       = self.debug_mode_checkbox.isChecked()
 

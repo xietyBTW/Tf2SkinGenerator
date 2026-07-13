@@ -3,6 +3,20 @@
 """
 
 from pathlib import Path
+from typing import Optional
+
+
+# ============================================================================
+# Команды TF2
+# ============================================================================
+
+class Team:
+    """Команды TF2. Значения СТРОКОВЫЕ намеренно: служат и dict-ключами
+    (``_textures['red']``), и сериализуются в edit-state как есть — поэтому
+    ``Team.RED == 'red'`` и замена литералов на константы поведение не меняет,
+    лишь убирает magic-строки и защищает от опечаток."""
+    RED = "red"
+    BLU = "blu"
 
 # ============================================================================
 # Сентинел-значения для extra_texture_callback
@@ -11,6 +25,42 @@ from pathlib import Path
 #: Пользователь выбрал «Использовать обычную» — взять оригинальную текстуру из игры.
 #: vpk_service пропускает создание VTF/VMT для этого слота → игра использует свою текстуру.
 EXTRA_TEX_USE_GAME_ORIGINAL = "__USE_GAME_ORIGINAL__"
+
+# ============================================================================
+# Форматы VTF
+# ============================================================================
+#: Все поддерживаемые форматы VTF (кроме P8). Единый источник: список в UI
+#: (заполнение комбобокса) и валидатор параметров сборки.
+VTF_FORMATS = [
+    "DXT1", "DXT3", "DXT5", "RGBA8888", "ABGR8888", "RGB888", "BGR888",
+    "RGB565", "BGR565", "I8", "IA88", "A8", "RGB888 Bluescreen",
+    "BGR888 Bluescreen", "ARGB8888", "BGRA8888", "BGRX8888", "BGRX5551",
+    "BGRA4444", "DXT1 With One Bit Alpha", "BGRA5551", "UV88", "UVWQ8888",
+    "RGBA16161616F", "RGBA16161616", "UVLX8888",
+]
+
+# ============================================================================
+# Обход sv_pure (казуал): в какую «белую» папку перенаправляем текстуры модели
+# ============================================================================
+#
+# sv_pure всегда читает с диска материалы из некоторых whitelisted-папок
+# (иначе бы не работали кастомные HUD'ы). Мы перенаправляем $cdmaterials
+# модели в такую папку — VTF/VMT грузятся из мода, а не из игры.
+#   • console               — исторический способ (папка console\);
+#   • vgui\replay\thumbnails — альтернатива (в whitelist по vgui-ветке);
+# оба работают в казуале, переключатель — страховка, если одну папку прикроют.
+SVPURE_BYPASS_METHODS = ("console", "vgui")
+SVPURE_BYPASS_PREFIXES = {
+    "console": "console",
+    "vgui": "vgui\\replay\\thumbnails",
+}
+SVPURE_BYPASS_DEFAULT = "console"
+
+
+def bypass_prefix(method: Optional[str]) -> str:
+    """Папка-обход для метода ('console' → 'console', 'vgui' → 'vgui\\replay\\thumbnails').
+    Неизвестный/None → исторический console (безопасный дефолт)."""
+    return SVPURE_BYPASS_PREFIXES.get(method or "", "console")
 
 # ============================================================================
 # Пути к инструментам
@@ -28,8 +78,37 @@ class ToolPaths:
 
     @classmethod
     def get_vpk_tool(cls) -> Path:
-        """Возвращает абсолютный путь к VPK инструменту"""
-        return cls.VPK_TOOL.resolve() if cls.VPK_TOOL.exists() else cls.VPK_TOOL
+        """Абсолютный путь к vpk.exe. Приоритет:
+
+          1. Бандл ``tools/VPK/vpk.exe`` (если положили рядом).
+          2. ``vpk.exe`` из ``bin`` установленной у пользователя TF2 — это тот же
+             официальный инструмент Valve, причём его DLL (tier0/vstdlib/
+             FileSystem_Stdio) лежат рядом в bin, поэтому он запускается без
+             бандла. Так проприетарные бинарники Valve не нужно носить в репо.
+          3. Иначе — бандл-путь (вызов упадёт с понятной ошибкой; у распаковки
+             есть резервный путь через python-библиотеку vpk).
+        """
+        if cls.VPK_TOOL.exists():
+            return cls.VPK_TOOL.resolve()
+        bin_vpk = cls._tf2_bin_tool("vpk.exe")
+        if bin_vpk is not None:
+            return bin_vpk
+        return cls.VPK_TOOL
+
+    @staticmethod
+    def _tf2_bin_tool(exe_name: str) -> Optional[Path]:
+        """Путь к инструменту из ``<TF2>/bin`` или None. Папку TF2 берём из
+        настроек приложения. Пригодно и для других инструментов Valve из bin
+        (vtex.exe, vtf2tga.exe, studiomdl.exe …)."""
+        try:
+            from src.config.app_config import AppConfig
+            tf2_root = AppConfig.get_tf2_game_folder()
+        except Exception:
+            return None
+        if not tf2_root:
+            return None
+        p = Path(tf2_root) / "bin" / exe_name
+        return p.resolve() if p.exists() else None
 
 
 # ============================================================================

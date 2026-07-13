@@ -150,6 +150,54 @@ class DecompileCacheTests(unittest.TestCase):
         meta_path.write_text(json.dumps(meta), encoding="utf-8")
         self.assertIsNone(dc.get_cached_decompile("c_test", str(vpk), "models/c_test.mdl"))
 
+    @staticmethod
+    def _entry_size(entry: Path) -> int:
+        return sum(f.stat().st_size for f in entry.rglob("*") if f.is_file())
+
+    def test_enforce_cache_limit_evicts_lru(self):
+        """enforce_cache_limit удаляет самые давно used записи, укладываясь в лимит."""
+        import os
+        vpk = _make_vpk(self.base)
+        decomp = _make_decompile_dir(self.base)
+        e_a = Path(dc.save_to_cache("c_a", str(vpk), "models/c_a.mdl", str(decomp)))
+        e_b = Path(dc.save_to_cache("c_b", str(vpk), "models/c_b.mdl", str(decomp)))
+        e_c = Path(dc.save_to_cache("c_c", str(vpk), "models/c_c.mdl", str(decomp)))
+        # Явные mtime: c_a — самая старая, c_c — свежая.
+        os.utime(e_a, (1000, 1000))
+        os.utime(e_b, (2000, 2000))
+        os.utime(e_c, (3000, 3000))
+
+        total = sum(self._entry_size(e) for e in (e_a, e_b, e_c))
+        one = self._entry_size(e_b)
+        # Лимит чуть выше (total - один размер) → должна уйти ровно самая старая.
+        limit_mb = (total - one // 2) / (1024 * 1024)
+        removed = dc.enforce_cache_limit(max_mb=limit_mb)
+
+        self.assertEqual(removed, 1)
+        self.assertFalse(e_a.exists(), "самая старая запись удаляется первой")
+        self.assertTrue(e_b.exists())
+        self.assertTrue(e_c.exists())
+
+    def test_enforce_cache_limit_disabled(self):
+        """max_mb<=0 — лимит выключен, ничего не удаляется."""
+        vpk = _make_vpk(self.base)
+        decomp = _make_decompile_dir(self.base)
+        dc.save_to_cache("c_a", str(vpk), "models/c_a.mdl", str(decomp))
+        self.assertEqual(dc.enforce_cache_limit(max_mb=0), 0)
+        self.assertIsNotNone(dc.find_cached_qc_for_weapon("c_a"))
+
+    def test_get_cached_decompile_touches_mtime_for_lru(self):
+        """Cache hit обновляет mtime записи (иначе LRU считала бы её старой)."""
+        import os
+        vpk = _make_vpk(self.base)
+        decomp = _make_decompile_dir(self.base)
+        saved = Path(dc.save_to_cache("c_test", str(vpk), "models/c_test.mdl", str(decomp)))
+        os.utime(saved, (1000, 1000))
+        old_mtime = saved.stat().st_mtime
+
+        self.assertIsNotNone(dc.get_cached_decompile("c_test", str(vpk), "models/c_test.mdl"))
+        self.assertGreater(saved.stat().st_mtime, old_mtime)
+
 
 if __name__ == "__main__":
     unittest.main()

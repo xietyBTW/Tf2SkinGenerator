@@ -24,6 +24,7 @@ class PreviewMode(Enum):
     SPY_MASKS = auto()   # маски маскировки шпиона
     CRITHIT = auto()     # спец-режим critHIT
     DEATH = auto()       # спец-режим эффекта смерти
+    SKYBOX = auto()      # режим «Скайбокс»: фон-кубмапа вместо модели
 
 
 @dataclass
@@ -61,6 +62,10 @@ class PreviewState:
     @property
     def is_death(self) -> bool:
         return self.mode == PreviewMode.DEATH
+
+    @property
+    def is_skybox(self) -> bool:
+        return self.mode == PreviewMode.SKYBOX
 
     @property
     def is_special(self) -> bool:

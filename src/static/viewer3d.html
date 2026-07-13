@@ -277,6 +277,15 @@ function _notifyPerMeshApplied() {
   catch (_) { /* ignore */ }
 }
 
+function _notifyModelLoaded(loadSeq) {
+  // Подтверждение Python-стороне: модель добавлена в сцену, можно накладывать
+  // текстуры (вместо угадывания задержки таймером). loadSeq — номер загрузки,
+  // выданный Python-стороной: по нему отбрасываются устаревшие подтверждения
+  // при back-to-back сменах модели.
+  try { if (_pyBridge && _pyBridge.notifyModelLoaded) _pyBridge.notifyModelLoaded(loadSeq | 0); }
+  catch (_) { /* ignore */ }
+}
+
 // ── Slot selector API (called from Python via runJavaScript) ──────────────── //
 
 window.showSlotSelector = function(slots, labelText) {
@@ -312,6 +321,7 @@ const I18N = {
     select_weapon : 'Выберите оружие для 3D Preview',
     loading       : 'Загрузка...',
     error_model   : 'Ошибка загрузки модели',
+    error_sky     : 'Ошибка загрузки текстуры неба',
     no_internet   : 'Нет подключения к интернету (Three.js CDN недоступен)',
     hint          : 'ЛКМ — вращение · Колесо — масштаб · ПКМ — панорама',
     drop_texture  : 'Отпустите, чтобы применить текстуру',
@@ -320,6 +330,7 @@ const I18N = {
     select_weapon : 'Select a weapon for 3D Preview',
     loading       : 'Loading...',
     error_model   : 'Model load error',
+    error_sky     : 'Sky texture load error',
     no_internet   : 'No internet connection (Three.js CDN unavailable)',
     hint          : 'LMB — rotate · Wheel — zoom · RMB — pan',
     drop_texture  : 'Release to apply texture',
@@ -351,9 +362,10 @@ renderer.setClearColor(0x1a1a1a);
 document.getElementById('canvas-container').appendChild(renderer.domElement);
 
 // ── Scene / Camera ───────────────────────────────────────────────────────── //
+const DEFAULT_FOV = 45;
 const scene  = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(
-  45, window.innerWidth / window.innerHeight, 0.001, 1000
+  DEFAULT_FOV, window.innerWidth / window.innerHeight, 0.001, 1000
 );
 camera.position.set(0, 0.5, 3);
 
@@ -382,6 +394,7 @@ let _animTimer    = null;
 let _animFrames   = [];
 let _pendingAnim        = null;
 let _pendingMaterialMap = null;  // {mat_name: dataUrl} — ожидает загрузки OBJ
+let _pendingTexUrl      = null;  // одиночная текстура — ожидает загрузки OBJ
 // null  → обновляем все меши (обычный режим)
 // Set   → обновляем только меши с именами из множества (режим рук)
 let _editableMeshNames  = null;
@@ -394,6 +407,10 @@ let _animGeneration     = 0;
 
 let _critSprite   = null;   // THREE.Sprite — CritHIT billboard
 let _isCritHitMode = false; // Режим CritHIT (персонаж + billboard)
+// Последняя ЗАПРОШЕННАЯ текстура billboard'а: async-колбэк загрузки OBJ ставит
+// её, а не значение, захваченное на момент старта — иначе смена текстуры во
+// время парсинга модели перезатиралась бы устаревшей.
+let _lastCritTexUrl = '';
 
 // CritHIT billboard animation (GIF / animated VTF)
 let _critAnimTimer  = null;   // setInterval для анимации billboard'а
@@ -435,6 +452,7 @@ function stopAnimation() {
   _animMeshNames      = null;
   _pendingAnim        = null;
   _pendingMaterialMap = null;
+  _pendingTexUrl      = null;
   if (_critAnimTimer !== null) { clearInterval(_critAnimTimer); _critAnimTimer = null; }
   ++_animGeneration;   // делаем все незавершённые _loadTextureThen-коллбэки устаревшими
 }
@@ -779,12 +797,14 @@ function _animateCritHitGif(dataUrls, fps) {
 
 // ── Public API ───────────────────────────────────────────────────────────── //
 
-window.loadModelFromContent = function(objContent, texDataUrl, cx, cy, cz, scale) {
+window.loadModelFromContent = function(objContent, texDataUrl, cx, cy, cz, scale, loadSeq) {
   const gen = ++_sceneGeneration;   // все предыдущие async-колбэки теперь устарели
+  const seqForAck = loadSeq | 0;    // номер загрузки для подтверждения Python-стороне
   _isCritHitMode    = false;
   _editableMeshNames = null;   // сбрасываем при каждой новой модели
   setStatus(_t.loading, false, true);
   stopAnimation();
+  _exitSkyboxView();
   if (currentModel) { scene.remove(currentModel); currentModel = null; }
   if (_critSprite)  { scene.remove(_critSprite);  _critSprite  = null; }
 
@@ -835,6 +855,17 @@ window.loadModelFromContent = function(objContent, texDataUrl, cx, cy, cz, scale
         _pendingMaterialMap = null;
         window.applyMaterialMap(map);
       }
+
+      if (_pendingTexUrl) {
+        // Одиночная текстура, запрошенная во время загрузки OBJ. Применяем
+        // ПОСЛЕ texDataUrl самой загрузки: запрос пришёл позже → он новее.
+        const url = _pendingTexUrl;
+        _pendingTexUrl = null;
+        window.updateTextureFromDataUrl(url);
+      }
+
+      // Модель в сцене, отложенные применения выполнены — сообщаем Python.
+      _notifyModelLoaded(seqForAck);
     },
     undefined,
     err => {
@@ -853,7 +884,13 @@ window.setEditableMeshNames = function(names) {
 
 window.updateTextureFromDataUrl = function(texDataUrl) {
   stopAnimation();
-  if (!currentModel) return;
+  if (!currentModel) {
+    // Модель ещё грузится (напр. back-to-back смена оружия) — очередируем,
+    // как applyMaterialMap: success-колбэк загрузки применит. Раньше вызов
+    // молча терялся и текстура пропадала до следующего действия пользователя.
+    _pendingTexUrl = texDataUrl;
+    return;
+  }
   const target  = currentModel;
   const animGen = _animGeneration;   // зафиксировали поколение после stopAnimation
   _loadTextureThen(texDataUrl, tex => {
@@ -996,9 +1033,142 @@ window.resetViewer = function() {
   _isCritHitMode    = false;
   _editableMeshNames = null;
   stopAnimation();
+  _exitSkyboxView();
   if (currentModel) { scene.remove(currentModel); currentModel = null; }
   if (_critSprite)  { scene.remove(_critSprite);  _critSprite  = null; }
   setStatus(_t.select_weapon);
+};
+
+// ── Skybox ───────────────────────────────────────────────────────────────── //
+
+// Соответствие граней Source → слотам CubeTexture Three.js.
+// Порядок слотов WebGL-кубмапы: [+X, -X, +Y, -Y, +Z, -Z].
+// rot — поворот картинки по часовой стрелке (в градусах) на канвасе.
+//
+// ОТКАЛИБРОВАНО по стоковым небам TF2 (sky_halloween/sky_badlands_01) через
+// численное сравнение стыков краёв: боковые грани хранятся КАК ФОТО (прямо,
+// без зеркала), цепочка горизонта при повороте вправо — ft → lf → bk → rt;
+// up стыкуется низом к rt (поворот -90°). С учётом flipEnvMap Three.js
+// (сэмплирование фона инвертирует X) слот nz показывает своё фото «как есть»
+// для взгляда вдоль -Z. Менять ТОЛЬКО вместе с FACE_BASES в
+// skybox_service.py — превью и нарезка панорамы обязаны совпадать.
+const SRC_FACE_MAP = [
+  { src: 'rt', rot: 0   },   // +X (справа-сзади по часовой от ft)
+  { src: 'lf', rot: 0   },   // -X (следующая при повороте вправо от ft)
+  { src: 'up', rot: -90 },   // +Y (низ картинки up примыкает к rt)
+  { src: 'dn', rot: 90  },   // -Y (симметрично up; в стоке почти всегда 1×1)
+  { src: 'bk', rot: 0   },   // +Z (за спиной)
+  { src: 'ft', rot: 0   },   // -Z (фронт, направление камеры по умолчанию)
+];
+
+let _skyboxTexture = null;
+let _isSkyboxMode  = false;   // колесо мыши меняет FOV вместо долли-зума
+
+function _disposeSkybox() {
+  if (_skyboxTexture) { _skyboxTexture.dispose(); _skyboxTexture = null; }
+  scene.background = null;
+}
+
+// Полный выход из режима скайбокса: снять фон + вернуть камеру/контролы.
+// Смена неба ВНУТРИ режима зовёт _disposeSkybox напрямую — FOV сохраняется.
+function _exitSkyboxView() {
+  _disposeSkybox();
+  if (_isSkyboxMode) {
+    _isSkyboxMode = false;
+    controls.enableZoom = true;
+    camera.fov = DEFAULT_FOV;
+    camera.updateProjectionMatrix();
+  }
+}
+
+// ── FOV-зум колесом (только скайбокс) ────────────────────────────────────── //
+// Фон-кубмапа бесконечно далёкая: долли-зум OrbitControls для неё ничего не
+// меняет, поэтому в режиме скайбокса колесо крутит угол обзора камеры
+// (скролл вверх = приблизить). Вне режима — обычный зум OrbitControls.
+const SKY_FOV_MIN = 20;
+const SKY_FOV_MAX = 110;
+renderer.domElement.addEventListener('wheel', (e) => {
+  if (!_isSkyboxMode) return;
+  e.preventDefault();
+  camera.fov = Math.min(SKY_FOV_MAX,
+                Math.max(SKY_FOV_MIN, camera.fov + e.deltaY * 0.05));
+  camera.updateProjectionMatrix();
+}, { passive: false });
+
+// Грань на квадратном канвасе с поворотом. Размер нормализуется (у стоковых
+// небес грань dn часто крошечная — растягиваем до общего размера куба).
+// Текстуры 2:1 (ширина = 2×высоты, полвысоты боковых граней стоковых небес)
+// движок кладёт на ВЕРХНЮЮ половину грани, низ — растянутая нижняя строка
+// (проверено: луна sky_halloween в 1024×512 круглая, при растяжении на весь
+// квадрат была бы яйцом). Правило — только для боковых граней (isSide):
+// up/dn в Source всегда квадратные. Квадратные текстуры — на всю грань.
+function _faceToCanvas(img, rotDeg, size, isSide) {
+  const c   = document.createElement('canvas');
+  c.width   = c.height = size;
+  const ctx = c.getContext('2d');
+  ctx.save();
+  ctx.translate(size / 2, size / 2);
+  ctx.rotate(rotDeg * Math.PI / 180);
+  if (isSide && img.width >= img.height * 2) {
+    // 2:1 — верхняя половина + низ из растянутой нижней строки
+    ctx.drawImage(img, 0, 0, img.width, img.height, -size / 2, -size / 2, size, size / 2);
+    ctx.drawImage(img, 0, img.height - 1, img.width, 1, -size / 2, 0, size, size / 2);
+  } else {
+    ctx.drawImage(img, -size / 2, -size / 2, size, size);
+  }
+  ctx.restore();
+  return c;
+}
+
+// Публичная функция: показывает скайбокс как фон сцены (режим «Скайбокс»).
+// faces = {up|dn|lf|rt|ft|bk: dataURL} — все 6 граней обязательны.
+window.loadSkybox = function(faces) {
+  const gen = ++_sceneGeneration;   // отменяет параллельные загрузки моделей
+  _isCritHitMode     = false;
+  _editableMeshNames = null;
+  _isSkyboxMode      = true;
+  controls.enableZoom = false;   // колесо теперь крутит FOV (см. wheel-listener)
+  stopAnimation();
+  if (currentModel) { scene.remove(currentModel); currentModel = null; }
+  if (_critSprite)  { scene.remove(_critSprite);  _critSprite  = null; }
+  setStatus(_t.loading, false, true);
+
+  const imgs = new Array(SRC_FACE_MAP.length);
+  let loaded = 0;
+  let failed = false;
+  SRC_FACE_MAP.forEach((m, slot) => {
+    const img = new Image();
+    img.onload = () => {
+      if (_sceneGeneration !== gen || failed) return;
+      imgs[slot] = img;
+      loaded += 1;
+      if (loaded < SRC_FACE_MAP.length) return;
+      // Все 6 граней загружены — собираем куб единого размера.
+      const size = Math.max(...imgs.map(i => Math.max(i.width, i.height)));
+      const canvases = SRC_FACE_MAP.map(
+        (mm, i) => _faceToCanvas(imgs[i], mm.rot, size, mm.src !== 'up' && mm.src !== 'dn'));
+      _disposeSkybox();
+      const cube = new THREE.CubeTexture(canvases);
+      cube.colorSpace  = THREE.SRGBColorSpace;
+      cube.needsUpdate = true;
+      scene.background = cube;
+      _skyboxTexture   = cube;
+      hideStatus();
+    };
+    img.onerror = () => {
+      if (_sceneGeneration !== gen || failed) return;
+      failed = true;
+      _disposeSkybox();   // не оставляем прежнее небо под текстом ошибки
+      setStatus(_t.error_sky, true);
+    };
+    img.src = faces[m.src] || '';
+  });
+};
+
+// Публичная функция: убирает фон-скайбокс (выход из режима «Скайбокс»).
+window.clearSkybox = function() {
+  ++_sceneGeneration;   // гасим летящие onload параллельного loadSkybox
+  _exitSkyboxView();
 };
 
 // ── CritHIT scene ────────────────────────────────────────────────────────── //
@@ -1086,8 +1256,10 @@ function _applyModelTexture(group, modelTexDataUrl) {
 window.loadCritHitScene = function(critTexDataUrl, modelTexDataUrl) {
   ++_sceneGeneration;   // отменяет любой параллельный loadCritHitSceneWithModel
   _isCritHitMode = true;
+  _lastCritTexUrl = critTexDataUrl || '';
   setStatus(_t.loading, false, true);
   stopAnimation();
+  _exitSkyboxView();
 
   // Очищаем предыдущую сцену
   if (currentModel) { scene.remove(currentModel); currentModel = null; }
@@ -1120,7 +1292,7 @@ window.loadCritHitScene = function(critTexDataUrl, modelTexDataUrl) {
 
   // Billboard над головой: макушка в мировых координатах = (solHeight - cy)*scale = 1.0
   const headTopWorld = (solHeight - cy) * scale; // ≈ 1.0
-  _placeCritSprite(critTexDataUrl, headTopWorld);
+  _placeCritSprite(_lastCritTexUrl, headTopWorld);
 
   hideStatus();
 };
@@ -1131,8 +1303,10 @@ window.loadCritHitScene = function(critTexDataUrl, modelTexDataUrl) {
 window.loadCritHitSceneWithModel = function(objContent, critTexDataUrl, cx, cy, cz, scale, modelTexDataUrl) {
   const gen = ++_sceneGeneration;   // все предыдущие async-колбэки теперь устарели
   _isCritHitMode = true;
+  _lastCritTexUrl = critTexDataUrl || '';
   setStatus(_t.loading, false, true);
   stopAnimation();
+  _exitSkyboxView();
 
   if (currentModel) { scene.remove(currentModel); currentModel = null; }
   if (_critSprite)  { scene.remove(_critSprite);  _critSprite  = null; }
@@ -1174,8 +1348,9 @@ window.loadCritHitSceneWithModel = function(objContent, critTexDataUrl, cx, cy, 
       controls.target.set(0, 0.35, 0);
       controls.update();
 
-      // Billboard: после нормализации top ≈ 1.0 (модель в диапазоне [-1, 1])
-      _placeCritSprite(critTexDataUrl, 1.0);
+      // Billboard: последняя ЗАПРОШЕННАЯ текстура (могла смениться за время
+      // парсинга OBJ через updateCritHitTexture), а не захваченная при старте.
+      _placeCritSprite(_lastCritTexUrl, 1.0);
 
       hideStatus();
         },
@@ -1185,7 +1360,7 @@ window.loadCritHitSceneWithModel = function(objContent, critTexDataUrl, cx, cy, 
       console.error('Custom model OBJ load error:', err);
       // Fallback: строим процедурного солдата (только если запрос ещё актуален)
       if (_sceneGeneration === gen) {
-        window.loadCritHitScene(critTexDataUrl, modelTexDataUrl);
+        window.loadCritHitScene(_lastCritTexUrl, modelTexDataUrl);
       }
     }
   );
@@ -1195,9 +1370,10 @@ window.loadCritHitSceneWithModel = function(objContent, critTexDataUrl, cx, cy, 
 // Публичная функция: обновляет только текстуру CritHIT billboard.
 window.updateCritHitTexture = function(critTexDataUrl) {
   if (!_isCritHitMode) return;
+  _lastCritTexUrl = critTexDataUrl || '';
   const solHeight    = 88;
   const headTopWorld = (solHeight - solHeight / 2) * (2.0 / solHeight); // 1.0
-  _placeCritSprite(critTexDataUrl, headTopWorld);
+  _placeCritSprite(_lastCritTexUrl, headTopWorld);
 };
 
 // ── Drag & Drop (текстура прямо в 3D) ────────────────────────────────────── //

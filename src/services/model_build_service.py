@@ -9,6 +9,7 @@ import shutil
 import subprocess
 from typing import List, Optional
 from src.services import qc_skin_parser
+from src.services.smd_service import NON_REFERENCE_SMD_KEYWORDS
 from src.shared.constants import ToolTimeouts
 from src.shared.logging_config import get_logger
 
@@ -444,15 +445,18 @@ class ModelBuildService:
         Нужен для редактора QC: пользователь видит ИСПРАВЛЕННЫЙ QC, а не сырой
         декомпилированный из игры.
         """
-        import tempfile
+        from src.shared.file_utils import get_temp_file_path
         if not src_qc_path or not os.path.exists(src_qc_path):
             return ''
-        tmp = tempfile.mktemp(suffix='.qc', prefix='tf2sg_qcedit_')
+        tmp = str(get_temp_file_path(prefix='tf2sg_qcedit_', suffix='.qc'))
         try:
+            # Превью показывает QC с реальной папкой обхода (как в сборке).
+            from src.config.app_config import AppConfig
+            from src.shared.constants import bypass_prefix
+            _bp = bypass_prefix(AppConfig.load_config().get('sv_pure_bypass', 'console'))
             shutil.copy2(src_qc_path, tmp)
-            cdmat = ModelBuildService.extract_cdmaterials_path_from_qc(tmp)
             try:
-                ModelBuildService.patch_qc_file(tmp, weapon_key, cdmat)
+                ModelBuildService.patch_qc_file(tmp, _bp)
             except Exception as exc:
                 logger.debug(f"[QC EDIT] patch_qc_file для превью не удался: {exc}")
             ModelBuildService.replace_texturegroup_in_qc(tmp, tg_block)
@@ -556,7 +560,7 @@ class ModelBuildService:
                 continue
             
             # Пропускаем physics и animation файлы
-            if any(skip in smd_lower for skip in ['physics', 'phys', 'anim', 'idle', 'pose']):
+            if any(skip in smd_lower for skip in NON_REFERENCE_SMD_KEYWORDS):
                 continue
             
             # Пропускаем дубли
@@ -653,25 +657,71 @@ class ModelBuildService:
         return None
 
     @staticmethod
-    def patch_qc_file(qc_path: str, weapon_key: str, cdmaterials_path: Optional[str] = None) -> None:
+    def _qc_has_unsafe_flex(lines) -> bool:
+        """True, если в QC есть flexcontroller с операторным символом (+ - * /) в
+        имени. Crowbar декомпилирует такие имена буквально (напр. 'CloseLidLoL+
+        CloseLidLoR'), но studiomdl парсит '+' как сложение → 'unknown controller'.
+        Любой такой контроллер делает flex-секцию некомпилируемой → её надо вырезать.
+        """
+        pat = re.compile(r'^\s*flexcontroller\s+(\S+)', re.IGNORECASE)
+        for l in lines:
+            m = pat.match(l)
+            if m and any(ch in m.group(1) for ch in '+-*/'):
+                return True
+        return False
+
+    @staticmethod
+    def apply_cdmaterials_prefix(original_path: str, bypass_prefix: str = "console") -> str:
+        """Перенаправляет один путь $cdmaterials в whitelisted-папку обхода sv_pure.
+
+        bypass_prefix — папка обхода ('console' или 'vgui\\replay\\thumbnails').
+        Если путь уже под этой папкой — оставляем как есть; если под console\\
+        (его добавляет Crowbar при декомпиляции), но целевая папка другая —
+        пере-корневаем в целевую. Результат всегда с обратными слешами.
+        """
+        prefix = bypass_prefix.rstrip("\\/") + "\\"
+        norm = original_path.replace("/", "\\")
+        body = norm.lstrip("\\")
+        low = body.lower()
+        pref_low = prefix.lower()
+        if low.startswith(pref_low):
+            return body                              # уже под нашей папкой
+        if low.startswith("console\\"):
+            body = body[len("console\\"):]           # Crowbar-console → в целевую
+        return prefix + body
+
+    @staticmethod
+    def patch_qc_file(qc_path: str, bypass_prefix: str = "console") -> None:
         """
         Пропатчивает QC файл после декомпиляции.
-        
+
         Нужно чтобы модель правильно компилировалась и текстуры загружались:
         - НЕ трогаем $modelname (оставляем как есть, путь модели должен быть правильным)
-        - Добавляем префикс console\\ к $cdmaterials (чтобы текстуры загружались из консольных команд)
+        - Перенаправляем $cdmaterials в whitelisted-папку обхода sv_pure
+          (console\\ по умолчанию, либо vgui\\replay\\thumbnails\\ — см.
+          apply_cdmaterials_prefix и SVPURE_BYPASS_PREFIXES)
         - Удаляем все блоки $lod (LOD нам не нужны, только мусорят)
-        
+
         Args:
             qc_path: Путь к QC файлу
-            weapon_key: Не используется, оставлен для совместимости (legacy)
-            cdmaterials_path: Не используется, оставлен для совместимости (legacy)
+            bypass_prefix: Папка обхода sv_pure ('console' или 'vgui\\replay\\thumbnails')
         """
         if not os.path.exists(qc_path):
             raise FileNotFoundError(f"QC file not found: {qc_path}")
 
         with open(qc_path, 'r', encoding='utf-8') as f:
             lines = f.readlines()
+
+        # Flex-контроллеры с операторными символами (+ - * /) в имени Crowbar
+        # декомпилирует буквально, но studiomdl парсит их как выражение и падает
+        # ('unknown controller'). Если такие есть — вырезаем всю flex-секцию
+        # (flexfile/flexcontroller/localvar/%-правила); для косметики флексы не нужны.
+        strip_flex = ModelBuildService._qc_has_unsafe_flex(lines)
+        if strip_flex:
+            logger.info(
+                "[QC] Обнаружены flex-контроллеры с операторными символами в имени — "
+                "вырезаем flex-секцию (несовместима со studiomdl)"
+            )
 
         new_lines: List[str] = []
         # Индекс в new_lines ПОСЛЕ последнего записанного непустого $cdmaterials.
@@ -682,6 +732,35 @@ class ModelBuildService:
         while i < len(lines):
             line = lines[i]
             stripped = line.strip()
+
+            # --- flex-секция (вырезаем только если имена контроллеров несовместимы) ---
+            if strip_flex:
+                _low = stripped.lower()
+                if (_low.startswith('flexcontroller') or _low.startswith('localvar')
+                        or stripped.startswith('%')):
+                    i += 1
+                    continue
+                if _low.startswith('flexfile'):
+                    i += 1
+                    # пропускаем пустые/коммент-строки до открывающей '{'
+                    while i < len(lines) and (not lines[i].strip()
+                                              or lines[i].strip().startswith('//')):
+                        i += 1
+                    # пропускаем сбалансированный блок { ... }
+                    if i < len(lines) and lines[i].strip().startswith('{'):
+                        depth = 0
+                        opened = False
+                        while i < len(lines):
+                            for ch in lines[i]:
+                                if ch == '{':
+                                    depth += 1
+                                    opened = True
+                                elif ch == '}':
+                                    depth -= 1
+                            i += 1
+                            if opened and depth == 0:
+                                break
+                    continue
 
             # --- $lod блок: пропускаем целиком ---
             if _RE_LOD.match(stripped):
@@ -714,14 +793,8 @@ class ModelBuildService:
                         i += 1
                         continue  # пустой путь — пропускаем
 
-                    prefix = 'console\\'
-                    lo = original_path.lower()
-                    if lo.startswith('console\\') or lo.startswith('console/'):
-                        modified_path = original_path.replace('/', '\\')
-                    elif original_path.startswith(('\\', '/')):
-                        modified_path = prefix + original_path.lstrip('\\/')
-                    else:
-                        modified_path = prefix + original_path
+                    modified_path = ModelBuildService.apply_cdmaterials_prefix(
+                        original_path, bypass_prefix)
 
                     new_lines.append(f'$cdmaterials "{modified_path}"\n')
                     last_cdmat_insert_pos = len(new_lines)  # позиция после этой строки

@@ -29,6 +29,8 @@ def setup_fake_pyside6():
 
     qtcore.QThread = DummyThread
     qtcore.Signal = DummySignal
+    qtcore.QMutex = object
+    qtcore.QWaitCondition = object
     sys.modules["PySide6"] = pyside
     sys.modules["PySide6.QtCore"] = qtcore
 

@@ -5,7 +5,7 @@
 import os
 from typing import Tuple, Optional
 from src.data.weapons import SPECIAL_MODES
-from .constants import ValidationLimits
+from .constants import ValidationLimits, VTF_FORMATS
 
 
 def validate_vpk_filename(filename: str) -> Tuple[bool, Optional[str]]:
@@ -117,36 +117,8 @@ def validate_build_params(
         return t['error_size_not_int']
     if width <= 0 or height <= 0:
         return t['error_size_not_positive']
-    valid_formats = [
-        'DXT1',
-        'DXT3',
-        'DXT5',
-        'RGBA8888',
-        'ABGR8888',
-        'RGB888',
-        'BGR888',
-        'RGB565',
-        'BGR565',
-        'I8',
-        'IA88',
-        'A8',
-        'RGB888 Bluescreen',
-        'BGR888 Bluescreen',
-        'ARGB8888',
-        'BGRA8888',
-        'BGRX8888',
-        'BGRX5551',
-        'BGRA4444',
-        'DXT1 With One Bit Alpha',
-        'BGRA5551',
-        'UV88',
-        'UVWQ8888',
-        'RGBA16161616F',
-        'RGBA16161616',
-        'UVLX8888'
-    ]
-    if format_type not in valid_formats:
-        return t['error_format_invalid'].format(format=format_type, formats=', '.join(valid_formats))
+    if format_type not in VTF_FORMATS:
+        return t['error_format_invalid'].format(format=format_type, formats=', '.join(VTF_FORMATS))
     # Только специальные режимы (спрей, крит и т.д.) не требуют TF2.
     # Персонажи, руки и оружия — полный pipeline через VPK + Crowbar.
     _no_tf2_needed = mode in SPECIAL_MODES.values()

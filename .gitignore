@@ -47,10 +47,25 @@ tools/temp_vmt_extract/
 tools/edited_vmt/
 tools/backupVMT/
 
-# ── Инструменты: сторонние бинари (скачиваются отдельно) ──────
-tools/crowbar/
+# ── Инструменты: сторонние бинари ─────────────────────────────
+# Лицензии/источники см. THIRD_PARTY_LICENSES.md
+# crowbar (CC BY-SA 3.0) и VTF-тулзы (VTFLib LGPL / VTFCmd GPL) — в репозитории:
+# их лицензии разрешают редистрибуцию (и они всё равно попадают в релиз).
+# vpk.exe — вне репо: он проприетарный Valve, берётся из bin установленной TF2.
 tools/VPK/
-tools/VTF/
+
+# ── Ассеты Valve/TF2: НЕ распространяются (чужой copyright) ────
+# Модели/текстуры берутся из локальной установки игры пользователя.
+# Папки-заглушки сохраняются через .gitkeep.
+tools/Model/**/*.vtf
+tools/Model/**/*.obj
+tools/Model/**/*.smd
+tools/Model/**/*.dmx
+tools/Model/**/*.mdl
+tools/Model/**/*.qc
+tools/mod_data/*.pcf
+tools/mod_data/*.vmt
+tools/mod_data/*.vtf
 
 # ── Логи и мусорные файлы ────────────────────────────────────
 *.log

@@ -1,4 +1,6 @@
+import os
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -9,6 +11,7 @@ from src.shared.file_utils import (
     safe_remove,
     copy_file_safe,
     get_temp_file_path,
+    cleanup_stale_temp_artifacts,
 )
 
 
@@ -70,6 +73,38 @@ class FileUtilsTests(unittest.TestCase):
             self.assertTrue(path.parent.exists())
             self.assertTrue(path.name.startswith("x_"))
             self.assertTrue(path.name.endswith(".bin"))
+
+    def test_cleanup_stale_temp_artifacts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            old_time = time.time() - 48 * 3600
+
+            stale_dir = base / "tf2sg_3d_abc"
+            stale_dir.mkdir()
+            (stale_dir / "model.obj").write_text("x", encoding="utf-8")
+            stale_file = base / "tf2_vtf_old.png"
+            stale_file.write_text("x", encoding="utf-8")
+            os.utime(stale_dir, (old_time, old_time))
+            os.utime(stale_file, (old_time, old_time))
+
+            fresh_dir = base / "tf2sg_3d_new"       # наш, но свежий — не трогаем
+            fresh_dir.mkdir()
+            foreign = base / "other_app_dir"        # чужой префикс — не трогаем
+            foreign.mkdir()
+            os.utime(foreign, (old_time, old_time))
+
+            removed = cleanup_stale_temp_artifacts(max_age_hours=24, temp_dir=base)
+
+            self.assertEqual(removed, 2)
+            self.assertFalse(stale_dir.exists())
+            self.assertFalse(stale_file.exists())
+            self.assertTrue(fresh_dir.exists())
+            self.assertTrue(foreign.exists())
+
+    def test_cleanup_missing_temp_dir_returns_zero(self):
+        self.assertEqual(
+            cleanup_stale_temp_artifacts(temp_dir=Path("Z:/no/such/dir_12345")), 0
+        )
 
     def test_get_temp_file_path_system_dir(self):
         path = get_temp_file_path(prefix="tf2sg_test_", suffix=".tmp")

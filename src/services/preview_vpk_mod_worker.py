@@ -23,6 +23,8 @@ from typing import List, Optional
 from PySide6.QtCore import Signal
 
 from src.services.base_worker import BaseWorker
+from src.services.game_vpk_reader import GameVpkReader
+from src.services.smd_service import NON_REFERENCE_SMD_KEYWORDS
 from src.shared.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -43,19 +45,6 @@ _SKIP_VTF_KEYWORDS = (
 
 
 # ── Утилиты ──────────────────────────────────────────────────────────────── #
-
-def _parse_basetexture_from_vmt(vmt_content: str) -> Optional[str]:
-    """
-    Ищет строку вида: "$basetexture" "путь/к/текстуре"
-    Возвращает значение (путь без кавычек) или None.
-    """
-    match = re.search(
-        r'"\$basetexture"\s+"([^"]+)"',
-        vmt_content,
-        re.IGNORECASE,
-    )
-    return match.group(1) if match else None
-
 
 def _weapon_key_from_path(path: str) -> Optional[str]:
     """
@@ -141,7 +130,16 @@ class PreviewVpkModWorker(BaseWorker):
         self.textures_vpk_path = textures_vpk_path
         self._preview_dir: Optional[str] = None
         self._model_materials: List[str] = []
+        # Игровой tf2_textures_dir.vpk открываем один раз за прогон (fallback-пути).
+        self._game_reader: Optional[GameVpkReader] = None
         self._p = self._PROGRESS.get(lang, self._PROGRESS['en'])
+
+    def _game_textures_pak(self):
+        """Хэндл игрового tf2_textures_dir.vpk (открыт один раз, кэш). None если нет."""
+        if self._game_reader is None:
+            self._game_reader = GameVpkReader([self.textures_vpk_path])
+        paks = self._game_reader.paks
+        return paks[0] if paks else None
 
     # ── Точка входа ───────────────────────────────────────────────────────── #
 
@@ -204,7 +202,7 @@ class PreviewVpkModWorker(BaseWorker):
                 try:
                     data = pak[vmt_rel].read()
                     vmt_content = data.decode("utf-8", errors="replace")
-                    bt = _parse_basetexture_from_vmt(vmt_content)
+                    bt = GameVpkReader.parse_basetexture(vmt_content)
                     if bt:
                         basetexture_path = bt
                         logger.info(f"$basetexture из VMT «{vmt_rel}»: {bt}")
@@ -316,6 +314,9 @@ class PreviewVpkModWorker(BaseWorker):
         except Exception as exc:
             logger.error(f"PreviewVpkModWorker: {exc}", exc_info=True)
             self.failed.emit(str(exc))
+        finally:
+            if self._game_reader is not None:
+                self._game_reader.close()
 
     # ── 2D-карточки: все основные текстуры мода из открытого pak ──────────── #
 
@@ -415,29 +416,15 @@ class PreviewVpkModWorker(BaseWorker):
         return out
 
     def _vtf_bytes_first_frame_png(self, vtf_data: bytes, key: str) -> Optional[str]:
-        """Сохраняет первый кадр VTF в уникальный PNG (для превью карточки)."""
-        import re as _re
-        safe = _re.sub(r'[^A-Za-z0-9_.-]', '_', key)
-        tmp_vtf = os.path.join(self._preview_dir, f"_card_{safe}.vtf")
-        try:
-            with open(tmp_vtf, "wb") as f:
-                f.write(vtf_data)
-            from src.services.vtflib_wrapper import VTFLib
-            from PIL import Image
-            all_frames, w, h = VTFLib.read_vtf_all_frames(tmp_vtf)
-            if not all_frames:
-                return None
-            out = os.path.join(self._preview_dir, f"_card_{safe}.png")
-            Image.frombytes("RGBA", (w, h), all_frames[0]).save(out)
-            return out
-        except Exception:
-            return None
-        finally:
-            try:
-                if os.path.exists(tmp_vtf):
-                    os.remove(tmp_vtf)
-            except Exception:
-                pass
+        """Сохраняет первый кадр VTF в уникальный PNG (для превью карточки).
+
+        Тонкая обёртка над общим vtf_preview_service.vtf_bytes_to_png — лишь
+        санитайзит ключ в безопасное имя файла.
+        """
+        from src.services import vtf_preview_service as _vps
+        safe = re.sub(r'[^A-Za-z0-9_.-]', '_', key)
+        return _vps.vtf_bytes_to_png(
+            vtf_data, os.path.join(self._preview_dir, f"_card_{safe}.png"), self._preview_dir)
 
     # ── MDL: декомпиляция из пользовательского VPK ───────────────────────── #
 
@@ -579,7 +566,7 @@ class PreviewVpkModWorker(BaseWorker):
             mdl_dir = tempfile.mkdtemp(prefix="tf2sg_mdl_")
             try:
                 extracted = TF2VPKExtractService.extract_file_set(
-                    self.misc_vpk_path, found_rel, mdl_dir, None
+                    self.misc_vpk_path, found_rel, mdl_dir
                 )
                 mdl_file = next((f for f in extracted if f.endswith(".mdl")), None)
                 if not mdl_file:
@@ -714,8 +701,6 @@ class PreviewVpkModWorker(BaseWorker):
     def _extract_game_texture_frames(self, weapon_key: str) -> tuple:
         """Извлекает текстуру оружия из игровых VPK (fallback). Возвращает (frames, fps)."""
         try:
-            import vpk as vpklib
-            import re
             from src.data.weapons import WEAPON_TEXTURE_PATHS
 
             _standard = [
@@ -727,24 +712,15 @@ class PreviewVpkModWorker(BaseWorker):
             vtf_search = WEAPON_TEXTURE_PATHS.get(weapon_key, []) + _standard
             vmt_search = [p.replace(".vtf", ".vmt") for p in vtf_search]
 
-            pak = vpklib.open(self.textures_vpk_path)
+            pak = self._game_textures_pak()
+            if pak is None:
+                return [], 0.0
             for path in vtf_search:
                 try:
                     vtf_data = pak[path].read()
                     logger.info(f"Текстура из игры (fallback): {path}")
-                    framerate = 15.0
-                    for vmt_path in vmt_search:
-                        try:
-                            vmt = pak[vmt_path].read().decode("utf-8", errors="replace")
-                            m = re.search(
-                                r'"animatedtextureframerate"\s+"?([0-9.]+)"?',
-                                vmt, re.IGNORECASE
-                            )
-                            if m:
-                                framerate = max(0.1, float(m.group(1)))
-                            break
-                        except KeyError:
-                            continue
+                    from src.services import vtf_preview_service as _vps
+                    framerate = _vps.read_vmt_framerate(pak, vmt_search)
                     return self._vtf_bytes_to_frame_pngs(vtf_data, framerate)
                 except KeyError:
                     continue
@@ -845,9 +821,10 @@ class PreviewVpkModWorker(BaseWorker):
         # ── Приоритет 5: игровой VPK ──────────────────────────────────────────
         if not vtf_data and weapon_key and self.textures_vpk_path:
             try:
-                import vpk as vpklib
                 from src.data.weapons import WEAPON_TEXTURE_PATHS
-                game_pak = vpklib.open(self.textures_vpk_path)
+                game_pak = self._game_textures_pak()
+                if game_pak is None:
+                    raise FileNotFoundError(self.textures_vpk_path)
                 # Строим BLU-варианты: нестандартные пути (stem + _blue) + стандартные
                 _extra_blu = [
                     p.replace(".vtf", "_blue.vtf")
@@ -873,32 +850,14 @@ class PreviewVpkModWorker(BaseWorker):
         if not vtf_data:
             return [], 0.0
 
-        # Сохраняем с уникальным именем чтобы не конфликтовать с RED кадрами
-        try:
-            from src.services.vtflib_wrapper import VTFLib
-            from PIL import Image
-
-            vtf_file = os.path.join(self._preview_dir, "_tmp_blu_mod.vtf")
-            with open(vtf_file, "wb") as f:
-                f.write(vtf_data)
-
-            all_frames, w, h = VTFLib.read_vtf_all_frames(vtf_file)
-            os.remove(vtf_file)
-
-            frame_paths: list[str] = []
-            for i, rgba in enumerate(all_frames):
-                img  = Image.frombytes("RGBA", (w, h), rgba)
-                name = f"texture_blu_{i:03d}.png" if len(all_frames) > 1 else "texture_blu.png"
-                path = os.path.join(self._preview_dir, name)
-                img.save(path)
-                frame_paths.append(path)
-
-            fps = red_framerate if len(frame_paths) > 1 else 0.0
-            return frame_paths, fps
-
-        except Exception as exc:
-            logger.debug(f"BLU VTF→PNG ошибка: {exc}")
+        # Уникальное имя 'texture_blu', чтобы не конфликтовать с RED кадрами.
+        from src.services import vtf_preview_service as _vps
+        frame_paths = _vps.vtf_bytes_to_frame_pngs(
+            vtf_data, self._preview_dir, "texture_blu", self._preview_dir)
+        if not frame_paths:
             return [], 0.0
+        fps = red_framerate if len(frame_paths) > 1 else 0.0
+        return frame_paths, fps
 
     # ── VTF → PNG (все кадры) ─────────────────────────────────────────────── #
 
@@ -906,55 +865,27 @@ class PreviewVpkModWorker(BaseWorker):
         self, vtf_data: bytes, framerate: float = 15.0
     ) -> tuple:
         """
-        Конвертирует VTF байты в PNG файлы (по одному на кадр).
-        Возвращает (frame_paths: list[str], framerate: float).
+        Конвертирует VTF байты в PNG файлы (по одному на кадр) через общий
+        vtf_preview_service. Возвращает (frame_paths: list[str], framerate: float);
+        ([], 0.0) при ошибке/пустом VTF.
+
+        Имена кадров совпадают со сервисом: один кадр → texture.png, несколько →
+        texture_000.png, texture_001.png, …
         """
-        try:
-            vtf_file = os.path.join(self._preview_dir, "_tmp_mod.vtf")
-            with open(vtf_file, "wb") as f:
-                f.write(vtf_data)
-
-            from src.services.vtflib_wrapper import VTFLib
-            from PIL import Image
-
-            all_frames, w, h = VTFLib.read_vtf_all_frames(vtf_file)
-            os.remove(vtf_file)
-
-            frame_paths: list[str] = []
-            for i, rgba in enumerate(all_frames):
-                img  = Image.frombytes("RGBA", (w, h), rgba)
-                name = f"texture_{i:03d}.png" if len(all_frames) > 1 else "texture.png"
-                path = os.path.join(self._preview_dir, name)
-                img.save(path)
-                frame_paths.append(path)
-
-            if len(frame_paths) > 1:
-                logger.info(
-                    f"Анимированная текстура мода: {len(frame_paths)} кадров "
-                    f"@ {framerate:.1f} fps"
-                )
-            return frame_paths, framerate
-
-        except Exception as exc:
-            logger.warning(f"VTF→PNG ошибка: {exc}")
+        from src.services import vtf_preview_service as _vps
+        frame_paths = _vps.vtf_bytes_to_frame_pngs(
+            vtf_data, self._preview_dir, "texture", self._preview_dir)
+        if not frame_paths:
             return [], 0.0
+        if len(frame_paths) > 1:
+            logger.info(
+                f"Анимированная текстура мода: {len(frame_paths)} кадров @ {framerate:.1f} fps")
+        return frame_paths, framerate
 
     def _read_vmt_framerate_from_pak(self, pak, vmt_files: List[str]) -> float:
-        """Ищет animatedtextureframerate в VMT файлах из пака мода."""
-        import re
-        for vmt_rel in vmt_files:
-            try:
-                content = pak[vmt_rel].read().decode("utf-8", errors="replace")
-                m = re.search(
-                    r'"animatedtextureframerate"\s+"?([0-9.]+)"?',
-                    content, re.IGNORECASE
-                )
-                if m:
-                    return max(0.1, float(m.group(1)))
-                break
-            except Exception:
-                continue
-        return 15.0
+        """Ищет animatedtextureframerate в VMT файлах из пака мода (общий парсер)."""
+        from src.services import vtf_preview_service as _vps
+        return _vps.read_vmt_framerate(pak, vmt_files)
 
     # ── Поиск reference SMD ───────────────────────────────────────────────── #
 
@@ -962,10 +893,8 @@ class PreviewVpkModWorker(BaseWorker):
         self, directory: str, weapon_key: Optional[str] = None
     ) -> Optional[str]:
         """Находит reference SMD, исключая physics/anim файлы."""
-        _SKIP = ("physics", "phys", "anim", "idle", "pose")
-
         def skip(p: str) -> bool:
-            return any(kw in os.path.basename(p).lower() for kw in _SKIP)
+            return any(kw in os.path.basename(p).lower() for kw in NON_REFERENCE_SMD_KEYWORDS)
 
         # *_reference.smd
         refs = [

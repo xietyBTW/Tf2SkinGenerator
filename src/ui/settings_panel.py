@@ -10,8 +10,14 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QDoubleValidator
 from src.data.translations import TRANSLATIONS
+from src.data.player_hands import HAND_MODE_KEYS
+from src.data.player_characters import PLAYER_BODY_MODE_KEYS
+from src.data.skyboxes import SKYBOX_MODE
 from src.utils.themes import get_modern_styles
 from src.config.app_config import AppConfig
+from src.ui.format_choices import (
+    VTF_FORMATS, allowed_formats_for_mode, plan_format_choices,
+)
 
 
 class CollapsibleGroup(QWidget):
@@ -260,35 +266,7 @@ class SettingsPanel(QWidget):
         main_settings_layout.addWidget(self.format_label)
         
         self.format_combo = QComboBox()
-        # Добавляем все поддерживаемые форматы VTF (кроме P8, который не поддерживается)
-        self.format_combo.addItems([
-            "DXT1",
-            "DXT3",
-            "DXT5",
-            "RGBA8888",
-            "ABGR8888",
-            "RGB888",
-            "BGR888",
-            "RGB565",
-            "BGR565",
-            "I8",
-            "IA88",
-            "A8",
-            "RGB888 Bluescreen",
-            "BGR888 Bluescreen",
-            "ARGB8888",
-            "BGRA8888",
-            "BGRX8888",
-            "BGRX5551",
-            "BGRA4444",
-            "DXT1 With One Bit Alpha",
-            "BGRA5551",
-            "UV88",
-            "UVWQ8888",
-            "RGBA16161616F",
-            "RGBA16161616",
-            "UVLX8888"
-        ])
+        self.format_combo.addItems(VTF_FORMATS)
         self.format_combo.setStyleSheet(self.styles['combo'])
         self.format_combo.setMinimumWidth(0)
         self.format_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
@@ -334,41 +312,6 @@ class SettingsPanel(QWidget):
         self.button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         main_settings_layout.addWidget(self.button)
 
-        self.extract_model_button = QPushButton(
-            self.t.get('extract_model', 'Extract Original Model (SMD)')
-        )
-        self.extract_model_button.setStyleSheet(self.styles['button_secondary'])
-        self.extract_model_button.setMinimumHeight(40)
-        self.extract_model_button.setMinimumWidth(0)
-        self.extract_model_button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        main_settings_layout.addWidget(self.extract_model_button)
-
-        # Кнопка генерации UV-шаблона по запросу (без полной сборки)
-        self.export_uv_button = QPushButton(
-            self.t.get('export_uv', 'Export UV Template (PNG)')
-        )
-        self.export_uv_button.setStyleSheet(self.styles['button_secondary'])
-        self.export_uv_button.setMinimumHeight(40)
-        self.export_uv_button.setMinimumWidth(0)
-        self.export_uv_button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        main_settings_layout.addWidget(self.export_uv_button)
-
-        # Кнопка извлечения оригинальной текстуры
-        self.extract_texture_button = QPushButton(self.t.get('extract_texture', 'Extract Original Texture'))
-        self.extract_texture_button.setStyleSheet(self.styles['button_secondary'])
-        self.extract_texture_button.setMinimumHeight(40)
-        self.extract_texture_button.setMinimumWidth(0)
-        self.extract_texture_button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        main_settings_layout.addWidget(self.extract_texture_button)
-        
-        # Кнопка объединения VPK
-        self.merge_vpk_button = QPushButton(self.t.get('merge_vpk', 'Сборка в один'))
-        self.merge_vpk_button.setStyleSheet(self.styles['button_secondary'])
-        self.merge_vpk_button.setMinimumHeight(40)
-        self.merge_vpk_button.setMinimumWidth(0)
-        self.merge_vpk_button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        main_settings_layout.addWidget(self.merge_vpk_button)
-        
         # Добавляем первый контейнер в главный layout
         main_layout.addWidget(main_settings_container, 0)
         
@@ -531,20 +474,41 @@ class SettingsPanel(QWidget):
         self.tools_label.setStyleSheet("font-weight: 500; font-size: 13px; color: #ccc; margin-top: 12px;")
         self.advanced_group.addWidget(self.tools_label)
 
-        # Кнопка очистки кэша декомпилированных моделей
-        self.clear_cache_button = QPushButton(self.t.get('clear_decompile_cache', 'Clear Model Cache'))
-        self.clear_cache_button.setStyleSheet(self.styles['button_secondary'])
-        self.clear_cache_button.setMinimumHeight(36)
-        self.clear_cache_button.setMinimumWidth(0)
-        self.clear_cache_button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.clear_cache_button.setToolTip(
-            self.t.get(
-                'clear_decompile_cache_tooltip',
-                'Deletes cached decompiled models (~/.tf2skingen_cache).\n'
-                'Use if models stopped building correctly after a TF2 update.'
-            )
+        # Инструменты извлечения/слияния (перенесены из основных настроек).
+        self.extract_model_button = QPushButton(
+            self.t.get('extract_model', 'Extract Original Model (SMD)')
         )
-        self.advanced_group.addWidget(self.clear_cache_button)
+        self.extract_model_button.setStyleSheet(self.styles['button_secondary'])
+        self.extract_model_button.setMinimumHeight(40)
+        self.extract_model_button.setMinimumWidth(0)
+        self.extract_model_button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.advanced_group.addWidget(self.extract_model_button)
+
+        # Кнопка генерации UV-шаблона по запросу (без полной сборки)
+        self.export_uv_button = QPushButton(
+            self.t.get('export_uv', 'Export UV Template (PNG)')
+        )
+        self.export_uv_button.setStyleSheet(self.styles['button_secondary'])
+        self.export_uv_button.setMinimumHeight(40)
+        self.export_uv_button.setMinimumWidth(0)
+        self.export_uv_button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.advanced_group.addWidget(self.export_uv_button)
+
+        # Кнопка извлечения оригинальной текстуры
+        self.extract_texture_button = QPushButton(self.t.get('extract_texture', 'Extract Original Texture'))
+        self.extract_texture_button.setStyleSheet(self.styles['button_secondary'])
+        self.extract_texture_button.setMinimumHeight(40)
+        self.extract_texture_button.setMinimumWidth(0)
+        self.extract_texture_button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.advanced_group.addWidget(self.extract_texture_button)
+
+        # Кнопка объединения VPK
+        self.merge_vpk_button = QPushButton(self.t.get('merge_vpk', 'Сборка в один'))
+        self.merge_vpk_button.setStyleSheet(self.styles['button_secondary'])
+        self.merge_vpk_button.setMinimumHeight(40)
+        self.merge_vpk_button.setMinimumWidth(0)
+        self.merge_vpk_button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.advanced_group.addWidget(self.merge_vpk_button)
 
         # Добавляем accordion во второй контейнер
         advanced_container_layout.addWidget(self.advanced_group)
@@ -604,6 +568,25 @@ class SettingsPanel(QWidget):
 
     # ── Единый контроллер ограничений UI по режиму ─────────────────────────── #
 
+    def _set_format_choices(self, allowed) -> None:
+        """Перезаполняет список форматов: allowed (подмножество) или полный набор.
+
+        План (target-список + индекс) считает чистый plan_format_choices; здесь —
+        только применение к комбобоксу. Сигналы блокируются — перезаполнение не
+        считается правкой пользователя.
+        """
+        current = [self.format_combo.itemText(i)
+                   for i in range(self.format_combo.count())]
+        plan = plan_format_choices(current, self.format_combo.currentText(), allowed)
+        if plan is None:
+            return
+        target, idx = plan
+        self.format_combo.blockSignals(True)
+        self.format_combo.clear()
+        self.format_combo.addItems(target)
+        self.format_combo.setCurrentIndex(idx)
+        self.format_combo.blockSignals(False)
+
     def apply_mode_restrictions(self, mode) -> None:
         """
         Применяет ограничения UI в зависимости от текущего режима сборки.
@@ -613,27 +596,21 @@ class SettingsPanel(QWidget):
 
         Матрица ограничений:
           Оружие — всё доступно
-          CritHIT — формат/флаги/UV/Normal заблокированы (on_crit_hit_selected);
+          CritHIT — формат сужен до alpha-совместимых (DXT5/RGBA8888/DXT3, выбор
+                    доступен); флаги/UV/Normal заблокированы (on_crit_hit_selected);
                     кнопки инструментов недоступны
           Spray   — только 256×256; только форматы с альфа; флаги недоступны;
                     UV/Normal скрыты; кнопки инструментов недоступны
           Hands   — UV скрыт; Normal Map доступен; VMT недоступен; Извлечь модель — доступно
           Тело    — UV скрыт; Normal Map доступен (модель VertexLitGeneric)
         """
-        try:
-            from src.data.player_hands import HAND_MODE_KEYS
-        except ImportError:
-            HAND_MODE_KEYS = frozenset()
-        try:
-            from src.data.player_characters import PLAYER_BODY_MODE_KEYS
-        except ImportError:
-            PLAYER_BODY_MODE_KEYS = frozenset()
-
         is_spray       = (mode == "spray")
         is_crit        = (mode == "critHIT")
+        is_skybox      = (mode == SKYBOX_MODE)
         is_hands       = bool(mode and mode in HAND_MODE_KEYS)
         is_player_body = bool(mode and mode in PLAYER_BODY_MODE_KEYS)
-        is_normal = bool(mode and not is_spray and not is_crit and not is_hands and not is_player_body)
+        is_normal = bool(mode and not is_spray and not is_crit and not is_skybox
+                         and not is_hands and not is_player_body)
 
         lang = 'ru'
         if self.parent and hasattr(self.parent, 'language'):
@@ -652,6 +629,11 @@ class SettingsPanel(QWidget):
             "DXT1 With One Bit Alpha", "BGRA5551", "BGRA4444", "IA88", "A8",
             "RGBA16161616F", "RGBA16161616",
         }
+        # Сужаем список форматов до тех, что реально поддерживает пайплайн этого
+        # режима (источник истины — сервис режима); вне ограничений — полный
+        # набор. Делаем всегда, включая CritHIT: ему нужен полный список, чтобы
+        # on_crit_hit_selected мог выставить DXT5. Enable/tooltip ниже crit не трогают.
+        self._set_format_choices(allowed_formats_for_mode(mode))
         if is_spray:
             if self.format_combo.currentText() not in _ALPHA_FORMATS:
                 self.format_combo.setCurrentText("DXT5")
@@ -660,6 +642,15 @@ class SettingsPanel(QWidget):
                 "Спрей требует формат с альфа-каналом (DXT5)"
                 if lang == 'ru' else
                 "Spray requires an alpha-capable format (DXT5)"
+            )
+        elif is_skybox:
+            # Скайбокс: список сужен до форматов без альфы (DXT1/BGR888),
+            # но выбор между ними остаётся за пользователем.
+            self.format_combo.setEnabled(True)
+            self.format_combo.setToolTip(
+                "Скайбокс: только форматы без альфы (DXT1 / BGR888)"
+                if lang == 'ru' else
+                "Skybox: alpha-free formats only (DXT1 / BGR888)"
             )
         elif not is_crit:
             # CritHIT управляется через on_crit_hit_selected — не трогаем
@@ -674,7 +665,9 @@ class SettingsPanel(QWidget):
             self.flag_nomipmaps, self.flag_nolod, self.flag_nominmipmaps,
         ]
         _opt_attrs = ('option_nothumbnail', 'option_noreflectivity', 'option_gamma')
-        if is_spray:
+        if is_spray or is_skybox:
+            # Skybox: флаги принудительные (CLAMPS/CLAMPT/NOLOD + nomipmaps
+            # внутри SkyboxService) — пользовательские галки не участвуют.
             for w in _flag_widgets:
                 w.setEnabled(False)
             for attr in _opt_attrs:
@@ -731,6 +724,9 @@ class SettingsPanel(QWidget):
                 return spray_ru if lang == 'ru' else spray_en
             if is_crit:
                 return crit_ru if lang == 'ru' else crit_en
+            if is_skybox:
+                return ("Режим скайбокса: модели нет" if lang == 'ru'
+                        else "Skybox mode: no model")
             if is_hands or is_player_body:
                 return hands_ru if lang == 'ru' else hands_en
             return ""
@@ -753,8 +749,9 @@ class SettingsPanel(QWidget):
 
     def on_crit_hit_selected(self, is_crit_hit):
         """Обработка выбора CritHIT режима"""
-        # Отключаем/включаем контролы в зависимости от режима
-        self.format_combo.setEnabled(not is_crit_hit)
+        # Формат остаётся выбираемым: crit-текстура translucent, годятся только
+        # форматы с альфой — список сужаем ниже, но не блокируем (DXT5 по умолч.).
+        self.format_combo.setEnabled(True)
         self.flag_clamps.setEnabled(not is_crit_hit)
         self.flag_clampt.setEnabled(not is_crit_hit)
         self.flag_nomipmaps.setEnabled(not is_crit_hit)
@@ -772,10 +769,22 @@ class SettingsPanel(QWidget):
             self.gamma_value_input.setEnabled(not is_crit_hit and 
                                                (hasattr(self, 'option_gamma') and self.option_gamma.isChecked()))
         self._sync_crit_hit_dependent_controls(is_crit_hit)
-        
-        # Для CritHIT устанавливаем формат DXT5
+
+        # Список форматов: crit → только translucent-совместимые (DXT5/RGBA8888/
+        # DXT3, DXT5 по умолч.); иначе восстанавливаем полный набор.
+        lang = 'ru'
+        if self.parent and hasattr(self.parent, 'language'):
+            lang = self.parent.language
         if is_crit_hit:
-            self.format_combo.setCurrentText("DXT5")
+            self._set_format_choices(allowed_formats_for_mode("critHIT"))
+            self.format_combo.setToolTip(
+                "CritHIT: только форматы с альфа-каналом (DXT5 рекомендуется)"
+                if lang == 'ru' else
+                "CritHIT: alpha-capable formats only (DXT5 recommended)"
+            )
+        else:
+            self._set_format_choices(None)
+            self.format_combo.setToolTip("")
 
     def _sync_crit_hit_dependent_controls(self, is_crit_hit=None) -> None:
         if is_crit_hit is None:
@@ -822,8 +831,6 @@ class SettingsPanel(QWidget):
                 lambda state: self.on_crit_hit_selected(state == Qt.Checked)
             )
             self.on_crit_hit_selected(self.parent.crit_hit_checkbox.isChecked())
-        if hasattr(self, 'clear_cache_button'):
-            self.clear_cache_button.clicked.connect(self._on_clear_cache_clicked)
 
     def _refresh_material_maps_button(self) -> None:
         """Подсветка кнопки + счётчик, если карты заданы."""
@@ -862,8 +869,9 @@ class SettingsPanel(QWidget):
         filename = self.filename_input.text().strip()
         
         if not filename:
-            self.filename_error.setText(self.t['enter_vpk_filename'])
-            self.filename_error.show()
+            # Пустое поле — не показываем нагательное сообщение (placeholder и так
+            # подсказывает). Просто скрываем ошибку и блокируем сборку.
+            self.filename_error.hide()
             self.button.setEnabled(False)
             return False
         
@@ -1029,7 +1037,8 @@ class SettingsPanel(QWidget):
             'tf2_game_folder': tf2_path,
             'export_folder': export_folder,
             'keep_temp_on_error': config.get('keep_temp_files', False),
-            'debug_mode': config.get('debug_mode', False)
+            'debug_mode': config.get('debug_mode', False),
+            'bypass_method': config.get('sv_pure_bypass', 'console'),
         }
     
     def load_config(self):
@@ -1065,41 +1074,6 @@ class SettingsPanel(QWidget):
         """Обработка нажатия кнопки объединения VPK"""
         if hasattr(self.parent, 'merge_vpk_files'):
             self.parent.merge_vpk_files()
-    
-    def _on_clear_cache_clicked(self):
-        """Очищает кэш декомпилированных моделей с подтверждением"""
-        from src.services.decompile_cache import clear_cache, get_cache_size_mb
-        from PySide6.QtWidgets import QMessageBox
-        
-        size_mb = get_cache_size_mb()
-        size_str = f"{size_mb:.1f} MB" if size_mb >= 0.1 else "< 0.1 MB"
-        
-        msg = self.t.get(
-            'clear_cache_confirm',
-            'Clear the model decompile cache?\n\nCache size: {size}\n\n'
-            'The cache speeds up repeated builds of the same weapon.\n'
-            'After clearing, the first build of each weapon will be slower.'
-        ).format(size=size_str)
-        
-        reply = QMessageBox.question(
-            self,
-            self.t.get('clear_decompile_cache', 'Clear Model Cache'),
-            msg,
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
-        )
-        
-        if reply == QMessageBox.Yes:
-            count = clear_cache()
-            ok_msg = self.t.get(
-                'clear_cache_done',
-                'Cache cleared. {count} entries removed.'
-            ).format(count=count)
-            QMessageBox.information(
-                self,
-                self.t.get('clear_decompile_cache', 'Clear Model Cache'),
-                ok_msg
-            )
     
     def open_support_link(self):
         """Открывает ссылку поддержки"""
@@ -1171,11 +1145,7 @@ class SettingsPanel(QWidget):
         # Обновляем кнопку объединения VPK
         if hasattr(self, 'merge_vpk_button'):
             self.merge_vpk_button.setText(self.t.get('merge_vpk', 'Сборка в один'))
-        
-        # Обновляем кнопку очистки кэша
-        if hasattr(self, 'clear_cache_button'):
-            self.clear_cache_button.setText(self.t.get('clear_decompile_cache', 'Clear Model Cache'))
-        
+
         # Перезапускаем валидацию имени файла, если ошибка уже отображается
         if hasattr(self, 'filename_error') and self.filename_error.isVisible():
             self.validate_vpk_name()

@@ -147,5 +147,99 @@ class ParseHatsMulticlassTests(unittest.TestCase):
                          "models/player/items/all_class/basename_spy.mdl")
 
 
+_ITEMS_GAME_CASES = '''
+"items_game"
+{
+    "items"
+    {
+        "900"
+        {
+            "name" "real_hat"
+            "item_name" "#real_hat"
+            "item_slot" "head"
+            "model_player" "models/player/items/all_class/real_hat.mdl"
+        }
+        "901"
+        {
+            "name" "abominable_cosmetic_case"
+            "item_name" "#TF_CosmeticCase"
+            "prefab" "base_cosmetic_case"
+            "tool" { "type" "supply_crate" }
+            "model_player" "models/player/items/crafting/cosmetic_case.mdl"
+        }
+        "902"
+        {
+            "name" "some_weapon_crate"
+            "item_name" "#TF_Crate"
+            "prefab" "eventcratebase"
+            "model_player" "models/player/items/crafting/eventcrate.mdl"
+        }
+    }
+}
+'''
+
+
+class ParseHatsCaseExclusionTests(unittest.TestCase):
+    """Кейсы/ящики/крафт-инструменты не должны попадать в список шапок."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        root = Path(self._tmp.name)
+        items_dir = root / "tf" / "scripts" / "items"
+        items_dir.mkdir(parents=True)
+        (items_dir / "items_game.txt").write_text(_ITEMS_GAME_CASES, encoding="utf-8")
+        self.root = str(root)
+        self._cache_backup = hats_parser._CACHE_FILE
+        hats_parser._CACHE_FILE = root / "cache.json"
+
+    def tearDown(self):
+        hats_parser._CACHE_FILE = self._cache_backup
+        self._tmp.cleanup()
+
+    def test_cases_excluded_hats_kept(self):
+        items = parse_hats(self.root, language="en", force_reparse=True)
+        names = {h.internal_name for h in items}
+        self.assertIn("real_hat", names)
+        self.assertNotIn("abominable_cosmetic_case", names)   # prefab + tool + crafting
+        self.assertNotIn("some_weapon_crate", names)          # prefab crate
+
+
+class HatItemFlagTests(unittest.TestCase):
+    """Флаги для фильтра списка шапок (медали / сезонное)."""
+
+    def _hat(self, **kw):
+        from src.data.hats_parser import HatItem
+        base = dict(defindex="1", name="x", internal_name="x", mdl_path="m",
+                    classes=[], slot="head")
+        base.update(kw)
+        return HatItem(**base)
+
+    def test_is_medal_from_item_type(self):
+        self.assertTrue(self._hat(item_type="#TF_Wearable_CommunityMedal").is_medal)
+        self.assertTrue(self._hat(item_type="#TF_Wearable_TournamentMedal").is_medal)
+        self.assertTrue(self._hat(item_type="#TF_Wearable_Medallion").is_medal)
+        self.assertFalse(self._hat(item_type="#TF_Wearable_Hat").is_medal)
+        self.assertFalse(self._hat().is_medal)
+
+    def test_is_medal_from_prefab_and_item_name(self):
+        # Турнирные медали: item_type_name наследуется через prefab и в блоке
+        # отсутствует — детекция должна ловить их по prefab и по item_name.
+        self.assertTrue(self._hat(prefab="tournament_medal").is_medal)
+        self.assertTrue(self._hat(prefab="etf2l_participation_styles tournament_medal").is_medal)
+        self.assertTrue(self._hat(item_name_token="#TF_TournamentMedal_AFC_Div1_1st").is_medal)
+        self.assertFalse(self._hat(prefab="hat", item_name_token="#Some_Cool_Hat").is_medal)
+
+    def test_halloween_and_holiday(self):
+        h = self._hat(holiday="halloween_or_fullmoon")
+        self.assertTrue(h.is_halloween)
+        self.assertTrue(h.is_holiday)
+        x = self._hat(holiday="christmas")
+        self.assertFalse(x.is_halloween)
+        self.assertTrue(x.is_holiday)
+        n = self._hat()
+        self.assertFalse(n.is_halloween)
+        self.assertFalse(n.is_holiday)
+
+
 if __name__ == "__main__":
     unittest.main()

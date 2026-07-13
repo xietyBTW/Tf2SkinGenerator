@@ -97,8 +97,3 @@ PICKUP_MODE_PREFIX = "pickup_"
 PICKUP_MDL_PATHS: Dict[str, str] = {
     key: data["mdl_path"] for key, data in PICKUPS.items()
 }
-
-
-def get_pickup_name(key: str, language: str = "ru") -> str:
-    data = PICKUPS.get(key, {})
-    return data.get(language, data.get("ru", key))

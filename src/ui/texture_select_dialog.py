@@ -31,12 +31,8 @@ logger = get_logger(__name__)
 
 def _load_accent() -> str:
     """Возвращает цвет акцента текущей темы приложения."""
-    try:
-        from src.config.app_config import AppConfig
-        cfg = AppConfig.load_config()
-        return "#4a90e2" if cfg.get("theme") == "blue" else "#ff6b35"
-    except Exception:
-        return "#ff6b35"
+    from src.utils.themes import get_accent_color
+    return get_accent_color()
 
 
 # ── Фоновый поток: сканирование + загрузка превью ───────────────────────── #
@@ -53,19 +49,22 @@ class _TextureLoader(QThread):
         self._folder   = folder
 
     def run(self) -> None:
-        textures = self._scan_folder()
-        self.scan_complete.emit(textures)
-        if not textures:
-            return
-
+        # Один pak на весь прогон (скан + превью): vpk.open парсит весь индекс
+        # архива, открывать его дважды незачем. Хэндл берём из общего
+        # потоко-локального кэша — закрывать нельзя, им владеет кэш
+        # (освобождается вместе с потоком).
         try:
-            import vpk as vpklib
-            pak = vpklib.open(self._vpk_path)
+            from src.services.vpk_cache import open_vpk_cached
+            pak = open_vpk_cached(self._vpk_path)
         except Exception as exc:
             logger.warning(f"[TextureLoader] Не удалось открыть VPK: {exc}")
-            for _, vtf_name in textures:
-                self.loaded.emit(vtf_name, None)
+            pak = None
+        if pak is None:
+            self.scan_complete.emit([])
             return
+
+        textures = self._scan_folder(pak)
+        self.scan_complete.emit(textures)
 
         for folder, vtf_name in textures:
             if self.isInterruptionRequested():
@@ -73,16 +72,8 @@ class _TextureLoader(QThread):
             px = self._load_one(pak, folder, vtf_name)
             self.loaded.emit(vtf_name, px)
 
-        if hasattr(pak, "close"):
-            try:
-                pak.close()
-            except Exception:
-                pass
-
-    def _scan_folder(self) -> List[Tuple[str, str]]:
+    def _scan_folder(self, pak) -> List[Tuple[str, str]]:
         try:
-            import vpk as vpklib
-            pak    = vpklib.open(self._vpk_path)
             prefix = f"materials/models/player/{self._folder}/"
             out: List[Tuple[str, str]] = []
             for path in pak:
@@ -90,11 +81,6 @@ class _TextureLoader(QThread):
                     rem = path[len(prefix):]
                     if "/" not in rem:
                         out.append((self._folder, rem[:-4]))
-            if hasattr(pak, "close"):
-                try:
-                    pak.close()
-                except Exception:
-                    pass
             out.sort(key=lambda x: x[1])
             logger.info(
                 f"[TextureLoader] Найдено {len(out)} текстур "

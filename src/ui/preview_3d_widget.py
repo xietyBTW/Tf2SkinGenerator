@@ -38,6 +38,7 @@ def _make_js_bridge():
         # data-URL + имя материала (пустая строка = дроп на пустое место)
         texture_dropped  = Signal(str, str)
         per_mesh_applied = Signal()     # дроп на конкретный меш (per-mesh drag)
+        model_loaded     = Signal(int)  # OBJ добавлен в сцену; int = номер загрузки
 
         @Slot(str, str)
         def notifyTextureDrop(self, data_url: str, material_name: str = '') -> None:  # noqa: N802
@@ -48,6 +49,13 @@ def _make_js_bridge():
         def notifyPerMeshApplied(self) -> None:  # noqa: N802
             """Вызывается из JS когда текстура применена к конкретному мешу (per-mesh drag)."""
             self.per_mesh_applied.emit()
+
+        @Slot(int)
+        def notifyModelLoaded(self, load_seq: int = 0) -> None:  # noqa: N802
+            """Вызывается из JS когда модель добавлена в сцену — подтверждение
+            вместо угадывания задержки таймером на Python-стороне. load_seq —
+            номер загрузки (выдан _Real3DWidget), отсеивает устаревшие ack'и."""
+            self.model_loaded.emit(int(load_seq))
 
     return JsBridge()
 
@@ -116,6 +124,9 @@ class _Real3DWidget:
         self._ready = False
         self._pending: Optional[tuple] = None          # (obj_path, tex_path)
         self._lang: str = 'en'
+        # Номер загрузки модели: инкрементируется на каждый loadModelFromContent,
+        # JS возвращает его в notifyModelLoaded — приёмник отсеивает устаревшие.
+        self.load_seq: int = 0
 
         settings = self._view.settings()
         # Разрешаем CDN из локального файла
@@ -338,6 +349,30 @@ class _Real3DWidget:
         js = f"window.updateCritHitTexture({json.dumps(data_url)})"
         self._view.page().runJavaScript(js)
 
+    def load_skybox(self, face_paths: dict) -> None:
+        """Показывает скайбокс фоном сцены (режим «Скайбокс»).
+
+        Args:
+            face_paths: {face: путь к изображению} — все 6 граней из SKY_FACES
+                        (up/dn/lf/rt/ft/bk). VTF/TGA конвертируются автоматически
+                        (_file_to_data_url).
+        """
+        if not self._ready or not face_paths:
+            return
+        faces = {}
+        for face, path in face_paths.items():
+            if path and os.path.exists(path):
+                faces[face] = _file_to_data_url(path)
+        if len(faces) < 6:
+            logger.debug(f"load_skybox: не все грани готовы ({sorted(faces)})")
+            return
+        self._view.page().runJavaScript(f"window.loadSkybox({json.dumps(faces)})")
+
+    def clear_skybox(self) -> None:
+        """Убирает фон-скайбокс (выход из режима «Скайбокс»)."""
+        if self._ready:
+            self._view.page().runJavaScript("window.clearSkybox()")
+
     def show_prompt(self, text: str = "") -> None:
         """Показывает подсказку без спиннера (режим ожидания действия)."""
         if self._ready:
@@ -370,11 +405,13 @@ class _Real3DWidget:
         cx: float, cy: float, cz: float,
         scale: float,
     ) -> None:
+        self.load_seq += 1
         js = (
             f"window.loadModelFromContent("
             f"{json.dumps(obj_content)}, "
             f"{json.dumps(tex_data_url)}, "
-            f"{cx:.6f}, {cy:.6f}, {cz:.6f}, {scale:.6f}"
+            f"{cx:.6f}, {cy:.6f}, {cz:.6f}, {scale:.6f}, "
+            f"{self.load_seq}"
             f")"
         )
         self._view.page().runJavaScript(js)
@@ -423,6 +460,8 @@ class _Fallback3DWidget:
     def load_crithit_scene(self, crit_tex_path: str = "", model_tex_path: str = ""): pass
     def load_crithit_scene_with_model(self, obj_path: str, crit_tex_path: str = "", model_tex_path: str = ""): pass
     def update_crithit_texture(self, *_): pass
+    def load_skybox(self, *_): pass
+    def clear_skybox(self): pass
     def show_loading(self, *_): pass
     def show_error(self, text=""): pass
     def reset(self): pass
@@ -448,6 +487,22 @@ def _file_to_data_url(path: str) -> str:
         '.webp': 'image/webp',
         '.gif':  'image/gif',
     }
+
+    if ext == '.vtf':
+        # PIL не читает VTF — конвертируем через VTFLib (иначе сырые байты
+        # ушли бы в браузер как «PNG» и загрузка упала бы в img.onerror).
+        try:
+            import io
+            from PIL import Image
+            from src.services.vtflib_wrapper import VTFLib
+            rgba, w, h = VTFLib.read_vtf_as_rgba(path)
+            buf = io.BytesIO()
+            Image.frombytes("RGBA", (w, h), rgba).save(buf, format="PNG")
+            b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+            return f"data:image/png;base64,{b64}"
+        except Exception as exc:
+            logger.warning(f"VTF→PNG для 3D viewer не удался ({path}): {exc}")
+            # Падаем в общий PIL-путь ниже (последний шанс).
 
     if ext in _NATIVE:
         mime = _NATIVE[ext]

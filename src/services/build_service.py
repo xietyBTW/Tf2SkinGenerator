@@ -81,7 +81,9 @@ class BuildService:
                 copy_file_safe(edited_vmt_path, vmt_path)
                 logger.info(f"Использован отредактированный VMT файл для специального режима: {edited_vmt_path} -> {vmt_path}")
                 vmt_to_delete = vmt_filename_without_ext
-            elif mod_data_vmt_path.exists():
+            elif mode != "critHIT" and mod_data_vmt_path.exists():
+                # critHIT намеренно исключён: его VMT генерируется из шаблона
+                # (VMTService._create_special_template), а не копируется из tools.
                 copy_file_safe(mod_data_vmt_path, vmt_path)
                 logger.info(f"Использован VMT файл из mod_data: {mod_data_vmt_path} -> {vmt_path}")
             else:
@@ -99,6 +101,17 @@ class BuildService:
             if mode == "critHIT":
                 pcf_filename = "crit.pcf"
                 mod_data_pcf_path = mod_data_base / pcf_filename
+                # Файла Valve нет в репозитории: если его ещё нет в mod_data —
+                # генерируем цветной crit.pcf из стокового particles/crit.pcf
+                # установленной у пользователя TF2 (см. CritPcfService).
+                if not mod_data_pcf_path.exists():
+                    try:
+                        from src.services.crit_pcf_service import CritPcfService
+                        from src.config.app_config import AppConfig
+                        tf2_root = AppConfig.get_tf2_game_folder()
+                        CritPcfService.ensure_colored_crit_pcf(tf2_root, mod_data_pcf_path)
+                    except Exception as e:
+                        logger.warning(f"Не удалось сгенерировать crit.pcf: {e}", exc_info=True)
                 if mod_data_pcf_path.exists():
                     pcf_output_path = ctx.vpkroot_dir / "particles"
                     ensure_directory_exists(pcf_output_path)
@@ -106,7 +119,10 @@ class BuildService:
                     copy_file_safe(mod_data_pcf_path, pcf_dest_path)
                     logger.info(f"Скопирован PCF файл: {mod_data_pcf_path} -> {pcf_dest_path}")
                 else:
-                    logger.warning(f"PCF файл не найден: {mod_data_pcf_path}")
+                    logger.warning(
+                        f"PCF файл не найден и не сгенерирован: {mod_data_pcf_path} "
+                        "(укажите путь к TF2 в настройках и установите srctools)"
+                    )
             success_msg = t.get('special_mode_success', 'Special mode textures created successfully')
             return True, success_msg, vmt_to_delete
         except Exception as e:

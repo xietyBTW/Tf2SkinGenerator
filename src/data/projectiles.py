@@ -112,8 +112,3 @@ PROJECTILE_MODE_PREFIX = "projectile_"
 PROJECTILE_MDL_PATHS: Dict[str, str] = {
     key: data["mdl_path"] for key, data in PROJECTILES.items()
 }
-
-
-def get_projectile_name(key: str, language: str = "ru") -> str:
-    data = PROJECTILES.get(key, {})
-    return data.get(language, data.get("ru", key))

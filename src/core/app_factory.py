@@ -72,9 +72,30 @@ class AppFactory:
             logger.debug(f"Не удалось задать AppUserModelID: {e}")
 
     @staticmethod
+    def _start_temp_cleanup() -> None:
+        """Фоновая уборка устаревших temp-артефактов (3D-превью и т.п.).
+
+        В отдельном daemon-потоке, чтобы не задерживать старт: папок может
+        накопиться много, а результат уборки для запуска не нужен.
+        """
+        import threading
+
+        def _cleanup() -> None:
+            try:
+                from src.shared.file_utils import cleanup_stale_temp_artifacts
+                removed = cleanup_stale_temp_artifacts()
+                if removed:
+                    logger.info(f"Удалено устаревших temp-артефактов: {removed}")
+            except Exception as e:
+                logger.debug(f"Уборка temp-артефактов не удалась: {e}")
+
+        threading.Thread(target=_cleanup, name="temp-cleanup", daemon=True).start()
+
+    @staticmethod
     def create_app(apply_theme: bool = True) -> QApplication:
         AppFactory.setup_working_directory()
         AppFactory._set_windows_app_id()
+        AppFactory._start_temp_cleanup()
 
         app = QApplication(sys.argv)
         logger.info("QApplication создан")

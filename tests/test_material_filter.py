@@ -46,25 +46,32 @@ class DefaultBlacklistTests(unittest.TestCase):
 
 
 class UserBlacklistTests(unittest.TestCase):
+    """Пользовательский ЧС теперь отдельная роль: is_user_blacklisted скрывает
+    карточку, но НЕ меняет класс материала (is_editable_material — только дефолты)."""
+
     def test_substring_user_pattern(self):
         with _with_user_patterns(["myglow"]):
-            self.assertFalse(mf.is_editable_material("hat_myglow"))
-            self.assertTrue(mf.is_editable_material("c_scattergun"))
+            self.assertTrue(mf.is_user_blacklisted("hat_myglow"))
+            self.assertFalse(mf.is_user_blacklisted("c_scattergun"))
+            # Класс «основная/служебная» от пользовательского ЧС не зависит.
+            self.assertTrue(mf.is_editable_material("hat_myglow"))
 
     def test_exact_user_pattern(self):
         # '=' → точное имя, без ложных подстрок
         with _with_user_patterns(["=sniper_lens"]):
-            self.assertFalse(mf.is_editable_material("sniper_lens"))
-            self.assertTrue(mf.is_editable_material("sniper_lens_red"))
+            self.assertTrue(mf.is_user_blacklisted("sniper_lens"))
+            self.assertFalse(mf.is_user_blacklisted("sniper_lens_red"))
 
     def test_case_insensitive(self):
         with _with_user_patterns(["FooBar"]):
-            self.assertFalse(mf.is_editable_material("xx_foobar_yy"))
+            self.assertTrue(mf.is_user_blacklisted("xx_foobar_yy"))
 
     def test_defaults_still_apply_with_user(self):
         with _with_user_patterns(["custom"]):
+            # Дефолтный классификатор: служебные остаются служебными.
             self.assertFalse(mf.is_editable_material("eyeball_l"))
-            self.assertFalse(mf.is_editable_material("a_custom_b"))
+            # Пользовательский ЧС: скрывает по своему паттерну.
+            self.assertTrue(mf.is_user_blacklisted("a_custom_b"))
 
     def test_missing_config_key_safe(self):
         with mock.patch(
@@ -73,6 +80,7 @@ class UserBlacklistTests(unittest.TestCase):
         ):
             self.assertTrue(mf.is_editable_material("c_scattergun"))
             self.assertFalse(mf.is_editable_material("eyeball_l"))
+            self.assertFalse(mf.is_user_blacklisted("anything"))
 
 
 class PatternsArgumentTests(unittest.TestCase):
@@ -83,15 +91,13 @@ class PatternsArgumentTests(unittest.TestCase):
             self.assertTrue(mf.is_editable_material("anything", patterns=["other"]))
         m_patterns.assert_not_called()
 
-    def test_filter_editable_loads_patterns_once(self):
-        """filter_editable загружает паттерны один раз на проход, не на каждый материал."""
-        with mock.patch.object(
-            mf, "get_blacklist_patterns",
-            return_value=list(mf.DEFAULT_NON_EDITABLE_PATTERNS),
-        ) as m_patterns:
+    def test_filter_editable_defaults_only(self):
+        """filter_editable классифицирует ТОЛЬКО по дефолтам; пользовательский ЧС
+        не влияет на класс (c_scattergun в ЧС остаётся редактируемым)."""
+        with _with_user_patterns(["c_scattergun"]):
             result = mf.filter_editable(["c_scattergun", "eyeball_l", "c_arrow"])
+        # eyeball_l — служебный (дефолт) → убран; c_scattergun остаётся.
         self.assertEqual(result, ["c_scattergun", "c_arrow"])
-        m_patterns.assert_called_once()
 
 
 if __name__ == "__main__":
