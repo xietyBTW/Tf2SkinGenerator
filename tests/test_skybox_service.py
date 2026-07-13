@@ -334,3 +334,111 @@ class BuildRoutingTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _make_animated_pano(path: str, frames: int = 3, w: int = 64, h: int = 32) -> None:
+    """Простая анимированная equirect-панорама (GIF, кадры разного цвета)."""
+    imgs = [Image.new("RGB", (w, h), (40 + i * 30, 60, 90)) for i in range(frames)]
+    imgs[0].save(path, save_all=True, append_images=imgs[1:], duration=100, loop=0)
+
+
+class AnimatedSkyboxTests(unittest.TestCase):
+    """Анимированные грани: нарезка анимированной панорамы + умный VMT
+    (UnlitGeneric+AnimatedTexture только для анимированных граней)."""
+
+    def _run_build(self, request, tmp):
+        captured = {}
+
+        def fake_create_vtf(png_path, out_dir, fmt, flags, options=None):
+            (Path(out_dir) / f"{Path(png_path).stem}.vtf").write_bytes(b"VTF0")
+
+        def fake_create_animated_vtf(input_path, output_file, size, fmt,
+                                     flags, options=None):
+            Path(output_file).write_bytes(b"VTF0")
+            return 24  # fps
+
+        def fake_pack(ctx, filename, export_folder, language="en"):
+            root = ctx.vpkroot_dir
+            captured["vmt_texts"] = {
+                p.name: p.read_text(encoding="utf-8")
+                for p in root.rglob("*.vmt")}
+            captured["files"] = sorted(
+                str(p.relative_to(root)).replace("\\", "/")
+                for p in root.rglob("*") if p.is_file())
+            return os.path.join(export_folder, filename)
+
+        def fake_ctx_create(mode, weapon_key, base_temp_dir=None, debug_mode=False):
+            ctx = BuildContext("test_id", mode, weapon_key, Path(tmp) / "ctx")
+            ctx.create_directories()
+            return ctx
+
+        with patch("src.services.texture_service.TextureService.create_vtf",
+                   side_effect=fake_create_vtf), \
+             patch("src.services.texture_service.TextureService.create_animated_vtf",
+                   side_effect=fake_create_animated_vtf), \
+             patch("src.services.packaging_service.PackagingService.create_vpk_file",
+                   side_effect=fake_pack), \
+             patch("src.services.build_context.BuildContext.create",
+                   side_effect=fake_ctx_create):
+            ok, msg = SkyboxService.build_skybox_vpk(request)
+        return ok, msg, captured
+
+    def test_animated_split_produces_apng_faces(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            pano = os.path.join(tmp, "p.gif")
+            _make_animated_pano(pano, frames=4)
+            out = os.path.join(tmp, "faces")
+            faces = SkyboxService.split_equirect_animated_to_faces(pano, 32, out)
+            self.assertEqual(set(faces), set(SKY_FACES))
+            for path in faces.values():
+                with Image.open(path) as im:
+                    self.assertEqual(im.n_frames, 4)     # все кадры сохранены
+                    self.assertEqual(im.size, (32, 32))  # квадрат face_size
+
+    def test_animated_panorama_writes_proxy_vmts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            pano = os.path.join(tmp, "anim_pano.gif")
+            _make_animated_pano(pano, frames=3)
+            req = _build_request(tmp, image_path=pano)
+            ok, msg, cap = self._run_build(req, tmp)
+            self.assertTrue(ok, msg)
+            self.assertEqual(
+                len([f for f in cap["files"] if f.endswith(".vtf")]), 6)
+            up = cap["vmt_texts"]["sky_a_01up.vmt"]
+            self.assertIn('"UnlitGeneric"', up)
+            self.assertIn('"AnimatedTexture"', up)
+            self.assertIn('"animatedTextureFrameRate" "24"', up)
+            self.assertIn('"$hdrbasetexture" "skybox/test_skyup"', up)
+            # HDR-клон идентичен
+            self.assertEqual(up, cap["vmt_texts"]["sky_a_01_hdrup.vmt"])
+
+    def test_mixed_uses_uniform_unlit_shader(self):
+        """Смешанный скайбокс: анимирована одна грань → ВСЕ грани на UnlitGeneric
+        (единый шейдер, без стыка sky/UnlitGeneric). Статичная грань — БЕЗ
+        анимационных параметров (требование «ничего лишнего не добавляем»)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            anim = os.path.join(tmp, "anim_up.gif")
+            _make_animated_pano(anim, frames=3)
+            # Статичная панорама (по умолчанию) + анимированный оверрайд только up.
+            req = _build_request(tmp, skybox_face_overrides={"up": anim})
+            ok, msg, cap = self._run_build(req, tmp)
+            self.assertTrue(ok, msg)
+            up = cap["vmt_texts"]["sky_a_01up.vmt"]
+            self.assertIn('"UnlitGeneric"', up)
+            self.assertIn('"AnimatedTexture"', up)       # анимированная грань
+            ft = cap["vmt_texts"]["sky_a_01ft.vmt"]
+            self.assertIn('"UnlitGeneric"', ft)          # единый шейдер
+            self.assertNotIn('"sky"', ft)                # не разнородный
+            self.assertNotIn("AnimatedTexture", ft)      # без анимац. параметров
+            self.assertNotIn("$frame", ft)
+
+    def test_fully_static_stays_sky_shader(self):
+        """Без анимации — нативный шейдер sky на всех гранях (UnlitGeneric не навязываем)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            req = _build_request(tmp)   # статичная панорама
+            ok, msg, cap = self._run_build(req, tmp)
+            self.assertTrue(ok, msg)
+            for face in SKY_FACES:
+                vmt = cap["vmt_texts"][f"sky_a_01{face}.vmt"]
+                self.assertTrue(vmt.startswith('"sky"'))
+                self.assertNotIn("UnlitGeneric", vmt)

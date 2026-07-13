@@ -34,6 +34,45 @@ _SKY_VMT_TEMPLATE = (
     '}}\n'
 )
 
+# Шаблон VMT АНИМИРОВАННОЙ грани. Шейдер sky не обрабатывает material-прокси,
+# поэтому для анимации переключаемся на UnlitGeneric + прокси AnimatedTexture
+# (проверенный рецепт TF2-сообщества). $hdrbasetexture указывает на тот же VTF —
+# иначе HDR-клиенты видят стоковое небо/неверный цвет. Пишется ТОЛЬКО для граней,
+# чьё исходное изображение реально анимировано (у статичных остаётся шейдер sky).
+_SKY_VMT_ANIMATED_TEMPLATE = (
+    '"UnlitGeneric"\n'
+    '{{\n'
+    '\t"$basetexture" "skybox/{stem}{face}"\n'
+    '\t"$hdrbasetexture" "skybox/{stem}{face}"\n'
+    '\t"$nofog" "1"\n'
+    '\t"$ignorez" "1"\n'
+    '\t"Proxies"\n'
+    '\t{{\n'
+    '\t\t"AnimatedTexture"\n'
+    '\t\t{{\n'
+    '\t\t\t"animatedTextureVar" "$basetexture"\n'
+    '\t\t\t"animatedTextureFrameNumVar" "$frame"\n'
+    '\t\t\t"animatedTextureFrameRate" "{fps}"\n'
+    '\t\t}}\n'
+    '\t}}\n'
+    '}}\n'
+)
+
+# Статичная грань, но на шейдере UnlitGeneric (без прокси). Нужна, когда в
+# скайбоксе есть хоть одна анимированная грань: весь куб рендерится одним
+# шейдером, иначе на стыке статичной sky-грани и анимированной UnlitGeneric-грани
+# возможна разница в тоне. Анимационных параметров тут нет — только базовый
+# материал (требование «у статичной грани ничего анимационного не добавляем»).
+_SKY_VMT_UNLIT_STATIC_TEMPLATE = (
+    '"UnlitGeneric"\n'
+    '{{\n'
+    '\t"$basetexture" "skybox/{stem}{face}"\n'
+    '\t"$hdrbasetexture" "skybox/{stem}{face}"\n'
+    '\t"$nofog" "1"\n'
+    '\t"$ignorez" "1"\n'
+    '}}\n'
+)
+
 # Префикс материалов неба внутри VPK (ключи vpk — lowercase, прямые слеши).
 _SKYBOX_VPK_PREFIX = "materials/skybox/"
 
@@ -87,6 +126,53 @@ class SkyboxService:
         return result
 
     @staticmethod
+    def _face_sample_map(face: str, w: int, h: int, face_size: int):
+        """Координаты билинейной выборки грани из equirect-панорамы w×h.
+
+        Зависят ТОЛЬКО от геометрии грани и размеров панорамы (не от пикселей) —
+        поэтому для анимации считаются один раз и переиспользуются на всех кадрах.
+        Центр панорамы → центр грани ft; вправо по панораме = поворот вправо
+        (ft → lf → bk → rt). Заворот по долготе (шов), зажим по широте (полюса).
+        Возвращает (y0, x0, y1, x1, tx, ty). numpy лениво — нужен только здесь.
+        """
+        import numpy as np
+        # Центры пикселей грани: u вправо, v вверх, оба в [-1..1].
+        a = (np.arange(face_size, dtype=np.float32) + 0.5) / face_size * 2.0 - 1.0
+        vv, uu = np.meshgrid(-a, a, indexing="ij")   # строка 0 = верх (v=+1)
+        fwd, right, up = (np.asarray(b, dtype=np.float32) for b in FACE_BASES[face])
+        d = (fwd[None, None, :]
+             + uu[..., None] * right[None, None, :]
+             + vv[..., None] * up[None, None, :])
+        d /= np.linalg.norm(d, axis=-1, keepdims=True)
+
+        lon = np.arctan2(d[..., 1], d[..., 0])          # +Y = влево от ft
+        lat = np.arcsin(np.clip(d[..., 2], -1.0, 1.0))
+        # Вправо по панораме — поворот вправо (убывание lon от центра +X).
+        xf = (0.5 - lon / (2.0 * np.pi)) * w - 0.5
+        yf = (0.5 - lat / np.pi) * h - 0.5
+
+        x0 = np.floor(xf).astype(np.int64)
+        y0 = np.floor(yf).astype(np.int64)
+        tx = (xf - x0)[..., None]
+        ty = (yf - y0)[..., None]
+        x0 %= w
+        x1 = (x0 + 1) % w                                # шов — заворот
+        # Полюса — зажим; y1 от НЕзажатого y0, иначе у верхнего полюса
+        # (y0 = -1) подмешивалась бы строка 1 вместо повтора строки 0.
+        y1 = np.clip(y0 + 1, 0, h - 1)
+        y0 = np.clip(y0, 0, h - 1)
+        return y0, x0, y1, x1, tx, ty
+
+    @staticmethod
+    def _gather_face(src, sample_map):
+        """Билинейно собирает грань из RGB-массива src по готовым координатам."""
+        y0, x0, y1, x1, tx, ty = sample_map
+        top = src[y0, x0] * (1 - tx) + src[y0, x1] * tx
+        bot = src[y1, x0] * (1 - tx) + src[y1, x1] * tx
+        import numpy as np
+        return (top * (1 - ty) + bot * ty).round().astype(np.uint8)
+
+    @staticmethod
     def split_equirect_to_faces(equirect_path: str, face_size: int,
                                 out_dir: str,
                                 cancel_callback=None) -> Dict[str, str]:
@@ -94,11 +180,6 @@ class SkyboxService:
         Режет equirectangular-панораму (2:1, как фото 360°) на 6 квадратных
         граней Source-скайбокса. Возвращает {грань: путь к PNG} (неполный,
         если cancel_callback вернул True между гранями).
-
-        Центр панорамы попадает в центр грани ft; движение вправо по панораме —
-        поворот вправо (ft → lf → bk → rt, калиброванная цепочка). Билинейная
-        выборка с заворотом по долготе (шов панорамы) и зажимом по широте
-        (полюса). numpy импортируется лениво — нужен только этой функции.
         """
         import numpy as np
         from PIL import Image
@@ -107,45 +188,60 @@ class SkyboxService:
         src = np.asarray(Image.open(equirect_path).convert("RGB"), dtype=np.float32)
         h, w = src.shape[:2]
 
-        # Центры пикселей грани: u вправо, v вверх, оба в [-1..1].
-        a = (np.arange(face_size, dtype=np.float32) + 0.5) / face_size * 2.0 - 1.0
-        vv, uu = np.meshgrid(-a, a, indexing="ij")   # строка 0 = верх (v=+1)
-
         result: Dict[str, str] = {}
         for face in SKY_FACES:
             if cancel_callback and cancel_callback():
                 return result
-            fwd, right, up = (np.asarray(b, dtype=np.float32)
-                              for b in FACE_BASES[face])
-            d = (fwd[None, None, :]
-                 + uu[..., None] * right[None, None, :]
-                 + vv[..., None] * up[None, None, :])
-            d /= np.linalg.norm(d, axis=-1, keepdims=True)
-
-            lon = np.arctan2(d[..., 1], d[..., 0])          # +Y = влево от ft
-            lat = np.arcsin(np.clip(d[..., 2], -1.0, 1.0))
-            # Вправо по панораме — поворот вправо (убывание lon от центра +X).
-            xf = (0.5 - lon / (2.0 * np.pi)) * w - 0.5
-            yf = (0.5 - lat / np.pi) * h - 0.5
-
-            x0 = np.floor(xf).astype(np.int64)
-            y0 = np.floor(yf).astype(np.int64)
-            tx = (xf - x0)[..., None]
-            ty = (yf - y0)[..., None]
-            x0 %= w
-            x1 = (x0 + 1) % w                                # шов — заворот
-            # Полюса — зажим; y1 от НЕзажатого y0, иначе у верхнего полюса
-            # (y0 = -1) подмешивалась бы строка 1 вместо повтора строки 0.
-            y1 = np.clip(y0 + 1, 0, h - 1)
-            y0 = np.clip(y0, 0, h - 1)
-
-            top = src[y0, x0] * (1 - tx) + src[y0, x1] * tx
-            bot = src[y1, x0] * (1 - tx) + src[y1, x1] * tx
-            out = (top * (1 - ty) + bot * ty).round().astype(np.uint8)
-
+            smap = SkyboxService._face_sample_map(face, w, h, face_size)
+            out = SkyboxService._gather_face(src, smap)
             path = os.path.join(out_dir, f"{face}.png")
             Image.fromarray(out).save(path)
             result[face] = path
+        return result
+
+    @staticmethod
+    def split_equirect_animated_to_faces(equirect_path: str, face_size: int,
+                                         out_dir: str,
+                                         cancel_callback=None) -> Dict[str, str]:
+        """
+        Режет АНИМИРОВАННУЮ equirect-панораму (GIF/APNG) на 6 анимированных граней
+        (APNG, без потери цвета). Возвращает {грань: путь к APNG}; {} при отмене.
+
+        Та же математика проекции, что у статичной нарезки → грани сходятся на
+        стыках так же. Карты выборки считаются ОДИН раз (не зависят от кадра),
+        далее на каждом кадре — только дешёвая билинейная сборка.
+
+        ponytail: держит все кадры×6 граней PIL-картинок в памяти
+        (≈ frames·6·face_size²·3 Б). Для типичной панорамы (десятки кадров) ок;
+        upgrade path — стриминг во временные файлы, если пойдут OOM на 4K×сотни кадров.
+        """
+        import numpy as np
+        from PIL import Image, ImageSequence
+
+        os.makedirs(out_dir, exist_ok=True)
+        im = Image.open(equirect_path)
+        w, h = im.size
+        smaps = {f: SkyboxService._face_sample_map(f, w, h, face_size)
+                 for f in SKY_FACES}
+        per_face: Dict[str, list] = {f: [] for f in SKY_FACES}
+        durations: List[int] = []
+        for frame in ImageSequence.Iterator(im):
+            if cancel_callback and cancel_callback():
+                return {}
+            durations.append(int(frame.info.get("duration", 0)
+                                 or im.info.get("duration", 0) or 100))
+            arr = np.asarray(frame.convert("RGB"), dtype=np.float32)
+            for f in SKY_FACES:
+                per_face[f].append(Image.fromarray(
+                    SkyboxService._gather_face(arr, smaps[f])))
+
+        result: Dict[str, str] = {}
+        for f in SKY_FACES:
+            frames = per_face[f]
+            path = os.path.join(out_dir, f"{f}.png")   # APNG (full-colour)
+            frames[0].save(path, save_all=True, append_images=frames[1:],
+                           duration=durations, loop=0, format="PNG")
+            result[f] = path
         return result
 
     # ═══════════════════════════════════════════════════════════════════════ #
@@ -225,10 +321,17 @@ class SkyboxService:
             sources: Dict[str, str] = {}
             if request.image_path and os.path.isfile(request.image_path):
                 sub(-1, t.get('build_skybox_split', 'Splitting panorama...'))
-                sources = SkyboxService.split_equirect_to_faces(
-                    request.image_path, face_size,
-                    str(ctx.temp_dir / "sky_faces"),
-                    cancel_callback=cancel_callback)
+                # Анимированная панорама (GIF/APNG) → анимированные грани;
+                # обычная — статичные PNG. Выбор по самому файлу, без доп. опции.
+                _faces_dir = str(ctx.temp_dir / "sky_faces")
+                if TextureService.is_animated_image(request.image_path):
+                    sources = SkyboxService.split_equirect_animated_to_faces(
+                        request.image_path, face_size, _faces_dir,
+                        cancel_callback=cancel_callback)
+                else:
+                    sources = SkyboxService.split_equirect_to_faces(
+                        request.image_path, face_size, _faces_dir,
+                        cancel_callback=cancel_callback)
                 if cancelled():
                     ctx.cleanup(on_error=True,
                                 keep_on_error=request.keep_temp_on_error,
@@ -247,6 +350,11 @@ class SkyboxService:
                                     'Load a panorama or all 6 face textures.')
 
             # ── 6 VTF (общие для всех небес) ──────────────────────────────── #
+            # animated_faces: {грань: fps} — только реально анимированные грани.
+            # Пустой словарь ⇒ ни одной анимации ⇒ все VMT остаются на шейдере sky.
+            animated_faces: Dict[str, int] = {}
+            _vtf_flags = ["CLAMPS", "CLAMPT", "NOLOD"]
+            _vtf_opts = {"nomipmaps": True, "nothumbnail": True}
             for i, face in enumerate(SKY_FACES):
                 if cancelled():
                     ctx.cleanup(on_error=True,
@@ -256,33 +364,52 @@ class SkyboxService:
                 sub(int(i / len(SKY_FACES) * 70),
                     t.get('build_skybox_faces', 'Building sky faces...'))
                 src = sources[face]
+                out_vtf = sky_dir / f"{stem}{face}.vtf"
                 if src.lower().endswith('.vtf'):
                     # Готовый VTF пользователя — как есть (флаги/формат его).
-                    copy_file_safe(src, sky_dir / f"{stem}{face}.vtf")
+                    copy_file_safe(src, out_vtf)
+                    continue
+                if TextureService.is_animated_image(src):
+                    # Многокадровый VTF. create_animated_vtf возвращает fps (из
+                    # длительности кадров) и внутри трактует как alpha → DXT1
+                    # станет DXT5; BGR888 остаётся BGR888 (обе без реальной альфы).
+                    fps = TextureService.create_animated_vtf(
+                        src, str(out_vtf), (face_size, face_size),
+                        format_type, _vtf_flags, _vtf_opts)
+                    animated_faces[face] = int(fps or 24)
                     continue
                 png = sky_dir / f"{stem}{face}.png"
                 SkyboxService._normalize_face_to_square(
                     src, str(png), face_size, face=face)
                 TextureService.create_vtf(
-                    str(png), str(sky_dir), format_type,
-                    ["CLAMPS", "CLAMPT", "NOLOD"],
-                    {"nomipmaps": True, "nothumbnail": True},
-                )
+                    str(png), str(sky_dir), format_type, _vtf_flags, _vtf_opts)
                 if png.exists():
                     png.unlink()
 
             # ── VMT на каждое небо × грань (LDR + HDR) ────────────────────── #
             sub(80, t.get('build_skybox_vmts', 'Writing sky materials...'))
+            # Если анимирована хоть одна грань — весь куб на UnlitGeneric (один
+            # шейдер, без стыка sky/UnlitGeneric); статичные грани без прокси.
+            # Полностью статичный скайбокс остаётся на нативном шейдере sky.
+            _has_animation = bool(animated_faces)
             for sky in request.skybox_sky_names:
                 for face in SKY_FACES:
-                    content = _SKY_VMT_TEMPLATE.format(stem=stem, face=face)
+                    if face in animated_faces:
+                        content = _SKY_VMT_ANIMATED_TEMPLATE.format(
+                            stem=stem, face=face, fps=animated_faces[face])
+                    elif _has_animation:
+                        content = _SKY_VMT_UNLIT_STATIC_TEMPLATE.format(
+                            stem=stem, face=face)
+                    else:
+                        content = _SKY_VMT_TEMPLATE.format(stem=stem, face=face)
                     for name in (f"{sky}{face}.vmt", f"{sky}_hdr{face}.vmt"):
                         with open(sky_dir / name, 'w', encoding='utf-8') as f:
                             f.write(content)
             logger.info(
                 f"[SKYBOX] {len(SKY_FACES)} VTF ({stem}*) + "
                 f"{len(request.skybox_sky_names) * len(SKY_FACES) * 2} VMT "
-                f"({len(request.skybox_sky_names)} небес)")
+                f"({len(request.skybox_sky_names)} небес; "
+                f"анимированных граней: {len(animated_faces)})")
 
             sub(90, t.get('build_packaging', 'Packaging VPK...'))
             vpk_path = PackagingService.create_vpk_file(

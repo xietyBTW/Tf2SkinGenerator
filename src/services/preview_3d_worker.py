@@ -860,11 +860,11 @@ class Preview3DWorker(BaseWorker):
                             vmt_raw = pak[ex["vmt"]].read()
                         except KeyError:
                             continue
-                        base = self._parse_basetexture_from_vmt(
+                        base = GameVpkReader.parse_basetexture(
                             vmt_raw.decode("utf-8", errors="replace"))
                         if base:
                             for pak2 in paks:
-                                data = self._find_vtf_for_basetexture(pak2, base)
+                                data = GameVpkReader.find_vtf_in_pak(pak2, base)
                                 if data:
                                     break
                         if data:
@@ -1003,14 +1003,14 @@ class Preview3DWorker(BaseWorker):
         """
         mat_lower = mat_name.lower()
         for pak in paks:
-            info = self._find_vmt_content_in_vpk(pak, cdmaterials, mat_lower)
+            info = GameVpkReader.find_vmt_in_pak(pak, cdmaterials, mat_lower)
             if not info:
                 continue
-            base = self._parse_basetexture_from_vmt(info[1])
+            base = GameVpkReader.parse_basetexture(info[1])
             if not base:
                 continue
             for pak2 in paks:
-                data = self._find_vtf_for_basetexture(pak2, base)
+                data = GameVpkReader.find_vtf_in_pak(pak2, base)
                 if data:
                     logger.debug(f"[3D] '{mat_name}' резолвлен через VMT → {base}")
                     return data
@@ -1180,15 +1180,15 @@ class Preview3DWorker(BaseWorker):
                 # ── Метод 2: VMT → $baseTexture → VTF ────────────────────── #
                 if not vtf_data and cdmaterials:
                     for pak in paks:
-                        vmt_info = self._find_vmt_content_in_vpk(
+                        vmt_info = GameVpkReader.find_vmt_in_pak(
                             pak, cdmaterials, tex_lower
                         )
                         if vmt_info:
                             _, vmt_content = vmt_info
-                            basetexture = self._parse_basetexture_from_vmt(vmt_content)
+                            basetexture = GameVpkReader.parse_basetexture(vmt_content)
                             if basetexture:
                                 for pak2 in paks:
-                                    vtf_data = self._find_vtf_for_basetexture(
+                                    vtf_data = GameVpkReader.find_vtf_in_pak(
                                         pak2, basetexture
                                     )
                                     if vtf_data:
@@ -1279,21 +1279,6 @@ class Preview3DWorker(BaseWorker):
             return None, None
 
     # ── VMT-поиск: QC → VMT → $baseTexture → VTF ────────────────────────── #
-    # Логика живёт в GameVpkReader (единый источник). Эти статики оставлены
-    # тонкими делегатами: их зовут из множества мест внутри воркера и из UI.
-
-    @staticmethod
-    def _find_vmt_content_in_vpk(pak, cdmaterials: list, mat_name: str) -> Optional[tuple]:
-        return GameVpkReader.find_vmt_in_pak(pak, cdmaterials, mat_name)
-
-    @staticmethod
-    def _parse_basetexture_from_vmt(vmt_content: str) -> Optional[str]:
-        return GameVpkReader.parse_basetexture(vmt_content)
-
-    @staticmethod
-    def _find_vtf_for_basetexture(pak, basetexture: str) -> Optional[bytes]:
-        return GameVpkReader.find_vtf_in_pak(pak, basetexture)
-
     def _vtf_data_to_png(self, vtf_data: bytes, name: str) -> Optional[str]:
         """
         Сохраняет VTF-байты как PNG в preview_dir.
@@ -1347,7 +1332,7 @@ class Preview3DWorker(BaseWorker):
             # ── Ищем VMT в любом из открытых VPK ─────────────────────── #
             vmt_info = None
             for pak in paks:
-                vmt_info = self._find_vmt_content_in_vpk(pak, cdmaterials, mat_lower)
+                vmt_info = GameVpkReader.find_vmt_in_pak(pak, cdmaterials, mat_lower)
                 if vmt_info:
                     break
 
@@ -1358,7 +1343,7 @@ class Preview3DWorker(BaseWorker):
                 continue
 
             vmt_path, vmt_content = vmt_info
-            basetexture = self._parse_basetexture_from_vmt(vmt_content)
+            basetexture = GameVpkReader.parse_basetexture(vmt_content)
             if not basetexture:
                 logger.warning(f"[3D] $baseTexture не найден в VMT: {vmt_path}")
                 continue
@@ -1366,7 +1351,7 @@ class Preview3DWorker(BaseWorker):
             # ── Ищем VTF в любом из открытых VPK ─────────────────────── #
             vtf_data = None
             for pak in paks:
-                vtf_data = self._find_vtf_for_basetexture(pak, basetexture)
+                vtf_data = GameVpkReader.find_vtf_in_pak(pak, basetexture)
                 if vtf_data:
                     break
 
@@ -1622,13 +1607,13 @@ class Preview3DWorker(BaseWorker):
 
             # Если прямой путь не нашёл — пробуем через VMT → $baseTexture
             for pak in paks:
-                vmt_info = self._find_vmt_content_in_vpk(pak, cdmaterials, tex_lower)
+                vmt_info = GameVpkReader.find_vmt_in_pak(pak, cdmaterials, tex_lower)
                 if vmt_info:
                     _, vmt_content = vmt_info
-                    basetexture = self._parse_basetexture_from_vmt(vmt_content)
+                    basetexture = GameVpkReader.parse_basetexture(vmt_content)
                     if basetexture:
                         for pak2 in paks:
-                            data = self._find_vtf_for_basetexture(pak2, basetexture)
+                            data = GameVpkReader.find_vtf_in_pak(pak2, basetexture)
                             if data:
                                 logger.info(
                                     f"[3D] RED texture via QC→VMT: {basetexture}"

@@ -6,15 +6,13 @@ import os
 import shutil
 from pathlib import Path
 from dataclasses import dataclass
-from typing import Tuple, List, Optional, Callable
-from .build_context import BuildContext, TextureBuildContext
+from typing import Tuple, Optional, Callable
+from .build_context import BuildContext
 from .build_request import BuildRequest
-from .vmt_service import VMTService
 from .build_service import BuildService
 from .texture_service import TextureService
 from .packaging_service import PackagingService
 from .model_service import ModelService
-from .tf2_vpk_extract_service import TF2VPKExtractService
 from .model_build_service import ModelBuildService
 from .vpk_texture_builder import VpkTextureBuilder
 from .vpk_model_pipeline import VpkModelPipeline
@@ -875,7 +873,7 @@ class VPKService:
             return _fail((False, _decomp_error))
 
         if draw_uv_layout:
-            VPKService._generate_uv_layout(ctx, weapon_key, size, export_folder, language)
+            ModelService.generate_uv_layout(ctx, weapon_key, size, export_folder, language)
 
         # Удаляем LOD файлы до кэширования — чтобы в кэше лежали уже чистые файлы
         ModelBuildService.remove_lod_files(ctx.decompile_dir)
@@ -1234,7 +1232,7 @@ class VPKService:
             if weapon_key in _MAT_ONLY:
                 logger.info(f"[{weapon_key}] Material-only: модель в мод не включается (console сохраняется)")
             else:
-                VPKService._copy_compiled_models_to_vpkroot(ctx, qc_path)
+                ModelService.copy_compiled_models_to_vpkroot(ctx, qc_path)
 
             # Мультиклассовая шапка с заменой модели: собираем модель для
             # ОСТАЛЬНЫХ выбранных классов (основная сборка делает только один).
@@ -1365,7 +1363,7 @@ class VPKService:
         ctx = None
         try:
             # Проверяем что все на месте, иначе потом будет больно (валидация параметров)
-            validation_error = VPKService._validate_build_params(
+            validation_error = validate_build_params(
                 image_path, mode, filename, size, format_type, tf2_root_dir, t, custom_vtf_path
             )
             if validation_error:
@@ -1455,7 +1453,7 @@ class VPKService:
                 if debug_mode:
                     logger.info("[VPK CONTENTS]\n" +
                                 "\n".join(f"  {f}" for f in vpkroot_files))
-            vpk_path = VPKService._create_vpk_file(ctx, filename, export_folder, language)
+            vpk_path = PackagingService.create_vpk_file(ctx, filename, export_folder, language)
 
             success_message = VPKService._finalize_build_success(
                 ctx, vpk_path, vmt_to_delete, language, debug_mode, t
@@ -1541,9 +1539,9 @@ class VPKService:
                     # ВАЖНО: имя PNG должно совпадать с именем VTF (без _tmp),
                     # иначе VTFCmd создаст файл с неправильным именем.
                     tmp_png = masks_dir / f"{vtf_name}.png"
-                    VPKService._process_image(mask_img, tmp_png, size)
+                    TextureService.process_image(mask_img, tmp_png, size)
                     vtf_flags, merged = TextureService.resolve_vtf_flags_and_options(flags, vtf_options, drop_normal=True)
-                    VPKService._create_vtf(str(tmp_png), str(masks_dir), format_type, vtf_flags, merged)
+                    TextureService.create_vtf(str(tmp_png), str(masks_dir), format_type, vtf_flags, merged)
                     if tmp_png.exists():
                         tmp_png.unlink()
                     logger.info(f"Создан VTF маски: {vtf_name}.vtf")
@@ -1570,7 +1568,7 @@ class VPKService:
                 return False, t.get('error_no_textures', 'No mask textures were provided.')
 
             # Пакуем VPK
-            vpk_path = VPKService._create_vpk_file(ctx, filename, export_folder, language)
+            vpk_path = PackagingService.create_vpk_file(ctx, filename, export_folder, language)
             ctx.cleanup(on_error=False, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
             logger.info(f"VPK масок шпиона готов: {vpk_path}")
             return True, vpk_path
@@ -1580,46 +1578,3 @@ class VPKService:
             if ctx:
                 ctx.cleanup(on_error=True, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)
             return False, str(exc)
-
-    @staticmethod
-    def _validate_build_params(
-        image_path: str,
-        mode: str,
-        filename: str,
-        size: Tuple[int, int],
-        format_type: str,
-        tf2_root_dir: str,
-        t: dict = None,
-        custom_vtf_path: str = None
-    ) -> Optional[str]:
-        return validate_build_params(
-            image_path,
-            mode,
-            filename,
-            size,
-            format_type,
-            tf2_root_dir,
-            t,
-            custom_vtf_path
-        )
-    
-    @staticmethod
-    def _process_image(input_path: str, output_path: str, size: Tuple[int, int]) -> None:
-        return TextureService.process_image(input_path, output_path, size)
-    
-    @staticmethod
-    def _create_vtf(png_path: str, output_path: str, format_type: str, flags: List[str], 
-                   options: dict = None) -> None:
-        return TextureService.create_vtf(png_path, output_path, format_type, flags, options)
-    
-    @staticmethod
-    def _create_vpk_file(ctx: BuildContext, filename: str, export_folder: str = "export", language: str = "en") -> str:
-        return PackagingService.create_vpk_file(ctx, filename, export_folder, language)
-    
-    @staticmethod
-    def _copy_compiled_models_to_vpkroot(ctx: BuildContext, qc_path: str) -> None:
-        return ModelService.copy_compiled_models_to_vpkroot(ctx, qc_path)
-    
-    @staticmethod
-    def _generate_uv_layout(ctx: BuildContext, weapon_key: str, image_size: Tuple[int, int], export_folder: str = "export", language: str = "en") -> None:
-        return ModelService.generate_uv_layout(ctx, weapon_key, image_size, export_folder, language)

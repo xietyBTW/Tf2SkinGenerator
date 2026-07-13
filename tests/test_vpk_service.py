@@ -13,6 +13,10 @@ from src.services.build_context import BuildContext
 from src.services.build_service import BuildService
 from src.services.vpk_service import VPKService
 from src.services.vpk_texture_builder import VpkTextureBuilder
+from src.services.texture_service import TextureService
+from src.services.packaging_service import PackagingService
+from src.services.model_service import ModelService
+from src.shared.validators import validate_build_params
 from src.shared.exceptions import VPKCreationError, RequiredFileMissingError as SharedFileNotFoundError
 
 
@@ -87,18 +91,18 @@ class VPKServiceTests(unittest.TestCase):
             base = Path(tmp)
             img = base / "img.png"
             Image.new("RGB", (2, 2), color="red").save(img)
-            self.assertEqual(VPKService._validate_build_params("", "m", "a.vpk", (1, 1), "DXT1", "x", t), t["error_image_not_specified"])
-            self.assertEqual(VPKService._validate_build_params(str(img), "", "a.vpk", (1, 1), "DXT1", "x", t), t["error_mode_not_specified"])
-            self.assertEqual(VPKService._validate_build_params(str(img), "m", "", (1, 1), "DXT1", "x", t), t["error_filename_not_specified"])
-            self.assertEqual(VPKService._validate_build_params(str(img), "m", "a.txt", (1, 1), "DXT1", "x", t), t["error_filename_no_vpk"])
-            self.assertEqual(VPKService._validate_build_params(str(img), "m", "a.vpk", (1, ), "DXT1", "x", t), t["error_size_invalid"])
-            self.assertEqual(VPKService._validate_build_params(str(img), "m", "a.vpk", ("1", 1), "DXT1", "x", t), t["error_size_not_int"])
-            self.assertEqual(VPKService._validate_build_params(str(img), "m", "a.vpk", (0, 1), "DXT1", "x", t), t["error_size_not_positive"])
-            self.assertIn(t["error_format_invalid"].split(":")[0], VPKService._validate_build_params(str(img), "m", "a.vpk", (1, 1), "BAD", "x", t))
+            self.assertEqual(validate_build_params("", "m", "a.vpk", (1, 1), "DXT1", "x", t), t["error_image_not_specified"])
+            self.assertEqual(validate_build_params(str(img), "", "a.vpk", (1, 1), "DXT1", "x", t), t["error_mode_not_specified"])
+            self.assertEqual(validate_build_params(str(img), "m", "", (1, 1), "DXT1", "x", t), t["error_filename_not_specified"])
+            self.assertEqual(validate_build_params(str(img), "m", "a.txt", (1, 1), "DXT1", "x", t), t["error_filename_no_vpk"])
+            self.assertEqual(validate_build_params(str(img), "m", "a.vpk", (1, ), "DXT1", "x", t), t["error_size_invalid"])
+            self.assertEqual(validate_build_params(str(img), "m", "a.vpk", ("1", 1), "DXT1", "x", t), t["error_size_not_int"])
+            self.assertEqual(validate_build_params(str(img), "m", "a.vpk", (0, 1), "DXT1", "x", t), t["error_size_not_positive"])
+            self.assertIn(t["error_format_invalid"].split(":")[0], validate_build_params(str(img), "m", "a.vpk", (1, 1), "BAD", "x", t))
 
     def test_validate_build_params_custom_vtf(self):
         t = TRANSLATIONS["en"]
-        self.assertEqual(VPKService._validate_build_params("a", "m", "a.vpk", (1, 1), "DXT1", "x", t, custom_vtf_path="missing"), t["error_custom_vtf_not_found"].format(path="missing"))
+        self.assertEqual(validate_build_params("a", "m", "a.vpk", (1, 1), "DXT1", "x", t, custom_vtf_path="missing"), t["error_custom_vtf_not_found"].format(path="missing"))
     
     def test_validate_build_params_tf2_root_errors(self):
         t = TRANSLATIONS["en"]
@@ -107,13 +111,13 @@ class VPKServiceTests(unittest.TestCase):
             img = base / "img.png"
             Image.new("RGB", (2, 2), color="red").save(img)
             self.assertEqual(
-                VPKService._validate_build_params(str(img), "scout_c_scattergun", "a.vpk", (1, 1), "DXT1", "missing", t),
+                validate_build_params(str(img), "scout_c_scattergun", "a.vpk", (1, 1), "DXT1", "missing", t),
                 t["error_tf2_not_found"].format(path="missing")
             )
             not_dir = base / "file.txt"
             not_dir.write_text("x", encoding="utf-8")
             self.assertEqual(
-                VPKService._validate_build_params(str(img), "scout_c_scattergun", "a.vpk", (1, 1), "DXT1", str(not_dir), t),
+                validate_build_params(str(img), "scout_c_scattergun", "a.vpk", (1, 1), "DXT1", str(not_dir), t),
                 t["error_tf2_not_dir"].format(path=str(not_dir))
             )
     
@@ -124,7 +128,7 @@ class VPKServiceTests(unittest.TestCase):
             dir_path = base / "dir"
             dir_path.mkdir()
             self.assertEqual(
-                VPKService._validate_build_params("a", "m", "a.vpk", (1, 1), "DXT1", "x", t, custom_vtf_path=str(dir_path)),
+                validate_build_params("a", "m", "a.vpk", (1, 1), "DXT1", "x", t, custom_vtf_path=str(dir_path)),
                 t["error_custom_vtf_not_file"].format(path=str(dir_path))
             )
 
@@ -143,14 +147,14 @@ class VPKServiceTests(unittest.TestCase):
             Image.new("RGBA", (10, 10), color=(255, 0, 0, 128)).save(rgba_path)
             out_rgb = base / "out_rgb.png"
             out_rgba = base / "out_rgba.png"
-            VPKService._process_image(str(rgb_path), str(out_rgb), (4, 4))
-            VPKService._process_image(str(rgba_path), str(out_rgba), (4, 4))
+            TextureService.process_image(str(rgb_path), str(out_rgb), (4, 4))
+            TextureService.process_image(str(rgba_path), str(out_rgba), (4, 4))
             self.assertTrue(out_rgb.exists())
             self.assertTrue(out_rgba.exists())
     
     def test_process_image_missing(self):
         with self.assertRaises(builtins.FileNotFoundError):
-            VPKService._process_image("missing.png", "out.png", (4, 4))
+            TextureService.process_image("missing.png", "out.png", (4, 4))
 
     def test_create_vtf_builds_command(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -160,7 +164,7 @@ class VPKServiceTests(unittest.TestCase):
             with patch("src.services.texture_service.TextureService.get_vtf_tool", return_value=Path("vtf.exe")):
                 with patch("src.services.texture_service.subprocess.run") as run:
                     run.return_value = type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
-                    VPKService._create_vtf(str(png_path), str(base), "DXT1", ["CLAMPS"], {"nomipmaps": True})
+                    TextureService.create_vtf(str(png_path), str(base), "DXT1", ["CLAMPS"], {"nomipmaps": True})
                     args = run.call_args[0][0]
                     self.assertIn("-alphaformat", args)
                     self.assertIn("-nomipmaps", args)
@@ -176,7 +180,7 @@ class VPKServiceTests(unittest.TestCase):
                     return type("R", (), {"returncode": 1, "stdout": "bad", "stderr": "err"})()
                 with patch("src.services.texture_service.subprocess.run", side_effect=fake_run):
                     with self.assertRaises(VTFCreationError) as cm:
-                        VPKService._create_vtf(str(png_path), str(base), "DXT1", [], {})
+                        TextureService.create_vtf(str(png_path), str(base), "DXT1", [], {})
                     # Сообщение должно содержать вывод VTFCmd
                     self.assertIn("bad", str(cm.exception))
                     self.assertIn("err", str(cm.exception))
@@ -199,18 +203,18 @@ class VPKServiceTests(unittest.TestCase):
 
             with patch("src.services.packaging_service.ToolPaths.get_vpk_tool", return_value=vpk_tool):
                 with patch("src.services.packaging_service.subprocess.run", side_effect=fake_run):
-                    output = VPKService._create_vpk_file(ctx, "out.vpk", export_folder=str(base))
+                    output = PackagingService.create_vpk_file(ctx, "out.vpk", export_folder=str(base))
                     self.assertTrue(Path(output).exists())
 
             with patch("src.services.packaging_service.ToolPaths.get_vpk_tool", return_value=vpk_tool):
                 with patch("src.services.packaging_service.subprocess.run", return_value=type("R", (), {"returncode": 1, "stdout": "bad", "stderr": "err"})()):
                     with self.assertRaises(VPKCreationError):
-                        VPKService._create_vpk_file(ctx, "out2.vpk", export_folder=str(base))
+                        PackagingService.create_vpk_file(ctx, "out2.vpk", export_folder=str(base))
 
             with patch("src.services.packaging_service.ToolPaths.get_vpk_tool", return_value=vpk_tool):
                 with patch("src.services.packaging_service.subprocess.run", return_value=type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()):
                     with self.assertRaises(SharedFileNotFoundError):
-                        VPKService._create_vpk_file(ctx, "out3.vpk", export_folder=str(base))
+                        PackagingService.create_vpk_file(ctx, "out3.vpk", export_folder=str(base))
 
     def test_copy_compiled_models_to_vpkroot(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -220,7 +224,7 @@ class VPKServiceTests(unittest.TestCase):
             (ctx.compile_dir / "v_test.mdl").write_text("x", encoding="utf-8")
             (ctx.compile_dir / "v_test.vvd").write_text("x", encoding="utf-8")
             with patch("src.services.model_service.ModelBuildService.extract_modelname_path", return_value="models/weapons/v_test.mdl"):
-                VPKService._copy_compiled_models_to_vpkroot(ctx, "qc")
+                ModelService.copy_compiled_models_to_vpkroot(ctx, "qc")
             target = ctx.vpkroot_dir / "models" / "models" / "weapons" / "v_test.mdl"
             self.assertTrue(target.exists())
 
@@ -333,8 +337,8 @@ class VPKServiceTests(unittest.TestCase):
                 patch(P + "BuildContext.create", return_value=ctx),
                 patch(P + "TF2Paths.check_crowbar", return_value=(True, "")),
                 patch(P + "TF2Paths.resolve", return_value=("studiomdl.exe", "tf2_misc_dir.vpk", str(base))),
-                patch(P + "TF2VPKExtractService.check_mdl_exists", return_value=True),
-                patch(P + "TF2VPKExtractService.extract_file_set", return_value=[str(base / "c_scattergun.mdl")]),
+                patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService.check_mdl_exists", return_value=True),
+                patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService.extract_file_set", return_value=[str(base / "c_scattergun.mdl")]),
                 patch(P + "ModelBuildService.decompile", return_value=str(base / "a.qc")),
                 patch(P + "ModelBuildService.extract_cdmaterials_path_from_qc", return_value="models/weapons/c_scattergun"),
                 patch(P + "ModelBuildService.extract_all_cdmaterials_paths_from_qc", return_value=["models/weapons/c_scattergun"]),
@@ -344,9 +348,9 @@ class VPKServiceTests(unittest.TestCase):
                 patch(P + "ModelBuildService.compile"),
                 patch(P + "ModelBuildService.remove_lod_files"),
                 patch(P + "TF2Paths.resolve_textures_vpk", return_value="tf2_textures_dir.vpk"),
-                patch(P + "TF2VPKExtractService.extract_vmt_file", return_value=str(vmt_source)),
-                patch(P + "VPKService._copy_compiled_models_to_vpkroot"),
-                patch(P + "VPKService._create_vpk_file", return_value=str(base / "out.vpk")),
+                patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService.extract_vmt_file", return_value=str(vmt_source)),
+                patch(P + "ModelService.copy_compiled_models_to_vpkroot"),
+                patch(P + "PackagingService.create_vpk_file", return_value=str(base / "out.vpk")),
                 patch(P + "DirectoryPaths.TEMP_VMT_EXTRACT_DIR", base / "temp_vmt"),
                 patch(TS + "is_animated_image", return_value=False),
                 patch(TS + "process_image", side_effect=fake_process_image),
@@ -413,8 +417,8 @@ class VPKServiceTests(unittest.TestCase):
                 patch(P + "BuildContext.create", return_value=ctx),
                 patch(P + "TF2Paths.check_crowbar", return_value=(True, "")),
                 patch(P + "TF2Paths.resolve", return_value=("studiomdl.exe", "tf2_misc_dir.vpk", str(base))),
-                patch(P + "TF2VPKExtractService.check_mdl_exists", return_value=True),
-                patch(P + "TF2VPKExtractService.extract_file_set", return_value=[str(base / "c_scattergun.mdl")]),
+                patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService.check_mdl_exists", return_value=True),
+                patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService.extract_file_set", return_value=[str(base / "c_scattergun.mdl")]),
                 patch(P + "ModelBuildService.decompile", return_value=str(base / "a.qc")),
                 patch(P + "ModelBuildService.extract_cdmaterials_path_from_qc", return_value="models/weapons/c_scattergun"),
                 patch(P + "ModelBuildService.extract_all_cdmaterials_paths_from_qc", return_value=["models/weapons/c_scattergun"]),
@@ -424,9 +428,9 @@ class VPKServiceTests(unittest.TestCase):
                 patch(P + "ModelBuildService.compile"),
                 patch(P + "ModelBuildService.remove_lod_files"),
                 patch(P + "TF2Paths.resolve_textures_vpk", return_value="tf2_textures_dir.vpk"),
-                patch(P + "TF2VPKExtractService.extract_vmt_file", return_value=str(vmt_source)),
-                patch(P + "VPKService._copy_compiled_models_to_vpkroot"),
-                patch(P + "VPKService._create_vpk_file", return_value=str(base / "out.vpk")),
+                patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService.extract_vmt_file", return_value=str(vmt_source)),
+                patch(P + "ModelService.copy_compiled_models_to_vpkroot"),
+                patch(P + "PackagingService.create_vpk_file", return_value=str(base / "out.vpk")),
                 patch(P + "DirectoryPaths.TEMP_VMT_EXTRACT_DIR", base / "temp_vmt"),
                 patch(TS + "is_animated_image", return_value=False),
                 patch(TS + "process_image", side_effect=fake_process_image),
@@ -488,8 +492,8 @@ class VPKServiceTests(unittest.TestCase):
                 patch(P + "BuildContext.create", return_value=ctx),
                 patch(P + "TF2Paths.check_crowbar", return_value=(True, "")),
                 patch(P + "TF2Paths.resolve", return_value=("studiomdl.exe", "tf2_misc_dir.vpk", str(base))),
-                patch(P + "TF2VPKExtractService.check_mdl_exists", return_value=True),
-                patch(P + "TF2VPKExtractService.extract_file_set", return_value=[str(base / "c_scattergun.mdl")]),
+                patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService.check_mdl_exists", return_value=True),
+                patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService.extract_file_set", return_value=[str(base / "c_scattergun.mdl")]),
                 patch(P + "ModelBuildService.decompile", return_value=str(base / "a.qc")),
                 patch(P + "ModelBuildService.extract_cdmaterials_path_from_qc", return_value="models/weapons/c_scattergun"),
                 patch(P + "ModelBuildService.extract_all_cdmaterials_paths_from_qc", return_value=["models/weapons/c_scattergun"]),
@@ -499,9 +503,9 @@ class VPKServiceTests(unittest.TestCase):
                 patch(P + "ModelBuildService.compile"),
                 patch(P + "ModelBuildService.remove_lod_files"),
                 patch(P + "TF2Paths.resolve_textures_vpk", return_value="tf2_textures_dir.vpk"),
-                patch(P + "TF2VPKExtractService.extract_vmt_file", return_value=str(vmt_source)),
-                patch(P + "VPKService._copy_compiled_models_to_vpkroot"),
-                patch(P + "VPKService._create_vpk_file", return_value=str(base / "out.vpk")),
+                patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService.extract_vmt_file", return_value=str(vmt_source)),
+                patch(P + "ModelService.copy_compiled_models_to_vpkroot"),
+                patch(P + "PackagingService.create_vpk_file", return_value=str(base / "out.vpk")),
                 patch(P + "DirectoryPaths.TEMP_VMT_EXTRACT_DIR", base / "temp_vmt"),
                 patch(TS + "is_animated_image", return_value=False),
                 patch(TS + "process_image", side_effect=fake_process_image),
@@ -546,8 +550,8 @@ class VPKServiceTests(unittest.TestCase):
             with patch("src.services.vpk_service.BuildContext.create", return_value=ctx):
                 with patch("src.services.vpk_service.TF2Paths.check_crowbar", return_value=(True, "")):
                     with patch("src.services.vpk_service.TF2Paths.resolve", return_value=("studiomdl.exe", "tf2_misc_dir.vpk", str(base))):
-                        with patch("src.services.vpk_service.TF2VPKExtractService.check_mdl_exists", return_value=True):
-                            with patch("src.services.vpk_service.TF2VPKExtractService.extract_file_set", return_value=[str(base / "c_scattergun.mdl")]):
+                        with patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService.check_mdl_exists", return_value=True):
+                            with patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService.extract_file_set", return_value=[str(base / "c_scattergun.mdl")]):
                                 with patch("src.services.vpk_service.ModelBuildService.decompile", return_value=str(base / "a.qc")):
                                     with patch("src.services.vpk_service.ModelBuildService.extract_cdmaterials_path_from_qc", return_value="models/weapons/c_scattergun"):
                                         with patch("src.services.vpk_service.ModelBuildService.extract_texturegroup_filename", return_value="c_scattergun"):
@@ -555,11 +559,11 @@ class VPKServiceTests(unittest.TestCase):
                                                 with patch("src.services.vpk_service.ModelBuildService.compile"):
                                                     with patch("src.services.vpk_service.ModelBuildService.remove_lod_files"):
                                                         with patch("src.services.vpk_service.TF2Paths.resolve_textures_vpk", return_value="tf2_textures_dir.vpk"):
-                                                            with patch("src.services.vpk_service.TF2VPKExtractService.extract_vmt_file", return_value=str(vmt_source)):
-                                                                with patch("src.services.vpk_service.VMTService.update_vmt_basetexture_path"):
-                                                                    with patch("src.services.vpk_service.VMTService.create_vmt_template_from_cdmaterials"):
-                                                                        with patch("src.services.vpk_service.VPKService._copy_compiled_models_to_vpkroot"):
-                                                                            with patch("src.services.vpk_service.VPKService._create_vpk_file", return_value=str(base / "out.vpk")):
+                                                            with patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService.extract_vmt_file", return_value=str(vmt_source)):
+                                                                with patch("src.services.vmt_service.VMTService.update_vmt_basetexture_path"):
+                                                                    with patch("src.services.vmt_service.VMTService.create_vmt_template_from_cdmaterials"):
+                                                                        with patch("src.services.vpk_service.ModelService.copy_compiled_models_to_vpkroot"):
+                                                                            with patch("src.services.vpk_service.PackagingService.create_vpk_file", return_value=str(base / "out.vpk")):
                                                                                 with patch("src.services.vpk_service.DirectoryPaths.TEMP_VMT_EXTRACT_DIR", base / "temp_vmt"):
                                                                                     (base / "temp_vmt").mkdir(exist_ok=True)
                                                                                     ok, msg = VPKService.build_vpk(
@@ -610,8 +614,8 @@ class VPKServiceTests(unittest.TestCase):
             with patch(P + "BuildContext.create", return_value=ctx), \
                  patch(P + "TF2Paths.check_crowbar", return_value=(True, "")), \
                  patch(P + "TF2Paths.resolve", return_value=("studiomdl.exe", "tf2_misc_dir.vpk", str(base))), \
-                 patch(P + "TF2VPKExtractService.check_mdl_exists", return_value=True), \
-                 patch(P + "TF2VPKExtractService.extract_file_set", return_value=[str(base / "c_scout_arms.mdl")]), \
+                 patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService.check_mdl_exists", return_value=True), \
+                 patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService.extract_file_set", return_value=[str(base / "c_scout_arms.mdl")]), \
                  patch(P + "ModelBuildService.decompile", return_value=str(base / "a.qc")), \
                  patch(P + "ModelBuildService.extract_cdmaterials_path_from_qc", return_value="models/player/scout"), \
                  patch(P + "ModelBuildService.extract_all_cdmaterials_paths_from_qc", return_value=["models/player/scout"]), \
@@ -621,11 +625,11 @@ class VPKServiceTests(unittest.TestCase):
                  patch(P + "ModelBuildService.compile"), \
                  patch(P + "ModelBuildService.remove_lod_files"), \
                  patch(P + "TF2Paths.resolve_textures_vpk", return_value="tf2_textures_dir.vpk"), \
-                 patch(P + "TF2VPKExtractService.extract_vmt_file", return_value=str(vmt_source)), \
-                 patch(P + "VMTService.update_vmt_basetexture_path"), \
-                 patch(P + "VMTService.create_vmt_template_from_cdmaterials"), \
-                 patch(P + "VPKService._copy_compiled_models_to_vpkroot"), \
-                 patch(P + "VPKService._create_vpk_file", return_value=str(base / "out.vpk")), \
+                 patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService.extract_vmt_file", return_value=str(vmt_source)), \
+                 patch("src.services.vmt_service.VMTService.update_vmt_basetexture_path"), \
+                 patch("src.services.vmt_service.VMTService.create_vmt_template_from_cdmaterials"), \
+                 patch(P + "ModelService.copy_compiled_models_to_vpkroot"), \
+                 patch(P + "PackagingService.create_vpk_file", return_value=str(base / "out.vpk")), \
                  patch(P + "DirectoryPaths.TEMP_VMT_EXTRACT_DIR", base / "temp_vmt"):
                 (base / "temp_vmt").mkdir(exist_ok=True)
                 ok, msg = VPKService.build_vpk(
@@ -671,8 +675,8 @@ class VPKServiceTests(unittest.TestCase):
             with patch(P + "BuildContext.create", return_value=ctx), \
                  patch(P + "TF2Paths.check_crowbar", return_value=(True, "")), \
                  patch(P + "TF2Paths.resolve", return_value=("studiomdl.exe", "tf2_misc_dir.vpk", str(base))), \
-                 patch(P + "TF2VPKExtractService.check_mdl_exists", return_value=True), \
-                 patch(P + "TF2VPKExtractService.extract_file_set", return_value=[str(base / "demo.mdl")]), \
+                 patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService.check_mdl_exists", return_value=True), \
+                 patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService.extract_file_set", return_value=[str(base / "demo.mdl")]), \
                  patch(P + "ModelBuildService.decompile", return_value=str(base / "a.qc")), \
                  patch(P + "ModelBuildService.extract_cdmaterials_path_from_qc", return_value="models/player/demo"), \
                  patch(P + "ModelBuildService.extract_all_cdmaterials_paths_from_qc", return_value=["models/player/demo"]), \
@@ -682,11 +686,11 @@ class VPKServiceTests(unittest.TestCase):
                  patch(P + "ModelBuildService.compile"), \
                  patch(P + "ModelBuildService.remove_lod_files"), \
                  patch(P + "TF2Paths.resolve_textures_vpk", return_value="tf2_textures_dir.vpk"), \
-                 patch(P + "TF2VPKExtractService.extract_vmt_file", return_value=str(vmt_source)), \
-                 patch(P + "VMTService.update_vmt_basetexture_path"), \
-                 patch(P + "VMTService.create_vmt_template_from_cdmaterials"), \
-                 patch(P + "VPKService._copy_compiled_models_to_vpkroot"), \
-                 patch(P + "VPKService._create_vpk_file", return_value=str(base / "out.vpk")), \
+                 patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService.extract_vmt_file", return_value=str(vmt_source)), \
+                 patch("src.services.vmt_service.VMTService.update_vmt_basetexture_path"), \
+                 patch("src.services.vmt_service.VMTService.create_vmt_template_from_cdmaterials"), \
+                 patch(P + "ModelService.copy_compiled_models_to_vpkroot"), \
+                 patch(P + "PackagingService.create_vpk_file", return_value=str(base / "out.vpk")), \
                  patch(P + "DirectoryPaths.TEMP_VMT_EXTRACT_DIR", base / "temp_vmt"):
                 (base / "temp_vmt").mkdir(exist_ok=True)
                 ok, msg = VPKService.build_vpk(
@@ -733,8 +737,8 @@ class VPKServiceTests(unittest.TestCase):
             with patch(P + "BuildContext.create", return_value=ctx), \
                  patch(P + "TF2Paths.check_crowbar", return_value=(True, "")), \
                  patch(P + "TF2Paths.resolve", return_value=("studiomdl.exe", "tf2_misc_dir.vpk", str(base))), \
-                 patch(P + "TF2VPKExtractService.check_mdl_exists", return_value=True), \
-                 patch(P + "TF2VPKExtractService.extract_file_set", return_value=[str(base / "hat_foo.mdl")]), \
+                 patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService.check_mdl_exists", return_value=True), \
+                 patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService.extract_file_set", return_value=[str(base / "hat_foo.mdl")]), \
                  patch(P + "ModelBuildService.decompile", return_value=str(base / "a.qc")), \
                  patch(P + "ModelBuildService.extract_cdmaterials_path_from_qc", return_value="models/player/items/all_class"), \
                  patch(P + "ModelBuildService.extract_all_cdmaterials_paths_from_qc", return_value=["models/player/items/all_class"]), \
@@ -744,11 +748,11 @@ class VPKServiceTests(unittest.TestCase):
                  patch(P + "ModelBuildService.compile"), \
                  patch(P + "ModelBuildService.remove_lod_files"), \
                  patch(P + "TF2Paths.resolve_textures_vpk", return_value="tf2_textures_dir.vpk"), \
-                 patch(P + "TF2VPKExtractService.extract_vmt_file", return_value=str(vmt_source)), \
-                 patch(P + "VMTService.update_vmt_basetexture_path"), \
-                 patch(P + "VMTService.create_vmt_template_from_cdmaterials"), \
-                 patch(P + "VPKService._copy_compiled_models_to_vpkroot"), \
-                 patch(P + "VPKService._create_vpk_file", return_value=str(base / "out.vpk")), \
+                 patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService.extract_vmt_file", return_value=str(vmt_source)), \
+                 patch("src.services.vmt_service.VMTService.update_vmt_basetexture_path"), \
+                 patch("src.services.vmt_service.VMTService.create_vmt_template_from_cdmaterials"), \
+                 patch(P + "ModelService.copy_compiled_models_to_vpkroot"), \
+                 patch(P + "PackagingService.create_vpk_file", return_value=str(base / "out.vpk")), \
                  patch(P + "DirectoryPaths.TEMP_VMT_EXTRACT_DIR", base / "temp_vmt"):
                 (base / "temp_vmt").mkdir(exist_ok=True)
                 ok, msg = VPKService.build_vpk(
@@ -793,8 +797,8 @@ class VPKServiceTests(unittest.TestCase):
                 patch(P + "BuildContext.create", return_value=ctx),
                 patch(P + "TF2Paths.check_crowbar", return_value=(True, "")),
                 patch(P + "TF2Paths.resolve", return_value=("studiomdl.exe", "tf2_misc_dir.vpk", str(base))),
-                patch(P + "TF2VPKExtractService.check_mdl_exists", return_value=True),
-                patch(P + "TF2VPKExtractService.extract_file_set", return_value=[str(base / "c_scattergun.mdl")]),
+                patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService.check_mdl_exists", return_value=True),
+                patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService.extract_file_set", return_value=[str(base / "c_scattergun.mdl")]),
                 patch(P + "ModelBuildService.decompile", return_value=str(base / "a.qc")),
                 patch(P + "ModelBuildService.extract_cdmaterials_path_from_qc", return_value="models/weapons/c_scattergun"),
                 patch(P + "ModelBuildService.extract_all_cdmaterials_paths_from_qc", return_value=["models/weapons/c_scattergun"]),
@@ -809,11 +813,11 @@ class VPKServiceTests(unittest.TestCase):
                 patch("src.services.vpk_model_pipeline.VpkModelPipeline._find_decompiled_reference_smd", return_value=str(user_smd)),
                 patch(P + "SMDService.ordered_unique_materials", return_value=["c_scattergun"]),
                 patch(P + "TF2Paths.resolve_textures_vpk", return_value="tf2_textures_dir.vpk"),
-                patch(P + "TF2VPKExtractService.extract_vmt_file", return_value=str(vmt_source)),
-                patch(P + "VMTService.update_vmt_basetexture_path"),
-                patch(P + "VMTService.create_vmt_template_from_cdmaterials"),
-                patch(P + "VPKService._copy_compiled_models_to_vpkroot"),
-                patch(P + "VPKService._create_vpk_file", return_value=str(base / "out.vpk")),
+                patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService.extract_vmt_file", return_value=str(vmt_source)),
+                patch("src.services.vmt_service.VMTService.update_vmt_basetexture_path"),
+                patch("src.services.vmt_service.VMTService.create_vmt_template_from_cdmaterials"),
+                patch(P + "ModelService.copy_compiled_models_to_vpkroot"),
+                patch(P + "PackagingService.create_vpk_file", return_value=str(base / "out.vpk")),
                 patch(P + "DirectoryPaths.TEMP_VMT_EXTRACT_DIR", base / "temp_vmt"),
             ]
             with contextlib.ExitStack() as stack:
@@ -869,8 +873,8 @@ class VPKServiceTests(unittest.TestCase):
                 patch(P + "BuildContext.create", return_value=ctx),
                 patch(P + "TF2Paths.check_crowbar", return_value=(True, "")),
                 patch(P + "TF2Paths.resolve", return_value=("studiomdl.exe", "tf2_misc_dir.vpk", str(base))),
-                patch(P + "TF2VPKExtractService.check_mdl_exists", return_value=True),
-                patch(P + "TF2VPKExtractService.extract_file_set", return_value=[str(base / "c_scattergun.mdl")]),
+                patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService.check_mdl_exists", return_value=True),
+                patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService.extract_file_set", return_value=[str(base / "c_scattergun.mdl")]),
                 patch(P + "ModelBuildService.decompile", return_value=str(base / "a.qc")),
                 patch(P + "ModelBuildService.extract_cdmaterials_path_from_qc", return_value="models/weapons/c_scattergun"),
                 patch(P + "ModelBuildService.extract_all_cdmaterials_paths_from_qc", return_value=["models/weapons/c_scattergun"]),
@@ -887,11 +891,11 @@ class VPKServiceTests(unittest.TestCase):
                 patch("src.services.vpk_texture_builder.VpkTextureBuilder._remap_skin_data_to_smd", side_effect=lambda sbd, mats: sbd),
                 patch(P + "SMDService.ordered_unique_materials", return_value=["c_scattergun"]),
                 patch(P + "TF2Paths.resolve_textures_vpk", return_value="tf2_textures_dir.vpk"),
-                patch(P + "TF2VPKExtractService.extract_vmt_file", return_value=str(vmt_source)),
-                patch(P + "VMTService.update_vmt_basetexture_path"),
-                patch(P + "VMTService.create_vmt_template_from_cdmaterials"),
-                patch(P + "VPKService._copy_compiled_models_to_vpkroot"),
-                patch(P + "VPKService._create_vpk_file", return_value=str(base / "out.vpk")),
+                patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService.extract_vmt_file", return_value=str(vmt_source)),
+                patch("src.services.vmt_service.VMTService.update_vmt_basetexture_path"),
+                patch("src.services.vmt_service.VMTService.create_vmt_template_from_cdmaterials"),
+                patch(P + "ModelService.copy_compiled_models_to_vpkroot"),
+                patch(P + "PackagingService.create_vpk_file", return_value=str(base / "out.vpk")),
                 patch(P + "DirectoryPaths.TEMP_VMT_EXTRACT_DIR", base / "temp_vmt"),
             ]
             with contextlib.ExitStack() as stack:
@@ -918,7 +922,7 @@ class VPKServiceTests(unittest.TestCase):
             self.assertTrue(ok, msg)
 
     def test_build_vpk_validation_error(self):
-        with patch.object(VPKService, "_validate_build_params", return_value="bad"):
+        with patch("src.services.vpk_service.validate_build_params", return_value="bad"):
             ok, msg = VPKService.build_vpk(
                 image_path="img.png",
                 mode="scout_c_scattergun",
@@ -934,7 +938,7 @@ class VPKServiceTests(unittest.TestCase):
             base = Path(tmp)
             img = base / "img.png"
             Image.new("RGB", (2, 2), color="red").save(img)
-            with patch.object(VPKService, "_validate_build_params", return_value=None):
+            with patch("src.services.vpk_service.validate_build_params", return_value=None):
                 with patch("src.services.vpk_service.BuildContext.create", return_value=BuildContext("id", "m", "w", base / "ctx")):
                     ok, msg = VPKService.build_vpk(
                         image_path=str(img),
@@ -953,7 +957,7 @@ class VPKServiceTests(unittest.TestCase):
             Image.new("RGB", (2, 2), color="red").save(img)
             ctx = BuildContext("id", "scout_c_scattergun", "c_scattergun", base / "ctx")
             ctx.create_directories()
-            with patch.object(VPKService, "_validate_build_params", return_value=None):
+            with patch("src.services.vpk_service.validate_build_params", return_value=None):
                 with patch("src.services.vpk_service.BuildContext.create", return_value=ctx):
                     with patch("src.services.vpk_service.TF2Paths.check_crowbar", return_value=(False, "crowbar missing")):
                         ok, msg = VPKService.build_vpk(
@@ -973,7 +977,7 @@ class VPKServiceTests(unittest.TestCase):
             Image.new("RGB", (2, 2), color="red").save(img)
             ctx = BuildContext("id", "scout_c_scattergun", "c_scattergun", base / "ctx")
             ctx.create_directories()
-            with patch.object(VPKService, "_validate_build_params", return_value=None):
+            with patch("src.services.vpk_service.validate_build_params", return_value=None):
                 with patch("src.services.vpk_service.BuildContext.create", return_value=ctx):
                     with patch("src.services.vpk_service.TF2Paths.check_crowbar", return_value=(True, "")):
                         with patch("src.services.vpk_service.TF2Paths.resolve", side_effect=FileNotFoundError("no tf2")):
@@ -994,7 +998,7 @@ class VPKServiceTests(unittest.TestCase):
             Image.new("RGB", (2, 2), color="red").save(img)
             ctx = BuildContext("id", "scout_missing", "missing", base / "ctx")
             ctx.create_directories()
-            with patch.object(VPKService, "_validate_build_params", return_value=None):
+            with patch("src.services.vpk_service.validate_build_params", return_value=None):
                 with patch("src.services.vpk_service.BuildContext.create", return_value=ctx):
                     with patch("src.services.vpk_service.TF2Paths.check_crowbar", return_value=(True, "")):
                         with patch("src.services.vpk_service.TF2Paths.resolve", return_value=("studiomdl.exe", "tf2_misc_dir.vpk", str(base))):
@@ -1015,11 +1019,11 @@ class VPKServiceTests(unittest.TestCase):
             Image.new("RGB", (2, 2), color="red").save(img)
             ctx = BuildContext("id", "scout_c_scattergun", "c_scattergun", base / "ctx")
             ctx.create_directories()
-            with patch.object(VPKService, "_validate_build_params", return_value=None):
+            with patch("src.services.vpk_service.validate_build_params", return_value=None):
                 with patch("src.services.vpk_service.BuildContext.create", return_value=ctx):
                     with patch("src.services.vpk_service.TF2Paths.check_crowbar", return_value=(True, "")):
                         with patch("src.services.vpk_service.TF2Paths.resolve", return_value=("studiomdl.exe", "tf2_misc_dir.vpk", str(base))):
-                            with patch("src.services.vpk_service.TF2VPKExtractService.check_mdl_exists", return_value=False):
+                            with patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService.check_mdl_exists", return_value=False):
                                 ok, msg = VPKService.build_vpk(
                                     image_path=str(img),
                                     mode="scout_c_scattergun",
@@ -1037,12 +1041,12 @@ class VPKServiceTests(unittest.TestCase):
             Image.new("RGB", (2, 2), color="red").save(img)
             ctx = BuildContext("id", "scout_c_scattergun", "c_scattergun", base / "ctx")
             ctx.create_directories()
-            with patch.object(VPKService, "_validate_build_params", return_value=None):
+            with patch("src.services.vpk_service.validate_build_params", return_value=None):
                 with patch("src.services.vpk_service.BuildContext.create", return_value=ctx):
                     with patch("src.services.vpk_service.TF2Paths.check_crowbar", return_value=(True, "")):
                         with patch("src.services.vpk_service.TF2Paths.resolve", return_value=("studiomdl.exe", "tf2_misc_dir.vpk", str(base))):
-                            with patch("src.services.vpk_service.TF2VPKExtractService.check_mdl_exists", return_value=True):
-                                with patch("src.services.vpk_service.TF2VPKExtractService.extract_file_set", return_value=[str(base / "c_scattergun.vvd")]), \
+                            with patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService.check_mdl_exists", return_value=True):
+                                with patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService.extract_file_set", return_value=[str(base / "c_scattergun.vvd")]), \
                                      patch("src.services.vpk_model_pipeline.get_cached_decompile", return_value=None):
                                     ok, msg = VPKService.build_vpk(
                                         image_path=str(img),
@@ -1060,7 +1064,7 @@ class VPKServiceTests(unittest.TestCase):
             ctx = BuildContext("id", "m", "w", base / "ctx")
             ctx.create_directories()
             with patch("src.services.model_service.SMDService.find_reference_smd", return_value=None):
-                VPKService._generate_uv_layout(ctx, "weapon", (4, 4), export_folder=str(base))
+                ModelService.generate_uv_layout(ctx, "weapon", (4, 4), export_folder=str(base))
     
     def test_generate_uv_layout_success(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1071,7 +1075,7 @@ class VPKServiceTests(unittest.TestCase):
             smd_path.write_text("x", encoding="utf-8")
             with patch("src.services.model_service.SMDService.find_reference_smd", return_value=str(smd_path)):
                 with patch("src.services.uv_layout_service.UVLayoutService.generate_uv_layout_from_smd", return_value=True) as generate:
-                    VPKService._generate_uv_layout(ctx, "weapon", (4, 4), export_folder=str(base))
+                    ModelService.generate_uv_layout(ctx, "weapon", (4, 4), export_folder=str(base))
             generate.assert_called()
 
     def test_render_extra_texture_missing_returns_false(self):
@@ -1190,14 +1194,14 @@ class BuildVpkCharacterizationTests(unittest.TestCase):
             m(patch(P + "TF2Paths.check_crowbar", return_value=(True, "")))
             m(patch(P + "TF2Paths.resolve", return_value=("studiomdl.exe", "tf2_misc_dir.vpk", str(base))))
             m(patch(P + "TF2Paths.resolve_textures_vpk", return_value="tf2_textures_dir.vpk"))
-            m(patch(P + "TF2VPKExtractService.check_mdl_exists", return_value=True))
-            m(patch(P + "TF2VPKExtractService.extract_file_set", return_value=[str(base / "c_scattergun.mdl")]))
+            m(patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService.check_mdl_exists", return_value=True))
+            m(patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService.extract_file_set", return_value=[str(base / "c_scattergun.mdl")]))
             # Герметичность: не читаем и не пишем глобальный кэш декомпиляции,
             # иначе соседние тесты поймают кэш-хит на c_scattergun. Патчим имена
             # в namespace vpk_service (там импорт на уровне модуля).
             m(patch("src.services.vpk_model_pipeline.get_cached_decompile", return_value=None))
             m(patch("src.services.vpk_model_pipeline.save_to_cache"))
-            m(patch(P + "TF2VPKExtractService.extract_vmt_file", return_value=str(vmt_source)))
+            m(patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService.extract_vmt_file", return_value=str(vmt_source)))
             m(patch(P + "ModelBuildService.decompile", return_value=str(qc)))
             m(patch(P + "ModelBuildService.extract_cdmaterials_path_from_qc", return_value="models/weapons/c_scattergun"))
             m(patch(P + "ModelBuildService.extract_all_cdmaterials_paths_from_qc", return_value=["models/weapons/c_scattergun"]))
@@ -1211,10 +1215,10 @@ class BuildVpkCharacterizationTests(unittest.TestCase):
             m(patch(P + "ModelBuildService.patch_qc_file"))
             m(patch(P + "ModelBuildService.compile"))
             m(patch(P + "ModelBuildService.remove_lod_files"))
-            m(patch(P + "VMTService.update_vmt_basetexture_path"))
-            m(patch(P + "VMTService.create_vmt_template_from_cdmaterials"))
-            m(patch(P + "VPKService._copy_compiled_models_to_vpkroot"))
-            m(patch(P + "VPKService._create_vpk_file", side_effect=fake_create_vpk))
+            m(patch("src.services.vmt_service.VMTService.update_vmt_basetexture_path"))
+            m(patch("src.services.vmt_service.VMTService.create_vmt_template_from_cdmaterials"))
+            m(patch(P + "ModelService.copy_compiled_models_to_vpkroot"))
+            m(patch(P + "PackagingService.create_vpk_file", side_effect=fake_create_vpk))
             m(patch(P + "TextureService.create_vtf", side_effect=fake_create_vtf))
             m(patch(P + "TextureService.process_image", side_effect=fake_process_image))
             if red_not_found:

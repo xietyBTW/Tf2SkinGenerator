@@ -10,8 +10,14 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QDoubleValidator
 from src.data.translations import TRANSLATIONS
+from src.data.player_hands import HAND_MODE_KEYS
+from src.data.player_characters import PLAYER_BODY_MODE_KEYS
+from src.data.skyboxes import SKYBOX_MODE
 from src.utils.themes import get_modern_styles
 from src.config.app_config import AppConfig
+from src.ui.format_choices import (
+    VTF_FORMATS, allowed_formats_for_mode, plan_format_choices,
+)
 
 
 class CollapsibleGroup(QWidget):
@@ -260,35 +266,7 @@ class SettingsPanel(QWidget):
         main_settings_layout.addWidget(self.format_label)
         
         self.format_combo = QComboBox()
-        # Добавляем все поддерживаемые форматы VTF (кроме P8, который не поддерживается)
-        self.format_combo.addItems([
-            "DXT1",
-            "DXT3",
-            "DXT5",
-            "RGBA8888",
-            "ABGR8888",
-            "RGB888",
-            "BGR888",
-            "RGB565",
-            "BGR565",
-            "I8",
-            "IA88",
-            "A8",
-            "RGB888 Bluescreen",
-            "BGR888 Bluescreen",
-            "ARGB8888",
-            "BGRA8888",
-            "BGRX8888",
-            "BGRX5551",
-            "BGRA4444",
-            "DXT1 With One Bit Alpha",
-            "BGRA5551",
-            "UV88",
-            "UVWQ8888",
-            "RGBA16161616F",
-            "RGBA16161616",
-            "UVLX8888"
-        ])
+        self.format_combo.addItems(VTF_FORMATS)
         self.format_combo.setStyleSheet(self.styles['combo'])
         self.format_combo.setMinimumWidth(0)
         self.format_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
@@ -590,6 +568,25 @@ class SettingsPanel(QWidget):
 
     # ── Единый контроллер ограничений UI по режиму ─────────────────────────── #
 
+    def _set_format_choices(self, allowed) -> None:
+        """Перезаполняет список форматов: allowed (подмножество) или полный набор.
+
+        План (target-список + индекс) считает чистый plan_format_choices; здесь —
+        только применение к комбобоксу. Сигналы блокируются — перезаполнение не
+        считается правкой пользователя.
+        """
+        current = [self.format_combo.itemText(i)
+                   for i in range(self.format_combo.count())]
+        plan = plan_format_choices(current, self.format_combo.currentText(), allowed)
+        if plan is None:
+            return
+        target, idx = plan
+        self.format_combo.blockSignals(True)
+        self.format_combo.clear()
+        self.format_combo.addItems(target)
+        self.format_combo.setCurrentIndex(idx)
+        self.format_combo.blockSignals(False)
+
     def apply_mode_restrictions(self, mode) -> None:
         """
         Применяет ограничения UI в зависимости от текущего режима сборки.
@@ -599,23 +596,14 @@ class SettingsPanel(QWidget):
 
         Матрица ограничений:
           Оружие — всё доступно
-          CritHIT — формат/флаги/UV/Normal заблокированы (on_crit_hit_selected);
+          CritHIT — формат сужен до alpha-совместимых (DXT5/RGBA8888/DXT3, выбор
+                    доступен); флаги/UV/Normal заблокированы (on_crit_hit_selected);
                     кнопки инструментов недоступны
           Spray   — только 256×256; только форматы с альфа; флаги недоступны;
                     UV/Normal скрыты; кнопки инструментов недоступны
           Hands   — UV скрыт; Normal Map доступен; VMT недоступен; Извлечь модель — доступно
           Тело    — UV скрыт; Normal Map доступен (модель VertexLitGeneric)
         """
-        try:
-            from src.data.player_hands import HAND_MODE_KEYS
-        except ImportError:
-            HAND_MODE_KEYS = frozenset()
-        try:
-            from src.data.player_characters import PLAYER_BODY_MODE_KEYS
-        except ImportError:
-            PLAYER_BODY_MODE_KEYS = frozenset()
-
-        from src.data.skyboxes import SKYBOX_MODE
         is_spray       = (mode == "spray")
         is_crit        = (mode == "critHIT")
         is_skybox      = (mode == SKYBOX_MODE)
@@ -641,6 +629,11 @@ class SettingsPanel(QWidget):
             "DXT1 With One Bit Alpha", "BGRA5551", "BGRA4444", "IA88", "A8",
             "RGBA16161616F", "RGBA16161616",
         }
+        # Сужаем список форматов до тех, что реально поддерживает пайплайн этого
+        # режима (источник истины — сервис режима); вне ограничений — полный
+        # набор. Делаем всегда, включая CritHIT: ему нужен полный список, чтобы
+        # on_crit_hit_selected мог выставить DXT5. Enable/tooltip ниже crit не трогают.
+        self._set_format_choices(allowed_formats_for_mode(mode))
         if is_spray:
             if self.format_combo.currentText() not in _ALPHA_FORMATS:
                 self.format_combo.setCurrentText("DXT5")
@@ -651,14 +644,13 @@ class SettingsPanel(QWidget):
                 "Spray requires an alpha-capable format (DXT5)"
             )
         elif is_skybox:
-            # Скайбокс: формат фиксирован (DXT1, без альфы); разрешение
-            # остаётся на выбор — это размер каждой грани куба.
-            self.format_combo.setCurrentText("DXT1")
-            self.format_combo.setEnabled(False)
+            # Скайбокс: список сужен до форматов без альфы (DXT1/BGR888),
+            # но выбор между ними остаётся за пользователем.
+            self.format_combo.setEnabled(True)
             self.format_combo.setToolTip(
-                "Скайбокс использует DXT1 (без альфа-канала)"
+                "Скайбокс: только форматы без альфы (DXT1 / BGR888)"
                 if lang == 'ru' else
-                "Skybox uses DXT1 (no alpha channel)"
+                "Skybox: alpha-free formats only (DXT1 / BGR888)"
             )
         elif not is_crit:
             # CritHIT управляется через on_crit_hit_selected — не трогаем
@@ -757,8 +749,9 @@ class SettingsPanel(QWidget):
 
     def on_crit_hit_selected(self, is_crit_hit):
         """Обработка выбора CritHIT режима"""
-        # Отключаем/включаем контролы в зависимости от режима
-        self.format_combo.setEnabled(not is_crit_hit)
+        # Формат остаётся выбираемым: crit-текстура translucent, годятся только
+        # форматы с альфой — список сужаем ниже, но не блокируем (DXT5 по умолч.).
+        self.format_combo.setEnabled(True)
         self.flag_clamps.setEnabled(not is_crit_hit)
         self.flag_clampt.setEnabled(not is_crit_hit)
         self.flag_nomipmaps.setEnabled(not is_crit_hit)
@@ -776,10 +769,22 @@ class SettingsPanel(QWidget):
             self.gamma_value_input.setEnabled(not is_crit_hit and 
                                                (hasattr(self, 'option_gamma') and self.option_gamma.isChecked()))
         self._sync_crit_hit_dependent_controls(is_crit_hit)
-        
-        # Для CritHIT устанавливаем формат DXT5
+
+        # Список форматов: crit → только translucent-совместимые (DXT5/RGBA8888/
+        # DXT3, DXT5 по умолч.); иначе восстанавливаем полный набор.
+        lang = 'ru'
+        if self.parent and hasattr(self.parent, 'language'):
+            lang = self.parent.language
         if is_crit_hit:
-            self.format_combo.setCurrentText("DXT5")
+            self._set_format_choices(allowed_formats_for_mode("critHIT"))
+            self.format_combo.setToolTip(
+                "CritHIT: только форматы с альфа-каналом (DXT5 рекомендуется)"
+                if lang == 'ru' else
+                "CritHIT: alpha-capable formats only (DXT5 recommended)"
+            )
+        else:
+            self._set_format_choices(None)
+            self.format_combo.setToolTip("")
 
     def _sync_crit_hit_dependent_controls(self, is_crit_hit=None) -> None:
         if is_crit_hit is None:
