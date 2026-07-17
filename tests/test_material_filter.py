@@ -84,12 +84,10 @@ class UserBlacklistTests(unittest.TestCase):
 
 
 class PatternsArgumentTests(unittest.TestCase):
-    def test_explicit_patterns_skip_config(self):
-        """С готовым списком паттернов конфиг читаться не должен."""
-        with mock.patch.object(mf, "get_blacklist_patterns") as m_patterns:
-            self.assertFalse(mf.is_editable_material("anything", patterns=["anything"]))
-            self.assertTrue(mf.is_editable_material("anything", patterns=["other"]))
-        m_patterns.assert_not_called()
+    def test_explicit_patterns_override_defaults(self):
+        """С готовым списком паттернов используются именно они, а не дефолты."""
+        self.assertFalse(mf.is_editable_material("anything", patterns=["anything"]))
+        self.assertTrue(mf.is_editable_material("anything", patterns=["other"]))
 
     def test_filter_editable_defaults_only(self):
         """filter_editable классифицирует ТОЛЬКО по дефолтам; пользовательский ЧС

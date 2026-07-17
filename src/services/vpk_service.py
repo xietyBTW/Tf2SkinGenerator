@@ -152,7 +152,7 @@ class VPKService:
                               else t.get('build_error_status', 'Build error'))
                 return success, message, False
 
-            is_special_mode = mode in SPECIAL_MODES.values()
+            is_special_mode = mode in SPECIAL_MODES
 
             _sub_label_init = "Preparing..." if language == "en" else "Подготовка..."
             emit_sub(-1, _sub_label_init)
@@ -1405,7 +1405,7 @@ class VPKService:
                 return result
 
             # Для critHIT и прочих спец режимов - просто текстуры, без всей этой возни с моделями
-            if mode in SPECIAL_MODES.values():
+            if mode in SPECIAL_MODES:
                 result = BuildService.build_special_mode_vpk(
                     ctx, mode, image_path, size, format_type, flags, vtf_options,
                     keep_temp_on_error, debug_mode, language, custom_vtf_path

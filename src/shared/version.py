@@ -12,4 +12,3 @@ __version__ = "1.0.3"
 # GitHub repo РґР»СЏ РїСЂРѕРІРµСЂРєРё РѕР±РЅРѕРІР»РµРЅРёР№
 GITHUB_OWNER = "xietyBTW"
 GITHUB_REPO  = "Tf2SkinGenerator"
-RELEASES_URL = f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest"

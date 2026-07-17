@@ -37,29 +37,9 @@ class ExclusiveCheckBox(QCheckBox):
     партнёры автоматически снимаются (без рекурсии через сигналы).
     """
 
-    def __init__(self, text: str, exclusive_with=None, parent=None):
+    def __init__(self, text: str, parent=None):
         super().__init__(text, parent)
-        # Может быть одним объектом или списком
-        if exclusive_with is None:
-            self._exclusive_partners: list = []
-        elif isinstance(exclusive_with, list):
-            self._exclusive_partners = exclusive_with
-        else:
-            self._exclusive_partners = [exclusive_with]
-
-    # Обратная совместимость: старый атрибут .exclusive_with возвращает первого партнёра
-    @property
-    def exclusive_with(self):
-        return self._exclusive_partners[0] if self._exclusive_partners else None
-
-    @exclusive_with.setter
-    def exclusive_with(self, value):
-        if value is None:
-            self._exclusive_partners = []
-        elif isinstance(value, list):
-            self._exclusive_partners = value
-        else:
-            self._exclusive_partners = [value]
+        self._exclusive_partners: list = []
 
     def set_exclusive_with(self, other) -> None:
         """Добавляет другой чекбокс в список взаимоисключающих партнёров."""
@@ -525,8 +505,8 @@ class MainWindow(QMainWindow, ProgressDialogMixin, MainWindowVmtMixin,
 
         self.class_combo = QComboBox()
         self.class_combo.setStyleSheet(styles['combo'])
-        for class_name, class_info in TF2_CLASSES.items():
-            self.class_combo.addItem(f"{class_info['icon']} {class_name}")
+        for class_name in TF2_CLASSES:
+            self.class_combo.addItem(class_name)
         group_layout.addWidget(self.class_combo)
 
         # ── Тип оружия — только слоты Primary/Secondary/Melee (Оружие) ────── #
@@ -1319,7 +1299,7 @@ class MainWindow(QMainWindow, ProgressDialogMixin, MainWindowVmtMixin,
         is_spy_masks = (self.mode == SPY_MASK_MODE_KEY)
         is_normal_weapon = (
             self.mode
-            and self.mode not in SPECIAL_MODES.values()
+            and self.mode not in SPECIAL_MODES
             and not is_hand_mode
             and not is_player_body
             and not is_spy_masks
@@ -1462,7 +1442,7 @@ class MainWindow(QMainWindow, ProgressDialogMixin, MainWindowVmtMixin,
             self.preview_panel.update_extra_slots_skybox()
             return
 
-        if not mode or mode in set(SPECIAL_MODES.values()) | {'custom'}:
+        if not mode or mode in set(SPECIAL_MODES) | {'custom'}:
             self.preview_panel.update_extra_slots('', mode='')
             return
 

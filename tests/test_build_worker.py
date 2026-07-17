@@ -42,7 +42,7 @@ BuildWorker = importlib.import_module("src.services.build_worker").BuildWorker
 
 class BuildWorkerTests(unittest.TestCase):
     def test_run_special_mode_success(self):
-        mode = next(iter(SPECIAL_MODES.values()))
+        mode = next(iter(SPECIAL_MODES))
         worker = BuildWorker(
             image_path="img.png",
             mode=mode,
@@ -84,7 +84,7 @@ class BuildWorkerTests(unittest.TestCase):
         worker.finished.emit.assert_called()
     
     def test_run_exception(self):
-        mode = next(iter(SPECIAL_MODES.values()))
+        mode = next(iter(SPECIAL_MODES))
         worker = BuildWorker(
             image_path="img.png",
             mode=mode,

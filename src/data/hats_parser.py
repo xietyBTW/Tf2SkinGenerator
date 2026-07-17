@@ -19,6 +19,8 @@ from dataclasses import dataclass, asdict, field
 from pathlib import Path
 from typing import List, Dict, Optional, Callable
 
+from src.data.weapon_model_index import get_items_game_path
+
 logger = logging.getLogger(__name__)
 
 # ── Пути ─────────────────────────────────────────────────────────────────── #
@@ -635,11 +637,6 @@ def _save_cache(items: List[HatItem]) -> None:
 
 # ── Публичный API ─────────────────────────────────────────────────────────── #
 
-def get_items_game_path(tf2_root: str) -> Optional[Path]:
-    p = Path(tf2_root) / "tf" / "scripts" / "items" / "items_game.txt"
-    return p if p.exists() else None
-
-
 def parse_hats(
     tf2_root: str,
     language: str = "en",
@@ -683,10 +680,3 @@ def parse_hats(
         progress_cb(100, f"Done — {len(items)} cosmetics found")
 
     return items
-
-
-def invalidate_cache() -> None:
-    """Удаляет кэш шапок (для принудительного пересчёта)."""
-    if _CACHE_FILE.exists():
-        _CACHE_FILE.unlink()
-        logger.info("Кэш шапок удалён")

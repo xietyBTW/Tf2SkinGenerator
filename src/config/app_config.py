@@ -30,8 +30,6 @@ class AppConfig:
         "export_folder": "export",
         "export_image_format": "VTF",
         "language": "en",
-        "last_size": "512",
-        "last_format": "DXT1",
         "last_flags": [],
         "keep_temp_on_error": False,
         "debug_mode": False,

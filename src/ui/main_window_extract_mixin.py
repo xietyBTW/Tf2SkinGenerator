@@ -32,7 +32,7 @@ class MainWindowExtractMixin:
             return None
 
         from src.data.weapons import SPECIAL_MODES
-        if self.mode in SPECIAL_MODES.values():
+        if self.mode in SPECIAL_MODES:
             error_msg = self.t.get('extract_model_special_mode_error', 'Cannot extract model for special modes')
             ErrorHandler.show_warning(self, error_msg, self.t['error'])
             return None
@@ -112,7 +112,7 @@ class MainWindowExtractMixin:
                 disable_button='extract_model_button',
             )
         except Exception as e:
-            ErrorHandler.show_error(self, e, "Ошибка при запуске извлечения модели", self.t['error'])
+            ErrorHandler.show_error(self, e, "Ошибка при запуске извлечения модели")
 
     def _on_extract_model_finished(self, success: bool, message: str) -> None:
         self._close_progress('_extract_model_progress_dialog', 'extract_model_button')
@@ -195,7 +195,7 @@ class MainWindowExtractMixin:
 
     def _on_extract_model_error(self, error_message: str) -> None:
         self._close_progress('_extract_model_progress_dialog', 'extract_model_button')
-        ErrorHandler.show_error(self, Exception(error_message), "Ошибка извлечения модели", self.t['error'])
+        ErrorHandler.show_error(self, Exception(error_message), "Ошибка извлечения модели")
 
     def _cancel_extract_model(self) -> None:
         self._cancel_worker('_extract_model_worker')
@@ -213,7 +213,7 @@ class MainWindowExtractMixin:
 
     def _on_export_model_error(self, error_message: str) -> None:
         self._close_progress('_export_model_progress_dialog', 'extract_model_button')
-        ErrorHandler.show_error(self, Exception(error_message), "Ошибка экспорта модели", self.t['error'])
+        ErrorHandler.show_error(self, Exception(error_message), "Ошибка экспорта модели")
 
     def export_uv_template(self) -> None:
         """По кнопке: декомпилирует модель и рисует UV-шаблон в папку экспорта
@@ -258,7 +258,7 @@ class MainWindowExtractMixin:
                 disable_button='export_uv_button',
             )
         except Exception as e:
-            ErrorHandler.show_error(self, e, "Ошибка при запуске генерации UV-шаблона", self.t['error'])
+            ErrorHandler.show_error(self, e, "Ошибка при запуске генерации UV-шаблона")
 
     def _on_uv_template_finished(self, success: bool, message: str) -> None:
         self._close_progress('_uv_template_progress_dialog', 'export_uv_button')
@@ -277,7 +277,7 @@ class MainWindowExtractMixin:
 
     def _on_uv_template_error(self, error_message: str) -> None:
         self._close_progress('_uv_template_progress_dialog', 'export_uv_button')
-        ErrorHandler.show_error(self, Exception(error_message), "Ошибка генерации UV-шаблона", self.t['error'])
+        ErrorHandler.show_error(self, Exception(error_message), "Ошибка генерации UV-шаблона")
 
     def _cancel_uv_template(self) -> None:
         self._cancel_worker('_uv_template_worker')
@@ -290,7 +290,7 @@ class MainWindowExtractMixin:
                 return
 
             from src.data.weapons import SPECIAL_MODES
-            if self.mode in SPECIAL_MODES.values():
+            if self.mode in SPECIAL_MODES:
                 error_msg = self.t.get('extract_texture_special_mode_error', 'Cannot extract texture for special modes')
                 ErrorHandler.show_warning(self, error_msg, self.t['error'])
                 return
@@ -305,7 +305,7 @@ class MainWindowExtractMixin:
                     is_player_body=self.mode in PLAYER_BODY_MODE_KEYS,
                 )
         except Exception as e:
-            ErrorHandler.show_error(self, e, "Ошибка при запуске извлечения текстуры", self.t['error'])
+            ErrorHandler.show_error(self, e, "Ошибка при запуске извлечения текстуры")
 
     def _extract_hat_texture(self) -> None:
         """Извлекает оригинальную текстуру шапки (отдельный воркер, как в 3D Preview)."""
@@ -460,7 +460,7 @@ class MainWindowExtractMixin:
     def _on_extract_error(self, error_message: str):
         """Обработчик ошибки извлечения текстуры"""
         self._close_progress('_extract_progress_dialog', 'extract_texture_button')
-        ErrorHandler.show_error(self, Exception(error_message), "Ошибка извлечения текстуры", self.t['error'])
+        ErrorHandler.show_error(self, Exception(error_message), "Ошибка извлечения текстуры")
     
     def _cancel_extract(self) -> None:
         """Отменяет извлечение текстуры"""
@@ -620,7 +620,7 @@ class MainWindowExtractMixin:
             if message == cancelled_msg:
                 ErrorHandler.show_info(self, cancelled_msg, self.t.get('cancel', 'Cancel'))
             else:
-                ErrorHandler.show_error(self, Exception(message), "Ошибка объединения VPK", self.t['error'])
+                ErrorHandler.show_error(self, Exception(message), "Ошибка объединения VPK")
     
     def _on_merge_progress(self, percentage: int, status: str):
         """Обработчик прогресса объединения VPK"""

@@ -44,10 +44,6 @@ class PreviewState:
 
     # ── Взаимоисключающие предикаты (для чтения в виджете) ─────────────────── #
     @property
-    def is_weapon(self) -> bool:
-        return self.mode == PreviewMode.WEAPON
-
-    @property
     def is_custom(self) -> bool:
         return self.mode == PreviewMode.CUSTOM
 
@@ -66,20 +62,3 @@ class PreviewState:
     @property
     def is_skybox(self) -> bool:
         return self.mode == PreviewMode.SKYBOX
-
-    @property
-    def is_special(self) -> bool:
-        """critHIT или эффект смерти — спец-режимы без обычного пайплайна модели."""
-        return self.mode in (PreviewMode.CRITHIT, PreviewMode.DEATH)
-
-    def as_legacy_flags(self) -> dict:
-        """
-        Значения старых булевых флагов, выведенные из режима. Нужно для безопасной
-        миграции: можно сверять, что enum и существующие флаги не разошлись.
-        """
-        return {
-            "_custom_smd_mode": self.is_custom,
-            "_spy_mask_mode": self.is_spy_masks,
-            "_crithit_mode": self.is_crithit,
-            "_death_effect_mode": self.is_death,
-        }

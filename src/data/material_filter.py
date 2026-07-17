@@ -35,15 +35,6 @@ def _user_patterns() -> list:
     return [p.strip().lower() for p in raw if isinstance(p, str) and p.strip()]
 
 
-def get_blacklist_patterns() -> list:
-    """Встроенный классификатор «служебных» материалов (для is_editable_material).
-
-    ВАЖНО: тут ТОЛЬКО дефолтные паттерны. Они решают, основная это текстура или
-    «Прочее». Пользовательский ЧС (настройки) сюда НЕ входит — он лишь скрывает
-    карточку, не меняя класс материала (см. is_user_blacklisted)."""
-    return list(DEFAULT_NON_EDITABLE_PATTERNS)
-
-
 def _matches(name_lower: str, pattern: str) -> bool:
     if pattern.startswith('='):
         return name_lower == pattern[1:]

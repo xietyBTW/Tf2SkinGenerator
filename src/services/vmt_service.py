@@ -136,7 +136,7 @@ class VMTService:
         Returns:
             Tuple[rel_path, vmt_filename, vtf_filename]
         """
-        if mode in SPECIAL_MODES.values():
+        if mode in SPECIAL_MODES:
             path_parts, stem = VMTService._SPECIAL_MODE_RELPATHS.get(
                 mode, (("materials", "effects"), mode)
             )
@@ -628,7 +628,7 @@ class VMTService:
     @staticmethod
     def _create_template(mode: str, class_name: str = "", weapon_type: str = "") -> str:
         """Создает шаблон VMT (базовый шаблон, если нет оригинального из игры)"""
-        if mode in SPECIAL_MODES.values():
+        if mode in SPECIAL_MODES:
             return VMTService._create_special_template(mode)
         else:
             return VMTService._create_weapon_template(mode)

@@ -18,10 +18,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from src.data.player_characters import (
-    PLAYER_CHARACTERS,
-    get_player_body_extra_label,
-)
+from src.data.player_characters import PLAYER_CHARACTERS
 from src.shared.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -636,8 +633,7 @@ class TextureSelectDialog(QDialog):
     def _make_label(self, idx: int, vtf_name: str) -> str:
         if idx == 0:
             return self._t["primary"]
-        label = get_player_body_extra_label(self._mode, vtf_name, self._lang)
-        return label  # если не в конфиге — возвращается vtf_name
+        return vtf_name
 
     def _on_texture_loaded(self, vtf_name: str, pixmap) -> None:
         row = self._rows.get(vtf_name)

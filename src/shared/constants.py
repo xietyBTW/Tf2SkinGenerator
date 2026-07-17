@@ -49,7 +49,6 @@ VTF_FORMATS = [
 #   • console               — исторический способ (папка console\);
 #   • vgui\replay\thumbnails — альтернатива (в whitelist по vgui-ветке);
 # оба работают в казуале, переключатель — страховка, если одну папку прикроют.
-SVPURE_BYPASS_METHODS = ("console", "vgui")
 SVPURE_BYPASS_PREFIXES = {
     "console": "console",
     "vgui": "vgui\\replay\\thumbnails",

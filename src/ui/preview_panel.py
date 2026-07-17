@@ -1067,7 +1067,7 @@ class PreviewPanel(Preview3DMixin, PreviewSkinsMixin, PreviewCustomModelMixin,
         if mode.startswith(PICKUP_MODE_PREFIX):
             return False
         from src.data.weapons import SPECIAL_MODES
-        if mode in set(SPECIAL_MODES.values()):
+        if mode in set(SPECIAL_MODES):
             return False
         from src.data.player_characters import PLAYER_BODY_MODE_KEYS, SPY_MASK_MODE_KEY
         if mode in PLAYER_BODY_MODE_KEYS or mode == SPY_MASK_MODE_KEY:

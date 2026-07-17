@@ -78,7 +78,7 @@ class MainWindowVmtMixin:
             ErrorHandler.show_warning(self, self.t.get('select_weapon_error', 'Select a weapon first'), self.t['error'])
             return
         from src.data.weapons import SPECIAL_MODES
-        if self.mode in set(SPECIAL_MODES.values()) | {"custom"}:
+        if self.mode in set(SPECIAL_MODES) | {"custom"}:
             ErrorHandler.show_warning(self, self.t.get('vmt_editor_not_available', 'VMT editor is not available for this mode.'), self.t['error'])
             return
         target = self._resolve_vmt_target()

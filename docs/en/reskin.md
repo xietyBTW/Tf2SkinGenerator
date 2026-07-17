@@ -5,6 +5,8 @@
 A reskin keeps the stock weapon model and only replaces its **texture**. It's the fastest kind
 of mod to make and the best place to start if you've never used the app before.
 
+![Building a simple reskin in the app](../img/reskin_example.gif)
+
 ## Before you begin
 
 - TF2 needs to be installed, with the **game folder** set in Settings (see

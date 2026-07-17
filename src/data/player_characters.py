@@ -71,15 +71,6 @@ PLAYER_CHARACTERS: Dict[str, dict] = {
 PLAYER_BODY_MODE_KEYS: frozenset = frozenset(PLAYER_CHARACTERS.keys())
 
 
-def get_player_body_extra_label(mode_key: str, vtf_name: str, language: str = "en") -> str:
-    """
-    Возвращает читаемое название текстурного слота персонажа.
-    Теперь текстуры обнаруживаются из QC динамически, поэтому
-    просто возвращаем vtf_name как есть.
-    """
-    return vtf_name
-
-
 # ──────────────────────────────────────────────────────────────────────────────
 # Маски маскировки шпиона
 # ──────────────────────────────────────────────────────────────────────────────

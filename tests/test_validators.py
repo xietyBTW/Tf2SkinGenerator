@@ -60,7 +60,7 @@ class ValidateBuildParamsTests(unittest.TestCase):
         self.assertIsNotNone(err)
 
     def test_special_mode_does_not_require_tf2(self):
-        special = next(iter(SPECIAL_MODES.values()))
+        special = next(iter(SPECIAL_MODES))
         with tempfile.TemporaryDirectory() as tmp:
             image = Path(tmp) / "img.png"
             image.write_bytes(b"123")
@@ -86,7 +86,7 @@ class ValidateBuildParamsTests(unittest.TestCase):
             image.write_bytes(b"123")
             err = validate_build_params(
                 image_path=str(image),
-                mode=next(iter(SPECIAL_MODES.values())),
+                mode=next(iter(SPECIAL_MODES)),
                 filename="a.vpk",
                 size=(512, 512), format_type="NOT_A_FORMAT",
                 tf2_root_dir="", t=self._t(),
@@ -100,7 +100,7 @@ class ValidateBuildParamsTests(unittest.TestCase):
             for bad_size in [(512,), (0, 512), ("512", 512), None]:
                 err = validate_build_params(
                     image_path=str(image),
-                    mode=next(iter(SPECIAL_MODES.values())),
+                    mode=next(iter(SPECIAL_MODES)),
                     filename="a.vpk",
                     size=bad_size, format_type="DXT1",
                     tf2_root_dir="", t=self._t(),
@@ -113,7 +113,7 @@ class ValidateBuildParamsTests(unittest.TestCase):
             image.write_bytes(b"123")
             err = validate_build_params(
                 image_path=str(image),
-                mode=next(iter(SPECIAL_MODES.values())),
+                mode=next(iter(SPECIAL_MODES)),
                 filename="a.zip",
                 size=(512, 512), format_type="DXT1",
                 tf2_root_dir="", t=self._t(),
@@ -123,7 +123,7 @@ class ValidateBuildParamsTests(unittest.TestCase):
     def test_custom_vtf_path_must_exist(self):
         err = validate_build_params(
             image_path=None,
-            mode=next(iter(SPECIAL_MODES.values())),
+            mode=next(iter(SPECIAL_MODES)),
             filename="a.vpk",
             size=(512, 512), format_type="DXT1",
             tf2_root_dir="", t=self._t(),

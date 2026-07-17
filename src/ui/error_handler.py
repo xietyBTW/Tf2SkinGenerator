@@ -62,7 +62,6 @@ class ErrorHandler:
         parent: Optional['QWidget'],
         error: Union[Exception, str],
         context: str = "",
-        title: Optional[str] = None,
         language: str = "ru",
     ) -> None:
         from src.ui.error_dialog import ErrorDialog
@@ -103,7 +102,7 @@ class ErrorHandler:
             logger.error(f"Не удалось показать ErrorDialog: {_dlg_err}", exc_info=True)
             QMessageBox.critical(
                 parent,
-                title or ("Ошибка" if language == "ru" else "Error"),
+                "Ошибка" if language == "ru" else "Error",
                 technical_details,
             )
 

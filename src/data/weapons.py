@@ -376,33 +376,25 @@ TF2_WEAPONS = {
     }
 }
 
-# Специальные режимы (эффекты)
-SPECIAL_MODES = {
-    "CritHIT": "critHIT",
-    "Spray": "spray",
+# Специальные режимы (эффекты). Только значения нужны везде (mode in SPECIAL_MODES).
+SPECIAL_MODES = (
+    "critHIT",
+    "spray",
     # Скины эффектов смерти (override игровых материалов рагдолла, client-side):
-    "DeathIce":  "death_ice",    # лёд (как от Sky-cicle)    → models/player/shared/ice_player
-    "DeathGold": "death_gold",   # золото (Golden Pan/Saxxy) → models/player/shared/gold_player
-    "DeathFire": "death_fire",   # огонь горящего игрока     → effects/tiledfire/fireLayeredSlowTiled512
-}
+    "death_ice",    # лёд (как от Sky-cicle)    → models/player/shared/ice_player
+    "death_gold",   # золото (Golden Pan/Saxxy) → models/player/shared/gold_player
+    "death_fire",   # огонь горящего игрока     → effects/tiledfire/fireLayeredSlowTiled512
+)
 
 # Спец-режимы, где пишем ТОЛЬКО VTF (без VMT): эти материалы используют особый
 # игровой шейдер/прокси (cloak/цвет/scroll), поэтому собственный VMT их сломает —
 # игровой VMT сам подхватит нашу текстуру по тому же пути.
 VTF_ONLY_SPECIAL_MODES = {"death_ice", "death_gold", "death_fire"}
 
-TF2_CLASSES = {
-    "Scout": {"color": "#87CEEB", "icon": ""},
-    "Soldier": {"color": "#8B4513", "icon": ""},
-    "Pyro": {"color": "#FF4500", "icon": ""},
-    "Demoman": {"color": "#800080", "icon": ""},
-    "Heavy": {"color": "#FFD700", "icon": ""},
-    "Engineer": {"color": "#DAA520", "icon": ""},
-    "Medic": {"color": "#FF0000", "icon": ""},
-    "Sniper": {"color": "#228B22", "icon": ""},
-    "Spy": {"color": "#4B0082", "icon": ""},
-    "All-Class": {"color": "#B0B0B0", "icon": ""}
-}
+TF2_CLASSES = (
+    "Scout", "Soldier", "Pyro", "Demoman", "Heavy",
+    "Engineer", "Medic", "Sniper", "Spy", "All-Class",
+)
 
 WEAPON_TYPES = {
     "PlayerSkin": {"ru": "Скин персонажа", "en": "Player Skin"},

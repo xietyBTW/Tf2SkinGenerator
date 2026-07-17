@@ -68,10 +68,6 @@ class DiagnosticReport:
         return [f for f in self.findings if f.severity is Severity.WARNING]
 
     @property
-    def infos(self) -> List[Finding]:
-        return [f for f in self.findings if f.severity is Severity.INFO]
-
-    @property
     def has_errors(self) -> bool:
         return any(f.severity is Severity.ERROR for f in self.findings)
 

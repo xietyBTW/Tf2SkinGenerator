@@ -121,7 +121,7 @@ def validate_build_params(
         return t['error_format_invalid'].format(format=format_type, formats=', '.join(VTF_FORMATS))
     # Только специальные режимы (спрей, крит и т.д.) не требуют TF2.
     # Персонажи, руки и оружия — полный pipeline через VPK + Crowbar.
-    _no_tf2_needed = mode in SPECIAL_MODES.values()
+    _no_tf2_needed = mode in SPECIAL_MODES
     if not _no_tf2_needed:
         if not tf2_root_dir or not isinstance(tf2_root_dir, str):
             return t['error_tf2_required']

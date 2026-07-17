@@ -967,23 +967,6 @@ class HatsPanel(QWidget):
     def active_style(self) -> int:
         return self._active_style
 
-    def get_selected_class_models(self) -> Optional[dict]:
-        """
-        Для мультиклассовой шапки — {класс: mdl} только по отмеченным классам.
-        Для обычной (≤1 модель на класс) — None.
-        """
-        hat = self._selected_hat
-        if not self._is_multiclass(hat):
-            return None
-        # Если dropdown активен для текущей шапки — берём отмеченные;
-        # иначе (на всякий случай) — все классы.
-        if self._dropdown_hat is hat and self._selected_classes:
-            sel = {c: hat.per_class_models[c]
-                   for c, on in self._selected_classes.items()
-                   if on and c in hat.per_class_models}
-            return sel or dict(hat.per_class_models)
-        return dict(hat.per_class_models)
-
     def get_selected_models(self) -> Optional[dict]:
         """
         Полный набор моделей для сборки: {уникальный_ключ: mdl_path} по выбранным

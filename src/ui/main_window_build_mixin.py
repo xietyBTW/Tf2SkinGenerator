@@ -35,8 +35,8 @@ class MainWindowBuildMixin:
             return
         for sig in (
             'finished', 'progress', 'sub_progress', 'error',
-            'request_extra_texture', 'request_model_file',
-            'request_extra_model', 'texture_mismatch_warning',
+            'request_extra_texture', 'request_extra_model',
+            'texture_mismatch_warning',
         ):
             try:
                 getattr(worker, sig).disconnect()
@@ -532,7 +532,7 @@ class MainWindowBuildMixin:
             )
 
         except Exception as e:
-            ErrorHandler.show_error(self, e, self.t.get('build_error', 'Build error'), self.t['build_error'], language=self.language)
+            ErrorHandler.show_error(self, e, self.t.get('build_error', 'Build error'), language=self.language)
     
     def _on_build_finished(self, success: bool, message: str):
         """Обработчик завершения сборки"""
@@ -541,7 +541,7 @@ class MainWindowBuildMixin:
             success_title = self.t.get('build_success', 'Success')
             ErrorHandler.show_info(self, message, success_title)
         else:
-            ErrorHandler.show_error(self, Exception(message), self.t.get('build_error', 'Build error'), self.t['build_error'], language=self.language)
+            ErrorHandler.show_error(self, Exception(message), self.t.get('build_error', 'Build error'), language=self.language)
     
     def _on_build_progress(self, percentage: int, status: str):
         """Обработчик прогресса сборки"""
@@ -555,7 +555,7 @@ class MainWindowBuildMixin:
     def _on_build_error(self, error_message: str):
         """Обработчик ошибки сборки"""
         self._close_progress('_progress_dialog', 'button')
-        ErrorHandler.show_error(self, Exception(error_message), self.t.get('build_error', 'Build error'), self.t.get('build_error', 'Build error'), language=self.language)
+        ErrorHandler.show_error(self, Exception(error_message), self.t.get('build_error', 'Build error'), language=self.language)
     
     def _cancel_build(self) -> None:
         """Отменяет сборку"""
@@ -666,13 +666,7 @@ class MainWindowBuildMixin:
         )
 
         # ── Человекочитаемое имя материала ────────────────────────────────────
-        from src.data.player_characters import PLAYER_BODY_MODE_KEYS, get_player_body_extra_label
-        lang = getattr(self, 'language', 'en')
-
-        if weapon_key in PLAYER_BODY_MODE_KEYS:
-            display_name = get_player_body_extra_label(weapon_key, material_name, lang)
-        else:
-            display_name = material_name
+        display_name = material_name
 
         # ── Apply-to-all: если уже есть запомненный выбор — применяем сразу ──
         _apply_all = getattr(self, '_extra_texture_apply_all', None)

@@ -13,10 +13,6 @@ logger = get_logger(__name__)
 class PackagingService:
 
     @staticmethod
-    def get_vpk_tool() -> Path:
-        return ToolPaths.get_vpk_tool()
-
-    @staticmethod
     def create_vpk_file(ctx, filename: str, export_folder: str = "export", language: str = "en") -> str:
         """Создаёт VPK из ctx.vpkroot_dir и перемещает в export_folder/filename."""
         if not ctx.vpkroot_dir.exists():

@@ -432,11 +432,8 @@ def classify(message: str, language: str = "ru") -> Tuple[str, str]:
     is_ru = (language == "ru")
 
     for pred, ru_title, ru_desc, en_title, en_desc in _RULES:
-        try:
-            if pred(m):
-                return (ru_title, ru_desc) if is_ru else (en_title, en_desc)
-        except Exception:
-            continue
+        if pred(m):
+            return (ru_title, ru_desc) if is_ru else (en_title, en_desc)
 
     if is_ru:
         return (
