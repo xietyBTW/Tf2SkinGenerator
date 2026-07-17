@@ -344,8 +344,7 @@ class MainWindow(QMainWindow, ProgressDialogMixin, MainWindowVmtMixin,
         layout.setSpacing(8)
 
         self._tf2_warning_label = QLabel()
-        self._tf2_warning_label.setStyleSheet(
-            "color: #e0b070; font-size: 12px; background: transparent; border: none;")
+        self._tf2_warning_label.setStyleSheet("color: #e0b070; font-size: 12px;")
         self._tf2_warning_label.setWordWrap(True)
         layout.addWidget(self._tf2_warning_label, 1)
 
@@ -370,8 +369,6 @@ class MainWindow(QMainWindow, ProgressDialogMixin, MainWindowVmtMixin,
 
     def _refresh_tf2_warning(self) -> None:
         """Показывает/прячет баннер-подсказку в зависимости от валидности пути TF2."""
-        if not hasattr(self, '_tf2_warning_banner'):
-            return
         from src.config.app_config import AppConfig
         from src.services.tf2_paths import TF2Paths
         path = (AppConfig.load_config().get('tf2_game_folder', '') or '').strip()

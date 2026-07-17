@@ -6,7 +6,6 @@ from pathlib import Path
 
 from src.shared.exceptions import RequiredFileMissingError
 from src.shared.file_utils import (
-    ensure_file_exists,
     ensure_directory_exists,
     safe_remove,
     copy_file_safe,
@@ -16,27 +15,6 @@ from src.shared.file_utils import (
 
 
 class FileUtilsTests(unittest.TestCase):
-    def test_ensure_file_exists_returns_path(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            file_path = Path(tmp) / "example.txt"
-            file_path.write_text("data", encoding="utf-8")
-            result = ensure_file_exists(file_path)
-            self.assertEqual(result, file_path)
-
-    def test_ensure_file_exists_raises_for_missing(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            missing = Path(tmp) / "missing.txt"
-            with self.assertRaises(RequiredFileMissingError):
-                ensure_file_exists(missing)
-            # Кастомное исключение должно ловиться и встроенным типом
-            with self.assertRaises(FileNotFoundError):
-                ensure_file_exists(missing)
-
-    def test_ensure_file_exists_raises_for_directory(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            with self.assertRaises(RequiredFileMissingError):
-                ensure_file_exists(tmp)
-
     def test_ensure_directory_exists_creates(self):
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "nested"
@@ -66,13 +44,14 @@ class FileUtilsTests(unittest.TestCase):
             self.assertTrue(result.exists())
             self.assertEqual(result.read_text(encoding="utf-8"), "data")
 
-    def test_get_temp_file_path(self):
+    def test_copy_file_safe_raises_for_missing_source(self):
         with tempfile.TemporaryDirectory() as tmp:
-            base = Path(tmp)
-            path = get_temp_file_path(prefix="x", suffix=".bin", directory=base)
-            self.assertTrue(path.parent.exists())
-            self.assertTrue(path.name.startswith("x_"))
-            self.assertTrue(path.name.endswith(".bin"))
+            missing = Path(tmp) / "missing.txt"
+            # Кастомное исключение должно ловиться и встроенным типом
+            with self.assertRaises(RequiredFileMissingError):
+                copy_file_safe(missing, Path(tmp) / "dest.txt")
+            with self.assertRaises(FileNotFoundError):
+                copy_file_safe(missing, Path(tmp) / "dest.txt")
 
     def test_cleanup_stale_temp_artifacts(self):
         with tempfile.TemporaryDirectory() as tmp:

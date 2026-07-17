@@ -177,17 +177,3 @@ class AppConfig:
             Путь к директории TF2 или пустая строка
         """
         return AppConfig.get("tf2_game_folder", "")
-
-    @staticmethod
-    def set_tf2_game_folder(path: str) -> bool:
-        """
-        Устанавливает путь к директории TF2
-
-        Args:
-            path: Путь к директории TF2
-
-        Returns:
-            True если успешно, False если ошибка
-        """
-        logger.info(f"Установлен путь к TF2: {path}")
-        return AppConfig.set("tf2_game_folder", path)

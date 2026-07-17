@@ -6,20 +6,7 @@
 `except FileNotFoundError` продолжали его ловить.
 """
 
-from dataclasses import dataclass
 from typing import Optional
-
-
-@dataclass
-class ErrorPayload:
-    code: str
-    message: str
-    details: Optional[str] = None
-
-    def to_text(self) -> str:
-        if self.details:
-            return f"{self.message}\n{self.details}"
-        return self.message
 
 
 class TF2SkinGeneratorError(Exception):

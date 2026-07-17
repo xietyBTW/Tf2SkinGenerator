@@ -9,27 +9,6 @@ from typing import Optional
 from .exceptions import RequiredFileMissingError
 
 
-def ensure_file_exists(file_path: str | Path) -> Path:
-    """
-    Проверяет существование файла, выбрасывает исключение если нет
-
-    Args:
-        file_path: Путь к файлу
-
-    Returns:
-        Path объект файла
-
-    Raises:
-        RequiredFileMissingError: Если файл не существует
-    """
-    path = Path(file_path)
-    if not path.exists():
-        raise RequiredFileMissingError(str(path))
-    if not path.is_file():
-        raise RequiredFileMissingError(str(path), f"Путь не является файлом: {path}")
-    return path
-
-
 def ensure_directory_exists(dir_path: str | Path) -> Path:
     """
     Создает директорию если не существует
@@ -84,7 +63,9 @@ def copy_file_safe(source: str | Path, destination: str | Path) -> Path:
     Raises:
         RequiredFileMissingError: Если исходный файл не существует
     """
-    source_path = ensure_file_exists(source)
+    source_path = Path(source)
+    if not source_path.is_file():
+        raise RequiredFileMissingError(str(source_path))
     dest_path = Path(destination)
 
     # Создаем директорию назначения если нужно
@@ -144,25 +125,19 @@ def cleanup_stale_temp_artifacts(max_age_hours: float = 24.0,
     return removed
 
 
-def get_temp_file_path(prefix: str = "temp", suffix: str = ".tmp", directory: Optional[Path] = None) -> Path:
+def get_temp_file_path(prefix: str = "temp", suffix: str = ".tmp") -> Path:
     """
     Генерирует путь к временному файлу (безопасная замена tempfile.mktemp)
 
     Args:
         prefix: Префикс имени файла
         suffix: Суффикс (расширение)
-        directory: Директория для временного файла (если None, используется системная)
 
     Returns:
         Path к временному файлу
     """
     import tempfile
 
-    if directory:
-        directory = Path(directory)
-        directory.mkdir(parents=True, exist_ok=True)
-        return directory / f"{prefix}_{os.urandom(8).hex()}{suffix}"
-    else:
-        fd, path = tempfile.mkstemp(prefix=prefix, suffix=suffix)
-        os.close(fd)
-        return Path(path)
+    fd, path = tempfile.mkstemp(prefix=prefix, suffix=suffix)
+    os.close(fd)
+    return Path(path)

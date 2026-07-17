@@ -1,7 +1,6 @@
 import unittest
 
 from src.shared.exceptions import (
-    ErrorPayload,
     TF2SkinGeneratorError,
     RequiredFileMissingError,
     VTFCreationError,
@@ -35,12 +34,6 @@ class ExceptionsTests(unittest.TestCase):
         err = VPKCreationError(stdout="out", stderr="err")
         self.assertIn("out", str(err))
         self.assertIn("err", str(err))
-
-    def test_error_payload_to_text(self):
-        payload = ErrorPayload(code="x", message="msg", details="det")
-        self.assertEqual(payload.to_text(), "msg\ndet")
-        payload_no_details = ErrorPayload(code="x", message="msg")
-        self.assertEqual(payload_no_details.to_text(), "msg")
 
 
 if __name__ == "__main__":

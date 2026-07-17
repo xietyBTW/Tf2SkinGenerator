@@ -29,11 +29,6 @@ except ImportError:
 _TLS = threading.local()
 
 
-def vpk_available() -> bool:
-    """Доступна ли библиотека vpk."""
-    return _VPK_AVAILABLE
-
-
 def open_vpk_cached(dir_vpk_path: str):
     """Открывает VPK один раз НА ПОТОК и переиспользует хэндл.
 

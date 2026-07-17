@@ -6,7 +6,6 @@
 from typing import Optional, TYPE_CHECKING, Union
 from PySide6.QtWidgets import QMessageBox, QWidget, QVBoxLayout, QLabel, QPushButton
 from src.shared.logging_config import get_logger
-from src.shared.exceptions import ErrorPayload
 from src.shared.error_classifier import classify
 
 if TYPE_CHECKING:
@@ -61,17 +60,14 @@ class ErrorHandler:
     @staticmethod
     def show_error(
         parent: Optional['QWidget'],
-        error: Union[Exception, ErrorPayload, str],
+        error: Union[Exception, str],
         context: str = "",
         title: Optional[str] = None,
         language: str = "ru",
     ) -> None:
         from src.ui.error_dialog import ErrorDialog
 
-        if isinstance(error, ErrorPayload):
-            raw_msg = error.to_text()
-            error_type = error.code
-        elif isinstance(error, Exception):
+        if isinstance(error, Exception):
             raw_msg = str(error)
             error_type = type(error).__name__
         else:

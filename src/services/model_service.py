@@ -19,15 +19,8 @@ class ModelService:
             t = TRANSLATIONS.get('en', TRANSLATIONS['en'])
             raise RequiredFileMissingError(qc_path, t['error_modelname_not_extracted'].format(qc_path=qc_path))
         normalized_path = modelname_path.replace('\\', '/')
-        path_parts = normalized_path.split('/')
-        if len(path_parts) > 1:
-            model_dir_path = '/'.join(path_parts[:-1])
-        else:
-            model_dir_path = ""
-        if model_dir_path:
-            target_dir = ctx.vpkroot_dir / "models" / model_dir_path
-        else:
-            target_dir = ctx.vpkroot_dir / "models"
+        # Пустой dirname pathlib молча отбрасывает при join.
+        target_dir = ctx.vpkroot_dir / "models" / normalized_path.rpartition('/')[0]
         ensure_directory_exists(target_dir)
         if not ctx.compile_dir.exists():
             from src.data.translations import TRANSLATIONS

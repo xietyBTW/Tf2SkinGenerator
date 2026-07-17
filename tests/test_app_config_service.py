@@ -47,16 +47,6 @@ class AppConfigServiceTests(unittest.TestCase):
             data = json.loads(config_file.read_text(encoding="utf-8"))
             self.assertEqual(data["tf2_game_folder"], "C:/TF2")
 
-    def test_set_tf2_game_folder(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            config_dir = Path(tmp) / "config"
-            config_file = config_dir / "app_config.json"
-            with patch.object(AppConfig, "CONFIG_DIR", config_dir):
-                with patch.object(AppConfig, "CONFIG_FILE", config_file):
-                    self.assertTrue(AppConfig.set_tf2_game_folder("C:/TF2"))
-            data = json.loads(config_file.read_text(encoding="utf-8"))
-            self.assertEqual(data["tf2_game_folder"], "C:/TF2")
-
     def test_cache_serves_repeated_reads(self):
         """Повторный load_config без изменения файла не должен читать диск."""
         with tempfile.TemporaryDirectory() as tmp:

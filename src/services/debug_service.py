@@ -55,10 +55,4 @@ class DebugService:
         if not os.path.exists(source_dir):
             return
 
-        for root, _, files in os.walk(source_dir):
-            for file_name in files:
-                src_path = os.path.join(root, file_name)
-                rel_path = os.path.relpath(src_path, source_dir)
-                target_path = os.path.join(stage_dir, rel_path)
-                os.makedirs(os.path.dirname(target_path), exist_ok=True)
-                shutil.copy2(src_path, target_path)
+        shutil.copytree(source_dir, stage_dir, dirs_exist_ok=True)

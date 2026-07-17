@@ -49,19 +49,15 @@ class TF2Paths:
     
     @staticmethod
     def is_valid(tf2_root_dir: str) -> bool:
-        """Быстрая (без исключений) проверка, что путь TF2 указан и пригоден.
+        """True, если путь TF2 указан и resolve() найдёт все нужные файлы.
 
-        True только если каталог существует и содержит те же файлы, что нужны
-        resolve() — bin\\studiomdl.exe и tf\\tf2_misc_dir.vpk. Используется для
-        подсказки-баннера в UI.
+        Используется для подсказки-баннера в UI.
         """
-        if not tf2_root_dir or not os.path.isdir(tf2_root_dir):
+        try:
+            TF2Paths.resolve(tf2_root_dir)
+            return True
+        except (FileNotFoundError, OSError):
             return False
-        if not os.path.isfile(os.path.join(tf2_root_dir, "bin", "studiomdl.exe")):
-            return False
-        if not os.path.isfile(os.path.join(tf2_root_dir, "tf", "tf2_misc_dir.vpk")):
-            return False
-        return True
 
     @staticmethod
     def resolve_textures_vpk(tf2_root_dir: str) -> Optional[str]:
