@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Particle Preview</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #1a1a1a;
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+
+  #canvas-container { width: 100%; height: 100%; }
+
+  /* ── Статус (idle / loading / error) — как в viewer3d ─────────────────── */
+  #status {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    pointer-events: none;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  #status-spinner {
+    width: 26px; height: 26px;
+    border: 2px solid #2c2c2c;
+    border-top-color: #5a5a5a;
+    border-radius: 50%;
+    animation: spin 0.75s linear infinite;
+    display: none;
+    flex-shrink: 0;
+  }
+
+  #status-icon { font-size: 32px; opacity: 0.18; line-height: 1; }
+
+  #status-text {
+    color: #454545;
+    font-size: 12px;
+    letter-spacing: 0.045em;
+    text-align: center;
+    max-width: 320px;
+    line-height: 1.55;
+  }
+
+  #status.loading #status-spinner { display: block; }
+  #status.loading #status-icon    { display: none; }
+  #status.loading #status-text    { color: #505050; }
+  #status.error   #status-icon    { opacity: 0.3; }
+  #status.error   #status-text    { color: #a05050; }
+  #status.hidden  { display: none; }
+
+  /* ── Счётчик частиц ───────────────────────────────────────────────────── */
+  #stats {
+    position: absolute;
+    left: 10px; bottom: 8px;
+    color: #4a4a4a;
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    user-select: none;
+    display: none;
+  }
+</style>
+</head>
+<body>
+<div id="canvas-container"></div>
+<div id="status">
+  <div id="status-spinner"></div>
+  <div id="status-icon">&#10038;</div>
+  <div id="status-text"></div>
+</div>
+<div id="stats"></div>
+
+<script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+
+<script type="importmap">
+{
+  "imports": {
+    "three":          "./js/three.module.js",
+    "three/addons/":  "./js/addons/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE        from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { ParticleSystemInstance } from './js/particles/engine.js';
+
+// ── Python bridge ────────────────────────────────────────────────────────── //
+
+let pyBridge = null;
+(function initBridge() {
+  try {
+    if (typeof QWebChannel !== 'undefined' && typeof qt !== 'undefined') {
+      new QWebChannel(qt.webChannelTransport, channel => {
+        pyBridge = channel.objects.pyBridge || null;
+        if (pyBridge && pyBridge.notifyReady) pyBridge.notifyReady();
+      });
+    }
+  } catch (e) { console.log('QWebChannel init failed:', e); }
+})();
+
+// ── i18n ─────────────────────────────────────────────────────────────────── //
+
+const I18N = {
+  en: {
+    prompt: 'Select a particle system on the left to preview it',
+    error_load: 'Failed to load effect',
+  },
+  ru: {
+    prompt: 'Выберите систему частиц слева, чтобы увидеть превью',
+    error_load: 'Не удалось загрузить эффект',
+  },
+};
+let lang = 'en';
+window.setLanguage = (l) => { lang = I18N[l] ? l : 'en'; };
+
+// ── Статус ───────────────────────────────────────────────────────────────── //
+
+const statusEl  = document.getElementById('status');
+const statusTxt = document.getElementById('status-text');
+const statsEl   = document.getElementById('stats');
+
+function setStatus(mode, text) {
+  statusEl.className = mode;
+  statusTxt.textContent = text || '';
+}
+window.showPrompt  = (t) => setStatus('', t || I18N[lang].prompt);
+window.showLoading = (t) => setStatus('loading', t || '');
+window.showError   = (t) => setStatus('error', t || I18N[lang].error_load);
+
+// ── Сцена ────────────────────────────────────────────────────────────────── //
+
+const container = document.getElementById('canvas-container');
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+renderer.setPixelRatio(window.devicePixelRatio || 1);
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setClearColor(0x1a1a1a);
+container.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+
+// Source: Z вверх, единицы — юниты Хаммера
+const camera = new THREE.PerspectiveCamera(
+  60, window.innerWidth / window.innerHeight, 1, 20000);
+camera.up.set(0, 0, 1);
+camera.position.set(110, -190, 80);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 0, 40);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.update();
+
+const grid = new THREE.GridHelper(512, 16, 0x333333, 0x262626);
+grid.rotation.x = Math.PI / 2;   // XZ → XY (пол Source)
+scene.add(grid);
+
+const axes = new THREE.AxesHelper(24);
+scene.add(axes);
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// ── Инстансный рендер спрайтов ───────────────────────────────────────────── //
+
+const VERT = `
+  attribute vec3 iPos;
+  attribute float iRadius;
+  attribute float iRot;
+  attribute vec3 iColor;
+  attribute float iAlpha;
+  attribute vec4 iUV0;
+  attribute vec4 iUV1;
+  attribute float iBlend;
+  attribute float iOrient;
+  varying vec2 vUv0;
+  varying vec2 vUv1;
+  varying float vBlend;
+  varying vec3 vColor;
+  varying float vAlpha;
+  varying vec2 vLocal;
+  void main() {
+    vec2 corner = position.xy;
+    float c = cos(iRot), s = sin(iRot);
+    vec2 rc = vec2(corner.x * c - corner.y * s, corner.x * s + corner.y * c);
+    vec4 pos;
+    if (iOrient > 1.5) {
+      // orientation_type 2: параллельно земле (XY-плоскость мира)
+      pos = modelViewMatrix * vec4(iPos + vec3(rc, 0.0) * iRadius, 1.0);
+    } else {
+      pos = modelViewMatrix * vec4(iPos, 1.0);
+      pos.xy += rc * iRadius;
+    }
+    gl_Position = projectionMatrix * pos;
+    vUv0 = uv * iUV0.xy + iUV0.zw;
+    vUv1 = uv * iUV1.xy + iUV1.zw;
+    vBlend = iBlend;
+    vColor = iColor;
+    vAlpha = iAlpha;
+    vLocal = uv;
+  }
+`;
+
+const FRAG = `
+  uniform sampler2D uTex;
+  uniform float uHasTex;
+  uniform float uSoft;
+  varying vec2 vUv0;
+  varying vec2 vUv1;
+  varying float vBlend;
+  varying vec3 vColor;
+  varying float vAlpha;
+  varying vec2 vLocal;
+  void main() {
+    vec4 t = vec4(1.0);
+    if (uHasTex > 0.5) {
+      vec4 t0 = texture2D(uTex, vUv0);
+      vec4 t1 = texture2D(uTex, vUv1);
+      t = mix(t0, t1, vBlend);
+    } else if (uSoft > 0.5) {
+      // Нет текстуры (refract-материал и т.п.) — мягкий круг вместо квада
+      float d = length(vLocal * 2.0 - 1.0);
+      t.a = smoothstep(1.0, 0.45, d);
+    }
+    gl_FragColor = vec4(t.rgb * vColor, t.a * vAlpha);
+    if (gl_FragColor.a < 0.004) discard;
+  }
+`;
+
+// Лента (render_rope): треугольная полоса через частицы, мягкие края по ширине
+const ROPE_VERT = `
+  attribute vec3 aColor;
+  attribute float aAlpha;
+  attribute float aU;
+  varying vec3 vColor;
+  varying float vAlpha;
+  varying float vU;
+  void main() {
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    vColor = aColor;
+    vAlpha = aAlpha;
+    vU = aU;
+  }
+`;
+
+const ROPE_FRAG = `
+  varying vec3 vColor;
+  varying float vAlpha;
+  varying float vU;
+  void main() {
+    float e = 1.0 - abs(vU * 2.0 - 1.0);
+    float a = vAlpha * smoothstep(0.0, 0.6, e);
+    gl_FragColor = vec4(vColor, a);
+    if (gl_FragColor.a < 0.004) discard;
+  }
+`;
+
+const textureLoader = new THREE.TextureLoader();
+const textureCache = {};   // materialName -> THREE.Texture | null
+
+function getTexture(materialName, materials) {
+  if (materialName in textureCache) return textureCache[materialName];
+  const info = materials[materialName];
+  let tex = null;
+  if (info && info.dataUrl) {
+    tex = textureLoader.load(info.dataUrl);
+    tex.flipY = false;                       // UV sheet-кадров — top-left, как в Source
+    // colorSpace не задаём: кастомный ShaderMaterial не делает обратного
+    // sRGB-преобразования, декод в линейное пространство затемнил бы текстуры
+    tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+    tex.minFilter = THREE.LinearFilter;
+    tex.magFilter = THREE.LinearFilter;
+  }
+  textureCache[materialName] = tex;
+  return tex;
+}
+
+/** Мягкий фолбэк вместо квада: материала нет вовсе или это refract без $basetexture. */
+function isSoftFallback(materialName) {
+  const info = materialsJson[materialName];
+  if (!info) return true;
+  return !info.dataUrl && info.shader === 'refract';
+}
+
+/** Батч: один материал (текстура+блендинг) → один инстансный меш. */
+class SpriteBatch {
+  constructor(texture, additive, soft) {
+    this._soft = soft ? 1.0 : 0.0;
+    this.capacity = 256;
+    this.geometry = new THREE.InstancedBufferGeometry();
+
+    // Квад ±1; uv: top-left origin (flipY=false)
+    const positions = new Float32Array([-1, -1, 0,  1, -1, 0,  1, 1, 0,  -1, 1, 0]);
+    const uvs       = new Float32Array([ 0,  1,     1,  1,     1, 0,      0, 0]);
+    const index     = [0, 1, 2, 0, 2, 3];
+    this.geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    this.geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+    this.geometry.setIndex(index);
+    this._allocAttributes();
+
+    this.material = new THREE.ShaderMaterial({
+      uniforms: {
+        uTex:    { value: texture },
+        uHasTex: { value: texture ? 1.0 : 0.0 },
+        uSoft:   { value: this._soft },
+      },
+      vertexShader: VERT,
+      fragmentShader: FRAG,
+      transparent: true,
+      depthWrite: false,
+      depthTest: true,
+      blending: THREE.CustomBlending,
+      blendSrc: THREE.SrcAlphaFactor,
+      blendDst: additive ? THREE.OneFactor : THREE.OneMinusSrcAlphaFactor,
+      side: THREE.DoubleSide,
+    });
+
+    this.mesh = new THREE.Mesh(this.geometry, this.material);
+    this.mesh.frustumCulled = false;
+    // ponytail: без пер-частичной сортировки; additive поверх обычных
+    this.mesh.renderOrder = additive ? 2 : 1;
+    scene.add(this.mesh);
+  }
+
+  _allocAttributes() {
+    const n = this.capacity;
+    const mk = (arr, itemSize) => {
+      const a = new THREE.InstancedBufferAttribute(arr, itemSize);
+      a.setUsage(THREE.DynamicDrawUsage);
+      return a;
+    };
+    this.aPos    = mk(new Float32Array(n * 3), 3);
+    this.aRadius = mk(new Float32Array(n), 1);
+    this.aRot    = mk(new Float32Array(n), 1);
+    this.aColor  = mk(new Float32Array(n * 3), 3);
+    this.aAlpha  = mk(new Float32Array(n), 1);
+    this.aUV0    = mk(new Float32Array(n * 4), 4);
+    this.aUV1    = mk(new Float32Array(n * 4), 4);
+    this.aBlend  = mk(new Float32Array(n), 1);
+    this.aOrient = mk(new Float32Array(n), 1);
+    const g = this.geometry;
+    g.setAttribute('iPos', this.aPos);
+    g.setAttribute('iRadius', this.aRadius);
+    g.setAttribute('iRot', this.aRot);
+    g.setAttribute('iColor', this.aColor);
+    g.setAttribute('iAlpha', this.aAlpha);
+    g.setAttribute('iUV0', this.aUV0);
+    g.setAttribute('iUV1', this.aUV1);
+    g.setAttribute('iBlend', this.aBlend);
+    g.setAttribute('iOrient', this.aOrient);
+  }
+
+  update(sprites) {
+    if (sprites.length > this.capacity) {
+      while (this.capacity < sprites.length) this.capacity *= 2;
+      this._allocAttributes();
+    }
+    for (let i = 0; i < sprites.length; i++) {
+      const s = sprites[i];
+      this.aPos.array[i * 3]     = s.pos[0];
+      this.aPos.array[i * 3 + 1] = s.pos[1];
+      this.aPos.array[i * 3 + 2] = s.pos[2];
+      this.aRadius.array[i] = s.radius;
+      this.aRot.array[i]    = s.rotation;
+      this.aColor.array[i * 3]     = s.color[0];
+      this.aColor.array[i * 3 + 1] = s.color[1];
+      this.aColor.array[i * 3 + 2] = s.color[2];
+      this.aAlpha.array[i] = s.alpha;
+      for (let j = 0; j < 4; j++) {
+        this.aUV0.array[i * 4 + j] = s.uv0[j];
+        this.aUV1.array[i * 4 + j] = s.uv1[j];
+      }
+      this.aBlend.array[i]  = s.blend;
+      this.aOrient.array[i] = s.orientation;
+    }
+    for (const a of [this.aPos, this.aRadius, this.aRot, this.aColor,
+                     this.aAlpha, this.aUV0, this.aUV1, this.aBlend, this.aOrient])
+      a.needsUpdate = true;
+    this.geometry.instanceCount = sprites.length;
+    this.mesh.visible = sprites.length > 0;
+  }
+
+  dispose() {
+    scene.remove(this.mesh);
+    this.geometry.dispose();
+    this.material.dispose();
+  }
+}
+
+/** Батч лент (render_rope): полоса, повёрнутая к камере, мягкие края.
+    Геометрия пересобирается каждый кадр — лент единицы, вершин сотни. */
+class RopeBatch {
+  constructor(additive) {
+    this.geometry = new THREE.BufferGeometry();
+    this.material = new THREE.ShaderMaterial({
+      vertexShader: ROPE_VERT,
+      fragmentShader: ROPE_FRAG,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.CustomBlending,
+      blendSrc: THREE.SrcAlphaFactor,
+      blendDst: additive ? THREE.OneFactor : THREE.OneMinusSrcAlphaFactor,
+      side: THREE.DoubleSide,
+    });
+    this.mesh = new THREE.Mesh(this.geometry, this.material);
+    this.mesh.frustumCulled = false;
+    this.mesh.renderOrder = additive ? 2 : 1;
+    scene.add(this.mesh);
+  }
+
+  update(ropes) {
+    const pos = [], col = [], alp = [], us = [], idx = [];
+    const cam = camera.position;
+    for (const rope of ropes) {
+      const pts = rope.points;
+      const base = pos.length / 3;
+      for (let i = 0; i < pts.length; i++) {
+        const p = pts[i];
+        const prev = pts[Math.max(0, i - 1)], next = pts[Math.min(pts.length - 1, i + 1)];
+        // Направление сегмента и вектор «в сторону» лицом к камере
+        let dx = next.pos[0] - prev.pos[0], dy = next.pos[1] - prev.pos[1], dz = next.pos[2] - prev.pos[2];
+        const vx = p.pos[0] - cam.x, vy = p.pos[1] - cam.y, vz = p.pos[2] - cam.z;
+        let sx = dy * vz - dz * vy, sy = dz * vx - dx * vz, sz = dx * vy - dy * vx;
+        const sl = Math.hypot(sx, sy, sz) || 1;
+        const r = p.radius;
+        sx = sx / sl * r; sy = sy / sl * r; sz = sz / sl * r;
+        pos.push(p.pos[0] - sx, p.pos[1] - sy, p.pos[2] - sz,
+                 p.pos[0] + sx, p.pos[1] + sy, p.pos[2] + sz);
+        col.push(p.color[0], p.color[1], p.color[2], p.color[0], p.color[1], p.color[2]);
+        alp.push(p.alpha, p.alpha);
+        us.push(0, 1);
+        if (i > 0) {
+          const a = base + (i - 1) * 2, b = base + i * 2;
+          idx.push(a, a + 1, b, a + 1, b + 1, b);
+        }
+      }
+    }
+    this.geometry.dispose();
+    this.geometry = new THREE.BufferGeometry();
+    this.geometry.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    this.geometry.setAttribute('aColor', new THREE.Float32BufferAttribute(col, 3));
+    this.geometry.setAttribute('aAlpha', new THREE.Float32BufferAttribute(alp, 1));
+    this.geometry.setAttribute('aU', new THREE.Float32BufferAttribute(us, 1));
+    this.geometry.setIndex(idx);
+    this.mesh.geometry = this.geometry;
+    this.mesh.visible = idx.length > 0;
+  }
+
+  dispose() {
+    scene.remove(this.mesh);
+    this.geometry.dispose();
+    this.material.dispose();
+  }
+}
+
+// ── Состояние эффекта ────────────────────────────────────────────────────── //
+
+let systemsJson = {};
+let materialsJson = {};
+let rootInstance = null;
+let batches = {};          // ключ материала → SpriteBatch
+let ropeBatches = {};      // ключ материала → RopeBatch
+let paused = false;
+let loop = true;
+let finishedAt = null;
+const controller = { controlPoints: [[0, 0, 0]] };
+
+function disposeBatches() {
+  for (const b of Object.values(batches)) b.dispose();
+  batches = {};
+  for (const b of Object.values(ropeBatches)) b.dispose();
+  ropeBatches = {};
+}
+
+window.loadParticleData = function(dataJson) {
+  try {
+    const data = (typeof dataJson === 'string') ? JSON.parse(dataJson) : dataJson;
+    systemsJson = data.systems || {};
+    materialsJson = data.materials || {};
+    for (const k of Object.keys(textureCache)) {
+      if (textureCache[k]) textureCache[k].dispose();
+      delete textureCache[k];
+    }
+    if (data.rootName) window.setRootSystem(data.rootName);
+    else { rootInstance = null; disposeBatches(); window.showPrompt(); }
+  } catch (e) {
+    console.log('loadParticleData error:', e);
+    window.showError(I18N[lang].error_load + ': ' + e.message);
+  }
+};
+
+/** Обновление только определений систем (правка атрибутов): материалы и
+    GPU-текстуры переиспользуются — без ремаршалинга PNG и роста VRAM. */
+window.updateSystems = function(systemsOnly, rootName) {
+  try {
+    systemsJson = (typeof systemsOnly === 'string')
+      ? JSON.parse(systemsOnly) : (systemsOnly || {});
+    if (rootName) window.setRootSystem(rootName);
+  } catch (e) {
+    console.log('updateSystems error:', e);
+    window.showError(I18N[lang].error_load + ': ' + e.message);
+  }
+};
+
+window.setRootSystem = function(name) {
+  try {
+    const def = systemsJson[name];
+    if (!def) { window.showError(I18N[lang].error_load + ': ' + name); return; }
+    disposeBatches();
+    rootInstance = new ParticleSystemInstance(def, systemsJson, materialsJson, controller);
+    finishedAt = null;
+    setStatus('hidden', '');
+    statsEl.style.display = 'block';
+  } catch (e) {
+    console.log('setRootSystem error:', e);
+    window.showError(I18N[lang].error_load + ': ' + e.message);
+  }
+};
+
+window.restartEffect = function() {
+  if (rootInstance) { rootInstance.reset(); finishedAt = null; }
+};
+
+window.setPaused = function(v) { paused = !!v; };
+window.setLoop = function(v) { loop = !!v; };
+
+window.setControlPoint = function(i, x, y, z) {
+  controller.controlPoints[i] = [x, y, z];
+};
+
+window.resetViewer = function() {
+  rootInstance = null;
+  disposeBatches();
+  statsEl.style.display = 'none';
+  window.showPrompt();
+};
+
+// ── Цикл ─────────────────────────────────────────────────────────────────── //
+
+const clock = new THREE.Clock();
+const spritePool = [];
+const ropePool = [];
+
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(), 0.3);
+  controls.update();
+
+  if (rootInstance && !paused) {
+    rootInstance.movement(dt);
+
+    if (loop && rootInstance.isFinished()) {
+      if (finishedAt === null) finishedAt = performance.now();
+      else if (performance.now() - finishedAt > 600) {
+        rootInstance.reset();
+        finishedAt = null;
+      }
+    } else {
+      finishedAt = null;
+    }
+  }
+
+  spritePool.length = 0;
+  ropePool.length = 0;
+  if (rootInstance) {
+    rootInstance.collectSprites(spritePool, ropePool);
+
+    // Группировка по материалу (текстура + блендинг)
+    const groups = {};
+    for (const s of spritePool) {
+      const key = s.material + (s.additive ? '|a' : '|n');
+      (groups[key] || (groups[key] = [])).push(s);
+    }
+    for (const [key, sprites] of Object.entries(groups)) {
+      if (!batches[key]) {
+        const tex = getTexture(sprites[0].material, materialsJson);
+        batches[key] = new SpriteBatch(
+          tex, sprites[0].additive, isSoftFallback(sprites[0].material));
+      }
+      batches[key].update(sprites);
+    }
+    for (const [key, batch] of Object.entries(batches))
+      if (!groups[key]) batch.update([]);
+
+    // Ленты (render_rope)
+    const ropeGroups = {};
+    let ropePts = 0;
+    for (const r of ropePool) {
+      const key = r.material + (r.additive ? '|a' : '|n');
+      (ropeGroups[key] || (ropeGroups[key] = [])).push(r);
+      ropePts += r.points.length;
+    }
+    for (const [key, ropes] of Object.entries(ropeGroups)) {
+      if (!ropeBatches[key])
+        ropeBatches[key] = new RopeBatch(ropes[0].additive);
+      ropeBatches[key].update(ropes);
+    }
+    for (const [key, batch] of Object.entries(ropeBatches))
+      if (!ropeGroups[key]) batch.update([]);
+
+    statsEl.textContent = (spritePool.length + ropePts) + ' particles';
+  }
+
+  renderer.render(scene, camera);
+}
+
+window.showPrompt();
+animate();
+</script>
+</body>
+</html>

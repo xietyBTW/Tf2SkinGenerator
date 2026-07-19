@@ -6,7 +6,7 @@ from typing import Optional
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QCheckBox, QPushButton, QScrollArea,
-    QFrame,
+    QFrame, QSizePolicy,
 )
 from PySide6.QtCore import QUrl, Qt
 from PySide6.QtGui import QDesktopServices, QMouseEvent, QIcon
@@ -454,9 +454,15 @@ class MainWindow(QMainWindow, ProgressDialogMixin, MainWindowVmtMixin,
         self._tab_diag_btn.setStyleSheet(_tab_btn_style(False))
         self._tab_diag_btn.clicked.connect(lambda: self._switch_tab(2))
 
+        self._tab_particles_btn = QPushButton(self.t.get('tab_particles', 'Particles'))
+        self._tab_particles_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._tab_particles_btn.setStyleSheet(_tab_btn_style(False))
+        self._tab_particles_btn.clicked.connect(lambda: self._switch_tab(3))
+
         tab_row.addWidget(self._tab_weapons_btn)
         tab_row.addWidget(self._tab_hats_btn)
         tab_row.addWidget(self._tab_diag_btn)
+        tab_row.addWidget(self._tab_particles_btn)
         tab_row.addStretch()
 
         # Разделитель под таб-баром
@@ -577,9 +583,23 @@ class MainWindow(QMainWindow, ProgressDialogMixin, MainWindowVmtMixin,
         self.diagnostics_panel = DiagnosticsPanel(diag_page, language=self.language)
         diag_page_layout.addWidget(self.diagnostics_panel)
 
-        self._left_stack.addWidget(weapons_page)   # index 0
-        self._left_stack.addWidget(hats_page)      # index 1
-        self._left_stack.addWidget(diag_page)      # index 2
+        # ── Страница 3: редактор частиц ─────────────────────────────────────
+        # Создаётся лениво при первом заходе: QWebEngineView — отдельный
+        # Chromium-процесс, на старте приложения он не нужен.
+        self._particles_page = QWidget()
+        # QStackedWidget берёт sizeHint по максимуму ВСЕХ страниц — без Ignored
+        # широкая страница частиц перекашивает ширину колонок на других вкладках
+        self._particles_page.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
+        self._particles_page_layout = QVBoxLayout(self._particles_page)
+        self._particles_page_layout.setContentsMargins(0, 0, 0, 0)
+        self._particles_page_layout.setSpacing(0)
+        self.particles_panel = None
+
+        self._left_stack.addWidget(weapons_page)          # index 0
+        self._left_stack.addWidget(hats_page)             # index 1
+        self._left_stack.addWidget(diag_page)             # index 2
+        self._left_stack.addWidget(self._particles_page)  # index 3
 
         layout.addWidget(self._left_stack, 1)
 
@@ -638,15 +658,29 @@ class MainWindow(QMainWindow, ProgressDialogMixin, MainWindowVmtMixin,
         self._tab_weapons_btn.setStyleSheet(active_style if index == 0 else inactive_style)
         self._tab_hats_btn.setStyleSheet(active_style if index == 1 else inactive_style)
         self._tab_diag_btn.setStyleSheet(active_style if index == 2 else inactive_style)
+        self._tab_particles_btn.setStyleSheet(active_style if index == 3 else inactive_style)
 
         # Превью и панель сборки нужны только для создания скина (Weapons/Hats).
-        # На «Диагностике» — самодостаточный осмотр VPK: прячем их, чтобы список
-        # находок занял всю ширину (там длинные тексты).
-        is_diag = (index == 2)
+        # «Диагностика» и «Частицы» самодостаточны: прячем их, чтобы страница
+        # заняла всю ширину.
+        is_full_width = index in (2, 3)
         if hasattr(self, 'preview_panel'):
-            self.preview_panel.setVisible(not is_diag)
+            self.preview_panel.setVisible(not is_full_width)
         if hasattr(self, 'settings_scroll'):
-            self.settings_scroll.setVisible(not is_diag)
+            self.settings_scroll.setVisible(not is_full_width)
+
+        # Ленивое создание редактора частиц; путь TF2 перечитываем на каждый
+        # заход — его могли сменить в настройках
+        if index == 3:
+            from src.config.app_config import AppConfig
+            tf2_root = AppConfig.load_config().get("tf2_game_folder", "")
+            if self.particles_panel is None:
+                from src.ui.particles_panel import ParticlesPanel
+                self.particles_panel = ParticlesPanel(
+                    self._particles_page, language=self.language, tf2_root=tf2_root)
+                self._particles_page_layout.addWidget(self.particles_panel)
+            else:
+                self.particles_panel.set_tf2_root(tf2_root)
 
         if index == 1:
             # Загружаем шапки если ещё не загружены
@@ -663,7 +697,7 @@ class MainWindow(QMainWindow, ProgressDialogMixin, MainWindowVmtMixin,
             self._hat_mdl_path = None
             self._hat_display_name = ""
             self.apply_selection_auto()
-        # index == 2 (диагностика) — превью/сборка скрыты, доп. логики не нужно
+        # index == 2/3 (диагностика/частицы) — превью/сборка скрыты
 
     def _on_hat_selected(self, mdl_path: str, display_name: str) -> None:
         """Пользователь выбрал шапку из списка."""
@@ -1058,6 +1092,10 @@ class MainWindow(QMainWindow, ProgressDialogMixin, MainWindowVmtMixin,
             self._tab_hats_btn.setText(self.t.get('tab_hats', 'Hats'))
         if hasattr(self, '_tab_diag_btn'):
             self._tab_diag_btn.setText(self.t.get('tab_diagnostics', 'Diagnostics'))
+        if hasattr(self, '_tab_particles_btn'):
+            self._tab_particles_btn.setText(self.t.get('tab_particles', 'Particles'))
+        if getattr(self, 'particles_panel', None) is not None:
+            self.particles_panel.update_language(self.language)
         if hasattr(self, 'hats_panel'):
             self.hats_panel.update_language(self.language)
         if hasattr(self, 'diagnostics_panel'):
@@ -1550,6 +1588,13 @@ class MainWindow(QMainWindow, ProgressDialogMixin, MainWindowVmtMixin,
     
     def closeEvent(self, event) -> None:
         """Останавливаем фоновые воркеры и сохраняем геометрию перед закрытием."""
+        # Воркер редактора частиц живёт внутри панели — цикл ниже его не видит
+        if getattr(self, 'particles_panel', None) is not None:
+            try:
+                self.particles_panel.shutdown()
+            except Exception:
+                pass
+
         # Любой выполняющийся QThread нужно корректно завершить, иначе Qt роняет
         # «QThread: Destroyed while thread is still running» при удалении окна.
         from src.services.base_worker import BaseWorker

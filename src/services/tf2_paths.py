@@ -81,6 +81,21 @@ class TF2Paths:
         return None
     
     @staticmethod
+    def resolve_hl2_vpks(tf2_root_dir: str) -> list:
+        """
+        Пути к hl2_misc_dir.vpk / hl2_textures_dir.vpk (существующие).
+
+        TF2 монтирует контент HL2 — часть particle-материалов (например
+        particle/particle_glow_*) лежит именно там, а не в tf2_misc.
+        """
+        out = []
+        for name in ("hl2_misc_dir.vpk", "hl2_textures_dir.vpk"):
+            p = os.path.join(tf2_root_dir, "hl2", name)
+            if os.path.exists(p):
+                out.append(p)
+        return out
+
+    @staticmethod
     def get_crowbar_path() -> str:
         """
         Возвращает путь к Crowbar CLI

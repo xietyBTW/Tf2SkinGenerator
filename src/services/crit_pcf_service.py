@@ -175,8 +175,10 @@ class CritPcfService:
                 cls._strip_element(definition)
 
         out = io.BytesIO()
+        # unicode="silent": "format" пишет заголовок "unicode_binary",
+        # который DMX-парсер игры не понимает — PCF отбрасывается целиком
         root.export_binary(
-            out, version=enc_ver, fmt_name=fmt_name, fmt_ver=fmt_ver, unicode="format"
+            out, version=enc_ver, fmt_name=fmt_name, fmt_ver=fmt_ver, unicode="silent"
         )
         return out.getvalue()
 
