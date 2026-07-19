@@ -550,6 +550,7 @@ class ParticleEditorService:
 
     def set_material_texture(
         self, material_name: str, image_path: str, tf2_root_dir: str,
+        max_size: int = 512, uncompressed: bool = False,
     ) -> Optional[tuple]:
         """
         Заменяет текстуру МАТЕРИАЛА: все системы PCF, использующие его
@@ -615,9 +616,11 @@ class ParticleEditorService:
             logger.error(f"Не удалось открыть картинку {image_path}: {exc}")
             return None
 
+        cap = max(64, min(int(max_size), 1024))
+
         def _pot(n: int) -> int:
             p = 1
-            while p * 2 <= min(n, 512):
+            while p * 2 <= min(n, cap):
                 p *= 2
             return p
 
@@ -634,7 +637,7 @@ class ParticleEditorService:
             os.close(fd)
             VTFLib.create_animated_vtf(
                 [img.tobytes()], w, h,
-                VTFImageFormat.DXT5,
+                VTFImageFormat.RGBA8888 if uncompressed else VTFImageFormat.DXT5,
                 # NOMIP|NOLOD обязательны: мипы не генерируем, без флагов игра
                 # полезет за отсутствующими уровнями
                 VTFImageFlags.CLAMPS | VTFImageFlags.CLAMPT

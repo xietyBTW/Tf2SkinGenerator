@@ -181,6 +181,189 @@ def _make_eye_icon(color: str = "#cccccc", size: int = 16):
     return QIcon(pix)
 
 
+def _make_folder_icon(color: str = "#666666", size: int = 16):
+    """Иконка «открыть файл» — папка."""
+    from PySide6.QtGui import QIcon, QPixmap, QPainter, QPen, QColor, QPainterPath
+    from PySide6.QtCore import Qt
+    pix = QPixmap(size, size)
+    pix.fill(Qt.transparent)
+    p = QPainter(pix)
+    p.setRenderHint(QPainter.Antialiasing)
+    pen = QPen(QColor(color))
+    pen.setWidthF(1.2)
+    pen.setCapStyle(Qt.RoundCap)
+    pen.setJoinStyle(Qt.RoundJoin)
+    p.setPen(pen)
+    p.setBrush(Qt.NoBrush)
+    s = float(size)
+    path = QPainterPath()
+    path.moveTo(s*.10, s*.82)
+    path.lineTo(s*.10, s*.22)
+    path.lineTo(s*.40, s*.22)
+    path.lineTo(s*.50, s*.34)
+    path.lineTo(s*.90, s*.34)
+    path.lineTo(s*.90, s*.82)
+    path.closeSubpath()
+    p.drawPath(path)
+    p.end()
+    return QIcon(pix)
+
+
+def _make_image_icon(color: str = "#666666", size: int = 16):
+    """Иконка «текстура» — картинка (рамка, горы, солнце)."""
+    from PySide6.QtGui import QIcon, QPixmap, QPainter, QPen, QColor
+    from PySide6.QtCore import Qt, QRectF, QPointF, QLineF
+    pix = QPixmap(size, size)
+    pix.fill(Qt.transparent)
+    p = QPainter(pix)
+    p.setRenderHint(QPainter.Antialiasing)
+    col = QColor(color)
+    pen = QPen(col)
+    pen.setWidthF(1.2)
+    pen.setCapStyle(Qt.RoundCap)
+    pen.setJoinStyle(Qt.RoundJoin)
+    p.setPen(pen)
+    p.setBrush(Qt.NoBrush)
+    s = float(size)
+    p.drawRect(QRectF(s*.10, s*.14, s*.80, s*.72))
+    # горы
+    p.drawLine(QLineF(s*.16, s*.78, s*.42, s*.46))
+    p.drawLine(QLineF(s*.42, s*.46, s*.60, s*.66))
+    p.drawLine(QLineF(s*.60, s*.66, s*.72, s*.54))
+    p.drawLine(QLineF(s*.72, s*.54, s*.84, s*.78))
+    # солнце
+    p.setBrush(col)
+    p.drawEllipse(QPointF(s*.68, s*.30), s*.07, s*.07)
+    p.end()
+    return QIcon(pix)
+
+
+def _make_droplet_icon(color: str = "#666666", size: int = 16):
+    """Иконка «цвета текстуры» — капля."""
+    from PySide6.QtGui import QIcon, QPixmap, QPainter, QPen, QColor, QPainterPath
+    from PySide6.QtCore import Qt
+    pix = QPixmap(size, size)
+    pix.fill(Qt.transparent)
+    p = QPainter(pix)
+    p.setRenderHint(QPainter.Antialiasing)
+    pen = QPen(QColor(color))
+    pen.setWidthF(1.3)
+    pen.setCapStyle(Qt.RoundCap)
+    pen.setJoinStyle(Qt.RoundJoin)
+    p.setPen(pen)
+    p.setBrush(Qt.NoBrush)
+    s = float(size)
+    path = QPainterPath()
+    path.moveTo(s*.50, s*.08)
+    path.cubicTo(s*.78, s*.44, s*.86, s*.60, s*.50, s*.90)
+    path.cubicTo(s*.14, s*.60, s*.22, s*.44, s*.50, s*.08)
+    p.drawPath(path)
+    p.end()
+    return QIcon(pix)
+
+
+def _make_save_icon(color: str = "#666666", size: int = 16):
+    """Иконка «сохранить» — дискета."""
+    from PySide6.QtGui import QIcon, QPixmap, QPainter, QPen, QColor, QPainterPath
+    from PySide6.QtCore import Qt, QRectF
+    pix = QPixmap(size, size)
+    pix.fill(Qt.transparent)
+    p = QPainter(pix)
+    p.setRenderHint(QPainter.Antialiasing)
+    pen = QPen(QColor(color))
+    pen.setWidthF(1.2)
+    pen.setCapStyle(Qt.RoundCap)
+    pen.setJoinStyle(Qt.RoundJoin)
+    p.setPen(pen)
+    p.setBrush(Qt.NoBrush)
+    s = float(size)
+    path = QPainterPath()
+    path.moveTo(s*.12, s*.12)
+    path.lineTo(s*.74, s*.12)
+    path.lineTo(s*.88, s*.26)
+    path.lineTo(s*.88, s*.88)
+    path.lineTo(s*.12, s*.88)
+    path.closeSubpath()
+    p.drawPath(path)
+    p.drawRect(QRectF(s*.30, s*.12, s*.36, s*.22))   # шторка
+    p.drawRect(QRectF(s*.26, s*.52, s*.48, s*.36))   # этикетка
+    p.end()
+    return QIcon(pix)
+
+
+def _make_restart_icon(color: str = "#666666", size: int = 16):
+    """Иконка «перезапуск» — круговая стрелка."""
+    import math
+    from PySide6.QtGui import QIcon, QPixmap, QPainter, QPen, QColor, QPolygonF
+    from PySide6.QtCore import Qt, QRectF, QPointF
+    pix = QPixmap(size, size)
+    pix.fill(Qt.transparent)
+    p = QPainter(pix)
+    p.setRenderHint(QPainter.Antialiasing)
+    col = QColor(color)
+    pen = QPen(col)
+    pen.setWidthF(1.4)
+    pen.setCapStyle(Qt.RoundCap)
+    p.setPen(pen)
+    p.setBrush(Qt.NoBrush)
+    s = float(size)
+    m = s * .18
+    rect = QRectF(m, m, s - 2*m, s - 2*m)
+    # дуга ~300°, начало на 60°
+    p.drawArc(rect, 60 * 16, 300 * 16)
+    # стрелка на конце дуги (угол 60°)
+    r = (s - 2*m) / 2.0
+    cx = cy = s / 2.0
+    a = math.radians(-60)
+    tip_x, tip_y = cx + r * math.cos(a), cy + r * math.sin(a)
+    p.setBrush(col)
+    p.setPen(Qt.NoPen)
+    p.drawPolygon(QPolygonF([
+        QPointF(tip_x + s*.02, tip_y - s*.16),
+        QPointF(tip_x + s*.16, tip_y + s*.06),
+        QPointF(tip_x - s*.14, tip_y + s*.04),
+    ]))
+    p.end()
+    return QIcon(pix)
+
+
+def _make_pause_icon(color: str = "#666666", size: int = 16):
+    """Иконка «пауза» — две вертикальные полосы."""
+    from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor
+    from PySide6.QtCore import Qt, QRectF
+    pix = QPixmap(size, size)
+    pix.fill(Qt.transparent)
+    p = QPainter(pix)
+    p.setRenderHint(QPainter.Antialiasing)
+    p.setPen(Qt.NoPen)
+    p.setBrush(QColor(color))
+    s = float(size)
+    p.drawRoundedRect(QRectF(s*.24, s*.16, s*.18, s*.68), 1.5, 1.5)
+    p.drawRoundedRect(QRectF(s*.58, s*.16, s*.18, s*.68), 1.5, 1.5)
+    p.end()
+    return QIcon(pix)
+
+
+def _make_play_icon(color: str = "#666666", size: int = 16):
+    """Иконка «продолжить» — треугольник."""
+    from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QPolygonF
+    from PySide6.QtCore import Qt, QPointF
+    pix = QPixmap(size, size)
+    pix.fill(Qt.transparent)
+    p = QPainter(pix)
+    p.setRenderHint(QPainter.Antialiasing)
+    p.setPen(Qt.NoPen)
+    p.setBrush(QColor(color))
+    s = float(size)
+    p.drawPolygon(QPolygonF([
+        QPointF(s*.28, s*.14),
+        QPointF(s*.84, s*.50),
+        QPointF(s*.28, s*.86),
+    ]))
+    p.end()
+    return QIcon(pix)
+
+
 def _make_team_icon(fill_color: str, size: int = 16):
     from PySide6.QtGui import QIcon, QPixmap, QPainter, QPen, QColor
     from PySide6.QtCore import Qt, QRectF

@@ -18,9 +18,10 @@ from typing import Optional
 from PySide6.QtCore import QByteArray, QObject, QSize, Qt, Signal, Slot
 from PySide6.QtGui import QColor, QIcon, QPixmap
 from PySide6.QtWidgets import (
-    QColorDialog, QComboBox, QFileDialog, QHBoxLayout, QInputDialog, QLabel,
-    QListWidget, QListWidgetItem, QMenu, QMessageBox, QPushButton, QSplitter,
-    QStackedWidget, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
+    QButtonGroup, QColorDialog, QComboBox, QFileDialog, QGridLayout,
+    QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem,
+    QMenu, QMessageBox, QPushButton, QRadioButton, QSplitter, QStackedWidget,
+    QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
 from src.data.translations import TRANSLATIONS
@@ -280,43 +281,89 @@ class ParticlesPanel(QWidget):
         root.setContentsMargins(0, 4, 0, 0)
         root.setSpacing(0)
 
-        # ── Тулбар ───────────────────────────────────────────────────────── #
-        bar = QWidget()
-        bar_l = QHBoxLayout(bar)
-        bar_l.setContentsMargins(0, 0, 0, 8)
-        bar_l.setSpacing(8)
+        # ── Тулбар: комбо + иконки + чипы 3D/2D — один компактный ряд ─────── #
+        from src.ui.preview_icons import (
+            _make_droplet_icon, _make_folder_icon, _make_image_icon,
+            _make_pause_icon, _make_play_icon, _make_restart_icon,
+            _make_save_icon,
+        )
+        self._icon_pause = _make_pause_icon("#666666")
+        self._icon_play = _make_play_icon("#666666")
+
+        # Комбо живёт в левой колонке (край = начало 3D-окна), иконки — над 3D
+        icons_row = QHBoxLayout()
+        icons_row.setContentsMargins(6, 0, 0, 6)
+        icons_row.setSpacing(6)
 
         self.pcf_combo = QComboBox()
-        self.pcf_combo.setFixedWidth(340)
         # Родной стиль приложения + непрокручиваемый попап с ограничением высоты
         self.pcf_combo.setStyleSheet(
             styles['combo'] + "QComboBox { combobox-popup: 0; }")
         self.pcf_combo.setMaxVisibleItems(18)
         self.pcf_combo.activated.connect(self._on_pcf_selected)
-        bar_l.addWidget(self.pcf_combo)
 
-        for attr_name, key, slot in (
-            ('open_btn', 'particles_open_file', self._on_open_file),
-            ('texture_btn', 'particles_set_texture', self._on_set_texture),
-            ('colors_btn', 'particles_natural_colors', self._on_natural_colors),
-            ('save_btn', 'particles_save_as', self._on_save_as),
-            ('vpk_btn', 'particles_build_vpk', self._on_export_vpk),
-            ('restart_btn', 'particles_restart', self._on_restart),
-            ('pause_btn', 'particles_pause', self._on_pause),
+        # Иконки-кнопки — как в тулбаре превью оружия (26×26, тонкая рамка)
+        self._icon_btn_style = """
+            QPushButton { background:transparent; border:1px solid #2a2a2a; border-radius:3px; padding:0; }
+            QPushButton:hover { background:rgba(255,255,255,0.05); border-color:#555; }
+            QPushButton:pressed { background:rgba(255,255,255,0.08); }
+            QPushButton:disabled { border-color:#222; }
+        """
+        for attr_name, icon, tip_key, slot in (
+            ('open_btn', _make_folder_icon("#666666"),
+             'particles_open_file', self._on_open_file),
+            ('texture_btn', _make_image_icon("#666666"),
+             'particles_set_texture', self._on_set_texture),
+            ('colors_btn', _make_droplet_icon("#666666"),
+             'particles_natural_colors', self._on_natural_colors),
+            ('save_btn', _make_save_icon("#666666"),
+             'particles_save_as', self._on_save_as),
+            ('restart_btn', _make_restart_icon("#666666"),
+             'particles_restart', self._on_restart),
+            ('pause_btn', self._icon_pause,
+             'particles_pause', self._on_pause),
         ):
-            btn = QPushButton(self.t[key])
-            btn.setStyleSheet(styles['button_secondary'])
+            btn = QPushButton()
+            btn.setFixedSize(26, 26)
+            btn.setIcon(icon)
+            btn.setStyleSheet(self._icon_btn_style)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setToolTip(self.t[tip_key])
             btn.clicked.connect(slot)
             setattr(self, attr_name, btn)
-            bar_l.addWidget(btn)
+            icons_row.addWidget(btn)
 
-        bar_l.addStretch(1)
+        icons_row.addStretch(1)
+
+        # Чипы 3D/2D — стиль тулбара превью оружия
+        def _chip_style(active: bool) -> str:
+            if active:
+                return (
+                    "QPushButton { background:#2a2a2a; color:#ccc; border:1px solid #444;"
+                    " padding:4px 16px; font-size:11px; font-weight:600; border-radius:3px; }"
+                )
+            return (
+                "QPushButton { background:transparent; color:#555; border:1px solid #2a2a2a;"
+                " padding:4px 16px; font-size:11px; border-radius:3px; }"
+                " QPushButton:hover { background:rgba(255,255,255,0.04); color:#888; border-color:#383838; }"
+            )
+        self._chip_active = _chip_style(True)
+        self._chip_inactive = _chip_style(False)
+
+        self.mode_3d_btn = QPushButton("3D")
+        self.mode_2d_btn = QPushButton("2D")
+        for btn, mode in ((self.mode_3d_btn, 0), (self.mode_2d_btn, 1)):
+            btn.setFixedHeight(26)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.clicked.connect(lambda _=False, m=mode: self._set_view_mode(m))
+            icons_row.addWidget(btn)
+        self.mode_3d_btn.setStyleSheet(self._chip_active)
+        self.mode_2d_btn.setStyleSheet(self._chip_inactive)
+
         self.save_btn.setEnabled(False)
-        self.vpk_btn.setEnabled(False)
         self.texture_btn.setEnabled(False)
         self.colors_btn.setEnabled(False)
-        root.addWidget(bar)
+        self._icons_row = icons_row
 
         # ── Сплиттер: список систем | свойства | превью ──────────────────── #
         split = QSplitter(Qt.Orientation.Horizontal)
@@ -387,33 +434,22 @@ class ParticlesPanel(QWidget):
         left.setCollapsible(0, False)
         left.setCollapsible(1, False)
 
-        split.addWidget(left)
+        # Обёртка левой колонки: комбо сверху, его правый край = начало 3D
+        left_wrap = QWidget()
+        left_wrap_l = QVBoxLayout(left_wrap)
+        left_wrap_l.setContentsMargins(0, 0, 6, 0)
+        left_wrap_l.setSpacing(6)
+        left_wrap_l.addWidget(self.pcf_combo)
+        left_wrap_l.addWidget(left, 1)
 
-        # ── Правая часть: переключатель 3D/2D + стек превью/карточек ──────── #
+        split.addWidget(left_wrap)
+
+        # ── Правая часть: иконки над вьюпортом + стек превью/карточек ─────── #
         right = QWidget()
         right_l = QVBoxLayout(right)
         right_l.setContentsMargins(0, 0, 0, 0)
-        right_l.setSpacing(4)
-
-        mode_row = QHBoxLayout()
-        mode_row.setContentsMargins(0, 0, 0, 0)
-        mode_row.addStretch(1)
-        toggle_style = styles['button_secondary'] + """
-            QPushButton { padding: 4px 16px; }
-            QPushButton:checked {
-                background-color: #ff6b35; color: #0a0a0a; border-color: #ff6b35;
-            }
-        """
-        self.mode_3d_btn = QPushButton("3D")
-        self.mode_2d_btn = QPushButton("2D")
-        for btn, mode in ((self.mode_3d_btn, 0), (self.mode_2d_btn, 1)):
-            btn.setCheckable(True)
-            btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setStyleSheet(toggle_style)
-            btn.clicked.connect(lambda _=False, m=mode: self._set_view_mode(m))
-            mode_row.addWidget(btn)
-        self.mode_3d_btn.setChecked(True)
-        right_l.addLayout(mode_row)
+        right_l.setSpacing(0)
+        right_l.addLayout(self._icons_row)
 
         self.view = ParticleViewWidget(self, language=self.language)
 
@@ -447,6 +483,91 @@ class ParticlesPanel(QWidget):
         right_l.addWidget(self.view_stack, 1)
 
         split.addWidget(right)
+
+        # ── Экспорт-колонка (стиль вкладки оружия) ─────────────────────────── #
+        export_col = QWidget()
+        export_col.setFixedWidth(240)
+        export_l = QVBoxLayout(export_col)
+        export_l.setContentsMargins(14, 4, 0, 0)
+        export_l.setSpacing(12)
+
+        # Тот же заголовок-«шаг», что у оружейной панели экспорта
+        self.export_title = QLabel(self.t.get('step_2_export', 'Export'))
+        self.export_title.setStyleSheet("""
+            font-size: 12px;
+            font-weight: 600;
+            color: #888;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            padding-bottom: 4px;
+        """)
+        export_l.addWidget(self.export_title)
+
+        _field_lbl = "font-weight: 500; font-size: 13px; color: #ccc;"
+
+        # Максимальный размер кастомных текстур (применяется при замене)
+        self.res_label = QLabel(self.t['resolution'])
+        self.res_label.setStyleSheet(_field_lbl)
+        export_l.addWidget(self.res_label)
+
+        self.size_group = QButtonGroup(self)
+        size_grid = QGridLayout()
+        size_grid.setHorizontalSpacing(8)
+        size_grid.setVerticalSpacing(6)
+        self._size_radios = {}
+        for i, size in enumerate((128, 256, 512, 1024)):
+            radio = QRadioButton(f"{size}x{size}")
+            if size == 512:
+                radio.setChecked(True)
+            self.size_group.addButton(radio)
+            self._size_radios[size] = radio
+            size_grid.addWidget(radio, i // 2, i % 2)
+        export_l.addLayout(size_grid)
+
+        # Формат VTF: для частиц осмысленны только форматы с альфой
+        self.format_label = QLabel(self.t['format_vtf'])
+        self.format_label.setStyleSheet(_field_lbl)
+        export_l.addWidget(self.format_label)
+
+        self.format_combo = QComboBox()
+        self.format_combo.addItem("DXT5", False)
+        self.format_combo.addItem("RGBA8888", True)   # data = uncompressed
+        self.format_combo.setStyleSheet(styles['combo'])
+        export_l.addWidget(self.format_combo)
+
+        # Имя VPK
+        self.filename_label = QLabel(self.t['filename_vpk'])
+        self.filename_label.setStyleSheet(_field_lbl)
+        export_l.addWidget(self.filename_label)
+
+        self.filename_input = QLineEdit()
+        self.filename_input.setPlaceholderText(self.t['placeholder'])
+        self.filename_input.setStyleSheet(styles['line_edit'])
+        self.filename_input.setMinimumHeight(40)
+        export_l.addWidget(self.filename_input)
+
+        self.filename_error = QLabel("")
+        self.filename_error.setStyleSheet(
+            "color: #ff4757; font-size: 11px; padding-top: 2px;")
+        self.filename_error.setWordWrap(True)
+        self.filename_error.hide()
+        export_l.addWidget(self.filename_error)
+
+        self.build_btn = QPushButton(self.t['build'])
+        self.build_btn.setStyleSheet(styles['button_primary'])
+        self.build_btn.setMinimumHeight(48)
+        self.build_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.build_btn.setEnabled(False)
+        self.build_btn.clicked.connect(self._on_export_vpk)
+        export_l.addWidget(self.build_btn)
+
+        export_l.addStretch(1)
+
+        content_row = QHBoxLayout()
+        content_row.setContentsMargins(0, 0, 0, 0)
+        content_row.setSpacing(0)
+        content_row.addWidget(split, 1)
+        content_row.addWidget(export_col)
         split.setSizes([380, 800])
         # Левая колонка держит свою ширину, всё лишнее место — 3D-превью
         split.setStretchFactor(0, 0)
@@ -456,7 +577,7 @@ class ParticlesPanel(QWidget):
         split.setCollapsible(0, False)
         split.setCollapsible(1, False)
 
-        root.addWidget(split, 1)
+        root.addLayout(content_row, 1)
 
     # ── Загрузка PCF ─────────────────────────────────────────────────────── #
 
@@ -489,7 +610,7 @@ class ParticlesPanel(QWidget):
         self.systems_list.clear()
         self.attr_tree.clear()
         self.save_btn.setEnabled(False)
-        self.vpk_btn.setEnabled(False)
+        self.build_btn.setEnabled(False)
         self.texture_btn.setEnabled(False)
         self.colors_btn.setEnabled(False)
         self._current_system = ""
@@ -513,7 +634,9 @@ class ParticlesPanel(QWidget):
         self.service = worker.service
         self._payload = worker.payload
         self.save_btn.setEnabled(True)
-        self.vpk_btn.setEnabled(True)
+        self.build_btn.setEnabled(True)
+        self.filename_input.setPlaceholderText(
+            Path(self.service.pcf_vpk_path()).stem + "_particles")
 
         self.systems_list.clear()
         # Показываем только корневые определения (children достижимы из них)
@@ -540,8 +663,10 @@ class ParticlesPanel(QWidget):
 
     def _set_view_mode(self, mode: int) -> None:
         """0 = 3D-превью, 1 = 2D-карточки текстур."""
-        self.mode_3d_btn.setChecked(mode == 0)
-        self.mode_2d_btn.setChecked(mode == 1)
+        self.mode_3d_btn.setStyleSheet(
+            self._chip_active if mode == 0 else self._chip_inactive)
+        self.mode_2d_btn.setStyleSheet(
+            self._chip_active if mode == 1 else self._chip_inactive)
         self.view_stack.setCurrentIndex(mode)
         # Симуляция в фоне не нужна, пока смотрим карточки
         self.view.set_paused(mode == 1 or self._paused)
@@ -632,8 +757,12 @@ class ParticlesPanel(QWidget):
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
             if answer != QMessageBox.StandardButton.Yes:
                 return
+        max_size = next(
+            (s for s, r in self._size_radios.items() if r.isChecked()), 512)
         res = self.service.set_material_texture(
-            material_name, image_path, self.tf2_root)
+            material_name, image_path, self.tf2_root,
+            max_size=max_size,
+            uncompressed=bool(self.format_combo.currentData()))
         if res is None:
             QMessageBox.warning(
                 self, t['particles_set_texture'], t['particles_texture_error'])
@@ -803,17 +932,36 @@ class ParticlesPanel(QWidget):
             t['particles_colors_done'].format(count=removed))
 
     def _on_export_vpk(self) -> None:
-        """Сборка VPK-мода: правленый PCF + кастомные материалы."""
+        """Сборка VPK-мода в папку экспорта из настроек (как оружие)."""
         if self.service is None:
             return
         t = self.t
-        default_name = Path(self.service.pcf_vpk_path()).stem + "_mod.vpk"
-        path, _ = QFileDialog.getSaveFileName(
-            self, t['particles_build_vpk'], default_name, "VPK (*.vpk)")
-        if not path:
+        name = self.filename_input.text().strip()
+        if not name:
+            name = self.filename_input.placeholderText() or "particles_mod"
+        if name.lower().endswith(".vpk"):
+            name = name[:-4]
+        # Та же валидация, что у сборки оружия (settings_panel)
+        for char in ('<', '>', ':', '"', '/', '\\', '|', '?', '*'):
+            if char in name:
+                self.filename_error.setText(
+                    t.get('invalid_char_error',
+                          'Invalid character: {char}').format(char=char))
+                self.filename_error.show()
+                return
+        if len(name) > 50:
+            self.filename_error.setText(
+                t.get('filename_too_long_error',
+                      'Filename is too long (max 50 characters)'))
+            self.filename_error.show()
             return
+        self.filename_error.hide()
+
+        from src.config.app_config import AppConfig
+        export_folder = AppConfig.load_config().get("export_folder", "export")
+        dest = str(Path(export_folder) / f"{name}.vpk")
         try:
-            out = self.service.export_vpk(path, language=self.language)
+            out = self.service.export_vpk(dest, language=self.language)
         except Exception as exc:
             logger.error(f"Сборка VPK частиц: {exc}", exc_info=True)
             QMessageBox.critical(self, t.get('error', 'Error'), str(exc))
@@ -846,7 +994,9 @@ class ParticlesPanel(QWidget):
         # В 2D-режиме симуляция остаётся на паузе независимо от кнопки
         self.view.set_paused(
             self._paused or self.view_stack.currentIndex() == 1)
-        self.pause_btn.setText(
+        self.pause_btn.setIcon(
+            self._icon_play if self._paused else self._icon_pause)
+        self.pause_btn.setToolTip(
             self.t['particles_play'] if self._paused else self.t['particles_pause'])
 
     def set_tf2_root(self, tf2_root: str) -> None:
@@ -863,12 +1013,20 @@ class ParticlesPanel(QWidget):
         self.language = language
         self.t = TRANSLATIONS.get(language, TRANSLATIONS['en'])
         t = self.t
-        self.open_btn.setText(t['particles_open_file'])
-        self.texture_btn.setText(t['particles_set_texture'])
-        self.colors_btn.setText(t['particles_natural_colors'])
-        self.save_btn.setText(t['particles_save_as'])
-        self.vpk_btn.setText(t['particles_build_vpk'])
-        self.restart_btn.setText(t['particles_restart'])
+        self.open_btn.setToolTip(t['particles_open_file'])
+        self.texture_btn.setToolTip(t['particles_set_texture'])
+        self.colors_btn.setToolTip(t['particles_natural_colors'])
+        self.save_btn.setToolTip(t['particles_save_as'])
+        self.restart_btn.setToolTip(t['particles_restart'])
+        self.pause_btn.setToolTip(
+            t['particles_play'] if self._paused else t['particles_pause'])
+        self.export_title.setText(t.get('step_2_export', 'Export'))
+        self.res_label.setText(t['resolution'])
+        self.format_label.setText(t['format_vtf'])
+        self.filename_label.setText(t['filename_vpk'])
+        if not self.filename_input.text() and self.service is None:
+            self.filename_input.setPlaceholderText(t['placeholder'])
+        self.build_btn.setText(t['build'])
         self.pause_btn.setText(
             t['particles_play'] if self._paused else t['particles_pause'])
         if self.pcf_combo.count() > 0:
