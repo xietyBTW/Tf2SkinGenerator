@@ -43,6 +43,65 @@ MODULE_GROUPS = (
     "renderers", "operators", "initializers", "emitters", "forces", "constraints",
 )
 
+#: Директория кастомных материалов частиц (materials/<...>). Стоковые
+#: particle-текстуры лежат в materials/effects/, custom_* кладём туда же.
+_CUSTOM_DIR = "effects"
+
+#: Атрибуты со значениями по умолчанию Source: при экспорте вырезаются
+#: (lossless — игра/превью подставляют те же дефолты). Присутствуют почти на
+#: каждом операторе/рендерере, поэтому дают килобайты экономии. Это нужно,
+#: чтобы модифицированный PCF влез в слот VPK: casual-bypass не грузит PCF
+#: больше оригинала (та же причина, по которой у casual-pre-loader есть
+#: pcf_compress). Значения — как в constants.py casual-pre-loader.
+_PCF_DEFAULT_ATTRS = {
+    "operator start fadein": 0.0,
+    "operator end fadein": 0.0,
+    "operator start fadeout": 0.0,
+    "operator end fadeout": 0.0,
+    "operator fade oscillate": 0.0,
+    "visibility proxy input control point number": -1,
+    "visibility proxy radius": 1.0,
+    "visibility input minimum": 0.0,
+    "visibility input maximum": 1.0,
+    "visibility alpha scale minimum": 0.0,
+    "visibility alpha scale maximum": 1.0,
+    "visibility radius scale minimum": 1.0,
+    "visibility radius scale maximum": 1.0,
+    "visibility camera depth bias": 0.0,
+}
+
+#: Каталог модулей для «Добавить модуль…» — ходовые functionName из стоковых
+#: PCF TF2 (написание — как в файлах игры). Превью умеет большинство из них.
+MODULE_CATALOG = {
+    "emitters": ["emit_continuously", "emit_instantaneously", "emit noise"],
+    "initializers": [
+        "Position Within Sphere Random", "Position Within Box Random",
+        "Position Modify Offset Random", "Position Modify Warp Random",
+        "Position From Parent Particles",
+        "Lifetime Random", "Radius Random", "Alpha Random", "Color Random",
+        "Rotation Random", "Rotation Speed Random", "Rotation Yaw Random",
+        "Rotation Yaw Flip Random", "Sequence Random", "Trail Length Random",
+        "Velocity Random", "Velocity Noise", "lifetime from sequence",
+        "remap initial scalar", "Remap Initial Distance to Control Point to Scalar",
+        "Remap Noise to Scalar", "Remap Control Point to Vector",
+    ],
+    "operators": [
+        "Lifespan Decay", "Movement Basic", "Movement Lock to Control Point",
+        "Movement Rotate Particle Around Axis", "Movement Max Velocity",
+        "Radius Scale", "Color Fade", "Alpha Fade In Random",
+        "Alpha Fade Out Random", "Alpha Fade and Decay",
+        "Rotation Basic", "Rotation Spin Roll", "Rotation Spin Yaw",
+        "Oscillate Scalar", "Oscillate Vector", "Remap Scalar",
+        "Remap Distance to Control Point to Scalar",
+        "Set child control points from particle positions",
+    ],
+    "forces": ["random force", "Pull towards control point", "twist around axis"],
+    "constraints": [
+        "Collision via traces", "Constrain distance to control point",
+    ],
+    "renderers": ["render_animated_sprites", "render_rope", "render_sprite_trail"],
+}
+
 # Якорь по началу строки: иначе матчились закомментированные строки и ссылки
 # на $basetexture внутри proxies; хвостовой //-комментарий отсекается.
 # \r?$ обязателен: VMT Valve с CRLF-концами строк.
@@ -209,6 +268,8 @@ class ParticleEditorService:
         self.custom_files: Dict[str, bytes] = {}
         #: Превью-инфо кастомных материалов: {имя материала из PCF: info-dict}.
         self._custom_material_info: Dict[str, dict] = {}
+        self._material_base_rel: Dict[str, str] = {}
+        self._material_original: Dict[str, str] = {}  # кастом → исходный
 
     # ── Загрузка ─────────────────────────────────────────────────────────── #
 
@@ -219,10 +280,11 @@ class ParticleEditorService:
         self._encoding = CritPcfService._detect_encoding(raw)
         self.root, _, _ = Element.parse(io.BytesIO(raw))
         self.source_path = source
+        self._loaded_size = len(raw)   # «потолок» размера для казуала
         self.custom_files = {}
         self._custom_material_info = {}
         self._material_base_rel = {}
-        self._material_original = {}   # кастомный материал → исходный из игры
+        self._material_original = {}
 
     def load_file(self, path: str) -> None:
         self.load_bytes(Path(path).read_bytes(), source=path)
@@ -271,6 +333,10 @@ class ParticleEditorService:
 
     def _find_definition(self, name: str):
         for d in self._definitions():
+            if d.name == name:
+                return d
+        # Системы, существующие только как children (нет в корневом списке)
+        for d in self._all_definition_elements():
             if d.name == name:
                 return d
         return None
@@ -538,15 +604,30 @@ class ParticleEditorService:
 
     def set_system_texture(
         self, system_name: str, image_path: str, tf2_root_dir: str,
-    ) -> Optional[dict]:
-        """Замена текстуры ТЕКУЩЕГО материала системы (шорткат к
-        set_material_texture)."""
+        max_size: int = 512, uncompressed: bool = False,
+    ) -> Optional[tuple]:
+        """
+        Замена текстуры ТОЛЬКО у одной системы: остальные системы, делящие
+        тот же материал, не трогаются (материал «расщепляется» — своя текстура
+        по новому пути effects/custom_<система>).
+
+        Returns:
+            (новое имя материала, info-dict для превью) либо None при ошибке.
+        """
         d = self._find_definition(system_name)
         if d is None or "material" not in d:
             return None
-        res = self.set_material_texture(
-            d["material"].val_str, image_path, tf2_root_dir)
-        return res[1] if res else None
+        old_mat = d["material"].val_str
+        built = self._build_custom_material(
+            old_mat, image_path, tf2_root_dir, max_size, uncompressed,
+            base_key=f"sys:{system_name}", slug_src=system_name)
+        if built is None:
+            return None
+        new_mat, info = built
+        d["material"] = Attribute.string(d["material"].name, new_mat)
+        if new_mat != old_mat:
+            self._material_original.setdefault(new_mat, old_mat)
+        return new_mat, info
 
     def set_material_texture(
         self, material_name: str, image_path: str, tf2_root_dir: str,
@@ -556,16 +637,10 @@ class ParticleEditorService:
         Заменяет текстуру МАТЕРИАЛА: все системы PCF, использующие его
         (включая дочерние), переводятся на кастомный материал.
 
-        Картинка конвертируется в VTF (DXT5, размеры приводятся к степени
-        двойки, максимум 512), VMT копируется с оригинального материала
-        (сохраняются $additive и прочие параметры) с новым $basetexture.
-        Файлы копятся в custom_files для экспорта VPK.
-
         Returns:
             (новое имя материала, info-dict для превью) либо None при ошибке.
         """
         # Сравнение нормализованное: в PCF встречаются разные регистр и слэши
-        # ('effects\X.vmt' vs 'effects/x.vmt') для одного материала
         def _norm(m: str) -> str:
             return m.replace("\\", "/").lower()
 
@@ -576,8 +651,29 @@ class ParticleEditorService:
         ]
         if not affected:
             return None
-        old_mat = material_name
+        built = self._build_custom_material(
+            material_name, image_path, tf2_root_dir, max_size, uncompressed,
+            base_key=material_name, slug_src=None)
+        if built is None:
+            return None
+        new_mat, info = built
+        for el in affected:
+            el["material"] = Attribute.string(el["material"].name, new_mat)
+        if new_mat != material_name:
+            self._material_original.setdefault(new_mat, material_name)
+        return new_mat, info
 
+    def _build_custom_material(
+        self, old_mat: str, image_path: str, tf2_root_dir: str,
+        max_size: int, uncompressed: bool,
+        base_key: str, slug_src: Optional[str],
+    ) -> Optional[tuple]:
+        """
+        Собирает кастомный материал (VMT+VTF в custom_files, превью-info):
+        картинка → VTF (размеры к степени двойки), VMT копируется с
+        оригинала (сохраняются $additive и пр.) с новым $basetexture.
+        Файлы кладутся по новому пути effects/custom_<slug>.
+        """
         # ── Оригинальный VMT — базис для параметров ────────────────────────
         vmt_rel = old_mat.replace("\\", "/").lower()
         if not vmt_rel.endswith(".vmt"):
@@ -586,8 +682,7 @@ class ParticleEditorService:
             vmt_rel = "materials/" + vmt_rel
 
         vmt_text = None
-        # Повторная замена: текущий материал уже кастомный — базис берём из
-        # него, иначе потеряются параметры оригинала ($additive и пр.)
+        # Повторная замена уже кастомного — базис из custom_files
         if vmt_rel in self.custom_files:
             vmt_text = self.custom_files[vmt_rel].decode("utf-8", errors="replace")
         else:
@@ -602,7 +697,6 @@ class ParticleEditorService:
             except FileNotFoundError:
                 pass
         if vmt_text is None:
-            # Оригинала нет — минимальный спрайтовый VMT
             vmt_text = (
                 '"SpriteCard"\n{\n\t"$basetexture" "placeholder"\n'
                 '\t"$vertexcolor" 1\n\t"$vertexalpha" 1\n\t"$additive" 1\n}\n'
@@ -629,7 +723,7 @@ class ParticleEditorService:
             img = img.resize((w, h), Image.LANCZOS)
 
         # ── VTF через VTFLib (пишет только на диск) ────────────────────────
-        base_rel = self._custom_base_rel(material_name)
+        base_rel = self._custom_base_rel(base_key, slug_src)
         tmp_path = None
         try:
             from src.services.vtflib_wrapper import VTFImageFlags, VTFImageFormat, VTFLib
@@ -656,7 +750,6 @@ class ParticleEditorService:
                     pass
 
         # ── VMT: оригинал с новым $basetexture ─────────────────────────────
-        # Заменяем ВСЕ вхождения: в VMT бывают дубли в fallback-блоках DX
         if _RE_BASETEXTURE.search(vmt_text):
             new_vmt = _RE_BASETEXTURE.sub(
                 lambda _m: f'\t"$basetexture" "{base_rel}"', vmt_text)
@@ -667,8 +760,6 @@ class ParticleEditorService:
         new_mat = f"{base_rel}.vmt"
         self.custom_files[f"materials/{base_rel}.vmt"] = new_vmt.encode("utf-8")
         self.custom_files[f"materials/{base_rel}.vtf"] = vtf_bytes
-        for el in affected:
-            el["material"] = Attribute.string(el["material"].name, new_mat)
 
         # ── Превью-инфо ────────────────────────────────────────────────────
         buf = io.BytesIO()
@@ -684,37 +775,28 @@ class ParticleEditorService:
             "height": h,
         }
         self._custom_material_info[new_mat] = info
-        # Для сброса к текстуре игры: первый исходный материал запоминаем
-        # (повторная замена кастомного не должна его затирать)
-        if not hasattr(self, "_material_original"):
-            self._material_original = {}
-        if new_mat != material_name:
-            self._material_original.setdefault(new_mat, material_name)
         return new_mat, info
 
     def is_custom_material(self, material_name: str) -> bool:
         """True, если материал — наша замена (можно сбросить к игровому)."""
-        return material_name in getattr(self, "_material_original", {})
+        return material_name in self._material_original
 
     def reset_material_texture(self, custom_material_name: str) -> Optional[str]:
         """
         Сбрасывает кастомный материал обратно к исходному игровому: все
-        системы возвращаются на оригинальный материал, файлы замены
-        убираются из экспорта.
+        системы возвращаются на оригинальный материал, файлы замены убираются.
 
         Returns:
             Имя исходного материала либо None (материал не был заменён).
         """
-        orig = getattr(self, "_material_original", {}).get(custom_material_name)
+        orig = self._material_original.get(custom_material_name)
         if orig is None:
             return None
-
         target = custom_material_name.replace("\\", "/").lower()
         for el in self._all_definition_elements():
             if ("material" in el
                     and el["material"].val_str.replace("\\", "/").lower() == target):
                 el["material"] = Attribute.string(el["material"].name, orig)
-
         base_rel = target[:-4] if target.endswith(".vmt") else target
         self.custom_files.pop(f"materials/{base_rel}.vmt", None)
         self.custom_files.pop(f"materials/{base_rel}.vtf", None)
@@ -722,31 +804,26 @@ class ParticleEditorService:
         self._material_original.pop(custom_material_name, None)
         return orig
 
-    def _custom_base_rel(self, material_name: str) -> str:
-        """Уникальный базовый путь кастомного материала.
-
-        Повторная замена того же (в т.ч. уже кастомного) материала получает
-        прежний путь — файлы перезаписываются; разные материалы со
-        схлопывающимися слагами разводятся суффиксом-счётчиком.
-        """
-        norm = material_name.replace("\\", "/").lower()
+    def _custom_base_rel(self, key: str, slug_src: Optional[str] = None) -> str:
+        """Уникальный базовый путь кастомного материала для ключа
+        (имя материала либо 'sys:<система>'). Повторная замена → тот же путь;
+        схлопывающиеся слаги разводятся счётчиком."""
+        norm = key.replace("\\", "/").lower()
         if norm.endswith(".vmt"):
             norm = norm[:-4]
-        if norm.startswith("particle/custom_"):
+        if norm.startswith(_CUSTOM_DIR + "/custom_"):
             return norm  # повторная замена уже кастомного
-        if not hasattr(self, "_material_base_rel"):
-            self._material_base_rel: Dict[str, str] = {}
-        if material_name in self._material_base_rel:
-            return self._material_base_rel[material_name]
-        stem = norm.rsplit("/", 1)[-1]
+        if key in self._material_base_rel:
+            return self._material_base_rel[key]
+        stem = (slug_src or norm.rsplit("/", 1)[-1]).lower()
         slug = re.sub(r"[^a-z0-9_]+", "_", stem).strip("_") or "tex"
-        base = f"particle/custom_{slug}"
+        base = f"{_CUSTOM_DIR}/custom_{slug}"
         candidate, n = base, 2
         taken = set(self._material_base_rel.values())
         while candidate in taken:
             candidate = f"{base}_{n}"
             n += 1
-        self._material_base_rel[material_name] = candidate
+        self._material_base_rel[key] = candidate
         return candidate
 
     # ── Экспорт VPK ──────────────────────────────────────────────────────── #
@@ -757,6 +834,30 @@ class ParticleEditorService:
         if src.startswith("vpk:"):
             return src[4:]
         return f"particles/{Path(src).name}"
+
+    def _active_custom_files(self) -> Dict[str, bytes]:
+        """custom_files без «сирот»: материалы удалённых систем (никем больше
+        не используемые) в VPK не попадают."""
+        used = set()
+        for el in self._all_definition_elements():
+            if "material" not in el:
+                continue
+            try:
+                m = el["material"].val_str.replace("\\", "/").lower()
+            except Exception:
+                continue
+            if not m.endswith(".vmt"):
+                m += ".vmt"
+            if not m.startswith("materials/"):
+                m = "materials/" + m
+            used.add(m)
+        out: Dict[str, bytes] = {}
+        for rel, data in self.custom_files.items():
+            rl = rel.replace("\\", "/").lower()
+            vmt = rl if rl.endswith(".vmt") else rl[:-4] + ".vmt"
+            if vmt in used:
+                out[rel] = data
+        return out
 
     def export_vpk(self, dest_path: str, language: str = "en") -> str:
         """
@@ -780,7 +881,7 @@ class ParticleEditorService:
             pcf_dest = vpkroot / self.pcf_vpk_path()
             pcf_dest.parent.mkdir(parents=True, exist_ok=True)
             self.save(str(pcf_dest))
-            for rel, data in self.custom_files.items():
+            for rel, data in self._active_custom_files().items():
                 f = vpkroot / rel
                 f.parent.mkdir(parents=True, exist_ok=True)
                 f.write_bytes(data)
@@ -793,6 +894,334 @@ class ParticleEditorService:
         finally:
             import shutil
             shutil.rmtree(tmp_root, ignore_errors=True)
+
+    # ── Структурное редактирование ───────────────────────────────────────── #
+
+    #: Кэш шаблонов модулей из стоковых PCF: {(group, fn_lower): Element}.
+    _module_templates: Dict[tuple, "Element"] = {}
+
+    @staticmethod
+    def _copy_module(el) -> "Element":
+        """Отвязанная копия модуля: все атрибуты копируются по значению.
+
+        Ключ — ОРИГИНАЛЬНОЕ имя атрибута (el.keys() отдаёт casefold-ключи,
+        присваивание по ним затирало бы регистр имён в файле)."""
+        new = Element(el.name, el.type)
+        for attr in el.values():
+            new[attr.name] = attr.copy()
+        return new
+
+    @classmethod
+    def _module_fn(cls, mod) -> str:
+        """functionName модуля (нижний регистр) с фолбэком на имя элемента."""
+        fn = ""
+        if "functionname" in mod:
+            try:
+                fn = mod["functionname"].val_str
+            except Exception:
+                fn = ""
+        return (fn or mod.name or "").strip().lower()
+
+    def _find_module_template(
+        self, group: str, function_name: str, tf2_root_dir: str,
+    ) -> Optional["Element"]:
+        """
+        Шаблон модуля с реалистичными атрибутами: ищем модуль с таким
+        functionName в текущем PCF, затем по стоковым PCF игры (первое
+        совпадение кэшируется на весь запуск).
+        """
+        key = (group, function_name.lower())
+        if key in ParticleEditorService._module_templates:
+            cached = ParticleEditorService._module_templates[key]
+            # None — закэшированный промах (не сканировать 134 PCF повторно)
+            return self._copy_module(cached) if cached is not None else None
+
+        def _scan(svc) -> Optional["Element"]:
+            for d in svc._all_definition_elements():
+                if group not in d:
+                    continue
+                try:
+                    for mod in d[group].iter_elem():
+                        if self._module_fn(mod) == key[1]:
+                            return mod
+                except Exception:
+                    continue
+            return None
+
+        found = _scan(self)
+        if found is None and tf2_root_dir:
+            for pcf in self.list_game_pcfs(tf2_root_dir):
+                try:
+                    other = ParticleEditorService()
+                    other.load_from_game(tf2_root_dir, pcf)
+                except Exception:
+                    continue
+                found = _scan(other)
+                if found is not None:
+                    break
+        if found is None:
+            ParticleEditorService._module_templates[key] = None
+            return None
+        template = self._copy_module(found)
+        ParticleEditorService._module_templates[key] = template
+        return self._copy_module(template)
+
+    def add_module(
+        self, system_name: str, group: str, function_name: str,
+        tf2_root_dir: str = "",
+    ) -> bool:
+        """
+        Добавляет модуль в группу системы. Атрибуты берутся из шаблона
+        (первый такой же модуль в текущем/стоковых PCF); если шаблона нет —
+        создаётся элемент с одним functionName (движок игры и превью
+        подставляют дефолты).
+        """
+        d = self._find_definition(system_name)
+        if d is None or group not in MODULE_GROUPS:
+            return False
+        mod = self._find_module_template(group, function_name, tf2_root_dir)
+        if mod is None:
+            mod = Element(function_name, "DmeParticleOperator")
+            mod["functionName"] = Attribute.string("functionName", function_name)
+        if group in d:
+            d[group].append(mod)
+        else:
+            arr = Attribute.array(group, ValueType.ELEMENT)
+            arr.append(mod)
+            d[group] = arr
+        return True
+
+    def remove_module(self, system_name: str, group: str, index: int) -> bool:
+        """Удаляет модуль по индексу из группы системы."""
+        d = self._find_definition(system_name)
+        if d is None or group not in d:
+            return False
+        try:
+            mods = list(d[group].iter_elem())
+            mods.pop(index)
+        except (IndexError, Exception):
+            return False
+        if mods:
+            d[group] = mods
+        else:
+            d[group] = Attribute.array(d[group].name, ValueType.ELEMENT)
+        return True
+
+    def duplicate_system(self, system_name: str, new_name: str) -> bool:
+        """
+        Дублирует систему под новым именем (в корневой список определений).
+
+        Модули копируются по значению (правки копии не трогают оригинал);
+        ссылки children остаются на те же дочерние системы.
+        """
+        d = self._find_definition(system_name)
+        if d is None or self._find_definition(new_name) is not None:
+            return False
+        new = Element(new_name, d.type)
+        for attr in d.values():
+            key = attr.name          # оригинальный регистр — уходит в файл
+            kl = key.casefold()
+            if kl in MODULE_GROUPS:
+                mods = [self._copy_module(m) for m in attr.iter_elem()]
+                if mods:
+                    new[key] = mods
+                else:
+                    new[key] = Attribute.array(key, ValueType.ELEMENT)
+            elif kl == "children":
+                # Копируем элементы-ссылки, сами дочерние системы — общие
+                refs = [self._copy_module(ch) for ch in attr.iter_elem()]
+                if refs:
+                    new[key] = refs
+                else:
+                    new[key] = Attribute.array(key, ValueType.ELEMENT)
+            else:
+                new[key] = attr.copy()
+        if "name" in new:
+            new["name"] = Attribute.string(new["name"].name, new_name)
+        self.root["particleSystemDefinitions"].append(new)
+        return True
+
+    def remove_system(self, system_name: str) -> bool:
+        """Удаляет систему совсем: из корневого списка И из children всех
+        родителей (иначе она оставалась «призраком» — играла у родителя и
+        держала имя занятым)."""
+        target = self._find_definition(system_name)
+        if target is None:
+            return False
+
+        # Отцепить все ссылки на target по всему дереву (до удаления из корня)
+        for el in self._all_definition_elements():
+            if "children" not in el:
+                continue
+            try:
+                refs = list(el["children"].iter_elem())
+            except Exception:
+                continue
+            kept_refs = []
+            for ch in refs:
+                is_target = False
+                if "child" in ch:
+                    try:
+                        is_target = ch["child"].val_elem is target
+                    except Exception:
+                        is_target = False
+                if not is_target:
+                    kept_refs.append(ch)
+            if len(kept_refs) != len(refs):
+                if kept_refs:
+                    el["children"] = kept_refs
+                else:
+                    el["children"] = Attribute.array(
+                        "children", ValueType.ELEMENT)
+
+        defs = self._definitions()
+        kept = [d for d in defs if d is not target]
+        if kept:
+            self.root["particleSystemDefinitions"] = kept
+        else:
+            self.root["particleSystemDefinitions"] = Attribute.array(
+                "particleSystemDefinitions", ValueType.ELEMENT)
+        return True
+
+    @staticmethod
+    def _make_module(function_name: str, element_type: str, attrs: list) -> "Element":
+        """Модуль из functionName и готовых Attribute."""
+        el = Element(function_name, element_type)
+        el["functionName"] = Attribute.string("functionName", function_name)
+        for attr in attrs:
+            el[attr.name] = attr
+        return el
+
+    def add_layer(self, parent_name: str,
+                  layer_name: Optional[str] = None) -> Optional[str]:
+        """
+        Создаёт новый слой-подэффект и цепляет его ребёнком к parent_name.
+
+        Слой — готовый «залп спрайтов» с разумными настройками (50 частиц
+        разлетаются из центра, крутятся, гаснут и падают): пользователю
+        остаётся дать текстуру и крутить параметры. Возвращает имя слоя.
+        """
+        parent = self._find_definition(parent_name)
+        if parent is None:
+            return None
+        if not layer_name:
+            base, n = f"{parent_name}_layer", 2
+            layer_name = base
+            while self._find_definition(layer_name) is not None:
+                layer_name = f"{base}{n}"
+                n += 1
+        elif self._find_definition(layer_name) is not None:
+            return None
+
+        d = Element(layer_name, "DmeParticleSystemDefinition")
+        d["max_particles"] = Attribute.int("max_particles", 300)
+        d["material"] = Attribute.string("material", "effects\\yellowflare.vmt")
+        d["radius"] = Attribute.float("radius", 5.0)
+        d["color"] = Attribute.color("color", 255, 255, 255, 255)
+
+        op = "DmeParticleOperator"
+        d["renderers"] = [self._make_module("render_animated_sprites", op, [
+            Attribute.float("animation rate", 1.0),
+            Attribute.int("orientation_type", 0),
+        ])]
+        d["emitters"] = [self._make_module("emit_instantaneously", op, [
+            Attribute.int("num_to_emit", 50),
+            Attribute.float("emission_start_time", 0.0),
+        ])]
+        d["initializers"] = [
+            self._make_module("Position Within Sphere Random", op, [
+                Attribute.float("distance_min", 0.0),
+                Attribute.float("distance_max", 4.0),
+                Attribute.float("speed_min", 150.0),
+                Attribute.float("speed_max", 300.0),
+                Attribute.float("speed_random_exponent", 1.0),
+            ]),
+            self._make_module("Lifetime Random", op, [
+                Attribute.float("lifetime_min", 0.4),
+                Attribute.float("lifetime_max", 0.8),
+            ]),
+            self._make_module("Radius Random", op, [
+                Attribute.float("radius_min", 3.0),
+                Attribute.float("radius_max", 6.0),
+            ]),
+            self._make_module("Rotation Random", op, []),
+        ]
+        d["operators"] = [
+            self._make_module("Lifespan Decay", op, []),
+            self._make_module("Movement Basic", op, [
+                Attribute.vec3("gravity", 0.0, 0.0, -200.0),
+                Attribute.float("drag", 0.0),
+            ]),
+            self._make_module("Alpha Fade Out Simple", op, [
+                Attribute.float("proportional fade out time", 0.25),
+            ]),
+            self._make_module("Rotation Spin Roll", op, [
+                Attribute.int("spin_rate_degrees", 240),
+                Attribute.int("spin_stop_time", 0),
+            ]),
+        ]
+
+        self.root["particleSystemDefinitions"].append(d)
+        if not self.add_child(parent_name, layer_name):
+            return None
+        return layer_name
+
+    def add_child(self, parent_name: str, child_name: str,
+                  delay: float = 0.0) -> bool:
+        """Подцепляет существующую систему ребёнком к parent_name."""
+        parent = self._find_definition(parent_name)
+        child = self._find_definition(child_name)
+        if parent is None or child is None or parent is child:
+            return False
+        # Гард от цикла: если parent достижим из child по children — в игре
+        # это бесконечная рекурсия инстанцирования (крэш клиента)
+        pending, seen = [child], set()
+        while pending:
+            cur = pending.pop()
+            if cur is parent:
+                return False
+            if id(cur) in seen:
+                continue
+            seen.add(id(cur))
+            if "children" in cur:
+                try:
+                    for ch in cur["children"].iter_elem():
+                        if "child" in ch:
+                            try:
+                                pending.append(ch["child"].val_elem)
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+        ref = Element(child_name, "DmeParticleChild")
+        ref["delay"] = Attribute.float("delay", float(delay))
+        ref["child"] = Attribute("child", ValueType.ELEMENT, child)
+        if "children" in parent:
+            parent["children"].append(ref)
+        else:
+            arr = Attribute.array("children", ValueType.ELEMENT)
+            arr.append(ref)
+            parent["children"] = arr
+        return True
+
+    def remove_child(self, parent_name: str, index: int) -> bool:
+        """Отцепляет ребёнка по индексу (сама дочерняя система остаётся)."""
+        parent = self._find_definition(parent_name)
+        if parent is None or "children" not in parent:
+            return False
+        try:
+            refs = list(parent["children"].iter_elem())
+            # UI нумерует только валидные ссылки (systems_json пропускает
+            # битые) — маппим индекс на сырой массив
+            valid = [i for i, ch in enumerate(refs) if "child" in ch]
+            refs.pop(valid[index])
+        except (IndexError, Exception):
+            return False
+        if refs:
+            parent["children"] = refs
+        else:
+            parent["children"] = Attribute.array("children", ValueType.ELEMENT)
+        return True
 
     # ── Натуральные цвета текстуры ───────────────────────────────────────── #
 
@@ -884,18 +1313,92 @@ class ParticleEditorService:
 
     # ── Сохранение ───────────────────────────────────────────────────────── #
 
+    def _serialize_pcf(self) -> bytes:
+        """
+        Сериализует дерево в бинарный PCF, вырезав default-атрибуты (сжатие
+        как у casual-pre-loader — чтобы файл влез в слот VPK для казуала).
+
+        Работает на КОПИИ дерева (re-parse собственных байтов): рабочее дерево
+        не мутируется, обзор свойств в UI сохраняет все строки.
+
+        unicode="silent" ОБЯЗАТЕЛЬНО: "format" пишет в заголовок
+        "unicode_binary", который парсер DMX игры не знает — TF2 молча
+        отбрасывает весь PCF и эффекты пропадают.
+        """
+        enc_ver, fmt_name, fmt_ver = self._encoding
+
+        raw0 = io.BytesIO()
+        self.root.export_binary(
+            raw0, version=enc_ver, fmt_name=fmt_name, fmt_ver=fmt_ver,
+            unicode="silent")
+        copy_root, _, _ = Element.parse(io.BytesIO(raw0.getvalue()))
+        self._strip_default_attrs(copy_root)
+
+        out = io.BytesIO()
+        copy_root.export_binary(
+            out, version=enc_ver, fmt_name=fmt_name, fmt_ver=fmt_ver,
+            unicode="silent")
+        return out.getvalue()
+
+    @staticmethod
+    def _strip_default_attrs(root) -> int:
+        """Удаляет из всех элементов дерева атрибуты со значением-дефолтом.
+        Lossless: игра и превью подставляют те же дефолты. Возвращает счётчик."""
+        removed, seen, stack = 0, set(), [root]
+        while stack:
+            el = stack.pop()
+            if id(el) in seen:
+                continue
+            seen.add(id(el))
+            for key in list(el.keys()):
+                attr = el[key]
+                if attr.type is ValueType.ELEMENT:
+                    # спуск в дочерние элементы/массивы элементов
+                    try:
+                        if attr.is_array:
+                            for sub in attr.iter_elem():
+                                if sub is not None:
+                                    stack.append(sub)
+                        else:
+                            sub = attr.val_elem
+                            if sub is not None:
+                                stack.append(sub)
+                    except Exception:
+                        pass
+                    continue
+                dv = _PCF_DEFAULT_ATTRS.get(attr.name.lower())
+                if dv is None:
+                    continue
+                try:
+                    if attr.type in (ValueType.FLOAT, ValueType.TIME) \
+                            and abs(attr.val_float - dv) < 1e-9:
+                        del el[key]
+                        removed += 1
+                    elif attr.type is ValueType.INTEGER and attr.val_int == dv:
+                        del el[key]
+                        removed += 1
+                except Exception:
+                    pass
+        return removed
+
+    def serialized_size(self) -> int:
+        """Размер экспортируемого (сжатого) PCF в байтах."""
+        return len(self._serialize_pcf())
+
+    def casual_size_overflow(self) -> Optional[int]:
+        """
+        На сколько байт сжатый PCF превышает исходный (потолок казуала).
+        <= 0 — влезает; > 0 — в казуале не загрузится (бай-пасс не берёт PCF
+        больше оригинального слота VPK). None — потолок неизвестен.
+        """
+        ceiling = getattr(self, "_loaded_size", None)
+        if not ceiling:
+            return None
+        return self.serialized_size() - ceiling
+
     def save(self, dest_path: str) -> None:
-        """Сохраняет текущее дерево в бинарный PCF с исходным encoding."""
+        """Сохраняет текущее дерево в бинарный (сжатый) PCF."""
         if self.root is None:
             raise RuntimeError("PCF не загружен")
-        enc_ver, fmt_name, fmt_ver = self._encoding
-        out = io.BytesIO()
-        # unicode="silent" ОБЯЗАТЕЛЬНО: "format" пишет в заголовок
-        # "unicode_binary", который парсер DMX игры не знает — TF2 молча
-        # отбрасывает весь PCF и эффекты пропадают
-        self.root.export_binary(
-            out, version=enc_ver, fmt_name=fmt_name, fmt_ver=fmt_ver,
-            unicode="silent",
-        )
-        Path(dest_path).write_bytes(out.getvalue())
+        Path(dest_path).write_bytes(self._serialize_pcf())
         logger.info(f"PCF сохранён: {dest_path}")

@@ -90,9 +90,9 @@ def test_set_attr_and_save_roundtrip(tmp_path):
     assert systems["fx"]["attrs"]["radius"]["v"] == 12.5
 
 
-def test_set_system_texture_without_game(tmp_path):
-    """Замена текстуры без установленной TF2: fallback-VMT, resize к степени
-    двойки, материал переписан, файлы готовы к экспорту."""
+def test_set_system_texture_custom_path(tmp_path):
+    """Замена текстуры создаёт кастомный материал effects/custom_<...> и
+    переписывает ссылку системы; файлы готовы к экспорту."""
     pytest.importorskip("PIL")
     from pathlib import Path as _P
     if not _P("tools/VTF/VTFLib.dll").exists():
@@ -105,56 +105,189 @@ def test_set_system_texture_without_game(tmp_path):
     img = tmp_path / "tex.png"
     Image.new("RGBA", (100, 60), (255, 0, 0, 255)).save(img)
 
-    info = svc.set_system_texture("fx", str(img), tf2_root_dir="")
-    assert info is not None
+    res = svc.set_system_texture("fx", str(img), tf2_root_dir="")
+    assert res is not None
+    mat, info = res
     assert (info["width"], info["height"]) == (64, 32)   # степени двойки
     assert info["dataUrl"].startswith("data:image/png;base64,")
 
-    # слаг — от имени материала (effects\test.vmt → custom_test)
-    mat = svc.systems_json()["fx"]["attrs"]["material"]["v"]
-    assert mat == "particle/custom_test.vmt"
+    # пер-системная замена: слаг от имени системы; дочерняя не тронута
+    assert mat == "effects/custom_fx.vmt"
+    assert svc.systems_json()["fx"]["attrs"]["material"]["v"] == "effects/custom_fx.vmt"
+    assert svc.systems_json()["fx_child"]["attrs"]["material"]["v"] == "Effects/TEST.vmt"
     assert set(svc.custom_files) == {
-        "materials/particle/custom_test.vmt",
-        "materials/particle/custom_test.vtf",
+        "materials/effects/custom_fx.vmt",
+        "materials/effects/custom_fx.vtf",
     }
-    vmt_text = svc.custom_files["materials/particle/custom_test.vmt"].decode()
-    assert '"$basetexture" "particle/custom_test"' in vmt_text
-    assert svc.custom_files["materials/particle/custom_test.vtf"][:4] == b"VTF\x00"
-    # кастомный материал виден превью даже без TF2
+    vmt_text = svc.custom_files["materials/effects/custom_fx.vmt"].decode()
+    assert '"$basetexture" "effects/custom_fx"' in vmt_text
+    assert svc.custom_files["materials/effects/custom_fx.vtf"][:4] == b"VTF\x00"
     assert mat in svc.materials_json("")
+    assert svc.is_custom_material(mat)
 
-    # повторная замена: тот же путь (перезапись), базис — прежний кастомный VMT
+    # повторная замена — тот же путь
     img2 = tmp_path / "tex2.png"
     Image.new("RGBA", (64, 64), (0, 255, 0, 255)).save(img2)
-    info2 = svc.set_system_texture("fx", str(img2), tf2_root_dir="")
-    assert info2 is not None
+    assert svc.set_system_texture("fx", str(img2), tf2_root_dir="") is not None
     assert svc.systems_json()["fx"]["attrs"]["material"]["v"] == mat
     assert set(svc.custom_files) == {
-        "materials/particle/custom_test.vmt",
-        "materials/particle/custom_test.vtf",
+        "materials/effects/custom_fx.vmt",
+        "materials/effects/custom_fx.vtf",
     }
 
-    # замена по материалу затрагивает и дочернюю систему с тем же материалом,
-    # даже если регистр/слэши записаны иначе (Effects/TEST.vmt)
+    # сброс — материал возвращён к оригиналу, файлы убраны
+    assert svc.reset_material_texture(mat) == "effects\\test.vmt"
+    assert svc.systems_json()["fx"]["attrs"]["material"]["v"] == "effects\\test.vmt"
+    assert svc.custom_files == {}
+    assert not svc.is_custom_material(mat)
+
+    # замена по материалу затрагивает обе системы (норм. сравнение регистра)
     svc2 = ParticleEditorService()
     svc2.load_bytes(_make_pcf_bytes())
-    res = svc2.set_material_texture("effects\\test.vmt", str(img), "")
-    assert res is not None
-    new_mat, _info = res
+    res2 = svc2.set_material_texture("effects\\test.vmt", str(img), "")
+    assert res2 is not None
+    new_mat, _ = res2
     sysj = svc2.systems_json()
     assert sysj["fx"]["attrs"]["material"]["v"] == new_mat
     assert sysj["fx_child"]["attrs"]["material"]["v"] == new_mat
+    assert len(svc2._active_custom_files()) == 2
 
-    # сброс к текстуре игры: материал возвращён, файлы замены убраны
-    assert svc2.is_custom_material(new_mat)
-    orig = svc2.reset_material_texture(new_mat)
-    assert orig == "effects\\test.vmt"
-    sysj = svc2.systems_json()
-    assert sysj["fx"]["attrs"]["material"]["v"] == orig
-    assert sysj["fx_child"]["attrs"]["material"]["v"] == orig
-    assert svc2.custom_files == {}
-    assert not svc2.is_custom_material(new_mat)
-    assert svc2.reset_material_texture(new_mat) is None
+
+def test_pcf_compression_strips_defaults(tmp_path):
+    """save() вырезает default-атрибуты (для влезания в слот VPK казуала),
+    рабочее дерево не мутируется, эффект остаётся валидным."""
+    svc = ParticleEditorService()
+    svc.load_bytes(_make_pcf_bytes())
+
+    # добавим оператору дефолтный атрибут «operator start fadein» = 0.0
+    assert svc.add_module("fx", "operators", "Movement Basic")
+    d = svc._find_definition("fx")
+    op = list(d["operators"].iter_elem())[0]
+    from srctools.dmx import Attribute as _A
+    op["operator start fadein"] = _A.float("operator start fadein", 0.0)
+    op["operator end fadeout"] = _A.float("operator end fadeout", 2.5)  # не дефолт
+
+    dest = tmp_path / "compressed.pcf"
+    svc.save(str(dest))
+    data = dest.read_bytes()
+
+    # рабочее дерево НЕ тронуто — дефолтный атрибут ещё на месте
+    op_live = list(svc._find_definition("fx")["operators"].iter_elem())[0]
+    assert "operator start fadein" in op_live
+
+    # в файле: дефолтный вырезан, недефолтный сохранён
+    svc2 = ParticleEditorService()
+    svc2.load_bytes(data)
+    op2 = list(svc2._find_definition("fx")["operators"].iter_elem())[0]
+    assert "operator start fadein" not in op2
+    assert "operator end fadeout" in op2
+    assert abs(op2["operator end fadeout"].val_float - 2.5) < 1e-6
+
+    # casual_size_overflow: сжатый < загруженного (в фикстуре дефолтов нет,
+    # но метод не должен падать)
+    assert isinstance(svc.casual_size_overflow(), int)
+
+
+def test_structural_editing():
+    """add/remove module, duplicate/remove system, add/remove child."""
+    svc = ParticleEditorService()
+    svc.load_bytes(_make_pcf_bytes())
+
+    # добавление модуля: шаблона в файле нет → элемент с functionName
+    assert svc.add_module("fx", "operators", "Rotation Spin Roll")
+    ops = svc.systems_json()["fx"]["operators"]
+    assert [o["functionName"] for o in ops] == ["Rotation Spin Roll"]
+
+    # добавление по шаблону из текущего файла: Color Random есть в fx
+    assert svc.add_module("fx_child", "initializers", "Color Random")
+    child_inits = svc.systems_json()["fx_child"]["initializers"]
+    assert child_inits[0]["functionName"] == "Color Random"
+    # атрибуты скопированы из шаблона
+    assert child_inits[0]["attrs"]["color1"]["v"] == [0, 255, 30, 255]
+    # копия отвязана: правка копии не трогает оригинал
+    assert svc.set_attr("fx_child", "initializers", 0, "color1", [1, 2, 3, 4])
+    assert svc.systems_json()["fx"]["initializers"][0]["attrs"]["color1"]["v"] \
+        == [0, 255, 30, 255]
+
+    # удаление модуля (последнего в группе → пустая типизированная группа)
+    assert svc.remove_module("fx", "operators", 0)
+    assert svc.systems_json()["fx"]["operators"] == []
+    assert not svc.remove_module("fx", "operators", 0)
+
+    # дублирование системы
+    assert svc.duplicate_system("fx", "fx_stars")
+    assert not svc.duplicate_system("fx", "fx_stars")   # имя занято
+    sysj = svc.systems_json()
+    assert "fx_stars" in sysj
+    assert sysj["fx_stars"]["attrs"]["max_particles"]["v"] == 100
+    # правка копии не трогает оригинал
+    assert svc.set_attr("fx_stars", "initializers", 0, "color1", [9, 9, 9, 9])
+    assert svc.systems_json()["fx"]["initializers"][0]["attrs"]["color1"]["v"] \
+        == [0, 255, 30, 255]
+
+    # дети: подцепить дубль ребёнком к fx, потом отцепить
+    assert svc.add_child("fx", "fx_stars", delay=0.5)
+    ch = svc.systems_json()["fx"]["children"]
+    assert {"delay": 0.5, "childName": "fx_stars"} in ch
+    # цикл запрещён: fx достижим из fx_stars? нет, но fx_stars уже ребёнок fx
+    # → обратная связь создала бы цикл
+    assert not svc.add_child("fx_stars", "fx")
+    assert svc.remove_child("fx", len(ch) - 1)
+    assert not any(c["childName"] == "fx_stars"
+                   for c in svc.systems_json()["fx"]["children"])
+
+    # копия сохраняет регистр имён атрибутов в файле (functionName и т.п.)
+    import io as _io
+    buf = _io.BytesIO()
+    svc.root.export_binary(buf, version=2, fmt_name="pcf", fmt_ver=1,
+                           unicode="silent")
+    assert b"functionName" in buf.getvalue()
+
+    # удаление системы + roundtrip всего через сохранение
+    assert svc.remove_system("fx_stars")
+    assert "fx_stars" not in svc.system_names()
+    import io as _io
+    buf = _io.BytesIO()
+    svc.root.export_binary(buf, version=2, fmt_name="pcf", fmt_ver=1,
+                           unicode="silent")
+    svc2 = ParticleEditorService()
+    svc2.load_bytes(buf.getvalue())
+    assert svc2.systems_json()["fx_child"]["initializers"][0]["attrs"]["color1"]["v"] \
+        == [1, 2, 3, 4]
+
+
+def test_add_layer():
+    svc = ParticleEditorService()
+    svc.load_bytes(_make_pcf_bytes())
+
+    layer = svc.add_layer("fx")
+    assert layer == "fx_layer"
+    sysj = svc.systems_json()
+    assert layer in sysj
+    assert {"delay": 0.0, "childName": layer} in sysj["fx"]["children"]
+    lj = sysj[layer]
+    assert lj["emitters"][0]["functionName"] == "emit_instantaneously"
+    assert lj["emitters"][0]["attrs"]["num_to_emit"]["v"] == 50
+    assert [o["functionName"] for o in lj["operators"]] == [
+        "Lifespan Decay", "Movement Basic", "Alpha Fade Out Simple",
+        "Rotation Spin Roll"]
+    # второй слой получает уникальное имя
+    assert svc.add_layer("fx") == "fx_layer2"
+
+    # удаление системы отцепляет её от родителя и освобождает имя
+    assert svc.remove_system("fx_layer2")
+    assert not any(c["childName"] == "fx_layer2"
+                   for c in svc.systems_json()["fx"]["children"])
+    assert svc.add_layer("fx") == "fx_layer2"   # имя переиспользуется
+    # functionName сохраняет регистр в файле
+    import io as _io
+    buf = _io.BytesIO()
+    svc.root.export_binary(buf, version=2, fmt_name="pcf", fmt_ver=1,
+                           unicode="silent")
+    assert b"functionName" in buf.getvalue()
+    svc2 = ParticleEditorService()
+    svc2.load_bytes(buf.getvalue())
+    assert "fx_layer2" in svc2.systems_json()
 
 
 def test_use_texture_colors():

@@ -26,7 +26,9 @@ from PySide6.QtWidgets import (
 
 from src.data.translations import TRANSLATIONS
 from src.services.base_worker import StandardWorker
-from src.services.particle_editor_service import MODULE_GROUPS, ParticleEditorService
+from src.services.particle_editor_service import (
+    MODULE_CATALOG, MODULE_GROUPS, ParticleEditorService,
+)
 from src.shared.logging_config import get_logger
 from src.ui.preview_3d_widget import is_webengine_available
 from src.ui.styled_dialog import _colors
@@ -35,6 +37,9 @@ from src.ui.preview_3d_widget import _get_html_path  # dev/frozen пути к st
 logger = get_logger(__name__)
 
 _ROLE_ATTR = Qt.ItemDataRole.UserRole  # (group|None, module_idx, attr_name, type)
+_ROLE_GROUP = Qt.ItemDataRole.UserRole + 2   # имя группы модулей (заголовок)
+_ROLE_MODULE = Qt.ItemDataRole.UserRole + 3  # (group, index) — модуль
+_ROLE_CHILD = Qt.ItemDataRole.UserRole + 4   # индекс ребёнка
 
 
 def _particles_html_path() -> str:
@@ -396,6 +401,10 @@ class ParticlesPanel(QWidget):
             }}
         """)
         self.systems_list.currentItemChanged.connect(self._on_system_selected)
+        self.systems_list.setContextMenuPolicy(
+            Qt.ContextMenuPolicy.CustomContextMenu)
+        self.systems_list.customContextMenuRequested.connect(
+            self._on_systems_menu)
         sys_box_l.addWidget(self.systems_list, 1)
         left.addWidget(sys_box)
 
@@ -427,6 +436,9 @@ class ParticlesPanel(QWidget):
             }}
         """)
         self.attr_tree.itemDoubleClicked.connect(self._on_attr_double_clicked)
+        self.attr_tree.setContextMenuPolicy(
+            Qt.ContextMenuPolicy.CustomContextMenu)
+        self.attr_tree.customContextMenuRequested.connect(self._on_tree_menu)
         prop_box_l.addWidget(self.attr_tree, 1)
         left.addWidget(prop_box)
 
@@ -802,22 +814,191 @@ class ParticlesPanel(QWidget):
 
         for group in MODULE_GROUPS:
             mods = sys_json.get(group) or []
-            if not mods:
+            # Пустые forces/constraints прячем; основные группы видны всегда —
+            # иначе после удаления последнего модуля их не вернуть
+            if not mods and group in ("forces", "constraints"):
                 continue
             group_item = QTreeWidgetItem([group, ""])
+            group_item.setData(0, _ROLE_GROUP, group)
             self.attr_tree.addTopLevelItem(group_item)
             for idx, mod in enumerate(mods):
                 mod_item = QTreeWidgetItem([mod["functionName"], ""])
+                mod_item.setData(0, _ROLE_MODULE, (group, idx))
                 group_item.addChild(mod_item)
                 add_attr_items(mod_item, mod["attrs"], group, idx)
             group_item.setExpanded(True)
 
-        if sys_json["children"]:
-            ch_item = QTreeWidgetItem(["children", ""])
-            self.attr_tree.addTopLevelItem(ch_item)
-            for ch in sys_json["children"]:
-                ch_item.addChild(QTreeWidgetItem(
-                    [ch["childName"], f"delay {ch['delay']:g}"]))
+        ch_item = QTreeWidgetItem(["children", ""])
+        ch_item.setData(0, _ROLE_GROUP, "children")
+        self.attr_tree.addTopLevelItem(ch_item)
+        for idx, ch in enumerate(sys_json["children"]):
+            child_item = QTreeWidgetItem(
+                [ch["childName"], f"delay {ch['delay']:g}"])
+            child_item.setData(0, _ROLE_CHILD, idx)
+            ch_item.addChild(child_item)
+
+    # ── Структурное редактирование ───────────────────────────────────────── #
+
+    def _structure_changed(self, keep_system: Optional[str] = None) -> None:
+        """Обновляет payload/превью/дерево/список после структурной правки."""
+        if self.service is None or self._payload is None:
+            return
+        self._payload["systems"] = self.service.systems_json()
+        current = keep_system or self._current_system
+        names = self.service.system_names()
+        self.systems_list.blockSignals(True)
+        self.systems_list.clear()
+        for name in names:
+            self.systems_list.addItem(QListWidgetItem(name))
+        self.systems_list.blockSignals(False)
+        if current in names:
+            self.systems_list.setCurrentRow(names.index(current))
+            self._current_system = current
+            self.view.update_systems(self._payload["systems"], current)
+            self._fill_attr_tree(current)
+            self._refresh_texture_cards()
+        elif names:
+            # Текущую систему удалили — движку нужен новый набор ДО set_root
+            self.view.update_systems(self._payload["systems"], names[0])
+            self.systems_list.setCurrentRow(0)
+        else:
+            self._current_system = ""
+            self.attr_tree.clear()
+            self.texture_cards.clear()
+            self.view.reset()
+
+    def _on_systems_menu(self, pos) -> None:
+        """Контекстное меню списка систем: дублировать / удалить / ребёнок."""
+        item = self.systems_list.itemAt(pos)
+        if item is None or self.service is None:
+            return
+        name = item.text()
+        t = self.t
+        menu = QMenu(self)
+        act_layer = menu.addAction(t['particles_menu_add_layer'])
+        menu.addSeparator()
+        act_dup = menu.addAction(t['particles_menu_duplicate'])
+        act_child = menu.addAction(t['particles_menu_add_child'])
+        act_del = menu.addAction(t['particles_menu_remove_system'])
+        chosen = menu.exec(self.systems_list.mapToGlobal(pos))
+        if chosen is act_layer:
+            self._on_add_layer(name)
+        elif chosen is act_dup:
+            new_name, ok = QInputDialog.getText(
+                self, t['particles_menu_duplicate'],
+                t['particles_new_name_prompt'], text=f"{name}_copy")
+            new_name = new_name.strip()
+            if ok and new_name and self.service.duplicate_system(name, new_name):
+                self._structure_changed(keep_system=new_name)
+        elif chosen is act_child:
+            others = [n for n in self.service.system_names() if n != name]
+            if not others:
+                return
+            child, ok = QInputDialog.getItem(
+                self, t['particles_menu_add_child'],
+                t['particles_pick_child'], others, 0, False)
+            if ok and child and self.service.add_child(name, child):
+                self._structure_changed(keep_system=name)
+        elif chosen is act_del:
+            answer = QMessageBox.question(
+                self, t['particles_menu_remove_system'],
+                t['particles_remove_system_confirm'].format(name=name),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            if answer == QMessageBox.StandardButton.Yes \
+                    and self.service.remove_system(name):
+                self._structure_changed()
+
+    def _on_add_layer(self, parent_name: str) -> None:
+        """Один шаг: новый слой-залп + своя текстура + подцепить ребёнком."""
+        if self.service is None or self._payload is None:
+            return
+        t = self.t
+        path, _ = QFileDialog.getOpenFileName(
+            self, t['particles_menu_add_layer'], "",
+            "Images (*.png *.jpg *.jpeg *.tga *.bmp *.webp *.gif)")
+        if not path:
+            return
+        layer = self.service.add_layer(parent_name)
+        if layer is None:
+            QMessageBox.warning(
+                self, t['particles_menu_add_layer'], t['particles_texture_error'])
+            return
+        max_size = next(
+            (s for s, r in self._size_radios.items() if r.isChecked()), 512)
+        res = self.service.set_system_texture(
+            layer, path, self.tf2_root, max_size=max_size,
+            uncompressed=bool(self.format_combo.currentData()))
+        if res is not None:
+            new_mat, info = res
+            self._payload["materials"][new_mat] = info
+        # Выбираем сам слой — его параметры сразу в дереве; родительский
+        # эффект целиком виден при выборе родителя
+        self._payload["systems"] = self.service.systems_json()
+        self.view.load_data(self._payload, root_name=layer)
+        self._structure_changed(keep_system=layer)
+
+    def _on_tree_menu(self, pos) -> None:
+        """Контекстное меню дерева: добавить/удалить модуль, отцепить ребёнка."""
+        item = self.attr_tree.itemAt(pos)
+        if item is None or self.service is None or not self._current_system:
+            return
+        t = self.t
+        sys_name = self._current_system
+        group = item.data(0, _ROLE_GROUP)
+        module = item.data(0, _ROLE_MODULE)
+        child_idx = item.data(0, _ROLE_CHILD)
+        menu = QMenu(self)
+
+        if group == "children":
+            act = menu.addAction(t['particles_menu_add_child'])
+            if menu.exec(self.attr_tree.mapToGlobal(pos)) is act:
+                others = [n for n in self.service.system_names()
+                          if n != sys_name]
+                if not others:
+                    return
+                child, ok = QInputDialog.getItem(
+                    self, t['particles_menu_add_child'],
+                    t['particles_pick_child'], others, 0, False)
+                if ok and child and self.service.add_child(sys_name, child):
+                    self._structure_changed()
+            return
+
+        if group in MODULE_GROUPS:
+            act = menu.addAction(t['particles_menu_add_module'])
+            if menu.exec(self.attr_tree.mapToGlobal(pos)) is act:
+                catalog = MODULE_CATALOG.get(group, [])
+                if not catalog:
+                    return
+                fn, ok = QInputDialog.getItem(
+                    self, t['particles_menu_add_module'],
+                    t['particles_pick_module'], catalog, 0, True)
+                fn = fn.strip()
+                if ok and fn:
+                    # Поиск шаблона может сканировать стоковые PCF (один раз)
+                    from PySide6.QtWidgets import QApplication
+                    QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+                    try:
+                        added = self.service.add_module(
+                            sys_name, group, fn, self.tf2_root)
+                    finally:
+                        QApplication.restoreOverrideCursor()
+                    if added:
+                        self._structure_changed()
+            return
+
+        if module is not None:
+            act = menu.addAction(t['particles_menu_remove_module'])
+            if menu.exec(self.attr_tree.mapToGlobal(pos)) is act:
+                mod_group, idx = module
+                if self.service.remove_module(sys_name, mod_group, idx):
+                    self._structure_changed()
+            return
+
+        if child_idx is not None:
+            act = menu.addAction(t['particles_menu_remove_child'])
+            if menu.exec(self.attr_tree.mapToGlobal(pos)) is act:
+                if self.service.remove_child(sys_name, child_idx):
+                    self._structure_changed()
 
     # ── Правка атрибутов ─────────────────────────────────────────────────── #
 
@@ -848,7 +1029,20 @@ class ParticlesPanel(QWidget):
         else:
             # Обычная правка: только определения, текстуры остаются в GPU
             self.view.update_systems(self._payload["systems"], sys_name)
-        self._fill_attr_tree(sys_name)
+
+        # Обновляем ТОЛЬКО изменённую строку — пересборка дерева сворачивала
+        # ветки и сбрасывала прокрутку наверх
+        sys_json = self._payload["systems"][sys_name]
+        attrs = (sys_json["attrs"] if group is None
+                 else sys_json[group][mod_idx]["attrs"])
+        tv = attrs.get(attr_name)
+        if tv is not None:
+            value_text = _fmt_value(tv)
+            item.setText(1, value_text)
+            item.setToolTip(1, value_text)
+            if tv["t"] == "color":
+                v = tv["v"]
+                item.setForeground(1, QColor(v[0], v[1], v[2]))
 
     def _ask_value(self, attr_name: str, attr_type: str, cur):
         """Диалог правки по типу атрибута. None — отмена."""
@@ -895,18 +1089,44 @@ class ParticlesPanel(QWidget):
     # ── Тулбар ───────────────────────────────────────────────────────────── #
 
     def _on_set_texture(self) -> None:
-        """Кнопка тулбара: замена текстуры материала выбранной системы."""
+        """Кнопка тулбара: замена текстуры ТОЛЬКО выбранной системы
+        (другие системы с тем же материалом не трогаются; карточки в 2D
+        меняют материал целиком)."""
         if self.service is None or not self._current_system or self._payload is None:
             return
-        cur_mat = (self._payload["systems"].get(self._current_system, {})
+        t = self.t
+        sys_name = self._current_system
+        cur_mat = (self._payload["systems"].get(sys_name, {})
                    .get("attrs", {}).get("material", {}).get("v"))
         if not cur_mat:
             return
         path, _ = QFileDialog.getOpenFileName(
-            self, self.t['particles_set_texture'], "",
+            self, t['particles_set_texture'], "",
             "Images (*.png *.jpg *.jpeg *.tga *.bmp *.webp *.gif)")
-        if path:
-            self._replace_material_texture(cur_mat, path)
+        if not path:
+            return
+        cur_info = (self._payload.get("materials") or {}).get(cur_mat)
+        if cur_info and cur_info.get("sheet"):
+            answer = QMessageBox.question(
+                self, t['particles_set_texture'], t['particles_sheet_warning'],
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+        max_size = next(
+            (s for s, r in self._size_radios.items() if r.isChecked()), 512)
+        res = self.service.set_system_texture(
+            sys_name, path, self.tf2_root, max_size=max_size,
+            uncompressed=bool(self.format_combo.currentData()))
+        if res is None:
+            QMessageBox.warning(
+                self, t['particles_set_texture'], t['particles_texture_error'])
+            return
+        new_mat, info = res
+        self._payload["systems"] = self.service.systems_json()
+        self._payload["materials"][new_mat] = info
+        self.view.load_data(self._payload, root_name=sys_name)
+        self._fill_attr_tree(sys_name)
+        self._refresh_texture_cards()
 
     def _on_natural_colors(self) -> None:
         """Убирает модули тинта у эффекта — текстуры в родных цветах."""
@@ -966,9 +1186,12 @@ class ParticlesPanel(QWidget):
             logger.error(f"Сборка VPK частиц: {exc}", exc_info=True)
             QMessageBox.critical(self, t.get('error', 'Error'), str(exc))
             return
-        QMessageBox.information(
-            self, t['particles_build_vpk'],
-            t['particles_vpk_done'].format(path=out))
+        msg = t['particles_vpk_done'].format(path=out)
+        # Казуал-бай-пасс не грузит PCF больше оригинала — предупреждаем
+        overflow = self.service.casual_size_overflow()
+        if overflow is not None and overflow > 0:
+            msg += "\n\n" + t['particles_casual_overflow'].format(bytes=overflow)
+        QMessageBox.information(self, t['particles_build_vpk'], msg)
 
     def _on_save_as(self) -> None:
         if self.service is None:

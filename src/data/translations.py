@@ -33,6 +33,10 @@ TRANSLATIONS = {
                                    'Своя картинка её заменит статичным изображением. Продолжить?',
         'particles_vpk_done': 'VPK собран: {path}\n\nПоложите его в tf/custom. '
                               'В казуальных матчах кастомные частицы блокируются sv_pure.',
+        'particles_casual_overflow': 'Внимание: PCF на {bytes} байт больше оригинального — '
+                                     'в казуале (через бай-пасс) он может не загрузиться. '
+                                     'Удалите лишние/неиспользуемые системы, чтобы уменьшить размер. '
+                                     'На своём сервере (sv_pure 0) работает без ограничений.',
         'particles_2d_hint': 'Текстуры эффекта — двойной клик или перетащите картинку на карточку; правый клик — сброс',
         'particles_reset_texture': 'Вернуть текстуру игры',
         'particles_natural_colors': 'Цвета текстуры',
@@ -41,6 +45,19 @@ TRANSLATIONS = {
                                     'рендериться родными цветами. Отмена — перезагрузка PCF.',
         'particles_colors_done': 'Удалено модулей цвета: {count}. Не забудьте сохранить или собрать VPK.',
         'particles_colors_none': 'У этого эффекта нет модулей цвета — текстуры уже в родных цветах.',
+        'particles_menu_add_layer': 'Добавить слой со своей текстурой…',
+        'particles_menu_duplicate': 'Дублировать систему…',
+        'particles_menu_remove_system': 'Удалить систему',
+        'particles_menu_add_child': 'Добавить дочернюю…',
+        'particles_menu_remove_child': 'Отцепить дочернюю',
+        'particles_menu_add_module': 'Добавить модуль…',
+        'particles_menu_remove_module': 'Удалить модуль',
+        'particles_new_name_prompt': 'Имя новой системы:',
+        'particles_pick_child': 'Какую систему подцепить ребёнком:',
+        'particles_pick_module': 'Модуль (можно вписать свой):',
+        'particles_remove_system_confirm': 'Удалить систему «{name}» из PCF? '
+                                           'Она исчезнет совсем — в том числе будет отцеплена '
+                                           'от всех систем, где была дочерней.',
         'make_team_tip': 'Сделать оружие командным: добавить отдельную BLU-текстуру (RED/BLU)',
         'misc_textures': 'Прочее',
         'misc_textures_tip': 'Служебные текстуры (глаза/убер/зомби и т.п.) — обычно скрыты. Открыть для опциональной замены.',
@@ -438,6 +455,10 @@ TRANSLATIONS = {
                                    'A custom image will replace it with a static picture. Continue?',
         'particles_vpk_done': 'VPK built: {path}\n\nPut it into tf/custom. '
                               'Note: custom particles are blocked by sv_pure in casual matches.',
+        'particles_casual_overflow': 'Warning: the PCF is {bytes} bytes larger than the original — '
+                                     'it may fail to load in casual (via a bypass). '
+                                     'Remove extra/unused systems to shrink it. '
+                                     'On your own server (sv_pure 0) it works without limits.',
         'particles_2d_hint': 'Effect textures — double-click or drop an image onto a card; right-click to reset',
         'particles_reset_texture': 'Restore game texture',
         'particles_natural_colors': 'Texture colors',
@@ -446,6 +467,19 @@ TRANSLATIONS = {
                                     'in their own colors. To undo, reload the PCF.',
         'particles_colors_done': 'Removed {count} color modules. Remember to save or build the VPK.',
         'particles_colors_none': 'This effect has no color modules — textures already use their own colors.',
+        'particles_menu_add_layer': 'Add layer with custom texture…',
+        'particles_menu_duplicate': 'Duplicate system…',
+        'particles_menu_remove_system': 'Remove system',
+        'particles_menu_add_child': 'Add child…',
+        'particles_menu_remove_child': 'Detach child',
+        'particles_menu_add_module': 'Add module…',
+        'particles_menu_remove_module': 'Remove module',
+        'particles_new_name_prompt': 'New system name:',
+        'particles_pick_child': 'System to attach as a child:',
+        'particles_pick_module': 'Module (custom names allowed):',
+        'particles_remove_system_confirm': 'Remove system "{name}" from the PCF? '
+                                           'It will be removed entirely, including being detached '
+                                           'from any parent systems.',
         'make_team_tip': 'Make this weapon team-colored: add a separate BLU texture (RED/BLU)',
         'misc_textures': 'Other',
         'misc_textures_tip': 'Service textures (eyes/uber/zombie, etc.) — normally hidden. Open to optionally replace.',
