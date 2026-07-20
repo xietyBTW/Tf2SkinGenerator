@@ -43,10 +43,6 @@ MODULE_GROUPS = (
     "renderers", "operators", "initializers", "emitters", "forces", "constraints",
 )
 
-#: Директория кастомных материалов частиц (materials/<...>). Стоковые
-#: particle-текстуры лежат в materials/effects/, custom_* кладём туда же.
-_CUSTOM_DIR = "effects"
-
 #: Атрибуты со значениями по умолчанию Source: при экспорте вырезаются
 #: (lossless — игра/превью подставляют те же дефолты). Присутствуют почти на
 #: каждом операторе/рендерере, поэтому дают килобайты экономии. Это нужно,
@@ -105,6 +101,17 @@ MODULE_CATALOG = {
 # Якорь по началу строки: иначе матчились закомментированные строки и ссылки
 # на $basetexture внутри proxies; хвостовой //-комментарий отсекается.
 # \r?$ обязателен: VMT Valve с CRLF-концами строк.
+def _norm_mat(name: str) -> str:
+    """Материал → нормализованный rel-путь под materials/ (effects/crit.vmt).
+    Ключ для сопоставления материалов с разным регистром/слэшами."""
+    n = name.replace("\\", "/").lower()
+    if not n.endswith(".vmt"):
+        n += ".vmt"
+    if n.startswith("materials/"):
+        n = n[len("materials/"):]
+    return n
+
+
 _RE_BASETEXTURE = re.compile(
     r'^[ \t]*"?\$basetexture"?[ \t]+"?([^"\r\n]+?)"?[ \t]*(?://[^\r\n]*)?\r?$',
     re.IGNORECASE | re.MULTILINE)
@@ -266,10 +273,10 @@ class ParticleEditorService:
         #: Кастомные материалы (замена текстур): {rel_path: bytes} —
         #: и .vmt (текст), и .vtf (бинарь); попадают в превью и в экспорт VPK.
         self.custom_files: Dict[str, bytes] = {}
-        #: Превью-инфо кастомных материалов: {имя материала из PCF: info-dict}.
+        #: Превью-инфо кастомных материалов: {норм. имя материала: info-dict}.
         self._custom_material_info: Dict[str, dict] = {}
-        self._material_base_rel: Dict[str, str] = {}
-        self._material_original: Dict[str, str] = {}  # кастом → исходный
+        #: Перезаписанные текстуры: {норм. имя материала: {tex_rel, material}}.
+        self._overwritten: Dict[str, dict] = {}
 
     # ── Загрузка ─────────────────────────────────────────────────────────── #
 
@@ -283,8 +290,7 @@ class ParticleEditorService:
         self._loaded_size = len(raw)   # «потолок» размера для казуала
         self.custom_files = {}
         self._custom_material_info = {}
-        self._material_base_rel = {}
-        self._material_original = {}
+        self._overwritten = {}
 
     def load_file(self, path: str) -> None:
         self.load_bytes(Path(path).read_bytes(), source=path)
@@ -317,6 +323,55 @@ class ParticleEditorService:
             except Exception as exc:
                 logger.warning(f"Не удалось перечислить PCF в VPK: {exc}")
         return sorted(set(out))
+
+    #: Кэш списка игровых particle-материалов (скан всех PCF — дорогой).
+    _game_materials_cache: Optional[List[str]] = None
+
+    @classmethod
+    def game_effect_materials(cls, tf2_root_dir: str) -> List[str]:
+        """
+        Материалы (текстуры) из ВСЕХ particle-эффектов игры — для выбора
+        существующей игровой текстуры вместо своей картинки. Такой материал
+        уже есть в игре, поэтому мод работает в казуале (bypass не нужно
+        добавлять новый файл). Результат кэшируется на весь запуск.
+        """
+        if cls._game_materials_cache is not None:
+            return cls._game_materials_cache
+        mats = set()
+        for pcf in cls.list_game_pcfs(tf2_root_dir):
+            try:
+                svc = cls()
+                svc.load_from_game(tf2_root_dir, pcf)
+                for m in svc.material_names():
+                    if not m or "custom_" in m.lower():
+                        continue
+                    # Только спрайтовые particle-текстуры (effects/particle),
+                    # без модельных/бэкпак-материалов — чтобы список был к делу
+                    norm = m.replace("\\", "/").lower()
+                    if norm.startswith(("effects/", "particle/")):
+                        mats.add(m)
+            except Exception:
+                continue
+        cls._game_materials_cache = sorted(mats, key=str.lower)
+        return cls._game_materials_cache
+
+    def set_material_to_game(self, old_material: str, game_material: str) -> bool:
+        """
+        Переводит все системы с материалом old_material на СУЩЕСТВУЮЩИЙ игровой
+        материал game_material (просто меняет строку — новый файл не создаётся).
+        Работает в казуале: игра уже содержит этот материал.
+        """
+        def _norm(m: str) -> str:
+            return m.replace("\\", "/").lower()
+
+        target = _norm(old_material)
+        changed = False
+        for el in self._all_definition_elements():
+            if "material" in el and _norm(el["material"].val_str) == target:
+                el["material"] = Attribute.string(
+                    el["material"].name, game_material)
+                changed = True
+        return changed
 
     # ── Определения систем ───────────────────────────────────────────────── #
 
@@ -433,8 +488,12 @@ class ParticleEditorService:
         Ошибки не фатальны — система без текстуры рендерится белым спрайтом.
         cancel_check: колбэк () -> bool; True — прервать (для фоновых воркеров).
         """
-        # Кастомные материалы (замена текстур) не зависят от установки TF2
-        out: Dict[str, dict] = dict(self._custom_material_info)
+        # Перезаписанные текстуры — превью-инфо по нормализованному ключу
+        out: Dict[str, dict] = {}
+        for mat in self.material_names():
+            ck = _norm_mat(mat)
+            if ck in self._custom_material_info:
+                out[mat] = self._custom_material_info[ck]
         try:
             _, misc_vpk, _ = TF2Paths.resolve(tf2_root_dir)
         except FileNotFoundError:
@@ -606,110 +665,97 @@ class ParticleEditorService:
         self, system_name: str, image_path: str, tf2_root_dir: str,
         max_size: int = 512, uncompressed: bool = False,
     ) -> Optional[tuple]:
-        """
-        Замена текстуры ТОЛЬКО у одной системы: остальные системы, делящие
-        тот же материал, не трогаются (материал «расщепляется» — своя текстура
-        по новому пути effects/custom_<система>).
-
-        Returns:
-            (новое имя материала, info-dict для превью) либо None при ошибке.
-        """
+        """Заменяет текстуру системы своей картинкой. Имя материала в PCF НЕ
+        меняется — ПЕРЕЗАПИСЫВАЕТСЯ оригинальный VTF-файл игры (для казуала —
+        bypass подменяет только существующие файлы). Returns (материал, info)."""
         d = self._find_definition(system_name)
         if d is None or "material" not in d:
             return None
-        old_mat = d["material"].val_str
-        built = self._build_custom_material(
-            old_mat, image_path, tf2_root_dir, max_size, uncompressed,
-            base_key=f"sys:{system_name}", slug_src=system_name)
-        if built is None:
-            return None
-        new_mat, info = built
-        d["material"] = Attribute.string(d["material"].name, new_mat)
-        if new_mat != old_mat:
-            self._material_original.setdefault(new_mat, old_mat)
-        return new_mat, info
+        mat = d["material"].val_str
+        info = self._overwrite_texture(
+            mat, image_path, tf2_root_dir, max_size, uncompressed)
+        return (mat, info) if info is not None else None
 
     def set_material_texture(
         self, material_name: str, image_path: str, tf2_root_dir: str,
         max_size: int = 512, uncompressed: bool = False,
     ) -> Optional[tuple]:
-        """
-        Заменяет текстуру МАТЕРИАЛА: все системы PCF, использующие его
-        (включая дочерние), переводятся на кастомный материал.
+        """То же по имени материала (перезапись одного общего VTF-файла)."""
+        info = self._overwrite_texture(
+            material_name, image_path, tf2_root_dir, max_size, uncompressed)
+        return (material_name, info) if info is not None else None
 
-        Returns:
-            (новое имя материала, info-dict для превью) либо None при ошибке.
+    def _overwrite_texture(
+        self, material_name: str, image_path: str, tf2_root_dir: str,
+        max_size: int, uncompressed: bool,
+    ) -> Optional[dict]:
         """
-        # Сравнение нормализованное: в PCF встречаются разные регистр и слэши
-        def _norm(m: str) -> str:
-            return m.replace("\\", "/").lower()
-
-        target = _norm(material_name)
-        affected = [
-            el for el in self._all_definition_elements()
-            if "material" in el and _norm(el["material"].val_str) == target
-        ]
-        if not affected:
-            return None
-        built = self._build_custom_material(
-            material_name, image_path, tf2_root_dir, max_size, uncompressed,
-            base_key=material_name, slug_src=None)
+        Перезаписывает ОРИГИНАЛЬНЫЙ VTF-файл материала своей картинкой.
+        Материал в PCF не переименовывается. КРИТИЧНО для казуала: bypass
+        подменяет только существующие файлы игры; новый путь он пропускает.
+        Кастомный VTF кладётся по пути $basetexture стокового VMT.
+        """
+        vmt_text, tex_rel = self._resolve_texture_path(material_name, tf2_root_dir)
+        built = self._image_to_vtf(image_path, max_size, uncompressed)
         if built is None:
             return None
-        new_mat, info = built
-        for el in affected:
-            el["material"] = Attribute.string(el["material"].name, new_mat)
-        if new_mat != material_name:
-            self._material_original.setdefault(new_mat, material_name)
-        return new_mat, info
+        vtf_bytes, w, h, png_b64 = built
+        self.custom_files[f"materials/{tex_rel}.vtf"] = vtf_bytes
 
-    def _build_custom_material(
-        self, old_mat: str, image_path: str, tf2_root_dir: str,
-        max_size: int, uncompressed: bool,
-        base_key: str, slug_src: Optional[str],
-    ) -> Optional[tuple]:
-        """
-        Собирает кастомный материал (VMT+VTF в custom_files, превью-info):
-        картинка → VTF (размеры к степени двойки), VMT копируется с
-        оригинала (сохраняются $additive и пр.) с новым $basetexture.
-        Файлы кладутся по новому пути effects/custom_<slug>.
-        """
-        # ── Оригинальный VMT — базис для параметров ────────────────────────
-        vmt_rel = old_mat.replace("\\", "/").lower()
-        if not vmt_rel.endswith(".vmt"):
-            vmt_rel += ".vmt"
-        if not vmt_rel.startswith("materials/"):
-            vmt_rel = "materials/" + vmt_rel
+        shader, additive = "", True
+        if vmt_text:
+            sm = _RE_SHADER.search(vmt_text)
+            shader = sm.group(1).lower() if sm else ""
+            additive = bool(_RE_ADDITIVE.search(vmt_text))
+        info = {
+            "dataUrl": f"data:image/png;base64,{png_b64}", "sheet": None,
+            "additive": additive, "shader": shader, "width": w, "height": h,
+        }
+        key = _norm_mat(material_name)
+        self._custom_material_info[key] = info
+        self._overwritten[key] = {"tex_rel": tex_rel, "material": material_name}
+        return info
 
+    def _resolve_texture_path(self, material_name: str, tf2_root_dir: str):
+        """(текст VMT|None, rel-путь текстуры без .vtf). Путь берётся из
+        $basetexture стокового VMT; фолбэк — имя материала."""
+        vmt_rel = _norm_mat(material_name)
         vmt_text = None
-        # Повторная замена уже кастомного — базис из custom_files
-        if vmt_rel in self.custom_files:
-            vmt_text = self.custom_files[vmt_rel].decode("utf-8", errors="replace")
-        else:
-            try:
-                _, misc_vpk, _ = TF2Paths.resolve(tf2_root_dir)
-                paks = open_vpks(
-                    [misc_vpk, TF2Paths.resolve_textures_vpk(tf2_root_dir)]
-                    + TF2Paths.resolve_hl2_vpks(tf2_root_dir))
-                raw = read_from_vpks(paks, vmt_rel)
-                if raw is not None:
-                    vmt_text = raw.decode("utf-8", errors="replace")
-            except FileNotFoundError:
-                pass
-        if vmt_text is None:
-            vmt_text = (
-                '"SpriteCard"\n{\n\t"$basetexture" "placeholder"\n'
-                '\t"$vertexcolor" 1\n\t"$vertexalpha" 1\n\t"$additive" 1\n}\n'
-            )
+        try:
+            _, misc_vpk, _ = TF2Paths.resolve(tf2_root_dir)
+            paks = open_vpks(
+                [misc_vpk, TF2Paths.resolve_textures_vpk(tf2_root_dir)]
+                + TF2Paths.resolve_hl2_vpks(tf2_root_dir))
+            raw = read_from_vpks(paks, "materials/" + vmt_rel)
+            if raw is not None:
+                vmt_text = raw.decode("utf-8", errors="replace")
+        except FileNotFoundError:
+            pass
+        tex_rel = None
+        if vmt_text:
+            m = _RE_BASETEXTURE.search(vmt_text)
+            if m:
+                t = m.group(1).strip().replace("\\", "/").lower()
+                tex_rel = t[:-4] if t.endswith(".vtf") else t
+        if tex_rel is None:
+            tex_rel = vmt_rel[:-4]
+            if tf2_root_dir:
+                logger.warning(
+                    f"Не удалось прочитать VMT {vmt_rel} — путь текстуры взят "
+                    f"из имени материала ({tex_rel}); для казуала проверьте, "
+                    f"что такой VTF есть в игре.")
+        return vmt_text, tex_rel
 
-        # ── Картинка → RGBA с размерами-степенями двойки ───────────────────
+    @staticmethod
+    def _image_to_vtf(image_path: str, max_size: int, uncompressed: bool):
+        """Картинка → (vtf_bytes, w, h, png_base64). None при ошибке.
+        Размеры → степени двойки (<= max_size, потолок 1024). NOMIP|NOLOD."""
         try:
             from PIL import Image
             img = Image.open(image_path).convert("RGBA")
         except Exception as exc:
             logger.error(f"Не удалось открыть картинку {image_path}: {exc}")
             return None
-
         cap = max(64, min(int(max_size), 1024))
 
         def _pot(n: int) -> int:
@@ -722,18 +768,15 @@ class ParticleEditorService:
         if (w, h) != img.size:
             img = img.resize((w, h), Image.LANCZOS)
 
-        # ── VTF через VTFLib (пишет только на диск) ────────────────────────
-        base_rel = self._custom_base_rel(base_key, slug_src)
         tmp_path = None
         try:
-            from src.services.vtflib_wrapper import VTFImageFlags, VTFImageFormat, VTFLib
+            from src.services.vtflib_wrapper import (
+                VTFImageFlags, VTFImageFormat, VTFLib)
             fd, tmp_path = tempfile.mkstemp(suffix=".vtf")
             os.close(fd)
             VTFLib.create_animated_vtf(
                 [img.tobytes()], w, h,
                 VTFImageFormat.RGBA8888 if uncompressed else VTFImageFormat.DXT5,
-                # NOMIP|NOLOD обязательны: мипы не генерируем, без флагов игра
-                # полезет за отсутствующими уровнями
                 VTFImageFlags.CLAMPS | VTFImageFlags.CLAMPT
                 | VTFImageFlags.NOMIP | VTFImageFlags.NOLOD,
                 tmp_path,
@@ -748,83 +791,28 @@ class ParticleEditorService:
                     os.unlink(tmp_path)
                 except OSError:
                     pass
-
-        # ── VMT: оригинал с новым $basetexture ─────────────────────────────
-        if _RE_BASETEXTURE.search(vmt_text):
-            new_vmt = _RE_BASETEXTURE.sub(
-                lambda _m: f'\t"$basetexture" "{base_rel}"', vmt_text)
-        else:
-            new_vmt = vmt_text.replace(
-                "{", '{\n\t"$basetexture" "' + base_rel + '"', 1)
-
-        new_mat = f"{base_rel}.vmt"
-        self.custom_files[f"materials/{base_rel}.vmt"] = new_vmt.encode("utf-8")
-        self.custom_files[f"materials/{base_rel}.vtf"] = vtf_bytes
-
-        # ── Превью-инфо ────────────────────────────────────────────────────
         buf = io.BytesIO()
         img.save(buf, format="PNG")
-        b64 = base64.b64encode(buf.getvalue()).decode("ascii")
-        shader_m = _RE_SHADER.search(new_vmt)
-        info = {
-            "dataUrl": f"data:image/png;base64,{b64}",
-            "sheet": None,
-            "additive": bool(_RE_ADDITIVE.search(new_vmt)),
-            "shader": shader_m.group(1).lower() if shader_m else "",
-            "width": w,
-            "height": h,
-        }
-        self._custom_material_info[new_mat] = info
-        return new_mat, info
+        png_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+        return vtf_bytes, w, h, png_b64
 
     def is_custom_material(self, material_name: str) -> bool:
-        """True, если материал — наша замена (можно сбросить к игровому)."""
-        return material_name in self._material_original
+        """True, если текстура материала заменена своей картинкой (можно сбросить)."""
+        return _norm_mat(material_name) in self._overwritten
 
-    def reset_material_texture(self, custom_material_name: str) -> Optional[str]:
-        """
-        Сбрасывает кастомный материал обратно к исходному игровому: все
-        системы возвращаются на оригинальный материал, файлы замены убираются.
-
-        Returns:
-            Имя исходного материала либо None (материал не был заменён).
-        """
-        orig = self._material_original.get(custom_material_name)
-        if orig is None:
+    def reset_material_texture(self, material_name: str) -> Optional[str]:
+        """Убирает перезапись текстуры (возврат к текстуре игры). Материал в
+        PCF не менялся — просто удаляем оверрайд-файл."""
+        key = _norm_mat(material_name)
+        entry = self._overwritten.pop(key, None)
+        if entry is None:
             return None
-        target = custom_material_name.replace("\\", "/").lower()
-        for el in self._all_definition_elements():
-            if ("material" in el
-                    and el["material"].val_str.replace("\\", "/").lower() == target):
-                el["material"] = Attribute.string(el["material"].name, orig)
-        base_rel = target[:-4] if target.endswith(".vmt") else target
-        self.custom_files.pop(f"materials/{base_rel}.vmt", None)
-        self.custom_files.pop(f"materials/{base_rel}.vtf", None)
-        self._custom_material_info.pop(custom_material_name, None)
-        self._material_original.pop(custom_material_name, None)
-        return orig
-
-    def _custom_base_rel(self, key: str, slug_src: Optional[str] = None) -> str:
-        """Уникальный базовый путь кастомного материала для ключа
-        (имя материала либо 'sys:<система>'). Повторная замена → тот же путь;
-        схлопывающиеся слаги разводятся счётчиком."""
-        norm = key.replace("\\", "/").lower()
-        if norm.endswith(".vmt"):
-            norm = norm[:-4]
-        if norm.startswith(_CUSTOM_DIR + "/custom_"):
-            return norm  # повторная замена уже кастомного
-        if key in self._material_base_rel:
-            return self._material_base_rel[key]
-        stem = (slug_src or norm.rsplit("/", 1)[-1]).lower()
-        slug = re.sub(r"[^a-z0-9_]+", "_", stem).strip("_") or "tex"
-        base = f"{_CUSTOM_DIR}/custom_{slug}"
-        candidate, n = base, 2
-        taken = set(self._material_base_rel.values())
-        while candidate in taken:
-            candidate = f"{base}_{n}"
-            n += 1
-        self._material_base_rel[key] = candidate
-        return candidate
+        self._custom_material_info.pop(key, None)
+        # Файл удаляем ТОЛЬКО если tex_rel не делит другой активный оверрайд
+        tex_rel = entry["tex_rel"]
+        if not any(e["tex_rel"] == tex_rel for e in self._overwritten.values()):
+            self.custom_files.pop(f"materials/{tex_rel}.vtf", None)
+        return material_name
 
     # ── Экспорт VPK ──────────────────────────────────────────────────────── #
 
@@ -836,28 +824,19 @@ class ParticleEditorService:
         return f"particles/{Path(src).name}"
 
     def _active_custom_files(self) -> Dict[str, bytes]:
-        """custom_files без «сирот»: материалы удалённых систем (никем больше
-        не используемые) в VPK не попадают."""
-        used = set()
+        """Оверрайд-файлы без «сирот»: перезаписи текстур материалов, которые
+        больше не используются ни одной системой, в VPK не попадают."""
+        used_mats = set()
         for el in self._all_definition_elements():
-            if "material" not in el:
-                continue
-            try:
-                m = el["material"].val_str.replace("\\", "/").lower()
-            except Exception:
-                continue
-            if not m.endswith(".vmt"):
-                m += ".vmt"
-            if not m.startswith("materials/"):
-                m = "materials/" + m
-            used.add(m)
-        out: Dict[str, bytes] = {}
-        for rel, data in self.custom_files.items():
-            rl = rel.replace("\\", "/").lower()
-            vmt = rl if rl.endswith(".vmt") else rl[:-4] + ".vmt"
-            if vmt in used:
-                out[rel] = data
-        return out
+            if "material" in el:
+                try:
+                    used_mats.add(_norm_mat(el["material"].val_str))
+                except Exception:
+                    pass
+        active_paths = {f"materials/{e['tex_rel']}.vtf"
+                        for k, e in self._overwritten.items() if k in used_mats}
+        return {rel: data for rel, data in self.custom_files.items()
+                if rel in active_paths}
 
     def export_vpk(self, dest_path: str, language: str = "en") -> str:
         """

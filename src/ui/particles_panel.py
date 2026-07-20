@@ -721,20 +721,58 @@ class ParticlesPanel(QWidget):
             self.texture_cards.addItem(item)
 
     def _on_card_menu(self, pos) -> None:
-        """Контекстное меню карточки: заменить / вернуть текстуру игры."""
+        """Контекстное меню карточки: игровая текстура / своя картинка / сброс."""
         item = self.texture_cards.itemAt(pos)
         if item is None or self.service is None:
             return
         mat = item.data(_ROLE_MATERIAL)
         menu = QMenu(self)
+        act_game = menu.addAction(self.t['particles_pick_game_tex'])
         act_replace = menu.addAction(self.t['particles_set_texture'])
+        menu.addSeparator()
         act_reset = menu.addAction(self.t['particles_reset_texture'])
         act_reset.setEnabled(self.service.is_custom_material(mat))
         chosen = menu.exec(self.texture_cards.mapToGlobal(pos))
-        if chosen is act_replace:
+        if chosen is act_game:
+            self._pick_game_material(mat)
+        elif chosen is act_replace:
             self._on_card_double_clicked(item)
         elif chosen is act_reset:
             self._reset_material_texture(mat)
+
+    def _pick_game_material(self, card_material: str) -> None:
+        """Выбор существующей игровой текстуры (работает в казуале — файл уже
+        в игре, новый не создаётся)."""
+        if self.service is None or self._payload is None:
+            return
+        t = self.t
+        if not self.tf2_root:
+            QMessageBox.information(
+                self, t['particles_pick_game_tex'], t['particles_no_tf2'])
+            return
+        from PySide6.QtWidgets import QApplication
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            mats = self.service.game_effect_materials(self.tf2_root)
+        finally:
+            QApplication.restoreOverrideCursor()
+        if not mats:
+            return
+        cur = card_material if card_material in mats else 0
+        start = mats.index(card_material) if card_material in mats else 0
+        chosen, ok = QInputDialog.getItem(
+            self, t['particles_pick_game_tex'],
+            t['particles_pick_game_prompt'], mats, start, True)
+        chosen = (chosen or "").strip()
+        if not ok or not chosen:
+            return
+        if not self.service.set_material_to_game(card_material, chosen):
+            return
+        self._payload["systems"] = self.service.systems_json()
+        self._payload["materials"] = self.service.materials_json(self.tf2_root)
+        self.view.load_data(self._payload, root_name=self._current_system)
+        self._fill_attr_tree(self._current_system)
+        self._refresh_texture_cards()
 
     def _reset_material_texture(self, material_name: str) -> None:
         """Возврат материала к исходной текстуре игры."""
@@ -909,33 +947,23 @@ class ParticlesPanel(QWidget):
                 self._structure_changed()
 
     def _on_add_layer(self, parent_name: str) -> None:
-        """Один шаг: новый слой-залп + своя текстура + подцепить ребёнком."""
+        """Создаёт слой-залп с игровой текстурой по умолчанию и цепляет
+        ребёнком. Текстуру потом меняют через 2D-карточку (игровую из списка
+        или свою картинку)."""
         if self.service is None or self._payload is None:
             return
         t = self.t
-        path, _ = QFileDialog.getOpenFileName(
-            self, t['particles_menu_add_layer'], "",
-            "Images (*.png *.jpg *.jpeg *.tga *.bmp *.webp *.gif)")
-        if not path:
-            return
         layer = self.service.add_layer(parent_name)
         if layer is None:
             QMessageBox.warning(
                 self, t['particles_menu_add_layer'], t['particles_texture_error'])
             return
-        max_size = next(
-            (s for s, r in self._size_radios.items() if r.isChecked()), 512)
-        res = self.service.set_system_texture(
-            layer, path, self.tf2_root, max_size=max_size,
-            uncompressed=bool(self.format_combo.currentData()))
-        if res is not None:
-            new_mat, info = res
-            self._payload["materials"][new_mat] = info
-        # Выбираем сам слой — его параметры сразу в дереве; родительский
-        # эффект целиком виден при выборе родителя
-        self._payload["systems"] = self.service.systems_json()
-        self.view.load_data(self._payload, root_name=layer)
+        # Слой выбран, его параметры сразу в дереве; переключаемся в 2D, чтобы
+        # пользователь задал текстуру карточкой
         self._structure_changed(keep_system=layer)
+        self._set_view_mode(1)
+        QMessageBox.information(
+            self, t['particles_menu_add_layer'], t['particles_layer_added'])
 
     def _on_tree_menu(self, pos) -> None:
         """Контекстное меню дерева: добавить/удалить модуль, отцепить ребёнка."""

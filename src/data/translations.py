@@ -39,6 +39,12 @@ TRANSLATIONS = {
                                      'На своём сервере (sv_pure 0) работает без ограничений.',
         'particles_2d_hint': 'Текстуры эффекта — двойной клик или перетащите картинку на карточку; правый клик — сброс',
         'particles_reset_texture': 'Вернуть текстуру игры',
+        'particles_pick_game_tex': 'Игровая текстура из списка…',
+        'particles_pick_game_prompt': 'Текстура из эффектов игры (работает в казуале, '
+                                      'файл уже в игре). Можно вписать свой путь:',
+        'particles_layer_added': 'Слой добавлен. Задайте ему текстуру карточкой в 2D: '
+                                 'правый клик → «Игровая текстура…» (для казуала) '
+                                 'или двойной клик → своя картинка.',
         'particles_natural_colors': 'Цвета текстуры',
         'particles_colors_confirm': 'Убрать у эффекта и его дочерних систем модули цвета '
                                     '(Color Random, Color Fade и т.п.)? Текстуры будут '
@@ -461,6 +467,12 @@ TRANSLATIONS = {
                                      'On your own server (sv_pure 0) it works without limits.',
         'particles_2d_hint': 'Effect textures — double-click or drop an image onto a card; right-click to reset',
         'particles_reset_texture': 'Restore game texture',
+        'particles_pick_game_tex': 'Game texture from list…',
+        'particles_pick_game_prompt': 'Texture from the game\'s effects (works in casual, '
+                                      'the file is already in the game). You can type a path too:',
+        'particles_layer_added': 'Layer added. Set its texture via the 2D card: '
+                                 'right-click → "Game texture…" (for casual) '
+                                 'or double-click → your own image.',
         'particles_natural_colors': 'Texture colors',
         'particles_colors_confirm': 'Remove color modules (Color Random, Color Fade, etc.) '
                                     'from this effect and its children? Textures will render '

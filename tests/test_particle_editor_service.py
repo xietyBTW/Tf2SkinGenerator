@@ -90,9 +90,9 @@ def test_set_attr_and_save_roundtrip(tmp_path):
     assert systems["fx"]["attrs"]["radius"]["v"] == 12.5
 
 
-def test_set_system_texture_custom_path(tmp_path):
-    """Замена текстуры создаёт кастомный материал effects/custom_<...> и
-    переписывает ссылку системы; файлы готовы к экспорту."""
+def test_set_system_texture_overwrites_original(tmp_path):
+    """Своя картинка ПЕРЕЗАПИСЫВАЕТ оригинальный VTF-путь (для казуала):
+    имя материала в PCF не меняется, custom_-путей не появляется."""
     pytest.importorskip("PIL")
     from pathlib import Path as _P
     if not _P("tools/VTF/VTFLib.dll").exists():
@@ -111,46 +111,68 @@ def test_set_system_texture_custom_path(tmp_path):
     assert (info["width"], info["height"]) == (64, 32)   # степени двойки
     assert info["dataUrl"].startswith("data:image/png;base64,")
 
-    # пер-системная замена: слаг от имени системы; дочерняя не тронута
-    assert mat == "effects/custom_fx.vmt"
-    assert svc.systems_json()["fx"]["attrs"]["material"]["v"] == "effects/custom_fx.vmt"
-    assert svc.systems_json()["fx_child"]["attrs"]["material"]["v"] == "Effects/TEST.vmt"
-    assert set(svc.custom_files) == {
-        "materials/effects/custom_fx.vmt",
-        "materials/effects/custom_fx.vtf",
-    }
-    vmt_text = svc.custom_files["materials/effects/custom_fx.vmt"].decode()
-    assert '"$basetexture" "effects/custom_fx"' in vmt_text
-    assert svc.custom_files["materials/effects/custom_fx.vtf"][:4] == b"VTF\x00"
-    assert mat in svc.materials_json("")
-    assert svc.is_custom_material(mat)
+    # ИМЯ МАТЕРИАЛА НЕ ИЗМЕНИЛОСЬ и никаких custom_-путей
+    assert mat == "effects\\test.vmt"
+    assert svc.systems_json()["fx"]["attrs"]["material"]["v"] == "effects\\test.vmt"
+    assert set(svc.custom_files) == {"materials/effects/test.vtf"}
+    assert not any("custom_" in p for p in svc.custom_files)
+    assert svc.custom_files["materials/effects/test.vtf"][:4] == b"VTF\x00"
 
-    # повторная замена — тот же путь
+    # превью видит кастом; fx_child делит материал (иной регистр) → тоже
+    assert svc.materials_json("").get("effects\\test.vmt") is not None
+    assert svc.materials_json("").get("Effects/TEST.vmt") is not None
+    assert svc.is_custom_material("effects\\test.vmt")
+
+    # повторная замена — тот же путь, один файл
     img2 = tmp_path / "tex2.png"
     Image.new("RGBA", (64, 64), (0, 255, 0, 255)).save(img2)
     assert svc.set_system_texture("fx", str(img2), tf2_root_dir="") is not None
-    assert svc.systems_json()["fx"]["attrs"]["material"]["v"] == mat
-    assert set(svc.custom_files) == {
-        "materials/effects/custom_fx.vmt",
-        "materials/effects/custom_fx.vtf",
-    }
+    assert set(svc.custom_files) == {"materials/effects/test.vtf"}
 
-    # сброс — материал возвращён к оригиналу, файлы убраны
-    assert svc.reset_material_texture(mat) == "effects\\test.vmt"
-    assert svc.systems_json()["fx"]["attrs"]["material"]["v"] == "effects\\test.vmt"
+    # сброс — оверрайд убран
+    assert svc.reset_material_texture("effects\\test.vmt") == "effects\\test.vmt"
     assert svc.custom_files == {}
-    assert not svc.is_custom_material(mat)
+    assert not svc.is_custom_material("effects\\test.vmt")
+    assert svc.reset_material_texture("effects\\test.vmt") is None
 
-    # замена по материалу затрагивает обе системы (норм. сравнение регистра)
+    # «сироты»: материал больше не используется → файл не в экспорте
     svc2 = ParticleEditorService()
     svc2.load_bytes(_make_pcf_bytes())
-    res2 = svc2.set_material_texture("effects\\test.vmt", str(img), "")
-    assert res2 is not None
-    new_mat, _ = res2
-    sysj = svc2.systems_json()
-    assert sysj["fx"]["attrs"]["material"]["v"] == new_mat
-    assert sysj["fx_child"]["attrs"]["material"]["v"] == new_mat
-    assert len(svc2._active_custom_files()) == 2
+    svc2.set_material_texture("effects\\test.vmt", str(img), "")
+    assert len(svc2._active_custom_files()) == 1
+    svc2.remove_system("fx")
+    assert svc2._active_custom_files() == {}
+
+    # общий tex_rel: reset одного не удаляет файл, нужный второму
+    svc3 = ParticleEditorService()
+    svc3.load_bytes(_make_pcf_bytes())
+    svc3._overwritten = {
+        "effects/a.vmt": {"tex_rel": "effects/shared", "material": "effects/a.vmt"},
+        "effects/b.vmt": {"tex_rel": "effects/shared", "material": "effects/b.vmt"},
+    }
+    svc3._custom_material_info = {"effects/a.vmt": {}, "effects/b.vmt": {}}
+    svc3.custom_files = {"materials/effects/shared.vtf": b"VTF\x00x"}
+    svc3.reset_material_texture("effects/a.vmt")
+    assert "materials/effects/shared.vtf" in svc3.custom_files   # ещё нужен b
+    svc3.reset_material_texture("effects/b.vmt")
+    assert svc3.custom_files == {}
+
+
+def test_set_material_to_game():
+    """Переназначение материала на игровой: имя строки меняется, новых
+    custom-файлов не создаётся (для казуала)."""
+    svc = ParticleEditorService()
+    svc.load_bytes(_make_pcf_bytes())
+
+    # fx и fx_child делят effects/test → оба переводятся на игровой материал
+    assert svc.set_material_to_game("effects\\test.vmt", "effects\\yellowflare.vmt")
+    sysj = svc.systems_json()
+    assert sysj["fx"]["attrs"]["material"]["v"] == "effects\\yellowflare.vmt"
+    assert sysj["fx_child"]["attrs"]["material"]["v"] == "effects\\yellowflare.vmt"
+    # никаких кастомных файлов
+    assert svc.custom_files == {}
+    # несуществующий исходный материал → False
+    assert not svc.set_material_to_game("effects\\nope.vmt", "effects\\x.vmt")
 
 
 def test_pcf_compression_strips_defaults(tmp_path):
