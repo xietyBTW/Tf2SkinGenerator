@@ -661,6 +661,36 @@ class ParticleEditorService:
             return False
         return True
 
+    def ensure_attr(
+        self, system_name: str, group: Optional[str], module_index: int,
+        attr_name: str, attr_type: str, value: Any,
+    ) -> bool:
+        """
+        set_attr; если атрибута нет — создаёт его с заданным DMX-типом.
+        Нужно простому режиму: крутилка должна работать и на модуле,
+        у которого этот атрибут ещё не записан (игра держит его в дефолте).
+        """
+        if self.set_attr(system_name, group, module_index, attr_name, value):
+            return True
+        d = self._find_definition(system_name)
+        if d is None:
+            return False
+        el = d
+        if group is not None:
+            if group not in d:
+                return False
+            try:
+                el = list(d[group].iter_elem())[module_index]
+            except (IndexError, Exception):
+                return False
+        if attr_name in el:
+            return False   # атрибут есть, но set_attr отверг значение
+        attr = self._attr_from_json(attr_name, {"t": attr_type, "v": value})
+        if attr is None:
+            return False
+        el[attr_name] = attr
+        return True
+
     # ── Копирование / вставка параметров ─────────────────────────────────── #
 
     @staticmethod

@@ -18,13 +18,15 @@ from typing import Optional
 from PySide6.QtCore import QByteArray, QObject, QSize, Qt, Signal, Slot
 from PySide6.QtGui import QColor, QIcon, QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import (
-    QButtonGroup, QColorDialog, QComboBox, QFileDialog, QGridLayout,
-    QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem,
-    QMenu, QMessageBox, QPushButton, QRadioButton, QSplitter, QStackedWidget,
-    QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
+    QButtonGroup, QColorDialog, QComboBox, QDoubleSpinBox, QFileDialog,
+    QGridLayout, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget,
+    QListWidgetItem, QMenu, QMessageBox, QPushButton, QRadioButton,
+    QScrollArea, QSlider, QSplitter, QStackedWidget, QTreeWidget,
+    QTreeWidgetItem, QTreeWidgetItemIterator, QVBoxLayout, QWidget,
 )
 
 from src.data.translations import TRANSLATIONS
+from src.services import simple_params
 from src.services.base_worker import StandardWorker
 from src.services.particle_editor_service import (
     MODULE_CATALOG, MODULE_GROUPS, ParticleEditorService,
@@ -254,6 +256,211 @@ def _pixmap_from_data_url(data_url, size: int = 112) -> QPixmap:
         Qt.TransformationMode.SmoothTransformation)
 
 
+# ── Простой режим: панель крутилок по схеме SIMPLE_PARAMS ────────────────── #
+
+class _SimpleParamsWidget(QWidget):
+    """Крутилки простого режима. Строится из SIMPLE_PARAMS: новая крутилка в
+    схеме появляется здесь сама. Значения читает из systems_json, правки
+    шлёт сигналом edited — панель применяет их через сервис (единый источник
+    правды, дерево экспертного режима обновляется тем же путём)."""
+
+    edited = Signal(object, object)      # (SimpleParam, значение)
+    enable_module = Signal(object)       # (SimpleParam) — создать модуль
+
+    def __init__(self, t: dict, colors: dict, parent=None):
+        super().__init__(parent)
+        self._c = colors
+        self._rows: dict = {}            # key -> {label, editors, enable, row}
+        self._sys_json: Optional[dict] = None
+
+        c = colors
+        self._spin_style = f"""
+            QDoubleSpinBox {{
+                background: {c['surface']}; color: {c['text']};
+                border: 1px solid {c['border']}; border-radius: 3px;
+                padding: 2px 4px; font-size: 12px;
+            }}
+            QDoubleSpinBox:disabled {{ color: #555; }}
+        """
+        self._label_style = f"color: {c['text']}; font-size: 12px;"
+        self._enable_style = f"""
+            QPushButton {{
+                background: transparent; color: {c['text_sub']};
+                border: 1px solid {c['border']}; border-radius: 3px;
+                padding: 2px 10px; font-size: 11px;
+            }}
+            QPushButton:hover {{ color: {c['text']}; border-color: #555; }}
+        """
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        body = QWidget()
+        self._grid = QGridLayout(body)
+        self._grid.setContentsMargins(2, 2, 6, 2)
+        self._grid.setHorizontalSpacing(8)
+        self._grid.setVerticalSpacing(6)
+        for row, param in enumerate(simple_params.SIMPLE_PARAMS):
+            self._build_row(row, param)
+        self._grid.setRowStretch(len(simple_params.SIMPLE_PARAMS), 1)
+        self._grid.setColumnStretch(1, 1)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.setStyleSheet("QScrollArea { background: transparent; }")
+        body.setStyleSheet("background: transparent;")
+        scroll.setWidget(body)
+        outer.addWidget(scroll)
+        self.update_language(t)
+
+    # ── Построение строк ─────────────────────────────────────────────────── #
+
+    def _make_spin(self, param) -> QDoubleSpinBox:
+        spin = QDoubleSpinBox()
+        spin.setRange(param.minimum, param.maximum)
+        spin.setDecimals(param.decimals)
+        spin.setStyleSheet(self._spin_style)
+        spin.setMinimumWidth(64)
+        spin.setButtonSymbols(QDoubleSpinBox.ButtonSymbols.NoButtons)
+        return spin
+
+    def _build_row(self, row: int, param) -> None:
+        label = QLabel()
+        label.setStyleSheet(self._label_style)
+        self._grid.addWidget(label, row, 0)
+
+        editors_box = QHBoxLayout()
+        editors_box.setSpacing(6)
+        editors: list = []
+
+        if param.kind == "value":
+            slider = QSlider(Qt.Orientation.Horizontal)
+            slider.setRange(0, 1000)
+            spin = self._make_spin(param)
+            span = param.maximum - param.minimum
+
+            def to_slider(v, span=span, p=param):
+                return round((v - p.minimum) / span * 1000) if span else 0
+
+            def from_slider(x, span=span, p=param):
+                return p.minimum + span * x / 1000
+
+            def on_slider(x, s=None):
+                spin.blockSignals(True)
+                spin.setValue(from_slider(x))
+                spin.blockSignals(False)
+                self.edited.emit(param, spin.value())
+
+            def on_spin(v):
+                slider.blockSignals(True)
+                slider.setValue(to_slider(v))
+                slider.blockSignals(False)
+                self.edited.emit(param, v)
+
+            slider.valueChanged.connect(on_slider)
+            spin.valueChanged.connect(on_spin)
+            editors_box.addWidget(slider, 1)
+            editors_box.addWidget(spin)
+            editors = [slider, spin]
+            self._rows[param.key] = {"set": lambda v, s=slider, sp=spin, f=to_slider: (
+                s.blockSignals(True), s.setValue(f(v)), s.blockSignals(False),
+                sp.blockSignals(True), sp.setValue(float(v)), sp.blockSignals(False))}
+        elif param.kind == "range":
+            spin_min, spin_max = self._make_spin(param), self._make_spin(param)
+            for sp in (spin_min, spin_max):
+                sp.valueChanged.connect(
+                    lambda _v, a=spin_min, b=spin_max:
+                        self.edited.emit(param, (a.value(), b.value())))
+                editors_box.addWidget(sp, 1)
+            editors = [spin_min, spin_max]
+            self._rows[param.key] = {"set": lambda v, a=spin_min, b=spin_max: (
+                a.blockSignals(True), a.setValue(float(v[0])), a.blockSignals(False),
+                b.blockSignals(True), b.setValue(float(v[1])), b.blockSignals(False))}
+        else:  # color_pair
+            btns = []
+            for i in (0, 1):
+                btn = QPushButton()
+                btn.setFixedSize(44, 22)
+                btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                btn.clicked.connect(lambda _=False, n=i: self._pick_color(param, n))
+                editors_box.addWidget(btn)
+                btns.append(btn)
+            editors_box.addStretch(1)
+            editors = btns
+
+            def set_colors(v, btns=btns):
+                for btn, col in zip(btns, v):
+                    btn.setProperty("_rgba", list(col))
+                    btn.setStyleSheet(
+                        f"background: rgb({col[0]},{col[1]},{col[2]});"
+                        "border: 1px solid #444; border-radius: 3px;")
+            self._rows[param.key] = {"set": set_colors}
+
+        self._grid.addLayout(editors_box, row, 1)
+
+        enable_btn = QPushButton()
+        enable_btn.setStyleSheet(self._enable_style)
+        enable_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        enable_btn.clicked.connect(lambda _=False, p=param: self.enable_module.emit(p))
+        enable_btn.hide()
+        self._grid.addWidget(enable_btn, row, 2)
+
+        self._rows[param.key].update({
+            "param": param, "label": label, "editors": editors,
+            "enable": enable_btn,
+        })
+
+    def _pick_color(self, param, index: int) -> None:
+        btns = self._rows[param.key]["editors"]
+        cur = btns[index].property("_rgba") or [255, 255, 255, 255]
+        initial = QColor(cur[0], cur[1], cur[2], cur[3] if len(cur) > 3 else 255)
+        color = QColorDialog.getColor(
+            initial, self, "", QColorDialog.ColorDialogOption.ShowAlphaChannel)
+        if not color.isValid():
+            return
+        vals = []
+        for i, btn in enumerate(btns):
+            if i == index:
+                vals.append([color.red(), color.green(), color.blue(),
+                             color.alpha()])
+            else:
+                vals.append(btn.property("_rgba") or [255, 255, 255, 255])
+        self._rows[param.key]["set"](vals)
+        self.edited.emit(param, tuple(vals))
+
+    # ── Обновление из systems_json ───────────────────────────────────────── #
+
+    def set_system(self, sys_json: Optional[dict]) -> None:
+        """Перечитывает все крутилки. None — система не выбрана."""
+        self._sys_json = sys_json
+        for entry in self._rows.values():
+            param = entry["param"]
+            widgets = [entry["label"], entry["enable"], *entry["editors"]]
+            if sys_json is None:
+                for w in widgets:
+                    w.hide()
+                continue
+            value = simple_params.read_param(sys_json, param)
+            missing = simple_params.missing_modules(sys_json, param)
+            if value is None and missing and not param.creatable:
+                for w in widgets:
+                    w.hide()               # эмиттера такого типа нет — не к чему
+                continue
+            entry["label"].show()
+            for w in entry["editors"]:
+                w.show()
+                w.setEnabled(value is not None)
+            entry["enable"].setVisible(value is None)
+            if value is not None:
+                entry["set"](value)
+
+    def update_language(self, t: dict) -> None:
+        for entry in self._rows.values():
+            entry["label"].setText(t.get(f"particles_sp_{entry['param'].key}",
+                                         entry["param"].key))
+            entry["enable"].setText(t.get("particles_simple_enable", "Enable"))
+
+
 # ── Панель редактора (вкладка главного окна) ─────────────────────────────── #
 
 class ParticlesPanel(QWidget):
@@ -412,9 +619,22 @@ class ParticlesPanel(QWidget):
         prop_box_l = QVBoxLayout(prop_box)
         prop_box_l.setContentsMargins(0, 4, 6, 0)
         prop_box_l.setSpacing(6)
-        prop_lbl = QLabel(self.t['particles_properties'])
-        prop_lbl.setStyleSheet(lbl_style)
-        prop_box_l.addWidget(prop_lbl)
+        prop_head = QHBoxLayout()
+        prop_head.setSpacing(6)
+        self.prop_lbl = QLabel(self.t['particles_properties'])
+        self.prop_lbl.setStyleSheet(lbl_style)
+        prop_head.addWidget(self.prop_lbl)
+        prop_head.addStretch(1)
+        # Чипы уровня: Просто (крутилки) / Экспертно (дерево атрибутов)
+        self.level_simple_btn = QPushButton(self.t['particles_level_simple'])
+        self.level_expert_btn = QPushButton(self.t['particles_level_expert'])
+        for btn, level in ((self.level_simple_btn, 0),
+                           (self.level_expert_btn, 1)):
+            btn.setFixedHeight(22)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.clicked.connect(lambda _=False, lv=level: self._set_level(lv))
+            prop_head.addWidget(btn)
+        prop_box_l.addLayout(prop_head)
 
         self.attr_tree = QTreeWidget()
         self.attr_tree.setHeaderLabels(["", ""])
@@ -450,8 +670,18 @@ class ParticlesPanel(QWidget):
             sc = QShortcut(seq, self.attr_tree)
             sc.setContext(Qt.ShortcutContext.WidgetShortcut)
             sc.activated.connect(slot)
-        prop_box_l.addWidget(self.attr_tree, 1)
+
+        self.simple_widget = _SimpleParamsWidget(self.t, c)
+        self.simple_widget.edited.connect(self._on_simple_edit)
+        self.simple_widget.enable_module.connect(self._on_simple_enable)
+        self.simple_widget.set_system(None)
+
+        self.prop_stack = QStackedWidget()
+        self.prop_stack.addWidget(self.simple_widget)   # 0 = просто
+        self.prop_stack.addWidget(self.attr_tree)       # 1 = экспертно
+        prop_box_l.addWidget(self.prop_stack, 1)
         left.addWidget(prop_box)
+        self._set_level(0)
 
         left.setSizes([240, 420])
         left.setCollapsible(0, False)
@@ -632,6 +862,7 @@ class ParticlesPanel(QWidget):
         self.view.show_loading(self.t['particles_loading'])
         self.systems_list.clear()
         self.attr_tree.clear()
+        self.simple_widget.set_system(None)
         self.save_btn.setEnabled(False)
         self.build_btn.setEnabled(False)
         self.texture_btn.setEnabled(False)
@@ -885,6 +1116,9 @@ class ParticlesPanel(QWidget):
             child_item.setData(0, _ROLE_CHILD, idx)
             ch_item.addChild(child_item)
 
+        # Крутилки простого режима смотрят на тот же systems_json
+        self._refresh_simple()
+
     # ── Структурное редактирование ───────────────────────────────────────── #
 
     def _structure_changed(self, keep_system: Optional[str] = None) -> None:
@@ -913,6 +1147,7 @@ class ParticlesPanel(QWidget):
             self._current_system = ""
             self.attr_tree.clear()
             self.texture_cards.clear()
+            self.simple_widget.set_system(None)
             self.view.reset()
 
     def _on_systems_menu(self, pos) -> None:
@@ -1183,6 +1418,93 @@ class ParticlesPanel(QWidget):
         self._fill_attr_tree(sys_name)
         self._refresh_texture_cards()
 
+    # ── Простой режим ────────────────────────────────────────────────────── #
+
+    def _set_level(self, level: int) -> None:
+        """0 = простой режим (крутилки), 1 = экспертный (дерево)."""
+        self.level_simple_btn.setStyleSheet(
+            self._chip_active if level == 0 else self._chip_inactive)
+        self.level_expert_btn.setStyleSheet(
+            self._chip_active if level == 1 else self._chip_inactive)
+        self.prop_stack.setCurrentIndex(level)
+
+    def _refresh_simple(self) -> None:
+        """Перечитывает крутилки из payload (после любой правки/выбора)."""
+        sys_json = None
+        if self._payload is not None and self._current_system:
+            sys_json = self._payload["systems"].get(self._current_system)
+        self.simple_widget.set_system(sys_json)
+
+    def _on_simple_edit(self, param, value) -> None:
+        """Крутилка изменена → пишем те же атрибуты, что видит дерево."""
+        if self.service is None or self._payload is None \
+                or not self._current_system:
+            return
+        sys_name = self._current_system
+        sys_json = self._payload["systems"].get(sys_name)
+        if sys_json is None:
+            return
+        calls = simple_params.write_calls(sys_json, param, value)
+        if not calls:
+            return
+        new_rows = False
+        for group, idx, attr, attr_type, val in calls:
+            attrs = (sys_json["attrs"] if group is None
+                     else sys_json[group][idx]["attrs"])
+            if attr not in attrs:
+                new_rows = True   # атрибут появится впервые — дереву нужна строка
+            self.service.ensure_attr(sys_name, group, idx, attr, attr_type, val)
+        self._payload["systems"] = self.service.systems_json()
+        self.view.update_systems(self._payload["systems"], sys_name)
+        if new_rows:
+            self._fill_attr_tree(sys_name)
+        else:
+            for group, idx, attr, _t, _v in calls:
+                self._refresh_tree_attr(group, idx, attr)
+
+    def _on_simple_enable(self, param) -> None:
+        """Кнопка «Включить»: создаёт недостающие модули крутилки."""
+        if self.service is None or self._payload is None \
+                or not self._current_system:
+            return
+        sys_name = self._current_system
+        sys_json = self._payload["systems"].get(sys_name)
+        if sys_json is None:
+            return
+        from PySide6.QtWidgets import QApplication
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            for group, fn in simple_params.missing_modules(sys_json, param):
+                self.service.add_module(sys_name, group, fn, self.tf2_root)
+        finally:
+            QApplication.restoreOverrideCursor()
+        self._structure_changed(keep_system=sys_name)
+
+    def _refresh_tree_attr(self, group, mod_idx: int, attr_name: str) -> None:
+        """Обновляет одну строку дерева по адресу атрибута (без пересборки —
+        она сворачивает ветки и сбрасывает прокрутку)."""
+        sys_json = self._payload["systems"].get(self._current_system)
+        if sys_json is None:
+            return
+        attrs = (sys_json["attrs"] if group is None
+                 else sys_json[group][mod_idx]["attrs"])
+        tv = attrs.get(attr_name)
+        if tv is None:
+            return
+        value_text = _fmt_value(tv)
+        it = QTreeWidgetItemIterator(self.attr_tree)
+        while it.value():
+            item = it.value()
+            meta = item.data(0, _ROLE_ATTR)
+            if meta is not None and meta[:3] == (group, mod_idx, attr_name):
+                item.setText(1, value_text)
+                item.setToolTip(1, value_text)
+                if tv["t"] == "color":
+                    v = tv["v"]
+                    item.setForeground(1, QColor(v[0], v[1], v[2]))
+                break
+            it += 1
+
     # ── Правка атрибутов ─────────────────────────────────────────────────── #
 
     def _on_attr_double_clicked(self, item: QTreeWidgetItem, _col: int) -> None:
@@ -1226,6 +1548,7 @@ class ParticlesPanel(QWidget):
             if tv["t"] == "color":
                 v = tv["v"]
                 item.setForeground(1, QColor(v[0], v[1], v[2]))
+        self._refresh_simple()   # та же правка видна крутилкам простого режима
 
     def _ask_value(self, attr_name: str, attr_type: str, cur):
         """Диалог правки по типу атрибута. None — отмена."""
@@ -1442,6 +1765,10 @@ class ParticlesPanel(QWidget):
         if self.pcf_combo.count() > 0:
             self.pcf_combo.setItemText(0, t['particles_pick_pcf'])
         self.cards_hint.setText(t['particles_2d_hint'])
+        self.prop_lbl.setText(t['particles_properties'])
+        self.level_simple_btn.setText(t['particles_level_simple'])
+        self.level_expert_btn.setText(t['particles_level_expert'])
+        self.simple_widget.update_language(t)
         self.view.set_language(language)
 
     # ── Завершение ───────────────────────────────────────────────────────── #
