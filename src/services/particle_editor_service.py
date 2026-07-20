@@ -661,6 +661,135 @@ class ParticleEditorService:
             return False
         return True
 
+    # ── Копирование / вставка параметров ─────────────────────────────────── #
+
+    @staticmethod
+    def _attr_from_json(name: str, tv: dict) -> Optional["Attribute"]:
+        """{"t","v"} из systems_json → Attribute (None — неизвестный тип/битое значение)."""
+        t, v = tv.get("t"), tv.get("v")
+        try:
+            if t == "color":
+                r, g, b, a = (list(v) + [255])[:4]
+                return Attribute.color(name, int(r), int(g), int(b), int(a))
+            if t == "vec3":
+                return Attribute.vec3(name, [float(x) for x in v])
+            if t == "vec2":
+                return Attribute.vec2(name, [float(x) for x in v])
+            if t == "vec4":
+                return Attribute.vec4(name, [float(x) for x in v])
+            if t == "bool":
+                return Attribute.bool(name, bool(v))
+            if t == "integer":
+                return Attribute.int(name, int(v))
+            if t == "time":
+                return Attribute.time(name, float(v))
+            if t == "float":
+                return Attribute.float(name, float(v))
+            if t == "string":
+                return Attribute.string(name, str(v))
+            if t == "float_array":
+                return Attribute.array(name, ValueType.FLOAT,
+                                       [float(x) for x in v])
+            if t == "int_array":
+                return Attribute.array(name, ValueType.INTEGER,
+                                       [int(x) for x in v])
+        except (TypeError, ValueError) as exc:
+            logger.warning(f"Вставка атрибута {name}={v!r}: {exc}")
+        return None
+
+    def _paste_attrs(self, el, attrs: Dict[str, dict],
+                     overwrite: bool = True) -> bool:
+        """Merge-вставка атрибутов в элемент: новые добавляются, совпадающие
+        перезаписываются (overwrite=False — существующие не трогаются)."""
+        changed = False
+        for name, tv in attrs.items():
+            if name.lower() in ("functionname", "name", "id"):
+                continue
+            if not overwrite and name in el:
+                continue
+            orig_name = el[name].name if name in el else name
+            attr = self._attr_from_json(orig_name, tv)
+            if attr is not None:
+                el[name] = attr
+                changed = True
+        return changed
+
+    def paste_params(self, system_name: str, payload: dict,
+                     mode: str = "overwrite") -> bool:
+        """
+        Вставляет скопированный набор параметров в систему.
+
+        payload — формат буфера копирования панели:
+            {"attrs": {имя: {"t","v"}},
+             "modules": {группа: [[functionName, {имя: {"t","v"}}], ...]}}
+        (легаси-формат {группа: {functionName: attrs}} тоже принимается —
+        старые копии в буфере обмена).
+
+        mode:
+            "overwrite" — merge, совпадающие имена перезаписываются молча;
+            "keep"      — merge, существующие параметры цели не трогаются,
+                          добавляются только недостающие;
+            "replace"   — параметры и модули цели удаляются, остаются только
+                          вставляемые (children и имя системы сохраняются).
+
+        Модуль ищется по functionName с учётом номера вхождения (у эффектов
+        бывает два одинаковых модуля, напр. Remap Noise to Scalar); нет
+        такого — создаётся новый.
+        """
+        d = self._find_definition(system_name)
+        if d is None:
+            return False
+        overwrite = mode != "keep"
+        changed = False
+        if mode == "replace":
+            # Сносим скалярные атрибуты (кроме имени) и все группы модулей;
+            # children и прочие element-ссылки не трогаем
+            for key in list(d.keys()):
+                if key in ("name", "id"):
+                    continue
+                if key in MODULE_GROUPS:
+                    d[key] = Attribute.array(d[key].name, ValueType.ELEMENT)
+                elif d[key].type is not ValueType.ELEMENT:
+                    del d[key]
+                changed = True
+        if self._paste_attrs(d, payload.get("attrs") or {}, overwrite):
+            changed = True
+        for group, mods in (payload.get("modules") or {}).items():
+            if group not in MODULE_GROUPS:
+                continue
+            pairs = mods.items() if isinstance(mods, dict) else mods
+            occurrence: Dict[str, int] = {}
+            for fn, attrs in pairs:
+                fn = (fn or "").strip()
+                if not fn:
+                    continue
+                # n-я копия модуля в буфере метит n-ю копию у цели
+                n = occurrence.get(fn.lower(), 0)
+                occurrence[fn.lower()] = n + 1
+                target = None
+                if group in d:
+                    k = 0
+                    for m in d[group].iter_elem():
+                        if self._module_fn(m) == fn.lower():
+                            if k == n:
+                                target = m
+                                break
+                            k += 1
+                if target is None:
+                    target = Element(fn, "DmeParticleOperator")
+                    target["functionName"] = Attribute.string(
+                        "functionName", fn)
+                    if group in d:
+                        d[group].append(target)
+                    else:
+                        arr = Attribute.array(group, ValueType.ELEMENT)
+                        arr.append(target)
+                        d[group] = arr
+                    changed = True
+                if self._paste_attrs(target, attrs or {}, overwrite):
+                    changed = True
+        return changed
+
     # ── Замена текстуры ──────────────────────────────────────────────────── #
 
     def set_system_texture(

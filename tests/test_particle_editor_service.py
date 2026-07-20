@@ -335,6 +335,130 @@ def test_use_texture_colors():
     assert svc2.systems_json()["fx"]["initializers"] == []
 
 
+def test_paste_params():
+    """Копи-паста параметров: merge атрибутов системы и модулей по functionName."""
+    svc = ParticleEditorService()
+    svc.load_bytes(_make_pcf_bytes())
+
+    payload = {
+        "attrs": {"radius": {"t": "float", "v": 42.0},          # есть в fx
+                  "new_scale": {"t": "float", "v": 1.5}},       # нет в fx
+        "modules": {
+            "initializers": {
+                # Color Random есть в fx → merge: color1 перезаписан, color2 добавлен
+                "Color Random": {"color1": {"t": "color", "v": [1, 2, 3, 4]},
+                                 "color2": {"t": "color", "v": [9, 9, 9, 9]}},
+            },
+            "operators": {
+                # операторов в fx нет вовсе → создаются и группа, и модуль
+                "Movement Basic": {"gravity": {"t": "vec3", "v": [0, 0, -400]}},
+            },
+        },
+    }
+    assert svc.paste_params("fx", payload)
+    fx = svc.systems_json()["fx"]
+    assert fx["attrs"]["radius"]["v"] == 42.0
+    assert fx["attrs"]["new_scale"]["v"] == 1.5
+    init = fx["initializers"][0]
+    assert init["functionName"] == "Color Random"
+    assert init["attrs"]["color1"]["v"] == [1, 2, 3, 4]
+    assert init["attrs"]["color2"]["v"] == [9, 9, 9, 9]
+    op = fx["operators"][0]
+    assert op["functionName"] == "Movement Basic"
+    assert op["attrs"]["gravity"]["v"] == [0.0, 0.0, -400.0]
+
+    # несуществующая система / пустой payload → False
+    assert not svc.paste_params("nope", payload)
+    assert not svc.paste_params("fx", {"attrs": {}, "modules": {}})
+
+    # roundtrip: вставленное переживает сохранение
+    buf = io.BytesIO()
+    svc.root.export_binary(buf, version=2, fmt_name="pcf", fmt_ver=1,
+                           unicode="silent")
+    svc2 = ParticleEditorService()
+    svc2.load_bytes(buf.getvalue())
+    assert svc2.systems_json()["fx"]["operators"][0]["attrs"]["gravity"]["v"] \
+        == [0.0, 0.0, -400.0]
+
+
+def test_paste_params_modes():
+    """Режимы вставки: keep не трогает существующее, replace сносит всё."""
+    payload = {
+        "attrs": {"radius": {"t": "float", "v": 42.0},
+                  "new_scale": {"t": "float", "v": 1.5}},
+        "modules": {
+            "initializers": {
+                "Color Random": {"color1": {"t": "color", "v": [1, 2, 3, 4]},
+                                 "color2": {"t": "color", "v": [9, 9, 9, 9]}},
+            },
+        },
+    }
+
+    # keep: существующие radius и color1 не тронуты, недостающие добавлены
+    svc = ParticleEditorService()
+    svc.load_bytes(_make_pcf_bytes())
+    assert svc.paste_params("fx", payload, mode="keep")
+    fx = svc.systems_json()["fx"]
+    assert fx["attrs"]["radius"]["v"] == 5.0            # осталось
+    assert fx["attrs"]["new_scale"]["v"] == 1.5         # добавлено
+    init = fx["initializers"][0]
+    assert init["attrs"]["color1"]["v"] == [0, 255, 30, 255]   # осталось
+    assert init["attrs"]["color2"]["v"] == [9, 9, 9, 9]        # добавлено
+
+    # replace: старые параметры и модули снесены, остались вставленные;
+    # children и имя системы сохраняются
+    svc = ParticleEditorService()
+    svc.load_bytes(_make_pcf_bytes())
+    assert svc.paste_params("fx", payload, mode="replace")
+    fx = svc.systems_json()["fx"]
+    assert fx["attrs"]["radius"]["v"] == 42.0
+    assert fx["attrs"]["new_scale"]["v"] == 1.5
+    assert "max_particles" not in fx["attrs"]           # снесено
+    assert "material" not in fx["attrs"]                # снесено
+    assert [m["functionName"] for m in fx["initializers"]] == ["Color Random"]
+    assert fx["initializers"][0]["attrs"]["color1"]["v"] == [1, 2, 3, 4]
+    assert fx["children"] == [{"delay": 0.25, "childName": "fx_child"}]
+
+
+def test_paste_params_duplicate_modules():
+    """Списковый формат буфера: два одинаковых модуля не схлопываются,
+    n-я копия в буфере метит n-ю копию у цели (инцидент halloween_ghosts —
+    два Remap Noise to Scalar, radius-ремап терялся при копировании)."""
+    payload = {
+        "attrs": {},
+        "modules": {
+            "initializers": [
+                ["Remap Noise to Scalar",
+                 {"output field": {"t": "integer", "v": 3},
+                  "output minimum": {"t": "float", "v": 0.5}}],
+                ["Remap Noise to Scalar",
+                 {"output field": {"t": "integer", "v": 1},
+                  "output minimum": {"t": "float", "v": 0.6}}],
+            ],
+        },
+    }
+    svc = ParticleEditorService()
+    svc.load_bytes(_make_pcf_bytes())
+    assert svc.paste_params("fx", payload)
+    inits = svc.systems_json()["fx"]["initializers"]
+    remaps = [m for m in inits if m["functionName"] == "Remap Noise to Scalar"]
+    assert [m["attrs"]["output field"]["v"] for m in remaps] == [3, 1]
+
+    # повторная вставка: 1-я запись мержится в 1-ю копию, 2-я во 2-ю —
+    # модули не плодятся
+    assert svc.paste_params("fx", payload)
+    inits = svc.systems_json()["fx"]["initializers"]
+    remaps = [m for m in inits if m["functionName"] == "Remap Noise to Scalar"]
+    assert len(remaps) == 2
+
+    # легаси-формат (dict) по-прежнему принимается
+    legacy = {"attrs": {}, "modules": {
+        "operators": {"Movement Basic": {"drag": {"t": "float", "v": 0.5}}}}}
+    assert svc.paste_params("fx", legacy)
+    ops = svc.systems_json()["fx"]["operators"]
+    assert ops[0]["attrs"]["drag"]["v"] == 0.5
+
+
 def test_parse_vtf_sheet():
     # Sheet: version 1 (4 coords/кадр), 1 секвенция, 2 кадра
     sheet = struct.pack("<II", 1, 1)

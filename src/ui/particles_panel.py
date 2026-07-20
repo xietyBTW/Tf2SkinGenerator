@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Optional
 
 from PySide6.QtCore import QByteArray, QObject, QSize, Qt, Signal, Slot
-from PySide6.QtGui import QColor, QIcon, QPixmap
+from PySide6.QtGui import QColor, QIcon, QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QButtonGroup, QColorDialog, QComboBox, QFileDialog, QGridLayout,
     QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem,
@@ -439,6 +439,17 @@ class ParticlesPanel(QWidget):
         self.attr_tree.setContextMenuPolicy(
             Qt.ContextMenuPolicy.CustomContextMenu)
         self.attr_tree.customContextMenuRequested.connect(self._on_tree_menu)
+        # Копи-паста параметров: мультивыделение + Ctrl+C/Ctrl+V (только
+        # когда фокус в дереве — не перехватываем буфер у полей ввода)
+        self.attr_tree.setSelectionMode(
+            QTreeWidget.SelectionMode.ExtendedSelection)
+        for seq, slot in (
+            (QKeySequence.StandardKey.Copy, self._on_copy_params),
+            (QKeySequence.StandardKey.Paste, self._on_paste_params),
+        ):
+            sc = QShortcut(seq, self.attr_tree)
+            sc.setContext(Qt.ShortcutContext.WidgetShortcut)
+            sc.activated.connect(slot)
         prop_box_l.addWidget(self.attr_tree, 1)
         left.addWidget(prop_box)
 
@@ -965,7 +976,7 @@ class ParticlesPanel(QWidget):
             self, t['particles_menu_add_layer'], t['particles_layer_added'])
 
     def _on_tree_menu(self, pos) -> None:
-        """Контекстное меню дерева: добавить/удалить модуль, отцепить ребёнка."""
+        """Контекстное меню дерева: копи-паста параметров + структурные правки."""
         item = self.attr_tree.itemAt(pos)
         if item is None or self.service is None or not self._current_system:
             return
@@ -976,56 +987,201 @@ class ParticlesPanel(QWidget):
         child_idx = item.data(0, _ROLE_CHILD)
         menu = QMenu(self)
 
+        # Копи-паста — для всего, кроме children (там ссылки, не параметры)
+        act_copy = act_copy_all = act_paste = None
+        if child_idx is None and group != "children":
+            act_copy = menu.addAction(t['particles_menu_copy'])
+            act_copy_all = menu.addAction(t['particles_menu_copy_all'])
+            act_paste = menu.addAction(t['particles_menu_paste'])
+            act_paste.setEnabled(self._clipboard_payload() is not None)
+            menu.addSeparator()
+
+        act_add_child = act_add_module = act_del_module = act_del_child = None
         if group == "children":
-            act = menu.addAction(t['particles_menu_add_child'])
-            if menu.exec(self.attr_tree.mapToGlobal(pos)) is act:
-                others = [n for n in self.service.system_names()
-                          if n != sys_name]
-                if not others:
-                    return
-                child, ok = QInputDialog.getItem(
-                    self, t['particles_menu_add_child'],
-                    t['particles_pick_child'], others, 0, False)
-                if ok and child and self.service.add_child(sys_name, child):
-                    self._structure_changed()
-            return
+            act_add_child = menu.addAction(t['particles_menu_add_child'])
+        elif group in MODULE_GROUPS:
+            act_add_module = menu.addAction(t['particles_menu_add_module'])
+        elif module is not None:
+            act_del_module = menu.addAction(t['particles_menu_remove_module'])
+        elif child_idx is not None:
+            act_del_child = menu.addAction(t['particles_menu_remove_child'])
 
-        if group in MODULE_GROUPS:
-            act = menu.addAction(t['particles_menu_add_module'])
-            if menu.exec(self.attr_tree.mapToGlobal(pos)) is act:
-                catalog = MODULE_CATALOG.get(group, [])
-                if not catalog:
-                    return
-                fn, ok = QInputDialog.getItem(
-                    self, t['particles_menu_add_module'],
-                    t['particles_pick_module'], catalog, 0, True)
-                fn = fn.strip()
-                if ok and fn:
-                    # Поиск шаблона может сканировать стоковые PCF (один раз)
-                    from PySide6.QtWidgets import QApplication
-                    QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-                    try:
-                        added = self.service.add_module(
-                            sys_name, group, fn, self.tf2_root)
-                    finally:
-                        QApplication.restoreOverrideCursor()
-                    if added:
-                        self._structure_changed()
+        chosen = menu.exec(self.attr_tree.mapToGlobal(pos))
+        if chosen is None:
             return
-
-        if module is not None:
-            act = menu.addAction(t['particles_menu_remove_module'])
-            if menu.exec(self.attr_tree.mapToGlobal(pos)) is act:
-                mod_group, idx = module
-                if self.service.remove_module(sys_name, mod_group, idx):
+        if chosen is act_copy:
+            self._on_copy_params()
+        elif chosen is act_copy_all:
+            self._on_copy_params(copy_all=True)
+        elif chosen is act_paste:
+            self._on_paste_params()
+        elif chosen is act_add_child:
+            others = [n for n in self.service.system_names() if n != sys_name]
+            if not others:
+                return
+            child, ok = QInputDialog.getItem(
+                self, t['particles_menu_add_child'],
+                t['particles_pick_child'], others, 0, False)
+            if ok and child and self.service.add_child(sys_name, child):
+                self._structure_changed()
+        elif chosen is act_add_module:
+            catalog = MODULE_CATALOG.get(group, [])
+            if not catalog:
+                return
+            fn, ok = QInputDialog.getItem(
+                self, t['particles_menu_add_module'],
+                t['particles_pick_module'], catalog, 0, True)
+            fn = fn.strip()
+            if ok and fn:
+                # Поиск шаблона может сканировать стоковые PCF (один раз)
+                from PySide6.QtWidgets import QApplication
+                QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+                try:
+                    added = self.service.add_module(
+                        sys_name, group, fn, self.tf2_root)
+                finally:
+                    QApplication.restoreOverrideCursor()
+                if added:
                     self._structure_changed()
+        elif chosen is act_del_module:
+            mod_group, idx = module
+            if self.service.remove_module(sys_name, mod_group, idx):
+                self._structure_changed()
+        elif chosen is act_del_child:
+            if self.service.remove_child(sys_name, child_idx):
+                self._structure_changed()
+
+    # ── Копирование / вставка параметров ─────────────────────────────────── #
+
+    def _on_copy_params(self, copy_all: bool = False) -> None:
+        """Копирует выделенные строки дерева (или все параметры системы)
+        в буфер обмена JSON-ом — вставляется в любую другую систему/PCF."""
+        if self._payload is None or not self._current_system:
             return
+        sys_json = self._payload["systems"].get(self._current_system)
+        if not sys_json:
+            return
+        payload = {"attrs": {}, "modules": {}}
+        # Модули копятся по (группа, индекс): дубли модулей (два одинаковых
+        # functionName) сохраняются как отдельные записи в порядке источника
+        mod_entries: dict = {}
 
-        if child_idx is not None:
-            act = menu.addAction(t['particles_menu_remove_child'])
-            if menu.exec(self.attr_tree.mapToGlobal(pos)) is act:
-                if self.service.remove_child(sys_name, child_idx):
-                    self._structure_changed()
+        def add_module_attrs(g, mi, only_attr=None):
+            mod = sys_json[g][mi]
+            entry = mod_entries.setdefault(
+                (g, mi), {"fn": mod["functionName"], "attrs": {}})
+            for k, tv in mod["attrs"].items():
+                if k in ("functionname", "name", "id"):
+                    continue
+                if only_attr is None or k == only_attr:
+                    entry["attrs"][k] = tv
+
+        def add_all():
+            payload["full"] = True   # полный набор → выбор режима при вставке
+            for k, tv in sys_json["attrs"].items():
+                if k not in ("functionname", "name", "id"):
+                    payload["attrs"][k] = tv
+            for g in MODULE_GROUPS:
+                for mi in range(len(sys_json.get(g) or [])):
+                    add_module_attrs(g, mi)
+
+        if copy_all:
+            add_all()
+        else:
+            for item in self.attr_tree.selectedItems():
+                meta = item.data(0, _ROLE_ATTR)
+                module = item.data(0, _ROLE_MODULE)
+                group = item.data(0, _ROLE_GROUP)
+                if meta is not None:
+                    g, mi, attr_name, _t = meta
+                    if g is None:
+                        tv = sys_json["attrs"].get(attr_name)
+                        if tv is not None:
+                            payload["attrs"][attr_name] = tv
+                    else:
+                        add_module_attrs(g, mi, only_attr=attr_name)
+                elif module is not None:
+                    g, mi = module
+                    add_module_attrs(g, mi)
+                elif group in MODULE_GROUPS:
+                    for mi in range(len(sys_json.get(group) or [])):
+                        add_module_attrs(group, mi)
+                elif group is None and item.parent() is None:
+                    add_all()   # строка самой системы = копировать всё
+        for (g, _mi) in sorted(mod_entries):
+            e = mod_entries[(g, _mi)]
+            payload["modules"].setdefault(g, []).append([e["fn"], e["attrs"]])
+        if not payload["attrs"] and not payload["modules"]:
+            return
+        from PySide6.QtWidgets import QApplication
+        QApplication.clipboard().setText(
+            json.dumps({"tf2sgParticleParams": payload}))
+
+    def _clipboard_payload(self) -> Optional[dict]:
+        """Скопированные параметры из буфера обмена (None — там не наше).
+        Буфер — внешний ввод: проверяем форму, чтобы вставка не падала."""
+        from PySide6.QtWidgets import QApplication
+        try:
+            payload = json.loads(
+                QApplication.clipboard().text()).get("tf2sgParticleParams")
+            if not isinstance(payload, dict) \
+                    or not isinstance(payload.get("attrs") or {}, dict) \
+                    or not isinstance(payload.get("modules") or {}, dict):
+                return None
+        except Exception:
+            return None
+        return payload
+
+    def _on_paste_params(self) -> None:
+        """Вставляет параметры из буфера в выбранную систему: совпадающие
+        перезаписываются молча, недостающие модули/атрибуты добавляются."""
+        if self.service is None or self._payload is None \
+                or not self._current_system:
+            return
+        payload = self._clipboard_payload()
+        if payload is None \
+                or not (payload.get("attrs") or payload.get("modules")):
+            return
+        mode = "overwrite"
+        if payload.get("full"):
+            # Полный набор: спросить, сохранять ли существующие параметры цели
+            t = self.t
+            box = QMessageBox(self)
+            box.setWindowTitle(t['particles_menu_paste'])
+            box.setText(t['particles_paste_full_prompt'])
+            btn_keep = box.addButton(
+                t['particles_paste_keep'], QMessageBox.ButtonRole.AcceptRole)
+            btn_replace = box.addButton(
+                t['particles_paste_replace'],
+                QMessageBox.ButtonRole.DestructiveRole)
+            box.addButton(QMessageBox.StandardButton.Cancel)
+            box.exec()
+            if box.clickedButton() is btn_keep:
+                mode = "keep"
+            elif box.clickedButton() is btn_replace:
+                mode = "replace"
+            else:
+                return
+        sys_name = self._current_system
+        try:
+            changed = self.service.paste_params(sys_name, payload, mode)
+        except Exception as exc:
+            # Глубже вложенный мусор из чужого буфера — не падаем
+            logger.warning(f"Вставка параметров: {exc}")
+            return
+        if not changed:
+            return
+        self._payload["systems"] = self.service.systems_json()
+        if self.tf2_root and (mode == "replace"
+                              or "material" in (payload.get("attrs") or {})):
+            # Материал мог смениться/удалиться — перерезолвить текстуры
+            self._payload["materials"] = self.service.materials_json(
+                self.tf2_root)
+            self.view.load_data(self._payload, root_name=sys_name)
+        else:
+            self.view.update_systems(self._payload["systems"], sys_name)
+        self._fill_attr_tree(sys_name)
+        self._refresh_texture_cards()
 
     # ── Правка атрибутов ─────────────────────────────────────────────────── #
 

@@ -63,6 +63,16 @@ TRANSLATIONS = {
         'particles_menu_remove_child': 'Отцепить дочернюю',
         'particles_menu_add_module': 'Добавить модуль…',
         'particles_menu_remove_module': 'Удалить модуль',
+        'particles_menu_copy': 'Копировать выделенное',
+        'particles_menu_copy_all': 'Копировать все параметры',
+        'particles_menu_paste': 'Вставить параметры',
+        'particles_paste_full_prompt': 'Скопированы все параметры эффекта. Как вставить?\n\n'
+                                       '«Без замены» — существующие параметры этого эффекта '
+                                       'останутся на месте, добавятся только недостающие.\n'
+                                       '«Полная замена» — параметры эффекта будут удалены '
+                                       'и заменены вставляемыми.',
+        'particles_paste_keep': 'Без замены',
+        'particles_paste_replace': 'Полная замена',
         'particles_new_name_prompt': 'Имя новой системы:',
         'particles_pick_child': 'Какую систему подцепить ребёнком:',
         'particles_pick_module': 'Модуль (можно вписать свой):',
@@ -496,6 +506,16 @@ TRANSLATIONS = {
         'particles_menu_remove_child': 'Detach child',
         'particles_menu_add_module': 'Add module…',
         'particles_menu_remove_module': 'Remove module',
+        'particles_menu_copy': 'Copy selected',
+        'particles_menu_copy_all': 'Copy all parameters',
+        'particles_menu_paste': 'Paste parameters',
+        'particles_paste_full_prompt': 'A full parameter set was copied. How to paste?\n\n'
+                                       '"Keep existing" — this effect\'s current parameters '
+                                       'stay in place, only missing ones are added.\n'
+                                       '"Replace all" — the effect\'s parameters are removed '
+                                       'and replaced with the pasted ones.',
+        'particles_paste_keep': 'Keep existing',
+        'particles_paste_replace': 'Replace all',
         'particles_new_name_prompt': 'New system name:',
         'particles_pick_child': 'System to attach as a child:',
         'particles_pick_module': 'Module (custom names allowed):',
