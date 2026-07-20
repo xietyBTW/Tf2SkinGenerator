@@ -114,7 +114,8 @@ def test_set_system_texture_overwrites_original(tmp_path):
     # ИМЯ МАТЕРИАЛА НЕ ИЗМЕНИЛОСЬ и никаких custom_-путей
     assert mat == "effects\\test.vmt"
     assert svc.systems_json()["fx"]["attrs"]["material"]["v"] == "effects\\test.vmt"
-    assert set(svc.custom_files) == {"materials/effects/test.vtf"}
+    assert set(svc.custom_files) == {"materials/effects/test.vtf",
+                                 "materials/effects/test.vmt"}
     assert not any("custom_" in p for p in svc.custom_files)
     assert svc.custom_files["materials/effects/test.vtf"][:4] == b"VTF\x00"
 
@@ -127,7 +128,8 @@ def test_set_system_texture_overwrites_original(tmp_path):
     img2 = tmp_path / "tex2.png"
     Image.new("RGBA", (64, 64), (0, 255, 0, 255)).save(img2)
     assert svc.set_system_texture("fx", str(img2), tf2_root_dir="") is not None
-    assert set(svc.custom_files) == {"materials/effects/test.vtf"}
+    assert set(svc.custom_files) == {"materials/effects/test.vtf",
+                                 "materials/effects/test.vmt"}
 
     # сброс — оверрайд убран
     assert svc.reset_material_texture("effects\\test.vmt") == "effects\\test.vmt"
@@ -139,7 +141,7 @@ def test_set_system_texture_overwrites_original(tmp_path):
     svc2 = ParticleEditorService()
     svc2.load_bytes(_make_pcf_bytes())
     svc2.set_material_texture("effects\\test.vmt", str(img), "")
-    assert len(svc2._active_custom_files()) == 1
+    assert len(svc2._active_custom_files()) == 2  # VTF + сгенерированный VMT
     svc2.remove_system("fx")
     assert svc2._active_custom_files() == {}
 

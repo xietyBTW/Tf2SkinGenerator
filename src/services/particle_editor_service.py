@@ -703,6 +703,19 @@ class ParticleEditorService:
             return None
         vtf_bytes, w, h, png_b64 = built
         self.custom_files[f"materials/{tex_rel}.vtf"] = vtf_bytes
+        if not vmt_text:
+            # Материала нет в игре (кастомное имя у ребёнка-партикла): без VMT
+            # Source не загрузит материал вовсе — генерируем шаблон по образцу
+            # стоковых партикл-материалов TF2 (effects/crit.vmt).
+            vmt_text = (
+                '"SpriteCard"\n'
+                '{\n'
+                f'\t"$basetexture" "{tex_rel}"\n'
+                '\t"$translucent" 1\n'
+                '\t"$vertexcolor" 1\n'
+                '\t"$vertexalpha" 1\n'
+                '}\n'
+            )
         if vmt_text:
             # Оригинальный игровой VMT кладём рядом с VTF: текстурная часть
             # мода самодостаточна (casual-pre-loader ставит материалы только
@@ -820,6 +833,7 @@ class ParticleEditorService:
         tex_rel = entry["tex_rel"]
         if not any(e["tex_rel"] == tex_rel for e in self._overwritten.values()):
             self.custom_files.pop(f"materials/{tex_rel}.vtf", None)
+        self.custom_files.pop(f"materials/{key}", None)  # VMT этого материала
         return material_name
 
     # ── Экспорт VPK ──────────────────────────────────────────────────────── #
