@@ -48,7 +48,8 @@ class PackagingService:
         MergeVPKService и CustomVPKService должны использовать этот метод.
 
         Args:
-            vpkroot_dir:   Директория с содержимым мода (должна называться vpkroot)
+            vpkroot_dir:   Директория с содержимым мода (любое имя; vpk.exe
+                           создаст рядом <имя_папки>.vpk)
             filename:      Имя выходного .vpk файла (например, "my_mod.vpk")
             export_folder: Куда переместить готовый файл
             language:      Язык для сообщений об ошибках
@@ -66,7 +67,9 @@ class PackagingService:
         t = TRANSLATIONS.get(language, TRANSLATIONS['en'])
 
         vpkroot_parent = vpkroot_dir.parent
-        temp_vpk_path = vpkroot_parent / "vpkroot.vpk"
+        # vpk.exe называет результат по имени упакованной папки (<dir>.vpk),
+        # поэтому имя папки может быть любым — не только "vpkroot".
+        temp_vpk_path = vpkroot_parent / f"{vpkroot_dir.name}.vpk"
 
         if temp_vpk_path.exists():
             temp_vpk_path.unlink()

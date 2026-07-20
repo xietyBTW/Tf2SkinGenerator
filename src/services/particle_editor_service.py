@@ -277,6 +277,8 @@ class ParticleEditorService:
         self._custom_material_info: Dict[str, dict] = {}
         #: Перезаписанные текстуры: {норм. имя материала: {tex_rel, material}}.
         self._overwritten: Dict[str, dict] = {}
+        #: Путь к <имя>_textures.vpk из последнего export_vpk (None — не собирался).
+        self.last_textures_vpk: Optional[str] = None
 
     # ── Загрузка ─────────────────────────────────────────────────────────── #
 
@@ -701,6 +703,12 @@ class ParticleEditorService:
             return None
         vtf_bytes, w, h, png_b64 = built
         self.custom_files[f"materials/{tex_rel}.vtf"] = vtf_bytes
+        if vmt_text:
+            # Оригинальный игровой VMT кладём рядом с VTF: текстурная часть
+            # мода самодостаточна (casual-pre-loader ставит материалы только
+            # из аддонов, и его автор просит модмейкеров включать VMT).
+            self.custom_files[f"materials/{_norm_mat(material_name)}"] = (
+                vmt_text.encode("utf-8"))
 
         shader, additive = "", True
         if vmt_text:
@@ -833,8 +841,11 @@ class ParticleEditorService:
                     used_mats.add(_norm_mat(el["material"].val_str))
                 except Exception:
                     pass
-        active_paths = {f"materials/{e['tex_rel']}.vtf"
-                        for k, e in self._overwritten.items() if k in used_mats}
+        active_paths = set()
+        for k, e in self._overwritten.items():
+            if k in used_mats:
+                active_paths.add(f"materials/{e['tex_rel']}.vtf")
+                active_paths.add(f"materials/{k}")  # оригинальный VMT материала
         return {rel: data for rel, data in self.custom_files.items()
                 if rel in active_paths}
 
@@ -854,22 +865,40 @@ class ParticleEditorService:
         from src.services.packaging_service import PackagingService
 
         dest = Path(dest_path)
+        self.last_textures_vpk = None
+        materials = self._active_custom_files()
         tmp_root = Path(tempfile.mkdtemp(prefix="tf2sg_particles_"))
         try:
             vpkroot = tmp_root / "vpkroot"
             pcf_dest = vpkroot / self.pcf_vpk_path()
             pcf_dest.parent.mkdir(parents=True, exist_ok=True)
             self.save(str(pcf_dest))
-            for rel, data in self._active_custom_files().items():
+            for rel, data in materials.items():
                 f = vpkroot / rel
                 f.parent.mkdir(parents=True, exist_ok=True)
                 f.write_bytes(data)
-            return PackagingService.pack_directory(
+            out = PackagingService.pack_directory(
                 vpkroot_dir=vpkroot,
                 filename=dest.name,
                 export_folder=str(dest.parent),
                 language=language,
             )
+            # Текстурная часть отдельным VPK без PCF: casual-pre-loader
+            # относит мод с любым .pcf к партикл-пакам и материалы из него
+            # не устанавливает — аддоном он увидит только чистый vpk.
+            if materials:
+                texroot = tmp_root / "texroot"
+                for rel, data in materials.items():
+                    f = texroot / rel
+                    f.parent.mkdir(parents=True, exist_ok=True)
+                    f.write_bytes(data)
+                self.last_textures_vpk = PackagingService.pack_directory(
+                    vpkroot_dir=texroot,
+                    filename=f"{dest.stem}_textures.vpk",
+                    export_folder=str(dest.parent),
+                    language=language,
+                )
+            return out
         finally:
             import shutil
             shutil.rmtree(tmp_root, ignore_errors=True)

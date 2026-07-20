@@ -758,7 +758,6 @@ class ParticlesPanel(QWidget):
             QApplication.restoreOverrideCursor()
         if not mats:
             return
-        cur = card_material if card_material in mats else 0
         start = mats.index(card_material) if card_material in mats else 0
         chosen, ok = QInputDialog.getItem(
             self, t['particles_pick_game_tex'],
@@ -1215,6 +1214,10 @@ class ParticlesPanel(QWidget):
             QMessageBox.critical(self, t.get('error', 'Error'), str(exc))
             return
         msg = t['particles_vpk_done'].format(path=out)
+        if self.service.last_textures_vpk:
+            msg += "\n\n" + t.get(
+                'particles_textures_vpk_done', 'Textures VPK: {path}',
+            ).format(path=self.service.last_textures_vpk)
         # Казуал-бай-пасс не грузит PCF больше оригинала — предупреждаем
         overflow = self.service.casual_size_overflow()
         if overflow is not None and overflow > 0:

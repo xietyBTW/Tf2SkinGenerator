@@ -33,6 +33,11 @@ TRANSLATIONS = {
                                    'Своя картинка её заменит статичным изображением. Продолжить?',
         'particles_vpk_done': 'VPK собран: {path}\n\nПоложите его в tf/custom. '
                               'В казуальных матчах кастомные частицы блокируются sv_pure.',
+        'particles_textures_vpk_done': 'Заменённые текстуры собраны отдельным модом: {path} '
+                                       '(VMT игры + ваш VTF, без PCF). В casual-pre-loader '
+                                       'он попадёт на вкладку аддонов — отметьте его там; '
+                                       'моды с PCF внутри тулза считает партикл-паками '
+                                       'и текстуры из них не устанавливает.',
         'particles_casual_overflow': 'Внимание: PCF на {bytes} байт больше оригинального — '
                                      'в казуале (через бай-пасс) он может не загрузиться. '
                                      'Удалите лишние/неиспользуемые системы, чтобы уменьшить размер. '
@@ -461,6 +466,11 @@ TRANSLATIONS = {
                                    'A custom image will replace it with a static picture. Continue?',
         'particles_vpk_done': 'VPK built: {path}\n\nPut it into tf/custom. '
                               'Note: custom particles are blocked by sv_pure in casual matches.',
+        'particles_textures_vpk_done': 'Replaced textures were packed as a separate mod: {path} '
+                                       '(game VMT + your VTF, no PCF). In casual-pre-loader it '
+                                       'will show up as an addon — check it there; the tool '
+                                       'treats any mod containing a PCF as a particle pack '
+                                       'and does not install textures from it.',
         'particles_casual_overflow': 'Warning: the PCF is {bytes} bytes larger than the original — '
                                      'it may fail to load in casual (via a bypass). '
                                      'Remove extra/unused systems to shrink it. '
