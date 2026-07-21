@@ -92,10 +92,16 @@ class _PcfLoadWorker(StandardWorker):
 class _ParticleBridge(QObject):
     ready = Signal()
     gizmo_edit = Signal(str)   # JSON {system, edits: [...], final}
+    support = Signal(str)      # JSON: какие модули движок умеет исполнять
 
     @Slot()
     def notifyReady(self) -> None:  # noqa: N802
         self.ready.emit()
+
+    @Slot(str)
+    def reportSupport(self, payload: str) -> None:  # noqa: N802
+        """Список модулей, реализованных движком превью."""
+        self.support.emit(payload)
 
     @Slot(str)
     def gizmoEdit(self, payload: str) -> None:  # noqa: N802
@@ -108,7 +114,8 @@ class _ParticleBridge(QObject):
 class ParticleViewWidget(QWidget):
     """QWebEngineView с particles3d.html (или заглушка без WebEngine)."""
 
-    gizmo_edited = Signal(str)   # проброс _ParticleBridge.gizmo_edit
+    gizmo_edited = Signal(str)     # проброс _ParticleBridge.gizmo_edit
+    support_reported = Signal(str)  # проброс _ParticleBridge.support
 
     def __init__(self, parent=None, language: str = 'en'):
         super().__init__(parent)
@@ -138,6 +145,7 @@ class ParticleViewWidget(QWidget):
         self._bridge = _ParticleBridge()
         self._bridge.ready.connect(self._on_ready)
         self._bridge.gizmo_edit.connect(self.gizmo_edited)
+        self._bridge.support.connect(self.support_reported)
         self._channel = QWebChannel()
         self._channel.registerObject("pyBridge", self._bridge)
         self._view.page().setWebChannel(self._channel)
@@ -512,6 +520,10 @@ class ParticlesPanel(QWidget):
         self.service: Optional[ParticleEditorService] = None
         self._payload: Optional[dict] = None
         self._attr_items: dict = {}   # (группа, индекс, атрибут) → строка дерева
+        #: Что умеет движок превью: {группа: set(functionName)} + алиасы имён.
+        #: Пусто, пока страница не отчиталась — до этого ничего не помечаем.
+        self._supported: dict = {}
+        self._fn_aliases: dict = {}
         self._worker: Optional[_PcfLoadWorker] = None
         self._queued_source: Optional[str] = None
         self._current_system: str = ""
@@ -762,6 +774,7 @@ class ParticlesPanel(QWidget):
 
         self.view = ParticleViewWidget(self, language=self.language)
         self.view.gizmo_edited.connect(self._on_gizmo_edit)
+        self.view.support_reported.connect(self._on_support_reported)
 
         cards_page = QWidget()
         cards_l = QVBoxLayout(cards_page)
@@ -1149,6 +1162,29 @@ class ParticlesPanel(QWidget):
         self._fill_attr_tree(self._current_system)
         self._refresh_texture_cards()
 
+    def _on_support_reported(self, payload: str) -> None:
+        """Движок сообщил, что умеет исполнять."""
+        try:
+            data = json.loads(payload)
+        except Exception:
+            return
+        self._supported = {
+            g: {str(fn).strip().lower() for fn in (data.get(g) or [])}
+            for g in MODULE_GROUPS
+        }
+        self._fn_aliases = {str(k).lower(): str(v).lower()
+                            for k, v in (data.get("aliases") or {}).items()}
+        if self._current_system:
+            self._fill_attr_tree(self._current_system)
+
+    def _module_unsupported(self, group: str, function_name: str) -> bool:
+        """True — превью этот модуль не симулирует (в игре эффект будет иным)."""
+        if not self._supported:
+            return False        # страница ещё не отчиталась
+        fn = (function_name or "").strip().lower()
+        fn = self._fn_aliases.get(fn, fn)
+        return fn not in self._supported.get(group, set())
+
     def _fill_attr_tree(self, system_name: str,
                         refresh_simple: bool = True) -> None:
         self.attr_tree.clear()
@@ -1192,6 +1228,15 @@ class ParticlesPanel(QWidget):
             for idx, mod in enumerate(mods):
                 mod_item = QTreeWidgetItem([mod["functionName"], ""])
                 mod_item.setData(0, _ROLE_MODULE, (group, idx))
+                if self._module_unsupported(group, mod["functionName"]):
+                    # Честно показываем: правки здесь на превью не влияют,
+                    # но в игре работают
+                    mod_item.setText(1, self.t['particles_not_previewed'])
+                    mod_item.setForeground(0, QColor("#7a6a3a"))
+                    mod_item.setForeground(1, QColor("#7a6a3a"))
+                    tip = self.t['particles_not_previewed_tip']
+                    mod_item.setToolTip(0, tip)
+                    mod_item.setToolTip(1, tip)
                 group_item.addChild(mod_item)
                 add_attr_items(mod_item, mod["attrs"], group, idx)
             group_item.setExpanded(True)

@@ -93,7 +93,7 @@
 <script type="module">
 import * as THREE        from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { ParticleSystemInstance } from './js/particles/engine.js';
+import { ParticleSystemInstance, implementedModules } from './js/particles/engine.js';
 
 // ── Python bridge ────────────────────────────────────────────────────────── //
 
@@ -104,6 +104,10 @@ let pyBridge = null;
       new QWebChannel(qt.webChannelTransport, channel => {
         pyBridge = channel.objects.pyBridge || null;
         if (pyBridge && pyBridge.notifyReady) pyBridge.notifyReady();
+        // Что движок умеет симулировать — редактор помечает остальное,
+        // чтобы правки «в никуда» не выглядели как работающие
+        if (pyBridge && pyBridge.reportSupport)
+          pyBridge.reportSupport(JSON.stringify(implementedModules()));
       });
     }
   } catch (e) { console.log('QWebChannel init failed:', e); }
@@ -1106,6 +1110,29 @@ window.setLoop = function(v) { loop = !!v; };
 
 window.setControlPoint = function(i, x, y, z) {
   controller.controlPoints[i] = [x, y, z];
+};
+
+/** Прокрутить симуляцию на steps шагов по dt секунд — детерминированно,
+    без зависимости от кадров (в фоновой вкладке rAF не тикает). */
+window.particleDebugAdvance = function(dt = 1 / 60, steps = 60) {
+  if (!rootInstance) return null;
+  for (let i = 0; i < steps; i++) rootInstance.movement(dt);
+  return window.particleDebugState();
+};
+
+/** Состояние частиц корневой системы — для автопроверки операторов
+    (движок большой, глазами регрессии в нём не видно). */
+window.particleDebugState = function(limit = 8) {
+  if (!rootInstance) return null;
+  const out = [];
+  for (const p of rootInstance.particles.slice(0, limit))
+    out.push({
+      pos: [...p.pos], radius: p.radius, alpha: p.alpha,
+      color: [...p.color], rotation: p.rotation,
+      age: rootInstance.curTime - p.spawnTime,
+    });
+  return { time: rootInstance.curTime, count: rootInstance.particles.length,
+           particles: out };
 };
 
 window.resetViewer = function() {

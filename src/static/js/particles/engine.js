@@ -82,7 +82,7 @@ function valueNoise3(x, y, z) {
 
 const SCALAR_FIELDS = {
     1: 'lifetime', 3: 'radius', 4: 'rotation', 5: 'rotSpeed',
-    7: 'alpha', 10: 'trailLength', 12: 'yaw', 16: 'alpha',
+    7: 'alpha', 9: 'seq', 10: 'trailLength', 12: 'yaw', 16: 'alpha',
 };
 
 function getScalarField(p, field) {
@@ -93,6 +93,30 @@ function getScalarField(p, field) {
 function setScalarField(p, field, val) {
     const k = SCALAR_FIELDS[field];
     if (k !== undefined) p[k] = val;
+}
+
+/**
+ * Активен ли осциллятор для частицы сейчас.
+ *
+ * Окно задаётся парами «start/end time min..max» (на частицу выбирается
+ * случайное значение в диапазоне). Трактовка времени — по флагу
+ * «start/end proportional» (доля жизни vs секунды); отдельный флаг
+ * «proportional 0/1» к окну НЕ относится, и раньше окно считалось по нему —
+ * из-за этого у эффектов вроде halloween_ghosts (proportional 0/1 = false,
+ * start/end proportional = true) осцилляция обрывалась почти сразу.
+ */
+function oscActive(mod, sys, p, slot) {
+    const proportional = attr(mod, 'start/end proportional',
+                              attr(mod, 'proportional 0/1', true));
+    let age = sys.curTime - p.spawnTime;
+    if (proportional) age /= (p.lifetime || 1);
+    const sMin = attr(mod, 'start time min', 0);
+    const eMin = attr(mod, 'end time min', 1);
+    const start = randRangeExpOp(sys, p, slot,
+        sMin, attr(mod, 'start time max', sMin), 1);
+    const end = randRangeExpOp(sys, p, slot + 1,
+        eMin, attr(mod, 'end time max', eMin), 1);
+    return age >= Math.min(start, end) && age <= Math.max(start, end);
 }
 
 function remapValClamped(val, inMin, inMax, outMin, outMax) {
@@ -690,14 +714,9 @@ const OPERATORS = {
         const freqMin = attr(mod, 'oscillation frequency min', 1);
         const freqMax = attr(mod, 'oscillation frequency max', 1);
         const mult = attr(mod, 'oscillation multiplier', 2);
-        const phase = attr(mod, 'oscillation start phase', 0);
-        const startMin = attr(mod, 'start time min', 0);
-        const endMin = attr(mod, 'end time min', 1e9);
-        const proportional = attr(mod, 'proportional 0/1', true);
+        const phase = attr(mod, 'oscillation start phase', 0.5);
         for (const p of sys.particles) {
-            let age = sys.curTime - p.spawnTime;
-            if (proportional) age /= p.lifetime;
-            if (age < startMin || age > endMin) continue;
+            if (!oscActive(mod, sys, p, 3)) continue;
             const rate = randRangeExpOp(sys, p, 5, rateMin, rateMax, 1);
             const freq = randRangeExpOp(sys, p, 6, freqMin, freqMax, 1);
             const osc = Math.sin((sys.curTime * freq * mult + phase) * Math.PI);
@@ -713,16 +732,22 @@ const OPERATORS = {
         const freqMin = attr(mod, 'oscillation frequency min', [1, 1, 1]);
         const freqMax = attr(mod, 'oscillation frequency max', [1, 1, 1]);
         const mult = attr(mod, 'oscillation multiplier', 2);
-        const phase = attr(mod, 'oscillation start phase', 0);
-        const proportional = attr(mod, 'proportional 0/1', true);
-        const startMin = attr(mod, 'start time min', 0);
-        const endMin = attr(mod, 'end time min', 1e9);
+        const phase = attr(mod, 'oscillation start phase', 0.5);
+        // Векторные поля Source: XYZ и tint. На скалярное поле (в стоке это
+        // 285 модулей с полем 4 — вращение) кладём первую компоненту:
+        // раньше такой модуль молча не делал НИЧЕГО.
+        const vectorField = field === 0 || field === 6;
         for (const p of sys.particles) {
-            let age = sys.curTime - p.spawnTime;
-            if (proportional) age /= p.lifetime;
-            if (age < startMin || age > endMin) continue;
-            const target = field === 0 ? p.pos : (field === 6 ? p.color : null);
-            if (target === null) return;
+            if (!oscActive(mod, sys, p, 3)) continue;
+            if (!vectorField) {
+                const rate = randRangeExpOp(sys, p, 5, rateMin[0], rateMax[0], 1);
+                const freq = randRangeExpOp(sys, p, 8, freqMin[0], freqMax[0], 1);
+                const osc = Math.sin((sys.curTime * freq * mult + phase) * Math.PI);
+                setScalarField(p, field,
+                    getScalarField(p, field) + rate * osc * sys.deltaTime);
+                continue;
+            }
+            const target = field === 0 ? p.pos : p.color;
             for (let i = 0; i < 3; i++) {
                 // слоты 5-10: не выходить за шаг 17 между операторами
                 const rate = randRangeExpOp(sys, p, 5 + i, rateMin[i], rateMax[i], 1);

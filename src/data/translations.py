@@ -73,6 +73,10 @@ TRANSLATIONS = {
                                        'и заменены вставляемыми.',
         'particles_paste_keep': 'Без замены',
         'particles_paste_replace': 'Полная замена',
+        'particles_not_previewed': 'нет в превью',
+        'particles_not_previewed_tip': 'Этот модуль превью не симулирует — '
+                                       'в игре он работает, но здесь изменения '
+                                       'не видны.',
         'particles_level_simple': 'Просто',
         'particles_level_expert': 'Экспертно',
         'particles_simple_enable': 'Включить',
@@ -532,6 +536,10 @@ TRANSLATIONS = {
                                        'and replaced with the pasted ones.',
         'particles_paste_keep': 'Keep existing',
         'particles_paste_replace': 'Replace all',
+        'particles_not_previewed': 'not in preview',
+        'particles_not_previewed_tip': 'This module is not simulated by the '
+                                       'preview — it works in game, but changes '
+                                       'are not visible here.',
         'particles_level_simple': 'Simple',
         'particles_level_expert': 'Expert',
         'particles_simple_enable': 'Enable',
