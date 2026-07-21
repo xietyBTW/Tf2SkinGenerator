@@ -57,6 +57,24 @@ TRANSLATIONS = {
         'particles_colors_done': 'Удалено модулей цвета: {count}. Не забудьте сохранить или собрать VPK.',
         'particles_colors_none': 'У этого эффекта нет модулей цвета — текстуры уже в родных цветах.',
         'particles_menu_add_layer': 'Добавить слой со своей текстурой…',
+        'particles_menu_param_reference': 'Сохранить справочник параметров (JSON)…',
+        'particles_reference_saved': 'Справочник сохранён: {path}\n\n'
+                                     'Его можно передать ИИ-помощнику вместе с '
+                                     'описанием нужного эффекта — он соберёт '
+                                     'набор параметров, который вставляется '
+                                     'сюда через Ctrl+V.',
+        'particles_menu_param_reference': 'Сохранить справочник параметров (JSON)…',
+        'particles_reference_purpose': 'Для чего нужен файл?',
+        'particles_reference_for_ai': 'Для ИИ (с заданием внутри)',
+        'particles_reference_plain': 'Просто справочник',
+        'particles_reference_saved': 'Справочник сохранён: {path}',
+        'particles_reference_saved_ai': 'Файл сохранён: {path}\n\n'
+                                        'Отправьте его нейросети вместе с '
+                                        'описанием нужного эффекта. Задание '
+                                        'уже внутри файла: ассистент уточнит '
+                                        'то, что вы не указали, и пришлёт '
+                                        'JSON, который вставляется сюда '
+                                        'через Ctrl+V.',
         'particles_menu_rename': 'Переименовать систему…',
         'particles_menu_rename_material': 'Переименовать материал…',
         'particles_new_material_prompt': 'Новый путь материала (например, '
@@ -80,6 +98,35 @@ TRANSLATIONS = {
                                        'останутся на месте, добавятся только недостающие.\n'
                                        '«Полная замена» — параметры эффекта будут удалены '
                                        'и заменены вставляемыми.',
+        'particles_copy_problem': 'Копировать',
+        'particles_copy_problem_json': 'Разбираемый JSON:',
+        'particles_paste_rejected': 'Не удалось вставить параметры.',
+        'particles_paste_partial': 'Параметры вставлены, но часть пропущена.',
+        'particles_paste_empty': 'Буфер обмена пуст.',
+        'particles_paste_not_json': 'В буфере не JSON: {detail}',
+        'particles_paste_no_key': 'В JSON нет раздела "tf2sgParticleParams" — '
+                                  'скопирован не тот текст.',
+        'particles_paste_bad_root': '"tf2sgParticleParams" должен быть '
+                                    'объектом с полями attrs и modules.',
+        'particles_paste_bad_attrs': '"{where}" должен быть объектом вида '
+                                     '{{"имя": {{"t": тип, "v": значение}}}}.',
+        'particles_paste_bad_modules': '"modules" должен быть объектом вида '
+                                       '{{"группа": [["Имя модуля", {{...}}]]}}.',
+        'particles_paste_bad_group': 'Группа "{group}" записана неверно: нужен '
+                                     'список пар ["Имя модуля", {{параметры}}].',
+        'particles_paste_nothing': 'В наборе нет ни параметров, ни модулей.',
+        'particles_paste_nothing_applied': 'Ни один параметр не подошёл — '
+                                           'проверьте имена модулей и полей.',
+        'particles_paste_failed': 'Ошибка разбора: {detail}',
+        'particles_paste_unknown_group': 'Неизвестная группа "{group}". '
+                                         'Допустимы: {known}',
+        'particles_paste_unknown_module': 'Модуля "{module}" нет в игре '
+                                          '(группа {group}) — вероятно, '
+                                          'опечатка; в игре он работать не '
+                                          'будет.',
+        'particles_paste_bad_value': 'Значение "{attr}" в "{where}" не '
+                                     'распознано: нужен вид '
+                                     '{{"t": тип, "v": значение}}.',
         'particles_paste_keep': 'Без замены',
         'particles_paste_replace': 'Полная замена',
         'particles_not_previewed': 'нет в превью',
@@ -557,6 +604,18 @@ TRANSLATIONS = {
         'particles_colors_done': 'Removed {count} color modules. Remember to save or build the VPK.',
         'particles_colors_none': 'This effect has no color modules — textures already use their own colors.',
         'particles_menu_add_layer': 'Add layer with custom texture…',
+        'particles_menu_param_reference': 'Save parameter reference (JSON)…',
+        'particles_reference_purpose': 'What is the file for?',
+        'particles_reference_for_ai': 'For an AI assistant (with task inside)',
+        'particles_reference_plain': 'Just the reference data',
+        'particles_reference_saved': 'Reference saved: {path}',
+        'particles_reference_saved_ai': 'File saved: {path}\n\n'
+                                        'Send it to an AI assistant together '
+                                        'with a description of the effect you '
+                                        'want. The task is already inside the '
+                                        'file: the assistant will ask about '
+                                        'anything you left out and reply with '
+                                        'JSON you paste here using Ctrl+V.',
         'particles_menu_rename': 'Rename system…',
         'particles_menu_rename_material': 'Rename material…',
         'particles_new_material_prompt': 'New material path (e.g. '
@@ -580,6 +639,35 @@ TRANSLATIONS = {
                                        'stay in place, only missing ones are added.\n'
                                        '"Replace all" — the effect\'s parameters are removed '
                                        'and replaced with the pasted ones.',
+        'particles_copy_problem': 'Copy',
+        'particles_copy_problem_json': 'JSON being parsed:',
+        'particles_paste_rejected': 'Could not paste the parameters.',
+        'particles_paste_partial': 'Parameters pasted, but some were skipped.',
+        'particles_paste_empty': 'The clipboard is empty.',
+        'particles_paste_not_json': 'The clipboard does not contain JSON: {detail}',
+        'particles_paste_no_key': 'The JSON has no "tf2sgParticleParams" '
+                                  'section — the wrong text was copied.',
+        'particles_paste_bad_root': '"tf2sgParticleParams" must be an object '
+                                    'with attrs and modules.',
+        'particles_paste_bad_attrs': '"{where}" must be an object like '
+                                     '{{"name": {{"t": type, "v": value}}}}.',
+        'particles_paste_bad_modules': '"modules" must be an object like '
+                                       '{{"group": [["Module Name", {{...}}]]}}.',
+        'particles_paste_bad_group': 'Group "{group}" is malformed: it needs a '
+                                     'list of ["Module Name", {{params}}] pairs.',
+        'particles_paste_nothing': 'The set contains neither parameters nor '
+                                   'modules.',
+        'particles_paste_nothing_applied': 'Nothing matched — check the module '
+                                           'and parameter names.',
+        'particles_paste_failed': 'Parsing error: {detail}',
+        'particles_paste_unknown_group': 'Unknown group "{group}". '
+                                         'Allowed: {known}',
+        'particles_paste_unknown_module': 'Module "{module}" does not exist in '
+                                          'the game (group {group}) — likely a '
+                                          'typo; it will not work in game.',
+        'particles_paste_bad_value': 'Value "{attr}" in "{where}" was not '
+                                     'understood: expected '
+                                     '{{"t": type, "v": value}}.',
         'particles_paste_keep': 'Keep existing',
         'particles_paste_replace': 'Replace all',
         'particles_not_previewed': 'not in preview',

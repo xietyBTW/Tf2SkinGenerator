@@ -381,6 +381,60 @@ def test_paste_params():
         == [0.0, 0.0, -400.0]
 
 
+def test_paste_params_reports_problems():
+    """Кривой набор (например, от нейросети) не должен проходить молча:
+    вставка складывает причины в report."""
+    svc = ParticleEditorService()
+    svc.load_bytes(_make_pcf_bytes())
+
+    # Неизвестная группа модулей
+    report = []
+    svc.paste_params("fx", {"attrs": {}, "modules": {
+        "operatorz": [["Movement Basic", {}]]}}, report=report)
+    assert [k for k, _p in report] == ["particles_paste_unknown_group"]
+    assert report[0][1]["group"] == "operatorz"
+
+    # Значение не в формате {"t","v"}
+    report = []
+    svc.paste_params("fx", {"attrs": {"radius": 12}}, report=report)
+    assert [k for k, _p in report] == ["particles_paste_bad_value"]
+    assert report[0][1]["attr"] == "radius"
+
+    # Значение неверного типа для объявленного t
+    report = []
+    svc.paste_params("fx", {"attrs": {"radius": {"t": "float",
+                                                 "v": "не число"}}},
+                     report=report)
+    assert [k for k, _p in report] == ["particles_paste_bad_value"]
+
+    # Группа задана не списком пар
+    report = []
+    svc.paste_params("fx", {"modules": {"operators": [["Movement Basic"]]}},
+                     report=report)
+    assert [k for k, _p in report] == ["particles_paste_bad_group"]
+
+    # modules вообще не объект
+    report = []
+    svc.paste_params("fx", {"modules": "нет"}, report=report)
+    assert [k for k, _p in report] == ["particles_paste_bad_modules"]
+
+    # Модуль, которого нет в каталоге игры, — предупреждаем, но вставляем
+    ParticleEditorService._attr_catalog[("operators", "movement basic")] = {}
+    report = []
+    assert svc.paste_params("fx", {"modules": {"operators": [
+        ["Super Cool Gravity", {"power": {"t": "float", "v": 1.0}}]]}},
+        report=report)
+    assert [k for k, _p in report] == ["particles_paste_unknown_module"]
+    assert report[0][1]["module"] == "Super Cool Gravity"
+    ParticleEditorService._attr_catalog.clear()
+
+    # Корректный набор проблем не даёт
+    report = []
+    assert svc.paste_params("fx", {"attrs": {"radius": {"t": "float", "v": 3.0}}},
+                            report=report)
+    assert report == []
+
+
 def test_paste_params_modes():
     """Режимы вставки: keep не трогает существующее, replace сносит всё."""
     payload = {
@@ -588,6 +642,66 @@ def test_attr_catalog_disk_cache(tmp_path, monkeypatch):
                         classmethod(lambda cls, root: "stamp-2"))
     assert not ParticleEditorService._load_disk_catalog("D:/fake")
     ParticleEditorService._attr_catalog.clear()
+
+
+def test_param_reference(monkeypatch, tmp_path):
+    """Справочник для генерации пресетов: канонические имена модулей,
+    формат буфера и отметка поддержки превью (с учётом алиасов)."""
+    ParticleEditorService._attr_catalog.clear()
+    ParticleEditorService._module_display.clear()
+    monkeypatch.setattr(ParticleEditorService, "_attr_catalog_file",
+                        staticmethod(lambda: tmp_path / "cat.json"))
+    monkeypatch.setattr(ParticleEditorService, "_game_stamp",
+                        classmethod(lambda cls, root: "s"))
+    monkeypatch.setattr(ParticleEditorService, "list_game_pcfs",
+                        staticmethod(lambda root: ["fake.pcf"]))
+    monkeypatch.setattr(ParticleEditorService, "load_from_game",
+                        lambda self, root, pcf: self.load_bytes(_make_pcf_bytes()))
+
+    support = {"initializers": ["color random"],
+               "aliases": {"color_random": "color random"}}
+    ref = ParticleEditorService.param_reference("D:/fake", supported=support)
+
+    # Имя модуля — как в игре, а не приведённое к нижнему регистру
+    inits = ref["modules"]["initializers"]
+    assert "Color Random" in inits
+    assert inits["Color Random"]["params"]["color1"]["type"] == "color"
+    assert inits["Color Random"]["previewed"] is True
+
+    # Параметры самой системы и описание формата вставки
+    assert "max_particles" in ref["system_params"]
+    example = ref["clipboard_format"]["example"]["tf2sgParticleParams"]
+    assert set(example) >= {"attrs", "modules"}
+    assert ref["value_types"]["color"].startswith("[r, g, b, a]")
+
+    # Пример из справочника действительно вставляется
+    svc = ParticleEditorService()
+    svc.load_bytes(_make_pcf_bytes())
+    assert svc.paste_params("fx", example)
+    attrs = svc.systems_json()["fx"]["attrs"]
+    assert attrs["max_particles"]["v"] == 50
+
+    # Вариант с заданием для ИИ: инструкция первым ключом, обычный — без неё
+    assert "instructions_for_ai" not in ref
+    with_ai = ParticleEditorService.param_reference(
+        "D:/fake", supported=support, with_prompt=True)
+    assert next(iter(with_ai)) == "instructions_for_ai"
+    prompt = with_ai["instructions_for_ai"]
+    # Ключевое: файл идёт вместе с требованиями пользователя, а недостающее
+    # ассистент должен уточнить
+    assert "TOGETHER WITH their own description" in prompt
+    assert "ASK BEFORE ANSWERING" in prompt
+    assert "Spawn area" in prompt
+    # Дополнение к эффекту или полная замена — спросить обязательно
+    assert "brand-new effect that should replace the whole system" in prompt
+    assert '"full": false — an ADDITION' in prompt
+    assert '"full": true — a COMPLETE effect' in prompt
+    assert "Hammer units" in prompt          # масштаб
+    assert "One preset describes ONE particle system" in prompt
+    # Остальной справочник не потерялся
+    assert with_ai["modules"] == ref["modules"]
+    ParticleEditorService._attr_catalog.clear()
+    ParticleEditorService._module_display.clear()
 
 
 def test_remove_attr():

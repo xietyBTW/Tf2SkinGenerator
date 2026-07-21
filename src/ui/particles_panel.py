@@ -1385,6 +1385,8 @@ class ParticlesPanel(QWidget):
         act_dup = menu.addAction(t['particles_menu_duplicate'])
         act_child = menu.addAction(t['particles_menu_add_child'])
         act_del = menu.addAction(t['particles_menu_remove_system'])
+        menu.addSeparator()
+        act_ref = menu.addAction(t['particles_menu_param_reference'])
         chosen = menu.exec(self.systems_list.mapToGlobal(pos))
         if chosen is act_layer:
             self._on_add_layer(name)
@@ -1416,6 +1418,8 @@ class ParticlesPanel(QWidget):
                 t['particles_pick_child'], others, 0, False)
             if ok and child and self.service.add_child(name, child):
                 self._structure_changed(keep_system=name)
+        elif chosen is act_ref:
+            self._export_param_reference()
         elif chosen is act_del:
             answer = QMessageBox.question(
                 self, t['particles_menu_remove_system'],
@@ -1424,6 +1428,50 @@ class ParticlesPanel(QWidget):
             if answer == QMessageBox.StandardButton.Yes \
                     and self.service.remove_system(name):
                 self._structure_changed()
+
+    def _export_param_reference(self) -> None:
+        """Сохраняет справочник параметров: с ним внешний инструмент может
+        собрать набор, который вставляется сюда через Ctrl+V."""
+        t = self.t
+        # Для чего справочник: просто данные или сразу с заданием для ИИ
+        box = QMessageBox(self)
+        box.setWindowTitle(t['particles_menu_param_reference'])
+        box.setText(t['particles_reference_purpose'])
+        btn_ai = box.addButton(t['particles_reference_for_ai'],
+                               QMessageBox.ButtonRole.AcceptRole)
+        btn_plain = box.addButton(t['particles_reference_plain'],
+                                  QMessageBox.ButtonRole.ActionRole)
+        box.addButton(QMessageBox.StandardButton.Cancel)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked not in (btn_ai, btn_plain):
+            return
+        with_prompt = clicked is btn_ai
+
+        path, _ = QFileDialog.getSaveFileName(
+            self, t['particles_menu_param_reference'],
+            "tf2_particle_prompt.json" if with_prompt
+            else "tf2_particle_params.json", "JSON (*.json)")
+        if not path:
+            return
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            data = ParticleEditorService.param_reference(
+                self.tf2_root, supported=self._supported or None,
+                with_prompt=with_prompt)
+            Path(path).write_text(
+                json.dumps(data, ensure_ascii=False, indent=2),
+                encoding="utf-8")
+        except Exception as exc:
+            logger.error(f"Справочник параметров: {exc}", exc_info=True)
+            QMessageBox.critical(self, t.get('error', 'Error'), str(exc))
+            return
+        finally:
+            QApplication.restoreOverrideCursor()
+        QMessageBox.information(
+            self, t['particles_menu_param_reference'],
+            (t['particles_reference_saved_ai'] if with_prompt
+             else t['particles_reference_saved']).format(path=path))
 
     def _on_add_layer(self, parent_name: str) -> None:
         """Создаёт слой-залп с игровой текстурой по умолчанию и цепляет
@@ -1661,18 +1709,46 @@ class ParticlesPanel(QWidget):
         QApplication.clipboard().setText(
             json.dumps({"tf2sgParticleParams": payload}))
 
-    def _clipboard_payload(self) -> Optional[dict]:
-        """Скопированные параметры из буфера обмена (None — там не наше).
-        Буфер — внешний ввод: проверяем форму, чтобы вставка не падала."""
-        from PySide6.QtWidgets import QApplication
+    def _clipboard_payload(self, reason: Optional[list] = None) -> Optional[dict]:
+        """
+        Скопированные параметры из буфера обмена (None — там не наше).
+
+        Буфер — внешний ввод (в том числе сгенерированный нейросетью),
+        поэтому разбираем по шагам и складываем причину отказа в reason:
+        молчаливое «ничего не произошло» — худший вид ошибки.
+        """
+        text = (QApplication.clipboard().text() or "").strip()
+        if not text:
+            if reason is not None:
+                reason.append(("particles_paste_empty", {}))
+            return None
         try:
-            payload = json.loads(
-                QApplication.clipboard().text()).get("tf2sgParticleParams")
-            if not isinstance(payload, dict) \
-                    or not isinstance(payload.get("attrs") or {}, dict) \
-                    or not isinstance(payload.get("modules") or {}, dict):
-                return None
-        except Exception:
+            data = json.loads(text)
+        except json.JSONDecodeError as exc:
+            if reason is not None:
+                reason.append(("particles_paste_not_json",
+                               {"detail": f"{exc.msg} (строка {exc.lineno})"}))
+            return None
+        if not isinstance(data, dict) or "tf2sgParticleParams" not in data:
+            if reason is not None:
+                reason.append(("particles_paste_no_key", {}))
+            return None
+        payload = data.get("tf2sgParticleParams")
+        if not isinstance(payload, dict):
+            if reason is not None:
+                reason.append(("particles_paste_bad_root", {}))
+            return None
+        if not isinstance(payload.get("attrs") or {}, dict):
+            if reason is not None:
+                reason.append(("particles_paste_bad_attrs", {"where": "attrs"}))
+            return None
+        if not isinstance(payload.get("modules") or {}, dict):
+            if reason is not None:
+                reason.append(("particles_paste_bad_modules", {}))
+            return None
+        if not (payload.get("attrs") or payload.get("modules")):
+            if reason is not None:
+                reason.append(("particles_paste_nothing", {}))
             return None
         return payload
 
@@ -1682,9 +1758,10 @@ class ParticlesPanel(QWidget):
         if self.service is None or self._payload is None \
                 or not self._current_system:
             return
-        payload = self._clipboard_payload()
-        if payload is None \
-                or not (payload.get("attrs") or payload.get("modules")):
+        reason: list = []
+        payload = self._clipboard_payload(reason)
+        if payload is None:
+            self._show_paste_problems(reason, applied=False)
             return
         mode = "overwrite"
         if payload.get("full"):
@@ -1707,13 +1784,20 @@ class ParticlesPanel(QWidget):
             else:
                 return
         sys_name = self._current_system
+        report: list = []
         try:
-            changed = self.service.paste_params(sys_name, payload, mode)
+            changed = self.service.paste_params(sys_name, payload, mode,
+                                                report=report)
         except Exception as exc:
-            # Глубже вложенный мусор из чужого буфера — не падаем
-            logger.warning(f"Вставка параметров: {exc}")
+            logger.warning(f"Вставка параметров: {exc}", exc_info=True)
+            self._show_paste_problems(
+                [("particles_paste_failed", {"detail": str(exc)})],
+                applied=False)
             return
         if not changed:
+            self._show_paste_problems(
+                report or [("particles_paste_nothing_applied", {})],
+                applied=False)
             return
         self._history_commit()
         self._payload["systems"] = self.service.systems_json()
@@ -1727,6 +1811,55 @@ class ParticlesPanel(QWidget):
             self.view.update_systems(self._payload["systems"], sys_name)
         self._fill_attr_tree(sys_name)
         self._refresh_texture_cards()
+        if report:
+            # Часть вставилась, часть нет — сказать, что именно пропущено
+            self._show_paste_problems(report, applied=True)
+
+    def _show_paste_problems(self, problems: list, applied: bool) -> None:
+        """
+        Показывает, почему вставка не сработала (или что пропущено).
+
+        Текст можно выделить мышью, а кнопка кладёт в буфер и описание
+        проблем, и сам разбираемый JSON — такую пару удобно отдать обратно
+        нейросети, которая его сгенерировала.
+        """
+        if not problems:
+            return
+        t = self.t
+        lines = []
+        for key, params in problems[:10]:
+            msg = t.get(key, key)
+            try:
+                msg = msg.format(**params)
+            except (KeyError, IndexError):
+                pass
+            lines.append(f"  - {msg}")
+        if len(problems) > 10:
+            lines.append(t['particles_lint_more'].format(
+                count=len(problems) - 10))
+        details = "\n".join(lines)
+
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Warning if not applied
+                    else QMessageBox.Icon.Information)
+        box.setWindowTitle(t['particles_menu_paste'])
+        box.setText(t['particles_paste_partial'] if applied
+                    else t['particles_paste_rejected'])
+        box.setInformativeText(details)
+        box.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+            | Qt.TextInteractionFlag.TextSelectableByKeyboard)
+        btn_copy = box.addButton(t['particles_copy_problem'],
+                                 QMessageBox.ButtonRole.ActionRole)
+        box.addButton(QMessageBox.StandardButton.Ok)
+        box.exec()
+        if box.clickedButton() is not btn_copy:
+            return
+        source = (QApplication.clipboard().text() or "").strip()
+        report = f"{box.text()}\n{details}"
+        if source:
+            report += f"\n\n{t['particles_copy_problem_json']}\n{source}"
+        QApplication.clipboard().setText(report)
 
     # ── Простой режим ────────────────────────────────────────────────────── #
 

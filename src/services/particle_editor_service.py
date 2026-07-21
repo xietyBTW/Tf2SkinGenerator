@@ -771,25 +771,43 @@ class ParticleEditorService:
             logger.warning(f"Вставка атрибута {name}={v!r}: {exc}")
         return None
 
-    def _paste_attrs(self, el, attrs: Dict[str, dict],
-                     overwrite: bool = True) -> bool:
+    def _paste_attrs(self, el, attrs: Dict[str, dict], overwrite: bool = True,
+                     report: Optional[list] = None,
+                     where: str = "") -> bool:
         """Merge-вставка атрибутов в элемент: новые добавляются, совпадающие
-        перезаписываются (overwrite=False — существующие не трогаются)."""
+        перезаписываются (overwrite=False — существующие не трогаются).
+
+        report — сюда складываются проблемы, чтобы вставка не проваливалась
+        молча: битые значения видны пользователю."""
         changed = False
+        if not isinstance(attrs, dict):
+            if report is not None:
+                report.append(("particles_paste_bad_attrs", {"where": where}))
+            return False
         for name, tv in attrs.items():
-            if name.lower() in ("functionname", "name", "id"):
+            if str(name).lower() in ("functionname", "name", "id"):
+                continue
+            if not isinstance(tv, dict) or "v" not in tv:
+                if report is not None:
+                    report.append(("particles_paste_bad_value",
+                                   {"where": where, "attr": name}))
                 continue
             if not overwrite and name in el:
                 continue
             orig_name = el[name].name if name in el else name
             attr = self._attr_from_json(orig_name, tv)
-            if attr is not None:
-                el[name] = attr
-                changed = True
+            if attr is None:
+                if report is not None:
+                    report.append(("particles_paste_bad_value",
+                                   {"where": where, "attr": name}))
+                continue
+            el[name] = attr
+            changed = True
         return changed
 
     def paste_params(self, system_name: str, payload: dict,
-                     mode: str = "overwrite") -> bool:
+                     mode: str = "overwrite",
+                     report: Optional[list] = None) -> bool:
         """
         Вставляет скопированный набор параметров в систему.
 
@@ -826,15 +844,38 @@ class ParticleEditorService:
                 elif d[key].type is not ValueType.ELEMENT:
                     del d[key]
                 changed = True
-        if self._paste_attrs(d, payload.get("attrs") or {}, overwrite):
+        if self._paste_attrs(d, payload.get("attrs") or {}, overwrite,
+                             report, where="attrs"):
             changed = True
-        for group, mods in (payload.get("modules") or {}).items():
+        modules = payload.get("modules") or {}
+        if not isinstance(modules, dict):
+            if report is not None:
+                report.append(("particles_paste_bad_modules", {}))
+            modules = {}
+        for group, mods in modules.items():
             if group not in MODULE_GROUPS:
+                if report is not None:
+                    report.append(("particles_paste_unknown_group",
+                                   {"group": group,
+                                    "known": ", ".join(MODULE_GROUPS)}))
                 continue
-            pairs = mods.items() if isinstance(mods, dict) else mods
+            try:
+                pairs = list(mods.items() if isinstance(mods, dict) else mods)
+            except TypeError:
+                if report is not None:
+                    report.append(("particles_paste_bad_group",
+                                   {"group": group}))
+                continue
             occurrence: Dict[str, int] = {}
-            for fn, attrs in pairs:
-                fn = (fn or "").strip()
+            for pair in pairs:
+                try:
+                    fn, attrs = pair
+                except (TypeError, ValueError):
+                    if report is not None:
+                        report.append(("particles_paste_bad_group",
+                                       {"group": group}))
+                    continue
+                fn = (str(fn) if fn is not None else "").strip()
                 if not fn:
                     continue
                 # n-я копия модуля в буфере метит n-ю копию у цели
@@ -850,6 +891,12 @@ class ParticleEditorService:
                                 break
                             k += 1
                 if target is None:
+                    # Модуля с таким именем нет в игре — почти наверняка
+                    # опечатка: игра его проигнорирует
+                    if report is not None and self._attr_catalog and \
+                            (group, fn.lower()) not in self._attr_catalog:
+                        report.append(("particles_paste_unknown_module",
+                                       {"group": group, "module": fn}))
                     target = Element(fn, "DmeParticleOperator")
                     target["functionName"] = Attribute.string(
                         "functionName", fn)
@@ -860,7 +907,8 @@ class ParticleEditorService:
                         arr.append(target)
                         d[group] = arr
                     changed = True
-                if self._paste_attrs(target, attrs or {}, overwrite):
+                if self._paste_attrs(target, attrs or {}, overwrite,
+                                     report, where=fn):
                     changed = True
         return changed
 
@@ -1272,6 +1320,10 @@ class ParticleEditorService:
 
     #: Кэш каталогов параметров: {(группа|None, fn_lower): {имя: {"t","v"}}}.
     _attr_catalog: Dict[tuple, Dict[str, dict]] = {}
+    #: Каноническое написание functionName: {(группа, fn_lower): "Имя Как В Игре"}.
+    _module_display: Dict[tuple, str] = {}
+    #: Версия формата дискового кэша (растёт, когда меняется его состав).
+    _CATALOG_FORMAT = 2
 
     #: Служебные поля — их не показываем и не даём удалять.
     _SERVICE_ATTRS = ("functionname", "name", "id")
@@ -1301,9 +1353,14 @@ class ParticleEditorService:
             data = json.loads(path.read_text(encoding="utf-8"))
             if data.get("stamp") != cls._game_stamp(tf2_root_dir):
                 return False
+            if data.get("format") != cls._CATALOG_FORMAT:
+                return False        # старый кэш без канонических имён
             for key_str, attrs in (data.get("catalog") or {}).items():
                 group, _, fn = key_str.partition("|")
                 cls._attr_catalog[(group or None, fn)] = attrs
+            for key_str, disp in (data.get("display") or {}).items():
+                group, _, fn = key_str.partition("|")
+                cls._module_display[(group or None, fn)] = disp
         except Exception as exc:
             logger.warning(f"Кэш каталога параметров не прочитан: {exc}")
             return False
@@ -1315,9 +1372,12 @@ class ParticleEditorService:
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             payload = {
+                "format": cls._CATALOG_FORMAT,
                 "stamp": cls._game_stamp(tf2_root_dir),
                 "catalog": {f"{g or ''}|{fn}": attrs
                             for (g, fn), attrs in cls._attr_catalog.items()},
+                "display": {f"{g or ''}|{fn}": name
+                            for (g, fn), name in cls._module_display.items()},
             }
             path.write_text(json.dumps(payload), encoding="utf-8")
         except Exception as exc:
@@ -1364,9 +1424,14 @@ class ParticleEditorService:
                     continue
                 try:
                     for mod in d[group].iter_elem():
-                        cat = catalog.setdefault(
-                            (group, cls._module_fn(mod)), {})
-                        for name, tv in _module_to_json(mod)["attrs"].items():
+                        fn = cls._module_fn(mod)
+                        cat = catalog.setdefault((group, fn), {})
+                        mod_json = _module_to_json(mod)
+                        # Каноническое имя нужно для генерации пресетов:
+                        # в ключах каталога оно приведено к нижнему регистру
+                        cls._module_display.setdefault(
+                            (group, fn), mod_json["functionName"])
+                        for name, tv in mod_json["attrs"].items():
                             if name not in cls._SERVICE_ATTRS:
                                 cat.setdefault(name, tv)
                 except Exception:
@@ -1396,6 +1461,174 @@ class ParticleEditorService:
             for name, tv in (probe.get(key) or {}).items():
                 catalog.setdefault(name, tv)
         return catalog
+
+    #: Инструкция для ИИ-ассистента, вкладывается в справочник по выбору
+    #: пользователя. На английском: модели точнее следуют инструкциям на нём,
+    #: а пользователь всё равно пишет свои требования отдельным сообщением.
+    _AI_INSTRUCTIONS = [
+        "You help build a Team Fortress 2 particle effect. The user sends "
+        "you this file TOGETHER WITH their own description of the effect "
+        "they want. This file is the reference of everything you may use.",
+        "",
+        "OUTPUT",
+        "- Reply with a single JSON object shaped exactly like "
+        "clipboard_format.example in this file, and nothing else around it: "
+        "no markdown fences, no comments inside the JSON.",
+        "- The user copies it and presses Ctrl+V in the editor, so it must "
+        "be valid JSON on its own.",
+        "- After the JSON, in a separate message part, add a short "
+        "plain-language summary of what each module does, so the user can "
+        "tweak it.",
+        "",
+        "HARD RULES",
+        "- Use ONLY module names and parameter names that appear in "
+        "'modules' and 'system_params' of this file. Never invent or guess "
+        "names: unknown ones are silently ignored on paste.",
+        "- One preset describes ONE particle system. Child systems cannot "
+        "be created through the clipboard. If the effect needs layers, say "
+        "so and tell the user to add a layer in the editor and paste a "
+        "second preset into it.",
+        "- Include only parameters you actually want to change. Anything "
+        "omitted keeps the engine default, which is usually what you want.",
+        "- A visible system needs at least one emitter and one renderer "
+        "(render_animated_sprites is the usual renderer).",
+        "- Order matters inside a group: position initializers run in "
+        "sequence, so 'Position Modify Offset Random' must come after the "
+        "module that sets the base position.",
+        "- Modules marked \"previewed\": false do work in game but are NOT "
+        "simulated by the editor's 3D preview. Prefer previewed modules, "
+        "and warn the user when you use one.",
+        "- \"full\" decides how the paste behaves and must match what the "
+        "user wants:",
+        "    \"full\": false — an ADDITION. Parameters you list are merged "
+        "into the system: matching ones are overwritten, everything else "
+        "the system already has stays untouched. Use this to adjust or "
+        "extend an existing effect.",
+        "    \"full\": true — a COMPLETE effect. On paste the editor asks "
+        "the user whether to keep the existing parameters or replace the "
+        "system entirely, so send a self-sufficient set: emitter, position "
+        "and lifetime initializers, renderer, material, and anything else "
+        "the effect needs to work on its own.",
+        "",
+        "UNITS AND CONVENTIONS",
+        "- Distances are Hammer units: a player is about 83 units tall, a "
+        "weapon about 30 units long, 1 unit is roughly 1.9 cm. Z is up.",
+        "- Times are in seconds. Colors are [r, g, b, a], each 0-255.",
+        "- 'material' is a path such as \"effects\\\\crit.vmt\". Prefer "
+        "paths that already exist in the game unless the user supplies "
+        "their own texture.",
+        "- 'example' values in this file come from real game effects. They "
+        "are not engine defaults; use them as a sanity check for scale.",
+        "",
+        "ASK BEFORE ANSWERING",
+        "Always make sure you know ONE thing before writing any JSON: is "
+        "this a brand-new effect that should replace the whole system "
+        "(\"full\": true), or an addition to an effect the user already "
+        "has (\"full\": false)? If the user did not say, ask.",
+        "Then, if the description leaves any of the following unclear, ask "
+        "about them too — in one short message, at most four questions, "
+        "and wait for the answer:",
+        "1. Spawn area: a single point, a sphere or a box, and how large.",
+        "2. Context and scale: on a weapon, on the player, or an explosion "
+        "in the world? How large should it read on screen?",
+        "3. Timing: a one-shot burst or a continuous stream, and for how "
+        "long each particle lives.",
+        "4. Look: colors, whether particles glow, and how they move "
+        "(fly outward, rise, fall, hover, swirl).",
+        "5. Density: roughly how many particles at once.",
+        "If the description is already detailed, skip the questions and "
+        "answer directly.",
+    ]
+
+    @classmethod
+    def param_reference(cls, tf2_root_dir: str = "",
+                        supported: Optional[dict] = None,
+                        with_prompt: bool = False) -> dict:
+        """
+        Справочник параметров для генерации пресетов внешними средствами.
+
+        Отдаёт всё, что нужно, чтобы собрать корректный набор параметров
+        и вставить его в редактор через буфер обмена: формат буфера, типы
+        значений, модули по группам с их параметрами и примерами значений
+        из эффектов игры, плюс отметка, какие модули отыгрывает превью.
+        """
+        cls.build_attr_catalog(tf2_root_dir)
+        # У части модулей в файлах игры старое написание имени — движок
+        # превью знает их через таблицу алиасов, учитываем и здесь
+        aliases = {str(k).lower(): str(v).lower()
+                   for k, v in ((supported or {}).get("aliases") or {}).items()}
+        groups: Dict[str, dict] = {}
+        for (group, fn), attrs in sorted(
+                cls._attr_catalog.items(), key=lambda kv: (kv[0][0] or "", kv[0][1])):
+            if group is None:
+                continue
+            entry = {
+                "params": {name: {"type": tv["t"], "example": tv["v"]}
+                           for name, tv in sorted(attrs.items())},
+            }
+            if supported is not None:
+                known = {str(s).strip().lower()
+                         for s in (supported.get(group) or [])}
+                entry["previewed"] = aliases.get(fn, fn) in known
+            groups.setdefault(group, {})[
+                cls._module_display.get((group, fn), fn)] = entry
+
+        system_attrs = cls._attr_catalog.get((None, ""), {})
+        reference: Dict[str, Any] = {
+            "format": 1,
+            "about": "Справочник параметров частиц TF2. Соберите набор в "
+                     "поле clipboard_format.example и вставьте его в "
+                     "редактор через Ctrl+V (правый клик по дереву свойств "
+                     "→ Вставить параметры).",
+            "notes": [
+                "Имена параметров и модулей писать точно как здесь.",
+                "example — значение из реального эффекта игры, а не "
+                "умолчание движка: это ориентир по смыслу и порядку величин.",
+                "Отсутствующий параметр не ошибка: движок берёт своё "
+                "умолчание. Указывайте только то, что нужно менять.",
+                "previewed=false — модуль работает в игре, но 3D-превью "
+                "редактора его не симулирует.",
+            ],
+            "value_types": {
+                "float": "число, например 1.5",
+                "integer": "целое число",
+                "bool": "true / false",
+                "string": "строка, например \"effects\\\\crit.vmt\"",
+                "vec3": "[x, y, z]",
+                "color": "[r, g, b, a], каждое 0-255",
+            },
+            "clipboard_format": {
+                "description": "Значение JSON, которое кладётся в буфер "
+                               "обмена. attrs — параметры самой системы, "
+                               "modules — модули по группам: список пар "
+                               "[имя модуля, {параметры}]. full=true "
+                               "означает полный набор — при вставке "
+                               "редактор спросит, заменять ли существующие.",
+                "example": {
+                    "tf2sgParticleParams": {
+                        "attrs": {"max_particles": {"t": "integer", "v": 50},
+                                  "radius": {"t": "float", "v": 8.0}},
+                        "modules": {
+                            "emitters": [["emit_instantaneously", {
+                                "num_to_emit": {"t": "integer", "v": 30}}]],
+                            "initializers": [["Lifetime Random", {
+                                "lifetime_min": {"t": "float", "v": 0.5},
+                                "lifetime_max": {"t": "float", "v": 1.2}}]],
+                        },
+                        "full": False,
+                    }
+                },
+            },
+            "module_groups": list(MODULE_GROUPS),
+            "system_params": {name: {"type": tv["t"], "example": tv["v"]}
+                              for name, tv in sorted(system_attrs.items())},
+            "modules": groups,
+        }
+        if with_prompt:
+            # Инструкция идёт первым ключом: модели читают файл сверху вниз
+            reference = {"instructions_for_ai": "\n".join(cls._AI_INSTRUCTIONS),
+                         **reference}
+        return reference
 
     def missing_attrs(
         self, system_name: str, group: Optional[str], module_index: int,
