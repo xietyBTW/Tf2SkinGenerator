@@ -22,6 +22,15 @@ logger = setup_logging(
     log_file=_log_file,
 )
 
+# Нативные падения (access violation в Qt/драйвере) не оставляют
+# Python-трейсбека — faulthandler допишет стек прямо в лог
+try:
+    import faulthandler
+    _fault_log = open(_log_dir / "tf2sg_crash.log", "a", buffering=1)
+    faulthandler.enable(file=_fault_log)
+except Exception:  # диагностика не должна мешать запуску
+    pass
+
 
 def _make_splash(app):
     """Создаёт и показывает сплэш-экран."""

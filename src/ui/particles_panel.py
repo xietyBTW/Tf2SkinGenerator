@@ -15,14 +15,16 @@ import json
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import QByteArray, QObject, QSize, Qt, Signal, Slot
+from PySide6.QtCore import (
+    QByteArray, QLocale, QObject, QSize, Qt, QTimer, Signal, Slot,
+)
 from PySide6.QtGui import QColor, QIcon, QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QButtonGroup, QColorDialog, QComboBox, QDoubleSpinBox, QFileDialog,
     QGridLayout, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget,
     QListWidgetItem, QMenu, QMessageBox, QPushButton, QRadioButton,
     QScrollArea, QSlider, QSplitter, QStackedWidget, QTreeWidget,
-    QTreeWidgetItem, QTreeWidgetItemIterator, QVBoxLayout, QWidget,
+    QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
 from src.data.translations import TRANSLATIONS
@@ -88,16 +90,24 @@ class _PcfLoadWorker(StandardWorker):
 
 class _ParticleBridge(QObject):
     ready = Signal()
+    gizmo_edit = Signal(str)   # JSON {system, edits: [...], final}
 
     @Slot()
     def notifyReady(self) -> None:  # noqa: N802
         self.ready.emit()
+
+    @Slot(str)
+    def gizmoEdit(self, payload: str) -> None:  # noqa: N802
+        """Драг ручки гизмо в 3D-превью — правка атрибутов из JS."""
+        self.gizmo_edit.emit(payload)
 
 
 # ── Виджет превью ────────────────────────────────────────────────────────── #
 
 class ParticleViewWidget(QWidget):
     """QWebEngineView с particles3d.html (или заглушка без WebEngine)."""
+
+    gizmo_edited = Signal(str)   # проброс _ParticleBridge.gizmo_edit
 
     def __init__(self, parent=None, language: str = 'en'):
         super().__init__(parent)
@@ -126,6 +136,7 @@ class ParticleViewWidget(QWidget):
         self._view = QWebEngineView(self)
         self._bridge = _ParticleBridge()
         self._bridge.ready.connect(self._on_ready)
+        self._bridge.gizmo_edit.connect(self.gizmo_edited)
         self._channel = QWebChannel()
         self._channel.registerObject("pyBridge", self._bridge)
         self._view.page().setWebChannel(self._channel)
@@ -169,6 +180,10 @@ class ParticleViewWidget(QWidget):
 
     def set_root(self, name: str) -> None:
         self._run(f"window.setRootSystem({json.dumps(name)})")
+
+    def set_gizmo_visible(self, visible: bool) -> None:
+        """Каркас области спавна (сфера/бокс инициализаторов позиции)."""
+        self._run(f"window.setGizmoVisible({json.dumps(bool(visible))})")
 
     def restart(self) -> None:
         self._run("window.restartEffect()")
@@ -258,6 +273,23 @@ def _pixmap_from_data_url(data_url, size: int = 112) -> QPixmap:
 
 # ── Простой режим: панель крутилок по схеме SIMPLE_PARAMS ────────────────── #
 
+class _NumSpin(QDoubleSpinBox):
+    """Числовое поле, не зависящее от локали: и «12.5», и «12,5» дают 12.5.
+
+    Под русской локалью штатный QDoubleSpinBox отбрасывает точку — набранное
+    «12.5» превращалось в 125. Запятая заменяется точкой прямо при вводе.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setLocale(QLocale.c())
+
+    def validate(self, text: str, pos: int):
+        return super().validate(text.replace(",", "."), pos)
+
+    def valueFromText(self, text: str) -> float:
+        return super().valueFromText(text.replace(",", "."))
+
 class _SimpleParamsWidget(QWidget):
     """Крутилки простого режима. Строится из SIMPLE_PARAMS: новая крутилка в
     схеме появляется здесь сама. Значения читает из systems_json, правки
@@ -316,12 +348,15 @@ class _SimpleParamsWidget(QWidget):
     # ── Построение строк ─────────────────────────────────────────────────── #
 
     def _make_spin(self, param) -> QDoubleSpinBox:
-        spin = QDoubleSpinBox()
+        spin = _NumSpin()
         spin.setRange(param.minimum, param.maximum)
         spin.setDecimals(param.decimals)
         spin.setStyleSheet(self._spin_style)
         spin.setMinimumWidth(64)
         spin.setButtonSymbols(QDoubleSpinBox.ButtonSymbols.NoButtons)
+        # Без этого правка уходит в модель на КАЖДЫЙ символ: набор «12.5»
+        # писал 1 → 12 → 125. Значение фиксируется по Enter/потере фокуса.
+        spin.setKeyboardTracking(False)
         return spin
 
     def _build_row(self, row: int, param) -> None:
@@ -475,10 +510,26 @@ class ParticlesPanel(QWidget):
 
         self.service: Optional[ParticleEditorService] = None
         self._payload: Optional[dict] = None
+        self._attr_items: dict = {}   # (группа, индекс, атрибут) → строка дерева
         self._worker: Optional[_PcfLoadWorker] = None
         self._queued_source: Optional[str] = None
         self._current_system: str = ""
         self._paused = False
+
+        # Отложенное применение правок крутилок (см. _on_simple_edit)
+        self._simple_pending_attrs: set = set()
+        self._simple_pending_rebuild = False
+        self._simple_timer = QTimer(self)
+        self._simple_timer.setInterval(60)
+        self._simple_timer.setSingleShot(True)
+        self._simple_timer.timeout.connect(self._flush_simple_edit)
+
+        # Отложенная синхронизация правок из 3D-гизмо (см. _on_gizmo_edit)
+        self._gizmo_pending: set = set()
+        self._gizmo_timer = QTimer(self)
+        self._gizmo_timer.setInterval(150)
+        self._gizmo_timer.setSingleShot(True)
+        self._gizmo_timer.timeout.connect(self._flush_gizmo_edit)
 
         self._build_ui()
         self._populate_game_pcfs()
@@ -681,7 +732,6 @@ class ParticlesPanel(QWidget):
         self.prop_stack.addWidget(self.attr_tree)       # 1 = экспертно
         prop_box_l.addWidget(self.prop_stack, 1)
         left.addWidget(prop_box)
-        self._set_level(0)
 
         left.setSizes([240, 420])
         left.setCollapsible(0, False)
@@ -705,6 +755,7 @@ class ParticlesPanel(QWidget):
         right_l.addLayout(self._icons_row)
 
         self.view = ParticleViewWidget(self, language=self.language)
+        self.view.gizmo_edited.connect(self._on_gizmo_edit)
 
         cards_page = QWidget()
         cards_l = QVBoxLayout(cards_page)
@@ -832,6 +883,9 @@ class ParticlesPanel(QWidget):
 
         root.addLayout(content_row, 1)
 
+        # После создания превью: чипы уровня + гизмо области спавна
+        self._set_level(0)
+
     # ── Загрузка PCF ─────────────────────────────────────────────────────── #
 
     def _populate_game_pcfs(self) -> None:
@@ -905,6 +959,14 @@ class ParticlesPanel(QWidget):
     def _on_system_selected(self, current, _previous) -> None:
         if current is None or self._payload is None:
             return
+        # Недоприменённые правки крутилок/гизмо относятся к прежней системе:
+        # их адреса (группа, индекс) в новой указывают на другие модули
+        if self._simple_timer.isActive():
+            self._simple_timer.stop()
+            self._flush_simple_edit()
+        if self._gizmo_timer.isActive():
+            self._gizmo_timer.stop()
+            self._flush_gizmo_edit()
         name = current.text()
         self._current_system = name
         self.texture_btn.setEnabled(True)
@@ -967,6 +1029,7 @@ class ParticlesPanel(QWidget):
         item = self.texture_cards.itemAt(pos)
         if item is None or self.service is None:
             return
+        self._flush_pending()
         mat = item.data(_ROLE_MATERIAL)
         menu = QMenu(self)
         act_game = menu.addAction(self.t['particles_pick_game_tex'])
@@ -1029,6 +1092,7 @@ class ParticlesPanel(QWidget):
         self._refresh_texture_cards()
 
     def _on_card_double_clicked(self, item: QListWidgetItem) -> None:
+        self._flush_pending()
         mat = item.data(_ROLE_MATERIAL)
         path, _ = QFileDialog.getOpenFileName(
             self, self.t['particles_set_texture'], "",
@@ -1065,8 +1129,12 @@ class ParticlesPanel(QWidget):
         self._fill_attr_tree(self._current_system)
         self._refresh_texture_cards()
 
-    def _fill_attr_tree(self, system_name: str) -> None:
+    def _fill_attr_tree(self, system_name: str,
+                        refresh_simple: bool = True) -> None:
         self.attr_tree.clear()
+        # Карта (группа, индекс модуля, атрибут) → строка дерева: точечное
+        # обновление без обхода (см. _refresh_tree_attr)
+        self._attr_items = {}
         sys_json = self._payload["systems"].get(system_name)
         if sys_json is None:
             return
@@ -1085,6 +1153,7 @@ class ParticlesPanel(QWidget):
                     v = tv["v"]
                     item.setForeground(1, QColor(v[0], v[1], v[2]))
                 parent_item.addChild(item)
+                self._attr_items[(group, mod_idx, attr_name)] = item
 
         sys_item = QTreeWidgetItem([system_name, ""])
         self.attr_tree.addTopLevelItem(sys_item)
@@ -1117,7 +1186,8 @@ class ParticlesPanel(QWidget):
             ch_item.addChild(child_item)
 
         # Крутилки простого режима смотрят на тот же systems_json
-        self._refresh_simple()
+        if refresh_simple:
+            self._refresh_simple()
 
     # ── Структурное редактирование ───────────────────────────────────────── #
 
@@ -1155,6 +1225,7 @@ class ParticlesPanel(QWidget):
         item = self.systems_list.itemAt(pos)
         if item is None or self.service is None:
             return
+        self._flush_pending()
         name = item.text()
         t = self.t
         menu = QMenu(self)
@@ -1215,6 +1286,7 @@ class ParticlesPanel(QWidget):
         item = self.attr_tree.itemAt(pos)
         if item is None or self.service is None or not self._current_system:
             return
+        self._flush_pending()
         t = self.t
         sys_name = self._current_system
         group = item.data(0, _ROLE_GROUP)
@@ -1427,6 +1499,23 @@ class ParticlesPanel(QWidget):
         self.level_expert_btn.setStyleSheet(
             self._chip_active if level == 1 else self._chip_inactive)
         self.prop_stack.setCurrentIndex(level)
+        # Каркас области спавна — часть простого режима: в экспертном
+        # позиция правится числами, лишняя графика там только мешает
+        self.view.set_gizmo_visible(level == 0)
+
+    def _flush_pending(self) -> None:
+        """Применяет отложенные правки крутилок/гизмо прямо сейчас.
+
+        Обязательно ПЕРЕД любым модальным диалогом: он крутит вложенный цикл
+        событий, где таймеры продолжают тикать и могут пересобрать дерево —
+        строки, с которыми работает вызвавший код, при этом умирают.
+        """
+        if self._simple_timer.isActive():
+            self._simple_timer.stop()
+            self._flush_simple_edit()
+        if self._gizmo_timer.isActive():
+            self._gizmo_timer.stop()
+            self._flush_gizmo_edit()
 
     def _refresh_simple(self) -> None:
         """Перечитывает крутилки из payload (после любой правки/выбора)."""
@@ -1436,7 +1525,12 @@ class ParticlesPanel(QWidget):
         self.simple_widget.set_system(sys_json)
 
     def _on_simple_edit(self, param, value) -> None:
-        """Крутилка изменена → пишем те же атрибуты, что видит дерево."""
+        """Крутилка изменена → пишем те же атрибуты, что видит дерево.
+
+        В Element-дерево пишем сразу (модель всегда актуальна), а пересборку
+        systems_json + перезалив превью откладываем: у больших PCF это ~20 мс,
+        а перетаскивание ползунка даёт десятки событий в секунду.
+        """
         if self.service is None or self._payload is None \
                 or not self._current_system:
             return
@@ -1447,20 +1541,33 @@ class ParticlesPanel(QWidget):
         calls = simple_params.write_calls(sys_json, param, value)
         if not calls:
             return
-        new_rows = False
         for group, idx, attr, attr_type, val in calls:
             attrs = (sys_json["attrs"] if group is None
                      else sys_json[group][idx]["attrs"])
             if attr not in attrs:
-                new_rows = True   # атрибут появится впервые — дереву нужна строка
+                # Атрибут появится впервые — дереву нужна новая строка
+                self._simple_pending_rebuild = True
             self.service.ensure_attr(sys_name, group, idx, attr, attr_type, val)
+            self._simple_pending_attrs.add((group, idx, attr))
+        self._simple_timer.start()
+
+    def _flush_simple_edit(self) -> None:
+        """Отложенное применение правок крутилок: превью + строки дерева."""
+        if self.service is None or self._payload is None \
+                or not self._current_system:
+            return
+        sys_name = self._current_system
         self._payload["systems"] = self.service.systems_json()
         self.view.update_systems(self._payload["systems"], sys_name)
-        if new_rows:
-            self._fill_attr_tree(sys_name)
+        # Пока правим крутилками, обратный рефреш их же значений не нужен —
+        # иначе программная установка дёргает виджет прямо под курсором
+        if self._simple_pending_rebuild:
+            self._fill_attr_tree(sys_name, refresh_simple=False)
         else:
-            for group, idx, attr, _t, _v in calls:
+            for group, idx, attr in self._simple_pending_attrs:
                 self._refresh_tree_attr(group, idx, attr)
+        self._simple_pending_rebuild = False
+        self._simple_pending_attrs.clear()
 
     def _on_simple_enable(self, param) -> None:
         """Кнопка «Включить»: создаёт недостающие модули крутилки."""
@@ -1471,6 +1578,7 @@ class ParticlesPanel(QWidget):
         sys_json = self._payload["systems"].get(sys_name)
         if sys_json is None:
             return
+        self._flush_pending()
         from PySide6.QtWidgets import QApplication
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
@@ -1480,30 +1588,106 @@ class ParticlesPanel(QWidget):
             QApplication.restoreOverrideCursor()
         self._structure_changed(keep_system=sys_name)
 
+    def _on_gizmo_edit(self, payload_json: str) -> None:
+        """Правка из драга ручки 3D-гизмо.
+
+        JS уже мутировал свою копию systemsJson и показал результат — во
+        время драга в превью НИЧЕГО не пушим (пуш пересоздаёт систему и
+        эффект мигает). Здесь только Element-дерево + отложенно дерево/крутилки.
+        Единственный пуш — по отпусканию кнопки, если пришлось создать модуль
+        (его JS-заготовка не в списке инициализаторов живого инстанса).
+        """
+        if self.service is None or self._payload is None:
+            return
+        try:
+            data = json.loads(payload_json)
+            edits = list(data.get("edits") or [])
+        except Exception:
+            return
+        sys_name = data.get("system")
+        if not sys_name or sys_name != self._current_system:
+            return
+        sys_json = self._payload["systems"].get(sys_name)
+        if sys_json is None:
+            return
+        final = bool(data.get("final"))
+        created = False
+        for e in edits:
+            try:
+                group, fn = e["group"], (e["fn"] or "").strip()
+                attr, atype, value = e["attr"], e["type"], e["value"]
+            except (KeyError, TypeError, AttributeError):
+                continue
+            if group not in MODULE_GROUPS or not fn or not attr:
+                continue
+            idx = simple_params._module_index(sys_json, group, fn)
+            if idx is None:
+                if not final:
+                    continue      # модуль создаём один раз, по отпусканию
+                if not self.service.add_module(sys_name, group, fn,
+                                               self.tf2_root):
+                    continue
+                created = True
+                self._payload["systems"] = self.service.systems_json()
+                sys_json = self._payload["systems"][sys_name]
+                idx = simple_params._module_index(sys_json, group, fn)
+                if idx is None:
+                    continue
+            self.service.ensure_attr(sys_name, group, idx, attr, atype, value)
+            self._gizmo_pending.add((group, idx, attr))
+        if final:
+            self._gizmo_timer.stop()
+            self._flush_gizmo_edit()
+            if created:
+                self._payload["systems"] = self.service.systems_json()
+                self.view.update_systems(self._payload["systems"], sys_name)
+                self._fill_attr_tree(sys_name)
+        else:
+            self._gizmo_timer.start()
+
+    def _flush_gizmo_edit(self) -> None:
+        """Синхронизация модели/дерева/крутилок по правкам гизмо (без превью)."""
+        if self.service is None or self._payload is None \
+                or not self._current_system:
+            return
+        self._payload["systems"] = self.service.systems_json()
+        for group, idx, attr in self._gizmo_pending:
+            self._refresh_tree_attr(group, idx, attr)
+        self._gizmo_pending.clear()
+        self._refresh_simple()
+
     def _refresh_tree_attr(self, group, mod_idx: int, attr_name: str) -> None:
         """Обновляет одну строку дерева по адресу атрибута (без пересборки —
-        она сворачивает ветки и сбрасывает прокрутку)."""
+        она сворачивает ветки и сбрасывает прокрутку).
+
+        Строка берётся из _attr_items, а не поиском по дереву:
+        QTreeWidgetItemIterator держит СЫРЫЕ указатели, и пересборка дерева
+        (её могут запустить таймеры прямо из-под модального диалога)
+        превращала обход в access violation.
+        """
         sys_json = self._payload["systems"].get(self._current_system)
         if sys_json is None:
             return
-        attrs = (sys_json["attrs"] if group is None
-                 else sys_json[group][mod_idx]["attrs"])
+        try:
+            # Адрес мог устареть (структурная правка при взведённом таймере)
+            attrs = (sys_json["attrs"] if group is None
+                     else sys_json[group][mod_idx]["attrs"])
+        except (IndexError, KeyError):
+            return
         tv = attrs.get(attr_name)
-        if tv is None:
+        item = self._attr_items.get((group, mod_idx, attr_name))
+        if tv is None or item is None:
             return
         value_text = _fmt_value(tv)
-        it = QTreeWidgetItemIterator(self.attr_tree)
-        while it.value():
-            item = it.value()
-            meta = item.data(0, _ROLE_ATTR)
-            if meta is not None and meta[:3] == (group, mod_idx, attr_name):
-                item.setText(1, value_text)
-                item.setToolTip(1, value_text)
-                if tv["t"] == "color":
-                    v = tv["v"]
-                    item.setForeground(1, QColor(v[0], v[1], v[2]))
-                break
-            it += 1
+        try:
+            item.setText(1, value_text)
+            item.setToolTip(1, value_text)
+            if tv["t"] == "color":
+                v = tv["v"]
+                item.setForeground(1, QColor(v[0], v[1], v[2]))
+        except RuntimeError:
+            # Строку удалили пересборкой дерева — карта устарела
+            self._attr_items.pop((group, mod_idx, attr_name), None)
 
     # ── Правка атрибутов ─────────────────────────────────────────────────── #
 
@@ -1511,6 +1695,7 @@ class ParticlesPanel(QWidget):
         meta = item.data(0, _ROLE_ATTR)
         if meta is None or self.service is None:
             return
+        self._flush_pending()   # диалог ниже крутит вложенный цикл событий
         group, mod_idx, attr_name, attr_type = meta
         sys_name = self._current_system
         sys_json = self._payload["systems"][sys_name]
@@ -1536,18 +1721,9 @@ class ParticlesPanel(QWidget):
             self.view.update_systems(self._payload["systems"], sys_name)
 
         # Обновляем ТОЛЬКО изменённую строку — пересборка дерева сворачивала
-        # ветки и сбрасывала прокрутку наверх
-        sys_json = self._payload["systems"][sys_name]
-        attrs = (sys_json["attrs"] if group is None
-                 else sys_json[group][mod_idx]["attrs"])
-        tv = attrs.get(attr_name)
-        if tv is not None:
-            value_text = _fmt_value(tv)
-            item.setText(1, value_text)
-            item.setToolTip(1, value_text)
-            if tv["t"] == "color":
-                v = tv["v"]
-                item.setForeground(1, QColor(v[0], v[1], v[2]))
+        # ветки и сбрасывала прокрутку наверх. Через карту строк, а не через
+        # item: за время диалога дерево могло пересобраться
+        self._refresh_tree_attr(group, mod_idx, attr_name)
         self._refresh_simple()   # та же правка видна крутилкам простого режима
 
     def _ask_value(self, attr_name: str, attr_type: str, cur):
@@ -1600,6 +1776,7 @@ class ParticlesPanel(QWidget):
         меняют материал целиком)."""
         if self.service is None or not self._current_system or self._payload is None:
             return
+        self._flush_pending()
         t = self.t
         sys_name = self._current_system
         cur_mat = (self._payload["systems"].get(sys_name, {})
@@ -1638,6 +1815,7 @@ class ParticlesPanel(QWidget):
         """Убирает модули тинта у эффекта — текстуры в родных цветах."""
         if self.service is None or not self._current_system or self._payload is None:
             return
+        self._flush_pending()
         t = self.t
         answer = QMessageBox.question(
             self, t['particles_natural_colors'], t['particles_colors_confirm'],

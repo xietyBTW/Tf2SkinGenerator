@@ -104,6 +104,30 @@ def test_ensure_attr_creates_missing():
     assert not svc.ensure_attr("fx", "operators", 5, "drag", "float", 1.0)
 
 
+def test_num_spin_accepts_both_decimal_separators():
+    """Под русской локалью штатный QDoubleSpinBox глотает точку («12.5» → 125).
+    _NumSpin принимает оба разделителя."""
+    qtwidgets = pytest.importorskip("PySide6.QtWidgets")
+    if not hasattr(qtwidgets, "QDoubleSpinBox"):
+        pytest.skip("PySide6 подменён заглушкой соседним тестом")
+    from PySide6.QtCore import QLocale
+    QLocale.setDefault(QLocale(QLocale.Language.Russian,
+                               QLocale.Country.Russia))
+    app = qtwidgets.QApplication.instance() or qtwidgets.QApplication([])
+    from src.ui.particles_panel import _NumSpin
+
+    spin = _NumSpin()
+    spin.setRange(0, 1000)
+    spin.setDecimals(2)
+    for typed, expected in (("12.5", 12.5), ("3,25", 3.25), ("48", 48.0)):
+        spin.lineEdit().setText("")
+        for ch in typed:
+            spin.lineEdit().insert(ch)
+        spin.interpretText()
+        assert spin.value() == expected, typed
+    del app
+
+
 def test_schema_sanity():
     """Каждая запись схемы согласована: kind ↔ количество refs."""
     for p in SIMPLE_PARAMS:
