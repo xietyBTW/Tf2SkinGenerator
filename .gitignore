@@ -25,6 +25,8 @@ run_test.bat
 build/
 dist/
 *.spec
+# кроме нашей: в ней описан состав сборки (исключения Qt/WebEngine)
+!Tf2SkinGenerator.spec
 
 # ── Скрипты сборки и установщик (не нужны пользователям) ─────
 *.bat

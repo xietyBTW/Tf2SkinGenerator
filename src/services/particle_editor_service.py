@@ -1514,9 +1514,12 @@ class ParticleEditorService:
         "- Distances are Hammer units: a player is about 83 units tall, a "
         "weapon about 30 units long, 1 unit is roughly 1.9 cm. Z is up.",
         "- Times are in seconds. Colors are [r, g, b, a], each 0-255.",
-        "- 'material' is a path such as \"effects\\\\crit.vmt\". Prefer "
-        "paths that already exist in the game unless the user supplies "
-        "their own texture.",
+        "- 'material' is the particle texture. Pick one from "
+        "available_materials.paths in this file — those are the materials "
+        "that actually ship with the game, so the effect works without the "
+        "user supplying any texture. Copy the path exactly, including "
+        "backslashes (escape them in JSON: \"effects\\\\crit.vmt\"). Never "
+        "invent a material path: a missing material means no texture in game.",
         "- 'example' values in this file come from real game effects. They "
         "are not engine defaults; use them as a sanity check for scale.",
         "",
@@ -1543,7 +1546,8 @@ class ParticleEditorService:
     @classmethod
     def param_reference(cls, tf2_root_dir: str = "",
                         supported: Optional[dict] = None,
-                        with_prompt: bool = False) -> dict:
+                        with_prompt: bool = False,
+                        materials: Optional[List[str]] = None) -> dict:
         """
         Справочник параметров для генерации пресетов внешними средствами.
 
@@ -1624,6 +1628,15 @@ class ParticleEditorService:
                               for name, tv in sorted(system_attrs.items())},
             "modules": groups,
         }
+        if materials is not None:
+            # Текстуры частиц, которые уже есть в игре: эффект с таким
+            # материалом работает сразу, ничего доустанавливать не нужно
+            reference["available_materials"] = {
+                "about": "Particle materials shipped with the game. Use one "
+                         "of these as the 'material' value; paths are exact.",
+                "count": len(materials),
+                "paths": list(materials),
+            }
         if with_prompt:
             # Инструкция идёт первым ключом: модели читают файл сверху вниз
             reference = {"instructions_for_ai": "\n".join(cls._AI_INSTRUCTIONS),

@@ -700,6 +700,17 @@ def test_param_reference(monkeypatch, tmp_path):
     assert "One preset describes ONE particle system" in prompt
     # Остальной справочник не потерялся
     assert with_ai["modules"] == ref["modules"]
+
+    # Список игровых текстур: попадает в справочник и в задание
+    assert "available_materials" not in ref     # без materials секции нет
+    with_mats = ParticleEditorService.param_reference(
+        "D:/fake", supported=support, with_prompt=True,
+        materials=["effects\\crit.vmt", "effects\\yellowflare.vmt"])
+    am = with_mats["available_materials"]
+    assert am["count"] == 2
+    assert "effects\\crit.vmt" in am["paths"]
+    assert "available_materials.paths" in with_mats["instructions_for_ai"]
+
     ParticleEditorService._attr_catalog.clear()
     ParticleEditorService._module_display.clear()
 

@@ -1456,9 +1456,13 @@ class ParticlesPanel(QWidget):
             return
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
+            # Список игровых текстур частиц: без него ассистент выдумывает
+            # несуществующие пути, и эффект остаётся без текстуры
+            materials = (ParticleEditorService.game_effect_materials(
+                self.tf2_root) if self.tf2_root else None)
             data = ParticleEditorService.param_reference(
                 self.tf2_root, supported=self._supported or None,
-                with_prompt=with_prompt)
+                with_prompt=with_prompt, materials=materials)
             Path(path).write_text(
                 json.dumps(data, ensure_ascii=False, indent=2),
                 encoding="utf-8")
