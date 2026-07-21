@@ -57,12 +57,21 @@ TRANSLATIONS = {
         'particles_colors_done': 'Удалено модулей цвета: {count}. Не забудьте сохранить или собрать VPK.',
         'particles_colors_none': 'У этого эффекта нет модулей цвета — текстуры уже в родных цветах.',
         'particles_menu_add_layer': 'Добавить слой со своей текстурой…',
+        'particles_menu_rename': 'Переименовать систему…',
+        'particles_menu_rename_material': 'Переименовать материал…',
+        'particles_new_material_prompt': 'Новый путь материала (например, '
+                                         'effects\\my_effect.vmt):',
+        'particles_name_taken': 'Такое имя уже занято.',
         'particles_menu_duplicate': 'Дублировать систему…',
         'particles_menu_remove_system': 'Удалить систему',
         'particles_menu_add_child': 'Добавить дочернюю…',
         'particles_menu_remove_child': 'Отцепить дочернюю',
         'particles_menu_add_module': 'Добавить модуль…',
         'particles_menu_remove_module': 'Удалить модуль',
+        'particles_menu_add_attr': 'Добавить параметр…',
+        'particles_menu_remove_attr': 'Удалить параметр (вернуть умолчание)',
+        'particles_pick_attr': 'Параметр (значение — как в эффектах игры):',
+        'particles_attr_all_set': 'Все известные параметры уже заданы.',
         'particles_menu_copy': 'Копировать выделенное',
         'particles_menu_copy_all': 'Копировать все параметры',
         'particles_menu_paste': 'Вставить параметры',
@@ -77,6 +86,34 @@ TRANSLATIONS = {
         'particles_not_previewed_tip': 'Этот модуль превью не симулирует — '
                                        'в игре он работает, но здесь изменения '
                                        'не видны.',
+        'particles_search': 'Поиск системы…',
+        'particles_not_previewed': 'нет в превью',
+        'particles_not_previewed_tip': 'Этот модуль превью не симулирует — '
+                                       'в игре он работает, но здесь изменения '
+                                       'не видны.',
+        'particles_lint_title': 'Проверка перед сборкой',
+        'particles_lint_intro': 'Найдено проблем: {count}. Они могут привести '
+                                'к тому, что эффект не будет виден в игре.',
+        'particles_lint_more': '  …и ещё {count}',
+        'particles_lint_fix': 'Исправить ({count}) и собрать',
+        'particles_lint_as_is': 'Собрать как есть',
+        'particles_lint_cp_camera': 'Эффект скрыт, когда на контрольной точке '
+                                    'камера игрока (обычно нужно -1)',
+        'particles_lint_no_renderer': 'Нет рендерера — частицы не рисуются',
+        'particles_lint_no_emitter': 'Нет эмиттера и дочерних систем — система '
+                                     'ничего не создаёт',
+        'particles_lint_no_particles': 'Максимум частиц равен нулю — частиц '
+                                       'не будет',
+        'particles_lint_zero_radius': 'Нулевой размер частиц — их не будет видно',
+        'particles_lint_zero_alpha': 'Прозрачность цвета равна нулю — частицы '
+                                     'невидимы',
+        'particles_lint_viewmodel': 'Эффект только для вида от первого лица',
+        'particles_lint_missing_child': 'Дочерняя система "{child}" не найдена '
+                                        'в файле',
+        'particles_lint_material': 'Материал "{material}" не читается — в игре '
+                                   'текстуры не будет',
+        'particles_lint_custom_override': 'Этот эффект перекрыт файлом: {path} — '
+                                          'игра возьмёт его, а не ваш мод',
         'particles_level_simple': 'Просто',
         'particles_level_expert': 'Экспертно',
         'particles_simple_enable': 'Включить',
@@ -520,12 +557,21 @@ TRANSLATIONS = {
         'particles_colors_done': 'Removed {count} color modules. Remember to save or build the VPK.',
         'particles_colors_none': 'This effect has no color modules — textures already use their own colors.',
         'particles_menu_add_layer': 'Add layer with custom texture…',
+        'particles_menu_rename': 'Rename system…',
+        'particles_menu_rename_material': 'Rename material…',
+        'particles_new_material_prompt': 'New material path (e.g. '
+                                         'effects\\my_effect.vmt):',
+        'particles_name_taken': 'That name is already taken.',
         'particles_menu_duplicate': 'Duplicate system…',
         'particles_menu_remove_system': 'Remove system',
         'particles_menu_add_child': 'Add child…',
         'particles_menu_remove_child': 'Detach child',
         'particles_menu_add_module': 'Add module…',
         'particles_menu_remove_module': 'Remove module',
+        'particles_menu_add_attr': 'Add parameter…',
+        'particles_menu_remove_attr': 'Remove parameter (back to default)',
+        'particles_pick_attr': 'Parameter (value as used in game effects):',
+        'particles_attr_all_set': 'All known parameters are already set.',
         'particles_menu_copy': 'Copy selected',
         'particles_menu_copy_all': 'Copy all parameters',
         'particles_menu_paste': 'Paste parameters',
@@ -540,6 +586,29 @@ TRANSLATIONS = {
         'particles_not_previewed_tip': 'This module is not simulated by the '
                                        'preview — it works in game, but changes '
                                        'are not visible here.',
+        'particles_search': 'Find system…',
+        'particles_lint_title': 'Pre-build check',
+        'particles_lint_intro': 'Problems found: {count}. They can make the '
+                                'effect invisible in game.',
+        'particles_lint_more': '  …and {count} more',
+        'particles_lint_fix': 'Fix ({count}) and build',
+        'particles_lint_as_is': 'Build as is',
+        'particles_lint_cp_camera': 'Effect is hidden when the player camera is '
+                                    'on this control point (-1 is usually wanted)',
+        'particles_lint_no_renderer': 'No renderer — particles are not drawn',
+        'particles_lint_no_emitter': 'No emitter and no children — this system '
+                                     'creates nothing',
+        'particles_lint_no_particles': 'Max particles is zero — there will be '
+                                       'no particles',
+        'particles_lint_zero_radius': 'Zero particle size — nothing will be seen',
+        'particles_lint_zero_alpha': 'Color alpha is zero — particles are invisible',
+        'particles_lint_viewmodel': 'First-person view only effect',
+        'particles_lint_missing_child': 'Child system "{child}" is missing from '
+                                        'the file',
+        'particles_lint_material': 'Material "{material}" cannot be read — there '
+                                   'will be no texture in game',
+        'particles_lint_custom_override': 'This effect is overridden by: {path} — '
+                                          'the game will use it instead of your mod',
         'particles_level_simple': 'Simple',
         'particles_level_expert': 'Expert',
         'particles_simple_enable': 'Enable',

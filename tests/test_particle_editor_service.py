@@ -519,6 +519,174 @@ def test_paste_params_duplicate_modules():
     assert ops[0]["attrs"]["drag"]["v"] == 0.5
 
 
+def test_attr_catalog_and_missing_attrs():
+    """Каталог параметров модуля собирается из самих эффектов, а не из
+    захардкоженного списка."""
+    ParticleEditorService._attr_catalog.clear()
+    svc = ParticleEditorService()
+    svc.load_bytes(_make_pcf_bytes())
+
+    # В фикстуре у Color Random задан только color1 — добавим второй
+    # экземпляр модуля с другим полем, каталог должен объединить оба
+    assert svc.add_module("fx_child", "initializers", "Color Random")
+    d = svc._find_definition("fx_child")
+    mod = list(d["initializers"].iter_elem())[0]
+    mod["tint_perc"] = Attribute.float("tint_perc", 0.5)
+
+    cat = ParticleEditorService.module_attr_catalog(
+        "initializers", "Color Random", current=svc)
+    assert "color1" in cat and "tint_perc" in cat
+    assert cat["color1"]["t"] == "color"
+    # Служебные поля в каталог не попадают
+    assert "functionname" not in cat and "name" not in cat
+
+    # У исходного модуля не хватает tint_perc
+    missing = svc.missing_attrs("fx", "initializers", 0)
+    assert "tint_perc" in missing and "color1" not in missing
+
+    # Каталог параметров самой системы (group=None)
+    ParticleEditorService._attr_catalog.clear()
+    sys_cat = ParticleEditorService.module_attr_catalog(None, "", current=svc)
+    assert "max_particles" in sys_cat and "material" in sys_cat
+    sys_missing = svc.missing_attrs("fx_child", None, 0)
+    assert "radius" in sys_missing          # есть у fx, нет у fx_child
+    ParticleEditorService._attr_catalog.clear()
+
+
+def test_attr_catalog_disk_cache(tmp_path, monkeypatch):
+    """Каталог собирается ОДНИМ проходом на все модули и переживает
+    перезапуск: иначе пользователь ловил паузу на каждый новый модуль."""
+    ParticleEditorService._attr_catalog.clear()
+    cache_file = tmp_path / "catalog.json"
+    monkeypatch.setattr(ParticleEditorService, "_attr_catalog_file",
+                        staticmethod(lambda: cache_file))
+    monkeypatch.setattr(ParticleEditorService, "_game_stamp",
+                        classmethod(lambda cls, root: "stamp-1"))
+    monkeypatch.setattr(ParticleEditorService, "list_game_pcfs",
+                        staticmethod(lambda root: ["fake.pcf"]))
+
+    def fake_load(self, root, pcf):
+        self.load_bytes(_make_pcf_bytes())
+    monkeypatch.setattr(ParticleEditorService, "load_from_game", fake_load)
+
+    ParticleEditorService.build_attr_catalog("D:/fake")
+    # За один проход собраны и модули, и параметры самой системы
+    assert ("initializers", "color random") in ParticleEditorService._attr_catalog
+    assert (None, "") in ParticleEditorService._attr_catalog   # сама система
+    assert cache_file.is_file()
+
+    # Перезапуск: каталог поднимается с диска без скана
+    ParticleEditorService._attr_catalog.clear()
+    monkeypatch.setattr(ParticleEditorService, "list_game_pcfs",
+                        staticmethod(lambda root: pytest.fail("скан не нужен")))
+    ParticleEditorService.build_attr_catalog("D:/fake")
+    assert ("initializers", "color random") in ParticleEditorService._attr_catalog
+
+    # Игра обновилась — отпечаток другой, кэш игнорируется
+    ParticleEditorService._attr_catalog.clear()
+    monkeypatch.setattr(ParticleEditorService, "_game_stamp",
+                        classmethod(lambda cls, root: "stamp-2"))
+    assert not ParticleEditorService._load_disk_catalog("D:/fake")
+    ParticleEditorService._attr_catalog.clear()
+
+
+def test_remove_attr():
+    """Удаление параметра = возврат к умолчанию движка (и меньший PCF)."""
+    svc = ParticleEditorService()
+    svc.load_bytes(_make_pcf_bytes())
+
+    assert svc.remove_attr("fx", None, 0, "radius")
+    assert "radius" not in svc.systems_json()["fx"]["attrs"]
+    assert svc.remove_attr("fx", "initializers", 0, "color1")
+    assert "color1" not in svc.systems_json()["fx"]["initializers"][0]["attrs"]
+
+    # Служебные поля защищены: без них эффект развалится
+    assert not svc.remove_attr("fx", "initializers", 0, "functionName")
+    assert not svc.remove_attr("fx", "initializers", 0, "name")
+    assert svc.systems_json()["fx"]["initializers"][0]["functionName"] \
+        == "Color Random"
+
+    # Несуществующие цели — False, не исключение
+    assert not svc.remove_attr("nope", None, 0, "radius")
+    assert not svc.remove_attr("fx", "initializers", 9, "color1")
+    assert not svc.remove_attr("fx", None, 0, "radius")   # уже удалён
+
+    # Правка переживает сохранение
+    buf = io.BytesIO()
+    svc.root.export_binary(buf, version=2, fmt_name="pcf", fmt_ver=1,
+                           unicode="silent")
+    svc2 = ParticleEditorService()
+    svc2.load_bytes(buf.getvalue())
+    assert "radius" not in svc2.systems_json()["fx"]["attrs"]
+
+
+def test_rename_system():
+    """Переименование не рвёт связь родителя с ребёнком."""
+    svc = ParticleEditorService()
+    svc.load_bytes(_make_pcf_bytes())
+
+    assert svc.rename_system("fx_child", "ghosts")
+    sysj = svc.systems_json()
+    assert "ghosts" in sysj and "fx_child" not in sysj
+    assert sysj["fx"]["children"] == [{"delay": 0.25, "childName": "ghosts"}]
+    # Атрибут name внутри определения тоже обновлён
+    assert svc._find_definition("ghosts")["name"].val_str == "ghosts"
+
+    assert not svc.rename_system("ghosts", "fx")        # имя занято
+    assert not svc.rename_system("ghosts", "  ")        # пустое
+    assert not svc.rename_system("нет такой", "x")
+
+    # Переименование корневой системы и живучесть после сохранения
+    assert svc.rename_system("fx", "fx_main")
+    buf = io.BytesIO()
+    svc.root.export_binary(buf, version=2, fmt_name="pcf", fmt_ver=1,
+                           unicode="silent")
+    svc2 = ParticleEditorService()
+    svc2.load_bytes(buf.getvalue())
+    sysj = svc2.systems_json()
+    assert svc2.system_names() == ["fx_main"]
+    assert sysj["fx_main"]["children"] == [{"delay": 0.25, "childName": "ghosts"}]
+
+
+def test_rename_material():
+    """Свой путь материала вместо перезаписи стокового; кастомные файлы
+    переезжают вместе с ним."""
+    svc = ParticleEditorService()
+    svc.load_bytes(_make_pcf_bytes())
+
+    # fx и fx_child делят материал (разный регистр) — оба переводятся
+    assert svc.rename_material("effects\\test.vmt", "effects\\mine.vmt")
+    sysj = svc.systems_json()
+    assert sysj["fx"]["attrs"]["material"]["v"] == "effects\\mine.vmt"
+    assert sysj["fx_child"]["attrs"]["material"]["v"] == "effects\\mine.vmt"
+
+    assert not svc.rename_material("effects\\nope.vmt", "effects\\x.vmt")
+    assert not svc.rename_material("effects\\mine.vmt", "")
+    # Тот же путь в другом написании — не переименование
+    assert not svc.rename_material("effects\\mine.vmt", "effects/mine.vmt")
+
+    # С кастомной текстурой: файлы и оверрайд едут на новый путь
+    svc2 = ParticleEditorService()
+    svc2.load_bytes(_make_pcf_bytes())
+    svc2.custom_files = {
+        "materials/effects/test.vtf": b"VTF\x00data",
+        "materials/effects/test.vmt": b'"SpriteCard"\n{\n\t"$basetexture" "effects/test"\n}\n',
+    }
+    svc2._overwritten = {"effects/test.vmt": {"tex_rel": "effects/test",
+                                              "material": "effects\\test.vmt"}}
+    svc2._custom_material_info = {"effects/test.vmt": {"dataUrl": "x"}}
+
+    assert svc2.rename_material("effects\\test.vmt", "effects\\custom_star.vmt")
+    assert set(svc2.custom_files) == {"materials/effects/custom_star.vtf",
+                                      "materials/effects/custom_star.vmt"}
+    vmt = svc2.custom_files["materials/effects/custom_star.vmt"].decode()
+    assert '"$basetexture" "effects/custom_star"' in vmt
+    assert svc2.is_custom_material("effects\\custom_star.vmt")
+    assert not svc2.is_custom_material("effects\\test.vmt")
+    # Экспорт видит переехавшие файлы
+    assert set(svc2._active_custom_files()) == set(svc2.custom_files)
+
+
 def test_snapshot_restore():
     """Снимок/восстановление для Ctrl+Z: дерево и оверрайды текстур."""
     svc = ParticleEditorService()

@@ -17,6 +17,7 @@
 
 import base64
 import io
+import json
 import os
 import re
 import struct
@@ -1269,6 +1270,180 @@ class ParticleEditorService:
             extent * 1.5)
         return True
 
+    #: Кэш каталогов параметров: {(группа|None, fn_lower): {имя: {"t","v"}}}.
+    _attr_catalog: Dict[tuple, Dict[str, dict]] = {}
+
+    #: Служебные поля — их не показываем и не даём удалять.
+    _SERVICE_ATTRS = ("functionname", "name", "id")
+
+    @staticmethod
+    def _attr_catalog_file() -> Path:
+        return (Path(os.path.expanduser("~")) / ".tf2skingen_cache"
+                / "particle_attr_catalog.json")
+
+    @classmethod
+    def _game_stamp(cls, tf2_root_dir: str) -> str:
+        """Отпечаток контента игры — чтобы кэш протух после обновления TF2."""
+        try:
+            _, misc_vpk, _ = TF2Paths.resolve(tf2_root_dir)
+            st = Path(misc_vpk).stat()
+            return f"{st.st_size}-{int(st.st_mtime)}"
+        except Exception:
+            return ""
+
+    @classmethod
+    def _load_disk_catalog(cls, tf2_root_dir: str) -> bool:
+        """Поднимает каталог из файла, если он от той же версии игры."""
+        path = cls._attr_catalog_file()
+        try:
+            if not path.is_file():
+                return False
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if data.get("stamp") != cls._game_stamp(tf2_root_dir):
+                return False
+            for key_str, attrs in (data.get("catalog") or {}).items():
+                group, _, fn = key_str.partition("|")
+                cls._attr_catalog[(group or None, fn)] = attrs
+        except Exception as exc:
+            logger.warning(f"Кэш каталога параметров не прочитан: {exc}")
+            return False
+        return bool(cls._attr_catalog)
+
+    @classmethod
+    def _save_disk_catalog(cls, tf2_root_dir: str) -> None:
+        path = cls._attr_catalog_file()
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "stamp": cls._game_stamp(tf2_root_dir),
+                "catalog": {f"{g or ''}|{fn}": attrs
+                            for (g, fn), attrs in cls._attr_catalog.items()},
+            }
+            path.write_text(json.dumps(payload), encoding="utf-8")
+        except Exception as exc:
+            logger.warning(f"Кэш каталога параметров не сохранён: {exc}")
+
+    @classmethod
+    def build_attr_catalog(cls, tf2_root_dir: str) -> None:
+        """
+        Собирает каталог параметров для ВСЕХ модулей игры за один проход.
+
+        Раньше сканировали под каждый запрошенный модуль отдельно, и
+        пользователь ловил пятисекундную паузу снова и снова — теперь
+        один скан на всё, плюс он переживает перезапуск приложения.
+        """
+        if cls._attr_catalog or not tf2_root_dir:
+            return
+        if cls._load_disk_catalog(tf2_root_dir):
+            return
+        # Собираем в локальный словарь и присваиваем целиком: сбор идёт в
+        # фоне, а UI не должен видеть наполовину готовый каталог
+        catalog: Dict[tuple, Dict[str, dict]] = {}
+        for pcf in cls.list_game_pcfs(tf2_root_dir):
+            try:
+                other = cls()
+                other.load_from_game(tf2_root_dir, pcf)
+            except Exception:
+                continue
+            cls._collect_catalog(other, catalog)
+        if catalog:
+            cls._attr_catalog = catalog
+            cls._save_disk_catalog(tf2_root_dir)
+
+    @classmethod
+    def _collect_catalog(cls, svc: "ParticleEditorService",
+                         catalog: Dict[tuple, Dict[str, dict]]) -> None:
+        """Добавляет в каталог параметры всех модулей одного файла."""
+        for d in svc._all_definition_elements():
+            sys_cat = catalog.setdefault((None, ""), {})
+            for name, tv in _element_attrs_to_json(d).items():
+                if name not in cls._SERVICE_ATTRS:
+                    sys_cat.setdefault(name, tv)
+            for group in MODULE_GROUPS:
+                if group not in d:
+                    continue
+                try:
+                    for mod in d[group].iter_elem():
+                        cat = catalog.setdefault(
+                            (group, cls._module_fn(mod)), {})
+                        for name, tv in _module_to_json(mod)["attrs"].items():
+                            if name not in cls._SERVICE_ATTRS:
+                                cat.setdefault(name, tv)
+                except Exception:
+                    continue
+
+    @classmethod
+    def module_attr_catalog(
+        cls, group: Optional[str], function_name: str,
+        tf2_root_dir: str = "", current: Optional["ParticleEditorService"] = None,
+    ) -> Dict[str, dict]:
+        """
+        Все параметры, которые встречаются у этого модуля в эффектах игры.
+
+        Список полей нигде не задекларирован, поэтому собираем его из
+        стоковых PCF. Значение берём первое встреченное: оно заведомо
+        осмысленное (так настроено у Valve) и годится как значение по
+        умолчанию при добавлении. group=None — параметры самого определения
+        системы.
+        """
+        cls.build_attr_catalog(tf2_root_dir)
+        key = (group, (function_name or "").strip().lower())
+        catalog = dict(cls._attr_catalog.get(key) or {})
+        # Открытый файл может знать поля, которых нет в стоке (чужой мод)
+        if current is not None:
+            probe: Dict[tuple, Dict[str, dict]] = {}
+            cls._collect_catalog(current, probe)
+            for name, tv in (probe.get(key) or {}).items():
+                catalog.setdefault(name, tv)
+        return catalog
+
+    def missing_attrs(
+        self, system_name: str, group: Optional[str], module_index: int,
+        tf2_root_dir: str = "",
+    ) -> Dict[str, dict]:
+        """Параметры из каталога, которых у этого модуля/системы ещё нет."""
+        d = self._find_definition(system_name)
+        if d is None:
+            return {}
+        el = d
+        fn = ""
+        if group is not None:
+            if group not in d:
+                return {}
+            try:
+                el = list(d[group].iter_elem())[module_index]
+            except (IndexError, Exception):
+                return {}
+            fn = self._module_fn(el)
+        catalog = self.module_attr_catalog(group, fn, tf2_root_dir, current=self)
+        return {name: tv for name, tv in catalog.items() if name not in el}
+
+    def remove_attr(self, system_name: str, group: Optional[str],
+                    module_index: int, attr_name: str) -> bool:
+        """
+        Удаляет параметр — значение возвращается к умолчанию движка.
+
+        Полезно вдвойне: убирает лишнее и уменьшает PCF (для казуала файл
+        не должен превышать оригинальный).
+        """
+        if (attr_name or "").lower() in self._SERVICE_ATTRS:
+            return False
+        d = self._find_definition(system_name)
+        if d is None:
+            return False
+        el = d
+        if group is not None:
+            if group not in d:
+                return False
+            try:
+                el = list(d[group].iter_elem())[module_index]
+            except (IndexError, Exception):
+                return False
+        if attr_name not in el:
+            return False
+        del el[attr_name]
+        return True
+
     def remove_module(self, system_name: str, group: str, index: int) -> bool:
         """Удаляет модуль по индексу из группы системы."""
         d = self._find_definition(system_name)
@@ -1317,6 +1492,93 @@ class ParticleEditorService:
         if "name" in new:
             new["name"] = Attribute.string(new["name"].name, new_name)
         self.root["particleSystemDefinitions"].append(new)
+        return True
+
+    def rename_system(self, old_name: str, new_name: str) -> bool:
+        """
+        Переименовывает систему вместе со всеми ссылками на неё.
+
+        Дети ссылаются на объект-определение, а не на имя, поэтому связь
+        не рвётся; но у элемента-ссылки (DmeParticleChild) собственное имя
+        совпадает с именем ребёнка — приводим и его, иначе файл выглядит
+        рассогласованным.
+        """
+        new_name = (new_name or "").strip()
+        target = self._find_definition(old_name)
+        if target is None or not new_name or new_name == old_name:
+            return False
+        if self._find_definition(new_name) is not None:
+            return False        # имя занято
+
+        target.name = new_name
+        if "name" in target:
+            target["name"] = Attribute.string(target["name"].name, new_name)
+
+        for el in self._all_definition_elements():
+            if "children" not in el:
+                continue
+            try:
+                for ch in el["children"].iter_elem():
+                    if "child" not in ch:
+                        continue
+                    try:
+                        if ch["child"].val_elem is target:
+                            ch.name = new_name
+                    except Exception:
+                        continue
+            except Exception:
+                continue
+        return True
+
+    def rename_material(self, old_material: str, new_material: str) -> bool:
+        """
+        Меняет путь материала у всех систем, где он используется.
+
+        Если текстура была заменена своей картинкой, кастомные файлы
+        переезжают на новый путь (и VMT начинает ссылаться на новый VTF) —
+        так эффект получает СВОЙ материал вместо перезаписи стокового,
+        и замена перестаёт менять текстуру у других эффектов игры.
+        """
+        new_material = (new_material or "").strip()
+        if not new_material or not old_material:
+            return False
+        old_key, new_key = _norm_mat(old_material), _norm_mat(new_material)
+        if old_key == new_key:
+            return False
+
+        changed = False
+        for el in self._all_definition_elements():
+            if "material" not in el:
+                continue
+            try:
+                if _norm_mat(el["material"].val_str) != old_key:
+                    continue
+            except Exception:
+                continue
+            el["material"] = Attribute.string(
+                el["material"].name, new_material)
+            changed = True
+        if not changed:
+            return False
+
+        entry = self._overwritten.pop(old_key, None)
+        if entry is not None:
+            old_tex = entry["tex_rel"]
+            new_tex = new_key[:-4] if new_key.endswith(".vmt") else new_key
+            vtf = self.custom_files.pop(f"materials/{old_tex}.vtf", None)
+            vmt = self.custom_files.pop(f"materials/{old_key}", None)
+            if vtf is not None:
+                self.custom_files[f"materials/{new_tex}.vtf"] = vtf
+            if vmt is not None:
+                text = vmt.decode("utf-8", errors="replace")
+                text = _RE_BASETEXTURE.sub(
+                    f'\t"$basetexture" "{new_tex}"', text)
+                self.custom_files[f"materials/{new_key}"] = text.encode("utf-8")
+            self._overwritten[new_key] = {
+                "tex_rel": new_tex, "material": new_material}
+            info = self._custom_material_info.pop(old_key, None)
+            if info is not None:
+                self._custom_material_info[new_key] = info
         return True
 
     def remove_system(self, system_name: str) -> bool:

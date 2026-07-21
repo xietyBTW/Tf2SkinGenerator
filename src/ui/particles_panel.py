@@ -29,7 +29,7 @@ from PySide6.QtWidgets import (
 )
 
 from src.data.translations import TRANSLATIONS
-from src.services import simple_params
+from src.services import particle_lint, simple_params
 from src.services.base_worker import StandardWorker
 from src.services.particle_editor_service import (
     MODULE_CATALOG, MODULE_GROUPS, ParticleEditorService,
@@ -88,6 +88,25 @@ class _PcfLoadWorker(StandardWorker):
 
 
 # ── JS-мост ──────────────────────────────────────────────────────────────── #
+
+class _CatalogWarmWorker(StandardWorker):
+    """Прогревает каталог параметров модулей в фоне.
+
+    Сбор идёт по всем PCF игры (секунды) и нужен только когда пользователь
+    полезет добавлять параметр — к этому моменту он уже готов, а после
+    первого раза поднимается с диска мгновенно."""
+
+    def __init__(self, tf2_root: str, parent=None):
+        super().__init__(parent)
+        self._tf2_root = tf2_root
+
+    def work(self):
+        try:
+            ParticleEditorService.build_attr_catalog(self._tf2_root)
+        except Exception as exc:      # прогрев не должен ломать работу
+            logger.warning(f"Каталог параметров не собран: {exc}")
+        return True, ""
+
 
 class _ParticleBridge(QObject):
     ready = Signal()
@@ -525,6 +544,7 @@ class ParticlesPanel(QWidget):
         self._supported: dict = {}
         self._fn_aliases: dict = {}
         self._worker: Optional[_PcfLoadWorker] = None
+        self._catalog_worker: Optional[_CatalogWarmWorker] = None
         self._queued_source: Optional[str] = None
         self._current_system: str = ""
         self._paused = False
@@ -663,6 +683,22 @@ class ParticlesPanel(QWidget):
         sys_lbl = QLabel(self.t['particles_systems'])
         sys_lbl.setStyleSheet(lbl_style)
         sys_box_l.addWidget(sys_lbl)
+
+        # Поиск: у больших эффектов (explosion.pcf — 66 систем) список
+        # иначе не обозреть
+        self.sys_search = QLineEdit()
+        self.sys_search.setPlaceholderText(self.t['particles_search'])
+        self.sys_search.setClearButtonEnabled(True)
+        self.sys_search.setStyleSheet(f"""
+            QLineEdit {{
+                background: {c['surface']}; color: {c['text']};
+                border: 1px solid {c['border']}; border-radius: 4px;
+                padding: 3px 6px; font-size: 12px;
+            }}
+            QLineEdit:focus {{ border-color: {c['border_h']}; }}
+        """)
+        self.sys_search.textChanged.connect(self._filter_systems)
+        sys_box_l.addWidget(self.sys_search)
 
         self.systems_list = QListWidget()
         self.systems_list.setStyleSheet(f"""
@@ -971,6 +1007,7 @@ class ParticlesPanel(QWidget):
         self.service = worker.service
         self._payload = worker.payload
         self._history_reset()
+        self._warm_catalog()
         self.save_btn.setEnabled(True)
         self.build_btn.setEnabled(True)
         self.filename_input.setPlaceholderText(
@@ -980,11 +1017,20 @@ class ParticlesPanel(QWidget):
         # Показываем только корневые определения (children достижимы из них)
         for name in self.service.system_names():
             self.systems_list.addItem(QListWidgetItem(name))
+        self._filter_systems(self.sys_search.text())
         self.view.load_data(self._payload)
         if self.systems_list.count() > 0:
             self.systems_list.setCurrentRow(0)
 
     # ── Выбор системы / дерево свойств ───────────────────────────────────── #
+
+    def _filter_systems(self, text: str) -> None:
+        """Прячет системы, не совпадающие с поиском (выбранную оставляем)."""
+        needle = (text or "").strip().lower()
+        for i in range(self.systems_list.count()):
+            item = self.systems_list.item(i)
+            item.setHidden(bool(needle) and needle not in item.text().lower()
+                           and item.text() != self._current_system)
 
     def _on_system_selected(self, current, _previous) -> None:
         if current is None or self._payload is None:
@@ -1064,6 +1110,7 @@ class ParticlesPanel(QWidget):
         menu = QMenu(self)
         act_game = menu.addAction(self.t['particles_pick_game_tex'])
         act_replace = menu.addAction(self.t['particles_set_texture'])
+        act_rename = menu.addAction(self.t['particles_menu_rename_material'])
         menu.addSeparator()
         act_reset = menu.addAction(self.t['particles_reset_texture'])
         act_reset.setEnabled(self.service.is_custom_material(mat))
@@ -1072,6 +1119,8 @@ class ParticlesPanel(QWidget):
             self._pick_game_material(mat)
         elif chosen is act_replace:
             self._on_card_double_clicked(item)
+        elif chosen is act_rename:
+            self._rename_material(mat)
         elif chosen is act_reset:
             self._reset_material_texture(mat)
 
@@ -1105,6 +1154,29 @@ class ParticlesPanel(QWidget):
         self._history_commit()
         self._payload["systems"] = self.service.systems_json()
         self._payload["materials"] = self.service.materials_json(self.tf2_root)
+        self.view.load_data(self._payload, root_name=self._current_system)
+        self._fill_attr_tree(self._current_system)
+        self._refresh_texture_cards()
+
+    def _rename_material(self, material_name: str) -> None:
+        """Свой путь материала вместо перезаписи стокового: замена текстуры
+        перестаёт менять её у других эффектов игры."""
+        if self.service is None or self._payload is None:
+            return
+        t = self.t
+        new_name, ok = QInputDialog.getText(
+            self, t['particles_menu_rename_material'],
+            t['particles_new_material_prompt'], text=material_name)
+        new_name = (new_name or "").strip()
+        if not ok or not new_name or new_name == material_name:
+            return
+        if not self.service.rename_material(material_name, new_name):
+            return
+        self._history_commit()
+        self._payload["systems"] = self.service.systems_json()
+        if self.tf2_root:
+            self._payload["materials"] = self.service.materials_json(
+                self.tf2_root)
         self.view.load_data(self._payload, root_name=self._current_system)
         self._fill_attr_tree(self._current_system)
         self._refresh_texture_cards()
@@ -1208,6 +1280,14 @@ class ParticlesPanel(QWidget):
                 if tv["t"] == "color":
                     v = tv["v"]
                     item.setForeground(1, QColor(v[0], v[1], v[2]))
+                # Опасное значение — знак вопроса с пояснением; у обычных
+                # значений ничего не показываем
+                warn = particle_lint.attr_warning(attr_name, tv["v"])
+                if warn:
+                    item.setText(1, f"{value_text}  ?")
+                    tip = self.t.get(warn, warn)
+                    item.setToolTip(1, tip)
+                    item.setForeground(1, QColor("#c9a227"))
                 parent_item.addChild(item)
                 self._attr_items[(group, mod_idx, attr_name)] = item
 
@@ -1271,6 +1351,7 @@ class ParticlesPanel(QWidget):
         self.systems_list.clear()
         for name in names:
             self.systems_list.addItem(QListWidgetItem(name))
+        self._filter_systems(self.sys_search.text())
         self.systems_list.blockSignals(False)
         if current in names:
             self.systems_list.setCurrentRow(names.index(current))
@@ -1300,12 +1381,25 @@ class ParticlesPanel(QWidget):
         menu = QMenu(self)
         act_layer = menu.addAction(t['particles_menu_add_layer'])
         menu.addSeparator()
+        act_rename = menu.addAction(t['particles_menu_rename'])
         act_dup = menu.addAction(t['particles_menu_duplicate'])
         act_child = menu.addAction(t['particles_menu_add_child'])
         act_del = menu.addAction(t['particles_menu_remove_system'])
         chosen = menu.exec(self.systems_list.mapToGlobal(pos))
         if chosen is act_layer:
             self._on_add_layer(name)
+        elif chosen is act_rename:
+            new_name, ok = QInputDialog.getText(
+                self, t['particles_menu_rename'],
+                t['particles_new_name_prompt'], text=name)
+            new_name = (new_name or "").strip()
+            if not ok or not new_name or new_name == name:
+                return
+            if not self.service.rename_system(name, new_name):
+                QMessageBox.warning(self, t['particles_menu_rename'],
+                                    t['particles_name_taken'])
+                return
+            self._structure_changed(keep_system=new_name)
         elif chosen is act_dup:
             new_name, ok = QInputDialog.getText(
                 self, t['particles_menu_duplicate'],
@@ -1372,15 +1466,24 @@ class ParticlesPanel(QWidget):
             act_paste.setEnabled(self._clipboard_payload() is not None)
             menu.addSeparator()
 
+        meta = item.data(0, _ROLE_ATTR)
         act_add_child = act_add_module = act_del_module = act_del_child = None
+        act_add_attr = act_del_attr = None
         if group == "children":
             act_add_child = menu.addAction(t['particles_menu_add_child'])
         elif group in MODULE_GROUPS:
             act_add_module = menu.addAction(t['particles_menu_add_module'])
         elif module is not None:
+            act_add_attr = menu.addAction(t['particles_menu_add_attr'])
             act_del_module = menu.addAction(t['particles_menu_remove_module'])
         elif child_idx is not None:
             act_del_child = menu.addAction(t['particles_menu_remove_child'])
+        elif meta is not None:
+            # Параметр: добавить соседний в тот же модуль либо убрать этот
+            act_add_attr = menu.addAction(t['particles_menu_add_attr'])
+            act_del_attr = menu.addAction(t['particles_menu_remove_attr'])
+        elif item.parent() is None:
+            act_add_attr = menu.addAction(t['particles_menu_add_attr'])
 
         chosen = menu.exec(self.attr_tree.mapToGlobal(pos))
         if chosen is None:
@@ -1426,6 +1529,71 @@ class ParticlesPanel(QWidget):
         elif chosen is act_del_child:
             if self.service.remove_child(sys_name, child_idx):
                 self._structure_changed()
+        elif chosen is act_add_attr:
+            # Адрес: модуль под курсором либо модуль выбранного параметра
+            if module is not None:
+                self._add_attr(sys_name, module[0], module[1])
+            elif meta is not None:
+                self._add_attr(sys_name, meta[0], meta[1])
+            else:
+                self._add_attr(sys_name, None, 0)
+        elif chosen is act_del_attr:
+            g, mi, attr_name, _type = meta
+            if self.service.remove_attr(sys_name, g, mi, attr_name):
+                self._attrs_changed(sys_name)
+
+    def _warm_catalog(self) -> None:
+        """Готовит каталог параметров заранее, чтобы меню не подвисало."""
+        if not self.tf2_root or ParticleEditorService._attr_catalog:
+            return
+        if self._catalog_worker is not None and self._catalog_worker.isRunning():
+            return
+        self._catalog_worker = _CatalogWarmWorker(self.tf2_root, self)
+        self._catalog_worker.finished.connect(
+            lambda *_: self._catalog_worker.deleteLater())
+        self._catalog_worker.start()
+
+    def _attrs_changed(self, sys_name: str) -> None:
+        """Обновляет всё после добавления/удаления параметра."""
+        self._history_commit()
+        self._payload["systems"] = self.service.systems_json()
+        self.view.update_systems(self._payload["systems"], sys_name)
+        self._fill_attr_tree(sys_name)
+
+    def _add_attr(self, sys_name: str, group: Optional[str],
+                  mod_idx: int) -> None:
+        """
+        Добавляет модулю (или самой системе) параметр, которого в нём нет.
+
+        Список берётся из эффектов игры: набор полей нигде не задекларирован,
+        поэтому каталог собирается сканом стоковых PCF (первый раз — секунды,
+        дальше из кэша).
+        """
+        if self.service is None or self._payload is None:
+            return
+        t = self.t
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            missing = self.service.missing_attrs(
+                sys_name, group, mod_idx, self.tf2_root)
+        finally:
+            QApplication.restoreOverrideCursor()
+        if not missing:
+            QMessageBox.information(self, t['particles_menu_add_attr'],
+                                    t['particles_attr_all_set'])
+            return
+        names = sorted(missing)
+        items = [f"{n}   ·   {_fmt_value(missing[n])}" for n in names]
+        chosen, ok = QInputDialog.getItem(
+            self, t['particles_menu_add_attr'], t['particles_pick_attr'],
+            items, 0, False)
+        if not ok or not chosen:
+            return
+        name = names[items.index(chosen)]
+        tv = missing[name]
+        if self.service.ensure_attr(sys_name, group, mod_idx, name,
+                                    tv["t"], tv["v"]):
+            self._attrs_changed(sys_name)
 
     # ── Копирование / вставка параметров ─────────────────────────────────── #
 
@@ -1647,6 +1815,7 @@ class ParticlesPanel(QWidget):
         self.systems_list.clear()
         for name in names:
             self.systems_list.addItem(QListWidgetItem(name))
+        self._filter_systems(self.sys_search.text())
         if keep in names:
             self.systems_list.setCurrentRow(names.index(keep))
         self.systems_list.blockSignals(False)
@@ -1843,12 +2012,17 @@ class ParticlesPanel(QWidget):
         if tv is None or item is None:
             return
         value_text = _fmt_value(tv)
+        warn = particle_lint.attr_warning(attr_name, tv["v"])
         try:
-            item.setText(1, value_text)
-            item.setToolTip(1, value_text)
-            if tv["t"] == "color":
+            item.setText(1, f"{value_text}  ?" if warn else value_text)
+            item.setToolTip(1, self.t.get(warn, warn) if warn else value_text)
+            if warn:
+                item.setForeground(1, QColor("#c9a227"))
+            elif tv["t"] == "color":
                 v = tv["v"]
                 item.setForeground(1, QColor(v[0], v[1], v[2]))
+            else:
+                item.setForeground(1, QColor(self._c['text']))
         except RuntimeError:
             # Строку удалили пересборкой дерева — карта устарела
             self._attr_items.pop((group, mod_idx, attr_name), None)
@@ -2002,11 +2176,95 @@ class ParticlesPanel(QWidget):
             self, t['particles_natural_colors'],
             t['particles_colors_done'].format(count=removed))
 
+    def _lint_findings(self) -> list:
+        """Проверки эффекта + конфликты установленных модов."""
+        if self.service is None or self._payload is None:
+            return []
+        baseline = None
+        if self._history:
+            # Сравниваем с состоянием на момент загрузки: особенности
+            # стоковых эффектов — не забота пользователя
+            snap = self._history[0]
+            probe = ParticleEditorService()
+            if probe.restore(snap):
+                baseline = probe.systems_json()
+        found = particle_lint.check_systems(
+            self._payload["systems"],
+            materials=self._payload.get("materials"),
+            baseline=baseline)
+        found += particle_lint.check_game_conflicts(
+            self.tf2_root, self.service.pcf_vpk_path())
+        return found
+
+    def _lint_text(self, findings: list) -> str:
+        """Человеческий список находок для диалога."""
+        t = self.t
+        lines = []
+        for f in findings[:12]:
+            msg = t.get(f.message_key, f.message_key)
+            try:
+                msg = msg.format(**f.params)
+            except (KeyError, IndexError):
+                pass
+            prefix = f"[{f.system}] " if f.system else ""
+            lines.append(f"  - {prefix}{msg}")
+        if len(findings) > 12:
+            lines.append(t['particles_lint_more'].format(
+                count=len(findings) - 12))
+        return "\n".join(lines)
+
+    def _confirm_lint(self) -> Optional[bool]:
+        """
+        Показывает найденные проблемы перед сборкой.
+
+        Returns:
+            True — исправить и собрать, False — собрать как есть,
+            None — отменить сборку.
+        """
+        findings = self._lint_findings()
+        if not findings:
+            return False
+        t = self.t
+        fixable = [f for f in findings if f.fixable]
+        box = QMessageBox(self)
+        box.setWindowTitle(t['particles_lint_title'])
+        box.setText(t['particles_lint_intro'].format(count=len(findings)))
+        box.setInformativeText(self._lint_text(findings))
+        btn_fix = None
+        if fixable:
+            btn_fix = box.addButton(
+                t['particles_lint_fix'].format(count=len(fixable)),
+                QMessageBox.ButtonRole.AcceptRole)
+        btn_as_is = box.addButton(t['particles_lint_as_is'],
+                                  QMessageBox.ButtonRole.DestructiveRole)
+        box.addButton(QMessageBox.StandardButton.Cancel)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is btn_fix:
+            return True
+        if clicked is btn_as_is:
+            return False
+        return None
+
     def _on_export_vpk(self) -> None:
         """Сборка VPK-мода в папку экспорта из настроек (как оружие)."""
         if self.service is None:
             return
         t = self.t
+        self._flush_pending()
+        decision = self._confirm_lint()
+        if decision is None:
+            return
+        if decision:
+            fixed = particle_lint.apply_fixes(
+                self.service, [f for f in self._lint_findings() if f.fixable])
+            if fixed:
+                self._history_commit()
+                self._payload["systems"] = self.service.systems_json()
+                if self._current_system:
+                    self.view.update_systems(
+                        self._payload["systems"], self._current_system)
+                    self._fill_attr_tree(self._current_system)
         name = self.filename_input.text().strip()
         if not name:
             name = self.filename_input.placeholderText() or "particles_mod"
@@ -2111,6 +2369,7 @@ class ParticlesPanel(QWidget):
             self.pcf_combo.setItemText(0, t['particles_pick_pcf'])
         self.cards_hint.setText(t['particles_2d_hint'])
         self.prop_lbl.setText(t['particles_properties'])
+        self.sys_search.setPlaceholderText(t['particles_search'])
         self.level_simple_btn.setText(t['particles_level_simple'])
         self.level_expert_btn.setText(t['particles_level_expert'])
         self.simple_widget.update_language(t)
@@ -2119,9 +2378,11 @@ class ParticlesPanel(QWidget):
     # ── Завершение ───────────────────────────────────────────────────────── #
 
     def shutdown(self) -> None:
-        """Останавливает фоновый воркер — вызывается при закрытии приложения."""
+        """Останавливает фоновые воркеры — вызывается при закрытии приложения."""
         if self._worker is not None:
             self._worker.stop()
+        if self._catalog_worker is not None:
+            self._catalog_worker.stop()
 
 
 def _fmt_value(tv: dict) -> str:
