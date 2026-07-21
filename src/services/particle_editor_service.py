@@ -375,6 +375,49 @@ class ParticleEditorService:
                 changed = True
         return changed
 
+    # ── Снимки состояния (undo/redo) ─────────────────────────────────────── #
+
+    def snapshot(self) -> Optional[dict]:
+        """
+        Полное состояние редактора одним снимком.
+
+        Дерево сериализуется в байты (тот же формат, что и файл — сжатие
+        default-атрибутов НЕ применяем, снимок должен быть точной копией),
+        рядом кладутся оверрайды текстур. Снимочный подход выбран вместо
+        обратимых команд: он автоматически покрывает и будущие операции —
+        забыть «откат» для новой правки невозможно.
+        """
+        if self.root is None:
+            return None
+        enc_ver, fmt_name, fmt_ver = self._encoding
+        buf = io.BytesIO()
+        self.root.export_binary(
+            buf, version=enc_ver, fmt_name=fmt_name, fmt_ver=fmt_ver,
+            unicode="silent")
+        return {
+            "pcf": buf.getvalue(),
+            "custom_files": dict(self.custom_files),
+            "custom_material_info": dict(self._custom_material_info),
+            "overwritten": {k: dict(v) for k, v in self._overwritten.items()},
+        }
+
+    def restore(self, snap: dict) -> bool:
+        """Возвращает состояние из снимка (дерево + оверрайды текстур)."""
+        if not snap or not SRCTOOLS_AVAILABLE:
+            return False
+        try:
+            root, _, _ = Element.parse(io.BytesIO(snap["pcf"]))
+        except Exception as exc:
+            logger.error(f"Восстановление снимка PCF: {exc}")
+            return False
+        self.root = root
+        self.custom_files = dict(snap.get("custom_files") or {})
+        self._custom_material_info = dict(
+            snap.get("custom_material_info") or {})
+        self._overwritten = {k: dict(v)
+                             for k, v in (snap.get("overwritten") or {}).items()}
+        return True
+
     # ── Определения систем ───────────────────────────────────────────────── #
 
     def _definitions(self) -> list:
@@ -1164,12 +1207,66 @@ class ParticleEditorService:
         if mod is None:
             mod = Element(function_name, "DmeParticleOperator")
             mod["functionName"] = Attribute.string("functionName", function_name)
+        self._seed_spawn_area(d, mod)
         if group in d:
             d[group].append(mod)
         else:
             arr = Attribute.array(group, ValueType.ELEMENT)
             arr.append(mod)
             d[group] = arr
+        return True
+
+    @classmethod
+    def _seed_spawn_area(cls, definition, mod) -> bool:
+        """
+        Даёт вырожденной области спавна видимый размер, соразмерный эффекту.
+
+        Шаблоны стоковых PCF часто приходят с нулевой областью (у бокса
+        min == max) — добавленный модуль спавнит всё в одну точку, каркас
+        в превью не рисуется и тянуть нечего. Размер берём от радиуса
+        частиц системы, чтобы область была соразмерна тому, что видно.
+        Осмысленные значения из шаблона не трогаем.
+        """
+        fn = cls._module_fn(mod)
+        if fn not in ("position within box random",
+                      "position within sphere random"):
+            return False
+        radius = 5.0
+        if "radius" in definition:
+            try:
+                radius = abs(definition["radius"].val_float) or 5.0
+            except Exception:
+                radius = 5.0
+        extent = max(4.0, radius * 4.0)
+
+        def _vec(el, name):
+            try:
+                return list(el[name].val_vec3) if name in el else None
+            except Exception:
+                return None
+
+        if fn == "position within box random":
+            lo, hi = _vec(mod, "min"), _vec(mod, "max")
+            if lo is not None and hi is not None and \
+                    any(abs(hi[i] - lo[i]) > 1e-6 for i in range(3)):
+                return False        # у шаблона нормальный бокс
+            mod["min"] = Attribute.vec3(
+                mod["min"].name if "min" in mod else "min",
+                -extent, -extent, -extent)
+            mod["max"] = Attribute.vec3(
+                mod["max"].name if "max" in mod else "max",
+                extent, extent, extent)
+            return True
+
+        try:
+            d_max = mod["distance_max"].val_float if "distance_max" in mod else 0.0
+        except Exception:
+            d_max = 0.0
+        if abs(d_max) > 1e-6:
+            return False            # у шаблона нормальная сфера
+        mod["distance_max"] = Attribute.float(
+            mod["distance_max"].name if "distance_max" in mod else "distance_max",
+            extent * 1.5)
         return True
 
     def remove_module(self, system_name: str, group: str, index: int) -> bool:

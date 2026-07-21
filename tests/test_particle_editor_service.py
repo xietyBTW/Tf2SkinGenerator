@@ -420,6 +420,66 @@ def test_paste_params_modes():
     assert fx["children"] == [{"delay": 0.25, "childName": "fx_child"}]
 
 
+def test_seed_spawn_area():
+    """Добавленная область спавна не должна быть точкой: вырожденной задаём
+    размер от радиуса частиц, осмысленную из шаблона не трогаем."""
+    svc = ParticleEditorService()
+    svc.load_bytes(_make_pcf_bytes())
+    d = svc._find_definition("fx")          # radius = 5.0 в фикстуре
+
+    def _mod(fn, attrs=()):
+        el = Element(fn, "DmeParticleOperator")
+        el["functionName"] = Attribute.string("functionName", fn)
+        for name, attr in attrs:
+            el[name] = attr
+        return el
+
+    # Вырожденный бокс (min == max) → куб ±radius*4
+    box = _mod("Position Within Box Random", [
+        ("min", Attribute.vec3("min", 0, 0, 64)),
+        ("max", Attribute.vec3("max", 0, 0, 64))])
+    assert ParticleEditorService._seed_spawn_area(d, box)
+    assert list(box["min"].val_vec3) == [-20.0, -20.0, -20.0]
+    assert list(box["max"].val_vec3) == [20.0, 20.0, 20.0]
+
+    # Бокс вообще без атрибутов — тоже получает размер
+    bare = _mod("Position Within Box Random")
+    assert ParticleEditorService._seed_spawn_area(d, bare)
+    assert list(bare["max"].val_vec3) == [20.0, 20.0, 20.0]
+
+    # Осмысленный бокс не трогаем
+    good = _mod("Position Within Box Random", [
+        ("min", Attribute.vec3("min", -3, -3, -3)),
+        ("max", Attribute.vec3("max", 3, 3, 3))])
+    assert not ParticleEditorService._seed_spawn_area(d, good)
+    assert list(good["min"].val_vec3) == [-3.0, -3.0, -3.0]
+
+    # Сфера нулевого радиуса → radius*6; ненулевая не трогается
+    sph = _mod("Position Within Sphere Random", [
+        ("distance_max", Attribute.float("distance_max", 0.0))])
+    assert ParticleEditorService._seed_spawn_area(d, sph)
+    assert abs(sph["distance_max"].val_float - 30.0) < 1e-6
+    sph2 = _mod("Position Within Sphere Random", [
+        ("distance_max", Attribute.float("distance_max", 7.0))])
+    assert not ParticleEditorService._seed_spawn_area(d, sph2)
+
+    # Не-позиционные модули не трогаем вовсе
+    other = _mod("Lifetime Random")
+    assert not ParticleEditorService._seed_spawn_area(d, other)
+
+    # Размер соразмерен радиусу системы
+    d["radius"] = Attribute.float("radius", 25.0)
+    big = _mod("Position Within Box Random")
+    ParticleEditorService._seed_spawn_area(d, big)
+    assert list(big["max"].val_vec3) == [100.0, 100.0, 100.0]
+
+    # add_module применяет то же самое (сквозной путь)
+    svc.add_module("fx", "initializers", "Position Within Box Random")
+    added = [m for m in svc.systems_json()["fx"]["initializers"]
+             if m["functionName"] == "Position Within Box Random"][-1]
+    assert added["attrs"]["max"]["v"] == [100.0, 100.0, 100.0]
+
+
 def test_paste_params_duplicate_modules():
     """Списковый формат буфера: два одинаковых модуля не схлопываются,
     n-я копия в буфере метит n-ю копию у цели (инцидент halloween_ghosts —
@@ -457,6 +517,50 @@ def test_paste_params_duplicate_modules():
     assert svc.paste_params("fx", legacy)
     ops = svc.systems_json()["fx"]["operators"]
     assert ops[0]["attrs"]["drag"]["v"] == 0.5
+
+
+def test_snapshot_restore():
+    """Снимок/восстановление для Ctrl+Z: дерево и оверрайды текстур."""
+    svc = ParticleEditorService()
+    svc.load_bytes(_make_pcf_bytes())
+
+    snap0 = svc.snapshot()
+    assert snap0 is not None and snap0["pcf"][:4] == b"<!--"
+
+    # Структурная и атрибутная правки + «оверрайд текстуры»
+    assert svc.set_attr("fx", None, 0, "radius", 99.0)
+    assert svc.add_module("fx", "operators", "Movement Basic")
+    svc.custom_files["materials/effects/test.vtf"] = b"VTF\x00fake"
+    svc._overwritten["effects/test.vmt"] = {
+        "tex_rel": "effects/test", "material": "effects\\test.vmt"}
+    snap1 = svc.snapshot()
+
+    # Возврат к исходному состоянию
+    assert svc.restore(snap0)
+    sysj = svc.systems_json()
+    assert sysj["fx"]["attrs"]["radius"]["v"] == 5.0
+    assert sysj["fx"]["operators"] == []
+    assert svc.custom_files == {}
+    assert not svc.is_custom_material("effects\\test.vmt")
+
+    # И вперёд к правленому
+    assert svc.restore(snap1)
+    sysj = svc.systems_json()
+    assert sysj["fx"]["attrs"]["radius"]["v"] == 99.0
+    assert [m["functionName"] for m in sysj["fx"]["operators"]] == ["Movement Basic"]
+    assert "materials/effects/test.vtf" in svc.custom_files
+    assert svc.is_custom_material("effects\\test.vmt")
+
+    # Снимок — независимая копия: правки после него не протекают в историю
+    svc.set_attr("fx", None, 0, "radius", 1.0)
+    svc.custom_files["materials/effects/other.vtf"] = b"x"
+    assert svc.restore(snap1)
+    assert svc.systems_json()["fx"]["attrs"]["radius"]["v"] == 99.0
+    assert "materials/effects/other.vtf" not in svc.custom_files
+
+    # Битый снимок не рушит сервис
+    assert not svc.restore({"pcf": b"garbage"})
+    assert not svc.restore({})
 
 
 def test_parse_vtf_sheet():

@@ -20,7 +20,8 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import QColor, QIcon, QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import (
-    QButtonGroup, QColorDialog, QComboBox, QDoubleSpinBox, QFileDialog,
+    QAbstractSpinBox, QApplication, QButtonGroup, QColorDialog, QComboBox,
+    QDoubleSpinBox, QFileDialog,
     QGridLayout, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget,
     QListWidgetItem, QMenu, QMessageBox, QPushButton, QRadioButton,
     QScrollArea, QSlider, QSplitter, QStackedWidget, QTreeWidget,
@@ -516,6 +517,11 @@ class ParticlesPanel(QWidget):
         self._current_system: str = ""
         self._paused = False
 
+        # История для Ctrl+Z / Ctrl+Y: список снимков и позиция в нём
+        self._history: list = []
+        self._history_pos = -1
+        self._restoring = False       # гасит запись истории во время отката
+
         # Отложенное применение правок крутилок (см. _on_simple_edit)
         self._simple_pending_attrs: set = set()
         self._simple_pending_rebuild = False
@@ -886,6 +892,16 @@ class ParticlesPanel(QWidget):
         # После создания превью: чипы уровня + гизмо области спавна
         self._set_level(0)
 
+        # Ctrl+Z / Ctrl+Y (и Ctrl+Shift+Z) — история правок эффекта
+        for seq, delta in (
+            (QKeySequence.StandardKey.Undo, -1),
+            (QKeySequence.StandardKey.Redo, 1),
+            (QKeySequence("Ctrl+Shift+Z"), 1),
+        ):
+            sc = QShortcut(seq, self)
+            sc.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+            sc.activated.connect(lambda d=delta: self._on_history_shortcut(d))
+
     # ── Загрузка PCF ─────────────────────────────────────────────────────── #
 
     def _populate_game_pcfs(self) -> None:
@@ -941,6 +957,7 @@ class ParticlesPanel(QWidget):
             return
         self.service = worker.service
         self._payload = worker.payload
+        self._history_reset()
         self.save_btn.setEnabled(True)
         self.build_btn.setEnabled(True)
         self.filename_input.setPlaceholderText(
@@ -1072,6 +1089,7 @@ class ParticlesPanel(QWidget):
             return
         if not self.service.set_material_to_game(card_material, chosen):
             return
+        self._history_commit()
         self._payload["systems"] = self.service.systems_json()
         self._payload["materials"] = self.service.materials_json(self.tf2_root)
         self.view.load_data(self._payload, root_name=self._current_system)
@@ -1085,6 +1103,7 @@ class ParticlesPanel(QWidget):
         orig = self.service.reset_material_texture(material_name)
         if orig is None:
             return
+        self._history_commit()
         self._payload["systems"] = self.service.systems_json()
         self._payload["materials"].pop(material_name, None)
         self.view.load_data(self._payload, root_name=self._current_system)
@@ -1123,6 +1142,7 @@ class ParticlesPanel(QWidget):
                 self, t['particles_set_texture'], t['particles_texture_error'])
             return
         new_mat, info = res
+        self._history_commit()
         self._payload["systems"] = self.service.systems_json()
         self._payload["materials"][new_mat] = info
         self.view.load_data(self._payload, root_name=self._current_system)
@@ -1192,9 +1212,13 @@ class ParticlesPanel(QWidget):
     # ── Структурное редактирование ───────────────────────────────────────── #
 
     def _structure_changed(self, keep_system: Optional[str] = None) -> None:
-        """Обновляет payload/превью/дерево/список после структурной правки."""
+        """Обновляет payload/превью/дерево/список после структурной правки.
+
+        Заодно единая точка истории для всех структурных операций
+        (добавление/удаление модулей и систем, дочерние, слои)."""
         if self.service is None or self._payload is None:
             return
+        self._history_commit()
         self._payload["systems"] = self.service.systems_json()
         current = keep_system or self._current_system
         names = self.service.system_names()
@@ -1478,6 +1502,7 @@ class ParticlesPanel(QWidget):
             return
         if not changed:
             return
+        self._history_commit()
         self._payload["systems"] = self.service.systems_json()
         if self.tf2_root and (mode == "replace"
                               or "material" in (payload.get("attrs") or {})):
@@ -1502,6 +1527,98 @@ class ParticlesPanel(QWidget):
         # Каркас области спавна — часть простого режима: в экспертном
         # позиция правится числами, лишняя графика там только мешает
         self.view.set_gizmo_visible(level == 0)
+
+    # ── История правок (Ctrl+Z / Ctrl+Y) ─────────────────────────────────── #
+
+    #: Сколько шагов помним. PCF весит десятки килобайт — сотни мегабайт
+    #: истории никому не нужны, а 30 шагов покрывают любую сессию правок.
+    _HISTORY_LIMIT = 30
+
+    def _on_history_shortcut(self, delta: int) -> None:
+        """Ctrl+Z/Ctrl+Y. В полях ввода отдаём штатную отмену текста."""
+        focus = QApplication.focusWidget()
+        if isinstance(focus, (QLineEdit, QAbstractSpinBox)):
+            return
+        self._history_go(delta)
+
+    def _history_reset(self) -> None:
+        """Начальное состояние после загрузки PCF."""
+        self._history = []
+        self._history_pos = -1
+        if self.service is not None:
+            snap = self.service.snapshot()
+            if snap is not None:
+                self._history = [snap]
+                self._history_pos = 0
+
+    def _history_commit(self) -> None:
+        """Фиксирует состояние ПОСЛЕ правки. Вызывается из точек, которые
+        меняют модель; во время отката игнорируется."""
+        if self._restoring or self.service is None or self._history_pos < 0:
+            return
+        snap = self.service.snapshot()
+        if snap is None:
+            return
+        # Ветка redo после новой правки теряет смысл
+        del self._history[self._history_pos + 1:]
+        self._history.append(snap)
+        if len(self._history) > self._HISTORY_LIMIT:
+            self._history.pop(0)
+        self._history_pos = len(self._history) - 1
+
+    def _history_go(self, delta: int) -> None:
+        """Откат (-1) или возврат (+1) на шаг."""
+        if self.service is None or self._payload is None:
+            return
+        self._flush_pending()      # незакоммиченные правки — часть текущего шага
+        pos = self._history_pos + delta
+        if pos < 0 or pos >= len(self._history):
+            return
+        prev_files = set(self.service.custom_files)
+        self._restoring = True
+        try:
+            if not self.service.restore(self._history[pos]):
+                return
+            self._history_pos = pos
+            self._payload["systems"] = self.service.systems_json()
+            # Текстуры перерезолвим только если менялся набор оверрайдов —
+            # это VTF→PNG на каждый материал, дорого
+            if self.tf2_root and set(self.service.custom_files) != prev_files:
+                self._payload["materials"] = self.service.materials_json(
+                    self.tf2_root)
+                reload_textures = True
+            else:
+                reload_textures = False
+            self._reload_after_restore(reload_textures)
+        finally:
+            self._restoring = False
+
+    def _reload_after_restore(self, reload_textures: bool) -> None:
+        """Пересобирает UI под восстановленное состояние."""
+        names = self.service.system_names()
+        keep = self._current_system if self._current_system in names else (
+            names[0] if names else "")
+        self.systems_list.blockSignals(True)
+        self.systems_list.clear()
+        for name in names:
+            self.systems_list.addItem(QListWidgetItem(name))
+        if keep in names:
+            self.systems_list.setCurrentRow(names.index(keep))
+        self.systems_list.blockSignals(False)
+        self._current_system = keep
+        if not keep:
+            self.attr_tree.clear()
+            self._attr_items = {}
+            self.texture_cards.clear()
+            self.simple_widget.set_system(None)
+            self.view.reset()
+            return
+        if reload_textures:
+            self.view.load_data(self._payload, root_name=keep)
+        else:
+            self.view.update_systems(self._payload["systems"], keep)
+        self._fill_attr_tree(keep)
+        self._refresh_texture_cards()
 
     def _flush_pending(self) -> None:
         """Применяет отложенные правки крутилок/гизмо прямо сейчас.
@@ -1557,6 +1674,7 @@ class ParticlesPanel(QWidget):
                 or not self._current_system:
             return
         sys_name = self._current_system
+        self._history_commit()
         self._payload["systems"] = self.service.systems_json()
         self.view.update_systems(self._payload["systems"], sys_name)
         # Пока правим крутилками, обратный рефреш их же значений не нужен —
@@ -1638,6 +1756,7 @@ class ParticlesPanel(QWidget):
         if final:
             self._gizmo_timer.stop()
             self._flush_gizmo_edit()
+            self._history_commit()
             if created:
                 self._payload["systems"] = self.service.systems_json()
                 self.view.update_systems(self._payload["systems"], sys_name)
@@ -1710,6 +1829,7 @@ class ParticlesPanel(QWidget):
             QMessageBox.warning(self, "Error", f"set_attr failed: {attr_name}")
             return
 
+        self._history_commit()
         self._payload["systems"] = self.service.systems_json()
         if attr_name == "material" and self.tf2_root:
             # Материал сменили — перерезолвить текстуры и перезалить всё
@@ -1805,6 +1925,7 @@ class ParticlesPanel(QWidget):
                 self, t['particles_set_texture'], t['particles_texture_error'])
             return
         new_mat, info = res
+        self._history_commit()
         self._payload["systems"] = self.service.systems_json()
         self._payload["materials"][new_mat] = info
         self.view.load_data(self._payload, root_name=sys_name)
@@ -1828,6 +1949,7 @@ class ParticlesPanel(QWidget):
                 self, t['particles_natural_colors'], t['particles_colors_none'])
             return
         sys_name = self._current_system
+        self._history_commit()
         self._payload["systems"] = self.service.systems_json()
         self.view.update_systems(self._payload["systems"], sys_name)
         self._fill_attr_tree(sys_name)
