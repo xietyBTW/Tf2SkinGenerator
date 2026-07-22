@@ -611,6 +611,7 @@ def test_attr_catalog_disk_cache(tmp_path, monkeypatch):
     """Каталог собирается ОДНИМ проходом на все модули и переживает
     перезапуск: иначе пользователь ловил паузу на каждый новый модуль."""
     ParticleEditorService._attr_catalog.clear()
+    ParticleEditorService._game_materials_cache = None
     cache_file = tmp_path / "catalog.json"
     monkeypatch.setattr(ParticleEditorService, "_attr_catalog_file",
                         staticmethod(lambda: cache_file))
@@ -629,12 +630,19 @@ def test_attr_catalog_disk_cache(tmp_path, monkeypatch):
     assert (None, "") in ParticleEditorService._attr_catalog   # сама система
     assert cache_file.is_file()
 
-    # Перезапуск: каталог поднимается с диска без скана
+    # Список particle-материалов собран тем же проходом (fx_child = effects/test)
+    assert ParticleEditorService._game_materials_cache
+    assert any("test" in m.lower()
+               for m in ParticleEditorService._game_materials_cache)
+
+    # Перезапуск: и каталог, и материалы поднимаются с диска без скана
     ParticleEditorService._attr_catalog.clear()
+    ParticleEditorService._game_materials_cache = None
     monkeypatch.setattr(ParticleEditorService, "list_game_pcfs",
                         staticmethod(lambda root: pytest.fail("скан не нужен")))
     ParticleEditorService.build_attr_catalog("D:/fake")
     assert ("initializers", "color random") in ParticleEditorService._attr_catalog
+    assert ParticleEditorService._game_materials_cache      # с диска
 
     # Игра обновилась — отпечаток другой, кэш игнорируется
     ParticleEditorService._attr_catalog.clear()
@@ -698,6 +706,9 @@ def test_param_reference(monkeypatch, tmp_path):
     assert '"full": true — a COMPLETE effect' in prompt
     assert "Hammer units" in prompt          # масштаб
     assert "One preset describes ONE particle system" in prompt
+    # Анимированные листы: без высокого rate или fit_lifetime они «стоят»
+    assert "animation_fit_lifetime" in prompt
+    assert "frames per second" in prompt
     # Остальной справочник не потерялся
     assert with_ai["modules"] == ref["modules"]
 
@@ -887,3 +898,75 @@ def test_parse_vtf_sheet():
     assert parse_vtf_sheet(b"not a vtf") is None
     v72 = b"VTF\x00" + struct.pack("<II", 7, 2) + b"\x00" * 0x60
     assert parse_vtf_sheet(v72) is None
+
+
+def test_canonical_attr_case_on_paste(tmp_path, monkeypatch):
+    """Source читает атрибуты С УЧЁТОМ РЕГИСТРА: записанный строчными
+    'spin strength' игра игнорирует и берёт умолчание. AI-пресеты дают
+    строчные имена — при вставке приводим к написанию игры.
+    Реальный инцидент: бабочки не разворачивались и анимация летела."""
+    ParticleEditorService._attr_catalog.clear()
+    ParticleEditorService._attr_canonical.clear()
+    ParticleEditorService._module_display.clear()
+    ParticleEditorService._game_materials_cache = None
+    monkeypatch.setattr(ParticleEditorService, "_attr_catalog_file",
+                        staticmethod(lambda: tmp_path / "cat.json"))
+    monkeypatch.setattr(ParticleEditorService, "_game_stamp",
+                        classmethod(lambda cls, root: "s"))
+    monkeypatch.setattr(ParticleEditorService, "list_game_pcfs",
+                        staticmethod(lambda root: ["a.pcf", "b.pcf"]))
+
+    def fake_load(self, root, pcf):
+        """a.pcf — «мод юзера» со строчным именем, b.pcf — стоковое
+        написание. Побеждать должно частое (стоковое)."""
+        root_el = Element("root", "DmElement")
+        sysdef = Element("fx", "DmeParticleSystemDefinition")
+        op = Element("Rotation Orient to 2D Direction", "DmeParticleOperator")
+        op["functionName"] = Attribute.string(
+            "functionName", "Rotation Orient to 2D Direction")
+        # в a.pcf — строчное, в b.pcf — как в игре (и встречается чаще)
+        op["spin strength" if pcf == "a.pcf" else "Spin Strength"] = \
+            Attribute.float("spin strength" if pcf == "a.pcf"
+                            else "Spin Strength", 1.0)
+        ops = Attribute.array("operators", srctools_dmx.ValueType.ELEMENT)
+        ops.append(op)
+        if pcf == "b.pcf":          # второе стоковое вхождение — перевес
+            op2 = Element("Rotation Orient to 2D Direction", "DmeParticleOperator")
+            op2["functionName"] = Attribute.string(
+                "functionName", "Rotation Orient to 2D Direction")
+            op2["Spin Strength"] = Attribute.float("Spin Strength", 1.0)
+            ops.append(op2)
+        sysdef["operators"] = ops
+        defs = Attribute.array("particleSystemDefinitions",
+                               srctools_dmx.ValueType.ELEMENT)
+        defs.append(sysdef)
+        root_el["particleSystemDefinitions"] = defs
+        out = io.BytesIO()
+        root_el.export_binary(out, version=2, fmt_name="pcf", fmt_ver=1,
+                              unicode="silent")
+        self.load_bytes(out.getvalue())
+
+    monkeypatch.setattr(ParticleEditorService, "load_from_game", fake_load)
+    ParticleEditorService.build_attr_catalog("D:/fake")
+
+    # Побеждает частое (стоковое) написание, а не первое встреченное
+    assert ParticleEditorService.canonical_attr_name(
+        "operators", "Rotation Orient to 2D Direction",
+        "spin strength") == "Spin Strength"
+
+    # Вставка строчного пресета кладёт в ФАЙЛ каноническое имя
+    svc = ParticleEditorService()
+    svc.load_bytes(_make_pcf_bytes())
+    assert svc.paste_params("fx", {"attrs": {}, "modules": {"operators": [
+        ["Rotation Orient to 2D Direction",
+         {"spin strength": {"t": "float", "v": 1.0}}]]}})
+    buf = io.BytesIO()
+    svc.root.export_binary(buf, version=2, fmt_name="pcf", fmt_ver=1,
+                           unicode="silent")
+    data = buf.getvalue()
+    assert b"Spin Strength" in data
+    assert b"spin strength" not in data
+
+    ParticleEditorService._attr_catalog.clear()
+    ParticleEditorService._attr_canonical.clear()
+    ParticleEditorService._module_display.clear()

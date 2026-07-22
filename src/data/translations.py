@@ -161,6 +161,8 @@ TRANSLATIONS = {
                                    'текстуры не будет',
         'particles_lint_custom_override': 'Этот эффект перекрыт файлом: {path} — '
                                           'игра возьмёт его, а не ваш мод',
+        'particles_expand': 'Развернуть превью (F11)',
+        'particles_collapse': 'Свернуть превью (F11 / Esc)',
         'particles_level_simple': 'Просто',
         'particles_level_expert': 'Экспертно',
         'particles_simple_enable': 'Включить',
@@ -697,6 +699,8 @@ TRANSLATIONS = {
                                    'will be no texture in game',
         'particles_lint_custom_override': 'This effect is overridden by: {path} — '
                                           'the game will use it instead of your mod',
+        'particles_expand': 'Expand preview (F11)',
+        'particles_collapse': 'Collapse preview (F11 / Esc)',
         'particles_level_simple': 'Simple',
         'particles_level_expert': 'Expert',
         'particles_simple_enable': 'Enable',

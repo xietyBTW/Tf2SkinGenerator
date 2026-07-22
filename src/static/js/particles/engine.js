@@ -145,6 +145,13 @@ const FN_ALIASES = {
     'oscillate_vector': 'oscillate vector',
     'postion_lock_to_controlpoint': 'movement lock to control point',
     'position_lock_to_controlpoint': 'movement lock to control point',
+    // Найдено аудитом стоковых PCF: те же модули, но через подчёркивания —
+    // без алиасов превью считало их нереализованными и не отыгрывало
+    'alpha_fade_in_random': 'alpha fade in random',
+    'alpha_fade_out_random': 'alpha fade out random',
+    'rotation_spin yaw': 'rotation spin yaw',
+    'rotation_spin': 'rotation spin roll',
+    'trail_length_random': 'trail length random',
 };
 
 function resolveFnName(name) {
@@ -556,6 +563,27 @@ const OPERATORS = {
             p.rotation += p.rotSpeed * sys.deltaTime;
     },
 
+    'rotation orient to 2d direction': (mod, sys) => {
+        // «2D» здесь — горизонтальная плоскость МИРА (стороны света,
+        // вид сверху), НЕ экран: подтверждено вики Valve («particles always
+        // face east; +90 makes north») и официальным редактором. Камера не
+        // участвует — поэтому у камеро-ориентированных спрайтов (бабочки)
+        // в игре это выглядит «боком/задом». Для разворота по движению НА
+        // ЭКРАНЕ игра использует рендерер render_screen_velocity_rotate.
+        const offset = attr(mod, 'rotation offset', 0) * DEG_TO_RAD;
+        const strength = attr(mod, 'spin strength', 1);
+        for (const p of sys.particles) {
+            const vx = p.pos[0] - p.prevPos[0];
+            const vy = p.pos[1] - p.prevPos[1];
+            if (vx * vx + vy * vy < 1e-12) continue;   // вертикальный полёт
+            const target = Math.atan2(vy, vx) + offset;
+            let d = target - p.rotation;
+            while (d > Math.PI) d -= 2 * Math.PI;
+            while (d < -Math.PI) d += 2 * Math.PI;
+            p.rotation += strength >= 1 ? d : d * strength;
+        }
+    },
+
     'rotation spin roll': (mod, sys) => {
         // ponytail: без замедления к spin_stop_time — постоянная скорость до стопа
         const rate = attr(mod, 'spin_rate_degrees', 0) * DEG_TO_RAD;
@@ -753,8 +781,11 @@ const OPERATORS = {
                 const rate = randRangeExpOp(sys, p, 5 + i, rateMin[i], rateMax[i], 1);
                 const freq = randRangeExpOp(sys, p, 8 + i, freqMin[i], freqMax[i], 1);
                 const osc = Math.sin((sys.curTime * freq * mult + phase) * Math.PI);
+                // prevPos НЕ компенсируем: в интеграторе Верле сдвиг позиции
+                // подмешивается в скорость — это и есть дёрганый трепет
+                // (бабочки, искры), как в игре. Раньше компенсация делала
+                // осцилляцию гладким дрейфом — расходилось с игрой.
                 target[i] += rate * osc * sys.deltaTime;
-                if (field === 0) p.prevPos[i] += rate * osc * sys.deltaTime;
             }
         }
     },
@@ -1046,13 +1077,33 @@ export class ParticleSystemInstance {
 
         this.rendererMods = def.renderers || [];
         this.animationRate = 1.0;
+        this.animationRateAsFps = false;
+        this.animationFitLifetime = false;
         this.orientationType = 0;
         this.rendererType = 'sprites';
+        this.screenVelRotate = null;
         for (const r of this.rendererMods) {
             const fn = (r.functionName || '').toLowerCase();
             if (fn === 'render_animated_sprites' || fn === 'render_sprite_trail') {
                 this.animationRate = attr(r, 'animation rate', 1.0);
+                // Смысл 'animation rate' зависит от флага (проверено по
+                // стоковым PCF: при FPS=true медиана 30 — это кадры/сек;
+                // при FPS=false самое частое 0.1 — это ЦИКЛЫ/сек)
+                this.animationRateAsFps = !!attr(r, 'use animation rate as fps', false);
+                // Растянуть весь sheet-цикл ровно на время жизни частицы:
+                // многие мастерские-анимации (30 кадров) без этого флага
+                // за короткую жизнь показывают лишь первый кадр
+                this.animationFitLifetime = !!attr(r, 'animation_fit_lifetime', false);
                 this.orientationType = attr(r, 'orientation_type', 0);
+            } else if (fn === 'render_screen_velocity_rotate') {
+                // Разворот спрайта по его скорости НА ЭКРАНЕ (бабочки,
+                // пауки, призраки анюжуалов). Ставится ВТОРЫМ рендерером
+                // рядом с render_animated_sprites. Угол зависит от камеры —
+                // досчитывается в рендере (particles3d.html)
+                this.screenVelRotate = {
+                    forward: attr(r, 'forward_angle', 0) * DEG_TO_RAD,
+                    rate: attr(r, 'rotate_rate(dps)', 0) * DEG_TO_RAD,
+                };
             } else if (fn === 'render_rope') {
                 // Лента по цепочке частиц (кровь/лучи). ponytail: без
                 // subdivision-сглаживания и скролла текстуры
@@ -1214,7 +1265,23 @@ export class ParticleSystemInstance {
         for (const p of this.particles) {
             let blend = 0;
             if (this.sheet !== null) {
-                const time = this.animationRate * (this.curTime - p.spawnTime);
+                let time;
+                const age = this.curTime - p.spawnTime;
+                if (this.animationFitLifetime) {
+                    // Весь цикл кадров ровно за одну жизнь частицы
+                    const seq = this.sheet.getSequence(p.seq);
+                    const dur = seq ? seq.duration : 1;
+                    time = (age / (p.lifetime || 1)) * dur;
+                } else if (this.animationRateAsFps) {
+                    // rate = КАДРОВ в секунду (длительности кадров = 1.0)
+                    time = this.animationRate * age;
+                } else {
+                    // rate = ЦИКЛОВ в секунду: 1.0 = один полный проход
+                    // листа за секунду (в игре это «нормальная» скорость)
+                    const seq = this.sheet.getSequence(p.seq);
+                    const dur = seq ? seq.duration : 1;
+                    time = this.animationRate * age * dur;
+                }
                 blend = this.sheet.calcScaleBias(uv0, uv1, p.seq, 0, time);
             } else {
                 uv0[0] = 1; uv0[1] = 1; uv0[2] = 0; uv0[3] = 0;
@@ -1225,7 +1292,7 @@ export class ParticleSystemInstance {
                 uv0[2] += uv0[0]; uv0[0] = -uv0[0];
                 uv1[2] += uv1[0]; uv1[0] = -uv1[0];
             }
-            out.push({
+            const s = {
                 system: this.name,
                 material: this.materialName,
                 additive: this.material ? this.material.additive : true,
@@ -1238,7 +1305,15 @@ export class ParticleSystemInstance {
                 uv0: [uv0[0], uv0[1], uv0[2], uv0[3]],
                 uv1: [uv1[0], uv1[1], uv1[2], uv1[3]],
                 blend: blend,
-            });
+            };
+            if (this.screenVelRotate) {
+                // Мировая скорость + параметры — экранный угол досчитает рендер
+                s.vel = [p.pos[0] - p.prevPos[0], p.pos[1] - p.prevPos[1],
+                         p.pos[2] - p.prevPos[2]];
+                s.screenVel = this.screenVelRotate;
+                s.age = this.curTime - p.spawnTime;
+            }
+            out.push(s);
         }
         for (const c of this.children) c.collectSprites(out, ropesOut);
     }
@@ -1252,7 +1327,8 @@ export function implementedModules() {
         forces: Object.keys(FORCES),
         constraints: Object.keys(CONSTRAINTS),
         emitters: ['emit_continuously', 'emit_instantaneously', 'emit noise'],
-        renderers: ['render_animated_sprites', 'render_sprite_trail', 'render_rope'],
+        renderers: ['render_animated_sprites', 'render_sprite_trail',
+                    'render_rope', 'render_screen_velocity_rotate'],
         aliases: FN_ALIASES,
     };
 }

@@ -1135,6 +1135,24 @@ window.particleDebugState = function(limit = 8) {
            particles: out };
 };
 
+/** Экранные углы спрайтов после render_screen_velocity_rotate — для
+    автотеста камеро-зависимого поворота. */
+window.particleDebugSpriteRotations = function() {
+  if (!rootInstance) return [];
+  const pool = [];
+  rootInstance.collectSprites(pool, []);
+  const out = [];
+  for (const s of pool) {
+    if (!s.screenVel || !s.vel) continue;
+    _orientVec.set(s.vel[0], s.vel[1], s.vel[2]);
+    if (_orientVec.lengthSq() < 1e-10) continue;
+    _orientVec.transformDirection(camera.matrixWorldInverse);
+    out.push(Math.atan2(_orientVec.y, _orientVec.x)
+             + s.screenVel.forward + s.screenVel.rate * (s.age || 0));
+  }
+  return out;
+};
+
 window.resetViewer = function() {
   rootInstance = null;
   currentRootName = '';
@@ -1148,6 +1166,7 @@ window.resetViewer = function() {
 
 const clock = new THREE.Clock();
 const spritePool = [];
+const _orientVec = new THREE.Vector3();   // переиспользуем для orient-to-2d
 const ropePool = [];
 
 function animate() {
@@ -1173,6 +1192,19 @@ function animate() {
   ropePool.length = 0;
   if (rootInstance) {
     rootInstance.collectSprites(spritePool, ropePool);
+
+    // render_screen_velocity_rotate: спрайт смотрит вдоль своей скорости
+    // на экране (бабочки/пауки/призраки). Считаем здесь — только тут есть
+    // камера, и угол должен пересчитываться при её вращении
+    for (const s of spritePool) {
+      if (!s.screenVel || !s.vel) continue;
+      _orientVec.set(s.vel[0], s.vel[1], s.vel[2]);
+      if (_orientVec.lengthSq() < 1e-10) continue;
+      // Направление скорости в пространстве камеры: x,y — оси экрана
+      _orientVec.transformDirection(camera.matrixWorldInverse);
+      s.rotation = Math.atan2(_orientVec.y, _orientVec.x)
+                 + s.screenVel.forward + s.screenVel.rate * (s.age || 0);
+    }
 
     // Группировка по материалу (текстура + блендинг)
     const groups = {};

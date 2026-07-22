@@ -381,3 +381,53 @@ def _make_team_icon(fill_color: str, size: int = 16):
     p.drawEllipse(QRectF(m, m, s - 2*m, s - 2*m))
     p.end()
     return QIcon(pix)
+
+
+def _make_expand_icon(color: str = "#666666", size: int = 16):
+    """Иконка «развернуть» — четыре уголка, расходящиеся наружу."""
+    from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QPen
+    from PySide6.QtCore import Qt, QPointF
+    pix = QPixmap(size, size)
+    pix.fill(Qt.transparent)
+    p = QPainter(pix)
+    p.setRenderHint(QPainter.Antialiasing)
+    pen = QPen(QColor(color))
+    pen.setWidthF(max(1.4, size * 0.11))
+    pen.setCapStyle(Qt.RoundCap)
+    pen.setJoinStyle(Qt.RoundJoin)
+    p.setPen(pen)
+    s = float(size)
+    a, b = s * 0.20, s * 0.80          # ближний/дальний край
+    arm = s * 0.22
+    for dx, dy in ((1, 1), (-1, 1), (1, -1), (-1, -1)):
+        x = a if dx > 0 else b
+        y = a if dy > 0 else b
+        p.drawLine(QPointF(x, y), QPointF(x + arm * dx, y))
+        p.drawLine(QPointF(x, y), QPointF(x, y + arm * dy))
+    p.end()
+    return QIcon(pix)
+
+
+def _make_collapse_icon(color: str = "#666666", size: int = 16):
+    """Иконка «свернуть» — те же уголки, но развёрнутые внутрь."""
+    from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QPen
+    from PySide6.QtCore import Qt, QPointF
+    pix = QPixmap(size, size)
+    pix.fill(Qt.transparent)
+    p = QPainter(pix)
+    p.setRenderHint(QPainter.Antialiasing)
+    pen = QPen(QColor(color))
+    pen.setWidthF(max(1.4, size * 0.11))
+    pen.setCapStyle(Qt.RoundCap)
+    pen.setJoinStyle(Qt.RoundJoin)
+    p.setPen(pen)
+    s = float(size)
+    a, b = s * 0.42, s * 0.58          # уголки ближе к центру
+    arm = s * 0.22
+    for dx, dy in ((1, 1), (-1, 1), (1, -1), (-1, -1)):
+        x = a if dx > 0 else b
+        y = a if dy > 0 else b
+        p.drawLine(QPointF(x, y), QPointF(x - arm * dx, y))
+        p.drawLine(QPointF(x, y), QPointF(x, y - arm * dy))
+    p.end()
+    return QIcon(pix)

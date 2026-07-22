@@ -21,7 +21,7 @@ from PySide6.QtCore import (
 from PySide6.QtGui import QColor, QIcon, QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QAbstractSpinBox, QApplication, QButtonGroup, QColorDialog, QComboBox,
-    QDoubleSpinBox, QFileDialog,
+    QDialog, QDoubleSpinBox, QFileDialog,
     QGridLayout, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget,
     QListWidgetItem, QMenu, QMessageBox, QPushButton, QRadioButton,
     QScrollArea, QSlider, QSplitter, QStackedWidget, QTreeWidget,
@@ -158,9 +158,18 @@ class ParticleViewWidget(QWidget):
 
         from PySide6.QtCore import QUrl
         from PySide6.QtWebChannel import QWebChannel
+        from PySide6.QtWebEngineCore import QWebEngineProfile
         from PySide6.QtWebEngineWidgets import QWebEngineView
 
         self._view = QWebEngineView(self)
+        # Без этого QtWebEngine кэширует engine.js как file://-модуль и после
+        # обновления приложения может отдать старую версию движка — правки
+        # симуляции «не применяются». Превью лёгкое, кэш ему не нужен.
+        try:
+            self._view.page().profile().setHttpCacheType(
+                QWebEngineProfile.HttpCacheType.NoCache)
+        except Exception:
+            pass
         self._bridge = _ParticleBridge()
         self._bridge.ready.connect(self._on_ready)
         self._bridge.gizmo_edit.connect(self.gizmo_edited)
@@ -524,6 +533,116 @@ class _SimpleParamsWidget(QWidget):
             entry["enable"].setText(t.get("particles_simple_enable", "Enable"))
 
 
+class _SearchablePicker(QDialog):
+    """Диалог выбора из длинного списка с живым поиском по подстроке.
+
+    QInputDialog.getItem не фильтрует список при вводе — при 896 материалах
+    найти «animated», не зная точного пути, невозможно. Здесь ввод фильтрует
+    список сразу, совпадение — в любом месте строки."""
+
+    def __init__(self, title: str, prompt: str, items: list, colors: dict,
+                 current: str = "", cancel_text: str = "Cancel",
+                 allow_custom: bool = False, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.resize(560, 480)
+        self._items = items
+        self._allow_custom = allow_custom   # принять вписанное имя вне списка
+        self._chosen: Optional[str] = None
+        c = colors
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(12, 12, 12, 12)
+        lay.setSpacing(8)
+        lbl = QLabel(prompt)
+        lbl.setStyleSheet(f"color: {c['text']}; font-size: 12px;")
+        lay.addWidget(lbl)
+
+        self._search = QLineEdit()
+        self._search.setPlaceholderText("…")
+        self._search.setClearButtonEnabled(True)
+        self._search.setStyleSheet(f"""
+            QLineEdit {{ background: {c['surface']}; color: {c['text']};
+                border: 1px solid {c['border']}; border-radius: 4px;
+                padding: 5px 8px; font-size: 13px; }}
+            QLineEdit:focus {{ border-color: {c['border_h']}; }}
+        """)
+        self._search.textChanged.connect(self._apply_filter)
+        lay.addWidget(self._search)
+
+        self._count = QLabel("")
+        self._count.setStyleSheet(f"color: {c['text_sub']}; font-size: 11px;")
+        lay.addWidget(self._count)
+
+        self._list = QListWidget()
+        self._list.setStyleSheet(f"""
+            QListWidget {{ background: {c['surface']}; color: {c['text']};
+                border: 1px solid {c['border']}; border-radius: 4px;
+                font-size: 12px; outline: none; }}
+            QListWidget::item {{ padding: 3px 6px; }}
+            QListWidget::item:selected {{ background: {c['border_h']}; color: #fff; }}
+        """)
+        self._list.itemDoubleClicked.connect(lambda _it: self._accept())
+        lay.addWidget(self._list, 1)
+
+        from src.utils.themes import get_modern_styles
+        styles = get_modern_styles()
+        btn_row = QHBoxLayout()
+        btn_row.addStretch(1)
+        cancel = QPushButton(cancel_text)
+        cancel.setStyleSheet(styles['button_secondary'])
+        cancel.clicked.connect(self.reject)
+        ok = QPushButton("OK")
+        ok.setStyleSheet(styles['button_primary'])
+        ok.clicked.connect(self._accept)
+        btn_row.addWidget(cancel)
+        btn_row.addWidget(ok)
+        lay.addLayout(btn_row)
+
+        # Enter в поиске — выбрать первый/выделенный; список стартует с текущего
+        self._search.returnPressed.connect(self._accept)
+        self._apply_filter("")
+        if current:
+            for i in range(self._list.count()):
+                if self._list.item(i).text() == current:
+                    self._list.setCurrentRow(i)
+                    self._list.scrollToItem(self._list.item(i))
+                    break
+        self._search.setFocus()
+
+    def _apply_filter(self, text: str) -> None:
+        needle = (text or "").strip().lower()
+        self._list.clear()
+        shown = [s for s in self._items if needle in s.lower()] if needle \
+            else self._items
+        self._list.addItems(shown)
+        if self._list.count():
+            self._list.setCurrentRow(0)
+        self._count.setText(f"{len(shown)} / {len(self._items)}")
+
+    def _accept(self) -> None:
+        it = self._list.currentItem()
+        if it is not None:
+            self._chosen = it.text()
+            self.accept()
+        elif self._allow_custom:
+            # Список пуст (ничего не совпало) — берём вписанный текст как есть
+            typed = self._search.text().strip()
+            if typed:
+                self._chosen = typed
+                self.accept()
+
+    @staticmethod
+    def pick(title: str, prompt: str, items: list, colors: dict,
+             current: str = "", cancel_text: str = "Cancel",
+             allow_custom: bool = False, parent=None) -> Optional[str]:
+        dlg = _SearchablePicker(title, prompt, items, colors, current,
+                                cancel_text, allow_custom, parent)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            return dlg._chosen
+        return None
+
+
 # ── Панель редактора (вкладка главного окна) ─────────────────────────────── #
 
 class ParticlesPanel(QWidget):
@@ -584,12 +703,14 @@ class ParticlesPanel(QWidget):
 
         # ── Тулбар: комбо + иконки + чипы 3D/2D — один компактный ряд ─────── #
         from src.ui.preview_icons import (
-            _make_droplet_icon, _make_folder_icon, _make_image_icon,
-            _make_pause_icon, _make_play_icon, _make_restart_icon,
-            _make_save_icon,
+            _make_collapse_icon, _make_droplet_icon, _make_expand_icon,
+            _make_folder_icon, _make_image_icon, _make_pause_icon,
+            _make_play_icon, _make_restart_icon, _make_save_icon,
         )
         self._icon_pause = _make_pause_icon("#666666")
         self._icon_play = _make_play_icon("#666666")
+        self._icon_expand = _make_expand_icon("#666666")
+        self._icon_collapse = _make_collapse_icon("#666666")
 
         # Комбо живёт в левой колонке (край = начало 3D-окна), иконки — над 3D
         icons_row = QHBoxLayout()
@@ -623,6 +744,8 @@ class ParticlesPanel(QWidget):
              'particles_restart', self._on_restart),
             ('pause_btn', self._icon_pause,
              'particles_pause', self._on_pause),
+            ('expand_btn', self._icon_expand,
+             'particles_expand', self._toggle_expanded),
         ):
             btn = QPushButton()
             btn.setFixedSize(26, 26)
@@ -792,7 +915,7 @@ class ParticlesPanel(QWidget):
         left.setCollapsible(1, False)
 
         # Обёртка левой колонки: комбо сверху, его правый край = начало 3D
-        left_wrap = QWidget()
+        left_wrap = self._left_wrap = QWidget()
         left_wrap_l = QVBoxLayout(left_wrap)
         left_wrap_l.setContentsMargins(0, 0, 6, 0)
         left_wrap_l.setSpacing(6)
@@ -844,7 +967,7 @@ class ParticlesPanel(QWidget):
         split.addWidget(right)
 
         # ── Экспорт-колонка (стиль вкладки оружия) ─────────────────────────── #
-        export_col = QWidget()
+        export_col = self._export_col = QWidget()
         export_col.setFixedWidth(240)
         export_l = QVBoxLayout(export_col)
         export_l.setContentsMargins(14, 4, 0, 0)
@@ -940,6 +1063,16 @@ class ParticlesPanel(QWidget):
 
         # После создания превью: чипы уровня + гизмо области спавна
         self._set_level(0)
+
+        # F11 — развернуть/свернуть превью, Esc — только свернуть
+        sc_expand = QShortcut(QKeySequence("F11"), self)
+        sc_expand.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        sc_expand.activated.connect(self._toggle_expanded)
+        sc_esc = QShortcut(QKeySequence(Qt.Key.Key_Escape), self)
+        sc_esc.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        sc_esc.activated.connect(
+            lambda: self._toggle_expanded() if getattr(self, "_expanded", False)
+            else None)
 
         # Ctrl+Z / Ctrl+Y (и Ctrl+Shift+Z) — история правок эффекта
         for seq, delta in (
@@ -1053,6 +1186,21 @@ class ParticlesPanel(QWidget):
 
     # ── 2D-карточки текстур ──────────────────────────────────────────────── #
 
+    def _toggle_expanded(self) -> None:
+        """Разворачивает превью на всю вкладку, пряча боковые колонки.
+
+        Не полноэкранный режим окна: в редакторе постоянно скачешь между
+        «покрутить параметр» и «посмотреть» — быстрый тумблер удобнее, а
+        тулбар с паузой/рестартом остаётся под рукой."""
+        self._expanded = not getattr(self, "_expanded", False)
+        self._left_wrap.setVisible(not self._expanded)
+        self._export_col.setVisible(not self._expanded)
+        self.expand_btn.setIcon(
+            self._icon_collapse if self._expanded else self._icon_expand)
+        self.expand_btn.setToolTip(
+            self.t['particles_collapse'] if self._expanded
+            else self.t['particles_expand'])
+
     def _set_view_mode(self, mode: int) -> None:
         """0 = 3D-превью, 1 = 2D-карточки текстур."""
         self.mode_3d_btn.setStyleSheet(
@@ -1142,12 +1290,12 @@ class ParticlesPanel(QWidget):
             QApplication.restoreOverrideCursor()
         if not mats:
             return
-        start = mats.index(card_material) if card_material in mats else 0
-        chosen, ok = QInputDialog.getItem(
-            self, t['particles_pick_game_tex'],
-            t['particles_pick_game_prompt'], mats, start, True)
+        chosen = _SearchablePicker.pick(
+            t['particles_pick_game_tex'], t['particles_pick_game_prompt'],
+            mats, self._c, current=card_material,
+            cancel_text=t.get('cancel', 'Cancel'), parent=self)
         chosen = (chosen or "").strip()
-        if not ok or not chosen:
+        if not chosen:
             return
         if not self.service.set_material_to_game(card_material, chosen):
             return
@@ -1556,16 +1704,22 @@ class ParticlesPanel(QWidget):
             if ok and child and self.service.add_child(sys_name, child):
                 self._structure_changed()
         elif chosen is act_add_module:
-            catalog = MODULE_CATALOG.get(group, [])
+            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+            try:
+                catalog = ParticleEditorService.group_module_catalog(
+                    group, self.tf2_root)
+            finally:
+                QApplication.restoreOverrideCursor()
             if not catalog:
                 return
-            fn, ok = QInputDialog.getItem(
-                self, t['particles_menu_add_module'],
-                t['particles_pick_module'], catalog, 0, True)
-            fn = fn.strip()
-            if ok and fn:
+            # Список длинный (все модули игры) — даём поиск с фильтром
+            fn = _SearchablePicker.pick(
+                t['particles_menu_add_module'], t['particles_pick_module'],
+                catalog, self._c, cancel_text=t.get('cancel', 'Cancel'),
+                allow_custom=True, parent=self)
+            fn = (fn or "").strip()
+            if fn:
                 # Поиск шаблона может сканировать стоковые PCF (один раз)
-                from PySide6.QtWidgets import QApplication
                 QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
                 try:
                     added = self.service.add_module(
@@ -2493,6 +2647,9 @@ class ParticlesPanel(QWidget):
         self.restart_btn.setToolTip(t['particles_restart'])
         self.pause_btn.setToolTip(
             t['particles_play'] if self._paused else t['particles_pause'])
+        self.expand_btn.setToolTip(
+            t['particles_collapse'] if getattr(self, "_expanded", False)
+            else t['particles_expand'])
         self.export_title.setText(t.get('step_2_export', 'Export'))
         self.res_label.setText(t['resolution'])
         self.format_label.setText(t['format_vtf'])

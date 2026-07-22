@@ -145,3 +145,212 @@ def test_oscillate_vector_respects_window_end():
       return { at5, at7: sys.particles[0].pos[0] };
     """)
     assert abs(res["at7"] - res["at5"]) < 1e-6, "после окна движения быть не должно"
+
+
+def test_sheet_animation_fit_lifetime():
+    """Sheet-анимация (много кадров в одной секвенции) с
+    animation_fit_lifetime растягивается на всю жизнь частицы; без флага и
+    при rate=1 длинная анимация почти стоит (кадр 0). Реальный кейс:
+    workshop animated_vortex_energy — 30 кадров, particle живёт секунды."""
+    build = """
+      const frames = [];
+      for (let i = 0; i < 30; i++)
+        frames.push({ duration: 1.0, coords: [[i/30, 0, (i+1)/30, 1]] });
+      const sheet = { sequences: { 1: { clamp: false, duration: 30, frames } } };
+      const mk = (fit, rate, asFps) => {
+        const def = {
+          name: 'fx',
+          attrs: { max_particles: {t:'integer', v:2}, radius: {t:'float', v:5},
+                   material: {t:'string', v:'m'} },
+          renderers: [{functionName:'render_animated_sprites', attrs:{
+            'animation rate': {t:'float', v:rate},
+            'use animation rate as fps': {t:'bool', v:!!asFps},
+            'animation_fit_lifetime': {t:'bool', v:fit} }}],
+          emitters: [{functionName:'emit_instantaneously',
+                      attrs:{num_to_emit:{t:'integer', v:1}}}],
+          initializers: [
+            {functionName:'Position Within Sphere Random',
+             attrs:{distance_max:{t:'float', v:0}}},
+            {functionName:'Lifetime Random',
+             attrs:{lifetime_min:{t:'float', v:2}, lifetime_max:{t:'float', v:2}}}],
+          operators: [{functionName:'Lifespan Decay', attrs:{}}],
+          forces: [], constraints: [], children: []
+        };
+        return new ParticleSystemInstance(def, {fx: def}, {m: {sheet}},
+                                          {controlPoints: [[0,0,0]]});
+      };
+      const frameAt = (sys, t) => {
+        while (sys.curTime < t - 1e-6) sys.movement(1/60);
+        const out = []; sys.collectSprites(out, []);
+        return out.length ? Math.round(out[0].uv0[2] * 30) : -1;
+      };
+    """
+    res = _run_js(build + """
+      const fit = mk(true, 1, false);
+      const loops = mk(false, 1, false);   // rate = ЦИКЛОВ/сек
+      const fps1 = mk(false, 1, true);     // rate = КАДРОВ/сек
+      return {
+        fit_start: frameAt(fit, 0.1), fit_mid: frameAt(fit, 1.0),
+        fit_end: frameAt(fit, 1.9),
+        loops_mid: frameAt(loops, 0.5),
+        fps1_end: frameAt(fps1, 1.9),
+      };
+    """)
+    # С fit_lifetime кадр растёт от начала к концу жизни
+    assert res["fit_start"] < 5, res
+    assert res["fit_mid"] > 10, res
+    assert res["fit_end"] > 25, res
+    # rate=1 без флага fps — ЦИКЛ в секунду: за 0.5 c уже середина листа
+    assert res["loops_mid"] > 10, res
+    # rate=1 С флагом fps — 1 КАДР в секунду: за 1.9 c почти стоит
+    assert res["fps1_end"] <= 2, res
+
+
+def test_rotation_orient_to_2d_direction_world_plane():
+    """Оператор ориентирует в ГОРИЗОНТАЛЬНОЙ ПЛОСКОСТИ МИРА (стороны света),
+    без камеры — подтверждено вики Valve и официальным редактором. Реальный
+    инцидент: бабочки с ним летали «боком» в игре, а превью (экранная
+    версия) показывало красиво — превью врало."""
+    res = _run_js("""
+      const mk = (vel, offsetDeg, strength) => {
+        const def = {
+          name: 'fx',
+          attrs: { max_particles: {t:'integer', v:2}, radius: {t:'float', v:3},
+                   material: {t:'string', v:'m'} },
+          renderers: [{functionName:'render_animated_sprites', attrs:{}}],
+          emitters: [{functionName:'emit_instantaneously',
+                      attrs:{num_to_emit:{t:'integer', v:1}}}],
+          initializers: [
+            {functionName:'Position Within Sphere Random',
+             attrs:{distance_max:{t:'float', v:0}}},
+            {functionName:'Velocity Random', attrs:{
+              speed_in_local_coordinate_system_min:{t:'vec3', v:vel},
+              speed_in_local_coordinate_system_max:{t:'vec3', v:vel}}},
+            {functionName:'Lifetime Random',
+             attrs:{lifetime_min:{t:'float', v:9}, lifetime_max:{t:'float', v:9}}}],
+          operators: [
+            {functionName:'Movement Basic', attrs:{}},
+            {functionName:'Rotation Orient to 2D Direction',
+             attrs:{'rotation offset':{t:'float', v:offsetDeg},
+                    'spin strength':{t:'float', v:strength}}}],
+          forces: [], constraints: [], children: []
+        };
+        const sys = new ParticleSystemInstance(def, {fx: def}, {m: {}},
+                                               {controlPoints: [[0,0,0]]});
+        for (let i = 0; i < 20; i++) sys.movement(1/60);
+        return sys.particles[0].rotation;
+      };
+      return {
+        plusX: mk([200,0,0], 0, 1),          // atan2(0,+)=0
+        plusY: mk([0,200,0], 0, 1),          // atan2(+,0)=PI/2
+        plusX_off90: mk([200,0,0], 90, 1),   // 0 + 90°
+        pureZ: mk([0,0,200], 0, 1),          // вертикально — XY вырожден
+        zeroStrength: mk([200,0,0], 90, 0),  // strength 0 — не трогает
+      };
+    """)
+    PI = 3.14159265
+    assert abs(res["plusX"]) < 1e-3, res
+    assert abs(res["plusY"] - PI / 2) < 1e-3, res
+    assert abs(res["plusX_off90"] - PI / 2) < 1e-3, res
+    # вертикальный полёт и нулевая сила не меняют исходное вращение (0)
+    assert abs(res["pureZ"]) < 1e-6, res
+    assert abs(res["zeroStrength"]) < 1e-6, res
+
+
+def test_render_screen_velocity_rotate_marks_sprites():
+    """Разворот по скорости НА ЭКРАНЕ — отдельный РЕНДЕРЕР (так делают
+    стоковые пауки/призраки: он ставится вторым рядом с
+    render_animated_sprites). Движок помечает спрайты: vel + forward_angle;
+    экранный угол досчитывает рендер."""
+    res = _run_js("""
+      const def = {
+        name: 'fx',
+        attrs: { max_particles: {t:'integer', v:2}, radius: {t:'float', v:3},
+                 material: {t:'string', v:'m'} },
+        renderers: [
+          {functionName:'render_animated_sprites', attrs:{}},
+          {functionName:'render_screen_velocity_rotate',
+           attrs:{'forward_angle':{t:'float', v:-90},
+                  'rotate_rate(dps)':{t:'float', v:0}}}],
+        emitters: [{functionName:'emit_instantaneously',
+                    attrs:{num_to_emit:{t:'integer', v:1}}}],
+        initializers: [
+          {functionName:'Position Within Sphere Random',
+           attrs:{distance_max:{t:'float', v:0}}},
+          {functionName:'Velocity Random', attrs:{
+            speed_in_local_coordinate_system_min:{t:'vec3', v:[200,0,0]},
+            speed_in_local_coordinate_system_max:{t:'vec3', v:[200,0,0]}}},
+          {functionName:'Lifetime Random',
+           attrs:{lifetime_min:{t:'float', v:9}, lifetime_max:{t:'float', v:9}}}],
+        operators: [{functionName:'Movement Basic', attrs:{}}],
+        forces: [], constraints: [], children: []
+      };
+      const sys = new ParticleSystemInstance(def, {fx: def}, {m: {}},
+                                             {controlPoints: [[0,0,0]]});
+      for (let i = 0; i < 20; i++) sys.movement(1/60);
+      const out = []; sys.collectSprites(out, []);
+      const s = out[0];
+      return {
+        rendererType: sys.rendererType,           // остаётся sprites
+        forward: sys.screenVelRotate.forward,
+        hasVel: Array.isArray(s.vel),
+        velX: s.vel ? s.vel[0] : null,
+        hasMeta: !!s.screenVel,
+        hasAge: typeof s.age === 'number',
+      };
+    """)
+    assert res["rendererType"] == "sprites"
+    assert abs(res["forward"] + 3.14159265 / 2) < 1e-4    # -90° в радианах
+    assert res["hasVel"] and res["hasMeta"] and res["hasAge"]
+    assert res["velX"] > 0
+
+
+def test_oscillate_position_feeds_velocity():
+    """Oscillate Vector на поле позиции (field 0) в интеграторе Верле
+    подмешивается в скорость — частица разгоняется и дёргается, как в
+    игре (бабочки). Раньше компенсация prevPos гасила это в гладкий дрейф."""
+    res = _run_js("""
+      const mk = (osc) => {
+        const ops = [{functionName:'Movement Basic',
+                      attrs:{drag:{t:'float',v:0}, gravity:{t:'vec3',v:[0,0,0]}}}];
+        if (osc) ops.push({functionName:'Oscillate Vector', attrs:{
+          'oscillation field':{t:'integer', v:0},
+          'oscillation frequency min':{t:'vec3', v:[2,2,2]},
+          'oscillation frequency max':{t:'vec3', v:[2,2,2]},
+          'oscillation rate min':{t:'vec3', v:[8,8,8]},
+          'oscillation rate max':{t:'vec3', v:[8,8,8]},
+          'proportional 0/1':{t:'bool', v:false},
+          'start time min':{t:'float', v:0}, 'start time max':{t:'float', v:0},
+          'end time min':{t:'float', v:1}, 'end time max':{t:'float', v:1},
+          'start/end proportional':{t:'bool', v:true}}});
+        const def = {
+          name:'fx', attrs:{max_particles:{t:'integer', v:2}, radius:{t:'float', v:3},
+                            material:{t:'string', v:'m'}},
+          renderers:[{functionName:'render_animated_sprites', attrs:{}}],
+          emitters:[{functionName:'emit_instantaneously',
+                     attrs:{num_to_emit:{t:'integer', v:1}}}],
+          initializers:[
+            {functionName:'Position Within Sphere Random', attrs:{distance_max:{t:'float', v:0}}},
+            {functionName:'Lifetime Random',
+             attrs:{lifetime_min:{t:'float', v:9}, lifetime_max:{t:'float', v:9}}}],
+          operators: ops, forces:[], constraints:[], children:[]
+        };
+        return new ParticleSystemInstance(def, {fx: def}, {m: {}},
+                                          {controlPoints: [[0,0,0]]});
+      };
+      const maxSpeed = (sys) => {
+        let mx = 0;
+        for (let i = 0; i < 120; i++) {
+          sys.movement(1/60);
+          const p = sys.particles[0];
+          mx = Math.max(mx, Math.hypot(p.pos[0]-p.prevPos[0], p.pos[1]-p.prevPos[1],
+                                       p.pos[2]-p.prevPos[2]) * 60);
+        }
+        return mx;
+      };
+      return { withOsc: maxSpeed(mk(true)), noOsc: maxSpeed(mk(false)) };
+    """)
+    # без осциллятора частица стоит (нет начальной скорости) → ~0
+    assert res["noOsc"] < 1, res
+    # осциллятор позиции разгоняет — скорость заметно ненулевая
+    assert res["withOsc"] > 20, res

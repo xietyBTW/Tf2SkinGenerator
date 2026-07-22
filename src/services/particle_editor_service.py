@@ -96,7 +96,8 @@ MODULE_CATALOG = {
     "constraints": [
         "Collision via traces", "Constrain distance to control point",
     ],
-    "renderers": ["render_animated_sprites", "render_rope", "render_sprite_trail"],
+    "renderers": ["render_animated_sprites", "render_rope",
+                  "render_sprite_trail", "render_screen_velocity_rotate"],
 }
 
 # Якорь по началу строки: иначе матчились закомментированные строки и ссылки
@@ -327,8 +328,16 @@ class ParticleEditorService:
                 logger.warning(f"Не удалось перечислить PCF в VPK: {exc}")
         return sorted(set(out))
 
-    #: Кэш списка игровых particle-материалов (скан всех PCF — дорогой).
+    #: Кэш списка игровых particle-материалов. Наполняется в том же проходе,
+    #: что и каталог параметров (build_attr_catalog), и живёт на диске.
     _game_materials_cache: Optional[List[str]] = None
+
+    @staticmethod
+    def _is_particle_material(name: str) -> bool:
+        """Спрайтовая particle-текстура (effects//particle), не служебная."""
+        if not name or "custom_" in name.lower():
+            return False
+        return name.replace("\\", "/").lower().startswith(("effects/", "particle/"))
 
     @classmethod
     def game_effect_materials(cls, tf2_root_dir: str) -> List[str]:
@@ -336,26 +345,16 @@ class ParticleEditorService:
         Материалы (текстуры) из ВСЕХ particle-эффектов игры — для выбора
         существующей игровой текстуры вместо своей картинки. Такой материал
         уже есть в игре, поэтому мод работает в казуале (bypass не нужно
-        добавлять новый файл). Результат кэшируется на весь запуск.
+        добавлять новый файл).
+
+        Собирается вместе с каталогом параметров одним сканом; результат
+        кэшируется на диск и переживает перезапуск.
         """
         if cls._game_materials_cache is not None:
             return cls._game_materials_cache
-        mats = set()
-        for pcf in cls.list_game_pcfs(tf2_root_dir):
-            try:
-                svc = cls()
-                svc.load_from_game(tf2_root_dir, pcf)
-                for m in svc.material_names():
-                    if not m or "custom_" in m.lower():
-                        continue
-                    # Только спрайтовые particle-текстуры (effects/particle),
-                    # без модельных/бэкпак-материалов — чтобы список был к делу
-                    norm = m.replace("\\", "/").lower()
-                    if norm.startswith(("effects/", "particle/")):
-                        mats.add(m)
-            except Exception:
-                continue
-        cls._game_materials_cache = sorted(mats, key=str.lower)
+        cls.build_attr_catalog(tf2_root_dir)   # заполнит и материалы
+        if cls._game_materials_cache is None:
+            cls._game_materials_cache = []
         return cls._game_materials_cache
 
     def set_material_to_game(self, old_material: str, game_material: str) -> bool:
@@ -729,10 +728,13 @@ class ParticleEditorService:
                 return False
         if attr_name in el:
             return False   # атрибут есть, но set_attr отверг значение
-        attr = self._attr_from_json(attr_name, {"t": attr_type, "v": value})
+        # Новый атрибут — в написании игры, иначе Source его не прочитает
+        canon = self.canonical_attr_name(
+            group, self._module_fn(el) if group else "", attr_name)
+        attr = self._attr_from_json(canon, {"t": attr_type, "v": value})
         if attr is None:
             return False
-        el[attr_name] = attr
+        el[canon] = attr
         return True
 
     # ── Копирование / вставка параметров ─────────────────────────────────── #
@@ -771,9 +773,31 @@ class ParticleEditorService:
             logger.warning(f"Вставка атрибута {name}={v!r}: {exc}")
         return None
 
+    @classmethod
+    def canonical_attr_name(cls, group: Optional[str], function_name: str,
+                            attr_name: str) -> str:
+        """
+        Имя атрибута в написании игры.
+
+        Source читает атрибуты С УЧЁТОМ РЕГИСТРА: записанный строчными
+        'spin strength' игра молча игнорирует и берёт умолчание, ей нужен
+        'Spin Strength'. AI-пресеты и ручной ввод часто дают строчные —
+        приводим к написанию из стоковых эффектов.
+        """
+        key = (group, (function_name or "").strip().lower())
+        canon = cls._attr_canonical.get(key)
+        if canon:
+            return canon.get(attr_name.lower(), attr_name)
+        # Модуля нет в каталоге — поищем это имя у любого другого модуля
+        for names in cls._attr_canonical.values():
+            hit = names.get(attr_name.lower())
+            if hit:
+                return hit
+        return attr_name
+
     def _paste_attrs(self, el, attrs: Dict[str, dict], overwrite: bool = True,
                      report: Optional[list] = None,
-                     where: str = "") -> bool:
+                     where: str = "", group: Optional[str] = None) -> bool:
         """Merge-вставка атрибутов в элемент: новые добавляются, совпадающие
         перезаписываются (overwrite=False — существующие не трогаются).
 
@@ -794,14 +818,20 @@ class ParticleEditorService:
                 continue
             if not overwrite and name in el:
                 continue
-            orig_name = el[name].name if name in el else name
+            # Существующий атрибут сохраняет своё написание; НОВЫЙ создаём
+            # в написании игры, иначе Source его не увидит
+            orig_name = (el[name].name if name in el
+                         else self.canonical_attr_name(
+                             group, self._module_fn(el) if group else "", name))
             attr = self._attr_from_json(orig_name, tv)
             if attr is None:
                 if report is not None:
                     report.append(("particles_paste_bad_value",
                                    {"where": where, "attr": name}))
                 continue
-            el[name] = attr
+            # Кладём ПО КАНОНИЧЕСКОМУ ключу: srctools пишет в файл имя ключа,
+            # а Source читает атрибуты с учётом регистра
+            el[orig_name] = attr
             changed = True
         return changed
 
@@ -845,7 +875,7 @@ class ParticleEditorService:
                     del d[key]
                 changed = True
         if self._paste_attrs(d, payload.get("attrs") or {}, overwrite,
-                             report, where="attrs"):
+                             report, where="attrs", group=None):
             changed = True
         modules = payload.get("modules") or {}
         if not isinstance(modules, dict):
@@ -908,7 +938,7 @@ class ParticleEditorService:
                         d[group] = arr
                     changed = True
                 if self._paste_attrs(target, attrs or {}, overwrite,
-                                     report, where=fn):
+                                     report, where=fn, group=group):
                     changed = True
         return changed
 
@@ -1322,8 +1352,13 @@ class ParticleEditorService:
     _attr_catalog: Dict[tuple, Dict[str, dict]] = {}
     #: Каноническое написание functionName: {(группа, fn_lower): "Имя Как В Игре"}.
     _module_display: Dict[tuple, str] = {}
+    #: Каноническое написание ИМЁН АТРИБУТОВ, как их пишет игра:
+    #: {(группа, fn_lower): {имя_в_нижнем: "Имя Как В Игре"}}.
+    #: КРИТИЧНО: Source читает атрибуты С УЧЁТОМ РЕГИСТРА — записанный
+    #: строчными 'spin strength' игра игнорирует, ей нужен 'Spin Strength'.
+    _attr_canonical: Dict[tuple, Dict[str, str]] = {}
     #: Версия формата дискового кэша (растёт, когда меняется его состав).
-    _CATALOG_FORMAT = 2
+    _CATALOG_FORMAT = 4   # 4: + канонический регистр имён атрибутов
 
     #: Служебные поля — их не показываем и не даём удалять.
     _SERVICE_ATTRS = ("functionname", "name", "id")
@@ -1361,6 +1396,10 @@ class ParticleEditorService:
             for key_str, disp in (data.get("display") or {}).items():
                 group, _, fn = key_str.partition("|")
                 cls._module_display[(group or None, fn)] = disp
+            for key_str, names in (data.get("canonical") or {}).items():
+                group, _, fn = key_str.partition("|")
+                cls._attr_canonical[(group or None, fn)] = names
+            cls._game_materials_cache = list(data.get("materials") or [])
         except Exception as exc:
             logger.warning(f"Кэш каталога параметров не прочитан: {exc}")
             return False
@@ -1378,6 +1417,9 @@ class ParticleEditorService:
                             for (g, fn), attrs in cls._attr_catalog.items()},
                 "display": {f"{g or ''}|{fn}": name
                             for (g, fn), name in cls._module_display.items()},
+                "canonical": {f"{g or ''}|{fn}": names
+                              for (g, fn), names in cls._attr_canonical.items()},
+                "materials": cls._game_materials_cache or [],
             }
             path.write_text(json.dumps(payload), encoding="utf-8")
         except Exception as exc:
@@ -1396,29 +1438,56 @@ class ParticleEditorService:
             return
         if cls._load_disk_catalog(tf2_root_dir):
             return
-        # Собираем в локальный словарь и присваиваем целиком: сбор идёт в
-        # фоне, а UI не должен видеть наполовину готовый каталог
+        # Собираем в локальные словари и присваиваем целиком: сбор идёт в
+        # фоне, а UI не должен видеть наполовину готовый каталог. Материалы
+        # копим в том же проходе — PCF уже загружены, это бесплатно.
         catalog: Dict[tuple, Dict[str, dict]] = {}
+        canon: Dict[tuple, Dict[str, Dict[str, int]]] = {}
+        materials: set = set()
         for pcf in cls.list_game_pcfs(tf2_root_dir):
             try:
                 other = cls()
                 other.load_from_game(tf2_root_dir, pcf)
             except Exception:
                 continue
-            cls._collect_catalog(other, catalog)
+            cls._collect_catalog(other, catalog, canon)
+            for m in other.material_names():
+                if cls._is_particle_material(m):
+                    materials.add(m)
         if catalog:
             cls._attr_catalog = catalog
+            # Побеждает самое частое написание (см. _canon)
+            cls._attr_canonical = {
+                key: {low: max(variants.items(), key=lambda kv: kv[1])[0]
+                      for low, variants in names.items()}
+                for key, names in canon.items()}
+            cls._game_materials_cache = sorted(materials, key=str.lower)
             cls._save_disk_catalog(tf2_root_dir)
 
     @classmethod
     def _collect_catalog(cls, svc: "ParticleEditorService",
-                         catalog: Dict[tuple, Dict[str, dict]]) -> None:
+                         catalog: Dict[tuple, Dict[str, dict]],
+                         canon: Optional[dict] = None) -> None:
         """Добавляет в каталог параметры всех модулей одного файла."""
+        def _canon(key, el):
+            """Копит ВАРИАНТЫ написания имён атрибутов со счётчиком.
+
+            Считаем, а не берём первое встреченное: собственный мод
+            пользователя тоже лежит в VPK игры и может нести неверный
+            регистр — побеждает написание, которое чаще у Valve."""
+            if canon is None:
+                return
+            m = canon.setdefault(key, {})
+            for a in el.values():
+                per_name = m.setdefault(a.name.lower(), {})
+                per_name[a.name] = per_name.get(a.name, 0) + 1
+
         for d in svc._all_definition_elements():
             sys_cat = catalog.setdefault((None, ""), {})
             for name, tv in _element_attrs_to_json(d).items():
                 if name not in cls._SERVICE_ATTRS:
                     sys_cat.setdefault(name, tv)
+            _canon((None, ""), d)
             for group in MODULE_GROUPS:
                 if group not in d:
                     continue
@@ -1431,6 +1500,7 @@ class ParticleEditorService:
                         # в ключах каталога оно приведено к нижнему регистру
                         cls._module_display.setdefault(
                             (group, fn), mod_json["functionName"])
+                        _canon((group, fn), mod)
                         for name, tv in mod_json["attrs"].items():
                             if name not in cls._SERVICE_ATTRS:
                                 cat.setdefault(name, tv)
@@ -1522,6 +1592,25 @@ class ParticleEditorService:
         "invent a material path: a missing material means no texture in game.",
         "- 'example' values in this file come from real game effects. They "
         "are not engine defaults; use them as a sanity check for scale.",
+        "- ANIMATED textures (a material whose .vtf is a multi-frame sprite "
+        "sheet, e.g. animated butterflies/vortex): to make the frames play, "
+        "the render_animated_sprites renderer needs either "
+        "\"animation_fit_lifetime\": true (plays the whole sheet once over "
+        "each particle's lifetime — the safe default), OR a high "
+        "\"animation rate\" with \"use animation rate as fps\": true where "
+        "the rate is frames per second (~24-30). 'animation rate': 1 means "
+        "one frame per second — a 32-frame sheet then looks frozen. When the "
+        "user asks for an animated texture, always set one of these.",
+        "- To make a sprite face the direction it moves ON SCREEN (a "
+        "butterfly, spider or ghost flying head-first), add a SECOND "
+        "renderer 'render_screen_velocity_rotate' with 'forward_angle' "
+        "(degrees, usually 90 or -90 depending on which way the texture's "
+        "head points) alongside render_animated_sprites — this is what the "
+        "game's own effects use. Do NOT use the 'Rotation Orient to 2D "
+        "Direction' operator for this: it orients in the WORLD horizontal "
+        "plane (compass heading, top-down view), so camera-facing sprites "
+        "end up sideways; it only suits flat/top-down sprites such as "
+        "shark fins on water.",
         "",
         "ASK BEFORE ANSWERING",
         "Always make sure you know ONE thing before writing any JSON: is "
@@ -1642,6 +1731,26 @@ class ParticleEditorService:
             reference = {"instructions_for_ai": "\n".join(cls._AI_INSTRUCTIONS),
                          **reference}
         return reference
+
+    @classmethod
+    def group_module_catalog(cls, group: str, tf2_root_dir: str = "") -> List[str]:
+        """
+        Полный список модулей группы для диалога «Добавить модуль…».
+
+        Ходовые (и понятные превью) идут первыми из MODULE_CATALOG, затем —
+        ВСЕ остальные модули этой группы, что реально встречаются в эффектах
+        игры (из _module_display, канонический регистр). Так в списке есть
+        всё, а частое — под рукой.
+        """
+        curated = list(MODULE_CATALOG.get(group, []))
+        seen = {name.lower() for name in curated}
+        cls.build_attr_catalog(tf2_root_dir)
+        rest = []
+        for (g, fn), display in cls._module_display.items():
+            if g == group and fn not in seen:
+                rest.append(display)
+                seen.add(fn)
+        return curated + sorted(rest, key=str.lower)
 
     def missing_attrs(
         self, system_name: str, group: Optional[str], module_index: int,
