@@ -16,7 +16,7 @@ from src.data.skyboxes import SKYBOX_MODE
 from src.utils.themes import get_modern_styles
 from src.config.app_config import AppConfig
 from src.ui.format_choices import (
-    VTF_FORMATS, allowed_formats_for_mode, plan_format_choices,
+    VTF_FORMATS, allowed_flags_for_mode, allowed_formats_for_mode, plan_format_choices,
 )
 
 
@@ -384,18 +384,27 @@ class SettingsPanel(QWidget):
         self.flag_nomipmaps        = QCheckBox(self.t['no_mipmap'])
         self.flag_nolod            = QCheckBox(self.t['no_lod'])
         self.flag_nominmipmaps     = QCheckBox(self.t.get('no_minimum_mipmap', 'No minimum Mipmap'))
+        self.flag_pointsample      = QCheckBox(self.t.get('point_sample', 'Point Sample'))
+        self.flag_pointsample.setToolTip(self.t.get('point_sample_tip', ''))
         self.option_normal         = QCheckBox(self.t.get('normal_map', 'Normal Map'))
         self.option_nothumbnail    = QCheckBox(self.t.get('no_thumbnail', 'No Thumbnail'))
         self.option_noreflectivity = QCheckBox(self.t.get('no_reflectivity', 'No Reflectivity'))
 
-        for _i, _cb in enumerate([
-            self.flag_clamps, self.flag_clampt,
-            self.flag_nomipmaps, self.flag_nolod,
-            self.flag_nominmipmaps, self.option_normal,
-            self.option_nothumbnail, self.option_noreflectivity,
-        ]):
+        # Имя флага/опции → галка. Порядок задаёт раскладку сетки и используется
+        # для показа только тех галок, что осмысленны в текущем режиме.
+        self._flag_grid = flags_grid
+        self._flag_boxes = [
+            ("CLAMPS", self.flag_clamps), ("CLAMPT", self.flag_clampt),
+            ("NOMIP", self.flag_nomipmaps), ("NOLOD", self.flag_nolod),
+            ("NOMINMIP", self.flag_nominmipmaps),
+            ("POINTSAMPLE", self.flag_pointsample),
+            ("NORMAL", self.option_normal),
+            ("NOTHUMBNAIL", self.option_nothumbnail),
+            ("NOREFLECTIVITY", self.option_noreflectivity),
+        ]
+        for _name, _cb in self._flag_boxes:
             _cb.setStyleSheet(compact_checkbox_style)
-            flags_grid.addWidget(_cb, _i // 2, _i % 2)
+        self._relayout_flag_boxes(None)
 
         flags_layout.addLayout(flags_grid)
         
@@ -665,9 +674,19 @@ class SettingsPanel(QWidget):
             self.flag_nomipmaps, self.flag_nolod, self.flag_nominmipmaps,
         ]
         _opt_attrs = ('option_nothumbnail', 'option_noreflectivity', 'option_gamma')
-        if is_spray or is_skybox:
-            # Skybox: флаги принудительные (CLAMPS/CLAMPT/NOLOD + nomipmaps
-            # внутри SkyboxService) — пользовательские галки не участвуют.
+        # Скрываем галки, не относящиеся к режиму (для скайбокса остаётся одна
+        # осмысленная — POINTSAMPLE); в остальных режимах показываем весь набор.
+        _allowed_flags = allowed_flags_for_mode(mode)
+        self._relayout_flag_boxes(_allowed_flags)
+        if hasattr(self, 'option_gamma'):
+            self.option_gamma.setVisible(_allowed_flags is None)
+        if hasattr(self, 'gamma_value_input'):
+            self.gamma_value_input.setVisible(_allowed_flags is None)
+        if is_skybox:
+            # Остальное скайбоксу выставляет SkyboxService сам: CLAMPS/CLAMPT/
+            # NOLOD (иначе швы на стыках граней) и отсутствие мипов.
+            self.flag_pointsample.setEnabled(True)
+        elif is_spray:
             for w in _flag_widgets:
                 w.setEnabled(False)
             for attr in _opt_attrs:
@@ -763,6 +782,8 @@ class SettingsPanel(QWidget):
             self.option_noreflectivity.setEnabled(not is_crit_hit)
         if hasattr(self, 'flag_nominmipmaps'):
             self.flag_nominmipmaps.setEnabled(not is_crit_hit)
+        if hasattr(self, 'flag_pointsample'):
+            self.flag_pointsample.setEnabled(not is_crit_hit)
         if hasattr(self, 'option_gamma'):
             self.option_gamma.setEnabled(not is_crit_hit)
         if hasattr(self, 'gamma_value_input'):
@@ -817,8 +838,8 @@ class SettingsPanel(QWidget):
             _rb.toggled.connect(self._on_edit_control_changed)
         self.format_combo.currentTextChanged.connect(self._on_edit_control_changed)
         for _fa in ('flag_clamps', 'flag_clampt', 'flag_nomipmaps', 'flag_nolod',
-                    'flag_nominmipmaps', 'option_normal', 'option_nothumbnail',
-                    'option_noreflectivity'):
+                    'flag_nominmipmaps', 'flag_pointsample', 'option_normal',
+                    'option_nothumbnail', 'option_noreflectivity'):
             _w = getattr(self, _fa, None)
             if _w is not None:
                 _w.stateChanged.connect(self._on_edit_control_changed)
@@ -831,6 +852,24 @@ class SettingsPanel(QWidget):
                 lambda state: self.on_crit_hit_selected(state == Qt.Checked)
             )
             self.on_crit_hit_selected(self.parent.crit_hit_checkbox.isChecked())
+
+    def _relayout_flag_boxes(self, allowed) -> None:
+        """Показывает только галки из allowed (None — все), без дыр в сетке.
+
+        Скрытая галка остаётся в раскладке пустой ячейкой, поэтому сетка
+        перекладывается: видимые идут подряд по два в строку.
+        """
+        for _name, cb in self._flag_boxes:
+            self._flag_grid.removeWidget(cb)
+        shown = 0
+        for name, cb in self._flag_boxes:
+            visible = allowed is None or name in allowed
+            cb.setVisible(visible)
+            if visible:
+                self._flag_grid.addWidget(cb, shown // 2, shown % 2)
+                shown += 1
+            elif cb.isChecked():
+                cb.setChecked(False)   # скрытая галка не должна влиять на сборку
 
     def _refresh_material_maps_button(self) -> None:
         """Подсветка кнопки + счётчик, если карты заданы."""
@@ -902,7 +941,7 @@ class SettingsPanel(QWidget):
         ctrls = [self.radio_256, self.radio_512, self.radio_1024, self.radio_2048,
                  self.format_combo, self.flag_clamps, self.flag_clampt,
                  self.flag_nomipmaps, self.flag_nolod]
-        for a in ('flag_nominmipmaps', 'option_normal',
+        for a in ('flag_nominmipmaps', 'flag_pointsample', 'option_normal',
                   'option_nothumbnail', 'option_noreflectivity'):
             w = getattr(self, a, None)
             if w is not None:
@@ -926,6 +965,8 @@ class SettingsPanel(QWidget):
         if self.flag_nolod.isChecked():     flags.append("NOLOD")
         if getattr(self, 'flag_nominmipmaps', None) and self.flag_nominmipmaps.isChecked():
             flags.append("NOMINMIP")
+        if getattr(self, 'flag_pointsample', None) and self.flag_pointsample.isChecked():
+            flags.append("POINTSAMPLE")
         options = {}
         if getattr(self, 'option_nothumbnail', None) and self.option_nothumbnail.isChecked():
             options['nothumbnail'] = True
@@ -954,6 +995,8 @@ class SettingsPanel(QWidget):
             self.flag_nolod.setChecked('NOLOD' in fl)
             if getattr(self, 'flag_nominmipmaps', None):
                 self.flag_nominmipmaps.setChecked('NOMINMIP' in fl)
+            if getattr(self, 'flag_pointsample', None):
+                self.flag_pointsample.setChecked('POINTSAMPLE' in fl)
             opt = s.get('options') or {}
             if getattr(self, 'option_normal', None):
                 self.option_normal.setChecked(bool(opt.get('normal')))
@@ -1122,6 +1165,9 @@ class SettingsPanel(QWidget):
         self.flag_clampt.setText(self.t['clamp_t'])
         self.flag_nomipmaps.setText(self.t['no_mipmap'])
         self.flag_nolod.setText(self.t['no_lod'])
+        if hasattr(self, 'flag_pointsample'):
+            self.flag_pointsample.setText(self.t.get('point_sample', 'Point Sample'))
+            self.flag_pointsample.setToolTip(self.t.get('point_sample_tip', ''))
         # Обновляем новые опции VTFCmd
         if hasattr(self, 'option_nothumbnail'):
             self.option_nothumbnail.setText(self.t.get('no_thumbnail', 'No Thumbnail'))

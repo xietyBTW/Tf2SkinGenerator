@@ -15,6 +15,24 @@ from src.shared.constants import VTF_FORMATS  # re-export: settings_panel имп
 # полупрозрачность. Порядок = приоритет: DXT5 первым остаётся дефолтом.
 CRIT_ALLOWED_FORMATS = ("DXT5", "RGBA8888", "DXT3")
 
+# Skybox: остальные галки флагов/опций к граням неба не относятся вообще.
+# CLAMPS/CLAMPT/NOLOD и отсутствие мипов SkyboxService выставляет сам (без
+# CLAMP видны швы на стыках), фильтрация мипов без мипов бессмысленна,
+# normal map/reflectivity/gamma — не про шейдер sky. Осмысленный выбор один:
+# POINTSAMPLE — отключает билинейное сглаживание, из-за которого при
+# растягивании грани на 90° обзора звёзды выглядят мягкими пятнами.
+SKYBOX_ALLOWED_FLAGS = ("POINTSAMPLE",)
+
+
+def allowed_flags_for_mode(mode):
+    """Галки флагов/опций VTF, осмысленные для режима (имена флагов).
+
+    None → ограничений нет, показываем весь набор.
+    """
+    if mode == SKYBOX_MODE:
+        return list(SKYBOX_ALLOWED_FLAGS)
+    return None
+
 
 def allowed_formats_for_mode(mode):
     """Разрешённые VTF-форматы для режима (источник истины — сервис/шейдер режима).

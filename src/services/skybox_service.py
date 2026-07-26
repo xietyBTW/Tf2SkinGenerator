@@ -151,10 +151,15 @@ class SkyboxService:
         xf = (0.5 - lon / (2.0 * np.pi)) * w - 0.5
         yf = (0.5 - lat / np.pi) * h - 0.5
 
-        x0 = np.floor(xf).astype(np.int64)
-        y0 = np.floor(yf).astype(np.int64)
-        tx = (xf - x0)[..., None]
-        ty = (yf - y0)[..., None]
+        # int32, не int64: карта выборки — самый крупный массив в нарезке
+        # (на сетке 2048² это 64 МиБ против 128 на каждый из четырёх индексов).
+        x0 = np.floor(xf).astype(np.int32)
+        y0 = np.floor(yf).astype(np.int32)
+        # Явный float32: float32 - int32 numpy повышает до float64, и тогда ВСЯ
+        # последующая выборка считалась бы в двойной точности (вдвое памяти
+        # и времени на ровном месте).
+        tx = (xf - x0.astype(np.float32))[..., None]
+        ty = (yf - y0.astype(np.float32))[..., None]
         x0 %= w
         x1 = (x0 + 1) % w                                # шов — заворот
         # Полюса — зажим; y1 от НЕзажатого y0, иначе у верхнего полюса
@@ -165,37 +170,109 @@ class SkyboxService:
 
     @staticmethod
     def _gather_face(src, sample_map):
-        """Билинейно собирает грань из RGB-массива src по готовым координатам."""
+        """Билинейно собирает грань из RGB-массива src по готовым координатам.
+
+        Возвращает float32 в единицах src (БЕЗ округления в uint8): выборка идёт
+        в линейном свете, где значения лежат в 0..1 и округление до целых
+        обнулило бы почти всю картинку.
+        """
         y0, x0, y1, x1, tx, ty = sample_map
         top = src[y0, x0] * (1 - tx) + src[y0, x1] * tx
         bot = src[y1, x0] * (1 - tx) + src[y1, x1] * tx
+        return top * (1 - ty) + bot * ty
+
+    @staticmethod
+    def _srgb_to_linear(img_u8):
+        """uint8 sRGB → float32 в линейном свете (через таблицу на 256 значений).
+
+        Смешивать яркости надо линейно: усреднение sRGB-значений гасит мелкие
+        яркие детали. Звезда 255 рядом с чёрным небом при усреднении 4 отсчётов
+        даёт в sRGB ~64, а физически верно ~140 — именно поэтому звёзды и
+        «пропадали» при нарезке.
+        """
         import numpy as np
-        return (top * (1 - ty) + bot * ty).round().astype(np.uint8)
+        lut = getattr(SkyboxService, "_SRGB_LUT", None)
+        if lut is None:
+            lut = (np.arange(256, dtype=np.float32) / 255.0) ** 2.2
+            SkyboxService._SRGB_LUT = lut
+        return lut[img_u8]
+
+    @staticmethod
+    def _linear_to_srgb_u8(arr):
+        """float32 в линейном свете → uint8 sRGB."""
+        import numpy as np
+        return (np.clip(arr, 0.0, 1.0) ** (1 / 2.2) * 255.0).round().astype(np.uint8)
+
+    @staticmethod
+    def _downsample_box(arr, factor: int):
+        """Усредняет блоки factor×factor (точная площадная фильтрация).
+
+        Кратный делитель → box-фильтр здесь корректнее LANCZOS: тот на уже
+        суперсэмплированной сетке даёт звон вокруг ярких точек.
+        """
+        h, w = arr.shape[0] // factor, arr.shape[1] // factor
+        return arr.reshape(h, factor, w, factor, -1).mean(axis=(1, 3))
 
     @staticmethod
     def split_equirect_to_faces(equirect_path: str, face_size: int,
                                 out_dir: str,
-                                cancel_callback=None) -> Dict[str, str]:
+                                cancel_callback=None,
+                                supersample: int = 1) -> Dict[str, str]:
         """
         Режет equirectangular-панораму (2:1, как фото 360°) на 6 квадратных
         граней Source-скайбокса. Возвращает {грань: путь к PNG} (неполный,
         если cancel_callback вернул True между гранями).
+
+        Вся выборка идёт в ЛИНЕЙНОМ СВЕТЕ (см. _srgb_to_linear) — иначе мелкие
+        яркие детали (звёзды, блики) гаснут при усреднении.
+
+        supersample=N: грань выбирается в N раз крупнее и усредняется блоками
+        N×N. Нужно, когда панорама подробнее грани: один отсчёт на пиксель
+        выбрасывает остальные данные и даёт алиасинг (мойре, «шипение» мелких
+        деталей). Цена — N² работы и памяти, поэтому живое превью зовёт с 1,
+        а сборка мода — с 2.
+
+        Резкость применяется ВСЕГДА, а не только при апскейле: в игре грань
+        покрывает 90° обзора, то есть на экране 1920 текстура 1024 растянута
+        почти вдвое и сглажена билинейно движком. Нерезкая маска компенсирует
+        именно это увеличение (сильнее — когда мы ещё и сами тянули панораму).
         """
         import numpy as np
-        from PIL import Image
+        from PIL import Image, ImageFilter
 
         os.makedirs(out_dir, exist_ok=True)
-        src = np.asarray(Image.open(equirect_path).convert("RGB"), dtype=np.float32)
-        h, w = src.shape[:2]
+        with Image.open(equirect_path) as im:
+            w, h = im.size
+            src = SkyboxService._srgb_to_linear(np.asarray(im.convert("RGB")))
+        ss = max(1, int(supersample))
+        # Панорама беднее грани → апскейл, деталей взять негде: суперсэмплинг
+        # только тратит время.
+        upscaling = w < 4 * face_size
+        if upscaling:
+            ss = 1
+        # Грань 2048 с ss=2 — сетка 4096²: карты выборки и промежуточные массивы
+        # уходят за 2 ГиБ. На таком разрешении алиасинг и так вдвое слабее.
+        if face_size * ss > 2048:
+            ss = 1
+        if upscaling:
+            logger.warning(
+                f"Панорама {w}x{h} беднее граней {face_size}: для честных "
+                f"{face_size} нужна ширина {4 * face_size}. Максимум без "
+                f"растягивания — грани {w // 4}.")
 
         result: Dict[str, str] = {}
         for face in SKY_FACES:
             if cancel_callback and cancel_callback():
                 return result
-            smap = SkyboxService._face_sample_map(face, w, h, face_size)
+            smap = SkyboxService._face_sample_map(face, w, h, face_size * ss)
             out = SkyboxService._gather_face(src, smap)
+            if ss > 1:
+                out = SkyboxService._downsample_box(out, ss)
+            img = Image.fromarray(SkyboxService._linear_to_srgb_u8(out))
+            img = img.filter(ImageFilter.UnsharpMask(
+                radius=1.2, percent=70 if upscaling else 45, threshold=2))
             path = os.path.join(out_dir, f"{face}.png")
-            Image.fromarray(out).save(path)
+            img.save(path)
             result[face] = path
         return result
 
@@ -207,9 +284,13 @@ class SkyboxService:
         Режет АНИМИРОВАННУЮ equirect-панораму (GIF/APNG) на 6 анимированных граней
         (APNG, без потери цвета). Возвращает {грань: путь к APNG}; {} при отмене.
 
-        Та же математика проекции, что у статичной нарезки → грани сходятся на
-        стыках так же. Карты выборки считаются ОДИН раз (не зависят от кадра),
-        далее на каждом кадре — только дешёвая билинейная сборка.
+        Та же математика проекции и тот же линейный свет, что у статичной
+        нарезки → грани сходятся на стыках так же. Карты выборки считаются ОДИН
+        раз (не зависят от кадра), далее на каждом кадре — только дешёвая
+        билинейная сборка.
+
+        Суперсэмплинга здесь нет намеренно: он умножает цену КАЖДОГО кадра
+        (30-кадровая панорама уехала бы в минуты).
 
         ponytail: держит все кадры×6 граней PIL-картинок в памяти
         (≈ frames·6·face_size²·3 Б). Для типичной панорамы (десятки кадров) ок;
@@ -230,10 +311,11 @@ class SkyboxService:
                 return {}
             durations.append(int(frame.info.get("duration", 0)
                                  or im.info.get("duration", 0) or 100))
-            arr = np.asarray(frame.convert("RGB"), dtype=np.float32)
+            arr = SkyboxService._srgb_to_linear(np.asarray(frame.convert("RGB")))
             for f in SKY_FACES:
                 per_face[f].append(Image.fromarray(
-                    SkyboxService._gather_face(arr, smaps[f])))
+                    SkyboxService._linear_to_srgb_u8(
+                        SkyboxService._gather_face(arr, smaps[f]))))
 
         result: Dict[str, str] = {}
         for f in SKY_FACES:
@@ -329,9 +411,11 @@ class SkyboxService:
                         request.image_path, face_size, _faces_dir,
                         cancel_callback=cancel_callback)
                 else:
+                    # supersample=2 только в сборке: +8 с на 6 граней 1024, зато
+                    # без алиасинга. Живое превью режет с 1, чтобы не тормозить.
                     sources = SkyboxService.split_equirect_to_faces(
                         request.image_path, face_size, _faces_dir,
-                        cancel_callback=cancel_callback)
+                        cancel_callback=cancel_callback, supersample=2)
                 if cancelled():
                     ctx.cleanup(on_error=True,
                                 keep_on_error=request.keep_temp_on_error,
@@ -353,7 +437,14 @@ class SkyboxService:
             # animated_faces: {грань: fps} — только реально анимированные грани.
             # Пустой словарь ⇒ ни одной анимации ⇒ все VMT остаются на шейдере sky.
             animated_faces: Dict[str, int] = {}
+            # CLAMPS/CLAMPT обязательны (иначе видны швы на стыках граней),
+            # мипы гране неба не нужны. Из пользовательских флагов осмысленен
+            # один: POINTSAMPLE — без сглаживания звёзды остаются точками, а не
+            # мягкими пятнами (грань растянута на 90° обзора).
             _vtf_flags = ["CLAMPS", "CLAMPT", "NOLOD"]
+            if "POINTSAMPLE" in (request.flags or []):
+                _vtf_flags.append("POINTSAMPLE")
+                logger.info("Скайбокс: POINTSAMPLE — билинейная фильтрация выключена")
             _vtf_opts = {"nomipmaps": True, "nothumbnail": True}
             for i, face in enumerate(SKY_FACES):
                 if cancelled():
@@ -370,9 +461,9 @@ class SkyboxService:
                     copy_file_safe(src, out_vtf)
                     continue
                 if TextureService.is_animated_image(src):
-                    # Многокадровый VTF. create_animated_vtf возвращает fps (из
-                    # длительности кадров) и внутри трактует как alpha → DXT1
-                    # станет DXT5; BGR888 остаётся BGR888 (обе без реальной альфы).
+                    # Многокадровый VTF. create_animated_vtf возвращает fps
+                    # (среднее по длительностям кадров); формат сохраняется —
+                    # у нарезанных граней альфы нет, апгрейда DXT1→DXT5 не будет.
                     fps = TextureService.create_animated_vtf(
                         src, str(out_vtf), (face_size, face_size),
                         format_type, _vtf_flags, _vtf_opts)

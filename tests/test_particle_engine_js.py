@@ -354,3 +354,55 @@ def test_oscillate_position_feeds_velocity():
     assert res["noOsc"] < 1, res
     # осциллятор позиции разгоняет — скорость заметно ненулевая
     assert res["withOsc"] > 20, res
+
+
+def test_gif_sheet_animates_without_animated_sprites(tmp_path):
+    """Гифка, положенная как текстура партикла, анимируется в превью даже у
+    системы с обычным render_sprites: sheet-данные из _gif_to_sheet движок
+    крутит на дефолтном rate (1 цикл/сек). Проверяется именно тот JSON,
+    который отдаёт Python — формат листа легко разъехаться с движком."""
+    pytest.importorskip("PIL")
+    from PIL import Image
+
+    from src.services.particle_editor_service import ParticleEditorService
+
+    gif = tmp_path / "anim.gif"
+    frames = [Image.new("RGB", (32, 32), c)
+              for c in ((255, 0, 0), (0, 255, 0), (0, 0, 255))]
+    frames[0].save(gif, save_all=True, append_images=frames[1:],
+                   duration=100, loop=0)
+    _, sheet = ParticleEditorService._gif_to_sheet(str(gif), 256)
+
+    res = _run_js("""
+      const sheet = """ + json.dumps(sheet) + """;
+      const def = {
+        name: 'fx',
+        attrs: { max_particles: {t:'integer', v:2}, radius: {t:'float', v:5},
+                 material: {t:'string', v:'m'} },
+        renderers: [{functionName:'render_sprites', attrs:{}}],
+        emitters: [{functionName:'emit_instantaneously',
+                    attrs:{num_to_emit:{t:'integer', v:1}}}],
+        initializers: [
+          {functionName:'Position Within Sphere Random',
+           attrs:{distance_max:{t:'float', v:0}}},
+          {functionName:'Lifetime Random',
+           attrs:{lifetime_min:{t:'float', v:5}, lifetime_max:{t:'float', v:5}}}],
+        operators: [], forces: [], constraints: [], children: []
+      };
+      const sys = new ParticleSystemInstance(def, {fx: def}, {m: {sheet}},
+                                             {controlPoints: [[0,0,0]]});
+      const cellAt = (t) => {
+        while (sys.curTime < t - 1e-6) sys.movement(1/60);
+        const out = []; sys.collectSprites(out, []);
+        const uv = out[0].uv0;             // [scaleU, scaleV, biasU, biasV]
+        return [uv[0], uv[1], uv[2], uv[3]];
+      };
+      return { f0: cellAt(0.05), f1: cellAt(0.5), f2: cellAt(0.9) };
+    """)
+
+    # Кадр занимает четверть листа (сетка 2x2) — масштаб UV 0.5 на кадре
+    assert res["f0"][:2] == [0.5, 0.5], res
+    # Смещение кадра меняется во времени: (0,0) → (0.5,0) → (0,0.5)
+    assert res["f0"][2:] == [0.0, 0.0], res
+    assert res["f1"][2:] == [0.5, 0.0], res
+    assert res["f2"][2:] == [0.0, 0.5], res

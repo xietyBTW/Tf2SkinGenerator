@@ -1,5 +1,5 @@
 import os
-from ctypes import POINTER, c_char_p, c_float, c_int, c_uint, c_ubyte, c_void_p, pointer, windll
+from ctypes import POINTER, c_char_p, c_float, c_int, c_uint, c_ubyte, pointer, windll
 from pathlib import Path
 from threading import RLock
 
@@ -183,14 +183,18 @@ class VTFLib:
     @classmethod
     def create_animated_vtf(
         cls,
-        frames_rgba8888: list[bytes],
+        frames_rgba8888,
         width: int,
         height: int,
         dest_format: int,
         flags: int,
         output_file: str,
         generate_thumbnail: bool = True,
+        frame_count: int = None,
     ) -> None:
+        """frames_rgba8888 — список ИЛИ генератор кадров (тогда нужен frame_count:
+        число кадров требуется до обхода, для vlImageCreate)."""
+        count = frame_count if frame_count is not None else len(frames_rgba8888)
         with cls._lock:
             cls.initialize()
             dll = cls._load()
@@ -209,7 +213,7 @@ class VTFLib:
                 if not dll.vlImageCreate(
                     vlUInt(width),
                     vlUInt(height),
-                    vlUInt(len(frames_rgba8888)),
+                    vlUInt(count),
                     vlUInt(1),
                     vlUInt(1),
                     c_int(dest_format),
@@ -222,27 +226,30 @@ class VTFLib:
                 if flags:
                     dll.vlImageSetFlags(vlUInt(flags))
 
-                keepalive_buffers: list[c_void_p] = []
-                for i, frame in enumerate(frames_rgba8888):
-                    if len(frame) != width * height * 4:
-                        raise ValueError("Frame size mismatch")
-
-                    src = (vlByte * len(frame)).from_buffer_copy(frame)
-                    if dest_format == VTFImageFormat.RGBA8888:
-                        dll.vlImageSetData(vlUInt(i), vlUInt(0), vlUInt(0), vlUInt(0), src)
-                        keepalive_buffers.append(src)
-                        continue
-
+                # Буфер приёмника один на все кадры: размер от кадра не зависит,
+                # а vlImageSetData копирует данные внутрь образа (memcpy) —
+                # держать буферы кадров живыми до vlImageSave не нужно.
+                dest = None
+                if dest_format != VTFImageFormat.RGBA8888:
                     dest_size = int(dll.vlImageComputeMipmapSize(vlUInt(width), vlUInt(height), vlUInt(1), vlUInt(0), c_int(dest_format)))
                     if dest_size <= 0:
                         raise RuntimeError("Failed to compute dest buffer size")
                     dest = (vlByte * dest_size)()
-                    ok = bool(dll.vlImageConvertFromRGBA8888(src, dest, vlUInt(width), vlUInt(height), c_int(dest_format)))
-                    if not ok:
+
+                for i, frame in enumerate(frames_rgba8888):
+                    if i >= count:
+                        raise ValueError("More frames than frame_count")
+                    if len(frame) != width * height * 4:
+                        raise ValueError("Frame size mismatch")
+
+                    src = (vlByte * len(frame)).from_buffer_copy(frame)
+                    if dest is None:
+                        dll.vlImageSetData(vlUInt(i), vlUInt(0), vlUInt(0), vlUInt(0), src)
+                        continue
+
+                    if not bool(dll.vlImageConvertFromRGBA8888(src, dest, vlUInt(width), vlUInt(height), c_int(dest_format))):
                         raise RuntimeError(cls._last_error())
                     dll.vlImageSetData(vlUInt(i), vlUInt(0), vlUInt(0), vlUInt(0), dest)
-                    keepalive_buffers.append(src)
-                    keepalive_buffers.append(dest)
 
                 if generate_thumbnail:
                     try:
@@ -253,7 +260,6 @@ class VTFLib:
                 out_bytes = str(Path(output_file)).encode("utf-8")
                 if not dll.vlImageSave(out_bytes):
                     raise RuntimeError(cls._last_error())
-                _ = keepalive_buffers
             finally:
                 try:
                     dll.vlImageDestroy()

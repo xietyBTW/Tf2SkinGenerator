@@ -7,7 +7,8 @@
 import unittest
 
 from src.ui.format_choices import (
-    VTF_FORMATS, CRIT_ALLOWED_FORMATS, allowed_formats_for_mode, plan_format_choices,
+    VTF_FORMATS, CRIT_ALLOWED_FORMATS, SKYBOX_ALLOWED_FLAGS,
+    allowed_flags_for_mode, allowed_formats_for_mode, plan_format_choices,
 )
 from src.services.skybox_service import SKYBOX_ALLOWED_FORMATS
 from src.data.skyboxes import SKYBOX_MODE
@@ -29,6 +30,21 @@ class AllowedFormatsForModeTests(unittest.TestCase):
 
     def test_other_modes_unrestricted(self):
         self.assertIsNone(allowed_formats_for_mode("scout_c_scattergun"))
+
+
+class AllowedFlagsForModeTests(unittest.TestCase):
+    def test_skybox_shows_only_pointsample(self):
+        """Остальные флаги/опции к граням неба не относятся: CLAMP и мипы
+        сервис ставит сам, normal/reflectivity/gamma не про шейдер sky."""
+        allowed = allowed_flags_for_mode(SKYBOX_MODE)
+        self.assertEqual(allowed, ["POINTSAMPLE"])
+        self.assertEqual(allowed, list(SKYBOX_ALLOWED_FLAGS))
+        for irrelevant in ("CLAMPS", "NOMIP", "NOMINMIP", "NORMAL"):
+            self.assertNotIn(irrelevant, allowed)
+
+    def test_other_modes_unrestricted(self):
+        self.assertIsNone(allowed_flags_for_mode("scout_c_scattergun"))
+        self.assertIsNone(allowed_flags_for_mode("critHIT"))
 
 
 class PlanFormatChoicesTests(unittest.TestCase):

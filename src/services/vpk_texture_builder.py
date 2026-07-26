@@ -837,6 +837,9 @@ class VpkTextureBuilder:
             normal_weapon_key = f"{texture_filename}_normal"
             VMTService.update_vmt_bumpmap_path(str(vmt_path), patched_cdmaterials_path, normal_weapon_key)
             logger.info(f"Обновлен VMT файл для добавления $bumpmap: {normal_weapon_key}")
+            if animated_fps:
+                # Бамп многокадровый (гифка + normal) — тот же fps, что у базы.
+                VMTService.enable_animated_bumpmap(str(vmt_path), animated_fps)
         return vmt_to_delete
 
     @staticmethod
@@ -939,7 +942,9 @@ class VpkTextureBuilder:
                     # карточку) — копируем как есть, без переконвертации.
                     copy_file_safe(extra_image_path, extra_vtf_path)
                 elif TextureService.is_animated_image(extra_image_path):
-                    vtf_flags_extra, merged_extra = TextureService.resolve_vtf_flags_and_options(flags, vtf_options)
+                    # drop_normal — как и в статичной ветке ниже: доп. материалы
+                    # normal map не получают (иначе бамп уехал бы в базовую текстуру).
+                    vtf_flags_extra, merged_extra = TextureService.resolve_vtf_flags_and_options(flags, vtf_options, drop_normal=True)
                     extra_animated_fps = TextureService.create_animated_vtf(
                         extra_image_path, str(extra_vtf_path),
                         size, format_type, vtf_flags_extra, merged_extra

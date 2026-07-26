@@ -98,6 +98,9 @@ class BuildService:
                 normal_cdmaterials_path = rel_path.replace('materials/', '').rstrip('/')
                 VMTService.update_vmt_bumpmap_path(str(vmt_path), normal_cdmaterials_path, normal_texture_filename)
                 logger.info(f"Обновлен VMT файл для добавления $bumpmap: {normal_texture_filename}")
+                if animated_fps:
+                    # Бамп многокадровый (гифка + normal) — тот же fps, что у базы.
+                    VMTService.enable_animated_bumpmap(str(vmt_path), animated_fps)
             if mode == "critHIT":
                 pcf_filename = "crit.pcf"
                 mod_data_pcf_path = mod_data_base / pcf_filename

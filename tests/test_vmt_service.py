@@ -70,6 +70,42 @@ class VMTServiceTests(unittest.TestCase):
             VMTService.update_vmt_basetexture_path(str(vmt_path), "models\\c_models", "c_test")
             self.assertFalse(vmt_path.exists())
     
+    def test_animated_bumpmap_adds_second_proxy(self):
+        """Гифка + normal map: прокси $bumpmap добавляется, $basetexture не теряется."""
+        with tempfile.TemporaryDirectory() as tmp:
+            vmt_path = Path(tmp) / "a.vmt"
+            vmt_path.write_text(
+                '"VertexLitGeneric"\n{\n\t"$basetexture" "models/c_test"\n'
+                '\t"$bumpmap" "models/c_test_normal"\n}',
+                encoding="utf-8")
+
+            VMTService.enable_animated_basetexture(str(vmt_path), 12)
+            VMTService.enable_animated_bumpmap(str(vmt_path), 12)
+            content = vmt_path.read_text(encoding="utf-8").lower()
+
+            self.assertIn('"animatedtexturevar" "$basetexture"', content)
+            self.assertIn('"animatedtexturevar" "$bumpmap"', content)
+            self.assertIn('"$frame" "0"', content)
+            self.assertIn('"$bumpframe" "0"', content)
+            self.assertIn('"animatedtextureframenumvar" "$bumpframe"', content)
+            self.assertEqual(content.count('"animatedtexture"'), 2)
+            # Оба прокси на одном fps, иначе бамп уедет по фазе от картинки.
+            self.assertEqual(content.count('"animatedtextureframerate" "12"'), 2)
+
+    def test_animated_bumpmap_idempotent(self):
+        """Повторный вызов не дублирует прокси, только обновляет fps."""
+        with tempfile.TemporaryDirectory() as tmp:
+            vmt_path = Path(tmp) / "a.vmt"
+            vmt_path.write_text(
+                '"VertexLitGeneric"\n{\n\t"$bumpmap" "models/c_test_normal"\n}',
+                encoding="utf-8")
+            VMTService.enable_animated_bumpmap(str(vmt_path), 10)
+            VMTService.enable_animated_bumpmap(str(vmt_path), 25)
+            content = vmt_path.read_text(encoding="utf-8").lower()
+            self.assertEqual(content.count('"animatedtexturevar" "$bumpmap"'), 1)
+            self.assertIn('"animatedtextureframerate" "25"', content)
+            self.assertNotIn('"animatedtextureframerate" "10"', content)
+
     def test_update_vmt_bumpmap_replace(self):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)

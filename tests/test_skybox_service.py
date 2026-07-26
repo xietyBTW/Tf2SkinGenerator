@@ -96,6 +96,59 @@ class SplitEquirectTests(unittest.TestCase):
             for g, wnt in zip(got, colors["bk"]):
                 self.assertLessEqual(abs(g - wnt), 12)
 
+    def test_fine_detail_survives_in_linear_light(self):
+        """Мелкие яркие детали (звёзды) не должны гаснуть при нарезке.
+
+        Шахматка 1 px из 255 и 4: физически верное среднее — 0.5 в линейном
+        свете, то есть ~186 в sRGB. Усреднение самих sRGB-значений дало бы ~130
+        (именно так звёзды и «пропадали»).
+
+        Заодно фиксируется суперсэмплинг: без него значение пикселя зависит от
+        того, куда случайно попал единственный отсчёт (разброс в сотню единиц —
+        это и есть «шипение» мелких деталей), с ним грань ровная.
+        """
+        import numpy as np
+
+        with tempfile.TemporaryDirectory() as tmp:
+            pano = os.path.join(tmp, "chk.png")
+            h, w = 256, 512
+            yy, xx = np.mgrid[0:h, 0:w]
+            chk = np.where((xx + yy) % 2 == 0, 255, 4).astype(np.uint8)
+            Image.fromarray(np.dstack([chk] * 3)).save(pano)
+
+            spans = {}
+            for ss in (1, 2):
+                faces = SkyboxService.split_equirect_to_faces(
+                    pano, 64, os.path.join(tmp, f"o{ss}"), supersample=ss)
+                arr = np.asarray(Image.open(faces["ft"]).convert("L"),
+                                 dtype=np.float32)[16:48, 16:48]
+                self.assertGreater(arr.mean(), 165, f"ss={ss}: детали погасли")
+                self.assertLess(arr.mean(), 205, f"ss={ss}: пересвет")
+                spans[ss] = float(arr.max() - arr.min())
+
+            # Суперсэмплинг убирает разброс от случайной попадания отсчёта
+            self.assertLess(spans[2], spans[1] / 4,
+                            f"суперсэмплинг не сгладил алиасинг: {spans}")
+
+    def test_upscaled_panorama_is_sharpened(self):
+        """Панорама меньше граней: суперсэмплинг бессмыслен (деталей нет),
+        зато контраст на границах должен подрасти от нерезкой маски."""
+        import numpy as np
+
+        with tempfile.TemporaryDirectory() as tmp:
+            pano = os.path.join(tmp, "small.png")
+            h, w = 64, 128
+            half = np.zeros((h, w, 3), np.uint8)
+            half[:, w // 2:] = 200          # резкая вертикальная граница
+            Image.fromarray(half).save(pano)
+
+            faces = SkyboxService.split_equirect_to_faces(
+                pano, 128, os.path.join(tmp, "o"))   # 128 > 128/4 → апскейл
+            arr = np.asarray(Image.open(faces["ft"]).convert("L"),
+                             dtype=np.float32)
+            # Нерезкая маска даёт «выброс» ярче исходных 200 у самой границы
+            self.assertGreater(arr.max(), 205, "нерезкая маска не применилась")
+
     def test_cancel_stops_between_faces(self):
         with tempfile.TemporaryDirectory() as tmp:
             pano = os.path.join(tmp, "pano.png")
@@ -257,9 +310,10 @@ class BuildSkyboxVpkTests(unittest.TestCase):
 
     def test_forces_clamp_flags_and_format(self):
         with tempfile.TemporaryDirectory() as tmp:
-            # Пользовательские флаги/формат игнорируются: у скайбокса свои.
+            # Формат вне SKYBOX_ALLOWED_FORMATS и посторонние флаги игнорируются:
+            # CLAMPS/CLAMPT/NOLOD и отсутствие мипов у скайбокса свои.
             req = _build_request(tmp, format_type="DXT5",
-                                 flags=["POINTSAMPLE"])
+                                 flags=["NOMINMIP", "TRILINEAR"])
             ok, msg, _cap, calls = self._run_build(req, tmp)
             self.assertTrue(ok, msg)
             self.assertEqual(len(calls), 6)
@@ -267,6 +321,18 @@ class BuildSkyboxVpkTests(unittest.TestCase):
                 self.assertEqual(c["flags"], ["CLAMPS", "CLAMPT", "NOLOD"])
                 self.assertTrue(c["options"].get("nomipmaps"))
                 self.assertEqual(c["format"], "DXT1")
+
+    def test_pointsample_flag_passes_through(self):
+        """POINTSAMPLE — единственный пользовательский флаг, доезжающий до граней
+        (без него звёзды размываются билинейной фильтрацией при увеличении)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            req = _build_request(tmp, flags=["POINTSAMPLE"])
+            ok, msg, _cap, calls = self._run_build(req, tmp)
+            self.assertTrue(ok, msg)
+            self.assertEqual(len(calls), 6)
+            for c in calls:
+                self.assertEqual(c["flags"],
+                                 ["CLAMPS", "CLAMPT", "NOLOD", "POINTSAMPLE"])
 
     def test_ready_vtf_override_copied_as_is(self):
         with tempfile.TemporaryDirectory() as tmp:

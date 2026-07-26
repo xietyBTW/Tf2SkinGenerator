@@ -265,6 +265,13 @@ TRANSLATIONS = {
         'no_reflectivity': 'No Reflectivity',
         'gamma_correction': 'Gamma Correction',
         'gamma_value': 'Gamma Value',
+        'point_sample': 'Point Sample (резкие пиксели)',
+        'point_sample_tip': 'Отключает билинейное сглаживание текстуры.\n'
+                            'Для скайбокса: грань растянута на 90° обзора, и '
+                            'сглаживание превращает звёзды в мягкие пятна — '
+                            'с этой галкой они остаются резкими точками.\n'
+                            'Плата: плавные градиенты (закат) могут стать '
+                            'ступенчатыми, заметнее на гранях 512 и 1024.',
         'normal_map': 'Normal Map',
         'material_maps_button': 'Карты материала…',
         'material_maps_button_tip': 'Добавить карты detail / самосвечения / phong из картинок — приложение само сгенерит VTF и пропишет VMT.',
@@ -803,6 +810,13 @@ TRANSLATIONS = {
         'no_reflectivity': 'No Reflectivity',
         'gamma_correction': 'Gamma Correction',
         'gamma_value': 'Gamma Value',
+        'point_sample': 'Point Sample (crisp pixels)',
+        'point_sample_tip': 'Disables bilinear texture filtering.\n'
+                            'For a skybox: a face is stretched across 90° of '
+                            'view, and filtering turns stars into soft blobs — '
+                            'with this flag they stay crisp points.\n'
+                            'Trade-off: smooth gradients (sunsets) may band, '
+                            'more visibly on 512 and 1024 faces.',
         'normal_map': 'Normal Map',
         'material_maps_button': 'Material Maps…',
         'material_maps_button_tip': 'Add detail / self-illum / phong maps from images — the app builds the VTF and wires the VMT.',

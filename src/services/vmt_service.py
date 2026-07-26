@@ -277,9 +277,44 @@ class VMTService:
             f.write(new_content)
 
     @staticmethod
-    def enable_animated_basetexture(vmt_path: str, fps: int) -> None:
+    def enable_animated_bumpmap(vmt_path: str, fps: int) -> None:
+        """Анимирует $bumpmap через $bumpframe — для гифки с включённым normal map.
+
+        Вызывать ПОСЛЕ update_vmt_bumpmap_path: $bumpframe вставляется рядом с
+        уже существующим ключом $bumpmap. fps обязан совпадать с fps базовой
+        текстуры, иначе рельеф уедет по фазе от картинки.
+        """
+        VMTService.enable_animated_basetexture(
+            vmt_path, fps, var="$bumpmap", framenumvar="$bumpframe")
+
+    @staticmethod
+    def enable_animated_basetexture(vmt_path: str, fps: int,
+                                    var: str = "$basetexture",
+                                    framenumvar: str = "$frame") -> None:
+        """Добавляет прокси AnimatedTexture для var в VMT-ФАЙЛ."""
         if not os.path.exists(vmt_path):
             return
+        with open(vmt_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        content = VMTService.add_animated_texture_proxy(
+            content, fps, var=var, framenumvar=framenumvar)
+        with open(vmt_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+
+    @staticmethod
+    def add_animated_texture_proxy(content: str, fps: int,
+                                   var: str = "$basetexture",
+                                   framenumvar: str = "$frame") -> str:
+        """Добавляет (или обновляет fps у) прокси AnimatedTexture для var.
+
+        Работает с ТЕКСТОМ VMT: редактор партиклов держит VMT в памяти
+        (custom_files), а сборка оружия — в файлах (enable_animated_basetexture).
+
+        var/framenumvar параметризованы, чтобы тем же кодом анимировать
+        $bumpmap/$bumpframe — см. enable_animated_bumpmap.
+        """
+        var_re = re.escape(var)
+        framenum_re = re.escape(framenumvar)
 
         try:
             fps_int = int(fps)
@@ -288,9 +323,6 @@ class VMTService:
         if fps_int <= 0:
             fps_int = 30
 
-        with open(vmt_path, 'r', encoding='utf-8') as f:
-            content = f.read()
-
         def update_framerate(text: str) -> str:
             return re.sub(
                 r'(?im)^(\s*"?animatedtextureframerate"?\s+)"?\d+(\.\d+)?"?\s*$',
@@ -298,17 +330,21 @@ class VMTService:
                 text,
             )
 
-        if not re.search(r'(?i)"?\$frame"?\s+"?\d+"?', content):
-            m = re.search(r'("?\$basetexture"?\s+)"[^"]+"', content, flags=re.IGNORECASE)
+        if not re.search(r'(?i)"?' + framenum_re + r'"?\s+"?\d+"?', content):
+            m = re.search(r'("?' + var_re + r'"?\s+)"[^"]+"', content, flags=re.IGNORECASE)
             if m:
                 insert_at = m.end()
-                content = content[:insert_at] + '\n\t"$frame" "0"' + content[insert_at:]
+                content = content[:insert_at] + f'\n\t"{framenumvar}" "0"' + content[insert_at:]
             else:
                 end_root = content.rfind('}')
                 if end_root != -1:
-                    content = content[:end_root] + '\n\t"$frame" "0"\n' + content[end_root:]
+                    content = content[:end_root] + f'\n\t"{framenumvar}" "0"\n' + content[end_root:]
 
-        proxies_key = re.search(r'(?im)^\s*"?proxies"?\s*(\{)?\s*$', content)
+        # [ \t] вместо \s: \s захватывает переводы строк, из-за чего ^ уезжал на
+        # предыдущую (пустую) строку — тогда proxies_indent получался с '\n'
+        # внутри и каждая вставленная строка удваивала перевод, а .end() съедал
+        # '{' со следующей строки и прокси вставлялся ВНУТРЬ соседнего блока.
+        proxies_key = re.search(r'(?im)^[ \t]*"?proxies"?[ \t]*(\{)?[ \t]*$', content)
         if not proxies_key:
             end_root = content.rfind('}')
             if end_root != -1:
@@ -317,11 +353,11 @@ class VMTService:
                     + '\n\t"Proxies"\n\t{\n\t}\n'
                     + content[end_root:]
                 )
-            proxies_key = re.search(r'(?im)^\s*"?proxies"?\s*(\{)?\s*$', content)
+            proxies_key = re.search(r'(?im)^[ \t]*"?proxies"?[ \t]*(\{)?[ \t]*$', content)
 
         if proxies_key:
             proxies_line_start = proxies_key.start()
-            proxies_indent = re.match(r'^\s*', content[proxies_line_start:]).group(0)
+            proxies_indent = re.match(r'[ \t]*', content[proxies_line_start:]).group(0)
             brace_pos = content.find('{', proxies_key.end() - 1)
             if brace_pos == -1:
                 nl = content.find('\n', proxies_key.end())
@@ -337,14 +373,15 @@ class VMTService:
 
                 if end is not None:
                     block = content[brace_pos:end + 1]
-                    # Check if there's already an AnimatedTexture proxy specifically for $basetexture.
+                    # Check if there's already an AnimatedTexture proxy specifically for var.
                     # Some VMTs (e.g. Hypno-Eyes) have a default AnimatedTexture proxy for $detail —
-                    # that's a different variable and must not block us from adding our own for $basetexture.
-                    has_basetexture_anim = bool(re.search(
-                        r'(?si)"?AnimatedTexture"?\s*\{[^}]*"?animatedtexturevar"?\s+"?\$basetexture"?',
+                    # that's a different variable and must not block us from adding our own.
+                    # По этой же причине прокси $basetexture не мешает добавить $bumpmap.
+                    has_var_anim = bool(re.search(
+                        r'(?si)"?AnimatedTexture"?\s*\{[^}]*"?animatedtexturevar"?\s+"?' + var_re + r'"?',
                         block,
                     ))
-                    if has_basetexture_anim:
+                    if has_var_anim:
                         patched_block = update_framerate(block)
                         content = content[:brace_pos] + patched_block + content[end + 1:]
                     else:
@@ -357,16 +394,15 @@ class VMTService:
                         insertion = (
                             inside_indent + '"AnimatedTexture"\n'
                             + inside_indent + '{\n'
-                            + inside_indent + '\t"animatedtexturevar" "$basetexture"\n'
-                            + inside_indent + '\t"animatedtextureframenumvar" "$frame"\n'
+                            + inside_indent + f'\t"animatedtexturevar" "{var}"\n'
+                            + inside_indent + f'\t"animatedtextureframenumvar" "{framenumvar}"\n'
                             + inside_indent + '\t"animatedtextureframerate" "' + str(fps_int) + '"\n'
                             + inside_indent + '}\n'
                         )
                         content = content[:insert_at] + insertion + content[insert_at:]
 
-        with open(vmt_path, 'w', encoding='utf-8') as f:
-            f.write(content)
-    
+        return content
+
     @staticmethod
     def update_vmt_bumpmap_path(vmt_path: str, cdmaterials_path: str, weapon_key: str):
         """

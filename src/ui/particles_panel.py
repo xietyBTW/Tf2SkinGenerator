@@ -244,6 +244,13 @@ _ROLE_MATERIAL = Qt.ItemDataRole.UserRole + 1
 _IMAGE_EXTS = ('.png', '.jpg', '.jpeg', '.tga', '.bmp', '.webp', '.gif')
 
 
+def _is_animated(image_path: str) -> bool:
+    """Гифка/APNG: замена НЕ убивает покадровую анимацию материала (свои кадры
+    едут в многокадровый VTF), поэтому предупреждение про статику не нужно."""
+    from src.services.texture_service import TextureService
+    return TextureService.is_animated_image(image_path)
+
+
 class _TextureCardsList(QListWidget):
     """Сетка карточек текстур эффекта: двойной клик или drop картинки на
     карточку → замена (как 2D-режим у оружия)."""
@@ -1358,7 +1365,7 @@ class ParticlesPanel(QWidget):
             return
         t = self.t
         info0 = (self._payload.get("materials") or {}).get(material_name)
-        if info0 and info0.get("sheet"):
+        if info0 and info0.get("sheet") and not _is_animated(image_path):
             answer = QMessageBox.question(
                 self, t['particles_set_texture'], t['particles_sheet_warning'],
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
@@ -2419,7 +2426,7 @@ class ParticlesPanel(QWidget):
         if not path:
             return
         cur_info = (self._payload.get("materials") or {}).get(cur_mat)
-        if cur_info and cur_info.get("sheet"):
+        if cur_info and cur_info.get("sheet") and not _is_animated(path):
             answer = QMessageBox.question(
                 self, t['particles_set_texture'], t['particles_sheet_warning'],
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)

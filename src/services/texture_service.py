@@ -11,6 +11,11 @@ from src.services.vtflib_wrapper import VTFLib, VTFImageFormat, VTFImageFlags
 
 logger = get_logger(__name__)
 
+# Ядра Sobel для «нормали из яркости». Общие для статичной нормали с маской
+# в альфе (make_normal_with_alpha) и для покадровой нормали анимации.
+_SOBEL_X = ImageFilter.Kernel((3, 3), (-1, 0, 1, -2, 0, 2, -1, 0, 1), scale=2, offset=128)
+_SOBEL_Y = ImageFilter.Kernel((3, 3), (-1, -2, -1, 0, 0, 0, 1, 2, 1), scale=2, offset=128)
+
 
 class TextureService:
     # Маппинг читаемых имён форматов → внутренние идентификаторы.
@@ -121,15 +126,26 @@ class TextureService:
         if size:
             base = base.resize(size, Image.LANCZOS)
         gray = ImageOps.grayscale(base)
-        sx = ImageFilter.Kernel((3, 3), (-1, 0, 1, -2, 0, 2, -1, 0, 1), scale=2, offset=128)
-        sy = ImageFilter.Kernel((3, 3), (-1, -2, -1, 0, 0, 0, 1, 2, 1), scale=2, offset=128)
-        r = gray.filter(sx)                      # наклон по X
-        g = gray.filter(sy)                      # наклон по Y
-        b = Image.new("L", gray.size, 255)       # Z вверх (приближённо)
         mask = Image.open(mask_png_path).convert("L").resize(gray.size, Image.LANCZOS)
-        Image.merge("RGBA", (r, g, b, mask)).save(out_png_path)
+        normal = TextureService._normal_from_gray(gray)
+        normal.putalpha(mask)
+        normal.save(out_png_path)
         logger.info(f"Нормаль с маской отражения в альфе: {out_png_path}")
         return out_png_path
+
+    @staticmethod
+    def _normal_from_gray(gray: "Image.Image") -> "Image.Image":
+        """Приближённая карта нормалей из яркости: R=наклон X, G=наклон Y, Z вверх.
+
+        Альфа = 255 (непрозрачная). Тот же приём, что в make_normal_with_alpha —
+        нормаль из диффуза, а не из настоящего хайтмапа.
+        """
+        return Image.merge("RGBA", (
+            gray.filter(_SOBEL_X),
+            gray.filter(_SOBEL_Y),
+            Image.new("L", gray.size, 255),
+            Image.new("L", gray.size, 255),
+        ))
 
     @staticmethod
     def process_image(input_path: str, output_path: str, size: Tuple[int, int]) -> None:
@@ -152,36 +168,58 @@ class TextureService:
             return False
 
     @staticmethod
-    def _extract_animation_frames_rgba(
-        input_path: str,
-        size: Tuple[int, int],
-        max_frames: int = 512,
-    ) -> Tuple[list[bytes], Optional[int]]:
-        frames: list[bytes] = []
-        fps: Optional[int] = None
+    def _animation_info(input_path: str, max_frames: int = 512) -> Tuple[int, bool]:
+        """(сколько кадров берём, есть ли прозрачность) — по метаданным, без декода.
 
+        Альфа определяется по источнику, а не по декодированным кадрам: иначе
+        пришлось бы держать их все в памяти ради одного bool.
+        """
         with Image.open(input_path) as img:
             n_frames = int(getattr(img, "n_frames", 1))
-            if n_frames <= 1:
-                frame = img.convert("RGBA").resize(size)
-                frames.append(frame.tobytes())
-                return frames, None
+            has_alpha = ("transparency" in img.info
+                         or img.mode in ("RGBA", "LA", "PA"))
+        if n_frames > max_frames:
+            logger.warning(
+                f"Анимация обрезана: {n_frames} кадров → {max_frames} "
+                f"({os.path.basename(input_path)})")
+        return min(n_frames, max_frames), has_alpha
 
-            duration_ms = None
-            try:
-                duration_ms = int(img.info.get("duration", 0)) if isinstance(img.info, dict) else None
-            except Exception:
-                duration_ms = None
-            if duration_ms and duration_ms > 0:
-                fps = max(1, min(240, int(round(1000 / duration_ms))))
+    @staticmethod
+    def _iter_animation_frames_rgba(
+        input_path: str,
+        size: Tuple[int, int],
+        count: int,
+        durations_out: list,
+        as_normal: bool = False,
+    ) -> "object":
+        """Отдаёт кадры RGBA по одному (пик памяти — один кадр, не вся гифка).
 
-            count = min(n_frames, max_frames)
+        Задержки кадров дописываются в durations_out: в VTF частота одна на всю
+        анимацию, поэтому fps считается по ним ПОСЛЕ обхода (см. _fps_from_durations).
+
+        as_normal=True — каждый кадр превращается в карту нормалей (Sobel по
+        яркости, уже после ресайза — как и в статичном пути через VTFCmd).
+        """
+        with Image.open(input_path) as img:
             for i in range(count):
                 img.seek(i)
-                frame = img.convert("RGBA").resize(size)
-                frames.append(frame.tobytes())
+                durations_out.append(int(img.info.get("duration", 0) or 0))
+                frame = img.convert("RGBA").resize(size, Image.LANCZOS)
+                if as_normal:
+                    frame = TextureService._normal_from_gray(ImageOps.grayscale(frame))
+                yield frame.tobytes()
 
-        return frames, fps
+    @staticmethod
+    def _fps_from_durations(durations: list) -> int:
+        """Средний fps по задержкам кадров.
+
+        Раньше брался duration ПЕРВОГО кадра — у гифок с переменными задержками
+        скорость в игре получалась неверной. Задержка < 20 мс трактуется как
+        100 мс: так делают браузеры и так размечена масса гифок в вебе.
+        """
+        vals = [d if d >= 20 else 100 for d in durations] or [100]
+        avg_ms = sum(vals) / len(vals)
+        return max(1, min(240, int(round(1000 / avg_ms))))
 
     @staticmethod
     def _map_format_to_vtflib(format_type: str, has_alpha: bool) -> int:
@@ -217,31 +255,36 @@ class TextureService:
         if options is None:
             options = {}
 
-        frames, fps = TextureService._extract_animation_frames_rgba(input_path, size)
-        if not frames:
+        # options["normal"] → на выходе многокадровая КАРТА НОРМАЛЕЙ той же
+        # анимации (VTFCmd -normal тут неприменим: он умеет только один кадр).
+        as_normal = bool(options.get("normal", False))
+
+        count, has_alpha = TextureService._animation_info(input_path)
+        if count < 1:
             raise RuntimeError("No frames extracted")
-
-        if len(frames) > 1 and fps is None:
-            fps = 30
-
-        has_alpha = True
-        if options.get("normal", False):
-            raise RuntimeError("Animated normal maps are not supported")
+        if as_normal:
+            has_alpha = False   # нормаль строится непрозрачной
 
         dest_format = TextureService._map_format_to_vtflib(format_type, has_alpha=has_alpha)
         vtf_flags = TextureService._map_flags_to_vtflib(flags, options)
+        # Многокадровая VTF создаётся без мип-уровней (vlImageCreate, bMipmaps=0),
+        # поэтому движку это надо сообщить флагами — иначе он ждёт мипы, которых нет.
+        vtf_flags |= VTFImageFlags.NOMIP | VTFImageFlags.NOLOD
         generate_thumbnail = not options.get("nothumbnail", False)
 
+        durations: list = []
         VTFLib.create_animated_vtf(
-            frames_rgba8888=frames,
+            frames_rgba8888=TextureService._iter_animation_frames_rgba(
+                input_path, size, count, durations, as_normal=as_normal),
             width=size[0],
             height=size[1],
             dest_format=dest_format,
             flags=vtf_flags,
             output_file=output_file,
             generate_thumbnail=generate_thumbnail,
+            frame_count=count,
         )
-        return fps
+        return TextureService._fps_from_durations(durations) if count > 1 else None
 
     @staticmethod
     def parse_vtf_flags_and_options(flags: List[str]) -> Tuple[List[str], dict]:
@@ -310,10 +353,21 @@ class TextureService:
         animated_fps = None
 
         if TextureService.is_animated_image(image_path):
+            base_options = merged.copy()
+            base_options.pop("normal", None)
             animated_fps = TextureService.create_animated_vtf(
-                image_path, str(out_vtf_path), size, format_type, vtf_flags, merged
+                image_path, str(out_vtf_path), size, format_type, vtf_flags, base_options
             )
             logger.info(f"Создана анимированная VTF текстура: {out_vtf_path.name}")
+            # Нормаль включена + анимация → бамп тоже анимированный, из тех же
+            # кадров и с тем же fps (VMT анимирует $bumpmap через $bumpframe).
+            if is_normal_map:
+                normal_vtf_path = vtf_output_path / f"{normal_base}_normal.vtf"
+                TextureService.create_animated_vtf(
+                    image_path, str(normal_vtf_path), size, format_type, [],
+                    {**base_options, "normal": True}
+                )
+                logger.info(f"Создана анимированная normal VTF: {normal_vtf_path.name}")
             return animated_fps, is_normal_map
 
         TextureService.process_image(image_path, temp_png_path, size)

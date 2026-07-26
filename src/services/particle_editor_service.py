@@ -982,7 +982,8 @@ class ParticleEditorService:
         built = self._image_to_vtf(image_path, max_size, uncompressed)
         if built is None:
             return None
-        vtf_bytes, w, h, png_b64 = built
+        vtf_bytes, w, h = built["vtf"], built["w"], built["h"]
+        png_b64, sheet, fps = built["png_b64"], built["sheet"], built["fps"]
         self.custom_files[f"materials/{tex_rel}.vtf"] = vtf_bytes
         if not vmt_text:
             # Материала нет в игре (кастомное имя у ребёнка-партикла): без VMT
@@ -997,6 +998,13 @@ class ParticleEditorService:
                 '\t"$vertexalpha" 1\n'
                 '}\n'
             )
+        if vmt_text and fps:
+            # Гифка: кадры многокадрового VTF в игре крутит прокси AnimatedTexture
+            # ($basetexture/$frame) — как у анимированных текстур оружия.
+            from src.services.vmt_service import VMTService
+            vmt_text = VMTService.add_animated_texture_proxy(vmt_text, fps)
+            logger.info(f"Материал {material_name}: добавлен прокси "
+                        f"AnimatedTexture @ {fps}fps")
         if vmt_text:
             # Оригинальный игровой VMT кладём рядом с VTF: текстурная часть
             # мода самодостаточна (casual-pre-loader ставит материалы только
@@ -1010,7 +1018,7 @@ class ParticleEditorService:
             shader = sm.group(1).lower() if sm else ""
             additive = bool(_RE_ADDITIVE.search(vmt_text))
         info = {
-            "dataUrl": f"data:image/png;base64,{png_b64}", "sheet": None,
+            "dataUrl": f"data:image/png;base64,{png_b64}", "sheet": sheet,
             "additive": additive, "shader": shader, "width": w, "height": h,
         }
         key = _norm_mat(material_name)
@@ -1048,10 +1056,72 @@ class ParticleEditorService:
                     f"что такой VTF есть в игре.")
         return vmt_text, tex_rel
 
+    #: Больше кадров в лист не влезает без потери разрешения (8×8 клеток).
+    _SHEET_MAX_FRAMES = 64
+
+    @staticmethod
+    def _gif_to_sheet(image_path: str, cap: int):
+        """Анимированная картинка → (лист-изображение, sheet-данные).
+
+        Кадры раскладываются в сетку из степеней двойки (лист остаётся POT),
+        а sheet-данные — тот же формат, что отдаёт parse_vtf_sheet для игровых
+        листов, поэтому движок превью анимирует их без единой правки.
+
+        ponytail: скорость проигрывания в превью задаёт 'animation rate'
+        рендерера системы, а не собственный fps гифки — так же, как это делает
+        игра с настоящим спрайт-листом. Длительности кадров относительные.
+        """
+        from PIL import Image
+
+        from src.services.texture_service import TextureService
+
+        count, _ = TextureService._animation_info(
+            image_path, ParticleEditorService._SHEET_MAX_FRAMES)
+        cols = 1
+        while cols * cols < count:
+            cols *= 2
+        rows = 1
+        while cols * rows < count:
+            rows *= 2
+        cell = 1
+        while cell * 2 * max(cols, rows) <= cap:
+            cell *= 2
+
+        durations: list = []
+        frames = [
+            Image.frombytes("RGBA", (cell, cell), buf)
+            for buf in TextureService._iter_animation_frames_rgba(
+                image_path, (cell, cell), count, durations)
+        ]
+        sheet_img = Image.new("RGBA", (cols * cell, rows * cell), (0, 0, 0, 0))
+        mean = (sum(d or 100 for d in durations) / len(durations)) or 100
+        seq_frames = []
+        for i, frame in enumerate(frames):
+            col, row = i % cols, i // cols
+            sheet_img.paste(frame, (col * cell, row * cell))
+            seq_frames.append({
+                "duration": (durations[i] or 100) / mean,
+                "coords": [[col / cols, row / rows,
+                            (col + 1) / cols, (row + 1) / rows]],
+            })
+        sheet = {"sequences": {0: {
+            "clamp": False,
+            "duration": sum(f["duration"] for f in seq_frames),
+            "frames": seq_frames,
+        }}}
+        logger.info(f"Гифка → спрайт-лист {cols}x{rows} по {cell}px "
+                    f"({count} кадров): {os.path.basename(image_path)}")
+        return sheet_img, sheet
+
     @staticmethod
     def _image_to_vtf(image_path: str, max_size: int, uncompressed: bool):
-        """Картинка → (vtf_bytes, w, h, png_base64). None при ошибке.
-        Размеры → степени двойки (<= max_size, потолок 1024). NOMIP|NOLOD."""
+        """Картинка → {vtf, w, h, png_b64, sheet, fps} либо None при ошибке.
+        Размеры → степени двойки (<= max_size, потолок 1024). NOMIP|NOLOD.
+
+        Анимированная картинка (GIF/APNG/WebP): VTF многокадровый (в игре кадры
+        крутит прокси AnimatedTexture, fps != None), а в превью уходит спрайт-лист
+        с sheet-данными — движок превью умеет только листы.
+        """
         try:
             from PIL import Image
             img = Image.open(image_path).convert("RGBA")
@@ -1066,23 +1136,48 @@ class ParticleEditorService:
                 p *= 2
             return p
 
+        sheet = None
+        preview_img = None
+        from src.services.texture_service import TextureService
+        if TextureService.is_animated_image(image_path):
+            try:
+                # img (первый кадр в полном разрешении) не трогаем — он идёт в VTF.
+                preview_img, sheet = ParticleEditorService._gif_to_sheet(
+                    image_path, cap)
+            except Exception as exc:
+                # Не смогли собрать лист — молча остаёмся на первом кадре.
+                logger.warning(f"Гифка → спрайт-лист не удалась: {exc}", exc_info=True)
+                sheet = preview_img = None
+
         w, h = _pot(img.width), _pot(img.height)
         if (w, h) != img.size:
             img = img.resize((w, h), Image.LANCZOS)
+        if preview_img is None:
+            preview_img = img
 
+        fps = None
         tmp_path = None
         try:
             from src.services.vtflib_wrapper import (
                 VTFImageFlags, VTFImageFormat, VTFLib)
             fd, tmp_path = tempfile.mkstemp(suffix=".vtf")
             os.close(fd)
-            VTFLib.create_animated_vtf(
-                [img.tobytes()], w, h,
-                VTFImageFormat.RGBA8888 if uncompressed else VTFImageFormat.DXT5,
-                VTFImageFlags.CLAMPS | VTFImageFlags.CLAMPT
-                | VTFImageFlags.NOMIP | VTFImageFlags.NOLOD,
-                tmp_path,
-            )
+            if sheet is not None:
+                # Многокадровый VTF: кадры анимации крутит прокси AnimatedTexture
+                # из VMT (тот же механизм, что у анимированных текстур оружия).
+                fps = TextureService.create_animated_vtf(
+                    image_path, tmp_path, (w, h),
+                    "RGBA8888" if uncompressed else "DXT5",
+                    ["CLAMPS", "CLAMPT"], {},
+                )
+            else:
+                VTFLib.create_animated_vtf(
+                    [img.tobytes()], w, h,
+                    VTFImageFormat.RGBA8888 if uncompressed else VTFImageFormat.DXT5,
+                    VTFImageFlags.CLAMPS | VTFImageFlags.CLAMPT
+                    | VTFImageFlags.NOMIP | VTFImageFlags.NOLOD,
+                    tmp_path,
+                )
             vtf_bytes = Path(tmp_path).read_bytes()
         except Exception as exc:
             logger.error(f"Картинка → VTF не удалась: {exc}", exc_info=True)
@@ -1094,9 +1189,10 @@ class ParticleEditorService:
                 except OSError:
                     pass
         buf = io.BytesIO()
-        img.save(buf, format="PNG")
+        preview_img.save(buf, format="PNG")
         png_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
-        return vtf_bytes, w, h, png_b64
+        return {"vtf": vtf_bytes, "w": w, "h": h, "png_b64": png_b64,
+                "sheet": sheet, "fps": fps}
 
     def is_custom_material(self, material_name: str) -> bool:
         """True, если текстура материала заменена своей картинкой (можно сбросить)."""

@@ -39,7 +39,8 @@ def test_missing_game_vmt_generates_spritecard_template():
     svc = ParticleEditorService()
     svc._resolve_texture_path = lambda material_name, tf2_root_dir: (
         None, "effects/custom_new")
-    svc._image_to_vtf = lambda *a: (b"vtf", 64, 64, "")
+    svc._image_to_vtf = lambda *a: {"vtf": b"vtf", "w": 64, "h": 64,
+                                    "png_b64": "", "sheet": None, "fps": None}
     info = svc._overwrite_texture(
         "effects/custom_new.vmt", "img.png", "", 512, False)
     vmt = svc.custom_files["materials/effects/custom_new.vmt"].decode()
