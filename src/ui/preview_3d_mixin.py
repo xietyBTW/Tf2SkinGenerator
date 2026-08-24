@@ -101,6 +101,7 @@ class Preview3DMixin:
         w.blu_ready.connect(self._on_3d_blu_ready)
         w.blu_multi_material.connect(self._on_3d_blu_multi_material)
         w.australium_ready.connect(self._on_australium_ready)
+        w.blu_same_as_red.connect(self._on_blu_same_as_red)
         w.failed.connect(self._on_3d_failed)
         w.start()
         self._3d_worker = w
@@ -136,6 +137,7 @@ class Preview3DMixin:
         w.blu_ready.connect(self._on_3d_blu_ready)
         w.blu_multi_material.connect(self._on_3d_blu_multi_material)
         w.australium_ready.connect(self._on_australium_ready)
+        w.blu_same_as_red.connect(self._on_blu_same_as_red)
         w.failed.connect(lambda e: (self.btn_load_3d.setEnabled(True),
                                     logger.info(f"[QC CARDS] {e}")))
         w.start()
@@ -387,6 +389,19 @@ class Preview3DMixin:
         # Видимость — единым правилом (для рук учитывает реальный командный материал).
         self._update_team_btn_visibility()
 
+
+    def _on_blu_same_as_red(self) -> None:
+        """BLU-скин у модели есть, но в стоке он не отличается от RED.
+
+        Переключатель не прячем: своя BLU-текстура собирается и для такой
+        модели (сборка пишет отдельный VMT с новым $basetexture). Но подпись
+        должна честно говорить, что сейчас команды выглядят одинаково —
+        иначе пользователь ищет разницу, которой нет.
+        """
+        self._blu_matches_red = True
+        hint = self.t.get('3d_team_blu_same_tip')
+        if hint:
+            self.btn_blu.setToolTip(hint)
 
     def _on_3d_blu_multi_material(self, payload) -> None:
         """Воркер нашёл BLU текстуры для многоматериальной модели (персонажи).

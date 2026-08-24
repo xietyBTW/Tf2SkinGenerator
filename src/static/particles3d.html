@@ -93,6 +93,7 @@
 <script type="module">
 import * as THREE        from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { OBJLoader }     from 'three/addons/loaders/OBJLoader.js';
 import { ParticleSystemInstance, implementedModules } from './js/particles/engine.js';
 
 // ── Python bridge ────────────────────────────────────────────────────────── //
@@ -172,6 +173,111 @@ scene.add(grid);
 const axes = new THREE.AxesHelper(24);
 scene.add(axes);
 
+// ── Модель под эффектом ──────────────────────────────────────────────────── //
+// Спрайты рисуются своим шейдером и на свет не реагируют — эти источники
+// нужны только мешу модели, чтобы форма читалась без текстуры.
+scene.add(new THREE.HemisphereLight(0xbfc6cf, 0x202024, 2.0));
+const modelSun = new THREE.DirectionalLight(0xffffff, 1.2);
+modelSun.position.set(60, -120, 140);
+scene.add(modelSun);
+
+let modelObject = null;
+let modelVisible = false;
+
+function disposeModel() {
+  if (modelObject === null) return;
+  scene.remove(modelObject);
+  const seen = new Set();
+  modelObject.traverse(child => {
+    if (!child.isMesh) return;
+    child.geometry.dispose();
+    const mat = child.material;
+    // Материал общий на несколько мешей — освобождаем один раз, вместе с картой
+    if (mat && !seen.has(mat)) {
+      seen.add(mat);
+      if (mat.map) mat.map.dispose();
+      if (mat.dispose) mat.dispose();
+    }
+  });
+  modelObject = null;
+}
+
+/**
+ * Меш модели в сцене: OBJ приходит строкой из smd_to_obj_service с флагом
+ * keep_source_axes, то есть уже в координатах Source — той же системе, в
+ * которой живут контрол-пойнты и частицы. Никаких доворотов здесь быть не
+ * должно, иначе эффект «съедет» с точки крепления.
+ *
+ * textures — {имя материала: data URL}; имена приходят из usemtl того же OBJ.
+ * Материал без текстуры остаётся серым: силуэт под эффектом всё равно нужен.
+ */
+window.loadModelObj = function(objText, textures) {
+  try {
+    disposeModel();
+    if (!objText) return;
+    const obj = new OBJLoader().parse(objText);
+    const maps = textures || {};
+    const loader = new THREE.TextureLoader();
+    const byName = {};
+    const plain = new THREE.MeshLambertMaterial({
+      color: 0x9aa0a8, side: THREE.DoubleSide,
+    });
+    const materialFor = (name) => {
+      const url = maps[name];
+      if (!url) return plain;
+      if (!byName[name]) {
+        const map = loader.load(url);
+        map.colorSpace = THREE.SRGBColorSpace;
+        byName[name] = new THREE.MeshLambertMaterial({
+          map: map, side: THREE.DoubleSide,
+        });
+      }
+      return byName[name];
+    };
+    obj.traverse(child => {
+      if (!child.isMesh) return;
+      const name = child.material && child.material.name;
+      child.material = materialFor(name);
+    });
+    obj.visible = modelVisible;
+    // Модель непрозрачна и пишет глубину: частицы за ней корректно скрываются
+    obj.renderOrder = 0;
+    scene.add(obj);
+    modelObject = obj;
+  } catch (e) {
+    console.log('loadModelObj error:', e);
+  }
+};
+
+window.setModelVisible = function(v) {
+  modelVisible = !!v;
+  if (modelObject !== null) modelObject.visible = modelVisible;
+};
+
+window.clearModel = function() {
+  disposeModel();
+};
+
+/** Состояние меша модели — для автопроверки загрузки (см. particleDebugState). */
+window.particleDebugModel = function() {
+  if (modelObject === null) return { loaded: false, visible: modelVisible };
+  let meshes = 0, textured = 0;
+  modelObject.traverse(child => {
+    if (!child.isMesh) return;
+    meshes++;
+    if (child.material && child.material.map) textured++;
+  });
+  const box = new THREE.Box3().setFromObject(modelObject);
+  return {
+    loaded: true,
+    visible: modelObject.visible,
+    meshes: meshes,
+    textured: textured,
+    min: [box.min.x, box.min.y, box.min.z],
+    max: [box.max.x, box.max.y, box.max.z],
+  };
+};
+
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
@@ -190,6 +296,8 @@ const VERT = `
   attribute vec4 iUV1;
   attribute float iBlend;
   attribute float iOrient;
+  attribute vec3 iRight;
+  attribute vec3 iUp;
   varying vec2 vUv0;
   varying vec2 vUv1;
   varying float vBlend;
@@ -202,8 +310,17 @@ const VERT = `
     vec2 rc = vec2(corner.x * c - corner.y * s, corner.x * s + corner.y * c);
     vec4 pos;
     if (iOrient > 1.5) {
-      // orientation_type 2: параллельно земле (XY-плоскость мира)
-      pos = modelViewMatrix * vec4(iPos + vec3(rc, 0.0) * iRadius, 1.0);
+      // orientation_type 2/3: спрайт лежит в плоскости осей iRight/iUp. Без
+      // «orientation control point» это XY-плоскость мира (как было раньше),
+      // с ним — базис контрол-пойнта
+      pos = modelViewMatrix * vec4(iPos + (iRight * rc.x + iUp * rc.y) * iRadius, 1.0);
+    } else if (iOrient > 0.5) {
+      // orientation_type 1: билборд, зафиксированный по мировой вертикали —
+      // разворачивается к камере только вокруг Z
+      vec3 up = vec3(0.0, 0.0, 1.0);
+      vec3 c = cross(up, cameraPosition - iPos);
+      vec3 right = length(c) < 1e-5 ? vec3(1.0, 0.0, 0.0) : normalize(c);
+      pos = modelViewMatrix * vec4(iPos + (right * rc.x + up * rc.y) * iRadius, 1.0);
     } else {
       pos = modelViewMatrix * vec4(iPos, 1.0);
       pos.xy += rc * iRadius;
@@ -355,6 +472,8 @@ class SpriteBatch {
     this.aUV1    = mk(new Float32Array(n * 4), 4);
     this.aBlend  = mk(new Float32Array(n), 1);
     this.aOrient = mk(new Float32Array(n), 1);
+    this.aRight  = mk(new Float32Array(n * 3), 3);
+    this.aUp     = mk(new Float32Array(n * 3), 3);
     const g = this.geometry;
     g.setAttribute('iPos', this.aPos);
     g.setAttribute('iRadius', this.aRadius);
@@ -365,6 +484,8 @@ class SpriteBatch {
     g.setAttribute('iUV1', this.aUV1);
     g.setAttribute('iBlend', this.aBlend);
     g.setAttribute('iOrient', this.aOrient);
+    g.setAttribute('iRight', this.aRight);
+    g.setAttribute('iUp', this.aUp);
   }
 
   update(sprites) {
@@ -389,9 +510,18 @@ class SpriteBatch {
       }
       this.aBlend.array[i]  = s.blend;
       this.aOrient.array[i] = s.orientation;
+      // Оси плоскости приходят только у ориентированных по CP спрайтов;
+      // без них — прежняя XY-плоскость мира
+      const right = s.right || SPRITE_PLANE_RIGHT;
+      const up = s.up || SPRITE_PLANE_UP;
+      for (let j = 0; j < 3; j++) {
+        this.aRight.array[i * 3 + j] = right[j];
+        this.aUp.array[i * 3 + j] = up[j];
+      }
     }
     for (const a of [this.aPos, this.aRadius, this.aRot, this.aColor,
-                     this.aAlpha, this.aUV0, this.aUV1, this.aBlend, this.aOrient])
+                     this.aAlpha, this.aUV0, this.aUV1, this.aBlend, this.aOrient,
+                     this.aRight, this.aUp])
       a.needsUpdate = true;
     this.geometry.instanceCount = sprites.length;
     this.mesh.visible = sprites.length > 0;
@@ -1039,7 +1169,11 @@ let ropeBatches = {};      // ключ материала → RopeBatch
 let paused = false;
 let loop = true;
 let finishedAt = null;
-const controller = { controlPoints: [[0, 0, 0]] };
+const controller = { controlPoints: [[0, 0, 0]], controlPointBases: {} };
+
+//: Плоскость ориентированных спрайтов, когда «orientation control point» не задан
+const SPRITE_PLANE_RIGHT = [1, 0, 0];
+const SPRITE_PLANE_UP = [0, 1, 0];
 
 function disposeBatches() {
   for (const b of Object.values(batches)) b.dispose();
@@ -1108,15 +1242,124 @@ window.restartEffect = function() {
 window.setPaused = function(v) { paused = !!v; };
 window.setLoop = function(v) { loop = !!v; };
 
+//: Базовые (заданные пользователем) значения CP — мотор двигает относительно них
+const cpBase = {};
+//: Пресеты движения CP: i -> {kind, amp, period}
+const cpMotion = {};
+//: Время, накопленное для пресетов (на паузе стоит)
+let cpMotionTime = 0;
+
+function cpBaseOf(i) {
+  return cpBase[i] || (cpBase[i] = { pos: [0, 0, 0], angles: [0, 0, 0], hasAngles: false });
+}
+
 window.setControlPoint = function(i, x, y, z) {
+  cpBaseOf(i).pos = [x, y, z];
   controller.controlPoints[i] = [x, y, z];
 };
+
+/**
+ * Ориентация контрол-пойнта из углов Source (pitch, yaw, roll в градусах) —
+ * порт AngleVectors из mathlib. От неё зависят локальные системы координат
+ * инициализаторов и плоскость спрайтов при orientation_type 2/3.
+ * Тот же формат углов пишет Crowbar в «$attachment ... rotate P Y R», поэтому
+ * привязка к attachment модели ляжет сюда без пересчётов.
+ *
+ * Нули здесь дают Forward=(1,0,0), Right=(0,-1,0), Up=(0,0,1) — это НЕ дефолт
+ * движка (Forward=(0,1,0), Right=(1,0,0)): дефолтом Source заполняет CP, пока
+ * ориентацию никто не выставил. Сбросить обратно — clearControlPointOrientation.
+ */
+function basisFromAngles(pitch, yaw, roll) {
+  const d = Math.PI / 180;
+  const sp = Math.sin(pitch * d), cp = Math.cos(pitch * d);
+  const sy = Math.sin(yaw * d), cy = Math.cos(yaw * d);
+  const sr = Math.sin(roll * d), cr = Math.cos(roll * d);
+  return {
+    fwd: [cp * cy, cp * sy, -sp],
+    right: [-sr * sp * cy + cr * sy, -sr * sp * sy - cr * cy, -sr * cp],
+    up: [cr * sp * cy + sr * sy, cr * sp * sy - sr * cy, cr * cp],
+  };
+}
+
+window.setControlPointOrientation = function(i, pitch, yaw, roll) {
+  const b = cpBaseOf(i);
+  b.angles = [pitch, yaw, roll];
+  b.hasAngles = true;
+  controller.controlPointBases[i] = basisFromAngles(pitch, yaw, roll);
+};
+
+/** Сброс ориентации CP к дефолту движка. */
+window.clearControlPointOrientation = function(i) {
+  delete controller.controlPointBases[i];
+  const b = cpBase[i];
+  if (b) { b.angles = [0, 0, 0]; b.hasAngles = false; }
+};
+
+/**
+ * Пресет движения контрол-пойнта. В игре эффект висит на движущемся игроке, и
+ * именно движение CP проявляет Movement Lock to Control Point, drag и инерцию
+ * Верле — на неподвижной точке этого не увидеть.
+ *   kind: 'none' | 'bob' (вверх-вниз) | 'sway' (шаг вбок с подскоком)
+ *       | 'orbit' (по кругу, CP смотрит по касательной) | 'spin' (разворот на месте)
+ * amp — юниты, period — секунды на цикл.
+ * Пресеты orbit и spin ЗАДАЮТ ориентацию CP, даже если углы не выставлялись.
+ */
+window.setControlPointMotion = function(i, kind, amp, period) {
+  if (!kind || kind === 'none') {
+    delete cpMotion[i];
+    const b = cpBaseOf(i);
+    applyControlPoint(i, b.pos, b.angles, b.hasAngles);
+    return;
+  }
+  cpMotion[i] = { kind: kind, amp: amp, period: period > 0 ? period : 1 };
+};
+
+/** Ставит CP на кадр, НЕ трогая базовые значения (их правит только UI). */
+function applyControlPoint(i, pos, angles, withAngles) {
+  controller.controlPoints[i] = [pos[0], pos[1], pos[2]];
+  if (withAngles) controller.controlPointBases[i] = basisFromAngles(
+    angles[0], angles[1], angles[2]);
+  else delete controller.controlPointBases[i];
+}
+
+/** Двигает CP по пресетам — вызывается каждый кадр до симуляции. */
+function updateControlPointMotion(dt) {
+  const keys = Object.keys(cpMotion);
+  if (keys.length === 0) return;
+  cpMotionTime += dt;
+  for (const key of keys) {
+    const m = cpMotion[key];
+    const b = cpBaseOf(key | 0);
+    const w = 2 * Math.PI * cpMotionTime / m.period;
+    const pos = [b.pos[0], b.pos[1], b.pos[2]];
+    const ang = [b.angles[0], b.angles[1], b.angles[2]];
+    let withAngles = b.hasAngles;
+    if (m.kind === 'bob') {
+      pos[2] += Math.sin(w) * m.amp;
+    } else if (m.kind === 'sway') {
+      pos[0] += Math.sin(w) * m.amp;
+      pos[2] += Math.abs(Math.cos(w)) * m.amp * 0.25;
+    } else if (m.kind === 'orbit') {
+      pos[0] += Math.cos(w) * m.amp;
+      pos[1] += Math.sin(w) * m.amp;
+      ang[1] += w * 180 / Math.PI + 90;   // смотрим по касательной
+      withAngles = true;
+    } else if (m.kind === 'spin') {
+      ang[1] += w * 180 / Math.PI;
+      withAngles = true;
+    }
+    applyControlPoint(key | 0, pos, ang, withAngles);
+  }
+}
 
 /** Прокрутить симуляцию на steps шагов по dt секунд — детерминированно,
     без зависимости от кадров (в фоновой вкладке rAF не тикает). */
 window.particleDebugAdvance = function(dt = 1 / 60, steps = 60) {
   if (!rootInstance) return null;
-  for (let i = 0; i < steps; i++) rootInstance.movement(dt);
+  for (let i = 0; i < steps; i++) {
+    updateControlPointMotion(dt);
+    rootInstance.movement(dt);
+  }
   return window.particleDebugState();
 };
 
@@ -1175,6 +1418,7 @@ function animate() {
   controls.update();
 
   if (rootInstance && !paused) {
+    updateControlPointMotion(dt);
     rootInstance.movement(dt);
 
     if (loop && rootInstance.isFinished()) {

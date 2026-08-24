@@ -24,6 +24,7 @@ from typing import Optional
 from PySide6.QtCore import Signal
 
 from src.services.base_worker import BaseWorker
+from src.services import vmt_tint
 from src.services.game_vpk_reader import GameVpkReader
 from src.shared.logging_config import get_logger
 
@@ -116,6 +117,7 @@ class HatTextureExtractWorker(BaseWorker):
 
         extracted: list[str] = []
         seen_basetex: set = set()   # избегаем дублей если несколько mat → одна VTF
+        painted = False             # у текстуры есть маска командной окраски
         total = max(len(mat_names), 1)
 
         with GameVpkReader([misc_vpk, textures_vpk]) as reader:
@@ -151,6 +153,10 @@ class HatTextureExtractWorker(BaseWorker):
                     logger.warning(f"[hat-tex] VTF not found for $baseTexture={basetexture}")
                     continue
 
+                tint = vmt_tint.parse_tint(vmt_content)
+                if tint is not None and not tint.is_neutral:
+                    painted = True
+
                 out = self._save_vtf(vtf_data, basetexture)
                 if out:
                     extracted.append(out)
@@ -162,6 +168,15 @@ class HatTextureExtractWorker(BaseWorker):
 
         self.progress.emit(100, "Done")
         msg = extracted[0] if len(extracted) == 1 else "\n".join(extracted)
+        if painted:
+            # Файл отдаём сырым: в игре краску накладывает сам движок, и
+            # впечатывать её значило бы получить двойную окраску. Но тёмные
+            # пятна маски выглядят как испорченная текстура — поясняем.
+            from src.data.translations import TRANSLATIONS
+            t = TRANSLATIONS.get(self._lang, TRANSLATIONS["en"])
+            note = t.get("hat_tex_paint_mask_note")
+            if note:
+                msg = f"{msg}\n\n{note}"
         self.finished.emit(True, msg)
 
     # ── Вспомогательные методы ────────────────────────────────────────────── #

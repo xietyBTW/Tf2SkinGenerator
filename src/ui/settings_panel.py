@@ -20,6 +20,19 @@ from src.ui.format_choices import (
 )
 
 
+def fits_two_columns(widths, spacing: int, available: int) -> bool:
+    """Влезет ли набор виджетов в две колонки при доступной ширине.
+
+    Ширину колонки задаёт самый широкий виджет в ней, поэтому считаем по
+    максимумам чётных и нечётных позиций, а не по сумме пар.
+    """
+    if not widths:
+        return True
+    col0 = max(widths[0::2])
+    col1 = max(widths[1::2]) if len(widths) > 1 else 0
+    return col0 + col1 + spacing <= available
+
+
 class CollapsibleGroup(QWidget):
     """Collapsible group для accordion"""
     toggled = Signal(bool)  # Сигнал при сворачивании/разворачивании
@@ -251,10 +264,10 @@ class SettingsPanel(QWidget):
         res_layout = QGridLayout()
         res_layout.setHorizontalSpacing(8)
         res_layout.setVerticalSpacing(6)
-        res_layout.addWidget(self.radio_256,  0, 0)
-        res_layout.addWidget(self.radio_512,  0, 1)
-        res_layout.addWidget(self.radio_1024, 1, 0)
-        res_layout.addWidget(self.radio_2048, 1, 1)
+        self._res_grid = res_layout
+        self._res_boxes = [self.radio_256, self.radio_512,
+                           self.radio_1024, self.radio_2048]
+        self._relayout_res_boxes()
         main_settings_layout.addLayout(res_layout)
         
         # Формат VTF
@@ -404,6 +417,7 @@ class SettingsPanel(QWidget):
         ]
         for _name, _cb in self._flag_boxes:
             _cb.setStyleSheet(compact_checkbox_style)
+        self._flag_allowed = None
         self._relayout_flag_boxes(None)
 
         flags_layout.addLayout(flags_grid)
@@ -853,12 +867,48 @@ class SettingsPanel(QWidget):
             )
             self.on_crit_hit_selected(self.parent.crit_hit_checkbox.isChecked())
 
+    # ── Ширина колонки ──────────────────────────────────────────────────── #
+
+    #: Запас на поля панели, отступ раскрывающегося блока и полосу прокрутки
+    _GRID_PADDING = 34
+
+    def _grid_columns(self, widgets, spacing: int) -> int:
+        """1 или 2 колонки — по тому, влезает ли пара в текущую ширину."""
+        widths = [w.sizeHint().width() for w in widgets]
+        avail = max(0, self.width() - self._GRID_PADDING)
+        return 2 if fits_two_columns(widths, spacing, avail) else 1
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if hasattr(self, '_res_grid'):
+            self._relayout_res_boxes()
+        if hasattr(self, '_flag_grid'):
+            self._relayout_flag_boxes(self._flag_allowed)
+
+    def _relayout_res_boxes(self) -> None:
+        """Раскладка переключателей разрешения под текущую ширину."""
+        cols = self._grid_columns(self._res_boxes,
+                                  self._res_grid.horizontalSpacing())
+        if cols == getattr(self, '_res_cols', None):
+            return
+        self._res_cols = cols
+        for rb in self._res_boxes:
+            self._res_grid.removeWidget(rb)
+        for i, rb in enumerate(self._res_boxes):
+            self._res_grid.addWidget(rb, i // cols, i % cols)
+
     def _relayout_flag_boxes(self, allowed) -> None:
         """Показывает только галки из allowed (None — все), без дыр в сетке.
 
         Скрытая галка остаётся в раскладке пустой ячейкой, поэтому сетка
-        перекладывается: видимые идут подряд по два в строку.
+        перекладывается: видимые идут подряд. Число колонок зависит от
+        ширины — на узкой панели правая колонка иначе уезжает за край.
         """
+        self._flag_allowed = allowed
+        visible_boxes = [cb for name, cb in self._flag_boxes
+                         if allowed is None or name in allowed]
+        cols = self._grid_columns(visible_boxes,
+                                  self._flag_grid.horizontalSpacing())
         for _name, cb in self._flag_boxes:
             self._flag_grid.removeWidget(cb)
         shown = 0
@@ -866,7 +916,7 @@ class SettingsPanel(QWidget):
             visible = allowed is None or name in allowed
             cb.setVisible(visible)
             if visible:
-                self._flag_grid.addWidget(cb, shown // 2, shown % 2)
+                self._flag_grid.addWidget(cb, shown // cols, shown % cols)
                 shown += 1
             elif cb.isChecked():
                 cb.setChecked(False)   # скрытая галка не должна влиять на сборку
@@ -892,10 +942,8 @@ class SettingsPanel(QWidget):
                 QTimer.singleShot(0, reset_normal)
     
     def on_advanced_toggled(self, is_expanded):
-        """Обработка сворачивания/разворачивания секции Дополнительно"""
-        # Уведомляем главное окно об изменении для пересчета размера
-        if hasattr(self.parent, 'on_advanced_section_toggled'):
-            self.parent.on_advanced_section_toggled(is_expanded)
+        """Раскрытие «Дополнительно» больше не меняет размер окна: колонка
+        прокручивается, а превью занимает всю высоту само."""
         self._sync_crit_hit_dependent_controls()
     
     def _get_crit_hit_state(self) -> bool:

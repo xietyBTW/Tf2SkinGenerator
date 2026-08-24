@@ -403,6 +403,32 @@ def selector_spec(layout: SkinLayout) -> SelectorSpec:
     return spec
 
 
+def team_material_map(layout: SkinLayout) -> Dict[str, str]:
+    """
+    {материал RED: материал BLU} — ПО СТОЛБЦАМ $texturegroup.
+
+    Команда в Source меняет материалы поколоночно, и меняет не обязательно
+    все. У hwn2022_alcoholic_automaton четыре столбца, а переключаются два:
+
+        { auto_1      auto      auto_1_blue auto_blue }
+        { auto_1_blue auto_blue auto_1_blue auto_blue }
+
+    Столбцы 3-4 в обеих строках одинаковы — это детали, которые синие
+    ВСЕГДА (линза), а не командный вариант. Такие материалы отображаются
+    сами в себя: потребитель по этому видит, что при смене команды их
+    трогать не нужно. Раньше знание жило только в превью, где вместо карты
+    брали ОДНУ первую BLU-текстуру и клали её на всю модель.
+
+    Пусто, если второй скин — не команда (стиль bloody/clean или вариант).
+    """
+    if not selector_spec(layout).team:
+        return {}
+    red = layout.base_rows[0] if layout.base_rows else []
+    blu = layout.second_row
+    return {name: (blu[i] if i < len(blu) else name)
+            for i, name in enumerate(red)}
+
+
 # ── Ограничение раскладки списком разрешённых материалов (режимы рук) ───── #
 
 def restrict_to_materials(

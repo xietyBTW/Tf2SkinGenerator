@@ -40,6 +40,7 @@ class SmdToObjService:
         include_mats: Optional[set] = None,
         extra_smd_paths: Optional[list] = None,
         source_zup: bool = True,
+        keep_source_axes: bool = False,
     ) -> Tuple[bool, List[str]]:
         """
         Конвертирует SMD → OBJ + MTL с поддержкой нескольких материалов.
@@ -54,6 +55,10 @@ class SmdToObjService:
             include_mats: Если задан — оставляем только эти материалы.
                           Используется для моделей рук, чтобы исключить костюм
                           и оставить только нужные меши.
+            keep_source_axes: True — не трогать оси вообще. Нужно превью
+                          частиц: его сцена живёт в координатах Source (Z-up,
+                          камера с up=(0,0,1)), и модель обязана попасть в ту же
+                          систему, что и контрол-пойнты с частицами.
             source_zup:   True (по умолчанию) — применять конвертацию Z-up→Y-up
                           для оружий и рук. False — для персонажей ($upaxis Y),
                           SMD уже в Y-up и только зеркалим Z для Three.js.
@@ -124,7 +129,11 @@ class SmdToObjService:
 
                         x, y, z = vert["pos"]
                         nx, ny, nz = vert["nrm"]
-                        if source_zup:
+                        if keep_source_axes:
+                            # Превью частиц: сцена уже в осях Source
+                            positions.append((x, y, z))
+                            normals.append((nx, ny, nz))
+                        elif source_zup:
                             # Оружия/руки: Source Z-up → Three.js Y-up: (x,y,z) → (x, z, -y)
                             positions.append((x, z, -y))
                             normals.append((nx, nz, -ny))

@@ -298,6 +298,16 @@ class SettingsDialog(StyledDialog):
         lay.addLayout(_pref_row(
             self.t.get('bypass_label', 'sv_pure bypass'), self.bypass_combo))
 
+        lay.addSpacing(14)
+
+        self.group_tree_checkbox = QCheckBox(
+            self.t.get('particles_group_tree', 'Group particle systems by parent'))
+        self.group_tree_checkbox.setStyleSheet(_CHECK_STYLE)
+        self.group_tree_checkbox.setToolTip(self.t.get(
+            'particles_group_tree_tip',
+            'In a stock PCF most definitions are children (holders, spawners). Grouping shows only the top of each effect; the rest opens on click.'))
+        lay.addWidget(self.group_tree_checkbox)
+
         lay.addSpacing(22)
         lay.addWidget(_divider())
         lay.addSpacing(22)
@@ -474,6 +484,8 @@ class SettingsDialog(StyledDialog):
         if idx >= 0:
             self.bypass_combo.setCurrentIndex(idx)
 
+        self.group_tree_checkbox.setChecked(
+            self.config.get("particles_group_tree", True))
         self.keep_temp_checkbox.setChecked(self.config.get("keep_temp_files", False))
         self.debug_mode_checkbox.setChecked(self.config.get("debug_mode", False))
 
@@ -487,6 +499,7 @@ class SettingsDialog(StyledDialog):
         self.config["language"]         = self.language_combo.currentData()
         self.config["theme"]            = self.theme_combo.currentData()
         self.config["sv_pure_bypass"]   = self.bypass_combo.currentData()
+        self.config["particles_group_tree"] = self.group_tree_checkbox.isChecked()
         self.config["keep_temp_files"]  = self.keep_temp_checkbox.isChecked()
         self.config["debug_mode"]       = self.debug_mode_checkbox.isChecked()
 

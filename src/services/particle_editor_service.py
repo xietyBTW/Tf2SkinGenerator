@@ -67,34 +67,170 @@ _PCF_DEFAULT_ATTRS = {
     "visibility camera depth bias": 0.0,
 }
 
+def flatten_hierarchy(tree: list) -> List[str]:
+    """Имена из дерева сверху вниз, каждое по одному разу."""
+    out, seen = [], set()
+
+    def walk(nodes):
+        for name, kids in nodes:
+            if name not in seen:
+                seen.add(name)
+                out.append(name)
+            walk(kids)
+
+    walk(tree)
+    return out
+
+
+#: Сколько контрольных точек знает движок Source (MAX_PARTICLE_CONTROL_POINTS).
+MAX_CONTROL_POINTS = 64
+
+#: Имена атрибутов, которые НЕ являются номером контрольной точки, хотя и
+#: содержат нужные слова: это границы диапазонов и счётчики (в стоке там
+#: встречаются 20/30/40 — за пределами реальных CP эффекта).
+_NOT_CP_ATTRS = ("maximum end control point", "# of control points to set",
+                 "control point movement distance tolerance",
+                 "control point offset for fast collisions",
+                 "emission count scale control point field")
+
+
+def referenced_control_points(sys_json: dict,
+                              systems: Optional[dict] = None) -> List[int]:
+    """
+    Номера контрольных точек, от которых зависит система (и её дети).
+
+    Ими игра управляет из кода — цвет килстрика на CP 9, положение оружия на
+    CP 1 и так далее. В превью такие точки надо выставить руками, а понять,
+    какие именно, можно только вычитав их из модулей эффекта.
+    """
+    found: set = set()
+    seen: set = set()
+    pending = [sys_json]
+    while pending:
+        s = pending.pop()
+        if s is None or id(s) in seen:
+            continue
+        seen.add(id(s))
+        for group in MODULE_GROUPS:
+            for mod in s.get(group) or []:
+                for name, tv in (mod.get("attrs") or {}).items():
+                    low = name.lower()
+                    if "control point" not in low and "control_point" not in low:
+                        continue
+                    if any(low == skip or low.startswith(skip)
+                           for skip in _NOT_CP_ATTRS):
+                        continue
+                    v = tv.get("v")
+                    if isinstance(v, bool) or not isinstance(v, int):
+                        continue
+                    if 0 <= v < MAX_CONTROL_POINTS:
+                        found.add(v)
+        if systems:
+            for ch in s.get("children") or []:
+                pending.append(systems.get(ch.get("childName")))
+    return sorted(found)
+
+
+def system_hierarchy(systems: dict, order: Optional[List[str]] = None) -> list:
+    """Иерархия систем: [(имя, [(ребёнок, [...]), ...]), ...].
+
+    Корень — система, которую никто, кроме неё самой, не называет своим
+    ребёнком. В большом файле корней в разы меньше, чем определений: в
+    summer2024_unusuals.pcf из 611 систем корней 52, остальные — служебные
+    держатели и спавнеры.
+
+    Один ребёнок может висеть сразу у нескольких родителей (в PCF это ссылка
+    по имени, а не владение) — тогда он появится под каждым из них, так оно и
+    есть на самом деле. Циклы обрываются по пути от корня.
+
+    Из списка ничего не пропадает: система, до которой не дотянуться ни от
+    одного корня (взаимный цикл), добавляется вершиной сама.
+
+    order задаёт порядок вершин; имена не из systems игнорируются.
+    """
+    names = list(order) if order is not None else list(systems)
+    names = [n for n in names if n in systems]
+
+    referenced = set()
+    for name, s in systems.items():
+        for c in s.get("children") or []:
+            child = c.get("childName")
+            if child != name:          # сам себе родителем не считается
+                referenced.add(child)
+
+    def subtree(name: str, path: frozenset) -> tuple:
+        kids = []
+        for c in systems.get(name, {}).get("children") or []:
+            child = c.get("childName")
+            if child in systems and child not in path:
+                kids.append(subtree(child, path | {child}))
+        return (name, kids)
+
+    tree = [subtree(n, frozenset({n})) for n in names if n not in referenced]
+
+    # Взаимный цикл без входа снаружи: иначе такие системы исчезли бы из UI
+    shown = set(flatten_hierarchy(tree))
+    for n in names:
+        if n not in shown:
+            node = subtree(n, frozenset({n}))
+            tree.append(node)
+            shown.update(flatten_hierarchy([node]))
+    return tree
+
+
 #: Каталог модулей для «Добавить модуль…» — ходовые functionName из стоковых
-#: PCF TF2 (написание — как в файлах игры). Превью умеет большинство из них.
+#: PCF TF2 (написание — как в файлах игры). Идут первыми в списке выбора,
+#: остальные модули игры добавляются к ним из каталога параметров.
+#:
+#: Правило отбора: сюда попадает всё, что умеет движок превью, плюс то, что
+#: массово встречается в эффектах игры (счётчики — по срезу 134 стоковых PCF).
+#: Модули, которых превью не понимает, помечаются в диалоге отдельно —
+#: скрывать их нельзя: в игре они работают, и без них не собрать половину
+#: приёмов Valve (спавн по модели, привязка к кости).
 MODULE_CATALOG = {
     "emitters": ["emit_continuously", "emit_instantaneously", "emit noise"],
     "initializers": [
         "Position Within Sphere Random", "Position Within Box Random",
         "Position Modify Offset Random", "Position Modify Warp Random",
-        "Position From Parent Particles",
+        "Position From Parent Particles", "Position on Model Random",
+        "Position Along Path Sequential", "Position Along Path Random",
         "Lifetime Random", "Radius Random", "Alpha Random", "Color Random",
         "Rotation Random", "Rotation Speed Random", "Rotation Yaw Random",
-        "Rotation Yaw Flip Random", "Sequence Random", "Trail Length Random",
-        "Velocity Random", "Velocity Noise", "lifetime from sequence",
+        "Rotation Yaw Flip Random", "Sequence Random", "Sequence Two Random",
+        "Trail Length Random",
+        "Velocity Random", "Velocity Noise",
+        "Velocity Inherit from Control Point", "lifetime from sequence",
+        "Lifetime From Control Point Life Time", "Lifetime Pre-Age Noise",
         "remap initial scalar", "Remap Initial Distance to Control Point to Scalar",
         "Remap Noise to Scalar", "Remap Control Point to Vector",
+        "Remap Control Point to Scalar", "Remap Scalar to Vector",
+        "Assign target CP", "move particles between 2 control points",
     ],
     "operators": [
         "Lifespan Decay", "Movement Basic", "Movement Lock to Control Point",
         "Movement Rotate Particle Around Axis", "Movement Max Velocity",
+        "Movement Lock to Bone", "Movement Follow CP",
+        "Movement Dampen Relative to Control Point",
+        "Movement Match Particle Velocities",
         "Radius Scale", "Color Fade", "Alpha Fade In Random",
         "Alpha Fade Out Random", "Alpha Fade and Decay",
         "Rotation Basic", "Rotation Spin Roll", "Rotation Spin Yaw",
-        "Oscillate Scalar", "Oscillate Vector", "Remap Scalar",
+        "Rotation Orient to 2D Direction", "Rotation Orient Relative to CP",
+        "Oscillate Scalar", "Oscillate Vector", "Noise Scalar",
+        "Remap Scalar",
         "Remap Distance to Control Point to Scalar",
+        "Remap Distance to Control Point to Vector",
+        "Remap Dot Product to Scalar",
         "Set child control points from particle positions",
+        "Set Control Point Positions", "Set Control Point To Player",
+        "Set Control Point To Particles' Center",
+        "Cull when crossing plane", "Cull Random",
     ],
     "forces": ["random force", "Pull towards control point", "twist around axis"],
     "constraints": [
         "Collision via traces", "Constrain distance to control point",
+        "Constrain distance to path between two control points",
+        "Prevent passing through a plane",
     ],
     "renderers": ["render_animated_sprites", "render_rope",
                   "render_sprite_trail", "render_screen_velocity_rotate"],
@@ -1454,7 +1590,7 @@ class ParticleEditorService:
     #: строчными 'spin strength' игра игнорирует, ей нужен 'Spin Strength'.
     _attr_canonical: Dict[tuple, Dict[str, str]] = {}
     #: Версия формата дискового кэша (растёт, когда меняется его состав).
-    _CATALOG_FORMAT = 4   # 4: + канонический регистр имён атрибутов
+    _CATALOG_FORMAT = 5   # 5: + разброс значений параметра (lo/hi/n)
 
     #: Служебные поля — их не показываем и не даём удалять.
     _SERVICE_ATTRS = ("functionname", "name", "id")
@@ -1560,6 +1696,38 @@ class ParticleEditorService:
             cls._game_materials_cache = sorted(materials, key=str.lower)
             cls._save_disk_catalog(tf2_root_dir)
 
+    @staticmethod
+    def _track_range(entry: dict, value: Any) -> None:
+        """Копит разброс числового параметра по эффектам игры.
+
+        Одного «примера» мало: по нему не понять, 0.1 — это норма или
+        экзотика. Границы нужны и подсказке в дереве свойств, и справочнику
+        для ИИ. bool считать бессмысленно, вектора и строки — пропускаем.
+        """
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return
+        entry["n"] = entry.get("n", 0) + 1
+        lo, hi = entry.get("lo"), entry.get("hi")
+        entry["lo"] = value if lo is None else min(lo, value)
+        entry["hi"] = value if hi is None else max(hi, value)
+
+    @classmethod
+    def attr_stats(cls, group: Optional[str], function_name: str,
+                   attr_name: str) -> Optional[dict]:
+        """
+        Как этот параметр настроен в эффектах игры: {'lo','hi','n','v'}.
+
+        Только по уже собранному каталогу — сканирование не запускает
+        (его греет фоновый воркер), поэтому годится для подсказок в UI.
+        None — каталога нет, параметр не числовой или встречен один раз.
+        """
+        key = (group, (function_name or "").strip().lower())
+        entry = (cls._attr_catalog.get(key) or {}).get(
+            (attr_name or "").strip().lower())
+        if not entry or entry.get("n", 0) < 2 or entry.get("lo") is None:
+            return None
+        return entry
+
     @classmethod
     def _collect_catalog(cls, svc: "ParticleEditorService",
                          catalog: Dict[tuple, Dict[str, dict]],
@@ -1582,7 +1750,8 @@ class ParticleEditorService:
             sys_cat = catalog.setdefault((None, ""), {})
             for name, tv in _element_attrs_to_json(d).items():
                 if name not in cls._SERVICE_ATTRS:
-                    sys_cat.setdefault(name, tv)
+                    cls._track_range(sys_cat.setdefault(name, dict(tv)),
+                                     tv["v"])
             _canon((None, ""), d)
             for group in MODULE_GROUPS:
                 if group not in d:
@@ -1599,7 +1768,8 @@ class ParticleEditorService:
                         _canon((group, fn), mod)
                         for name, tv in mod_json["attrs"].items():
                             if name not in cls._SERVICE_ATTRS:
-                                cat.setdefault(name, tv)
+                                cls._track_range(
+                                    cat.setdefault(name, dict(tv)), tv["v"])
                 except Exception:
                     continue
 
@@ -1728,6 +1898,18 @@ class ParticleEditorService:
         "answer directly.",
     ]
 
+    @staticmethod
+    def _param_reference_entry(tv: dict) -> dict:
+        """Описание одного параметра для справочника: тип, пример и разброс.
+
+        Разброс по эффектам игры отвечает на вопрос, который не решается
+        одним примером: 0.1 — это норма или экзотика.
+        """
+        entry = {"type": tv["t"], "example": tv["v"]}
+        if tv.get("lo") is not None and tv.get("lo") != tv.get("hi"):
+            entry["range"] = [tv["lo"], tv["hi"]]
+        return entry
+
     @classmethod
     def param_reference(cls, tf2_root_dir: str = "",
                         supported: Optional[dict] = None,
@@ -1752,7 +1934,7 @@ class ParticleEditorService:
             if group is None:
                 continue
             entry = {
-                "params": {name: {"type": tv["t"], "example": tv["v"]}
+                "params": {name: cls._param_reference_entry(tv)
                            for name, tv in sorted(attrs.items())},
             }
             if supported is not None:
@@ -1773,6 +1955,9 @@ class ParticleEditorService:
                 "Имена параметров и модулей писать точно как здесь.",
                 "example — значение из реального эффекта игры, а не "
                 "умолчание движка: это ориентир по смыслу и порядку величин.",
+                "range — [минимум, максимум] этого параметра по всем "
+                "эффектам игры: значения вне него почти наверняка ошибка "
+                "порядка величины.",
                 "Отсутствующий параметр не ошибка: движок берёт своё "
                 "умолчание. Указывайте только то, что нужно менять.",
                 "previewed=false — модуль работает в игре, но 3D-превью "
@@ -1809,7 +1994,7 @@ class ParticleEditorService:
                 },
             },
             "module_groups": list(MODULE_GROUPS),
-            "system_params": {name: {"type": tv["t"], "example": tv["v"]}
+            "system_params": {name: cls._param_reference_entry(tv)
                               for name, tv in sorted(system_attrs.items())},
             "modules": groups,
         }

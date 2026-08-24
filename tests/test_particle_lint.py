@@ -15,7 +15,11 @@ def _system(**over):
                   "material": {"t": "string", "v": "effects/test.vmt"}},
         "renderers": [{"functionName": "render_animated_sprites", "attrs": {}}],
         "emitters": [{"functionName": "emit_continuously", "attrs": {}}],
-        "initializers": [], "operators": [], "forces": [], "constraints": [],
+        "initializers": [],
+        # Без оператора смерти частицы бессмертны — рабочий эффект так не
+        # выглядит, и правило immortal справедливо ругается (см. тесты ниже)
+        "operators": [{"functionName": "Lifespan Decay", "attrs": {}}],
+        "forces": [], "constraints": [],
         "children": [],
     }
     base.update(over)
@@ -160,3 +164,114 @@ def test_apply_fixes_writes_to_tree():
     # Починяемые находки ушли (осталось лишь то, что руками: у фикстуры
     # нет рендерера)
     assert not [f for f in check_systems(svc.systems_json()) if f.fixable]
+
+
+def _sheet(frames: int, seq: str = "0") -> dict:
+    """Материал со спрайт-листом на заданное число кадров."""
+    return {"sheet": {"sequences": {seq: {"clamp": True, "duration": 1.0,
+                                          "frames": [[0, 0, 1, 1]] * frames}}}}
+
+
+def test_immortal_particles_reported():
+    """Непрерывный поток без оператора смерти: частицы копятся до потолка,
+    и эффект замирает навсегда — в превью это выглядит как «сначала шло,
+    потом перестало»."""
+    s = _system(operators=[])
+    assert "immortal" in [f.rule for f in check_systems({"fx": s})]
+
+    # Смерть может приходить и от Alpha Fade and Decay — тогда всё в порядке
+    ok = _system(operators=[{"functionName": "Alpha Fade and Decay", "attrs": {}}])
+    assert "immortal" not in [f.rule for f in check_systems({"fx": ok})]
+
+    # Разовый залп копиться не может — правило молчит
+    burst = _system(operators=[],
+                    emitters=[{"functionName": "emit_instantaneously",
+                               "attrs": {}}])
+    assert "immortal" not in [f.rule for f in check_systems({"fx": burst})]
+
+
+def test_frozen_animation_reported_and_fixable():
+    """Гифка из 30 кадров при «1 кадр в секунду» и жизни в секунду: в игре
+    частица так и стоит первым кадром. Чинится растягиванием листа на жизнь."""
+    s = _system(initializers=[{"functionName": "Lifetime Random",
+                               "attrs": {"lifetime_max": {"t": "float", "v": 1.0}}}],
+                renderers=[{"functionName": "render_animated_sprites",
+                            "attrs": {"animation rate": {"t": "float", "v": 1.0},
+                                      "use animation rate as fps":
+                                          {"t": "bool", "v": True}}}])
+    found = check_systems({"fx": s}, materials={"effects/test.vmt": _sheet(30)})
+    frozen = [f for f in found if f.rule == "frozen_animation"]
+    assert len(frozen) == 1, [f.rule for f in found]
+    assert frozen[0].params["frames"] == 30
+    assert frozen[0].fix == ("renderers", 0, "animation_fit_lifetime", "bool")
+    assert frozen[0].fix_value is True
+
+
+def test_animation_not_reported_when_it_plays():
+    """Способы проиграть лист, которыми пользуется сама игра."""
+    mats = {"effects/test.vmt": _sheet(30)}
+    life = [{"functionName": "Lifetime Random",
+             "attrs": {"lifetime_max": {"t": "float", "v": 1.0}}}]
+
+    fit = _system(initializers=life, renderers=[
+        {"functionName": "render_animated_sprites",
+         "attrs": {"animation_fit_lifetime": {"t": "bool", "v": True},
+                   "animation rate": {"t": "float", "v": 0.1}}}])
+    fps = _system(initializers=life, renderers=[
+        {"functionName": "render_animated_sprites",
+         "attrs": {"use animation rate as fps": {"t": "bool", "v": True},
+                   "animation rate": {"t": "float", "v": 30.0}}}])
+    cycles = _system(initializers=life, renderers=[
+        {"functionName": "render_animated_sprites",
+         "attrs": {"animation rate": {"t": "float", "v": 1.0}}}])
+    for case in (fit, fps, cycles):
+        assert "frozen_animation" not in [
+            f.rule for f in check_systems({"fx": case}, materials=mats)]
+
+    # Одно-кадровый лист анимировать нечем — молчим
+    single = _system(initializers=life, renderers=[
+        {"functionName": "render_animated_sprites",
+         "attrs": {"animation rate": {"t": "float", "v": 0.1}}}])
+    assert "frozen_animation" not in [
+        f.rule for f in check_systems({"fx": single},
+                                      materials={"effects/test.vmt": _sheet(1)})]
+
+
+def test_slow_sheet_scroll_is_not_reported():
+    """Приём Valve: длинный лист еле ползёт, зато Sequence Random раздаёт
+    частицам разные стартовые кадры. Так сделаны кровь и дым — это не
+    ошибка, и ругаться на неё значит утопить отчёт в шуме."""
+    mats = {"effects/test.vmt": _sheet(15)}
+    life = [{"functionName": "Lifetime Random",
+             "attrs": {"lifetime_max": {"t": "float", "v": 0.5}}}]
+    slow = [{"functionName": "render_animated_sprites",
+             "attrs": {"animation rate": {"t": "float", "v": 0.1}}}]
+
+    with_random = _system(
+        initializers=life + [{"functionName": "Sequence Random", "attrs": {}}],
+        renderers=slow)
+    assert "frozen_animation" not in [
+        f.rule for f in check_systems({"fx": with_random}, materials=mats)]
+
+    # Без раздачи кадров та же настройка — статичная картинка
+    without = _system(initializers=life, renderers=slow)
+    assert "frozen_animation" in [
+        f.rule for f in check_systems({"fx": without}, materials=mats)]
+
+
+def test_frozen_animation_uses_system_sequence_number():
+    """Кадры считаются по той последовательности, которую система играет."""
+    mats = {"effects/test.vmt": {"sheet": {"sequences": {
+        "0": {"frames": [[0, 0, 1, 1]]},
+        "3": {"frames": [[0, 0, 1, 1]] * 16}}}}}
+    s = _system(initializers=[{"functionName": "Lifetime Random",
+                               "attrs": {"lifetime_max": {"t": "float", "v": 1.0}}}],
+                renderers=[{"functionName": "render_animated_sprites",
+                            "attrs": {"animation rate": {"t": "float", "v": 0.1}}}])
+    s["attrs"]["sequence_number"] = {"t": "integer", "v": 3}
+    assert "frozen_animation" in [
+        f.rule for f in check_systems({"fx": s}, materials=mats)]
+
+    s["attrs"]["sequence_number"] = {"t": "integer", "v": 0}    # один кадр
+    assert "frozen_animation" not in [
+        f.rule for f in check_systems({"fx": s}, materials=mats)]

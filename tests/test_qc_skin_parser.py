@@ -18,6 +18,7 @@ from src.services.qc_skin_parser import (
     parse_texturegroup_rows,
     pick_preview_variant,
     restrict_to_materials,
+    team_material_map,
     variant_kind,
 )
 
@@ -348,6 +349,61 @@ class RowParserEdgeCases(unittest.TestCase):
     def test_describe_does_not_crash(self):
         for rows in ([], [["a"]], [["a"], ["a_blue"]], [["a"], ["a_bloody"]]):
             self.assertIsInstance(classify_rows(rows).describe(), str)
+
+
+class TeamMaterialMapTests(unittest.TestCase):
+    """Карта «столбец RED → столбец BLU»: что именно меняет команда."""
+
+    def test_multi_column_hat_keeps_shared_materials(self):
+        """Alcoholic Automaton: четыре столбца, команда переключает два.
+
+        Столбцы 3-4 в обеих строках одинаковы (линза синяя всегда) — они
+        отображаются сами в себя. Раньше превью брало одну первую BLU-текстуру
+        и клало её на всю модель, из-за чего линза получала текстуру корпуса.
+        """
+        layout = classify_rows([
+            ["auto_1", "auto", "auto_1_blue", "auto_blue"],
+            ["auto_1_blue", "auto_blue", "auto_1_blue", "auto_blue"],
+        ])
+        self.assertTrue(layout.blu_is_team)
+        self.assertEqual(team_material_map(layout), {
+            "auto_1": "auto_1_blue",
+            "auto": "auto_blue",
+            "auto_1_blue": "auto_1_blue",   # общий: на BLU остаётся собой
+            "auto_blue": "auto_blue",
+        })
+
+    def test_simple_team_pair(self):
+        layout = classify_rows([["hat"], ["hat_blue"]])
+        self.assertEqual(team_material_map(layout), {"hat": "hat_blue"})
+
+    def test_styles_are_not_a_team(self):
+        """Второй скин — стиль (bloody), а не команда: карты нет."""
+        layout = classify_rows([["knife"], ["knife_bloody"]])
+        self.assertEqual(team_material_map(layout), {})
+
+    def test_single_skin_has_no_map(self):
+        self.assertEqual(team_material_map(classify_rows([["hat"]])), {})
+        self.assertEqual(team_material_map(classify_rows([])), {})
+
+    def test_shorter_blu_row_falls_back_to_self(self):
+        """BLU-строка короче RED — недостающие столбцы остаются собой."""
+        layout = classify_rows([
+            ["body", "shell", "scope"],
+            ["body_blue", "shell_blue"],
+        ])
+        self.assertEqual(team_material_map(layout), {
+            "body": "body_blue", "shell": "shell_blue", "scope": "scope",
+        })
+
+    def test_corpus_flaregun(self):
+        """Реальный QC: тело и ствол переключаются оба."""
+        layout = parse_skin_layout(_qc("flaregun_team_shell.qc"))
+        mapping = team_material_map(layout)
+        self.assertTrue(mapping)
+        for red, blu in mapping.items():
+            self.assertTrue(blu.lower().endswith("_blue") or blu == red,
+                            f"{red} → {blu}")
 
 
 if __name__ == "__main__":

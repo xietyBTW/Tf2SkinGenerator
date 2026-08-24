@@ -15,6 +15,7 @@
 // ── Утилиты ──────────────────────────────────────────────────────────────── //
 
 const DEG_TO_RAD = Math.PI / 180;
+const TWO_PI = Math.PI * 2;
 
 function lerp(a, b, t) { return a + (b - a) * t; }
 function invlerp(a, b, v) { return (v - a) / (b - a); }
@@ -119,6 +120,90 @@ function oscActive(mod, sys, p, slot) {
     return age >= Math.min(start, end) && age <= Math.max(start, end);
 }
 
+/**
+ * Аргумент синуса осцилляторов (Oscillate Scalar/Vector), в единицах
+ * SinEst01SIMD: 1.0 = π. По умолчанию «proportional 0/1» = ИСТИНА (так в
+ * Source и во всех стоковых модулях) — фаза считается от ДОЛИ ЖИЗНИ частицы,
+ * а не от абсолютного времени. За жизнь аргумент проходит всего mult*freq,
+ * поэтому знак синуса обычно не меняется: оператор работает не как колебание,
+ * а как постоянный снос в свою сторону у каждой частицы.
+ */
+function oscPhase(mod, sys, p, freq, mult, phase) {
+    if (attr(mod, 'proportional 0/1', true)) {
+        const age = (sys.curTime - p.spawnTime) / (p.lifetime || 1);
+        return mult * age * freq + phase;
+    }
+    return (mult * sys.curTime + phase) * freq;
+}
+
+/**
+ * Огибающая силы оператора (flStrength в Source). У КАЖДОГО модуля есть
+ * «operator start/end fadein», «operator start/end fadeout» и
+ * «operator fade oscillate»: по ним движок считает силу от ВРЕМЕНИ СИСТЕМЫ и
+ * при нуле не запускает оператор вовсе (CheckIfOperatorShouldRun).
+ * Инициализаторы силу НЕ получают — в Source это прямо прокомментировано
+ * («initializers don't support it»), поэтому их огибающая ни на что не влияет.
+ *
+ * Возвращает null, когда все параметры нулевые (подавляющее большинство
+ * модулей) — тогда сила всегда 1 и лишней работы в кадре нет.
+ */
+function opEnvelope(mod) {
+    const inStart = attr(mod, 'operator start fadein', 0);
+    const inEnd = attr(mod, 'operator end fadein', 0);
+    const outStart = attr(mod, 'operator start fadeout', 0);
+    const outEnd = attr(mod, 'operator end fadeout', 0);
+    const period = attr(mod, 'operator fade oscillate', 0);
+    if (!inStart && !inEnd && !outStart && !outEnd && !period) return null;
+    return { inStart, inEnd, outStart, outEnd, period };
+}
+
+/** FadeInOut из particles.cpp: сила оператора в момент времени системы. */
+function opStrength(env, curTime) {
+    if (env === null) return 1;
+    let t = curTime;
+    if (env.period > 0) t = (t / env.period) % 1;
+    if (env.inStart > t) return 0;
+    if (env.outEnd > 0 && env.outEnd < t) return 0;
+    // порядок границ может быть нарушен автором — Source их выправляет
+    const inEnd = Math.max(env.inEnd, env.inStart);
+    const outStart = Math.max(env.outStart, inEnd);
+    const outEnd = Math.max(env.outEnd, outStart);
+    let strength = 1;
+    if (inEnd > t && inEnd > env.inStart)
+        strength = Math.min(strength, invlerp(env.inStart, inEnd, t));
+    if (t > outStart && outEnd > outStart)
+        strength = Math.min(strength, invlerp(outEnd, outStart, t));
+    return strength;
+}
+
+/** Обёртка силы под огибающую: масштабируется её вклад в ускорение. */
+function withForceStrength(fn, env) {
+    if (env === null) return fn;
+    const contrib = [0, 0, 0];
+    return (sys, p, accel) => {
+        const strength = opStrength(env, sys.curTime);
+        if (strength <= 0) return;
+        contrib[0] = contrib[1] = contrib[2] = 0;
+        fn(sys, p, contrib);
+        for (let i = 0; i < 3; i++) accel[i] += contrib[i] * strength;
+    };
+}
+
+/** SimpleSplineRemapValClamped из mathlib: линейный remap + сглаживание. */
+function splineRemapClamped(val, a, b, c, d) {
+    if (a === b) return val >= b ? d : c;
+    return lerp(c, d, smoothstep(saturate(invlerp(a, b, val))));
+}
+
+/**
+ * Bias() из mathlib — СТЕПЕННАЯ форма: x^(log(amt)/log(0.5)).
+ * Это не тот bias, что в schlickBias (та форма — BiasSIMD, у Alpha Fade Out
+ * и Radius Scale); в Source обе живут рядом под похожими именами.
+ */
+function valveBias(x, amt) {
+    return Math.pow(x, Math.log(amt) * -1.4427);
+}
+
 function remapValClamped(val, inMin, inMax, outMin, outMax) {
     if (inMin === inMax) return val >= inMax ? outMax : outMin;
     return lerp(outMin, outMax, saturate(invlerp(inMin, inMax, val)));
@@ -157,6 +242,93 @@ const FN_ALIASES = {
 function resolveFnName(name) {
     const lower = (name || '').toLowerCase();
     return FN_ALIASES[lower] || lower;
+}
+
+/**
+ * Базис контрол-пойнта по умолчанию (particles.cpp): Forward=(0,1,0),
+ * Right=(1,0,0), Up=(0,0,1) — он НЕ совпадает с мировыми осями. Свой базис
+ * задаётся через controller.controlPointBases (см. setControlPointOrientation
+ * в particles3d.html); отсюда же будет питаться привязка к attachment модели.
+ */
+const CP_DEFAULT_BASIS = { fwd: [0, 1, 0], right: [1, 0, 0], up: [0, 0, 1] };
+
+/**
+ * Локальные координаты CP → мир по МАТРИЦЕ CP: x*Forward - y*Right + z*Up.
+ * Так Source строит matrix3x4 Init(Forward, -Right, Up, позиция) — по ней идут
+ * и позиции («bias in local system»), и скорость в Velocity Random.
+ */
+function cpLocalToWorld(b, v, out) {
+    const x = v[0], y = v[1], z = v[2];   // out может быть тем же массивом, что v
+    for (let i = 0; i < 3; i++)
+        out[i] = x * b.fwd[i] - y * b.right[i] + z * b.up[i];
+    return out;
+}
+
+/**
+ * Порт TransformAxis (particles.h): x*Right + y*Forward + z*Up.
+ * Да, это ТРЕТЬЕ сопоставление осей в Source — у матрицы CP минус по Y,
+ * у скорости в Position Within Sphere Random плюс, здесь переставлены X и Y.
+ * Каждое перенесено как есть: иначе эффект развернёт.
+ */
+function cpTransformAxis(b, v, out) {
+    const x = v[0], y = v[1], z = v[2];
+    for (let i = 0; i < 3; i++)
+        out[i] = x * b.right[i] + y * b.fwd[i] + z * b.up[i];
+    return out;
+}
+
+/**
+ * Переход от одного базиса контрольной точки к другому — то есть поворот,
+ * который CP совершила между кадрами. null, если она не поворачивалась.
+ *
+ * Знаки осей здесь не важны: одна и та же тройка используется и для
+ * разложения, и для сборки, поэтому договорённость сокращается.
+ */
+function basisDelta(from, to) {
+    if (from === to) return null;
+    for (const axis of ['fwd', 'right', 'up'])
+        for (let i = 0; i < 3; i++)
+            if (Math.abs(from[axis][i] - to[axis][i]) > 1e-9)
+                return { from, to };
+    return null;
+}
+
+/** Поворачивает точку v вокруг center по basisDelta; k — сила (0..1). */
+function applyBasisDelta(delta, v, center, k) {
+    const { from, to } = delta;
+    const rx = v[0] - center[0], ry = v[1] - center[1], rz = v[2] - center[2];
+    // Раскладываем по осям прошлого базиса и собираем по осям нынешнего
+    const lf = rx * from.fwd[0] + ry * from.fwd[1] + rz * from.fwd[2];
+    const lr = rx * from.right[0] + ry * from.right[1] + rz * from.right[2];
+    const lu = rx * from.up[0] + ry * from.up[1] + rz * from.up[2];
+    for (let i = 0; i < 3; i++) {
+        const rotated = lf * to.fwd[i] + lr * to.right[i] + lu * to.up[i];
+        v[i] = center[i] + lerp(v[i] - center[i], rotated, k);
+    }
+}
+
+/** Поворот вектора v вокруг оси axis (единичной) на angle — формула Родрига. */
+function rotateAboutAxis(v, axis, angle, out) {
+    const c = Math.cos(angle), sn = Math.sin(angle);
+    const x = v[0], y = v[1], z = v[2];   // out может быть тем же массивом, что v
+    const dot = axis[0] * x + axis[1] * y + axis[2] * z;
+    const cross = [
+        axis[1] * z - axis[2] * y,
+        axis[2] * x - axis[0] * z,
+        axis[0] * y - axis[1] * x];
+    const src = [x, y, z];
+    for (let i = 0; i < 3; i++)
+        out[i] = src[i] * c + cross[i] * sn + axis[i] * dot * (1 - c);
+    return out;
+}
+
+/**
+ * dt для перевода стартовой скорости в prevPos. В Source это m_flPreviousDt:
+ * Movement Basic домножает (xyz-prev) на dt/prevDt, и только с прошлым dt
+ * частица стартует ровно с заданной скоростью.
+ */
+function spawnDt(sys) {
+    return sys.prevDeltaTime || sys.deltaTime;
 }
 
 function vec3RandomUnit(rand) {
@@ -235,6 +407,7 @@ const INITIALIZERS = {
         const distMin = attr(mod, 'distance_min', 0);
         const distMax = attr(mod, 'distance_max', 0);
         const distBias = attr(mod, 'distance_bias', [1, 1, 1]);
+        const distBiasAbs = attr(mod, 'distance_bias_absolute_value', [0, 0, 0]);
         const biasLocal = attr(mod, 'bias in local system', false);
         const cpNo = attr(mod, 'control_point_number', 0);
         const speedMin = attr(mod, 'speed_min', 0);
@@ -243,34 +416,48 @@ const INITIALIZERS = {
         const speedLocalMin = attr(mod, 'speed_in_local_coordinate_system_min', [0, 0, 0]);
         const speedLocalMax = attr(mod, 'speed_in_local_coordinate_system_max', [0, 0, 0]);
 
+        // C_INIT_CreateWithinSphere: направление и дистанция — из ОДНОГО
+        // броска (RandomVectorInUnitSphere возвращает точку и её длину).
+        // У точки, равномерной по объёму шара, CDF длины = r³, то есть
+        // cbrt(random) — это и есть доля для лерпа distance_min..max.
         let dir = vec3RandomUnit(sys.rand);
+        const unitLen = Math.cbrt(sys.rand.nextF32());
+        // distance_bias_absolute_value: ненулевая компонента складывает
+        // соответствующую полусферу в другую (fabs у Valve) — в стоке так
+        // сделаны 195 «полусферических» систем
+        for (let i = 0; i < 3; i++)
+            if (distBiasAbs[i] !== 0) dir[i] = Math.abs(dir[i]);
         if (distBias[0] !== 1 || distBias[1] !== 1 || distBias[2] !== 1) {
             dir = [dir[0] * distBias[0], dir[1] * distBias[1], dir[2] * distBias[2]];
             const len = Math.hypot(dir[0], dir[1], dir[2]) || 1;
             dir = [dir[0] / len, dir[1] / len, dir[2] / len];
         }
-        let distance;
-        if (distMin === distMax) {
-            distance = distMin;
-        } else {
-            let d = sys.rand.nextF32();
-            d = 1.0 - Math.pow(d, 3.0);
-            distance = lerp(distMin, distMax, d);
-        }
+        const distance = lerp(distMin, distMax, unitLen);
         const cp = sys.getControlPoint(cpNo);
-        let px = dir[0] * distance, py = dir[1] * distance, pz = dir[2] * distance;
-        // ponytail: контрол-пойнты — только позиция (без вращения), локальные оси = мировые
-        px += cp[0]; py += cp[1]; pz += cp[2];
+        const basis = sys.getControlPointBasis(cpNo);
+        const off = [dir[0] * distance, dir[1] * distance, dir[2] * distance];
+        // Source: локальную систему включает ТОЛЬКО сочетание «есть distance_bias»
+        // и «bias in local system» — иначе точка просто смещается на позицию CP
+        const hasBias = distBias[0] !== 1 || distBias[1] !== 1 || distBias[2] !== 1;
+        if (hasBias && biasLocal) cpLocalToWorld(basis, off, off);
+        const px = off[0] + cp[0], py = off[1] + cp[1], pz = off[2] + cp[2];
         p.pos[0] = px; p.pos[1] = py; p.pos[2] = pz;
 
-        const speed = randRangeExp(sys.rand, speedMin, speedMax, speedExp);
-        let vx = dir[0] * speed, vy = dir[1] * speed, vz = dir[2] * speed;
-        vx += lerp(speedLocalMin[0], speedLocalMax[0], sys.rand.nextF32());
-        vy += lerp(speedLocalMin[1], speedLocalMax[1], sys.rand.nextF32());
-        vz += lerp(speedLocalMin[2], speedLocalMax[2], sys.rand.nextF32());
-        p.prevPos[0] = px - vx * sys.deltaTime;
-        p.prevPos[1] = py - vy * sys.deltaTime;
-        p.prevPos[2] = pz - vz * sys.deltaTime;
+        // Source применяет случайную скорость только при speed_max > 0
+        const speed = speedMax > 0
+            ? randRangeExp(sys.rand, speedMin, speedMax, speedExp) : 0;
+        // Локальные оси CP: x*Forward + y*Right + z*Up. Здесь, в отличие от
+        // матрицы CP и Velocity Random, знак Y НЕ инвертируется (так в Source)
+        const l = [0, 0, 0];
+        for (let i = 0; i < 3; i++)
+            l[i] = lerp(speedLocalMin[i], speedLocalMax[i], sys.rand.nextF32());
+        const sdt = spawnDt(sys);
+        const pos = [px, py, pz];
+        for (let i = 0; i < 3; i++) {
+            const v = dir[i] * speed +
+                l[0] * basis.fwd[i] + l[1] * basis.right[i] + l[2] * basis.up[i];
+            p.prevPos[i] = pos[i] - v * sdt;
+        }
     },
 
     'lifetime random': (mod, sys, p) => {
@@ -318,12 +505,23 @@ const INITIALIZERS = {
         const min = attr(mod, 'offset min', [0, 0, 0]);
         const max = attr(mod, 'offset max', [0, 0, 0]);
         const propRadius = attr(mod, 'offset proportional to radius 0/1', false);
-        let ox = lerp(min[0], max[0], sys.rand.nextF32());
-        let oy = lerp(min[1], max[1], sys.rand.nextF32());
-        let oz = lerp(min[2], max[2], sys.rand.nextF32());
-        if (propRadius) { ox *= p.radius; oy *= p.radius; oz *= p.radius; }
-        p.pos[0] += ox; p.pos[1] += oy; p.pos[2] += oz;
-        p.prevPos[0] += ox; p.prevPos[1] += oy; p.prevPos[2] += oz;
+        const off = [0, 0, 0];
+        for (let i = 0; i < 3; i++) {
+            off[i] = lerp(min[i], max[i], sys.rand.nextF32());
+            if (propRadius) off[i] *= p.radius;
+        }
+        // «offset in local space 0/1»: смещение поворачивается матрицей CP
+        // (VectorRotate, без переноса). Раньше флаг игнорировался, и точка
+        // спавна в превью уезжала относительно игры на всю длину смещения —
+        // особенно заметно у эффектов, привязанных к оружию
+        if (attr(mod, 'offset in local space 0/1', false)) {
+            const cpNo = attr(mod, 'control_point_number', 0);
+            cpLocalToWorld(sys.getControlPointBasis(cpNo), off, off);
+        }
+        for (let i = 0; i < 3; i++) {
+            p.pos[i] += off[i];
+            p.prevPos[i] += off[i];
+        }
     },
 
     'rotation random': (mod, sys, p) => {
@@ -380,17 +578,29 @@ const INITIALIZERS = {
     },
 
     'velocity random': (mod, sys, p) => {
-        const speedMin = attr(mod, 'speed_min', 0);
-        const speedMax = attr(mod, 'speed_max', 0);
-        const speedExp = attr(mod, 'speed_random_exponent', 1);
+        // C_INIT_VelocityRandom. Параметры называются random_speed_*, а НЕ
+        // speed_* (те есть только у Position Within Sphere Random) — раньше
+        // движок читал несуществующие имена и терял всю случайную скорость.
+        const cpNo = attr(mod, 'control_point_number', 0);
+        let speedMin = attr(mod, 'random_speed_min', 0);
+        let speedMax = attr(mod, 'random_speed_max', 0);
+        if (speedMax < speedMin) { const t = speedMin; speedMin = speedMax; speedMax = t; }
         const localMin = attr(mod, 'speed_in_local_coordinate_system_min', [0, 0, 0]);
         const localMax = attr(mod, 'speed_in_local_coordinate_system_max', [0, 0, 0]);
-        const dir = vec3RandomUnit(sys.rand);
-        const speed = randRangeExp(sys.rand, speedMin, speedMax, speedExp);
-        for (let i = 0; i < 3; i++) {
-            const v = dir[i] * speed + lerp(localMin[i], localMax[i], sys.rand.nextF32());
-            p.prevPos[i] = p.pos[i] - v * sys.deltaTime;
+        const vel = [0, 0, 0];
+        if (localMin.some(v => v !== 0) || localMax.some(v => v !== 0)) {
+            const local = [0, 0, 0];
+            for (let i = 0; i < 3; i++)
+                local[i] = lerp(localMin[i], localMax[i], sys.rand.nextF32());
+            cpLocalToWorld(sys.getControlPointBasis(cpNo), local, vel);
         }
+        // RandomVector: покомпонентно в КУБЕ [min..max], а не направление на
+        // сфере × скорость. При min=0 игра толкает частицы в один октант.
+        if (speedMax > 0)
+            for (let i = 0; i < 3; i++)
+                vel[i] += lerp(speedMin, speedMax, sys.rand.nextF32());
+        const dt = spawnDt(sys);
+        for (let i = 0; i < 3; i++) p.prevPos[i] = p.pos[i] - vel[i] * dt;
     },
 
     'velocity noise': (mod, sys, p) => {
@@ -404,6 +614,7 @@ const INITIALIZERS = {
         const outMin = attr(mod, 'output minimum', [0, 0, 0]);
         const outMax = attr(mod, 'output maximum', [1, 1, 1]);
         const t = (sys.curTime + to) * ts;
+        const vel = [0, 0, 0];
         for (let i = 0; i < 3; i++) {
             // смещение 49.7*i разносит компоненты по шумовому полю
             let n = valueNoise3(
@@ -412,9 +623,15 @@ const INITIALIZERS = {
                 p.pos[2] * ss + t + (Array.isArray(so) ? so[2] : 0));
             if (absVal[i]) n = Math.abs(n);
             if (absInv[i]) n = 1.0 - Math.abs(n);
-            const v = lerp(outMin[i], outMax[i], saturate(n * 0.5 + 0.5));
-            p.prevPos[i] -= v * sys.deltaTime;
+            vel[i] = lerp(outMin[i], outMax[i], saturate(n * 0.5 + 0.5));
         }
+        // Шум задан в осях CP, а не мира (в стоке 164 модуля): без этого
+        // «взлетающие» эффекты на повёрнутом CP летели не туда
+        if (attr(mod, 'apply velocity in local space (0/1)', false))
+            cpLocalToWorld(sys.getControlPointBasis(
+                attr(mod, 'control point number', 0)), vel, vel);
+        const sdt = spawnDt(sys);
+        for (let i = 0; i < 3; i++) p.prevPos[i] -= vel[i] * sdt;
     },
 
     'rotation yaw flip random': (mod, sys, p) => {
@@ -481,8 +698,10 @@ const INITIALIZERS = {
         let n = valueNoise3(
             p.pos[0] * ss, p.pos[1] * ss,
             p.pos[2] * ss + (sys.curTime + to) * ts);
+        // Скалярный вариант пишет имена целиком ('invert absolute value'),
+        // сокращённые 'invert abs value' — у ВЕКТОРНОГО Velocity Noise
         if (attr(mod, 'absolute value', false)) n = Math.abs(n);
-        if (attr(mod, 'invert abs value', false)) n = 1.0 - Math.abs(n);
+        if (attr(mod, 'invert absolute value', false)) n = 1.0 - Math.abs(n);
         setScalarField(p, attr(mod, 'output field', 3), lerp(
             attr(mod, 'output minimum', 0), attr(mod, 'output maximum', 1),
             saturate(n * 0.5 + 0.5)));
@@ -509,7 +728,9 @@ const INITIALIZERS = {
         const cpNo = attr(mod, 'input control point number', 0);
         if (!sys.isControlPointDefined(cpNo)) return;
         const cp = sys.getControlPoint(cpNo);
-        const axis = attr(mod, 'input field', 0);
+        // Имя поля тут именно такое: у скалярного remap-а от CP игра пишет
+        // 'input field 0-2 X/Y/Z' (короткое 'input field' — у remap initial scalar)
+        const axis = attr(mod, 'input field 0-2 x/y/z', 0);
         setScalarField(p, attr(mod, 'output field', 3), remapValClamped(
             cp[Math.min(2, Math.max(0, axis))],
             attr(mod, 'input minimum', 0), attr(mod, 'input maximum', 1),
@@ -543,9 +764,14 @@ const OPERATORS = {
 
     'movement basic': (mod, sys) => {
         const gravity = attr(mod, 'gravity', [0, 0, 0]);
-        const drag = 1.0 - attr(mod, 'drag', 0);
         const dt = sys.deltaTime;
         const dt2 = dt * dt;
+        // C_OP_BasicMovement: adj_dt = (dt/prevDt) * ExponentialDecay(1-drag,
+        // 1/30, dt). «drag» в PCF — доля, теряемая за 1/30 с, а НЕ за кадр:
+        // без нормировки превью тормозило частицы вдвое сильнее игры (и по-
+        // разному при разном FPS). Ускорение на drag не умножается — как в Source.
+        const dragF = Math.pow(Math.max(0, 1 - attr(mod, 'drag', 0)), 30 * dt) *
+            (dt / (sys.prevDeltaTime || dt));
         const accel = [0, 0, 0];
         for (const p of sys.particles) {
             accel[0] = gravity[0]; accel[1] = gravity[1]; accel[2] = gravity[2];
@@ -553,14 +779,14 @@ const OPERATORS = {
             for (let i = 0; i < 3; i++) {
                 const speed = p.pos[i] - p.prevPos[i];
                 p.prevPos[i] = p.pos[i];
-                p.pos[i] += (speed + accel[i] * dt2) * drag;
+                p.pos[i] += speed * dragF + accel[i] * dt2;
             }
         }
     },
 
-    'rotation basic': (mod, sys) => {
+    'rotation basic': (mod, sys, strength) => {
         for (const p of sys.particles)
-            p.rotation += p.rotSpeed * sys.deltaTime;
+            p.rotation += p.rotSpeed * sys.deltaTime * strength;
     },
 
     'rotation orient to 2d direction': (mod, sys) => {
@@ -584,16 +810,9 @@ const OPERATORS = {
         }
     },
 
-    'rotation spin roll': (mod, sys) => {
-        // ponytail: без замедления к spin_stop_time — постоянная скорость до стопа
-        const rate = attr(mod, 'spin_rate_degrees', 0) * DEG_TO_RAD;
-        const stopTime = attr(mod, 'spin_stop_time', 0);
-        for (const p of sys.particles) {
-            const age = sys.curTime - p.spawnTime;
-            if (stopTime > 0 && age >= stopTime) continue;
-            p.rotation += rate * sys.deltaTime;
-        }
-    },
+    'rotation spin roll': (mod, sys, strength) => generalSpin(
+        mod, sys, strength, 'rotation',
+        'spin_rate_degrees', 'spin_stop_time', 'spin_rate_min'),
 
     'alpha fade in random': (mod, sys) => {
         const min = attr(mod, 'fade in time min', 0.25);
@@ -611,19 +830,26 @@ const OPERATORS = {
     },
 
     'alpha fade out random': (mod, sys) => {
-        const min = attr(mod, 'fade out time min', 0.25);
-        const max = attr(mod, 'fade out time max', 0.25);
+        // C_OP_FadeOut: значение — ДЛИТЕЛЬНОСТЬ угасания перед смертью, а не
+        // момент его начала. Гаснуть начинают с (1 - value) доли жизни; раньше
+        // движок брал value как момент старта и гасил частицы сильно раньше игры.
+        let min = attr(mod, 'fade out time min', 0.25);
+        let max = attr(mod, 'fade out time max', 0.25);
+        if (min === 0 && max === 0) min = max = 1e-7;   // как InitParams: FLT_EPSILON
         const exp = attr(mod, 'fade out time exponent', 1);
         const proportional = attr(mod, 'proportional 0/1', true);
+        const ease = attr(mod, 'ease in and out', true);
+        const bias = attr(mod, 'fade bias', 0.5) || 0.5;
         for (const p of sys.particles) {
-            const fadeStart = randRangeExpOp(sys, p, 0, min, max, exp);
-            let fadeEnd;
+            const span = randRangeExpOp(sys, p, 0, min, max, exp);
             let t = sys.curTime - p.spawnTime;
-            if (proportional) { t /= p.lifetime; fadeEnd = 1; }
-            else fadeEnd = p.lifetime;
-            if (t <= fadeStart) continue;
-            t = saturate(invlerp(fadeEnd, fadeStart, t));
-            p.alpha = p.alphaInit * smoothstep(t);
+            let start;
+            if (proportional) { t /= (p.lifetime || 1); start = 1 - span; }
+            else start = p.lifetime - span;
+            if (t <= start || span <= 0) continue;
+            const frac = saturate((t - start) / span);
+            p.alpha = p.alphaInit *
+                (1 - (ease ? smoothstep(frac) : schlickBias(frac, bias)));
         }
     },
 
@@ -701,25 +927,77 @@ const OPERATORS = {
         }
     },
 
-    'movement lock to control point': (mod, sys) => {
-        // Частицы следуют за CP: добавляем дельту его движения.
-        // ponytail: без start/end fadeout по возрасту частицы
+    'movement lock to control point': (mod, sys, strength) => {
+        // C_OP_PositionLock: частицы следуют за CP, но привязка ОСЛАБЕВАЕТ с
+        // возрастом (start_fadeout..end_fadeout по доле жизни, у каждой частицы
+        // свой момент из диапазона) и по удалению от CP (distance fade range).
+        // Раньше привязка была вечной и полной — шлейфы, которые в игре
+        // отстают и растягиваются, в превью жёстко висели на точке.
         const cpNo = attr(mod, 'control_point_number', 0);
         const cp = sys.getControlPoint(cpNo);
-        const st = sys.getOpState(mod, () => ({ prev: [cp[0], cp[1], cp[2]] }));
-        const dx = cp[0] - st.prev[0], dy = cp[1] - st.prev[1], dz = cp[2] - st.prev[2];
+        const basis = sys.getControlPointBasis(cpNo);
+        const st = sys.getOpState(mod, () => ({
+            prev: [cp[0], cp[1], cp[2]], basis: basis,
+        }));
+        const prevCp = [st.prev[0], st.prev[1], st.prev[2]];
+        const d = [(cp[0] - prevCp[0]) * strength,
+                   (cp[1] - prevCp[1]) * strength,
+                   (cp[2] - prevCp[2]) * strength];
         st.prev[0] = cp[0]; st.prev[1] = cp[1]; st.prev[2] = cp[2];
-        if (dx === 0 && dy === 0 && dz === 0) return;
+        // «lock rotation»: частицы едут не только за позицией точки, но и за
+        // её поворотом (1645 стоковых модулей — вихри и ауры на вращающемся
+        // CP). Поворот берём как переход от прошлого базиса к нынешнему.
+        const spin = attr(mod, 'lock rotation', false)
+            ? basisDelta(st.basis, basis) : null;
+        st.basis = basis;
+        if (spin === null && d[0] === 0 && d[1] === 0 && d[2] === 0) return;
+        const sMin = attr(mod, 'start_fadeout_min', 1);
+        const sMax = attr(mod, 'start_fadeout_max', 1);
+        const sExp = attr(mod, 'start_fadeout_exponent', 1);
+        const eMin = attr(mod, 'end_fadeout_min', 1);
+        const eMax = attr(mod, 'end_fadeout_max', 1);
+        const eExp = attr(mod, 'end_fadeout_exponent', 1);
+        const range = attr(mod, 'distance fade range', 0);
         for (const p of sys.particles) {
-            p.pos[0] += dx; p.pos[1] += dy; p.pos[2] += dz;
-            p.prevPos[0] += dx; p.prevPos[1] += dy; p.prevPos[2] += dz;
+            // Родилась в этом кадре: в Source берётся позиция CP на момент
+            // рождения. Истории CP в превью нет — значит дельта нулевая
+            if (p.spawnTime >= sys.curTime - sys.deltaTime) continue;
+            const life = p.lifetime > 0
+                ? saturate((sys.curTime - p.spawnTime) / p.lifetime) : 0;
+            const lock = splineRemapClamped(
+                life,
+                randRangeExpOp(sys, p, 9, sMin, sMax, sExp),
+                randRangeExpOp(sys, p, 10, eMin, eMax, eExp), 1, 0);
+            if (lock <= 0) continue;
+            let k = lock;
+            if (range !== 0) {
+                const dist = Math.hypot(
+                    p.pos[0] + d[0] * lock - cp[0],
+                    p.pos[1] + d[1] * lock - cp[1],
+                    p.pos[2] + d[2] * lock - cp[2]);
+                k *= valveBias(splineRemapClamped(dist, 0, range, 1, 0), 0.2);
+            }
+            if (spin !== null) {
+                // Вокруг ПРОШЛОГО положения точки: сдвиг за её движением
+                // добавляется отдельно, ниже
+                applyBasisDelta(spin, p.pos, prevCp, k);
+                applyBasisDelta(spin, p.prevPos, prevCp, k);
+            }
+            for (let i = 0; i < 3; i++) {
+                p.pos[i] += d[i] * k;
+                p.prevPos[i] += d[i] * k;
+            }
         }
     },
 
     'movement rotate particle around axis': (mod, sys) => {
-        const axis = attr(mod, 'rotation axis', [0, 0, 1]);
+        let axis = attr(mod, 'rotation axis', [0, 0, 1]);
         const rate = attr(mod, 'rotation rate', 180) * DEG_TO_RAD;
-        const cp = sys.getControlPoint(attr(mod, 'control point', 0));
+        const cpNo = attr(mod, 'control point', 0);
+        const cp = sys.getControlPoint(cpNo);
+        // «Use Local Space»: ось задана в системе CP (порт TransformAxis)
+        if (attr(mod, 'use local space', false))
+            axis = cpTransformAxis(sys.getControlPointBasis(cpNo), axis, [0, 0, 0]);
         const angle = rate * sys.deltaTime;
         const al = Math.hypot(axis[0], axis[1], axis[2]) || 1;
         const ax = axis[0] / al, ay = axis[1] / al, az = axis[2] / al;
@@ -735,7 +1013,7 @@ const OPERATORS = {
         for (const p of sys.particles) { rot(p.pos); rot(p.prevPos); }
     },
 
-    'oscillate scalar': (mod, sys) => {
+    'oscillate scalar': (mod, sys, strength) => {
         const field = attr(mod, 'oscillation field', 7);
         const rateMin = attr(mod, 'oscillation rate min', 0);
         const rateMax = attr(mod, 'oscillation rate max', 0);
@@ -747,13 +1025,13 @@ const OPERATORS = {
             if (!oscActive(mod, sys, p, 3)) continue;
             const rate = randRangeExpOp(sys, p, 5, rateMin, rateMax, 1);
             const freq = randRangeExpOp(sys, p, 6, freqMin, freqMax, 1);
-            const osc = Math.sin((sys.curTime * freq * mult + phase) * Math.PI);
+            const osc = Math.sin(oscPhase(mod, sys, p, freq, mult, phase) * Math.PI);
             setScalarField(p, field,
-                getScalarField(p, field) + rate * osc * sys.deltaTime);
+                getScalarField(p, field) + rate * osc * sys.deltaTime * strength);
         }
     },
 
-    'oscillate vector': (mod, sys) => {
+    'oscillate vector': (mod, sys, strength) => {
         const field = attr(mod, 'oscillation field', 0);
         const rateMin = attr(mod, 'oscillation rate min', [0, 0, 0]);
         const rateMax = attr(mod, 'oscillation rate max', [0, 0, 0]);
@@ -770,9 +1048,9 @@ const OPERATORS = {
             if (!vectorField) {
                 const rate = randRangeExpOp(sys, p, 5, rateMin[0], rateMax[0], 1);
                 const freq = randRangeExpOp(sys, p, 8, freqMin[0], freqMax[0], 1);
-                const osc = Math.sin((sys.curTime * freq * mult + phase) * Math.PI);
+                const osc = Math.sin(oscPhase(mod, sys, p, freq, mult, phase) * Math.PI);
                 setScalarField(p, field,
-                    getScalarField(p, field) + rate * osc * sys.deltaTime);
+                    getScalarField(p, field) + rate * osc * sys.deltaTime * strength);
                 continue;
             }
             const target = field === 0 ? p.pos : p.color;
@@ -780,12 +1058,12 @@ const OPERATORS = {
                 // слоты 5-10: не выходить за шаг 17 между операторами
                 const rate = randRangeExpOp(sys, p, 5 + i, rateMin[i], rateMax[i], 1);
                 const freq = randRangeExpOp(sys, p, 8 + i, freqMin[i], freqMax[i], 1);
-                const osc = Math.sin((sys.curTime * freq * mult + phase) * Math.PI);
+                const osc = Math.sin(oscPhase(mod, sys, p, freq, mult, phase) * Math.PI);
                 // prevPos НЕ компенсируем: в интеграторе Верле сдвиг позиции
                 // подмешивается в скорость — это и есть дёрганый трепет
                 // (бабочки, искры), как в игре. Раньше компенсация делала
                 // осцилляцию гладким дрейфом — расходилось с игрой.
-                target[i] += rate * osc * sys.deltaTime;
+                target[i] += rate * osc * sys.deltaTime * strength;
             }
         }
     },
@@ -837,22 +1115,62 @@ const OPERATORS = {
         }
     },
 
-    'rotation spin yaw': (mod, sys) => {
-        const rate = attr(mod, 'yaw_rate_degrees', 0) * DEG_TO_RAD;
-        for (const p of sys.particles) p.yaw += rate * sys.deltaTime;
-    },
+    'rotation spin yaw': (mod, sys, strength) => generalSpin(
+        mod, sys, strength, 'yaw',
+        'yaw_rate_degrees', 'yaw_stop_time', 'yaw_rate_min'),
 
     'set child control points from particle positions': (mod, sys) => {
         const first = attr(mod, 'first control point to set', 0);
         const count = attr(mod, '# of control points to set', 1);
+        // Оператор адресует не всех детей, а группу: у Valve так разведены
+        // несколько наборов держателей внутри одного эффекта
+        const groupId = attr(mod, 'group id to affect', 0);
+        const targets = sys.children.filter(
+            c => attr(c.def, 'group id', 0) === groupId);
         const n = Math.min(count, sys.particles.length);
         for (let i = 0; i < n; i++) {
             const pos = sys.particles[i].pos;
-            for (const child of sys.children)
+            for (const child of targets)
                 child.cpOverrides[first + i] = [pos[0], pos[1], pos[2]];
         }
     },
 };
+
+/**
+ * Порт CGeneralSpin::Operate — общий код Rotation Spin Roll / Spin Yaw.
+ *
+ * Скорость: градусы переводятся в радианы и ЕЩЁ РАЗ умножаются на 2π
+ * (`drot = dt * |rate * 2π|`), то есть реальное вращение в 2π раз быстрее,
+ * чем «градусы в секунду» из названия параметра. Раньше движок крутил
+ * спрайты в 6.28 раза медленнее игры (медиана spin_rate_degrees в стоке — 10,
+ * то есть в превью вращения не было видно вовсе).
+ */
+function generalSpin(mod, sys, strength, field, rateKey, stopKey, minKey) {
+    const rate = attr(mod, rateKey, 0) * DEG_TO_RAD * strength;
+    if (rate === 0) return;
+    const stopTime = attr(mod, stopKey, 0);
+    const dt = sys.deltaTime;
+    let drot = dt * Math.abs(rate * TWO_PI);
+    if (stopTime === 0) drot = drot % TWO_PI;
+    if (rate < 0) drot = -drot;
+    const minStep = dt * Math.abs(attr(mod, minKey, 0) * DEG_TO_RAD * TWO_PI);
+    for (const p of sys.particles) {
+        // stop time — ДОЛЯ жизни, а не секунды (в Source это помечено «HACK»),
+        // и скорость падает до нуля линейно, а не обрывается
+        let step = drot;
+        if (stopTime !== 0)
+            step *= Math.max(0, 1 - (sys.curTime - p.spawnTime) /
+                                    (p.lifetime * stopTime));
+        // Порт как есть, вместе с багом Valve (рядом стоит «FIXME: This is
+        // wrong»): сравнение знаковое, поэтому отрицательная скорость всегда
+        // подменяется на spin_rate_min — в игре такие модули не вращаются
+        if (step <= minStep) step = minStep;
+        let v = p[field] + step;
+        if (v >= TWO_PI) v -= TWO_PI;
+        else if (v <= -TWO_PI) v += TWO_PI;
+        p[field] = v;
+    }
+}
 
 /** Пер-частичный «случайный» из пула — порт randF32Op (стабилен между кадрами). */
 function randRangeExpOp(sys, p, o, min, max, exp) {
@@ -957,6 +1275,7 @@ function makeEmitter(mod) {
             duration: attr(mod, 'emission_duration', 0),
             startTime: attr(mod, 'emission_start_time', 0),
             ts: attr(mod, 'time noise coordinate scale', 0.1),
+            env: opEnvelope(mod),
             emitCounter: 0,
             emitNum: 0,
             isActive(sys) {
@@ -964,8 +1283,10 @@ function makeEmitter(mod) {
             },
             emit(sys) {
                 if (sys.curTime <= this.startTime || !this.isActive(sys)) return;
+                const strength = opStrength(this.env, sys.curTime);
+                if (strength <= 0) return;
                 const n = valueNoise3(sys.curTime * this.ts, 7.3, 11.9) * 0.5 + 0.5;
-                const rate = lerp(this.min, this.max, saturate(n));
+                const rate = lerp(this.min, this.max, saturate(n)) * strength;
                 if (rate <= 0) return;
                 this.emitCounter += rate * sys.deltaTime;
                 const newEmitNum = this.emitCounter | 0;
@@ -983,6 +1304,7 @@ function makeEmitter(mod) {
             rate: attr(mod, 'emission_rate', 100),
             duration: attr(mod, 'emission_duration', 0),
             startTime: attr(mod, 'emission_start_time', 0),
+            env: opEnvelope(mod),
             emitCounter: 0,
             emitNum: 0,
             isActive(sys) {
@@ -991,13 +1313,16 @@ function makeEmitter(mod) {
             emit(sys) {
                 if (this.rate <= 0 || sys.curTime <= this.startTime || !this.isActive(sys))
                     return;
+                // Огибающая масштабирует темп эмиссии (flEmissionRate *= strength)
+                const rate = this.rate * opStrength(this.env, sys.curTime);
+                if (rate <= 0) return;
                 let prevTime = sys.curTime - sys.deltaTime;
                 if (prevTime < this.startTime) prevTime = this.startTime;
-                this.emitCounter += this.rate * (sys.curTime - prevTime);
+                this.emitCounter += rate * (sys.curTime - prevTime);
                 const newEmitNum = this.emitCounter | 0;
                 const count = newEmitNum - this.emitNum;
                 let spawnTime = prevTime;
-                const step = 1.0 / this.rate;
+                const step = 1.0 / rate;
                 let created = 0;
                 for (let i = 0; i < count; i++) {
                     if (sys.spawnParticle(spawnTime)) created++;
@@ -1015,15 +1340,32 @@ function makeEmitter(mod) {
         return {
             num: attr(mod, 'num_to_emit', 100),
             startTime: attr(mod, 'emission_start_time', 0),
-            done: false,
-            isActive(sys) { return !this.done; },
+            // Потолок на кадр: залп размазывается на несколько кадров
+            // (у Valve так сделаны 452 эмиттера). -1 — без ограничения
+            perFrame: attr(mod, 'maximum emission per frame', -1),
+            env: opEnvelope(mod),
+            left: 0,
+            started: false,
+            isActive(sys) { return !this.started || this.left > 0; },
             emit(sys) {
-                if (this.done || sys.curTime < this.startTime) return;
-                this.done = true;
-                for (let i = 0; i < this.num; i++)
-                    sys.spawnParticle(Math.max(this.startTime, 0));
+                if (sys.curTime < this.startTime) return;
+                // Мгновенный эмиттер силу не масштабирует — только гасится ею
+                if (opStrength(this.env, sys.curTime) <= 0) return;
+                if (!this.started) {
+                    this.started = true;
+                    this.left = this.num;
+                }
+                const batch = this.perFrame > 0
+                    ? Math.min(this.left, this.perFrame) : this.left;
+                // Первая порция рождается в свой заявленный момент, хвост —
+                // тогда, когда до него дошла очередь
+                const spawnTime = this.left === this.num
+                    ? Math.max(this.startTime, 0) : Math.max(sys.curTime, 0);
+                for (let i = 0; i < batch; i++)
+                    sys.spawnParticle(spawnTime);
+                this.left -= batch;
             },
-            reset() { this.done = false; },
+            reset() { this.started = false; this.left = 0; },
         };
     }
     console.log('Unknown Emitter:', mod.functionName);
@@ -1051,6 +1393,12 @@ export class ParticleSystemInstance {
             ? new Sheet(this.material.sheet) : null;
 
         this.maxParticles = attr(def, 'max_particles', 1000);
+        // Кламп шага симуляции — как в игре (m_flMaximumTimeStep, дефолт 0.1):
+        // при просадке FPS превью не должно интегрировать шагами, которых в
+        // игре не бывает. 0 в файле означает «без ограничения» — тогда 0.3.
+        this.maxTimeStep = attr(def, 'maximum time step', 0.1) || 0.3;
+        // Частицы, которые система создаёт в момент старта, помимо эмиттеров
+        this.initialParticles = attr(def, 'initial_particles', 0);
         this.constRadius = attr(def, 'radius', 5);
         this.constColor = colorF(attr(def, 'color', null), [1, 1, 1, 1]);
         this.constRotation = attr(def, 'rotation', 0) * DEG_TO_RAD;
@@ -1061,25 +1409,31 @@ export class ParticleSystemInstance {
             .map(m => ({ mod: m, fn: INITIALIZERS[resolveFnName(m.functionName)] }))
             .filter(x => x.fn || (console.log('Unknown Initializer:', x.mod.functionName), false));
         this.operators = def.operators
-            .map(m => ({ mod: m, fn: OPERATORS[resolveFnName(m.functionName)] }))
+            .map(m => ({ mod: m, fn: OPERATORS[resolveFnName(m.functionName)],
+                         env: opEnvelope(m) }))
             .filter(x => x.fn || (console.log('Unknown Operator:', x.mod.functionName), false));
         this.emitters = def.emitters.map(makeEmitter).filter(e => e !== null);
         this.forcesList = (def.forces || [])
             .map(m => {
                 const make = FORCES[resolveFnName(m.functionName)];
                 if (!make) { console.log('Unknown Force:', m.functionName); return null; }
-                return make(m);
+                return withForceStrength(make(m), opEnvelope(m));
             })
             .filter(f => f !== null);
         this.constraints = (def.constraints || [])
-            .map(m => ({ mod: m, fn: CONSTRAINTS[resolveFnName(m.functionName)] }))
+            .map(m => ({ mod: m, fn: CONSTRAINTS[resolveFnName(m.functionName)],
+                         env: opEnvelope(m) }))
             .filter(x => x.fn || (console.log('Unknown Constraint:', x.mod.functionName), false));
 
         this.rendererMods = def.renderers || [];
+        // Огибающая ПЕРВОГО рендерера: гейт на отрисовку системы целиком
+        this.rendererEnv = this.rendererMods.length
+            ? opEnvelope(this.rendererMods[0]) : null;
         this.animationRate = 1.0;
         this.animationRateAsFps = false;
         this.animationFitLifetime = false;
         this.orientationType = 0;
+        this.orientationCP = -1;
         this.rendererType = 'sprites';
         this.screenVelRotate = null;
         for (const r of this.rendererMods) {
@@ -1095,6 +1449,8 @@ export class ParticleSystemInstance {
                 // за короткую жизнь показывают лишь первый кадр
                 this.animationFitLifetime = !!attr(r, 'animation_fit_lifetime', false);
                 this.orientationType = attr(r, 'orientation_type', 0);
+                // orientation_type 2/3 берут плоскость спрайта из базиса этого CP
+                this.orientationCP = attr(r, 'orientation control point', -1);
             } else if (fn === 'render_screen_velocity_rotate') {
                 // Разворот спрайта по его скорости НА ЭКРАНЕ (бабочки,
                 // пауки, призраки анюжуалов). Ставится ВТОРЫМ рендерером
@@ -1136,6 +1492,7 @@ export class ParticleSystemInstance {
     reset() {
         this.curTime = -this.delay;
         this.deltaTime = 0;
+        this.prevDeltaTime = 0;
         this.particles = [];
         this.nextID = 0;
         this.spawnSeq = 0;
@@ -1151,6 +1508,13 @@ export class ParticleSystemInstance {
         if (this.parent !== null) return this.parent.getControlPoint(i);
         const cps = this.controller.controlPoints;
         return cps[i] || cps[0] || [0, 0, 0];
+    }
+
+    /** Базис CP: свой, если задан ориентацией снаружи, иначе дефолт движка. */
+    getControlPointBasis(i) {
+        if (this.parent !== null) return this.parent.getControlPointBasis(i);
+        const bases = this.controller.controlPointBases;
+        return (bases && bases[i]) || CP_DEFAULT_BASIS;
     }
 
     /** Задан ли CP явно (оператором, родителем или извне через setControlPoint).
@@ -1223,17 +1587,27 @@ export class ParticleSystemInstance {
     }
 
     movement(dt) {
-        this.deltaTime = Math.min(dt, 0.3);
+        this.prevDeltaTime = this.deltaTime;
+        this.deltaTime = Math.min(dt, this.maxTimeStep);
         if (this.deltaTime <= 0.001) return;
+        const wasBeforeStart = this.curTime <= 0;
         this.curTime += this.deltaTime;
         if (this.curTime > 0) {
+            // initial_particles: разовый залп на первом же шаге после старта
+            if (wasBeforeStart && this.initialParticles > 0)
+                for (let i = 0; i < this.initialParticles; i++)
+                    this.spawnParticle(this.curTime);
             for (const e of this.emitters) e.emit(this);
             this.randOpCounter = 0;
-            for (const { mod, fn } of this.operators) {
-                fn(mod, this);
+            for (const { mod, fn, env } of this.operators) {
+                const strength = opStrength(env, this.curTime);
+                if (strength <= 0) continue;   // как в Source: оператор не запускается
+                fn(mod, this, strength);
+                // Смещение пула случайных двигается только у запущенных операторов
                 this.randOpCounter += 17;
             }
-            for (const { mod, fn } of this.constraints) fn(mod, this);
+            for (const { mod, fn, env } of this.constraints)
+                if (opStrength(env, this.curTime) > 0) fn(mod, this);
         }
         for (const c of this.children) c.movement(dt);
     }
@@ -1245,6 +1619,13 @@ export class ParticleSystemInstance {
      * частицы rope-систем соединяются в порядке создания.
      */
     collectSprites(out, ropesOut) {
+        // Рендерер — такой же модуль с огибающей: при нулевой силе Source его
+        // не запускает, и частицы просто не рисуются (в стоке так сделана
+        // одна система, но выглядит это как «эффект пропал без причины»)
+        if (opStrength(this.rendererEnv, this.curTime) <= 0) {
+            for (const c of this.children) c.collectSprites(out, ropesOut);
+            return;
+        }
         if (this.rendererType === 'rope' && ropesOut !== undefined) {
             if (this.particles.length >= 2) {
                 ropesOut.push({
@@ -1306,6 +1687,17 @@ export class ParticleSystemInstance {
                 uv1: [uv1[0], uv1[1], uv1[2], uv1[3]],
                 blend: blend,
             };
+            if (this.orientationType >= 2 && this.orientationCP >= 0) {
+                // Source путает имена: в RenderNonSpriteCardOriented «right»
+                // спрайта — это Forward контрол-пойнта, а «up» — его Right
+                const b = this.getControlPointBasis(this.orientationCP);
+                s.right = [b.fwd[0], b.fwd[1], b.fwd[2]];
+                s.up = [b.right[0], b.right[1], b.right[2]];
+                // orientation_type 3 = тот же режим, но ось right доворачивается
+                // на yaw частицы вокруг оси up
+                if (this.orientationType === 3 && p.yaw !== 0)
+                    rotateAboutAxis(s.right, s.up, p.yaw, s.right);
+            }
             if (this.screenVelRotate) {
                 // Мировая скорость + параметры — экранный угол досчитает рендер
                 s.vel = [p.pos[0] - p.prevPos[0], p.pos[1] - p.prevPos[1],

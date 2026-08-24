@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
     QCheckBox, QPushButton, QScrollArea,
     QFrame, QSizePolicy,
 )
-from PySide6.QtCore import QUrl, Qt
+from PySide6.QtCore import QUrl, Qt, QThread, Signal
 from PySide6.QtGui import QDesktopServices, QMouseEvent, QIcon
 
 from src.ui.preview_panel import PreviewPanel
@@ -79,7 +79,8 @@ class MainWindow(QMainWindow, ProgressDialogMixin, MainWindowVmtMixin,
         self.language = self.config.get('language') or 'en'
         self.t = TRANSLATIONS[self.language]
         self.setWindowTitle("TF2 Skin Generator")
-        self.setGeometry(100, 100, 1600, 800)
+        self.resize(1280, 760)
+        self._center_on_screen()
         # Минимум окна: ниже этого правая колонка (настройки/кнопки) обрезалась бы.
         # Qt сам поднимет минимум, если контенту нужно больше — обрезки не будет.
         self.setMinimumSize(1080, 600)
@@ -109,9 +110,6 @@ class MainWindow(QMainWindow, ProgressDialogMixin, MainWindowVmtMixin,
         if saved_geom:
             from PySide6.QtCore import QByteArray
             self.restoreGeometry(QByteArray.fromBase64(saved_geom.encode()))
-        else:
-            from PySide6.QtCore import QTimer
-            QTimer.singleShot(100, self._adjust_window_size)
     
     def init_ui(self) -> None:
         central_widget = QWidget()
@@ -126,6 +124,9 @@ class MainWindow(QMainWindow, ProgressDialogMixin, MainWindowVmtMixin,
         top_bar_layout.setContentsMargins(16, 8, 16, 0)
         top_bar_layout.setSpacing(0)
         top_bar_layout.addStretch()
+        # Таб-бар вставляется сюда первым элементом ниже: он строится внутри
+        # create_weapon_selection_panel(), а она вызывается уже после.
+        self._top_bar_layout = top_bar_layout
 
         self.settings_button = QPushButton()
         self.settings_button.setFixedSize(28, 28)
@@ -154,6 +155,11 @@ class MainWindow(QMainWindow, ProgressDialogMixin, MainWindowVmtMixin,
 
         main_vertical_layout.addWidget(top_bar)
 
+        nav_sep = QFrame()
+        nav_sep.setFrameShape(QFrame.Shape.HLine)
+        nav_sep.setStyleSheet("background: #1a1a1a; border: none; max-height: 1px;")
+        main_vertical_layout.addWidget(nav_sep)
+
         # Баннер обновления — скрыт по умолчанию, показывается при наличии новой версии
         self._update_banner = self._create_update_banner()
         self._update_banner.hide()
@@ -171,6 +177,8 @@ class MainWindow(QMainWindow, ProgressDialogMixin, MainWindowVmtMixin,
 
         left_panel = self.create_weapon_selection_panel()
         main_layout.addWidget(left_panel, 1)
+        # Вкладки — навигация всего приложения, поэтому живут в верхней панели
+        self._top_bar_layout.insertWidget(0, self._tab_bar)
 
         self.preview_panel = PreviewPanel(self)
 
@@ -217,6 +225,7 @@ class MainWindow(QMainWindow, ProgressDialogMixin, MainWindowVmtMixin,
         main_layout.addWidget(self.settings_scroll, 1)
 
         main_vertical_layout.addLayout(main_layout)
+        main_vertical_layout.addWidget(self._create_status_bar())
 
         self.settings_panel.radio_256.toggled.connect(self.update_preview_info)
         self.settings_panel.radio_512.toggled.connect(self.update_preview_info)
@@ -347,10 +356,97 @@ class MainWindow(QMainWindow, ProgressDialogMixin, MainWindowVmtMixin,
 
         return banner
 
+    def _create_status_bar(self) -> QWidget:
+        """Тонкая строка внизу: состояние приложения и готовность инструментов."""
+        from PySide6.QtWidgets import QLabel
+
+        bar = QWidget()
+        bar.setFixedHeight(26)
+        bar.setStyleSheet(
+            "QWidget { background: transparent; border-top: 1px solid #1a1a1a; }"
+            "QLabel { border: none; font-size: 11px; color: #484848; }")
+        row = QHBoxLayout(bar)
+        row.setContentsMargins(16, 0, 16, 0)
+        row.setSpacing(7)
+
+        self._status_dot = QLabel("\u25cf")
+        self._status_dot.setStyleSheet("border:none; font-size:9px; color:#3a7d44;")
+        row.addWidget(self._status_dot)
+
+        self._status_text = QLabel("")
+        row.addWidget(self._status_text)
+        row.addStretch(1)
+
+        self._status_tools = QLabel("")
+        row.addWidget(self._status_tools)
+
+        self._status_cache = QLabel("")
+        row.addWidget(self._status_cache)
+        return bar
+
+    def _measure_cache(self) -> None:
+        """Объём кэша — в фоне: обход файлов занимает секунды."""
+        if getattr(self, '_cache_probe', None) is not None:
+            return                      # замер уже идёт
+        probe = _CacheProbe()
+        probe.measured.connect(self._on_cache_measured)
+        probe.finished.connect(lambda: setattr(self, '_cache_probe', None))
+        self._cache_probe = probe
+        probe.start()
+
+    def _on_cache_measured(self, size_mb: float, models: int) -> None:
+        size = (f"{size_mb / 1024:.1f} GB" if size_mb >= 1024
+                else f"{size_mb:.0f} MB")
+        self._status_cache.setText(
+            "  ·  %s: %s  ·  %s: %d"
+            % (self.t['status_cache'], size, self.t['status_models'], models))
+        self._status_cache.setToolTip(self.t['status_cache_tip'])
+
+    def _refresh_status_bar(self) -> None:
+        """Слева — состояние, справа — что найдено из внешних инструментов."""
+        if not hasattr(self, '_status_text'):
+            return
+        from src.config.app_config import AppConfig
+        from src.services.tf2_paths import TF2Paths
+
+        path = (AppConfig.load_config().get('tf2_game_folder', '') or '').strip()
+        tf2_ok = TF2Paths.is_valid(path)
+        crowbar_ok, _ = TF2Paths.check_crowbar()
+
+        parts = [self.t['status_tf2_ok'] if tf2_ok else self.t['status_tf2_missing'],
+                 self.t['status_crowbar_ok'] if crowbar_ok
+                 else self.t['status_crowbar_missing']]
+        self._status_tools.setText("  \u00b7  ".join(parts))
+
+        # Без папки игры не собрать и не показать — это не «готов»
+        self._status_text.setText(
+            self.t['status_ready'] if tf2_ok else self.t['status_no_game'])
+        self._status_dot.setStyleSheet(
+            "border:none; font-size:9px; color:%s;"
+            % ("#3a7d44" if tf2_ok else "#8a6a2a"))
+
+        # Кэш могли почистить в настройках — перемеряем
+        self._measure_cache()
+
+    def _center_on_screen(self) -> None:
+        """Стартовое положение по центру экрана, а не в углу.
+
+        Работает только на первом запуске: дальше геометрия берётся из
+        конфига, её пользователь выставил сам.
+        """
+        from PySide6.QtWidgets import QApplication
+        screen = QApplication.primaryScreen()
+        if screen is None:
+            return
+        frame = self.frameGeometry()
+        frame.moveCenter(screen.availableGeometry().center())
+        self.move(frame.topLeft())
+
     def _refresh_tf2_warning(self) -> None:
         """Показывает/прячет баннер-подсказку в зависимости от валидности пути TF2."""
         from src.config.app_config import AppConfig
         from src.services.tf2_paths import TF2Paths
+        self._refresh_status_bar()
         path = (AppConfig.load_config().get('tf2_game_folder', '') or '').strip()
         if TF2Paths.is_valid(path):
             self._tf2_warning_banner.hide()
@@ -376,7 +472,7 @@ class MainWindow(QMainWindow, ProgressDialogMixin, MainWindowVmtMixin,
 
     def create_weapon_selection_panel(self) -> QWidget:
         from PySide6.QtWidgets import (
-            QGroupBox, QVBoxLayout, QLabel, QComboBox,
+            QVBoxLayout, QLabel, QComboBox,
             QPushButton, QWidget, QStackedWidget,
         )
         from src.utils.themes import get_modern_styles
@@ -465,13 +561,7 @@ class MainWindow(QMainWindow, ProgressDialogMixin, MainWindowVmtMixin,
         tab_row.addWidget(self._tab_particles_btn)
         tab_row.addStretch()
 
-        # Разделитель под таб-баром
-        tab_sep = QFrame()
-        tab_sep.setFrameShape(QFrame.Shape.HLine)
-        tab_sep.setStyleSheet("background: #1a1a1a; border: none; max-height: 1px;")
-
-        layout.addWidget(self._tab_bar)
-        layout.addWidget(tab_sep)
+        # self._tab_bar здесь не добавляется: его забирает верхняя панель
 
         # ── QStackedWidget: страница 0 = оружие, страница 1 = шапки ─────── #
         self._left_stack = QStackedWidget()
@@ -480,21 +570,27 @@ class MainWindow(QMainWindow, ProgressDialogMixin, MainWindowVmtMixin,
         # ── Страница 0: оружие ────────────────────────────────────────────── #
         weapons_page = QWidget()
         weapons_layout = QVBoxLayout(weapons_page)
-        weapons_layout.setSpacing(16)
-        weapons_layout.setContentsMargins(0, 8, 0, 0)
+        weapons_layout.setSpacing(0)
+        weapons_layout.setContentsMargins(0, 0, 0, 0)
 
-        self.weapon_selection_group = QGroupBox(self.t['weapon_selection'])
+        # Просто контейнер: рамка обводила единственную группу на экране и
+        # ничего не отделяла, а заголовок «Игровой контент» повторял «Выбор»
+        # строкой выше. Колонку теперь держат сами подписи полей.
+        self.weapon_selection_group = QWidget()
         styles = get_modern_styles()
-        self.weapon_selection_group.setStyleSheet(styles['groupbox'])
+        self.weapon_selection_group.setStyleSheet("background: transparent;")
 
         group_layout = QVBoxLayout(self.weapon_selection_group)
-        group_layout.setSpacing(12)
+        # Шаг 4 — подпись к своему списку; между полями 4 + margin-top 12 = 16
+        group_layout.setSpacing(4)
+        group_layout.setContentsMargins(0, 0, 0, 0)
 
-        _lbl_style = "font-weight: 500; font-size: 13px; color: #ccc; margin-top: 8px;"
+        _lbl_style = "font-weight: 500; font-size: 13px; color: #ccc; margin-top: 12px;"
 
         # ── Категория — верхний селектор: что вообще делаем ───────────────── #
         self.category_label = QLabel(self.t['category'])
-        self.category_label.setStyleSheet("font-weight: 500; font-size: 13px; color: #ccc; margin-top: 4px;")
+        self.category_label.setStyleSheet(
+            "font-weight: 500; font-size: 13px; color: #ccc; margin-top: 0;")
         group_layout.addWidget(self.category_label)
 
         # Ключи категорий в порядке отображения. Используем индекс для маппинга.
@@ -1052,8 +1148,6 @@ class MainWindow(QMainWindow, ProgressDialogMixin, MainWindowVmtMixin,
         # Обновляем заголовки
         if hasattr(self, 'step_1_label'):
             self.step_1_label.setText(self.t['step_1_selection'])
-        if hasattr(self, 'weapon_selection_group'):
-            self.weapon_selection_group.setTitle(self.t['weapon_selection'])
         if hasattr(self, 'category_label'):
             self.category_label.setText(self.t['category'])
         if hasattr(self, 'class_label'):
@@ -1622,40 +1716,25 @@ class MainWindow(QMainWindow, ProgressDialogMixin, MainWindowVmtMixin,
         self.t = TRANSLATIONS[lang]
         self.settings_panel.update_language(self.t)
         self.update_ui_text()
-    
-    def on_advanced_section_toggled(self, is_expanded):
-        """Обработка сворачивания/разворачивания секции Дополнительно"""
-        # Даём время на обновление layout
-        from PySide6.QtCore import QTimer
-        QTimer.singleShot(50, self._adjust_window_size)
-    
-    def _adjust_window_size(self) -> None:
-        """Пересчитывает и применяет оптимальный размер окна"""
-        if self.isMaximized() or self.isFullScreen():
-            self.centralWidget().updateGeometry()
-            self.centralWidget().layout().activate()
-            return
 
-        # Обновляем layout
-        self.centralWidget().updateGeometry()
-        self.centralWidget().layout().activate()
-        
-        # Учитываем minimumSizeHint, иначе высота окна может быть меньше блока Step 2: Export
-        cw = self.centralWidget()
-        hint = cw.sizeHint()
-        min_hint = cw.minimumSizeHint()
-        needed_h = max(hint.height(), min_hint.height()) + 20
+# ── Фоновый замер кэша ───────────────────────────────────────────────────── #
 
-        # Применяем новый размер с сохранением ширины
-        current_width = self.width()
-        new_height = max(needed_h, 600)
+class _CacheProbe(QThread):
+    """Считает объём кэша декомпиляции и число моделей в нём.
 
-        screen = self.screen()
-        if screen:
-            available = screen.availableGeometry()
-            new_height = min(new_height, available.height())
-        
-        self.resize(current_width, new_height)
+    Отдельный поток, потому что обход файлов идёт секунды: на UI-потоке это
+    заметная пауза при старте и после закрытия настроек.
+    """
+
+    measured = Signal(float, int)
+
+    def run(self) -> None:
+        try:
+            from src.services.decompile_cache import get_cache_size_mb
+            from src.services.model_attachments import list_decompiled_models
+            self.measured.emit(get_cache_size_mb(), len(list_decompiled_models()))
+        except Exception as exc:
+            logger.debug(f"Замер кэша не удался: {exc}")
 
 
 # ── Иконка шестерёнки для кнопки настроек ────────────────────────────────── #

@@ -48,6 +48,52 @@ class NeutralityTests(TextureStateBase):
         self.assertFalse(self.state.is_neutral("medic_blue"))
         self.assertTrue(self.state.is_neutral("sniper_lens"))
 
+    def test_self_mapped_material_is_neutral(self):
+        """Материал, который на BLU остаётся собой, — общий для команд.
+
+        У многоматериальных шапок (hwn2022_alcoholic_automaton) синее имя
+        одной колонки одновременно является обычным материалом другой: линза
+        там синяя всегда и по команде не меняется. По правилу «имя есть среди
+        значений» её карточка считалась командной и пропадала на BLU.
+        """
+        self.state.blu_name_map = {
+            "auto_1": "auto_1_blue",          # переключается
+            "auto": "auto_blue",              # переключается
+            "auto_1_blue": "auto_1_blue",     # общий (ссылка на себя)
+            "auto_blue": "auto_blue",         # общий
+        }
+        self.assertFalse(self.state.is_neutral("auto_1"))
+        self.assertFalse(self.state.is_neutral("auto"))
+        self.assertTrue(self.state.is_neutral("auto_1_blue"))
+        self.assertTrue(self.state.is_neutral("auto_blue"))
+
+    def test_shared_material_edit_survives_team_switch(self):
+        """Правка общего материала видна обеим командам.
+
+        Сценарий шапки с четырьмя столбцами: линза одинаковая у RED и BLU,
+        и загруженная на неё текстура не должна исчезать при переключении.
+        """
+        self.state.material_names = ["auto", "auto_blue"]
+        self.state.blu_name_map = {"auto": "auto_blue", "auto_blue": "auto_blue"}
+        self.state.active_team = Team.RED
+        lens = self.png("lens")
+        self.state.set_texture("auto_blue", lens)
+        self.assertEqual(self.state.textures[Team.RED]["auto_blue"], lens)
+        self.assertEqual(self.state.textures[Team.BLU]["auto_blue"], lens)
+
+        # А командный материал остаётся при своей команде
+        body = self.png("body")
+        self.state.set_texture("auto", body)
+        self.assertEqual(self.state.textures[Team.RED]["auto"], body)
+        self.assertNotIn("auto", self.state.textures[Team.BLU])
+
+    def test_blu_only_name_stays_team_specific(self):
+        """Имя, встречающееся ТОЛЬКО как значение, — чисто синий материал."""
+        self.state.blu_name_map = {"medic_hands_red": "medic_hands_blue"}
+        self.assertFalse(self.state.is_neutral("medic_hands_blue"))
+        self.assertFalse(self.state.is_neutral("MEDIC_HANDS_BLUE"))
+        self.assertTrue(self.state.is_neutral("sniper_lens"))
+
     def test_single_blu_frame_makes_main_team_specific(self):
         # Одно-текстурное командное оружие: BLU одним кадром, маппинга нет.
         self.state.material_names = ["c_gun"]

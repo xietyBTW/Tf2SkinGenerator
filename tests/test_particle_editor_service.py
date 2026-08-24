@@ -970,3 +970,129 @@ def test_canonical_attr_case_on_paste(tmp_path, monkeypatch):
     ParticleEditorService._attr_catalog.clear()
     ParticleEditorService._attr_canonical.clear()
     ParticleEditorService._module_display.clear()
+
+
+# ── Контрольные точки, каталог параметров, согласованность с превью ────── #
+
+def test_referenced_control_points():
+    """Какие CP нужны эффекту — вычитывается из модулей: в игре их ставит
+    код, в превью пользователь, и без подсказки о CP 9 не догадаться."""
+    from src.services.particle_editor_service import referenced_control_points
+
+    child = {
+        "attrs": {}, "renderers": [], "emitters": [], "initializers": [],
+        "operators": [{"functionName": "Movement Lock to Control Point",
+                       "attrs": {"control_point_number": {"t": "integer", "v": 4}}}],
+        "forces": [], "constraints": [], "children": [],
+    }
+    root = {
+        "attrs": {}, "renderers": [], "emitters": [],
+        "initializers": [
+            {"functionName": "Position Within Sphere Random",
+             "attrs": {"control_point_number": {"t": "integer", "v": 0}}},
+            {"functionName": "Remap Control Point to Vector",
+             "attrs": {"input control point number": {"t": "integer", "v": 9}}}],
+        "operators": [], "forces": [], "constraints": [],
+        "children": [{"delay": 0.0, "childName": "kid"}],
+    }
+    systems = {"fx": root, "kid": child}
+    assert referenced_control_points(root) == [0, 9]
+    # С деревом систем считаются и точки детей
+    assert referenced_control_points(root, systems) == [0, 4, 9]
+
+
+def test_referenced_control_points_ignores_range_fields():
+    """«maximum end control point» = 30 — это граница диапазона, а не точка:
+    в стоке такие поля есть, и без фильтра подсказка врала бы."""
+    from src.services.particle_editor_service import referenced_control_points
+
+    s = {"attrs": {}, "renderers": [], "emitters": [], "initializers": [],
+         "operators": [{"functionName": "Movement Follow CP",
+                        "attrs": {"control point number": {"t": "integer", "v": 1},
+                                  "maximum end control point": {"t": "integer",
+                                                                "v": 30}}}],
+         "forces": [], "constraints": [], "children": []}
+    assert referenced_control_points(s) == [1]
+
+
+def test_attr_stats_tracks_value_spread():
+    """Каталог копит разброс значения по эффектам игры: одного «примера»
+    мало, чтобы понять, 0.1 — это норма или экзотика."""
+    from src.services.particle_editor_service import ParticleEditorService as P
+
+    entry = {"t": "float", "v": 1.0}
+    for v in (1.0, 5.0, 0.25, True, "текст", [1, 2, 3]):
+        P._track_range(entry, v)
+    assert entry["n"] == 3            # bool, строка и вектор не считаются
+    assert entry["lo"] == 0.25 and entry["hi"] == 5.0
+
+    saved = dict(P._attr_catalog)
+    try:
+        P._attr_catalog = {("operators", "radius scale"): {"end_time": entry}}
+        stats = P.attr_stats("operators", "Radius Scale", "end_time")
+        assert stats["lo"] == 0.25 and stats["hi"] == 5.0
+        # Единичное наблюдение диапазоном не считается
+        P._attr_catalog = {("operators", "radius scale"): {
+            "end_time": {"t": "float", "v": 1.0, "lo": 1.0, "hi": 1.0, "n": 1}}}
+        assert P.attr_stats("operators", "Radius Scale", "end_time") is None
+        assert P.attr_stats("operators", "Radius Scale", "нет такого") is None
+    finally:
+        P._attr_catalog = saved
+
+
+def test_param_reference_entry_carries_range():
+    from src.services.particle_editor_service import ParticleEditorService as P
+
+    spread = P._param_reference_entry(
+        {"t": "float", "v": 1.0, "lo": 0.5, "hi": 4.0, "n": 12})
+    assert spread == {"type": "float", "example": 1.0, "range": [0.5, 4.0]}
+    # Одно значение на всю игру — диапазона нет
+    same = P._param_reference_entry(
+        {"t": "float", "v": 1.0, "lo": 1.0, "hi": 1.0, "n": 9})
+    assert "range" not in same
+
+
+def test_module_catalog_covers_everything_preview_simulates():
+    """Каталог «Добавить модуль…» и движок превью не должны разъезжаться:
+    если превью умеет модуль, он обязан быть в списке под рукой.
+
+    Исключение — модули, которых нет в файлах TF2 вовсе (порт движка знает
+    операторы других игр Source); они перечислены явно.
+    """
+    import re
+    from pathlib import Path
+
+    from src.services.particle_editor_service import MODULE_CATALOG
+
+    engine = Path("src/static/js/particles/engine.js")
+    if not engine.is_file():
+        import pytest
+        pytest.skip("engine.js не найден")
+    src = engine.read_text(encoding="utf-8")
+
+    def block(name: str) -> str:
+        start = src.index(f"const {name} = {{")
+        i = src.index("{", start)
+        depth = 0
+        for j in range(i, len(src)):
+            depth += (src[j] == "{") - (src[j] == "}")
+            if depth == 0:
+                return src[i:j]
+        raise AssertionError(name)
+
+    aliases = dict(re.findall(
+        r"^    '([^']+)': '([^']+)',",
+        src[src.index("const FN_ALIASES"):src.index("function resolveFnName")],
+        re.M))
+    #: Операторы движка, которых нет ни в одном стоковом PCF TF2.
+    not_in_tf2 = {"alpha fade in simple", "alpha fade out simple"}
+
+    for group, const in (("initializers", "INITIALIZERS"),
+                         ("operators", "OPERATORS"),
+                         ("forces", "FORCES"),
+                         ("constraints", "CONSTRAINTS")):
+        simulated = set(re.findall(r"^    '([^']+)':", block(const), re.M))
+        listed = {name.lower() for name in MODULE_CATALOG[group]}
+        listed |= {aliases.get(name, name) for name in listed}
+        missing = sorted(simulated - listed - not_in_tf2)
+        assert missing == [], (group, missing)

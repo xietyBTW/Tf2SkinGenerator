@@ -119,10 +119,9 @@ class Preview2DImageMixin:
                     self.preview.show()
                     self.preview.clear()
                     self.preview.setStyleSheet(self._preview_style)
-                    pw = max(self.preview.width(), 600)
-                    self.preview.setPixmap(
-                        QPixmap.fromImage(qimg).scaled(pw, 500, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-                    )
+                    self.preview.setPixmap(QPixmap.fromImage(qimg).scaled(
+                        *self._preview_box(600),
+                        Qt.KeepAspectRatio, Qt.SmoothTransformation))
         except Exception as e:
             logger.warning(f"VTF рендер: {e}")
 
@@ -242,14 +241,16 @@ class Preview2DImageMixin:
                     return
                 w = max(self.preview.width(), self.width(), 600)
                 if not self._start_gif(path, w):
-                    pix = _load_pixmap(path, opaque).scaled(w, 500, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-                    self.preview.setPixmap(pix)
+                    self.preview.setPixmap(_load_pixmap(path, opaque).scaled(
+                        *self._preview_box(w),
+                        Qt.KeepAspectRatio, Qt.SmoothTransformation))
             QTimer.singleShot(50, _try_gif)
         else:
             def _scale():
                 w = max(self.preview.width(), self.width(), 600)
-                pix = _load_pixmap(path, opaque).scaled(w, 500, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-                self.preview.setPixmap(pix)
+                self.preview.setPixmap(_load_pixmap(path, opaque).scaled(
+                    *self._preview_box(w),
+                    Qt.KeepAspectRatio, Qt.SmoothTransformation))
             QTimer.singleShot(50, _scale)
 
     def _clear_preview_label(self) -> None:

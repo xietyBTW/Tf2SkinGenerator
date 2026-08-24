@@ -65,6 +65,26 @@ from src.ui.preview_skybox_mixin import PreviewSkyboxMixin
 from src.ui.preview_material_cards_mixin import PreviewMaterialCardsMixin
 
 
+def vtf_bytes(width: int, height: int, fmt: str, flags, bpp_table) -> int:
+    """Сколько примерно займёт готовый VTF.
+
+    Мип-уровни добавляют примерно треть: 1 + 1/4 + 1/16 + ... = 4/3. Флаг
+    NOMIP их отключает. Блочные форматы (DXT) считаем по битам на пиксель —
+    для сторон, кратных четырём, это точно.
+    """
+    bits = bpp_table.get(fmt, 32)
+    base = width * height * bits // 8
+    return base if 'NOMIP' in (flags or ()) else base * 4 // 3
+
+
+def human_size(num_bytes: int) -> str:
+    """Байты человеку: КБ до мегабайта, дальше МБ с одним знаком."""
+    kb = num_bytes / 1024
+    if kb < 1024:
+        return f"{kb:.0f} KB"
+    return f"{kb / 1024:.1f} MB"
+
+
 class PreviewPanel(Preview3DMixin, PreviewSkinsMixin, PreviewCustomModelMixin,
                    PreviewTeamMixin, Preview2DImageMixin, PreviewCritHitMixin,
                    PreviewSkyboxMixin, PreviewMaterialCardsMixin, QWidget):
@@ -189,6 +209,9 @@ class PreviewPanel(Preview3DMixin, PreviewSkinsMixin, PreviewCustomModelMixin,
         # ── Командные кадры из VPK ────────────────────────────────────────── #
         # Данные (кадры/карты/маппинг) — в self._state; здесь только framerate.
         self._team_framerate: float = 0.0
+        #: У модели есть BLU-скин, но в стоке он не отличается от RED
+        #: (та же текстура и та же краска в VMT) — влияет только на подпись.
+        self._blu_matches_red: bool = False
 
         # ── GIF кэш {gif_path: (frame_paths, fps)} ───────────────────────── #
         self._gif_cache: Dict[str, tuple] = {}
@@ -388,20 +411,19 @@ class PreviewPanel(Preview3DMixin, PreviewSkinsMixin, PreviewCustomModelMixin,
         root = QVBoxLayout(self)
         root.setSpacing(12)
         root.setContentsMargins(0, 0, 0, 0)
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
         root.addWidget(self._build_toggle_bar())
 
         self.view_stack = QStackedWidget()
-        self.view_stack.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.view_stack.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
         self.page_2d = self._build_2d_page()
         self.view_stack.addWidget(self.page_2d)
         # page_3d добавляется в _init_3d_widget
 
-        root.addWidget(self.view_stack)
+        root.addWidget(self.view_stack, 1)
         root.addWidget(self._build_info_panel())
-        root.addStretch(1)
 
         self._init_3d_widget()
 
@@ -642,7 +664,7 @@ class PreviewPanel(Preview3DMixin, PreviewSkinsMixin, PreviewCustomModelMixin,
 
     def _build_2d_page(self) -> QWidget:
         page = QWidget()
-        page.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        page.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         vlay = QVBoxLayout(page)
         vlay.setContentsMargins(0, 0, 0, 0)
         vlay.setSpacing(0)
@@ -651,17 +673,20 @@ class PreviewPanel(Preview3DMixin, PreviewSkinsMixin, PreviewCustomModelMixin,
 
         # Пустое состояние
         self.empty_state = QWidget()
-        self.empty_state.setFixedHeight(500)
-        self.empty_state.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.empty_state.setMinimumHeight(240)
+        self.empty_state.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.empty_state.setMinimumWidth(440)
-        self.empty_state.setStyleSheet(f"QWidget {{ {_border} }}")
+        self.empty_state.setObjectName("dropZone")
+        self.empty_state.setStyleSheet(f"#dropZone {{ {_border} }}")
         self.empty_state.setAcceptDrops(True)
         e_lay = QVBoxLayout(self.empty_state)
         e_lay.setAlignment(Qt.AlignCenter)
         e_lay.setSpacing(16)
 
         self.empty_text = QLabel(self.t['drag_text'])
-        self.empty_text.setStyleSheet("color:#666; font-size:14px; font-weight:300; padding:40px;")
+        self.empty_text.setStyleSheet(
+            "border:none; background:transparent;"
+            " color:#666; font-size:14px; font-weight:300;")
         self.empty_text.setAlignment(Qt.AlignCenter)
         e_lay.addWidget(self.empty_text)
 
@@ -680,9 +705,8 @@ class PreviewPanel(Preview3DMixin, PreviewSkinsMixin, PreviewCustomModelMixin,
         self.preview = QLabel()
         self.preview.setStyleSheet(self._preview_style)
         self.preview.setAlignment(Qt.AlignCenter)
-        self.preview.setFixedHeight(500)
-        self.preview.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.preview.setMinimumWidth(440)
+        self.preview.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
+        self.preview.setMinimumSize(440, 240)
         self.preview.setAcceptDrops(True)
         self.preview.hide()
         vlay.addWidget(self.preview)
@@ -712,29 +736,73 @@ class PreviewPanel(Preview3DMixin, PreviewSkinsMixin, PreviewCustomModelMixin,
 
         return page
 
+    #: Бит на пиксель для форматов VTF. Чего нет в таблице — считаем 32.
+    _VTF_BPP = {
+        'DXT1': 4, 'DXT1 With One Bit Alpha': 4,
+        'DXT3': 8, 'DXT5': 8, 'I8': 8, 'A8': 8,
+        'IA88': 16, 'UV88': 16, 'RGB565': 16, 'BGR565': 16,
+        'BGRX5551': 16, 'BGRA5551': 16, 'BGRA4444': 16,
+        'RGB888': 24, 'BGR888': 24,
+        'RGB888 Bluescreen': 24, 'BGR888 Bluescreen': 24,
+        'RGBA16161616F': 64, 'RGBA16161616': 64,
+    }
+
     def _build_info_panel(self) -> QWidget:
+        """Сводка о будущем VTF — таблицей в две пары колонок.
+
+        Стиль вешается на #infoPanel, а НЕ на QWidget: селектор по типу бьёт
+        по всем потомкам, и каждая QLabel получала собственную рамку — именно
+        так сводка когда-то и превратилась в пять коробок вместо одной.
+        """
+        from PySide6.QtWidgets import QGridLayout
+
         panel = QWidget()
-        panel.setFixedHeight(220)
+        panel.setObjectName("infoPanel")
         panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         panel.setMinimumWidth(440)
-        panel.setStyleSheet("""
-            QWidget { background:rgba(255,255,255,0.02); border:1px solid #333; border-radius:4px; }
-        """)
+        panel.setStyleSheet(
+            "#infoPanel { background:rgba(255,255,255,0.02);"
+            " border:1px solid #262626; border-radius:4px; }"
+            " QLabel { border:none; background:transparent; }")
         lay = QVBoxLayout(panel)
-        lay.setContentsMargins(12, 12, 12, 12)
-        lay.setSpacing(8)
+        lay.setContentsMargins(14, 11, 14, 13)
+        lay.setSpacing(10)
 
         self.info_title = QLabel(self.t['info_title'])
         self.info_title.setStyleSheet(
-            "font-weight:600; font-size:13px; color:#ccc; padding-bottom:8px; border-bottom:1px solid #333;"
-        )
+            "font-size:10px; font-weight:600; letter-spacing:1px; color:#666;"
+            " padding-bottom:9px; border-bottom:1px solid #1e1e1e;")
         lay.addWidget(self.info_title)
 
-        for attr in ('info_resolution', 'info_format', 'info_flags', 'info_filename'):
-            lbl = QLabel("")
-            lbl.setStyleSheet("font-size:12px; color:#888;")
-            setattr(self, attr, lbl)
-            lay.addWidget(lbl)
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(10)
+        grid.setVerticalSpacing(7)
+        grid.setContentsMargins(0, 0, 0, 0)
+
+        # (атрибут значения, ключ подписи, строка, пара) — левая пара и правая
+        rows = [
+            ('info_resolution', 'info_resolution', 0, 0),
+            ('info_source',     'info_source',     0, 1),
+            ('info_format',     'info_format',     1, 0),
+            ('info_weight',     'info_weight',     1, 1),
+            ('info_flags',      'info_flags',      2, 0),
+            ('info_filename',   'info_filename',   2, 1),
+        ]
+        self._info_captions = {}
+        for attr, key, row, pair in rows:
+            cap = QLabel("")
+            cap.setStyleSheet("font-size:11px; color:#484848;")
+            val = QLabel("")
+            val.setStyleSheet("font-size:12px; color:#c8c8c8;")
+            grid.addWidget(cap, row, pair * 2)
+            grid.addWidget(val, row, pair * 2 + 1)
+            self._info_captions[key] = cap
+            setattr(self, attr, val)
+
+        # Значения тянутся, подписи держат свою ширину — колонки выравниваются
+        grid.setColumnStretch(1, 1)
+        grid.setColumnStretch(3, 1)
+        lay.addLayout(grid)
 
         self.info_summary = panel
         return panel
@@ -746,8 +814,8 @@ class PreviewPanel(Preview3DMixin, PreviewSkinsMixin, PreviewCustomModelMixin,
         self._3d_widget.set_language(self._lang)
 
         qt_w = self._3d_widget.qt_widget
-        qt_w.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        qt_w.setMinimumHeight(500)
+        qt_w.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        qt_w.setMinimumHeight(300)
         qt_w.setMinimumWidth(440)
 
         self.page_3d = qt_w
@@ -1866,7 +1934,8 @@ class PreviewPanel(Preview3DMixin, PreviewSkinsMixin, PreviewCustomModelMixin,
             movie.deleteLater()
             return False
         self._gif_orig_size = orig
-        movie.setScaledSize(orig.scaled(preview_width, 500, Qt.KeepAspectRatio))
+        movie.setScaledSize(orig.scaled(*self._preview_box(preview_width),
+                                        Qt.KeepAspectRatio))
         self._gif_movie = movie
         self.preview.setMovie(movie)
         movie.start()
@@ -1884,6 +1953,11 @@ class PreviewPanel(Preview3DMixin, PreviewSkinsMixin, PreviewCustomModelMixin,
         # Данные команд и вариант — одним сбросом в модели.
         self._state.reset_team_data()
         self._state.reset_australium()
+        # Признак «BLU в стоке не отличается от RED» относится к прошлой
+        # модели — вместе с ним возвращаем обычную подпись кнопки
+        self._blu_matches_red = False
+        if hasattr(self, 'btn_blu'):
+            self.btn_blu.setToolTip(self.t.get('3d_team_blu_tip', 'BLU team texture'))
         if hasattr(self, 'btn_red'):
             self.btn_red.setVisible(False)
         if hasattr(self, 'btn_blu'):
@@ -1949,25 +2023,56 @@ class PreviewPanel(Preview3DMixin, PreviewSkinsMixin, PreviewCustomModelMixin,
         return fp.lower().endswith('.vtf')
 
     # ── Совместимость с is_image_file / is_vtf_file ───────────────────────────
+    def _source_size(self):
+        """Размеры исходной картинки без её полной распаковки."""
+        if not self.image_path or not os.path.exists(self.image_path):
+            return None
+        from PySide6.QtGui import QImageReader
+        sz = QImageReader(self.image_path).size()
+        return (sz.width(), sz.height()) if sz.isValid() else None
+
     def update_info_summary(self) -> None:
-        if hasattr(self.parent, 'settings_panel'):
-            s = self.parent.settings_panel.get_settings()
-            sz = s.get('size', (512, 512))
-            self.info_resolution.setText(f"{self.t['info_resolution']} {sz[0]}x{sz[1]}")
-            self.info_format.setText(f"{self.t['info_format']} {s.get('format', 'DXT1')}")
-            flags = s.get('flags', [])
-            self.info_flags.setText(
-                f"{self.t['info_flags']} {', '.join(flags)}" if flags else self.t['info_flags_none']
-            )
-            fn = s.get('filename', '')
-            self.info_filename.setText(
-                f"{self.t['info_filename']} {fn}" if fn else self.t['info_filename_none']
-            )
+        for key, cap in self._info_captions.items():
+            cap.setText(self.t[key].rstrip(':'))
+
+        def put(lbl, text, tone="#c8c8c8"):
+            lbl.setText(text)
+            lbl.setStyleSheet(f"font-size:12px; color:{tone};")
+
+        if not hasattr(self.parent, 'settings_panel'):
+            for lbl in (self.info_resolution, self.info_format,
+                        self.info_source, self.info_weight):
+                put(lbl, "—", "#484848")
+            put(self.info_flags, self.t['info_none'], "#484848")
+            put(self.info_filename, self.t['info_unset'], "#cc5522")
+            return
+
+        s = self.parent.settings_panel.get_settings()
+        w, h = s.get('size', (512, 512))
+        fmt = s.get('format', 'DXT1')
+        flags = s.get('flags', [])
+
+        put(self.info_resolution, f"{w}×{h}")
+        put(self.info_format, fmt)
+        put(self.info_flags,
+            ", ".join(flags) if flags else self.t['info_none'],
+            "#c8c8c8" if flags else "#484848")
+
+        fn = s.get('filename', '')
+        put(self.info_filename, fn or self.t['info_unset'],
+            "#c8c8c8" if fn else "#cc5522")
+
+        # Исходник: меньше цели — значит апскейл и мыло, предупреждаем
+        src = self._source_size()
+        if src is None:
+            put(self.info_source, self.t['info_not_loaded'], "#484848")
         else:
-            self.info_resolution.setText(f"{self.t['info_resolution']} -")
-            self.info_format.setText(f"{self.t['info_format']} -")
-            self.info_flags.setText(self.t['info_flags_none'])
-            self.info_filename.setText(self.t['info_filename_none'])
+            upscaled = src[0] < w or src[1] < h
+            put(self.info_source, f"{src[0]}×{src[1]}",
+                "#cc5522" if upscaled else "#c8c8c8")
+
+        put(self.info_weight, human_size(vtf_bytes(w, h, fmt, flags,
+                                                   self._VTF_BPP)))
 
     # ═══════════════════════════════════════════════════════════════════════════
     # Language
@@ -1979,6 +2084,7 @@ class PreviewPanel(Preview3DMixin, PreviewSkinsMixin, PreviewCustomModelMixin,
         self.empty_text.setText(t['drag_text'])
         self.select_file_button.setText(t['select_file_btn'])
         self.info_title.setText(t['info_title'])
+        self.update_info_summary()
         if self.info_summary.isVisible():
             self.update_info_summary()
         self.btn_load_3d.setToolTip(t.get('3d_load_model_tip', 'Load 3D model'))
@@ -1992,6 +2098,16 @@ class PreviewPanel(Preview3DMixin, PreviewSkinsMixin, PreviewCustomModelMixin,
     # Resize
     # ═══════════════════════════════════════════════════════════════════════════
 
+    def _preview_box(self, width: int = 0) -> tuple:
+        """Прямоугольник, в который вписывается картинка 2D-превью.
+
+        Высота раньше была зашита числом 500 в трёх местах — ровно столько
+        же, сколько виджет занимал жёстко. Теперь берём его фактический
+        размер, иначе при растяжении окна картинка осталась бы прежней.
+        """
+        return (max(width, self.preview.width(), 440),
+                max(self.preview.height(), 240))
+
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         if not self.preview.isVisible():
@@ -2000,17 +2116,15 @@ class PreviewPanel(Preview3DMixin, PreviewSkinsMixin, PreviewCustomModelMixin,
 
         if self._gif_movie is not None and self._gif_orig_size is not None:
             def _resize_gif():
-                w = max(self.preview.width(), self.width(), 600)
                 self._gif_movie.setScaledSize(
-                    self._gif_orig_size.scaled(w, 500, Qt.KeepAspectRatio)
-                )
+                    self._gif_orig_size.scaled(*self._preview_box(),
+                                               Qt.KeepAspectRatio))
             QTimer.singleShot(50, _resize_gif)
         elif self.image_path and os.path.exists(self.image_path):
             def _rescale():
-                w = max(self.preview.width(), self.width(), 600)
                 pix = QPixmap(self.image_path)
                 if not pix.isNull():
-                    self.preview.setPixmap(
-                        pix.scaled(w, 500, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-                    )
+                    self.preview.setPixmap(pix.scaled(
+                        *self._preview_box(),
+                        Qt.KeepAspectRatio, Qt.SmoothTransformation))
             QTimer.singleShot(50, _rescale)

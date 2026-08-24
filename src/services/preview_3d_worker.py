@@ -20,7 +20,7 @@ from PySide6.QtCore import Signal
 
 from src.data.weapons import WEAPON_MDL_PATHS
 from src.services import decompile_cache
-from src.services import qc_skin_parser
+from src.services import qc_skin_parser, vmt_tint
 from src.services.base_worker import BaseWorker
 from src.services.game_vpk_reader import GameVpkReader
 from src.services.model_build_service import ModelBuildService
@@ -52,6 +52,10 @@ class Preview3DWorker(BaseWorker):
     # Australium/Gold/Festive вариант оружия: (png_path, material_name)
     # Эмитируется когда в QC skinfamilies есть вариантная строка без 'blue'
     australium_ready = Signal(str, str)
+    # BLU-скин есть, но в стоке он выглядит ТОЧНО как RED (та же текстура,
+    # та же краска в VMT). Переключатель команд оставляем — свою BLU-текстуру
+    # сделать можно, — но честно предупреждаем, что в игре разницы нет.
+    blu_same_as_red = Signal()
     # Ошибка
     failed   = Signal(str)
     # Текстовый прогресс для UI
@@ -95,6 +99,9 @@ class Preview3DWorker(BaseWorker):
         self._preview_dir: Optional[str] = None
         self._decomp_dir:  Optional[str] = None  # папка с декомпилированными QC/SMD
         self._hat_decomp_dir: Optional[str] = None  # алиас для режима hat
+        #: {материал: (basetexture, TintSpec)} для RED — с чем сравнивать
+        #: BLU, чтобы понять, отличаются ли команды вообще
+        self._red_looks: dict = {}
         self._p = self._PROGRESS.get(lang, self._PROGRESS['en'])
 
     # ── Точка входа ───────────────────────────────────────────────────────── #
@@ -257,9 +264,22 @@ class Preview3DWorker(BaseWorker):
             return
 
         if _qc_dir:
-            blu_paths, blu_fps = self._extract_blu_via_qc(_qc_dir, 0.0)
-            if blu_paths:
-                self.blu_ready.emit(blu_paths, blu_fps)
+            # Сначала пробуем по материалам: у многоматериальной шапки команда
+            # меняет не все из них, и одна общая BLU-текстура легла бы на все
+            # меши сразу (линза Alcoholic Automaton получала корпус)
+            raw = self._extract_hat_blu_textures(_qc_dir, mat_names)
+            if raw:
+                tex_map = {m: png for m, (png, _n) in raw.items() if png}
+                name_map = {m: n for m, (_p, n) in raw.items() if n}
+                self.blu_multi_material.emit((tex_map, name_map))
+                logger.info(
+                    f"[3D] BLU шапки по материалам: {len(tex_map)} текстур "
+                    f"из {len(mat_names)}"
+                )
+            else:
+                blu_paths, blu_fps = self._extract_blu_via_qc(_qc_dir, 0.0)
+                if blu_paths:
+                    self.blu_ready.emit(blu_paths, blu_fps)
 
     def _emit_weapon_textures(self, obj_path: str, mat_names: list) -> None:
         """Обычное оружие: текстуры + BLU/Australium через QC skinfamilies."""
@@ -696,6 +716,8 @@ class Preview3DWorker(BaseWorker):
                 png_path = self._vtf_data_to_png(vtf_data, mat_name)
                 if not png_path:
                     continue
+                vmt_tint.apply_to_png(
+                    png_path, self._tint_for_material(paks, cdmats, mat_name))
                 result[mat_name] = png_path
                 logger.debug(f"[3D] Материал '{mat_name}' → {os.path.basename(png_path)}")
 
@@ -993,6 +1015,23 @@ class Preview3DWorker(BaseWorker):
             logger.debug(f"[3D] Не удалось создать плейсхолдер для {name}: {exc}")
             return None
 
+    def _tint_for_material(self, paks: list, cdmaterials: list,
+                           mat_name: str):
+        """
+        Краска материала ($blendtintbybasealpha) из его VMT; None — не красится.
+
+        Нужна не только шапкам: у пяти стоковых пушек (Cow Mangler, Lollichop,
+        праздничные) окрашиваемые места в текстуре тоже лежат почти чёрными.
+        """
+        if not cdmaterials:
+            return None
+        for pak in paks:
+            info = GameVpkReader.find_vmt_in_pak(pak, cdmaterials,
+                                                 mat_name.lower())
+            if info:
+                return vmt_tint.parse_tint(info[1])
+        return None
+
     def _resolve_vtf_via_vmt(self, paks: list, cdmaterials: list, mat_name: str) -> Optional[bytes]:
         """
         Резолвит VTF материала через его VMT: {cdmat}/{mat}.vmt → $basetexture → VTF.
@@ -1163,6 +1202,7 @@ class Preview3DWorker(BaseWorker):
             for tex_name in blu_tex_names:
                 tex_lower = tex_name.lower()
                 vtf_data: Optional[bytes] = None
+                blu_look: Optional[tuple] = None
 
                 # ── Метод 1: прямой путь materials/{cdmat}/{name}.vtf ─────── #
                 for cdmat in cdmaterials:
@@ -1186,6 +1226,8 @@ class Preview3DWorker(BaseWorker):
                         if vmt_info:
                             _, vmt_content = vmt_info
                             basetexture = GameVpkReader.parse_basetexture(vmt_content)
+                            blu_look = (basetexture,
+                                        vmt_tint.parse_tint(vmt_content))
                             if basetexture:
                                 for pak2 in paks:
                                     vtf_data = GameVpkReader.find_vtf_in_pak(
@@ -1211,6 +1253,20 @@ class Preview3DWorker(BaseWorker):
                     vtf_data, self._preview_dir, "texture_blu")
                 if not frame_paths:
                     continue
+
+                # Синий материал может отличаться от красного ТОЛЬКО краской
+                # в VMT (329 стоковых шапок) — без её применения переключатель
+                # команд показывал бы две одинаковые картинки
+                if blu_look is not None:
+                    for frame in frame_paths:
+                        vmt_tint.apply_to_png(frame, blu_look[1])
+                    first_red = next(iter(self._red_looks.values()), None)
+                    if vmt_tint.same_material_look(first_red, blu_look):
+                        logger.info(
+                            "[3D] BLU-скин совпадает с RED и текстурой, и "
+                            "краской — в игре команды не отличаются"
+                        )
+                        self.blu_same_as_red.emit()
 
                 fps = red_framerate if len(frame_paths) > 1 else 0.0
                 logger.info(
@@ -1288,6 +1344,131 @@ class Preview3DWorker(BaseWorker):
         return _vps.vtf_bytes_to_png(
             vtf_data, os.path.join(self._preview_dir, f"{name}.png"), self._preview_dir)
 
+    def _extract_hat_blu_textures(self, decomp_dir: str, mat_names: list) -> dict:
+        """
+        BLU-текстуры шапки ПО МАТЕРИАЛАМ: {red_mat: (png | None, blu_mat_name)}.
+
+        Шапка часто многоматериальная, и команда переключает НЕ ВСЁ. У
+        hwn2022_alcoholic_automaton в $texturegroup четыре столбца, и линза в
+        обеих строках одна и та же:
+
+            { auto_1       auto       auto_1_blue auto_blue }
+            { auto_1_blue  auto_blue  auto_1_blue auto_blue }
+
+        Одна общая BLU-текстура (путь _extract_blu_via_qc) натягивала на
+        линзу текстуру корпуса. Здесь каждый материал берёт свой столбец —
+        те, что в обеих строках одинаковы, так и остаются прежними.
+
+        Returns:
+            {} — если второй скин не команда, QC не читается или ничего не нашли.
+        """
+        qc_files = glob.glob(os.path.join(decomp_dir, "*.qc"))
+        if not qc_files or not mat_names:
+            return {}
+
+        cdmaterials = qc_skin_parser.parse_cdmaterials(qc_files[0])
+        layout = qc_skin_parser.parse_skin_layout(qc_files[0])
+        # Карта «столбец RED → столбец BLU»; пустая, если второй скин не
+        # команда (стиль bloody/clean) — тот же авторитет, что у сборки
+        team_map = qc_skin_parser.team_material_map(layout)
+        if not cdmaterials or not team_map:
+            return {}
+        by_lower = {k.lower(): v for k, v in team_map.items()}
+
+        paks = list(reversed(self._reader.paks))
+        if not paks:
+            return {}
+
+        result: dict = {}
+        for mat_name in mat_names:
+            mat_lower = mat_name.lower()
+            blu_name = by_lower.get(mat_lower)
+            if blu_name is None:
+                # Имена материалов SMD и $texturegroup иногда расходятся
+                # префиксом пути — сверяем по хвосту, как в оружейном пути
+                blu_name = next(
+                    (v for k, v in by_lower.items()
+                     if mat_lower.endswith(k) or k.endswith(mat_lower)), None)
+            if blu_name is None:
+                continue
+            if blu_name.lower() == mat_lower:
+                # Материал в обеих строках один и тот же: на BLU он остаётся
+                # собой. Записываем это явно — по такой «ссылке на себя»
+                # панель понимает, что карточку при смене команды не трогать.
+                result[mat_lower] = (None, mat_name)
+                continue
+
+            png_path, basetexture, tint = self._hat_material_png(
+                paks, cdmaterials, blu_name, f"blu_{mat_lower}")
+            if png_path and vmt_tint.same_material_look(
+                    self._red_looks.get(mat_lower), (basetexture, tint)):
+                # Числится командным, а выглядит точно как RED — для панели
+                # это такой же общий материал
+                png_path, blu_name = None, mat_name
+            result[mat_lower] = (png_path, blu_name)
+
+        # Ни одной реальной BLU-текстуры — сообщать не о чем
+        if not any(png for png, _ in result.values()):
+            if result:
+                logger.info(
+                    "[3D] BLU-скин шапки не отличается от RED ни одной "
+                    "текстурой — команды выглядят одинаково"
+                )
+                self.blu_same_as_red.emit()
+            return {}
+        return result
+
+    def _hat_material_png(self, paks: list, cdmaterials: list, mat_name: str,
+                          out_name: str) -> tuple:
+        """
+        Материал шапки → PNG по цепочке VMT → $basetexture → VTF.
+
+        Общий шаг для RED и BLU: команда у шапки — это ДРУГОЙ МАТЕРИАЛ, а
+        значит та же самая цепочка, только с другого имени. Краска VMT
+        впечатывается сразу, иначе окрашиваемые места остаются чёрными.
+
+        Returns:
+            (png_path | None, basetexture | None, TintSpec | None)
+        """
+        vmt_info = None
+        for pak in paks:
+            vmt_info = GameVpkReader.find_vmt_in_pak(pak, cdmaterials,
+                                                     mat_name.lower())
+            if vmt_info:
+                break
+        if not vmt_info:
+            logger.info(
+                f"[3D] VMT не найден: mat='{mat_name}', cdmaterials={cdmaterials}"
+            )
+            return None, None, None
+
+        vmt_path, vmt_content = vmt_info
+        basetexture = GameVpkReader.parse_basetexture(vmt_content)
+        if not basetexture:
+            logger.warning(f"[3D] $baseTexture не найден в VMT: {vmt_path}")
+            return None, None, None
+
+        vtf_data = None
+        for pak in paks:
+            vtf_data = GameVpkReader.find_vtf_in_pak(pak, basetexture)
+            if vtf_data:
+                break
+        if not vtf_data:
+            logger.warning(
+                f"[3D] VTF не найден: $baseTexture={basetexture} (VMT={vmt_path})"
+            )
+            return None, basetexture, None
+
+        tint = vmt_tint.parse_tint(vmt_content)
+        png_path = self._vtf_data_to_png(vtf_data, out_name)
+        if png_path:
+            vmt_tint.apply_to_png(png_path, tint)
+            logger.info(
+                f"[3D] Шапка '{mat_name}': VMT={vmt_path} → {basetexture}"
+                + (f", краска {tint.color}" if tint else "")
+            )
+        return png_path, basetexture, tint
+
     def _extract_hat_textures_via_qc_vmt(
         self, decomp_dir: str, mat_names: list
     ) -> dict:
@@ -1301,6 +1482,9 @@ class Preview3DWorker(BaseWorker):
            – VTF → tf2_textures_dir.vpk
         3. Для каждого имени материала из SMD ищет VMT в любом из пакетов,
            пропускает VMT с «backpack», читает $baseTexture → ищет VTF → PNG.
+
+        Попутно запоминает вид каждого материала (текстура + краска) — по
+        нему потом видно, отличается ли BLU-скин от RED вообще.
 
         Returns:
             {mat_name: png_path}  (пустой dict если ничего не нашлось)
@@ -1328,46 +1512,11 @@ class Preview3DWorker(BaseWorker):
         result: dict = {}
         for mat_name in mat_names:
             mat_lower = mat_name.lower()
-
-            # ── Ищем VMT в любом из открытых VPK ─────────────────────── #
-            vmt_info = None
-            for pak in paks:
-                vmt_info = GameVpkReader.find_vmt_in_pak(pak, cdmaterials, mat_lower)
-                if vmt_info:
-                    break
-
-            if not vmt_info:
-                logger.info(
-                    f"[3D] VMT не найден: mat='{mat_lower}', cdmaterials={cdmaterials}"
-                )
-                continue
-
-            vmt_path, vmt_content = vmt_info
-            basetexture = GameVpkReader.parse_basetexture(vmt_content)
-            if not basetexture:
-                logger.warning(f"[3D] $baseTexture не найден в VMT: {vmt_path}")
-                continue
-
-            # ── Ищем VTF в любом из открытых VPK ─────────────────────── #
-            vtf_data = None
-            for pak in paks:
-                vtf_data = GameVpkReader.find_vtf_in_pak(pak, basetexture)
-                if vtf_data:
-                    break
-
-            if not vtf_data:
-                logger.warning(
-                    f"[3D] VTF не найден: $baseTexture={basetexture} "
-                    f"(VMT={vmt_path})"
-                )
-                continue
-
-            png_path = self._vtf_data_to_png(vtf_data, f"hat_{mat_lower}")
+            png_path, basetexture, tint = self._hat_material_png(
+                paks, cdmaterials, mat_lower, f"hat_{mat_lower}")
             if png_path:
+                self._red_looks[mat_lower] = (basetexture, tint)
                 result[mat_lower] = png_path
-                logger.info(
-                    f"[3D] Шапка '{mat_lower}': VMT={vmt_path} → {basetexture}"
-                )
 
         return result
 
@@ -1542,6 +1691,12 @@ class Preview3DWorker(BaseWorker):
             frame_paths = _vps.vtf_bytes_to_frame_pngs(
                 vtf_data, self._preview_dir, "texture")
 
+            # Краска из VMT: без неё окрашиваемые места показываются чёрными
+            tint = self._tint_from_vmt_paths(paks_tex, vmt_search)
+            if tint is not None:
+                for frame in frame_paths:
+                    vmt_tint.apply_to_png(frame, tint)
+
             # Framerate из VMT
             framerate = 0.0
             if len(frame_paths) > 1:
@@ -1678,3 +1833,16 @@ class Preview3DWorker(BaseWorker):
         """Ищет animatedtextureframerate в VMT файле из VPK (общий парсер)."""
         from src.services import vtf_preview_service as _vps
         return _vps.read_vmt_framerate(pak, vmt_search)
+
+    def _tint_from_vmt_paths(self, paks: list, vmt_search: list):
+        """Краска из первого найденного VMT по списку путей; None — нет."""
+        for pak in paks or []:
+            for path in vmt_search:
+                try:
+                    return vmt_tint.parse_tint(
+                        pak[path].read().decode("utf-8", "replace"))
+                except KeyError:
+                    continue
+                except Exception:
+                    return None
+        return None
