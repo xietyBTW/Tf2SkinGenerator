@@ -25,10 +25,10 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
-from src.services import vmt_parse, vmt_tint
+from src.services import vmt_parse, vmt_render, vmt_tint
 from src.services.game_vpk_reader import GameVpkReader
 from src.shared.logging_config import get_logger
 
@@ -45,6 +45,9 @@ class ResolvedMaterial:
     png_path: Optional[str] = None     # готовая картинка для превью
     tint: Optional[vmt_tint.TintSpec] = None
     shader: str = ""
+    #: Как материал рисуется: прозрачность, смешивание, блик (см. vmt_render).
+    #: Без этого превью рисует стекло банки серым пластиком.
+    render: vmt_render.RenderSpec = field(default_factory=vmt_render.RenderSpec)
 
     @property
     def ok(self) -> bool:
@@ -148,6 +151,21 @@ class MaterialResolver:
         return {name: res.png_path
                 for name, res in self.resolve_many(mat_names, cdmaterials).items()}
 
+    def render_map(self, mat_names: List[str],
+                   cdmaterials: List[str]) -> Dict[str, dict]:
+        """{имя материала: как его рисовать} — для 3D-превью.
+
+        Отдаём только материалы с особенностями: у остальных вьювер и так
+        построит обычный непрозрачный материал. Ключ — имя КАК В МОДЕЛИ, по
+        нему вьювер находит меш.
+        """
+        out: Dict[str, dict] = {}
+        for name in mat_names or []:
+            spec = self.describe(name, cdmaterials).render
+            if not spec.is_plain:
+                out[name] = spec.as_dict()
+        return out
+
     # ── Внутреннее ───────────────────────────────────────────────────────── #
 
     def _describe_uncached(self, mat_name: str,
@@ -166,7 +184,8 @@ class MaterialResolver:
             logger.info(f"[mat] нет $basetexture в {vmt_path}")
         return ResolvedMaterial(
             name=mat_lower, vmt_path=vmt_path, basetexture=basetexture,
-            tint=vmt_tint.parse_tint(vmt_text), shader=doc.shader)
+            tint=vmt_tint.parse_tint(vmt_text), shader=doc.shader,
+            render=vmt_render.from_doc(doc))
 
     def _resolve_uncached(self, mat_name: str, cdmaterials: List[str],
                           out_name: Optional[str]) -> ResolvedMaterial:
@@ -186,7 +205,7 @@ class MaterialResolver:
         return ResolvedMaterial(
             name=info.name, vmt_path=info.vmt_path,
             basetexture=info.basetexture, png_path=png_path,
-            tint=info.tint, shader=info.shader)
+            tint=info.tint, shader=info.shader, render=info.render)
 
     def _find_vmt(self, mat_lower: str, cdmaterials: List[str]):
         """VMT материала: сначала по $cdmaterials, потом по пути внутри имени.

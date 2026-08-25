@@ -253,6 +253,7 @@
 import * as THREE        from 'three';
 import { OBJLoader }     from 'three/addons/loaders/OBJLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { makeMeshMaterial as _makeMeshMaterial } from './js/viewer_materials.js';
 
 // ── Python bridge (QWebChannel JS → Python) ──────────────────────────────── //
 // Инициализируется асинхронно; вызовы _notifyTextureDrop() безопасны до готовности.
@@ -457,14 +458,42 @@ function stopAnimation() {
   ++_animGeneration;   // делаем все незавершённые _loadTextureThen-коллбэки устаревшими
 }
 
+// ── Свойства материалов из VMT ───────────────────────────────────────────── //
+//
+// {имя материала: {blend, opacity, alphaTest, twoSided}} — присылает Python
+// (vmt_render). Блика и отражений там нет намеренно: в Source они ограничены
+// маской из текстуры, а без неё покрывают модель белёсой плёнкой.
+// Сама сборка материала живёт в js/viewer_materials.js (её проверяет тест).
+let _matHints = {};
+
+function makeMeshMaterial(opts) {
+  return _makeMeshMaterial(THREE, opts, _matHints);
+}
+
+// Пересобирает материалы уже загруженной модели под новые подсказки:
+// подсказки обычно приходят раньше текстур, но порядок не гарантирован.
+function _refreshMaterials(object) {
+  if (!object) return;
+  object.traverse(child => {
+    if (!child.isMesh || !child.material || Array.isArray(child.material)) return;
+    const old = child.material;
+    if (!old.name) return;
+    child.material = makeMeshMaterial({ map: old.map, name: old.name });
+  });
+}
+
+window.setMaterialHints = function(hints) {
+  _matHints = hints || {};
+  _refreshMaterials(currentModel);
+};
+
 // Применяет текстуру к одному мешу, всегда создавая новый материал.
 // In-place (map=tex) ненадёжен для материалов, созданных без map —
 // Three.js не перекомпилирует шейдер даже при needsUpdate=true.
 function _updateMeshTex(child, tex) {
   const prevName = (child.material && !Array.isArray(child.material))
     ? (child.material.name || '') : '';
-  child.material = new THREE.MeshLambertMaterial({ map: tex, side: THREE.DoubleSide });
-  if (prevName) child.material.name = prevName;
+  child.material = makeMeshMaterial({ map: tex, name: prevName });
 }
 
 // Обходит модель и применяет текстуру только к мешам из filter (Set имён).
@@ -516,10 +545,7 @@ function applyTexture(object, tex) {
     // Preserve the material name so applyMaterialMap can still match by name
     const prevMatName = child.material && !Array.isArray(child.material)
       ? child.material.name : '';
-    child.material = tex
-      ? new THREE.MeshLambertMaterial({ map: tex, side: THREE.DoubleSide })
-      : new THREE.MeshLambertMaterial({ color: 0x888888, side: THREE.DoubleSide });
-    if (prevMatName) child.material.name = prevMatName;
+    child.material = makeMeshMaterial({ map: tex, name: prevMatName });
     child.material.needsUpdate = true;
   });
 }
@@ -902,8 +928,7 @@ window.updateTextureFromDataUrl = function(texDataUrl) {
         if (!child.isMesh || !_editableMeshNames.has(child.name)) return;
         const prevName = child.material && !Array.isArray(child.material)
           ? child.material.name : '';
-        child.material = new THREE.MeshLambertMaterial({ map: tex, side: THREE.DoubleSide });
-        if (prevName) child.material.name = prevName;
+        child.material = makeMeshMaterial({ map: tex, name: prevName });
         child.material.needsUpdate = true;
       });
     } else {
@@ -946,8 +971,7 @@ window.applyMaterialMap = function(texMapJson) {
         const matNameMatch = child.material && !Array.isArray(child.material)
           ? child.material.name === matName : false;
         if (child.name === matName || matNameMatch) {
-          child.material = new THREE.MeshLambertMaterial({ map: tex, side: THREE.DoubleSide });
-          child.material.name = matName;
+          child.material = makeMeshMaterial({ map: tex, name: matName });
           matched = true;
         }
       });
@@ -1430,8 +1454,7 @@ function _clearDragHover() {
 function _applyTexToMesh(mesh, tex) {
   const prevName = mesh.material && !Array.isArray(mesh.material)
     ? mesh.material.name : '';
-  mesh.material = new THREE.MeshLambertMaterial({ map: tex, side: THREE.DoubleSide });
-  if (prevName) mesh.material.name = prevName;
+  mesh.material = makeMeshMaterial({ map: tex, name: prevName });
   mesh.material.needsUpdate = true;
   _notifyPerMeshApplied();
 }

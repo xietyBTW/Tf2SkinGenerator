@@ -58,6 +58,10 @@ class Preview3DWorker(BaseWorker):
     # та же краска в VMT). Переключатель команд оставляем — свою BLU-текстуру
     # сделать можно, — но честно предупреждаем, что в игре разницы нет.
     blu_same_as_red = Signal()
+    # Как рисовать материалы: {имя материала: {blend, opacity, twoSided…}}.
+    # Без этого вьювер рисует всё непрозрачным и матовым: стекло банки
+    # Мутировавшего молока ($additive) превращается в серый пластик.
+    render_hints = Signal(object)
     # Ошибка
     failed   = Signal(str)
     # Текстовый прогресс для UI
@@ -168,11 +172,18 @@ class Preview3DWorker(BaseWorker):
                         f"({_all_mats}) — показываю всю модель"
                     )
 
+            # Поза из первой последовательности QC: игра всегда её проигрывает,
+            # и reference-меш — не то, что видит игрок (у Мутировавшего молока
+            # хлеб в bind-позе торчит из банки). Модель, чья поза совпадает с
+            # bind, остаётся нетронутой — таких подавляющее большинство.
+            _pose_smd = self._find_pose_smd()
+
             ok, mat_names = SmdToObjService.convert(
                 smd_path, obj_path,
                 include_mats=_include_mats,
                 extra_smd_paths=bodygroup_smds,
                 source_zup=_source_zup,
+                pose_smd_path=_pose_smd,
             )
             if not ok:
                 self.failed.emit(self._p['conv_error'])
@@ -182,6 +193,10 @@ class Preview3DWorker(BaseWorker):
 
             # ── 3. Текстура ───────────────────────────────────────────────── #
             self.progress.emit(self._p['texture'])
+
+            # Свойства рисования — ДО текстур: вьювер применит их к материалам
+            # по мере поступления картинок, а не пересоберёт материалы дважды.
+            self._emit_render_hints(mat_names)
 
             if self.kind.multi_material and mat_names:
                 self._emit_multi_tex_mode(obj_path, mat_names)
@@ -195,6 +210,40 @@ class Preview3DWorker(BaseWorker):
             self.failed.emit(str(exc))
         finally:
             self._reader.close()
+
+    def _find_pose_smd(self) -> Optional[str]:
+        """SMD анимации из QC модели — поза, в которой предмет виден в игре."""
+        if not self._decomp_dir:
+            return None
+        try:
+            from src.services import smd_pose
+            model = self._model(self._decomp_dir)
+            if model is None:
+                return None
+            return smd_pose.find_pose_smd(model.qc_path)
+        except Exception as exc:
+            logger.debug(f"[3D] SMD анимации не найден: {exc}")
+            return None
+
+    def _emit_render_hints(self, mat_names: list) -> None:
+        """Отдаёт вьюверу прозрачность/блик/отражение материалов модели.
+
+        Свойства берутся из VMT (vmt_render) и зависят только от материала,
+        не от того, какая картинка на нём сейчас: пользователь может бросить
+        свою текстуру на стекло, и оно обязано остаться стеклом.
+        """
+        try:
+            hints = self.materials.render_map(
+                list(mat_names or []), self._get_qc_cdmaterials())
+        except Exception as exc:
+            logger.debug(f"[3D] свойства материалов не собраны: {exc}")
+            hints = {}
+        # Отправляем ВСЕГДА, даже пустое: иначе на новой модели останутся
+        # свойства предыдущей, а материалы у разных пушек нередко тёзки
+        # (36 моделей стока делят главную текстуру с соседней).
+        if hints:
+            logger.info(f"[3D] особые материалы: {hints}")
+        self.render_hints.emit(hints)
 
     # ── Ветки извлечения текстур (по режиму) ────────────────────────────── #
 

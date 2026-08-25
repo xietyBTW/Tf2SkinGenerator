@@ -122,6 +122,8 @@ class _Real3DWidget:
 
         self._view = QWebEngineView(parent)
         self._ready = False
+        #: Свойства материалов, пришедшие до готовности страницы (см. set_material_hints).
+        self._pending_hints = None
         self._pending: Optional[tuple] = None          # (obj_path, tex_path)
         self._lang: str = 'en'
         # Номер загрузки модели: инкрементируется на каждый loadModelFromContent,
@@ -183,6 +185,12 @@ class _Real3DWidget:
         self._view.page().runJavaScript(
             f"window.setLanguage({json.dumps(self._lang)})"
         )
+        # Свойства материалов — ДО модели: она грузится асинхронно и заберёт
+        # их сама, а обратный порядок оставил бы стекло непрозрачным до
+        # следующей смены текстуры.
+        if self._pending_hints is not None:
+            hints, self._pending_hints = self._pending_hints, None
+            self.set_material_hints(hints)
         if self._pending:
             obj_path, tex_path = self._pending
             self._pending = None
@@ -235,6 +243,24 @@ class _Real3DWidget:
         if not self._ready:
             return
         js = f"window.setEditableMeshNames({json.dumps(mat_names or None)})"
+        self._view.page().runJavaScript(js)
+
+    def set_material_hints(self, hints: dict) -> None:
+        """
+        Сообщает вьюверу, как рисовать материалы модели.
+
+        Args:
+            hints: {material_name: {blend, opacity, alphaTest, twoSided}}
+                    — из VMT (vmt_render).
+
+        Свойства живут отдельно от текстур: они привязаны к материалу, а не к
+        картинке. Пользователь может бросить свою текстуру на стекло банки —
+        стеклом оно быть не перестанет.
+        """
+        if not self._ready:
+            self._pending_hints = hints or {}
+            return
+        js = f"window.setMaterialHints({json.dumps(hints or {})})"
         self._view.page().runJavaScript(js)
 
     def apply_material_map(self, tex_map: dict) -> None:
@@ -454,6 +480,7 @@ class _Fallback3DWidget:
     def show_prompt(self, text: str = ""): pass
     def load_model_files(self, *_): pass
     def apply_material_map(self, *_): pass
+    def set_material_hints(self, *_): pass
     def set_editable_mesh_names(self, *_): pass
     def update_texture_file(self, *_): pass
     def update_animated_texture_files(self, frame_paths=None, framerate=0.0, mat_name=''): pass

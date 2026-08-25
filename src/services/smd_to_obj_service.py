@@ -41,6 +41,7 @@ class SmdToObjService:
         extra_smd_paths: Optional[list] = None,
         source_zup: bool = True,
         keep_source_axes: bool = False,
+        pose_smd_path: Optional[str] = None,
     ) -> Tuple[bool, List[str]]:
         """
         Конвертирует SMD → OBJ + MTL с поддержкой нескольких материалов.
@@ -62,6 +63,11 @@ class SmdToObjService:
             source_zup:   True (по умолчанию) — применять конвертацию Z-up→Y-up
                           для оружий и рук. False — для персонажей ($upaxis Y),
                           SMD уже в Y-up и только зеркалим Z для Three.js.
+            pose_smd_path: SMD анимации, первый кадр которой задаёт позу. Игра
+                          всегда проигрывает последовательность, и reference-меш
+                          — не то, что видит игрок: у Мутировавшего молока хлеб
+                          в bind-позе торчит из банки. Не задан или поза
+                          совпадает с bind — меш остаётся как есть.
 
         Returns:
             (success, material_names) где material_names — список уникальных
@@ -84,6 +90,8 @@ class SmdToObjService:
                     f"SMD→OBJ: merged bodygroup '{os.path.basename(extra)}' "
                     f"({sum(len(v) for v in extra_tris.values())} треугольников)"
                 )
+
+            SmdToObjService._apply_pose(triangles_by_mat, smd_path, pose_smd_path)
 
             if include_mats is not None:
                 triangles_by_mat = {
@@ -189,6 +197,54 @@ class SmdToObjService:
     # ── Внутренние методы ─────────────────────────────────────────────────── #
 
     @staticmethod
+    def _apply_pose(triangles_by_mat: Dict[str, List[List[dict]]],
+                    ref_smd: str, pose_smd: Optional[str]) -> bool:
+        """
+        Переводит вершины из bind-позы в позу анимации (на месте).
+
+        Бодигруппы делят скелет с reference-мешем, поэтому матрицы считаются
+        один раз на всю модель. Любая неудача — молчаливый отказ: превью
+        останется в bind-позе, как было раньше.
+
+        Returns:
+            True, если поза применена.
+        """
+        if not pose_smd:
+            return False
+        try:
+            from src.services import smd_pose
+            mats = smd_pose.skinning_matrices(ref_smd, pose_smd)
+        except Exception as exc:
+            logger.debug(f"SMD→OBJ: поза не посчитана: {exc}")
+            return False
+        if not mats:
+            return False
+
+        # Считаем в сторону, чтобы можно было отказаться: моделей в игре
+        # тысячи, все не проверить, и на незнакомой поза может разъехаться.
+        verts = [v for triangles in triangles_by_mat.values()
+                 for tri in triangles for v in tri]
+        posed = []
+        for vert in verts:
+            posed.append(smd_pose.apply_to_vertex(
+                mats, vert.get("links") or (), vert["pos"], vert["nrm"]))
+
+        if not smd_pose.looks_sane([v["pos"] for v in verts],
+                                   [p for p, _ in posed]):
+            logger.warning(
+                f"SMD→OBJ: поза из {os.path.basename(pose_smd)} разъехалась — "
+                f"оставляем bind-позу")
+            return False
+
+        for vert, (pos, nrm) in zip(verts, posed):
+            vert["pos"], vert["nrm"] = pos, nrm
+        logger.info(
+            f"SMD→OBJ: поза из {os.path.basename(pose_smd)} применена "
+            f"({len(verts)} вершин, {len(mats)} костей)"
+        )
+        return True
+
+    @staticmethod
     def _parse_triangles_by_mat(smd_path: str) -> Dict[str, List[List[dict]]]:
         """
         Парсит секцию triangles SMD файла.
@@ -244,15 +300,34 @@ class SmdToObjService:
         """
         Парсит строку вершины SMD.
 
-        Формат: parent_bone  x y z  nx ny nz  u v  [links...]
+        Формат: parent_bone  x y z  nx ny nz  u v  [кол-во кость вес …]
+
+        Привязка к костям нужна, чтобы перевести меш в позу из анимации
+        (см. smd_pose). Хвост со связями необязателен: без него вершина висит
+        целиком на parent_bone.
         """
         parts = line.split()
         if len(parts) < 9:
             return None
         try:
+            parent     = int(parts[0])
             x,  y,  z  = float(parts[1]), float(parts[2]), float(parts[3])
             nx, ny, nz = float(parts[4]), float(parts[5]), float(parts[6])
             u,  v      = float(parts[7]), float(parts[8])
-            return {"pos": (x, y, z), "nrm": (nx, ny, nz), "uv": (u, v)}
         except (ValueError, IndexError):
             return None
+
+        links: List[Tuple[int, float]] = []
+        try:
+            count = int(parts[9]) if len(parts) > 9 else 0
+            for i in range(count):
+                bone   = int(parts[10 + i * 2])
+                weight = float(parts[11 + i * 2])
+                if weight > 0.0:
+                    links.append((bone, weight))
+        except (ValueError, IndexError):
+            links = []
+        if not links:
+            links = [(parent, 1.0)]
+
+        return {"pos": (x, y, z), "nrm": (nx, ny, nz), "uv": (u, v), "links": links}

@@ -102,6 +102,7 @@ class Preview3DMixin:
         w.blu_multi_material.connect(self._on_3d_blu_multi_material)
         w.australium_ready.connect(self._on_australium_ready)
         w.blu_same_as_red.connect(self._on_blu_same_as_red)
+        w.render_hints.connect(self._on_3d_render_hints)
         w.failed.connect(self._on_3d_failed)
         w.start()
         self._3d_worker = w
@@ -138,6 +139,7 @@ class Preview3DMixin:
         w.blu_multi_material.connect(self._on_3d_blu_multi_material)
         w.australium_ready.connect(self._on_australium_ready)
         w.blu_same_as_red.connect(self._on_blu_same_as_red)
+        w.render_hints.connect(self._on_3d_render_hints)
         w.failed.connect(lambda e: (self.btn_load_3d.setEnabled(True),
                                     logger.info(f"[QC CARDS] {e}")))
         w.start()
@@ -435,6 +437,14 @@ class Preview3DMixin:
         # Видимость кнопок RED/BLU — единым правилом (для рук учитывает, что
         # командным считается только материал с ОТЛИЧНЫМ синим именем).
         self._update_team_btn_visibility()
+
+    def _on_3d_render_hints(self, hints: dict) -> None:
+        """Свойства рисования материалов (прозрачность, блик) → во вьювер.
+
+        Пустой набор тоже передаём: он сбрасывает свойства прошлой модели.
+        """
+        if self._3d_widget is not None:
+            self._3d_widget.set_material_hints(hints or {})
 
     def _on_3d_multi_material(self, tex_map: dict) -> None:
         """Модель многоматериальная — применяем и создаём карточки."""
