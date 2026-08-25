@@ -25,6 +25,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from src.services import vmt_parse
 from src.services.crit_pcf_service import CritPcfService
 from src.services.tf2_paths import TF2Paths
 from src.services.vtf_preview_service import open_vpks, read_from_vpks
@@ -250,11 +251,11 @@ def _norm_mat(name: str) -> str:
     return n
 
 
-_RE_BASETEXTURE = re.compile(
+#: Только для ЗАМЕНЫ строки $basetexture в тексте VMT. Чтение — через
+#: vmt_parse: регулярка не отличает настоящий параметр от закомментированного.
+_RE_BASETEXTURE_LINE = re.compile(
     r'^[ \t]*"?\$basetexture"?[ \t]+"?([^"\r\n]+?)"?[ \t]*(?://[^\r\n]*)?\r?$',
     re.IGNORECASE | re.MULTILINE)
-_RE_ADDITIVE = re.compile(r'"?\$additive"?\s+"?1"?', re.IGNORECASE)
-_RE_SHADER = re.compile(r'^\s*"?([A-Za-z_][A-Za-z0-9_]*)"?\s*$', re.MULTILINE)
 
 
 # ── Конвертация атрибутов DMX → JSON ─────────────────────────────────────── #
@@ -708,21 +709,21 @@ class ParticleEditorService:
             return None
         vmt_text = vmt_raw.decode("utf-8", errors="replace")
 
-        shader_m = _RE_SHADER.search(vmt_text)
-        shader = (shader_m.group(1).lower() if shader_m else "")
-        base_m = _RE_BASETEXTURE.search(vmt_text)
-        if not base_m:
+        vmt = vmt_parse.parse(vmt_text)
+        shader = vmt.shader
+        base = vmt.path("basetexture")
+        if not base:
             # Материалы без $basetexture (vgui/white и т.п.) — однотонный квад
             # с вершинным цветом; важно сохранить хотя бы режим блендинга
             return {
                 "dataUrl": None,
                 "sheet": None,
-                "additive": bool(_RE_ADDITIVE.search(vmt_text)),
+                "additive": vmt.flag("additive"),
                 "shader": shader,
                 "width": 0,
                 "height": 0,
             }
-        vtf_rel = base_m.group(1).strip().replace("\\", "/").lower()
+        vtf_rel = base
         if not vtf_rel.endswith(".vtf"):
             vtf_rel += ".vtf"
         if not vtf_rel.startswith("materials/"):
@@ -740,7 +741,7 @@ class ParticleEditorService:
         return {
             "dataUrl": data_url,
             "sheet": parse_vtf_sheet(vtf_raw),
-            "additive": bool(_RE_ADDITIVE.search(vmt_text)),
+            "additive": vmt.flag("additive"),
             "shader": shader,
             "width": width,
             "height": height,
@@ -1150,9 +1151,9 @@ class ParticleEditorService:
 
         shader, additive = "", True
         if vmt_text:
-            sm = _RE_SHADER.search(vmt_text)
-            shader = sm.group(1).lower() if sm else ""
-            additive = bool(_RE_ADDITIVE.search(vmt_text))
+            vmt = vmt_parse.parse(vmt_text)
+            shader = vmt.shader
+            additive = vmt.flag("additive")
         info = {
             "dataUrl": f"data:image/png;base64,{png_b64}", "sheet": sheet,
             "additive": additive, "shader": shader, "width": w, "height": h,
@@ -1179,9 +1180,8 @@ class ParticleEditorService:
             pass
         tex_rel = None
         if vmt_text:
-            m = _RE_BASETEXTURE.search(vmt_text)
-            if m:
-                t = m.group(1).strip().replace("\\", "/").lower()
+            t = vmt_parse.parse(vmt_text).path("basetexture")
+            if t:
                 tex_rel = t[:-4] if t.endswith(".vtf") else t
         if tex_rel is None:
             tex_rel = vmt_rel[:-4]
@@ -2207,7 +2207,7 @@ class ParticleEditorService:
                 self.custom_files[f"materials/{new_tex}.vtf"] = vtf
             if vmt is not None:
                 text = vmt.decode("utf-8", errors="replace")
-                text = _RE_BASETEXTURE.sub(
+                text = _RE_BASETEXTURE_LINE.sub(
                     f'\t"$basetexture" "{new_tex}"', text)
                 self.custom_files[f"materials/{new_key}"] = text.encode("utf-8")
             self._overwritten[new_key] = {

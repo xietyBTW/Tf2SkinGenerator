@@ -18,11 +18,13 @@ from typing import Optional
 
 from PySide6.QtCore import Signal
 
+from src.data.item_kinds import kind_of
 from src.data.weapons import WEAPON_MDL_PATHS
 from src.services import decompile_cache
 from src.services import qc_skin_parser, vmt_tint
 from src.services.base_worker import BaseWorker
 from src.services.game_vpk_reader import GameVpkReader
+from src.services.material_resolver import MaterialResolver
 from src.services.model_build_service import ModelBuildService
 from src.services.smd_service import NON_REFERENCE_SMD_KEYWORDS
 from src.services.tf2_paths import TF2Paths
@@ -94,14 +96,20 @@ class Preview3DWorker(BaseWorker):
         super().__init__(parent)
         self.weapon_key        = weapon_key
         self.mode              = mode
+        #: Вид предмета: вместо разбросанных проверок «mode == 'hat'» и
+        #: «mode in HAND_MODE_KEYS» (см. src/data/item_kinds.py)
+        self.kind              = kind_of(mode)
         self.misc_vpk_path     = misc_vpk_path
         self.textures_vpk_path = textures_vpk_path
         self._preview_dir: Optional[str] = None
         self._decomp_dir:  Optional[str] = None  # папка с декомпилированными QC/SMD
         self._hat_decomp_dir: Optional[str] = None  # алиас для режима hat
-        #: {материал: (basetexture, TintSpec)} для RED — с чем сравнивать
-        #: BLU, чтобы понять, отличаются ли команды вообще
+        #: {материал: ResolvedMaterial} для RED — с чем сравнивать BLU,
+        #: чтобы понять, отличаются ли команды вообще
         self._red_looks: dict = {}
+        #: Ленивый резолвер материалов и кэш разбора QC (по папке декомпиляции)
+        self._materials: Optional[MaterialResolver] = None
+        self._models: dict = {}
         self._p = self._PROGRESS.get(lang, self._PROGRESS['en'])
 
     # ── Точка входа ───────────────────────────────────────────────────────── #
@@ -121,7 +129,7 @@ class Preview3DWorker(BaseWorker):
                 return
             # Сохраняем папку декомпиляции: нужна для QC-парсинга BLU текстур
             self._decomp_dir = os.path.dirname(smd_path)
-            if self.mode == "hat":
+            if self.kind.is_hat:
                 self._hat_decomp_dir = self._decomp_dir
             if self.isInterruptionRequested():
                 return
@@ -130,7 +138,6 @@ class Preview3DWorker(BaseWorker):
             self.progress.emit(self._p['converting'])
             obj_path = os.path.join(self._preview_dir, "model.obj")
             from src.services.smd_to_obj_service import SmdToObjService
-            from src.data.player_hands import HAND_MODE_KEYS
 
             # Ищем bodygroup SMDs в той же папке (например c_righthand_bodygroup.smd)
             bodygroup_smds = self._find_bodygroup_smds(smd_path)
@@ -140,9 +147,9 @@ class Preview3DWorker(BaseWorker):
                     f"{[os.path.basename(b) for b in bodygroup_smds]}"
                 )
 
-            from src.data.player_characters import PLAYER_BODY_MODE_KEYS as _PBK
-            # Персонажи TF2 компилируются с $upaxis Y — SMD уже Y-up, конвертацию Z→Y не делаем
-            _source_zup = self.mode not in _PBK
+            # Персонажи TF2 компилируются с $upaxis Y — SMD уже Y-up,
+            # конвертацию Z→Y для них не делаем
+            _source_zup = self.kind.model_is_z_up
 
             # Превью-фильтр материалов: для моделей, где надо показать только часть
             # (напр. Dead Ringer на viewmodel с руками — оставляем только часы).
@@ -176,11 +183,9 @@ class Preview3DWorker(BaseWorker):
             # ── 3. Текстура ───────────────────────────────────────────────── #
             self.progress.emit(self._p['texture'])
 
-            from src.data.player_characters import PLAYER_BODY_MODE_KEYS
-            is_multi_tex_mode = self.mode in HAND_MODE_KEYS or self.mode in PLAYER_BODY_MODE_KEYS
-            if is_multi_tex_mode and mat_names:
+            if self.kind.multi_material and mat_names:
                 self._emit_multi_tex_mode(obj_path, mat_names)
-            elif self.mode == "hat":
+            elif self.kind.is_hat:
                 self._emit_hat_textures(obj_path, mat_names)
             else:
                 self._emit_weapon_textures(obj_path, mat_names)
@@ -276,6 +281,15 @@ class Preview3DWorker(BaseWorker):
                     f"[3D] BLU шапки по материалам: {len(tex_map)} текстур "
                     f"из {len(mat_names)}"
                 )
+                # Одноматериальная шапка (Battle Balaclava «No Gloves»):
+                # карточек нет, и панель ищет BLU не по имени материала, а
+                # кадром. Без этого поле синей команды оставалось пустым.
+                # Считаем материалы так же, как панель считает карточки:
+                # служебные меши (глаза, sheen) карточку не получают.
+                from src.data.material_filter import is_editable_material
+                _editable = [m for m in mat_names if is_editable_material(m)]
+                if len(tex_map) == 1 and len(_editable or mat_names) <= 1:
+                    self.blu_ready.emit(list(tex_map.values()), 0.0)
             else:
                 blu_paths, blu_fps = self._extract_blu_via_qc(_qc_dir, 0.0)
                 if blu_paths:
@@ -340,9 +354,8 @@ class Preview3DWorker(BaseWorker):
             # $texturegroup) — BLU строим как карту {материал: blu_png}.
             # Одиночный BLU тут наложил бы одну текстуру на всю модель.
             if len(mat_names) > 1:
-                _qcs = glob.glob(os.path.join(self._decomp_dir, "*.qc"))
-                _lay = qc_skin_parser.parse_skin_layout(_qcs[0]) if _qcs else None
-                if _lay and qc_skin_parser.selector_spec(_lay).team:
+                _model = self._model(self._decomp_dir)
+                if _model and _model.spec.team:
                     try:
                         raw = self._extract_blu_multi_textures_via_qc(mat_names)
                         tex_map  = {k: v[0] for k, v in raw.items() if v[0]}
@@ -373,10 +386,10 @@ class Preview3DWorker(BaseWorker):
 
     def _get_reference_smd(self) -> Optional[str]:
         """Возвращает reference SMD из кэша или после декомпиляции."""
-        from src.data.player_characters import PLAYER_BODY_MODE_KEYS as _PBK, SPY_MASK_MODE_KEY as _SMK
         from src.data.weapons import PREVIEW_MDL_OVERRIDE
         _override = PREVIEW_MDL_OVERRIDE.get(self.weapon_key)
-        if self.mode == "hat" or self.mode in _PBK or self.mode == _SMK:
+        # У шапок, персонажей и масок weapon_key — это уже полный путь MDL
+        if self.kind.is_hat or self.kind.is_character or self.kind.is_spy_mask:
             # weapon_key IS the full MDL path for hats and player body modes
             mdl_rel = self.weapon_key
         elif _override:
@@ -418,12 +431,12 @@ class Preview3DWorker(BaseWorker):
 
         logger.info(f"[3D] cwd={os.getcwd()} | crowbar={crowbar_abs} | vpk={self.misc_vpk_path}")
 
-        from src.data.player_characters import PLAYER_BODY_MODE_KEYS as _PBK, SPY_MASK_MODE_KEY as _SMK
         from src.data.weapons import PREVIEW_MDL_OVERRIDE
-        if self.mode == "hat":
+        if self.kind.is_hat:
             from src.services.tf2_paths import build_hat_mdl_candidates
             paths_to_try = build_hat_mdl_candidates(mdl_rel_hint)
-        elif self.mode in _PBK or self.mode == _SMK or self.weapon_key in PREVIEW_MDL_OVERRIDE:
+        elif (self.kind.is_character or self.kind.is_spy_mask
+                or self.weapon_key in PREVIEW_MDL_OVERRIDE):
             # Персонажи, маски шпиона и превью-подмены: прямой путь (weapon_key —
             # это уже полный путь MDL, не ключ из WEAPON_MDL_PATHS).
             paths_to_try = [mdl_rel_hint]
@@ -503,10 +516,10 @@ class Preview3DWorker(BaseWorker):
         # Стэм файла ("medic", "demo", ...) — правильное короткое имя класса,
         # именно так Crowbar называет декомпилированные SMD файлы.
         # Важно: у демомена MDL называется demo.mdl, а не demoman.mdl.
-        from src.data.player_characters import PLAYER_BODY_MODE_KEYS, SPY_MASK_MODE_KEY
+        from src.data.player_characters import PLAYER_BODY_MODE_KEYS
 
         # ── Режим масок шпиона: загружаем spy_mask.smd (bodygroup) ─────────── #
-        if self.mode == SPY_MASK_MODE_KEY:
+        if self.kind.is_spy_mask:
             mask_smd = os.path.join(directory, "spy_mask.smd")
             if os.path.exists(mask_smd):
                 logger.debug("[3D] spy_mask.smd найден")
@@ -587,12 +600,17 @@ class Preview3DWorker(BaseWorker):
         directory = os.path.dirname(reference_smd_path)
         found = set(glob.glob(os.path.join(directory, "*_bodygroup.smd")))
 
-        # Все доп. body-SMD из QC (исключая основной/physics/anim — это делает сервис).
+        # Части модели из QC. Берём вариант ПО УМОЛЧАНИЮ каждой бодигруппы:
+        # переключаемая группа (broken у бутылки, bites у сэндвича, reload у
+        # гранатомёта, класс у id_badge) показывает в игре ровно один вариант,
+        # и складывать их все в одну модель значит показать бутылку целой и
+        # разбитой разом. Материалы скрытых вариантов не теряются — они
+        # приходят карточками из $texturegroup (_extract_texturegroup_extras).
         try:
-            qcs = glob.glob(os.path.join(directory, "*.qc"))
-            if qcs:
+            model = self._model(directory)
+            if model is not None:
                 from src.services.model_build_service import ModelBuildService
-                for smd in ModelBuildService.extract_extra_body_smds(qcs[0], self.weapon_key):
+                for smd in ModelBuildService.extract_default_body_smds(model.qc_path):
                     found.add(smd)
         except Exception as exc:
             logger.debug(f"[3D] Не удалось собрать part-SMD из QC: {exc}")
@@ -667,7 +685,7 @@ class Preview3DWorker(BaseWorker):
         """
         result: dict = {}
         try:
-            from src.data.player_hands import HAND_MODE_KEYS, HAND_MODES
+            from src.data.player_hands import HAND_MODES
 
             # Кэширующий reader открывает оба VPK один раз: VTF обычно в textures,
             # VMT (для материалов с $basetexture) — чаще в misc.
@@ -678,13 +696,13 @@ class Preview3DWorker(BaseWorker):
             # Для моделей рук / скинов персонажа определяем папку (materials/models/player/{folder}/)
             # Все материалы SMD текстурируем — _find_vtf_for_mat ищет сначала
             # в папке игрока, что покрывает и руки, и рукав костюма.
-            from src.data.player_characters import PLAYER_BODY_MODE_KEYS, PLAYER_CHARACTERS
+            from src.data.player_characters import PLAYER_CHARACTERS
             arm_folder: Optional[str] = None
-            if self.mode in HAND_MODE_KEYS:
+            if self.kind.is_hands:
                 textures_list = HAND_MODES.get(self.mode, {}).get("textures", [])
                 if textures_list:
                     arm_folder = textures_list[0][0]
-            elif self.mode in PLAYER_BODY_MODE_KEYS:
+            elif self.kind.is_character:
                 # Берём папку текстур из PLAYER_CHARACTERS["folder"].
                 # Нельзя просто брать стем MDL — у Heavy MDL = "heavy.mdl",
                 # но папка текстур = "hvyweapon".
@@ -716,8 +734,11 @@ class Preview3DWorker(BaseWorker):
                 png_path = self._vtf_data_to_png(vtf_data, mat_name)
                 if not png_path:
                     continue
+                # Краска материала ($blendtintbybasealpha) — у пяти стоковых
+                # пушек (Cow Mangler, Lollichop, праздничные) окрашиваемые
+                # места в текстуре тоже лежат почти чёрными
                 vmt_tint.apply_to_png(
-                    png_path, self._tint_for_material(paks, cdmats, mat_name))
+                    png_path, self.materials.tint_for(mat_name, cdmats))
                 result[mat_name] = png_path
                 logger.debug(f"[3D] Материал '{mat_name}' → {os.path.basename(png_path)}")
 
@@ -743,12 +764,12 @@ class Preview3DWorker(BaseWorker):
         if not self._decomp_dir or not mat_names:
             return {}
 
-        qc_files = glob.glob(os.path.join(self._decomp_dir, "*.qc"))
-        if not qc_files:
+        model = self._model(self._decomp_dir)
+        if model is None:
             return {}
 
-        cdmaterials = qc_skin_parser.parse_cdmaterials(qc_files[0])
-        layout = qc_skin_parser.parse_skin_layout(qc_files[0])
+        cdmaterials = model.cdmaterials
+        layout = model.layout
         if not layout.second_row or not cdmaterials:
             logger.debug(
                 "[3D] _extract_blu_multi_textures_via_qc: "
@@ -918,12 +939,12 @@ class Preview3DWorker(BaseWorker):
         if not self._decomp_dir:
             return {}
         try:
-            qc_files = glob.glob(os.path.join(self._decomp_dir, "*.qc"))
-            if not qc_files:
+            model = self._model(self._decomp_dir)
+            if model is None:
                 return {}
             from src.services.model_build_service import ModelBuildService
             from src.data.material_filter import is_editable_material, is_user_blacklisted
-            tg = ModelBuildService.extract_texturegroup_structure(qc_files[0])
+            tg = ModelBuildService.extract_texturegroup_structure(model.qc_path)
             extras = tg.get('extra_materials', []) or []
             known = {m.lower() for m in mat_names}
             # Редактируемые (не служебные) и не скрытые пользовательским ЧС,
@@ -936,7 +957,7 @@ class Preview3DWorker(BaseWorker):
             # которых нет в геометрии. Показываем карточкой, чтобы стиль можно было
             # перекрасить (сборка пакует их через blu_row). Только настоящие стили
             # (selector_spec.styles), не команда/австралий.
-            _lay = qc_skin_parser.parse_skin_layout(qc_files[0])
+            _lay = model.layout
             for _lbl, _idx in qc_skin_parser.selector_spec(_lay).styles:
                 if 0 <= _idx < len(_lay.all_rows):
                     for _m in _lay.all_rows[_idx]:
@@ -972,11 +993,11 @@ class Preview3DWorker(BaseWorker):
         if not self._decomp_dir:
             return {}
         try:
-            qc_files = glob.glob(os.path.join(self._decomp_dir, "*.qc"))
-            if not qc_files:
+            model = self._model(self._decomp_dir)
+            if model is None:
                 return {}
             from src.data.material_filter import is_editable_material, is_user_blacklisted
-            _lay = qc_skin_parser.parse_skin_layout(qc_files[0])
+            _lay = model.layout
             known = {m.lower() for m in mat_names}
             seen: set = set()
             misc: list = []
@@ -1015,23 +1036,6 @@ class Preview3DWorker(BaseWorker):
             logger.debug(f"[3D] Не удалось создать плейсхолдер для {name}: {exc}")
             return None
 
-    def _tint_for_material(self, paks: list, cdmaterials: list,
-                           mat_name: str):
-        """
-        Краска материала ($blendtintbybasealpha) из его VMT; None — не красится.
-
-        Нужна не только шапкам: у пяти стоковых пушек (Cow Mangler, Lollichop,
-        праздничные) окрашиваемые места в текстуре тоже лежат почти чёрными.
-        """
-        if not cdmaterials:
-            return None
-        for pak in paks:
-            info = GameVpkReader.find_vmt_in_pak(pak, cdmaterials,
-                                                 mat_name.lower())
-            if info:
-                return vmt_tint.parse_tint(info[1])
-        return None
-
     def _resolve_vtf_via_vmt(self, paks: list, cdmaterials: list, mat_name: str) -> Optional[bytes]:
         """
         Резолвит VTF материала через его VMT: {cdmat}/{mat}.vmt → $basetexture → VTF.
@@ -1065,11 +1069,9 @@ class Preview3DWorker(BaseWorker):
             return self._cached_cdmaterials
         cdmats: list = []
         try:
-            decomp = getattr(self, '_decomp_dir', None)
-            if decomp:
-                qcs = glob.glob(os.path.join(decomp, "*.qc"))
-                if qcs:
-                    cdmats = qc_skin_parser.parse_cdmaterials(qcs[0])
+            model = self._model(getattr(self, '_decomp_dir', None))
+            if model:
+                cdmats = model.cdmaterials
         except Exception as exc:
             logger.debug(f"[3D] Не удалось распарсить $cdmaterials: {exc}")
         self._cached_cdmaterials = cdmats
@@ -1166,13 +1168,13 @@ class Preview3DWorker(BaseWorker):
             (frame_paths: list[str], framerate: float)
             Пустой список если BLU варианта нет.
         """
-        qc_files = glob.glob(os.path.join(decomp_dir, "*.qc"))
-        if not qc_files:
+        model = self._model(decomp_dir)
+        if model is None:
             logger.debug(f"[3D] _extract_blu_via_qc: QC не найден в {decomp_dir}")
             return [], 0.0
 
-        cdmaterials = qc_skin_parser.parse_cdmaterials(qc_files[0])
-        layout = qc_skin_parser.parse_skin_layout(qc_files[0])
+        cdmaterials = model.cdmaterials
+        layout = model.layout
         if not layout.second_row:
             logger.debug("[3D] _extract_blu_via_qc: второго скина в QC нет → нет BLU варианта")
             return [], 0.0
@@ -1260,8 +1262,10 @@ class Preview3DWorker(BaseWorker):
                 if blu_look is not None:
                     for frame in frame_paths:
                         vmt_tint.apply_to_png(frame, blu_look[1])
+                    # _red_looks хранит ResolvedMaterial — сравниваем по .look
                     first_red = next(iter(self._red_looks.values()), None)
-                    if vmt_tint.same_material_look(first_red, blu_look):
+                    if first_red is not None and vmt_tint.same_material_look(
+                            first_red.look, blu_look):
                         logger.info(
                             "[3D] BLU-скин совпадает с RED и текстурой, и "
                             "краской — в игре команды не отличаются"
@@ -1290,12 +1294,12 @@ class Preview3DWorker(BaseWorker):
         Returns:
             Путь к PNG-файлу варианта или None если нет.
         """
-        qc_files = glob.glob(os.path.join(decomp_dir, "*.qc"))
-        if not qc_files:
+        model = self._model(decomp_dir)
+        if model is None:
             return None, None
 
-        cdmaterials = qc_skin_parser.parse_cdmaterials(qc_files[0])
-        layout = qc_skin_parser.parse_skin_layout(qc_files[0])
+        cdmaterials = model.cdmaterials
+        layout = model.layout
         if not cdmaterials:
             return None, None
 
@@ -1335,6 +1339,25 @@ class Preview3DWorker(BaseWorker):
             return None, None
 
     # ── VMT-поиск: QC → VMT → $baseTexture → VTF ────────────────────────── #
+    @property
+    def materials(self) -> MaterialResolver:
+        """Единая цепочка «материал → PNG» с кэшем на весь прогон."""
+        if self._materials is None:
+            self._materials = MaterialResolver(self._reader, self._preview_dir)
+        return self._materials
+
+    def _model(self, decomp_dir: Optional[str]):
+        """Разбор QC этой папки — один раз за прогон (см. QcModel).
+
+        None на входе (папки декомпиляции ещё нет) — None на выходе, чтобы
+        вызывающим не приходилось проверять это перед каждым обращением.
+        """
+        if not decomp_dir:
+            return None
+        if decomp_dir not in self._models:
+            self._models[decomp_dir] = qc_skin_parser.load_model(decomp_dir)
+        return self._models[decomp_dir]
+
     def _vtf_data_to_png(self, vtf_data: bytes, name: str) -> Optional[str]:
         """
         Сохраняет VTF-байты как PNG в preview_dir.
@@ -1362,21 +1385,13 @@ class Preview3DWorker(BaseWorker):
         Returns:
             {} — если второй скин не команда, QC не читается или ничего не нашли.
         """
-        qc_files = glob.glob(os.path.join(decomp_dir, "*.qc"))
-        if not qc_files or not mat_names:
+        model = self._model(decomp_dir)
+        if not model or not mat_names or not model.cdmaterials:
             return {}
-
-        cdmaterials = qc_skin_parser.parse_cdmaterials(qc_files[0])
-        layout = qc_skin_parser.parse_skin_layout(qc_files[0])
         # Карта «столбец RED → столбец BLU»; пустая, если второй скин не
         # команда (стиль bloody/clean) — тот же авторитет, что у сборки
-        team_map = qc_skin_parser.team_material_map(layout)
-        if not cdmaterials or not team_map:
-            return {}
-        by_lower = {k.lower(): v for k, v in team_map.items()}
-
-        paks = list(reversed(self._reader.paks))
-        if not paks:
+        by_lower = {k.lower(): v for k, v in model.team_map.items()}
+        if not by_lower:
             return {}
 
         result: dict = {}
@@ -1391,20 +1406,29 @@ class Preview3DWorker(BaseWorker):
                      if mat_lower.endswith(k) or k.endswith(mat_lower)), None)
             if blu_name is None:
                 continue
-            if blu_name.lower() == mat_lower:
+            if qc_skin_parser.is_shared_column(mat_lower, blu_name):
                 # Материал в обеих строках один и тот же: на BLU он остаётся
                 # собой. Записываем это явно — по такой «ссылке на себя»
                 # панель понимает, что карточку при смене команды не трогать.
                 result[mat_lower] = (None, mat_name)
                 continue
 
-            png_path, basetexture, tint = self._hat_material_png(
-                paks, cdmaterials, blu_name, f"blu_{mat_lower}")
-            if png_path and vmt_tint.same_material_look(
-                    self._red_looks.get(mat_lower), (basetexture, tint)):
+            blu = self.materials.resolve(blu_name, model.cdmaterials,
+                                         out_name=f"blu_{mat_lower}")
+            png_path = blu.png_path
+            if png_path and blu.same_look(self._red_looks.get(mat_lower)):
                 # Числится командным, а выглядит точно как RED — для панели
                 # это такой же общий материал
                 png_path, blu_name = None, mat_name
+            elif not png_path:
+                # Материал командный, но его текстуру в игре не нашли. Показать
+                # нечего, и пометить его командным значит оставить пустое поле
+                # у синей команды — честнее считать материал общим.
+                logger.info(
+                    f"[3D] BLU-текстура '{blu_name}' не найдена — материал "
+                    f"'{mat_lower}' показываем общим для команд"
+                )
+                blu_name = mat_name
             result[mat_lower] = (png_path, blu_name)
 
         # Ни одной реальной BLU-текстуры — сообщать не о чем
@@ -1418,109 +1442,36 @@ class Preview3DWorker(BaseWorker):
             return {}
         return result
 
-    def _hat_material_png(self, paks: list, cdmaterials: list, mat_name: str,
-                          out_name: str) -> tuple:
-        """
-        Материал шапки → PNG по цепочке VMT → $basetexture → VTF.
-
-        Общий шаг для RED и BLU: команда у шапки — это ДРУГОЙ МАТЕРИАЛ, а
-        значит та же самая цепочка, только с другого имени. Краска VMT
-        впечатывается сразу, иначе окрашиваемые места остаются чёрными.
-
-        Returns:
-            (png_path | None, basetexture | None, TintSpec | None)
-        """
-        vmt_info = None
-        for pak in paks:
-            vmt_info = GameVpkReader.find_vmt_in_pak(pak, cdmaterials,
-                                                     mat_name.lower())
-            if vmt_info:
-                break
-        if not vmt_info:
-            logger.info(
-                f"[3D] VMT не найден: mat='{mat_name}', cdmaterials={cdmaterials}"
-            )
-            return None, None, None
-
-        vmt_path, vmt_content = vmt_info
-        basetexture = GameVpkReader.parse_basetexture(vmt_content)
-        if not basetexture:
-            logger.warning(f"[3D] $baseTexture не найден в VMT: {vmt_path}")
-            return None, None, None
-
-        vtf_data = None
-        for pak in paks:
-            vtf_data = GameVpkReader.find_vtf_in_pak(pak, basetexture)
-            if vtf_data:
-                break
-        if not vtf_data:
-            logger.warning(
-                f"[3D] VTF не найден: $baseTexture={basetexture} (VMT={vmt_path})"
-            )
-            return None, basetexture, None
-
-        tint = vmt_tint.parse_tint(vmt_content)
-        png_path = self._vtf_data_to_png(vtf_data, out_name)
-        if png_path:
-            vmt_tint.apply_to_png(png_path, tint)
-            logger.info(
-                f"[3D] Шапка '{mat_name}': VMT={vmt_path} → {basetexture}"
-                + (f", краска {tint.color}" if tint else "")
-            )
-        return png_path, basetexture, tint
-
     def _extract_hat_textures_via_qc_vmt(
         self, decomp_dir: str, mat_names: list
     ) -> dict:
         """
-        Главный метод извлечения текстур шапки через цепочку QC → VMT → VTF.
+        Текстуры шапки: материалы модели → цепочка VMT → $basetexture → VTF.
 
-        1. Читает QC из decomp_dir, получает $cdmaterials пути.
-        2. Открывает ОБА VPK (misc + textures) сразу, т.к. VMT и VTF
-           могут быть в РАЗНЫХ архивах:
-           – VMT → tf2_misc_dir.vpk
-           – VTF → tf2_textures_dir.vpk
-        3. Для каждого имени материала из SMD ищет VMT в любом из пакетов,
-           пропускает VMT с «backpack», читает $baseTexture → ищет VTF → PNG.
-
-        Попутно запоминает вид каждого материала (текстура + краска) — по
-        нему потом видно, отличается ли BLU-скин от RED вообще.
+        Сама цепочка (включая командную краску из VMT) живёт в
+        MaterialResolver — здесь только выбор материалов и запоминание того,
+        как выглядит RED: по этому потом видно, отличается ли BLU-скин.
 
         Returns:
             {mat_name: png_path}  (пустой dict если ничего не нашлось)
         """
-        qc_files = glob.glob(os.path.join(decomp_dir, "*.qc"))
-        if not qc_files:
-            logger.warning(f"[3D] QC не найден в {decomp_dir}")
+        model = self._model(decomp_dir)
+        if not model or not model.cdmaterials:
+            logger.warning(f"[3D] $cdmaterials не найден в QC: {decomp_dir}")
             return {}
 
-        cdmaterials = qc_skin_parser.parse_cdmaterials(qc_files[0])
-        if not cdmaterials:
-            logger.warning(f"[3D] $cdmaterials не найден в QC: {qc_files[0]}")
-            return {}
-
-        logger.info(f"[3D] Hat QC: cdmaterials={cdmaterials}, materials={mat_names}")
-
-        # VMT обычно в misc, VTF в textures → reader открывает оба один раз;
-        # misc первым, чтобы сохранить прежний приоритет поиска VMT.
-        paks = list(reversed(self._reader.paks))
-
-        if not paks:
-            logger.warning("[3D] Не удалось открыть ни один VPK")
-            return {}
+        logger.info(
+            f"[3D] Hat QC: cdmaterials={model.cdmaterials}, materials={mat_names}")
 
         result: dict = {}
         for mat_name in mat_names:
             mat_lower = mat_name.lower()
-            png_path, basetexture, tint = self._hat_material_png(
-                paks, cdmaterials, mat_lower, f"hat_{mat_lower}")
-            if png_path:
-                self._red_looks[mat_lower] = (basetexture, tint)
-                result[mat_lower] = png_path
-
+            res = self.materials.resolve(mat_lower, model.cdmaterials,
+                                         out_name=f"hat_{mat_lower}")
+            if res.ok:
+                self._red_looks[mat_lower] = res
+                result[mat_lower] = res.png_path
         return result
-
-    # ── Извлечение текстуры ───────────────────────────────────────────────── #
 
     def _extract_hat_texture_frames(self) -> tuple:
         """
@@ -1645,8 +1596,7 @@ class Preview3DWorker(BaseWorker):
             return self._extract_hat_texture_frames()
 
         # ── Режим масок шпиона: извлекаем mask_spy.vtf по умолчанию ─────── #
-        from src.data.player_characters import SPY_MASK_MODE_KEY
-        if self.mode == SPY_MASK_MODE_KEY:
+        if self.kind.is_spy_mask:
             return self._extract_spy_mask_texture("mask_spy")
 
         try:
@@ -1728,16 +1678,16 @@ class Preview3DWorker(BaseWorker):
         if not self._decomp_dir or not paks:
             return None
 
-        qc_files = glob.glob(os.path.join(self._decomp_dir, "*.qc"))
-        if not qc_files:
+        model = self._model(self._decomp_dir)
+        if model is None:
             return None
 
-        cdmaterials = qc_skin_parser.parse_cdmaterials(qc_files[0])
+        cdmaterials = model.cdmaterials
         if not cdmaterials:
             return None
 
         # RED-текстуры: первая строка группы (или weapon_key как единственный кандидат)
-        rows = qc_skin_parser.parse_texturegroup_rows(qc_files[0])
+        rows = model.layout.all_rows
         if rows:
             red_tex_names = [t for t in rows[0] if t]
         else:

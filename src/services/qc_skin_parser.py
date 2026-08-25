@@ -22,6 +22,7 @@
                  именам: col0 + '_blue'/'_blu'), а не стилем вроде bloody.
 """
 
+import glob
 import os
 import re
 from dataclasses import dataclass, field
@@ -70,6 +71,147 @@ def variant_kind(texture_name: str) -> Optional[str]:
         if name.endswith(suffix):
             return kind
     return None
+
+
+def _team_form(texture_name: str) -> tuple:
+    """
+    (основа, синий?) — имя материала без командного суффикса.
+
+    Командный суффикс стоит либо в конце ('c_scattergun_blue'), либо ПЕРЕД
+    вариантным ('c_ambassador_opt_blue_xmas'). База может уже нести '_red'
+    (festive_lights_red / festive_lights_blue) — тогда основа общая.
+    """
+    name = (texture_name or '').lower()
+    tail = ''
+    for suffix in VARIANT_SUFFIXES:
+        if name.endswith(suffix):
+            name, tail = name[: -len(suffix)], suffix
+            break
+    for team_suffix in ('_blue', '_blu'):
+        if name.endswith(team_suffix):
+            return name[: -len(team_suffix)] + tail, True
+    if name.endswith('_red'):
+        return name[:-4] + tail, False
+    return name + tail, False
+
+
+def _is_own_material(name: str, row: List[str]) -> bool:
+    """
+    Столбец несёт СВОЙ материал, а не командную/вариантную копию соседнего.
+
+    В красной строке Valve нередко держит и синие имена, и австралий соседнего
+    столбца (c_scattergun рядом с c_scattergun_gold). Их пишут отдельные ветки
+    сборки, и в списке материалов предмета им делать нечего. При этом имя с
+    '_xmas' само по себе поводом не является: у праздничного револьвера так
+    называется его единственный собственный материал — вариантом столбец
+    считается, только если рядом лежит его база.
+    """
+    name = (name or '').lower()
+    if not name or _team_form(name)[1]:
+        return False
+    if variant_kind(name):
+        present = {(n or '').lower() for n in row}
+        for suffix in VARIANT_SUFFIXES:
+            if name.endswith(suffix) and name[: -len(suffix)] in present:
+                return False
+    return True
+
+
+#: Порог «этот столбец и есть модель»: главным назначается не нулевой столбец,
+#: только если он покрывает не меньше половины модели И как минимум втрое
+#: больше нулевого. Откалибровано по стоку: переезжают очевидные случаи
+#: (Quick-Fix 93% против 6%, C.A.P.P.E.R 99% против 0%, праздничный револьвер
+#: 58% против 13%), а спорные остаются на порядке автора — Mad Milk (стекло 67%
+#: против жидкости 32%) и Карамельная трость (60/40) не трогаются.
+MAIN_COLUMN_MIN_SHARE = 0.50
+MAIN_COLUMN_MIN_RATIO = 3.0
+#: Ниже этой доли покрытия веса считаются несопоставимыми с $texturegroup
+#: (имена мешей разошлись с именами столбцов) и не используются вовсе.
+MAIN_COLUMN_MIN_COVERAGE = 0.50
+
+
+def choose_main_column(row: List[str], weights: Optional[Dict[str, int]]) -> int:
+    """
+    Номер столбца, который пользователь считает «текстурой предмета».
+
+    По умолчанию это нулевой столбец — порядок, в котором материалы записал
+    автор модели. Но порядок ничего не обещает: у Quick-Fix первым идёт стекло
+    (4% модели), у C.A.P.P.E.R — экранчик (0.1%), и основная картинка уезжала
+    на них, а корпус оставался «доп. материалом». Если веса мешей показывают,
+    что модель почти целиком покрыта другим столбцом, главным становится он.
+
+    weights — {имя материала: сколько треугольников} (SMDService.
+    material_triangle_counts). Без весов или при слабом перевесе → 0.
+
+    Синие имена в основные не берём никогда, а вариантные — только если в том
+    же ряду есть их база: у c_tw_eagle 82% модели покрывает столбец
+    'c_tw_eagle_gold', и красить надо не его, а стоящий рядом 'c_tw_eagle'.
+    Само по себе имя с '_xmas' поводом не является — у праздничного револьвера
+    так называется его единственный собственный материал.
+    """
+    if not row or not weights:
+        return 0
+    total = sum(weights.values())
+    if total <= 0:
+        return 0
+
+    def share(index: int) -> float:
+        name = (row[index] or '').lower() if index < len(row) else ''
+        return weights.get(name, 0) / total
+
+    if sum(share(i) for i in range(len(row))) < MAIN_COLUMN_MIN_COVERAGE:
+        logger.debug("choose_main_column: веса мешей не сходятся с $texturegroup")
+        return 0
+
+    from src.data.material_filter import is_editable_material
+
+    def eligible(name: str) -> bool:
+        return _is_own_material(name, row) and is_editable_material(name)
+
+    best = 0
+    for i, name in enumerate(row):
+        if eligible(name) and share(i) > share(best):
+            best = i
+    if best and share(best) >= MAIN_COLUMN_MIN_SHARE \
+            and share(best) >= MAIN_COLUMN_MIN_RATIO * share(0):
+        logger.info(
+            f"Главный материал по мешам: '{row[best]}' ({share(best):.0%} модели) "
+            f"вместо столбца 0 '{row[0]}' ({share(0):.0%})"
+        )
+        return best
+    return 0
+
+
+def is_team_row_pair(red_row: List[str], blu_row: List[str]) -> bool:
+    """
+    Вторая строка $texturegroup — именно BLU-команда, а не стиль/вариант?
+
+    Команда в Source меняет материалы ПОКОЛОНОЧНО и не обязательно все:
+    столбец либо остаётся тем же (нейтральная деталь), либо заменяется на
+    свою синюю пару. Достаточно одного изменённого столбца — но любая
+    ПОСТОРОННЯЯ разница означает, что это стиль (bloody/clean), а не команда.
+
+        { c_proto_medigun_glass  c_proto_medigun       c_proto_medigun_blue }
+        { c_proto_medigun_glass  c_proto_medigun_blue  c_proto_medigun_blue }
+
+    Проверка только по col0 признала бы Quick-Fix некомандным: стекло у него
+    общее, а меняется второй столбец.
+    """
+    width = min(len(red_row or []), len(blu_row or []))
+    if not width:
+        return False
+    changed = False
+    for i in range(width):
+        red, blu = (red_row[i] or '').lower(), (blu_row[i] or '').lower()
+        if red == blu:
+            continue
+        red_stem, red_is_blue = _team_form(red)
+        blu_stem, blu_is_blue = _team_form(blu)
+        if blu_is_blue and not red_is_blue and red_stem == blu_stem:
+            changed = True
+            continue
+        return False
+    return changed
 
 
 # ── Низкоуровневый парсинг QC ───────────────────────────────────────────── #
@@ -173,6 +315,10 @@ class SkinLayout:
     #: Базовые строки после схлопывания идентичных (padding) — для UI/стилей.
     unique_base_rows: List[List[str]] = field(default_factory=list)
     main_texture: Optional[str] = None
+    #: Столбец, из которого взята main_texture. Обычно 0, но при явном перевесе
+    #: по мешам — другой (см. choose_main_column). Командную пару главной надо
+    #: брать из ЭТОГО столбца второй строки, иначе синяя уедет не туда.
+    main_index: int = 0
     extra_materials: List[str] = field(default_factory=list)
     #: Вторая базовая строка (позиционно): BLU-команда ИЛИ стиль (bloody…).
     second_row: List[str] = field(default_factory=list)
@@ -208,19 +354,24 @@ def _style_label(row: List[str], idx: int) -> str:
     return f'Skin {idx}'
 
 
-def classify_rows(rows: List[List[str]]) -> SkinLayout:
+def classify_rows(rows: List[List[str]],
+                  weights: Optional[Dict[str, int]] = None) -> SkinLayout:
     """
     Классифицирует строки $texturegroup.
+
+    weights — {материал: сколько треугольников} из мешей модели (необязательно).
+    Только они отличают корпус от стекла и лампочки; без них раскладка честно
+    остаётся на порядке столбцов автора.
 
     Правила (зафиксированы тестами на корпусе QC):
       1. Строка с вариантным суффиксом в col0 → variant (не базовая).
       2. Если все строки — варианты, базовыми считаются все (fallback).
-      3. main_texture = col0 первой базовой строки.
+      3. main_texture = главный столбец первой базовой строки: нулевой, а при
+         явном перевесе по мешам — покрывающий модель (choose_main_column).
       4. second_row = вторая базовая строка позиционно (для сборки).
-      5. blu_is_team — по именам: col0 второй УНИКАЛЬНОЙ базовой строки ==
-         col0 первой + '_blue'/'_blu'.
-      6. extra_materials = col1+ первой базовой строки, кроме имён, уже
-         присутствующих в second_row (Valve иногда пишет BLU-варианты
+      5. blu_is_team — по именам, ПО ВСЕМ СТОЛБЦАМ (is_team_row_pair).
+      6. extra_materials = остальные столбцы первой базовой строки, кроме имён,
+         уже присутствующих в second_row (Valve иногда пишет BLU-варианты
          столбцами в одной строке).
       7. Идентичные базовые строки (padding для strange/killstreak)
          схлопываются ТОЛЬКО в unique_base_rows/roles — base_rows/second_row
@@ -242,24 +393,31 @@ def classify_rows(rows: List[List[str]]) -> SkinLayout:
         base_rows = rows[:]
     layout.base_rows = base_rows
 
-    # Праздничные (festive) варианты — это ВСЕГДА отдельные модели (c_*_xmas.mdl).
-    # Поэтому если САМ основной материал festive (база и BLU оканчиваются на
-    # _xmas, напр. c_sapper_xmas / c_wrangler_xmas), модель НАТИВНО праздничная,
-    # а не имеет overlay-вариант — убираем festive из variants, иначе в превью
-    # всплывёт ложная карточка варианта. Australium так НЕ трогаем: золотой скин
-    # живёт в той же модели отдельной строкой (skin 0 = норма, skin 1 = золото).
-    _main_kind = variant_kind(base_rows[0][0]) if (base_rows and base_rows[0]) else None
-    if _main_kind == 'festive':
-        layout.variants.pop('festive', None)
-
     # 3-4: главная текстура, второй скин (позиционно)
-    layout.main_texture = base_rows[0][0]
+    layout.main_index = choose_main_column(base_rows[0], weights)
+    layout.main_texture = base_rows[0][layout.main_index] if base_rows[0] else None
     layout.second_row = base_rows[1] if len(base_rows) > 1 else []
 
-    # 6: extra_materials (минус имена из second_row — см. док-стринг)
-    second_names = set(layout.second_row)
-    extra_raw = base_rows[0][1:] if len(base_rows[0]) > 1 else []
-    layout.extra_materials = [m for m in extra_raw if m not in second_names]
+    # Праздничные (festive) варианты — это ВСЕГДА отдельные модели (c_*_xmas.mdl).
+    # Поэтому если САМ основной материал festive (c_sapper_xmas / c_wrangler_xmas),
+    # модель НАТИВНО праздничная, а не имеет overlay-вариант — убираем festive из
+    # variants, иначе в превью всплывёт ложная карточка варианта. Australium так
+    # НЕ трогаем: золотой скин живёт в той же модели отдельной строкой.
+    if variant_kind(layout.main_texture or '') == 'festive':
+        layout.variants.pop('festive', None)
+
+    # 6: extra_materials — остальные столбцы первой базовой строки, кроме
+    # СИНИХ имён и вариантов соседнего столбца (c_scattergun_gold рядом с
+    # c_scattergun): и то и другое пишут свои ветки сборки. Общие материалы
+    # (стекло Quick-Fix) в списке остаются — раньше их выбрасывало правило
+    # «минус имена из второй строки», хотя общий материал там есть всегда.
+    # Столбцы, которых нет ни на одном меше, тоже выбрасываем: у праздничного
+    # сапёра в строке лежит материал обычного сапёра, но на модели его нет.
+    layout.extra_materials = [
+        m for i, m in enumerate(base_rows[0])
+        if i != layout.main_index and _is_own_material(m, base_rows[0])
+        and (not weights or weights.get(m.lower(), 0) > 0)
+    ]
 
     # 7: дедуп идентичных строк (padding) — для UI/стилей
     seen = set()
@@ -271,25 +429,12 @@ def classify_rows(rows: List[List[str]]) -> SkinLayout:
             unique_rows.append(r)
     layout.unique_base_rows = unique_rows
 
-    # 5: командность второй уникальной строки — строго по именам. Распознаём оба
-    # паттерна col0: «нейтраль → X_blue» (c_flaregun_shell → c_flaregun_shell_blue)
-    # И «X_red → X_blue» (w_grenade_red → w_grenade_blue, типично для снарядов), где
-    # база уже несёт суффикс _red. Иначе UI не показывал бы переключатель, хотя
-    # команда есть (и сборка её находит через team_reference).
-    if len(unique_rows) >= 2 and unique_rows[0] and unique_rows[1]:
-        b0 = unique_rows[0][0].lower()
-        b1 = unique_rows[1][0].lower()
-
-        def _team_stem(name: str) -> str:
-            for suf in ('_blue', '_blu', '_red'):
-                if name.endswith(suf):
-                    return name[: -len(suf)]
-            return name
-
-        b1_is_blue = b1.endswith('_blue') or b1.endswith('_blu')
-        layout.blu_is_team = (
-            b1_is_blue and b0 != b1 and _team_stem(b0) == _team_stem(b1)
-        )
+    # 5: командность второй уникальной строки — строго по именам, ПО ВСЕМ
+    # СТОЛБЦАМ (см. is_team_row_pair). Раньше смотрели только col0, и команда
+    # терялась там, где по команде меняется не первый материал: Quick-Fix,
+    # Overdose, Manmelter, C.A.P.P.E.R, праздничные пушки, Conspiracy Cap.
+    if len(unique_rows) >= 2:
+        layout.blu_is_team = is_team_row_pair(unique_rows[0], unique_rows[1])
 
     # Подписи скинов для UI
     n = len(unique_rows)
@@ -305,10 +450,7 @@ def classify_rows(rows: List[List[str]]) -> SkinLayout:
     # модели). Padding-дубли skin 0 пропускаем — сборка заполнит их базой; но
     # индексы оставшихся строк сохраняем, чтобы команда/австралий/стиль
     # выбирались игрой по правильному индексу.
-    has_team = any(
-        r and (r[0].lower().endswith('_blue') or r[0].lower().endswith('_blu'))
-        for r in rows
-    )
+    has_team = any(is_team_row_pair(rows[0], r) for r in rows[1:])
     skins: List[dict] = []
     seen_keys = set()
     for raw_idx, row in enumerate(rows):
@@ -318,13 +460,12 @@ def classify_rows(rows: List[List[str]]) -> SkinLayout:
         if raw_idx != 0 and key in seen_keys:
             continue  # padding/дубль базового скина
         seen_keys.add(key)
-        col0 = row[0].lower()
         kind = variant_kind(row[0])
         if raw_idx == 0:
             role = 'RED' if has_team else 'Skin 0'
         elif kind:
             role = kind.capitalize()
-        elif col0.endswith('_blue') or col0.endswith('_blu'):
+        elif is_team_row_pair(rows[0], row):
             role = 'BLU'
         else:
             role = _style_label(row, raw_idx)
@@ -334,9 +475,58 @@ def classify_rows(rows: List[List[str]]) -> SkinLayout:
     return layout
 
 
-def parse_skin_layout(qc_path: str) -> SkinLayout:
-    """Парсит QC и классифицирует его $texturegroup одной операцией."""
-    layout = classify_rows(parse_texturegroup_rows(qc_path))
+#: (qc_path, mtime) -> веса материалов. Раскладку одной модели за сборку
+#: спрашивают несколько раз, а SMD у пушек весят мегабайты.
+_WEIGHTS_CACHE: Dict[tuple, Dict[str, int]] = {}
+
+
+def mesh_material_weights(qc_path: str) -> Dict[str, int]:
+    """
+    {материал: сколько треугольников} по ВСЕМ мешам модели.
+
+    Берём все варианты бодигрупп, а не только видимые по умолчанию: парашют
+    B.A.S.E. Jumper и разбитая бутылка — переключаемые части, но материалы у
+    них настоящие и красить их надо. Ноль треугольников означает, что столбец
+    $texturegroup на модели не используется вовсе.
+
+    Пусто, если QC или SMD рядом нет: тогда раскладка останется на порядке
+    столбцов, как раньше.
+    """
+    if not qc_path or not os.path.isfile(qc_path):
+        return {}
+    try:
+        key = (os.path.abspath(qc_path), os.path.getmtime(qc_path))
+    except OSError:
+        return {}
+    cached = _WEIGHTS_CACHE.get(key)
+    if cached is not None:
+        return cached
+    try:
+        from src.services.model_build_service import ModelBuildService
+        from src.services.smd_service import SMDService
+        weights = SMDService.material_triangle_counts(
+            ModelBuildService.extract_all_mesh_smds(qc_path))
+    except Exception as exc:
+        logger.debug(f"mesh_material_weights({os.path.basename(qc_path)}): {exc}")
+        weights = {}
+    if len(_WEIGHTS_CACHE) > 64:
+        _WEIGHTS_CACHE.clear()
+    _WEIGHTS_CACHE[key] = weights
+    return weights
+
+
+def parse_skin_layout(qc_path: str,
+                      weights: Optional[Dict[str, int]] = None) -> SkinLayout:
+    """
+    Парсит QC и классифицирует его $texturegroup одной операцией.
+
+    Веса материалов по мешам берутся из SMD рядом с QC — только они отличают
+    корпус от стекла и лампочки (см. choose_main_column). Явный аргумент
+    weights нужен там, где меши уже посчитаны или их заведомо нет.
+    """
+    if weights is None:
+        weights = mesh_material_weights(qc_path)
+    layout = classify_rows(parse_texturegroup_rows(qc_path), weights)
     logger.debug(f"skin layout {os.path.basename(qc_path)}: {layout.describe()}")
     return layout
 
@@ -401,6 +591,66 @@ def selector_spec(layout: SkinLayout) -> SelectorSpec:
             continue  # это вариант (austr/festive/botkiller) — учтён в spec.variant
         spec.styles.append((role, idx))
     return spec
+
+
+@dataclass
+class QcModel:
+    """
+    Разобранный QC декомпилированной модели — один раз на прогон.
+
+    Раньше каждый метод воркера сам искал QC в папке (`glob(*.qc)` встречался
+    одиннадцать раз) и заново разбирал его: за один показ шапки один и тот же
+    файл читался и парсился по нескольку раз, а какой именно из QC достанется
+    методу, зависело от порядка файлов в папке. Здесь это делается один раз, и
+    все шаги работают с одним и тем же разбором.
+    """
+
+    qc_path: str
+    cdmaterials: List[str] = field(default_factory=list)
+    layout: SkinLayout = field(default_factory=SkinLayout)
+
+    @property
+    def team_map(self) -> Dict[str, str]:
+        """{материал RED: материал BLU} по столбцам (см. team_material_map)."""
+        return team_material_map(self.layout)
+
+    @property
+    def spec(self) -> "SelectorSpec":
+        """Команда / вариант / стили — одной классификацией."""
+        return selector_spec(self.layout)
+
+    @property
+    def skin0(self) -> List[str]:
+        """Материалы первой строки $texturegroup (skin 0)."""
+        return self.layout.base_rows[0] if self.layout.base_rows else []
+
+
+def load_model(decomp_dir: str) -> Optional[QcModel]:
+    """QC из папки декомпиляции, разобранный целиком. None — QC нет."""
+    if not decomp_dir:
+        return None
+    qc_files = sorted(glob.glob(os.path.join(decomp_dir, "*.qc")))
+    if not qc_files:
+        logger.debug(f"QC не найден в {decomp_dir}")
+        return None
+    qc_path = qc_files[0]
+    return QcModel(
+        qc_path=qc_path,
+        cdmaterials=parse_cdmaterials(qc_path),
+        layout=parse_skin_layout(qc_path),
+    )
+
+
+def is_shared_column(red_name: str, blu_name: str) -> bool:
+    """
+    Столбец не меняется по команде: в обеих строках стоит один материал.
+
+    Одно правило на сборку и на превью. Регистр в $texturegroup у Valve
+    гуляет от файла к файлу, поэтому сравнение регистронезависимое — сборка
+    раньше сравнивала строки как есть и на файле с разным регистром сделала бы
+    лишний BLU-материал.
+    """
+    return (red_name or "").strip().lower() == (blu_name or "").strip().lower()
 
 
 def team_material_map(layout: SkinLayout) -> Dict[str, str]:

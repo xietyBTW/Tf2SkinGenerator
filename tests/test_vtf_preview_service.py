@@ -3,25 +3,7 @@
 import unittest
 
 from src.services import vtf_preview_service as vps
-
-
-class _FakeEntry:
-    def __init__(self, data):
-        self._data = data
-
-    def read(self):
-        return self._data
-
-
-class _FakePak:
-    """Минимальный stub VPK: pak[path] → объект с .read(), иначе KeyError."""
-    def __init__(self, files: dict):
-        self._files = files
-
-    def __getitem__(self, path):
-        if path in self._files:
-            return _FakeEntry(self._files[path])
-        raise KeyError(path)
+from tests.fake_vpk import FakePak as _FakePak
 
 
 class VtfPreviewServiceTests(unittest.TestCase):

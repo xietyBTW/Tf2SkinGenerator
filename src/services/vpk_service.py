@@ -7,7 +7,7 @@ import shutil
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Tuple, Optional, Callable
-from .build_context import BuildContext
+from .build_context import BuildContext, MaterialSlots, TextureBuildContext
 from .build_request import BuildRequest
 from .build_service import BuildService
 from .texture_service import TextureService
@@ -856,6 +856,25 @@ class VPKService:
             weapon_key = Path(found_mdl_path).stem
             logger.info(f"Hat weapon_key обновлён: {weapon_key}")
 
+        # Праздничные пушки — базовая модель ПЛЮС отдельная модель-гирлянда;
+        # в списке гирлянда выглядит как оружие, но перекрашивается только она.
+        # Молчать нельзя: пользователь красит «Праздничный пулемёт» и не видит
+        # изменений на стволе (items_game: "attached_models").
+        if mode != "hat":
+            try:
+                from src.data.weapon_model_index import (
+                    attachment_only_models, tf2_root_from_misc_vpk,
+                )
+                _root = tf2_root_from_misc_vpk(tf2_misc_vpk)
+                if weapon_key.lower() in attachment_only_models(_root):
+                    ctx.warn(
+                        f"'{weapon_key}' — это навесное украшение (гирлянда), а не сам "
+                        f"ствол: игра рисует его поверх базового оружия. Красится только "
+                        f"украшение; чтобы изменить сам ствол, соберите базовое оружие."
+                    )
+            except Exception as _att_exc:
+                logger.debug(f"attachment check: {_att_exc}")
+
         if is_cancelled():
             return _fail(cancelled_result(ctx))
         emit_progress(25, t.get('build_decompiling', 'Decompiling model...'))
@@ -1074,6 +1093,7 @@ class VPKService:
             vmt_path = vtf_output_path / vmt_filename
             vtf_temp_png = vtf_output_path / vtf_filename.replace(".vtf", ".png")
 
+
             try:
                 ensure_directory_exists(vtf_output_path)
             except OSError as e:
@@ -1123,15 +1143,34 @@ class VPKService:
             # и извлечение оригинального VMT).
             tf2_textures_vpk = TF2Paths.resolve_textures_vpk(tf2_root_dir)
 
+            # Два контекста на всю запись материалов: куда писать и где искать
+            # оригиналы (slots) + как рендерить VTF (tex_ctx). Раньше эта
+            # дюжина значений передавалась по одному в каждую функцию.
+            slots = MaterialSlots(
+                vtf_output_path=vtf_output_path,
+                vmt_path=vmt_path,
+                patched_cdmaterials_path=patched_cdmaterials_path,
+                original_cdmaterials_paths=original_cdmaterials_paths,
+                tf2_textures_vpk=tf2_textures_vpk,
+                tf2_misc_vpk=tf2_misc_vpk,
+            )
+            tex_ctx = TextureBuildContext(
+                vtf_output_path=vtf_output_path,
+                size=size,
+                format_type=format_type,
+                flags=flags,
+                vtf_options=vtf_options,
+                custom_vtf_path=custom_vtf_path,
+            )
+
             # Главная текстура: RED-резолв → VTF (custom/готовый/рендер) →
             # оригинальный VMT с перенаправлением $basetexture.
             image_path, animated_fps, is_normal_map, vmt_to_delete = (
                 VpkTextureBuilder._build_main_material(
                     image_path, texture_filename, vtf_filename, vtf_temp_png,
-                    vmt_path, original_cdmaterials_path, original_cdmaterials_paths,
-                    _game_vmt_name, patched_cdmaterials_path, mode, hat_apply_game_paints,
-                    ctx, vtf_output_path, tf2_textures_vpk, tf2_misc_vpk,
-                    extra_texture_callback, weapon_key, custom_vtf_path, _eff,
+                    original_cdmaterials_path, _game_vmt_name, mode,
+                    hat_apply_game_paints, ctx, slots, tex_ctx,
+                    extra_texture_callback, weapon_key, _eff,
                 )
             )
 
@@ -1145,18 +1184,16 @@ class VPKService:
             # лишний {texture}_blue.vtf/vmt.
             VpkTextureBuilder._maybe_build_blu_team_texture(
                 weapon_key, blu_row, _blu_is_team, blu_mode, blu_image_path,
-                vtf_output_path, vtf_filename, vmt_path, texture_filename,
-                patched_cdmaterials_path, size, format_type, flags, vtf_options,
+                vtf_filename, texture_filename, slots, tex_ctx,
+                red_row=tg_structure.get('red_row') or [],
             )
 
             # === Создаем текстуры для дополнительных материалов модели (shell, scope и т.д.) ===
             # Это столбцы 1+ из RED строки $texturegroup
             # Словарь для хранения путей к VTF дополнительных материалов (нужно для BLU копий)
             extra_materials_vtf_paths = VpkTextureBuilder._build_extra_material_textures(
-                extra_materials, weapon_key, ctx, vtf_output_path, vmt_path,
-                patched_cdmaterials_path, original_cdmaterials_paths,
-                tf2_textures_vpk, tf2_misc_vpk, extra_texture_callback,
-                custom_vtf_path, size, format_type, flags, vtf_options, animated_fps,
+                extra_materials, weapon_key, ctx, slots, tex_ctx,
+                extra_texture_callback, animated_fps,
             )
 
             # === Блэклист/служебные материалы: запись ОРИГИНАЛЬНОГО VMT ===
@@ -1168,20 +1205,14 @@ class VPKService:
             # игровые текстуры находятся по абсолютным путям. На случай
             # относительного $basetexture дополнительно кладём VTF, если он есть.
             VpkTextureBuilder._write_blacklisted_materials(
-                _blacklisted_extra, panel_extra_textures, ctx, vtf_output_path,
-                vmt_path, patched_cdmaterials_path, original_cdmaterials_paths,
-                tf2_textures_vpk, tf2_misc_vpk,
-            )
+                _blacklisted_extra, panel_extra_textures, ctx, slots)
 
             # === Изолированные плечи вьюмодели ===
             # Пишем переименованный материал плеч (vm_<orig>) под главным
             # console-путём. Источник: пользовательская текстура (ключ —
             # ОРИГИНАЛЬНОЕ имя материала) либо оригинал тела из игры.
             VpkTextureBuilder._write_shoulder_iso_materials(
-                _shoulder_iso, ctx, vtf_output_path, vmt_path,
-                patched_cdmaterials_path, original_cdmaterials_paths,
-                tf2_textures_vpk, tf2_misc_vpk, size, format_type, flags, vtf_options,
-            )
+                _shoulder_iso, ctx, slots, tex_ctx)
 
             # === Создаем текстуры для BLU команды ===
             # BLU - это отдельная строка (row 1) в $texturegroup
@@ -1189,11 +1220,8 @@ class VPKService:
             # если пользователь отказывается — копируем соответствующую RED текстуру
             VpkTextureBuilder._build_blu_row_textures(
                 blu_row, tg_structure, texture_filename, vtf_filename, ctx,
-                vtf_output_path, vmt_path, patched_cdmaterials_path,
-                original_cdmaterials_paths, tf2_textures_vpk, tf2_misc_vpk,
-                extra_texture_callback, weapon_key, custom_vtf_path,
-                size, format_type, flags, vtf_options, animated_fps,
-                is_normal_map, extra_materials_vtf_paths,
+                slots, tex_ctx, extra_texture_callback, weapon_key,
+                animated_fps, is_normal_map, extra_materials_vtf_paths,
             )
 
             # Зеркальные VMT по оригинальному пути (руки / spy-watch и т.п.).
@@ -1211,8 +1239,7 @@ class VPKService:
             # Фиксированные доп. текстуры (vgui-вставки и т.п.) — пишем по
             # их зашитому пути, не по cdmaterials. Возвращает обработанные имена.
             VpkTextureBuilder._build_secondary_textures(
-                weapon_key, panel_extra_textures, ctx, vtf_output_path, vmt_path,
-                patched_cdmaterials_path, size, format_type, flags, vtf_options,
+                weapon_key, panel_extra_textures, ctx, slots, tex_ctx,
                 material_maps, texture_filename, image_path, is_normal_map,
                 _has_skins, skin_build_data, _eff,
             )
@@ -1234,11 +1261,14 @@ class VPKService:
             else:
                 ModelService.copy_compiled_models_to_vpkroot(ctx, qc_path)
 
-            # Мультиклассовая шапка с заменой модели: собираем модель для
-            # ОСТАЛЬНЫХ выбранных классов (основная сборка делает только один).
+            # Мультиклассовая шапка: собираем модель для ОСТАЛЬНЫХ выбранных
+            # классов (основная сборка делает только один). Нужно и БЕЗ замены
+            # геометрии: у каждой классовой модели свой файл, и путь к
+            # материалам на папку обхода переписывается при компиляции —
+            # непересобранный класс грузит оригинальную текстуру игры.
             # Источник: явный список выбранных классов (model_player_per_class)
             # либо legacy %s-шаблон в hat_mdl_path.
-            if mode == "hat" and replace_model_smd_path:
+            if mode == "hat":
                 _extra_targets = None
                 if hat_class_models and len(hat_class_models) > 1:
                     # Все выбранные классы, КРОМЕ primary (он уже собран).
@@ -1259,11 +1289,18 @@ class VPKService:
             # моделью и своей текстурой в тот же мод (активный стиль уже
             # собран основным пайплайном выше).
             if mode == "hat" and hat_style_builds:
+                # Текстура активного стиля уже записана основным пайплайном —
+                # передаём её, чтобы поймать стили, делящие один материал
+                _written = {
+                    f"{patched_cdmaterials_path}/{texture_filename}".lower():
+                        image_path or "",
+                }
                 VpkModelPipeline._build_extra_style_models(
                     ctx, hat_style_builds, tf2_misc_vpk, studiomdl_exe,
                     crowbar_exe, tf_dir, language, emit_sub,
                     size, format_type, flags, vtf_options, vmt_path,
                     bypass_prefix=_bypass_prefix,
+                    written_textures=_written,
                 )
 
             # Подстраховка: удаляем любые {texture}_blue.*, если их успел

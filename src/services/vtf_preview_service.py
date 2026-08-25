@@ -7,15 +7,14 @@
 """
 
 import os
-import re
 import tempfile
 from typing import List, Optional
 
+from src.services import vmt_parse
 from src.shared.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-_RE_ANIM_FPS = re.compile(r'"animatedtextureframerate"\s+"?([0-9.]+)"?', re.IGNORECASE)
 
 
 def open_vpks(paths: List[Optional[str]]) -> list:
@@ -52,9 +51,12 @@ def read_from_vpks(paks: list, vpk_path: str) -> Optional[bytes]:
 
 
 def parse_animated_framerate(vmt_content: str) -> Optional[float]:
-    """Парсит animatedtextureframerate из текста VMT (None если ключа нет)."""
-    m = _RE_ANIM_FPS.search(vmt_content)
-    return max(0.1, float(m.group(1))) if m else None
+    """animatedtextureframerate из текста VMT (None если ключа нет).
+
+    Параметр лежит внутри прокси AnimatedTexture, поэтому ищется по всему
+    дереву материала (разбор — общий, vmt_parse).
+    """
+    return vmt_parse.animated_framerate(vmt_content)
 
 
 def read_vmt_framerate(pak, vmt_paths: List[str], default: float = 15.0) -> float:

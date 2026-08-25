@@ -22,9 +22,13 @@ logger = get_logger(__name__)
 
 _CACHE_FILE = Path("cache") / "weapon_paths_cache.json"
 _MODEL_RE = re.compile(r'"model_player[^"]*"\s+"([^"]+\.mdl)"', re.IGNORECASE)
+_MODEL_ANY_RE = re.compile(r'"model"\s+"([^"]+\.mdl)"', re.IGNORECASE)
+_ATTACHED_BLOCK_RE = re.compile(r'"attached_models"\s*\{(.*?)\n\s*\}', re.S | re.I)
 
 # Память процесса: tf2_root -> индекс (чтобы не парсить 8 МБ повторно за сессию).
 _MEM: Dict[str, Dict[str, str]] = {}
+#: tf2_root -> стебли моделей-украшений (см. attachment_only_models).
+_MEM_ATTACHED: Dict[str, set] = {}
 
 
 def get_items_game_path(tf2_root: str) -> Optional[Path]:
@@ -103,6 +107,45 @@ def resolve_weapon_mdl(weapon_key: str, tf2_root: str) -> Optional[str]:
     if not weapon_key or not tf2_root:
         return None
     return weapon_model_index(tf2_root).get(weapon_key.lower())
+
+
+def attachment_only_models(tf2_root: str) -> set:
+    """
+    Модели, которые игра только НАВЕШИВАЕТ на оружие, а не рисует как оружие.
+
+    Праздничные пушки собраны из базовой модели плюс отдельная модель-гирлянда,
+    объявленная в items_game блоком "attached_models" (c_minigun_xmas — это
+    ровно гирлянда: в ней два материала, оба — лампочки). Ключ такой модели
+    выглядит в списке как обычное оружие, но перекраска меняет украшение, а не
+    ствол: сам ствол — базовая запись оружия.
+
+    Возвращает стебли имён, встречающиеся ТОЛЬКО в attached_models. Пусто, если
+    items_game недоступен.
+    """
+    if not tf2_root:
+        return set()
+    cached = _MEM_ATTACHED.get(tf2_root)
+    if cached is not None:
+        return cached
+    items = get_items_game_path(tf2_root)
+    if not items:
+        return set()
+    try:
+        txt = items.read_text(encoding="utf-8", errors="replace")
+    except Exception as e:
+        logger.warning(f"weapon index: не прочитать {items}: {e}")
+        return set()
+    attached = set()
+    for block in _ATTACHED_BLOCK_RE.finditer(txt):
+        for m in _MODEL_ANY_RE.finditer(block.group(1)):
+            stem = os.path.splitext(os.path.basename(
+                m.group(1).replace("\\", "/").lower()))[0]
+            if stem:
+                attached.add(stem)
+    result = attached - set(weapon_model_index(tf2_root))
+    _MEM_ATTACHED[tf2_root] = result
+    logger.info(f"items_game: моделей-украшений (attached_models): {len(result)}")
+    return result
 
 
 def tf2_root_from_misc_vpk(misc_vpk_path: Optional[str]) -> Optional[str]:

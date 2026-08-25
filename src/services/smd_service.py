@@ -19,6 +19,46 @@ NON_REFERENCE_SMD_KEYWORDS: Tuple[str, ...] = ("physics", "phys", "anim", "idle"
 class SMDService:
 
     @staticmethod
+    def material_triangle_counts(smd_paths: List[str]) -> dict:
+        """
+        {имя материала (lower): сколько треугольников} по нескольким SMD.
+
+        В секции triangles каждый треугольник записан четырьмя строками: имя
+        материала и три вершины. Считаем только имена — это дешёвая мера
+        «сколько модели покрывает материал», по которой видно, какой материал
+        основной, а какой — стекло, лампочка или экранчик.
+
+        Отсутствующие и битые файлы просто пропускаются: мера вспомогательная,
+        без неё вызывающий откатывается на порядок столбцов из QC.
+        """
+        counts: dict = {}
+        for path in smd_paths or []:
+            if not path or not os.path.exists(path):
+                continue
+            try:
+                with open(path, "r", encoding="utf-8", errors="replace") as f:
+                    in_triangles = False
+                    step = 0
+                    for line in f:
+                        stripped = line.strip()
+                        if not stripped:
+                            continue
+                        low = stripped.lower()
+                        if not in_triangles:
+                            in_triangles = low == "triangles"
+                            continue
+                        if low == "end":
+                            break
+                        if step == 0:
+                            name = os.path.splitext(
+                                stripped.replace("\\", "/").rsplit("/", 1)[-1])[0].lower()
+                            counts[name] = counts.get(name, 0) + 1
+                        step = (step + 1) % 4
+            except Exception:
+                continue
+        return counts
+
+    @staticmethod
     def replace_model_sections(
         user_smd_path: str,
         original_smd_path: str,

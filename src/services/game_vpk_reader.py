@@ -21,9 +21,9 @@
 """
 
 import os
-import re
 from typing import List, Optional, Tuple
 
+from src.services import vmt_parse
 from src.shared.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -41,8 +41,6 @@ _WORKSHOP_SWAPS = [
      "materials/models/player/items"),
 ]
 
-_RE_BASETEX_QUOTED = re.compile(r'"?\$baseTexture"?\s+"([^"]+)"', re.IGNORECASE)
-_RE_BASETEX_BARE = re.compile(r'"?\$baseTexture"?\s+([^\s"{}]+)', re.IGNORECASE)
 
 
 class GameVpkReader:
@@ -135,11 +133,7 @@ class GameVpkReader:
         Извлекает $baseTexture из VMT (ключ с кавычками/без, значение с/без кавычек).
         Возвращает путь относительно materials/ (прямые слеши, lowercase) или None.
         """
-        m = _RE_BASETEX_QUOTED.search(vmt_content)
-        if m:
-            return m.group(1).replace("\\", "/").lower()
-        m = _RE_BASETEX_BARE.search(vmt_content)
-        return m.group(1).replace("\\", "/").lower() if m else None
+        return vmt_parse.basetexture(vmt_content)
 
     @staticmethod
     def find_vtf_in_pak(pak, basetexture: str) -> Optional[bytes]:

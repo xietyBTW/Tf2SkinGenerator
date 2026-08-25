@@ -19,30 +19,16 @@
 Модуль без Qt и без обращений к VPK: на вход текст VMT и PNG-файл.
 """
 
-import re
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
+from src.services import vmt_parse
 from src.shared.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-#: VMT Valve пишет с CRLF — якорь конца строки обязан это учитывать.
-def _param_re(name: str) -> re.Pattern:
-    return re.compile(
-        r'^[ \t]*"?\$' + name + r'"?[ \t]+"?([^"\r\n]+?)"?[ \t]*\r?$',
-        re.IGNORECASE | re.MULTILINE)
-
-
-_RE_BLEND = _param_re("blendtintbybasealpha")
-_RE_OVER_BASE = _param_re("blendtintcoloroverbase")
-_RE_TINT_BASE = _param_re("colortint_base")
-_RE_COLOR2 = _param_re("color2")
-_RE_TRANSLUCENT = _param_re("translucent")
-_RE_ALPHATEST = _param_re("alphatest")
-
-#: «{ 189 59 59 }» — целые 0-255, «[0.7 0.2 0.2]» — доли единицы.
-_RE_TRIPLE = re.compile(r'[-+]?\d*\.?\d+')
+#: Разбор цвета VMT — общий (фигурные скобки 0-255, квадратные — доли).
+parse_color = vmt_parse.parse_color
 
 
 @dataclass(frozen=True)
@@ -57,22 +43,6 @@ class TintSpec:
         return self.color == (255, 255, 255) and self.over_base <= 0.0
 
 
-def parse_color(value: str) -> Optional[Tuple[int, int, int]]:
-    """«{ 189 59 59 }» или «[.74 .23 .23]» → (r, g, b) 0-255."""
-    if not value:
-        return None
-    nums = _RE_TRIPLE.findall(value)
-    if len(nums) < 3:
-        return None
-    floats = [float(n) for n in nums[:3]]
-    # Скобки решают: фигурные — уже 0-255, квадратные — доли единицы.
-    # Ориентируемся на скобку, а не на «есть ли значение > 1»: [1 1 1] это
-    # белый, а не почти чёрный.
-    if "[" in value:
-        floats = [f * 255.0 for f in floats]
-    return tuple(max(0, min(255, int(round(f)))) for f in floats)
-
-
 def parse_tint(vmt_text: str) -> Optional[TintSpec]:
     """
     Краска материала либо None, если материал так не красится.
@@ -82,26 +52,18 @@ def parse_tint(vmt_text: str) -> Optional[TintSpec]:
     """
     if not vmt_text:
         return None
-    blend = _RE_BLEND.search(vmt_text)
-    if not blend or parse_color(blend.group(1)) == (0, 0, 0) \
-            or blend.group(1).strip() in ("0", "0.0"):
+    vmt = vmt_parse.parse(vmt_text)
+    if not vmt.flag("blendtintbybasealpha"):
         return None
     # Прозрачность и маска краски в одном материале несовместимы: раз VMT
     # просит прозрачность, альфу считаем прозрачностью и не трогаем.
-    for rx in (_RE_TRANSLUCENT, _RE_ALPHATEST):
-        m = rx.search(vmt_text)
-        if m and m.group(1).strip() not in ("0", "0.0", ""):
-            return None
+    if vmt.flag("translucent") or vmt.flag("alphatest"):
+        return None
 
-    src = _RE_TINT_BASE.search(vmt_text) or _RE_COLOR2.search(vmt_text)
-    color = parse_color(src.group(1)) if src else None
+    color = vmt.color("colortint_base") or vmt.color("color2")
     if color is None:
         color = (255, 255, 255)     # краски нет, но альфа-маска всё равно есть
-    over = _RE_OVER_BASE.search(vmt_text)
-    try:
-        over_base = float(over.group(1)) if over else 0.0
-    except ValueError:
-        over_base = 0.0
+    over_base = vmt.number("blendtintcoloroverbase", 0.0) or 0.0
     return TintSpec(color, max(0.0, min(1.0, over_base)))
 
 

@@ -1,35 +1,9 @@
+"""Тесты кэширующего читателя игровых VPK (поиск VMT/VTF)."""
+
 import unittest
 
 from src.services.game_vpk_reader import GameVpkReader
-
-
-class _Entry:
-    def __init__(self, data: bytes):
-        self._data = data
-
-    def read(self) -> bytes:
-        return self._data
-
-
-class _FakePak:
-    """Имитация vpk-архива: dict путь→bytes, __getitem__ кидает KeyError при отсутствии."""
-
-    def __init__(self, files: dict):
-        self._files = files
-        self.closed = False
-
-    def __getitem__(self, key):
-        return _Entry(self._files[key])  # KeyError если нет — как у vpklib
-
-    def close(self):
-        self.closed = True
-
-
-def _reader(files: dict) -> GameVpkReader:
-    r = GameVpkReader([])
-    r._paks = [_FakePak(files)]   # инжектим, минуя реальный vpk.open
-    return r
-
+from tests.fake_vpk import FakePak, fake_reader as _reader
 
 class GameVpkReaderTests(unittest.TestCase):
     def test_read_hit_and_miss(self):
@@ -39,7 +13,7 @@ class GameVpkReaderTests(unittest.TestCase):
 
     def test_read_falls_through_multiple_paks(self):
         r = GameVpkReader([])
-        r._paks = [_FakePak({}), _FakePak({"a.vtf": b"data"})]
+        r._paks = [FakePak({}), FakePak({"a.vtf": b"data"})]
         self.assertEqual(r.read("a.vtf"), b"data")
 
     def test_find_vmt_basic(self):

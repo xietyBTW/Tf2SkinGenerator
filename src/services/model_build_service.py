@@ -249,6 +249,9 @@ class ModelBuildService:
             'red_row': layout.base_rows[0] if layout.base_rows else [],
             'blu_row': layout.second_row,
             'blu_is_team': spec.team,  # вторая строка — настоящая команда, а не вариант
+            # {материал RED: материал BLU} по столбцам — тем же правилом, что
+            # и в превью: часть столбцов команда не переключает вовсе
+            'team_map': qc_skin_parser.team_material_map(layout),
             'main_texture': layout.main_texture,
             'extra_materials': layout.extra_materials,
             'all_rows': layout.all_rows,
@@ -470,6 +473,134 @@ class ModelBuildService:
                 os.remove(tmp)
             except OSError:
                 pass
+
+    @staticmethod
+    def extract_bodygroup_groups(qc_path: str) -> List[List[Optional[str]]]:
+        """
+        Варианты каждой бодигруппы QC в порядке объявления.
+
+        `$bodygroup "shell" { studio "shell.smd" blank }` — это ПЕРЕКЛЮЧАТЕЛЬ:
+        игра показывает ровно один вариант, по умолчанию нулевой. Для превью
+        это важно: сложить все варианты в одну модель значит показать целую
+        бутылку и разбитую разом (в стоке так устроены 36 пушек из 295 — shell
+        у сигнальных, reload у гранатомётов, broken у бутылки, bites у сэндвича
+        — и 6 шапок вроде id_badge с девятью классовыми вариантами).
+
+        Returns:
+            Список групп; каждая группа — список вариантов в порядке QC, где
+            вариант это путь к SMD либо None для `blank` (пустой вариант).
+            Порядок групп — как в файле, поэтому первая обычно основное тело.
+        """
+        if not os.path.exists(qc_path):
+            return []
+        try:
+            with open(qc_path, 'r', encoding='utf-8', errors='replace') as f:
+                content = f.read()
+        except OSError:
+            return []
+
+        qc_dir = os.path.dirname(qc_path)
+        groups: List[List[Optional[str]]] = []
+        for m in re.finditer(r'\$(?:bodygroup|body)\b', content, re.IGNORECASE):
+            line_end = content.find('\n', m.end())
+            head = content[m.end():line_end if line_end != -1 else len(content)]
+            # Однострочная форма: $body studio "x.smd" — блока нет
+            inline = re.search(r'studio\s+"([^"]+\.smd)"', head, re.IGNORECASE)
+            if inline:
+                groups.append([os.path.join(qc_dir, inline.group(1))])
+                continue
+            # Блочная форма: '{' обычно на СЛЕДУЮЩЕЙ строке (так пишет Crowbar).
+            # Между заголовком и скобкой не должно быть другой директивы.
+            brace = content.find('{', m.end())
+            if brace == -1 or '$' in content[m.end():brace]:
+                continue
+            depth, end = 0, None
+            for i in range(brace, len(content)):
+                if content[i] == '{':
+                    depth += 1
+                elif content[i] == '}':
+                    depth -= 1
+                    if depth == 0:
+                        end = i
+                        break
+            if end is None:
+                continue
+            variants: List[Optional[str]] = []
+            for item in re.finditer(r'studio\s+"([^"]+\.smd)"|\bblank\b',
+                                    content[brace + 1:end], re.IGNORECASE):
+                ref = item.group(1)
+                variants.append(os.path.join(qc_dir, ref) if ref else None)
+            if variants:
+                groups.append(variants)
+        return groups
+
+    @staticmethod
+    def extract_all_mesh_smds(qc_path: str) -> List[str]:
+        """
+        ВСЕ меши модели: `$model`, `$body`, все варианты `$bodygroup`.
+
+        Нужно там, где важно «из чего вообще состоит модель», а не «что видно
+        по умолчанию»: например, чтобы посчитать, какой материал её покрывает.
+        Косметика часто объявляет единственный меш через `$model` (в кэше
+        декомпиляции таких QC каждый шестой), и разбор одних бодигрупп на них
+        не находит ничего.
+
+        Служебные SMD (physics/anim/pose) отбрасываются, порядок сохранён,
+        дубли убраны. Несуществующие файлы не возвращаются.
+        """
+        out: List[str] = []
+        seen = set()
+
+        def add(path: Optional[str]) -> None:
+            if not path:
+                return
+            low = os.path.basename(path).lower()
+            if any(skip in low for skip in NON_REFERENCE_SMD_KEYWORDS):
+                return
+            if low in seen or not os.path.exists(path):
+                return
+            seen.add(low)
+            out.append(path)
+
+        for variants in ModelBuildService.extract_bodygroup_groups(qc_path):
+            for variant in variants:
+                add(variant)
+
+        # $model "Body" "hat.smd" { ... } — одиночный меш без бодигруппы
+        try:
+            with open(qc_path, 'r', encoding='utf-8', errors='replace') as f:
+                content = f.read()
+        except OSError:
+            return out
+        qc_dir = os.path.dirname(qc_path)
+        for m in re.finditer(r'^\s*\$model\b[^\n]*?"([^"]+\.smd)"',
+                             content, re.IGNORECASE | re.MULTILINE):
+            add(os.path.join(qc_dir, m.group(1)))
+        return out
+
+    @staticmethod
+    def extract_default_body_smds(qc_path: str) -> List[str]:
+        """
+        SMD, которые игра показывает при бодигруппах по умолчанию.
+
+        Из каждой группы берётся НУЛЕВОЙ вариант (именно его показывает игра,
+        пока бодигруппу не переключили); `blank` означает, что группа по
+        умолчанию не рисуется. Служебные SMD (physics/anim) отбрасываются.
+        """
+        out: List[str] = []
+        seen = set()
+        for variants in ModelBuildService.extract_bodygroup_groups(qc_path):
+            first = variants[0] if variants else None
+            if not first:
+                continue                      # blank первым — группа не рисуется
+            low = os.path.basename(first).lower()
+            if any(skip in low for skip in NON_REFERENCE_SMD_KEYWORDS):
+                continue
+            if low in seen or not os.path.exists(first):
+                continue
+            seen.add(low)
+            out.append(first)
+        return out
 
     @staticmethod
     def extract_extra_body_smds(qc_path: str, weapon_key: str) -> List[str]:

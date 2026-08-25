@@ -16,6 +16,7 @@ from typing import List, Optional, Tuple
 
 from src.services.debug_service import DebugService
 from src.services.decompile_cache import get_cached_decompile, restore_from_cache, save_to_cache
+from src.services import qc_skin_parser
 from src.services.model_build_service import ModelBuildService
 from src.services.model_service import ModelService
 from src.services.smd_service import SMDService
@@ -32,6 +33,18 @@ from src.shared.file_utils import ensure_directory_exists, copy_file_safe
 from src.shared.logging_config import get_logger
 
 logger = get_logger(__name__)
+
+
+def texture_slot_key(cdmaterials_path: str, material: str) -> str:
+    """
+    Ключ «куда ляжет файл текстуры»: папка обхода + имя материала.
+
+    Нормализует слэши и регистр: путь приходит и в QC-виде (обратные слэши),
+    и в VPK-виде (прямые), а на диске это один и тот же файл.
+    """
+    cd = (cdmaterials_path or "").replace(chr(92), "/").strip().strip("/")
+    name = (material or "").replace(chr(92), "/").strip("/")
+    return f"{cd}/{name}".lower()
 
 
 class VpkModelPipeline:
@@ -397,8 +410,13 @@ class VpkModelPipeline:
         Ошибки одного класса не валят сборку — этот класс просто останется с
         оригинальной игровой моделью.
         """
-        if not (replace_model_smd_path and os.path.exists(replace_model_smd_path)):
-            return
+        # Модель класса пересобирается ВСЕГДА, даже когда пользователь менял
+        # только текстуру: путь к материалам в модели переписывается на папку
+        # обхода sv_pure, и класс, чью модель не тронули, продолжает грузить
+        # ОРИГИНАЛЬНУЮ текстуру игры. Раньше сюда заходили только при замене
+        # геометрии — и мод «работал только на одном классе».
+        has_geometry = bool(replace_model_smd_path
+                            and os.path.exists(replace_model_smd_path))
         use_explicit = bool(target_mdl_paths)
         if not use_explicit and (not hat_mdl_path or "%s" not in hat_mdl_path):
             return
@@ -493,15 +511,19 @@ class VpkModelPipeline:
                     continue
 
                 # Вставляем геометрию пользователя в reference SMD ЭТОГО класса
-                # (скелет/кости — класса, иначе bonemerge съедет).
-                ref_smd = VpkModelPipeline._find_decompiled_reference_smd(qc_p, wk, decomp_d)
-                if not ref_smd:
-                    logger.warning(f"[HAT MULTI] {cls}: reference SMD не найден — пропуск")
-                    continue
-                SMDService.replace_model_sections(
-                    replace_model_smd_path, ref_smd, ref_smd,
-                    keep_user_materials=keep_user_materials,
-                )
+                # (скелет/кости — класса, иначе bonemerge съедет). Без своей
+                # геометрии просто перекомпилируем модель класса как есть —
+                # ради пути к материалам.
+                if has_geometry:
+                    ref_smd = VpkModelPipeline._find_decompiled_reference_smd(
+                        qc_p, wk, decomp_d)
+                    if not ref_smd:
+                        logger.warning(f"[HAT MULTI] {cls}: reference SMD не найден — пропуск")
+                        continue
+                    SMDService.replace_model_sections(
+                        replace_model_smd_path, ref_smd, ref_smd,
+                        keep_user_materials=keep_user_materials,
+                    )
 
                 # Патчим cdmaterials в ту же папку обхода, что и основная модель —
                 # чтобы модель класса нашла нашу текстуру по тому же пути.
@@ -535,6 +557,7 @@ class VpkModelPipeline:
         vtf_options: dict,
         base_vmt_path: Path,
         bypass_prefix: str = "console",
+        written_textures: Optional[dict] = None,
     ) -> None:
         """
         Собирает доп. ИЗМЕНЁННЫЕ стили-модели шапки — каждый со СВОЕЙ моделью и
@@ -622,19 +645,21 @@ class VpkModelPipeline:
                     _sub = type('SubCtx', (), {'compile_dir': comp_d, 'vpkroot_dir': ctx.vpkroot_dir})()
                     ModelService.copy_compiled_models_to_vpkroot(_sub, qc_p)
 
-                    # Текстура стиля → materials/<папка обхода>/<cdmat0>/<tex_name>.vtf+.vmt
-                    if img and os.path.isfile(img):
-                        patched_cd = ModelBuildService.apply_cdmaterials_prefix(
-                            cdmat0, bypass_prefix)
-                        materials_rel = "materials/" + patched_cd.replace('\\', '/').strip().rstrip('/')
-                        vtf_dir = ctx.vpkroot_dir
-                        for part in materials_rel.split('/'):
-                            vtf_dir = vtf_dir / part
-                        VpkTextureBuilder._render_extra_texture(
-                            tex_name, img, vtf_dir, base_vmt_path, patched_cd,
-                            size, format_type, flags, vtf_options,
-                        )
-                        logger.info(f"[HAT STYLE] стиль {wk}: модель+текстура '{tex_name}' добавлены в мод")
+                    # Текстуры стиля → materials/<папка обхода>/<cdmat0>/
+                    patched_cd = ModelBuildService.apply_cdmaterials_prefix(
+                        cdmat0, bypass_prefix)
+                    materials_rel = "materials/" + patched_cd.replace('\\', '/').strip().rstrip('/')
+                    vtf_dir = ctx.vpkroot_dir
+                    for part in materials_rel.split('/'):
+                        vtf_dir = vtf_dir / part
+                    written = VpkModelPipeline._write_style_textures(
+                        qc_p, entry, img, tex_name, vtf_dir, base_vmt_path,
+                        patched_cd, size, format_type, flags, vtf_options,
+                        written_textures=written_textures, ctx=ctx, label=wk,
+                    )
+                    if written:
+                        logger.info(
+                            f"[HAT STYLE] стиль {wk}: модель и текстур: {written}")
                     else:
                         logger.info(f"[HAT STYLE] стиль {wk}: модель добавлена (без своей текстуры)")
                 except Exception as exc:
@@ -642,6 +667,92 @@ class VpkModelPipeline:
                         f"[HAT STYLE] {wk}: ошибка сборки стиля — пропуск: {exc}",
                         exc_info=True,
                     )
+
+    @staticmethod
+    def _write_style_textures(
+        qc_path: str,
+        entry: dict,
+        main_img: Optional[str],
+        main_tex: str,
+        vtf_dir: Path,
+        base_vmt_path: Path,
+        patched_cd: str,
+        size: Tuple[int, int],
+        format_type: str,
+        flags: List[str],
+        vtf_options: dict,
+        written_textures: Optional[dict] = None,
+        ctx=None,
+        label: str = "",
+    ) -> int:
+        """
+        Пишет ВСЕ текстуры одного стиля: каждый его материал и командный вариант.
+
+        Раньше стиль получал ровно одну текстуру — главный материал из
+        $texturegroup, — а пер-материальные и BLU-правки пользователя молча
+        терялись: панель их запоминает (`capture_edit_state()['textures']`),
+        метка «изменён» у стиля загоралась, сборка проходила без ошибок, и уже
+        в игре оказывалось, что у стиля заменена только часть. Это не редкость:
+        из 1401 модели стилей в стоке у 605 несколько материалов, у 575 есть
+        команда.
+
+        Правки пользователя хранятся по имени RED-материала, поэтому синяя
+        картинка пишется под именем ЕГО командной пары из $texturegroup.
+
+        Returns:
+            Сколько текстур записано.
+        """
+        from src.shared.constants import Team
+
+        textures = entry.get('textures') or {}
+        red_edits = {str(k).lower(): v
+                     for k, v in (textures.get(Team.RED) or {}).items()}
+        blu_edits = {str(k).lower(): v
+                     for k, v in (textures.get(Team.BLU) or {}).items()}
+
+        model = qc_skin_parser.load_model(os.path.dirname(qc_path))
+        mats = list(model.skin0) if model else []
+        team_map = model.team_map if model else {}
+        if main_tex and not any(m.lower() == main_tex.lower() for m in mats):
+            mats.insert(0, main_tex)
+
+        seen = written_textures if written_textures is not None else {}
+
+        def _render(name: str, img: Optional[str]) -> bool:
+            if not (img and os.path.isfile(img)):
+                return False
+            # Стили одной шапки нередко делят материал (63 шапки в стоке:
+            # «Bugscreen Up»/«Bugscreen Down» и т.п.). Тогда РАЗНЫМИ их
+            # текстуры не сделать — в игре у них один файл, и мод молча
+            # оставил бы ту, что записалась последней. Говорим об этом.
+            key = texture_slot_key(patched_cd, name)
+            prev = seen.get(key)
+            if prev and os.path.abspath(prev) != os.path.abspath(img) and ctx:
+                ctx.warn(
+                    f"Стили шапки делят материал '{name}': в игре они не могут "
+                    f"выглядеть по-разному, в мод попадёт одна текстура."
+                )
+            seen[key] = img
+            return bool(VpkTextureBuilder._render_extra_texture(
+                name, img, vtf_dir, base_vmt_path, patched_cd,
+                size, format_type, flags, vtf_options))
+
+        written = 0
+        for mat in mats:
+            low = mat.lower()
+            # Общая картинка стиля достаётся главному материалу — тому, что
+            # показан на главной карточке превью
+            img = red_edits.get(low)
+            if not img and low == (main_tex or '').lower():
+                img = main_img
+            if _render(mat, img):
+                written += 1
+
+            blu_mat = team_map.get(mat)
+            if blu_mat and not qc_skin_parser.is_shared_column(mat, blu_mat):
+                if _render(blu_mat, blu_edits.get(low)):
+                    written += 1
+        return written
 
     @staticmethod
     def _copy_precompiled_model(

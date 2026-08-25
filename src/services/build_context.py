@@ -70,6 +70,38 @@ class TextureBuildContext:
 
 
 @dataclass
+class MaterialSlots:
+    """
+    Куда мод пишет материалы и где искать их оригиналы в игре.
+
+    Эта шестёрка ходит вместе через всю сборку: у функций, которые пишут
+    материалы, было по 12-21 аргументу, и больше половины — вот эти пути
+    (плюс параметры рендера, для которых уже есть TextureBuildContext).
+    Перечислять их по одному в каждой сигнатуре — верный способ однажды
+    передать не тот путь и заметить это только по фиолетовой модели в игре.
+    """
+
+    #: Папка мода, куда кладутся VTF и VMT материалов.
+    vtf_output_path: Path
+    #: Готовый VMT главного материала — образец для вторичных.
+    vmt_path: Path
+    #: Путь materials/... внутри мода (куда указывает $basetexture).
+    patched_cdmaterials_path: str
+    #: Пути $cdmaterials ОРИГИНАЛЬНОЙ модели — где искать текстуры игры.
+    original_cdmaterials_paths: List[str] = field(default_factory=list)
+    tf2_textures_vpk: Optional[str] = None
+    tf2_misc_vpk: Optional[str] = None
+
+    def vtf(self, name: str) -> Path:
+        """Путь VTF материала внутри мода."""
+        return self.vtf_output_path / f"{name}.vtf"
+
+    def vmt(self, name: str) -> Path:
+        """Путь VMT материала внутри мода."""
+        return self.vtf_output_path / f"{name}.vmt"
+
+
+@dataclass
 class BuildContext:
     """Контекст сборки с временными путями"""
     

@@ -405,6 +405,18 @@ class TeamMaterialMapTests(unittest.TestCase):
             self.assertTrue(blu.lower().endswith("_blue") or blu == red,
                             f"{red} → {blu}")
 
+    def test_is_shared_column(self):
+        """Одно правило «столбец общий» на сборку и на превью."""
+        self.assertTrue(team_material_map and True)
+        from src.services.qc_skin_parser import is_shared_column
+        self.assertTrue(is_shared_column("auto_blue", "auto_blue"))
+        self.assertTrue(is_shared_column("Auto_Blue", "auto_blue"),
+                        "регистр в $texturegroup гуляет от файла к файлу")
+        self.assertTrue(is_shared_column(" auto ", "auto"))
+        self.assertFalse(is_shared_column("auto", "auto_blue"))
+        self.assertFalse(is_shared_column("", "auto_blue"))
+        self.assertTrue(is_shared_column(None, None))
+
 
 if __name__ == "__main__":
     unittest.main()

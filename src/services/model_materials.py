@@ -18,6 +18,7 @@ import tempfile
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from src.services import vmt_parse
 from src.services.tf2_paths import TF2Paths
 from src.services.vtf_preview_service import (
     open_vpks, read_from_vpks, vtf_bytes_to_png,
@@ -27,7 +28,6 @@ from src.shared.logging_config import get_logger
 logger = get_logger(__name__)
 
 _RE_CDMATERIALS = re.compile(r'^\s*\$cdmaterials\s+"?([^"\r\n]*)"?', re.IGNORECASE)
-_RE_BASETEXTURE = re.compile(r'"?\$basetexture"?\s+"?([^"\r\n]+)"?', re.IGNORECASE)
 
 #: Потолок стороны текстуры в превью: 2К-текстура в base64 — это мегабайты,
 #: которые незачем гнать через runJavaScript ради серого силуэта под эффектом.
@@ -113,10 +113,10 @@ def resolve_model_textures(qc_path: str, mat_names: List[str],
         if vmt_raw is None:
             logger.debug(f"VMT материала {name} не найден в VPK")
             continue
-        base = _RE_BASETEXTURE.search(vmt_raw.decode("utf-8", errors="replace"))
-        if base is None:
+        vtf_rel = vmt_parse.basetexture(
+            vmt_raw.decode("utf-8", errors="replace"))
+        if not vtf_rel:
             continue
-        vtf_rel = base.group(1).strip().replace("\\", "/").lower().lstrip("/")
         if not vtf_rel.endswith(".vtf"):
             vtf_rel += ".vtf"
         if not vtf_rel.startswith("materials/"):

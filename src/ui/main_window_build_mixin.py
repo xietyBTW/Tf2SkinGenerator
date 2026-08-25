@@ -298,6 +298,10 @@ class MainWindowBuildMixin:
                     'keep_materials': bool(_st.get('custom_keep')),
                     'image_path': _st.get('image_path'),
                     'vtf_path': _st.get('vtf_path'),
+                    # Пер-материальные и командные правки стиля: без них в мод
+                    # уходила только главная текстура, а остальные карточки
+                    # (и BLU) пользователь терял молча
+                    'textures': _st.get('textures') or {},
                 })
             hat_style_builds = _builds or None
             if hat_style_builds:

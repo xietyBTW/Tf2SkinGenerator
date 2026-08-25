@@ -24,8 +24,8 @@ from typing import Optional
 from PySide6.QtCore import Signal
 
 from src.services.base_worker import BaseWorker
-from src.services import vmt_tint
 from src.services.game_vpk_reader import GameVpkReader
+from src.services.material_resolver import MaterialResolver
 from src.shared.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -83,17 +83,16 @@ class HatTextureExtractWorker(BaseWorker):
         if self.isInterruptionRequested():
             return
 
-        # ── 2. Находим QC ──────────────────────────────────────────────────── #
+        # ── 2. Разбираем QC (один раз, общим разбором) ─────────────────────── #
         self.progress.emit(35, "Parsing QC file...")
-        qc_files = glob.glob(os.path.join(decomp_dir, "*.qc"))
-        if not qc_files:
+        from src.services import qc_skin_parser
+        model = qc_skin_parser.load_model(decomp_dir)
+        if model is None:
             self.finished.emit(False, f"QC not found in: {decomp_dir}")
             return
 
-        from src.services import qc_skin_parser
-        cdmaterials = qc_skin_parser.parse_cdmaterials(qc_files[0])
-        rows = qc_skin_parser.parse_texturegroup_rows(qc_files[0])
-        skin0_textures = rows[0] if rows else []
+        cdmaterials = model.cdmaterials
+        skin0_textures = model.skin0
         if not cdmaterials:
             self.finished.emit(False, "No $cdmaterials in QC")
             return
@@ -125,6 +124,10 @@ class HatTextureExtractWorker(BaseWorker):
                 self.finished.emit(False, "Could not open any VPK file")
                 return
 
+            # Цепочка VMT → $basetexture → VTF — общая (MaterialResolver);
+            # краску НЕ впечатываем: экспорт отдаёт исходный файл игры
+            materials = MaterialResolver(reader, self._export, apply_tint=False)
+
             self.progress.emit(55, "Searching VMT/VTF in VPK...")
             for idx, mat_name in enumerate(mat_names):
                 if self.isInterruptionRequested():
@@ -132,29 +135,22 @@ class HatTextureExtractWorker(BaseWorker):
 
                 pct = 55 + int(idx / total * 35)
                 self.progress.emit(pct, f"Extracting: {mat_name}...")
-                mat_lower = mat_name.lower()
 
-                vmt_info = reader.find_vmt(cdmaterials, mat_lower)
-                if not vmt_info:
-                    logger.info(f"[hat-tex] VMT not found for '{mat_lower}'")
-                    continue
-                vmt_path, vmt_content = vmt_info
-
-                basetexture = GameVpkReader.parse_basetexture(vmt_content)
+                info = materials.describe(mat_name, cdmaterials)
+                basetexture = info.basetexture
                 if not basetexture:
-                    logger.warning(f"[hat-tex] No $baseTexture in VMT: {vmt_path}")
+                    logger.info(f"[hat-tex] no $basetexture for '{mat_name}'")
                     continue
                 if basetexture in seen_basetex:
                     continue
                 seen_basetex.add(basetexture)
 
-                vtf_data = reader.find_vtf_for_basetexture(basetexture)
+                vtf_data = materials.vtf_bytes(mat_name, cdmaterials)
                 if not vtf_data:
                     logger.warning(f"[hat-tex] VTF not found for $baseTexture={basetexture}")
                     continue
 
-                tint = vmt_tint.parse_tint(vmt_content)
-                if tint is not None and not tint.is_neutral:
+                if info.tint is not None and not info.tint.is_neutral:
                     painted = True
 
                 out = self._save_vtf(vtf_data, basetexture)
