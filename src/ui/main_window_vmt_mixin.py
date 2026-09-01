@@ -10,7 +10,6 @@ VMT из игровых VPK / из QC / для шапок и открытие р
 import os
 from typing import Optional
 
-from src.data.weapons import weapon_key_from_mode
 from src.shared.logging_config import get_logger
 from src.ui.error_handler import ErrorHandler
 from src.ui.vmt_editor import VMTEditorDialog
@@ -23,51 +22,25 @@ class MainWindowVmtMixin:
 
     def _resolve_vmt_target(self):
         """(weapon_key, display_name) для VMT-редактора по текущему режиму, либо None
-        (с предупреждением), если режим не поддерживается."""
-        from src.data.player_hands import HAND_MODE_KEYS, HAND_MODES
-        from src.data.player_characters import PLAYER_BODY_MODE_KEYS, PLAYER_CHARACTERS
-        if self.mode == "hat":
-            hat_mdl = getattr(self, '_hat_mdl_path', None)
-            if not hat_mdl:
-                ErrorHandler.show_warning(
-                    self,
-                    self.t.get('select_weapon_error', 'Select a hat first'),
-                    self.t['error'],
-                )
-                return None
-            # Ключ для кэша — нормализованный MDL путь
-            weapon_key   = hat_mdl.replace("\\", "/").lower()
-            display_name = getattr(self, '_hat_display_name', weapon_key)
+        (с предупреждением), если режим не поддерживается.
 
-        elif self.mode in HAND_MODE_KEYS:
-            arm_model = HAND_MODES.get(self.mode, {}).get("arm_model", "")
-            if not arm_model:
-                ErrorHandler.show_warning(
-                    self,
-                    self.t.get('vmt_editor_not_available', 'VMT editor is not available for this mode.'),
-                    self.t['error'],
-                )
-                return None
-            weapon_key   = arm_model
-            display_name = arm_model
+        Само правило — в ``vmt_source_service.resolve_target``: тем же путём
+        ключ находит веб-представление, а расхождение означало бы «правка
+        потерялась»."""
+        from src.services import vmt_source_service
 
-        elif self.mode in PLAYER_BODY_MODE_KEYS:
-            mdl_key = PLAYER_CHARACTERS.get(self.mode, {}).get("mdl_key", "")
-            if not mdl_key:
-                ErrorHandler.show_warning(
-                    self,
-                    self.t.get('vmt_editor_not_available', 'VMT editor is not available for this mode.'),
-                    self.t['error'],
-                )
-                return None
-            weapon_key   = mdl_key
-            display_name = mdl_key
-
-        else:
-            # Обычное оружие: mode = "scout_c_scattergun" → "c_scattergun"
-            weapon_key   = weapon_key_from_mode(self.mode)
-            display_name = weapon_key
-        return weapon_key, display_name
+        target = vmt_source_service.resolve_target(
+            self.mode,
+            hat_mdl=getattr(self, '_hat_mdl_path', None),
+            hat_display=getattr(self, '_hat_display_name', None),
+        )
+        if target is None:
+            key = ('select_weapon_error' if self.mode == 'hat'
+                   else 'vmt_editor_not_available')
+            fallback = ('Select a hat first' if self.mode == 'hat'
+                        else 'VMT editor is not available for this mode.')
+            ErrorHandler.show_warning(self, self.t.get(key, fallback), self.t['error'])
+        return target
 
     def _open_vmt_for_material(self, material: str = "") -> None:
         """
@@ -136,10 +109,9 @@ class MainWindowVmtMixin:
             return
 
         # ── Извлекаем VMT из VPK ─────────────────────────────────────────── #
-        if self.mode == "hat":
-            vmt_path = self._extract_hat_vmt_from_game(weapon_key, tf2_root_dir, material_name)
-        else:
-            vmt_path = self.extract_original_vmt_from_game(weapon_key, tf2_root_dir, material_name)
+        from src.services import vmt_source_service
+        vmt_path = vmt_source_service.extract_original(
+            self.mode, weapon_key, tf2_root_dir, material_name, self.language)
 
         if not vmt_path:
             ErrorHandler.show_warning(
@@ -157,161 +129,21 @@ class MainWindowVmtMixin:
 
     def _extract_game_vmt_content(self, weapon_key: str,
                                   material_name: Optional[str] = None) -> Optional[str]:
-        """Извлекает игровой оригинал VMT и возвращает его СОДЕРЖИМОЕ (не путь).
+        """Игровой оригинал VMT как СОДЕРЖИМОЕ — для «вернуть как в игре»."""
+        from src.services import vmt_source_service
 
-        Нужно для бэкапа «Reset to game original», когда открываем уже сохранённую
-        правку. None — если путь к TF2 не задан или оригинал не найден."""
-        settings     = self.settings_panel.get_settings()
-        tf2_root_dir = settings.get('tf2_game_folder', '')
+        tf2_root_dir = self.settings_panel.get_settings().get('tf2_game_folder', '')
         if not tf2_root_dir:
             return None
-        if self.mode == "hat":
-            path = self._extract_hat_vmt_from_game(weapon_key, tf2_root_dir, material_name)
-        else:
-            path = self.extract_original_vmt_from_game(weapon_key, tf2_root_dir, material_name)
-        if path and os.path.exists(path):
-            try:
-                with open(path, "r", encoding="utf-8", errors="replace") as f:
-                    return f.read()
-            except OSError:
-                return None
-        return None
+        return vmt_source_service.original_content(
+            self.mode, weapon_key, tf2_root_dir, material_name, self.language)
 
-    def _extract_hat_vmt_from_game(self, hat_mdl: str, tf2_root_dir: str,
-                                   material_name: Optional[str] = None) -> Optional[str]:
-        """
-        Извлекает VMT для шапки через $cdmaterials из кэшированного QC
-        (тот же общий путь, что и у оружия — _extract_vmt_from_qc).
-        """
-        from src.services import decompile_cache
-
-        qc_path = decompile_cache.find_cached_qc_for_weapon(hat_mdl)
-        if not qc_path:
-            # Нет кэша — пробуем без декомпиляции (быстро, не всегда работает)
-            return None
-
-        from src.services import qc_skin_parser
-        # Материалы skin0, а если их нет — стебель имени модели (минус класс).
-        _rows = qc_skin_parser.parse_texturegroup_rows(qc_path)
-        skin0_textures = list(_rows[0]) if _rows else []
-        if not skin0_textures:
-            import re as _re
-            stem = os.path.splitext(os.path.basename(hat_mdl))[0]
-            stem = _re.sub(
-                r'_(heavy|scout|soldier|pyro|demoman|engineer|medic|sniper|spy)$',
-                '', stem, flags=_re.IGNORECASE,
-            )
-            skin0_textures = [stem]
-
-        # Конкретный материал (пер-карточная правка) — ищем именно его; если у
-        # добавленной текстуры нет своего VMT в игре, наследуем от главного
-        # материала skin0 (правило #2).
-        if material_name:
-            fallback = [m for m in skin0_textures if m.lower() != material_name.lower()]
-            mat_names = [material_name] + fallback
-        else:
-            mat_names = skin0_textures
-
-        return self._extract_vmt_from_qc(qc_path, tf2_root_dir, mat_names)
-    
     def extract_original_vmt_from_game(self, weapon_key: str, tf2_root_dir: str,
                                        material_name: Optional[str] = None) -> Optional[str]:
-        """
-        Извлекает оригинальный VMT оружия через $cdmaterials из QC (как у шапок).
-
-        Папки материалов берём из декомпилированного QC модели (авторитетно), а не
-        угадываем хардкодом. QC обычно уже в кэше после 3D-превью; если нет —
-        декомпилируем модель на месте тем же сервисом, что и превью.
-
-        Args:
-            weapon_key:    ключ оружия (например c_scattergun).
-            tf2_root_dir:  корень TF2.
-            material_name: конкретный материал (пер-карточно) или None → skin0/ключ.
-
-        Returns:
-            Путь к извлечённому VMT или None.
-        """
-        from src.services import decompile_cache, qc_skin_parser
-
-        qc_path = decompile_cache.find_cached_qc_for_weapon(weapon_key)
-        if not qc_path:
-            # Нет кэша — декомпилируем сейчас (класс в mode не важен).
-            try:
-                import glob as _glob
-                from src.services.extract_model_service import ExtractModelService
-                ok, _msg, _cancel, data = (
-                    ExtractModelService.prepare_decompiled_model_files_with_progress(
-                        tf2_root_dir, f"scout_{weapon_key}", weapon_key, language=self.language,
-                    )
-                )
-                if ok and data and data.get("decompile_dir"):
-                    qcs = _glob.glob(os.path.join(data["decompile_dir"], "*.qc"))
-                    qc_path = qcs[0] if qcs else None
-            except Exception as e:
-                logger.debug(f"VMT: декомпиляция для {weapon_key} не удалась: {e}")
-                qc_path = None
-        if not qc_path:
-            return None
-
-        # Имя(имена) материала: конкретный (пер-карточно) или materials из skin0.
-        rows = qc_skin_parser.parse_texturegroup_rows(qc_path)
-        skin0 = list(rows[0]) if rows else []
-        if material_name:
-            # Специфичный материал первым; если у добавленной текстуры нет своего
-            # VMT в игре — берём VMT главного материала (skin0) как основу
-            # (правило #2: наследуем от основного оружия и правим).
-            fallback = [m for m in skin0 if m.lower() != material_name.lower()]
-            mat_names = [material_name] + fallback + ([weapon_key] if not skin0 else [])
-        else:
-            mat_names = skin0 or [weapon_key]
-        return self._extract_vmt_from_qc(qc_path, tf2_root_dir, mat_names)
-
-    def _extract_vmt_from_qc(self, qc_path: str, tf2_root_dir: str,
-                             mat_names: list) -> Optional[str]:
-        """Извлекает VMT через $cdmaterials из QC: папки материалов берём из самой
-        модели (как делает игра), а не угадываем. Единый путь для оружия и шапок."""
-        from src.services.tf2_paths import TF2Paths
-        from src.services.game_vpk_reader import GameVpkReader
-        from src.services import qc_skin_parser
-
-        if not qc_path or not os.path.exists(qc_path):
-            return None
-        cdmaterials = qc_skin_parser.parse_cdmaterials(qc_path)
-        if not cdmaterials or not mat_names:
-            return None
-
-        try:
-            _, misc_vpk, _ = TF2Paths.resolve(tf2_root_dir)
-        except Exception:
-            misc_vpk = None
-        textures_vpk = TF2Paths.resolve_textures_vpk(tf2_root_dir)
-
-        # GameVpkReader берёт хэндлы из общего потоко-локального кэша: индекс
-        # каждого VPK парсится один раз на поток, повторные открытия редактора
-        # VMT мгновенны. Закрывать хэндлы нельзя — ими владеет кэш.
-        vmt_content: Optional[str] = None
-        vmt_filename: str = "material.vmt"
-        with GameVpkReader([misc_vpk, textures_vpk]) as reader:
-            if not reader.paks:
-                return None
-            for mat_name in mat_names:
-                info = reader.find_vmt(cdmaterials, mat_name.lower())
-                if info:
-                    vmt_content = info[1]
-                    vmt_filename = os.path.basename(info[0])
-                    break
-        if not vmt_content:
-            return None
-
-        temp_dir = os.path.join("tools", "temp_vmt_extract")
-        os.makedirs(temp_dir, exist_ok=True)
-        out_path = os.path.join(temp_dir, vmt_filename)
-        try:
-            with open(out_path, "w", encoding="utf-8") as f:
-                f.write(vmt_content)
-            return out_path
-        except OSError:
-            return None
+        """Путь к извлечённому оригиналу VMT (правило — в vmt_source_service)."""
+        from src.services import vmt_source_service
+        return vmt_source_service.extract_weapon_vmt(
+            weapon_key, tf2_root_dir, material_name, self.language)
 
     def open_vmt_editor(self, path: str, edit_key: str = "", display_name: str = "",
                         original_content: Optional[str] = None) -> None:

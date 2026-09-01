@@ -4,7 +4,8 @@
 
 import os
 import re
-from typing import List, Tuple
+from pathlib import Path
+from typing import Dict, List, Tuple
 from PIL import Image, ImageDraw
 from src.shared.logging_config import get_logger
 
@@ -96,13 +97,62 @@ class UVLayoutService:
         return uv_coords
     
     @staticmethod
+    def parse_smd_uv_by_material(smd_path: str) -> Dict[str, List[Tuple[float, ...]]]:
+        """
+        То же, что parse_smd_uv_coordinates, но с разбивкой по материалам.
+
+        У каждого материала СВОЯ текстура, а развёртки у всех в одних и тех же
+        координатах [0,1]². Свалить их в одну картинку — значит наложить швы
+        друг на друга: по такой разметке не порисуешь.
+        """
+        if not os.path.exists(smd_path):
+            raise FileNotFoundError(f"SMD файл не найден: {smd_path}")
+
+        with open(smd_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+
+        triangles_match = re.search(r'triangles\s*\n(.*?)\nend', content, re.DOTALL)
+        if not triangles_match:
+            return {}
+
+        by_material: Dict[str, List[Tuple[float, ...]]] = {}
+        current = ''
+        for raw in triangles_match.group(1).split('\n'):
+            line = raw.strip()
+            if not line or line.startswith('//'):
+                continue
+            parts = line.split()
+            is_vertex = False
+            if len(parts) >= 9:
+                try:
+                    int(parts[0])
+                    float(parts[1])
+                    is_vertex = True
+                except (ValueError, IndexError):
+                    is_vertex = False
+
+            if not is_vertex:
+                current = line          # строка с именем материала
+                continue
+            try:
+                by_material.setdefault(current, []).append((
+                    float(parts[7]), float(parts[8]),
+                    float(parts[1]), float(parts[2]), float(parts[3]),
+                    float(parts[4]), float(parts[5]), float(parts[6]),
+                ))
+            except (ValueError, IndexError):
+                continue
+        return by_material
+
+    @staticmethod
     def draw_uv_layout(
         uv_coords: List[Tuple[float, ...]],
         output_path: str,
         image_size: Tuple[int, int] = (1024, 1024),
         line_color: str = "red",
         line_width: int = 1,
-        point_size: int = 0
+        point_size: int = 0,
+        caption: str = ""
     ) -> None:
         """
         Рисует UV разметку на изображении
@@ -157,40 +207,64 @@ class UVLayoutService:
                         fill=line_color
                     )
         
+        # Имя материала прямо на картинке: файлов у многоматериальной модели
+        # несколько, и без подписи они различаются только именем в проводнике.
+        if caption:
+            draw.text((6, 4), caption, fill="black")
+
         # Сохраняем изображение
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         img.save(output_path)
     
     @staticmethod
+    def _material_file(output_path: str, material: str) -> str:
+        """Имя файла разметки для материала: «..._uv_layout__<материал>.png»."""
+        safe = re.sub(r'[^A-Za-z0-9_.-]+', '_', material).strip('_') or 'material'
+        base = Path(output_path)
+        return str(base.with_name(f"{base.stem}__{safe}{base.suffix}"))
+
+    @staticmethod
     def generate_uv_layout_from_smd(
         smd_path: str,
         output_path: str,
         image_size: Tuple[int, int] = (1024, 1024)
-    ) -> bool:
+    ) -> List[str]:
         """
-        Генерирует UV разметку из SMD файла
-        
+        Рисует UV-разметку модели: по файлу на КАЖДЫЙ материал.
+
+        У одноматериальной модели файл один и называется как просили. У
+        многоматериальной к имени добавляется материал: развёртки материалов
+        живут в одних и тех же координатах [0,1]², на общей картинке ложатся
+        друг на друга, и рисовать по такой разметке нельзя.
+
         Args:
             smd_path: Путь к SMD файлу
-            output_path: Путь для сохранения изображения UV разметки
+            output_path: Путь (одноматериальная модель) или основа имени
             image_size: Размер выходного изображения
-            
+
         Returns:
-            True если успешно, False если ошибка
+            Список записанных файлов; пустой — рисовать было нечего.
         """
         try:
             logger.info(f"Начинаем генерацию UV разметки из SMD файла: {smd_path}")
-            uv_coords = UVLayoutService.parse_smd_uv_coordinates(smd_path)
-            logger.debug(f"Найдено UV координат: {len(uv_coords)}")
-            if not uv_coords:
+            by_material = UVLayoutService.parse_smd_uv_by_material(smd_path)
+            if not by_material:
                 logger.warning(f"Не найдено UV координат в SMD файле: {smd_path}")
-                return False
-            
-            logger.debug(f"Рисуем UV разметку на изображении размером {image_size}")
-            UVLayoutService.draw_uv_layout(uv_coords, output_path, image_size)
-            logger.info(f"UV разметка успешно создана: {output_path}")
-            return True
+                return []
+
+            written: List[str] = []
+            single = len(by_material) == 1
+            for material, uv_coords in by_material.items():
+                if not uv_coords:
+                    continue
+                target = (output_path if single
+                          else UVLayoutService._material_file(output_path, material))
+                UVLayoutService.draw_uv_layout(uv_coords, target, image_size,
+                                               caption='' if single else material)
+                written.append(target)
+                logger.info(f"UV разметка успешно создана: {target}")
+            return written
         except Exception as e:
             logger.error(f"Ошибка при создании UV разметки: {e}", exc_info=True)
-            return False
+            return []
 

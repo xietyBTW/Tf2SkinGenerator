@@ -45,7 +45,11 @@ class ExtractModelService:
 
     @staticmethod
     def _build_paths_to_try(mode: str, weapon_key: str, tf2_root: str = None) -> list[str]:
-        base_path_from_config = WEAPON_MDL_PATHS[weapon_key]
+        # Ключ может быть незнакомым (модель из пользовательского VPK) — тогда
+        # берём стандартную раскладку c_models вместо падения по KeyError.
+        base_path_from_config = WEAPON_MDL_PATHS.get(
+            weapon_key, f"models/weapons/c_models/{weapon_key}/{weapon_key}.mdl"
+        )
         paths_to_try = []
 
         # Точный путь из items_game.txt (авторитетный) — первым кандидатом.
@@ -120,10 +124,16 @@ class ExtractModelService:
         weapon_key: str,
         image_size: Tuple[int, int],
         export_folder: str = "export",
-    ) -> Tuple[bool, str]:
+    ) -> Tuple[bool, str, List[str]]:
         """
         Генерирует PNG c UV-разметкой из уже декомпилированной модели
-        (без полной сборки мода). Возвращает (успех, путь_или_сообщение_об_ошибке).
+        (без полной сборки мода).
+
+        Файлов бывает несколько: у каждого материала своя текстура и своя
+        развёртка, а на одной картинке они ложатся друг на друга.
+
+        Returns:
+            (успех, первый файл или причина отказа, все файлы)
         """
         from src.services.smd_service import SMDService
         from src.services.uv_layout_service import UVLayoutService
@@ -131,7 +141,7 @@ class ExtractModelService:
         smd_path = SMDService.find_reference_smd(str(decompile_dir), weapon_key)
         if not smd_path or not os.path.exists(smd_path):
             logger.warning(f"UV-шаблон: не найден reference SMD для {weapon_key} в {decompile_dir}")
-            return False, "no_smd"
+            return False, "no_smd", []
 
         # weapon_key для персонажей/шапок может быть полным mdl-путём — берём
         # безопасное имя файла из его basename.
@@ -140,10 +150,12 @@ class ExtractModelService:
             Path(export_folder), f"{safe_name}_uv_layout.png"
         )
         ensure_directory_exists(out_path.parent)
-        if UVLayoutService.generate_uv_layout_from_smd(smd_path, str(out_path), image_size):
-            logger.info(f"UV-шаблон сохранён: {out_path}")
-            return True, str(out_path)
-        return False, "render_failed"
+        written = UVLayoutService.generate_uv_layout_from_smd(
+            smd_path, str(out_path), image_size)
+        if written:
+            logger.info(f"UV-шаблон сохранён: {len(written)} файл(ов), {written[0]}")
+            return True, written[0], written
+        return False, "render_failed", []
 
     @staticmethod
     def prepare_decompiled_model_files_with_progress(
@@ -370,6 +382,24 @@ class ExtractModelService:
             "files": files,
         }
         return True, t.get("extract_model_completed", "Извлечение завершено"), False, data
+
+    @staticmethod
+    def default_export_selection(file_names: List[str]) -> List[str]:
+        """
+        Что отметить по умолчанию в списке подготовленных файлов.
+
+        Обычно нужен один файл — reference-SMD: это сама геометрия, остальное
+        (физика, LOD, анимации) человек берёт осознанно. Правило общее для окна
+        и для веб-страницы, поэтому живёт здесь, а не в диалоге.
+        """
+        lower = [(n, n.lower()) for n in file_names]
+        for name, low in lower:
+            if low.endswith("_reference.smd") or ("reference" in low and low.endswith(".smd")):
+                return [name]
+        for name, low in lower:
+            if low.endswith(".smd"):
+                return [name]
+        return []
 
     @staticmethod
     def export_selected_files(

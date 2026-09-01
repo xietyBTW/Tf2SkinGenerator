@@ -23,11 +23,33 @@ UV:
 
 import os
 import re
-from typing import Dict, List, Optional, Tuple
+from dataclasses import dataclass
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from src.shared.logging_config import get_logger
 
 logger = get_logger(__name__)
+
+#: Секция triangles целиком — её разбирают и полный парсер, и быстрый скан.
+_RE_TRIANGLES = re.compile(r"\btriangles\b(.*?)\bend\b", re.DOTALL | re.IGNORECASE)
+
+
+@dataclass(frozen=True)
+class MeshPart:
+    """Один меш сцены со своей позой.
+
+    Обычная модель — это одна часть. Вьюмодель — две (руки и оружие): скелеты
+    разные, матрицы скиннинга считаются отдельно (см. viewmodel_pose), а сцена
+    и оси общие.
+    """
+
+    smd_path: str
+    #: Бодигруппы и прочие части, разделяющие скелет с основным мешем.
+    extra_smd_paths: Sequence[str] = ()
+    #: {кость: матрица} — готовые матрицы скиннинга. None — меш как есть.
+    skinning: Optional[dict] = None
+    #: Если задан — оставить только эти материалы.
+    include_mats: Optional[set] = None
 
 
 class SmdToObjService:
@@ -73,32 +95,60 @@ class SmdToObjService:
             (success, material_names) где material_names — список уникальных
             имён материалов в том порядке, в котором они встречаются в SMD.
         """
+        return SmdToObjService.convert_parts(
+            [MeshPart(
+                smd_path=smd_path,
+                extra_smd_paths=tuple(extra_smd_paths or ()),
+                skinning=SmdToObjService._pose_matrices(smd_path, pose_smd_path),
+                include_mats=include_mats,
+            )],
+            obj_path,
+            source_zup=source_zup,
+            keep_source_axes=keep_source_axes,
+        )
+
+    @staticmethod
+    def convert_parts(
+        parts: Sequence["MeshPart"],
+        obj_path: str,
+        *,
+        source_zup: bool = True,
+        keep_source_axes: bool = False,
+    ) -> Tuple[bool, List[str]]:
+        """
+        Собирает ОДИН OBJ + MTL из нескольких мешей с разными позами.
+
+        Нужно там, где в кадре несколько моделей сразу: вьюмодель — это руки
+        класса и оружие, у каждого свой скелет и своя матрица скиннинга, но
+        общее пространство и одна сцена.
+
+        Оси задаются на всю сцену, а не на часть: части уже приведены в одно
+        пространство своими позами, и разная конвертация развалила бы кадр.
+
+        Имена материалов у частей обязаны различаться — по ним вьювер потом
+        раскладывает текстуры. Совпадение логируется: значит, пользовательская
+        текстура ляжет сразу на обе части.
+
+        Returns:
+            (успех, имена материалов) — в порядке появления, части за частью.
+        """
         try:
-            triangles_by_mat = SmdToObjService._parse_triangles_by_mat(smd_path)
+            triangles_by_mat: Dict[str, List[List[dict]]] = {}
+            for part in parts:
+                part_tris = SmdToObjService._part_triangles(part)
+                for mat, tris in part_tris.items():
+                    if mat in triangles_by_mat:
+                        logger.warning(
+                            f"SMD→OBJ: материал '{mat}' есть у нескольких частей "
+                            f"сцены — они получат одну текстуру"
+                        )
+                    triangles_by_mat.setdefault(mat, []).extend(tris)
 
-            # Merge extra SMDs (bodygroups, etc.) into the same triangle dict
-            for extra in (extra_smd_paths or []):
-                if not os.path.exists(extra):
-                    logger.warning(f"SMD→OBJ: extra SMD не найден: {extra}")
-                    continue
-                extra_tris = SmdToObjService._parse_triangles_by_mat(extra)
-                for mat, tris in extra_tris.items():
-                    if mat not in triangles_by_mat:
-                        triangles_by_mat[mat] = []
-                    triangles_by_mat[mat].extend(tris)
-                logger.info(
-                    f"SMD→OBJ: merged bodygroup '{os.path.basename(extra)}' "
-                    f"({sum(len(v) for v in extra_tris.values())} треугольников)"
-                )
-
-            SmdToObjService._apply_pose(triangles_by_mat, smd_path, pose_smd_path)
-
-            if include_mats is not None:
-                triangles_by_mat = {
-                    k: v for k, v in triangles_by_mat.items() if k in include_mats
-                }
             if not triangles_by_mat:
-                logger.warning(f"SMD→OBJ: нет треугольников в {smd_path}")
+                logger.warning(
+                    f"SMD→OBJ: нет треугольников "
+                    f"({[os.path.basename(p.smd_path) for p in parts]})"
+                )
                 return False, []
 
             obj_dir  = os.path.dirname(obj_path)
@@ -157,8 +207,9 @@ class SmdToObjService:
                     faces.append(tuple(face_idx))
                 faces_by_mat[mat] = faces
 
+            sources = ", ".join(os.path.basename(p.smd_path) for p in parts)
             with open(obj_path, "w", encoding="utf-8") as f:
-                f.write(f"# Converted from {os.path.basename(smd_path)}\n")
+                f.write(f"# Converted from {sources}\n")
                 f.write(f"mtllib {mtl_name}\n\n")
 
                 for p in positions:
@@ -191,55 +242,113 @@ class SmdToObjService:
             return True, mat_names
 
         except Exception as exc:
-            logger.error(f"Ошибка SMD→OBJ ({smd_path}): {exc}", exc_info=True)
+            logger.error(
+                f"Ошибка SMD→OBJ "
+                f"({[os.path.basename(x.smd_path) for x in parts]}): {exc}",
+                exc_info=True)
             return False, []
 
     # ── Внутренние методы ─────────────────────────────────────────────────── #
 
     @staticmethod
-    def _apply_pose(triangles_by_mat: Dict[str, List[List[dict]]],
-                    ref_smd: str, pose_smd: Optional[str]) -> bool:
+    def scan_material_names(smd_paths: Sequence[str]) -> set:
         """
-        Переводит вершины из bind-позы в позу анимации (на месте).
+        Имена материалов из SMD без разбора вершин — в 10-30 раз быстрее.
 
-        Бодигруппы делят скелет с reference-мешем, поэтому матрицы считаются
-        один раз на всю модель. Любая неудача — молчаливый отказ: превью
-        останется в bind-позе, как было раньше.
+        Нужно там, где важен только состав модели: подобрать превью-фильтр или
+        понять, какие меши сцены чьи.
+        """
+        result: set = set()
+        for path in smd_paths:
+            if not path or not os.path.exists(path):
+                continue
+            try:
+                with open(path, "r", encoding="utf-8", errors="replace") as f:
+                    content = f.read()
+                m = _RE_TRIANGLES.search(content)
+                if not m:
+                    continue
+                lines = [ln.strip() for ln in m.group(1).splitlines() if ln.strip()]
+                # Каждые 4 строки: имя материала, вершина, вершина, вершина.
+                result.update(lines[i] for i in range(0, len(lines), 4))
+            except Exception as exc:
+                logger.debug(f"SMD: не прочитать материалы {path}: {exc}")
+        return result
+
+    @staticmethod
+    def _part_triangles(part: "MeshPart") -> Dict[str, List[List[dict]]]:
+        """Треугольники одной части сцены: меш + бодигруппы, уже в своей позе."""
+        triangles_by_mat = SmdToObjService._parse_triangles_by_mat(part.smd_path)
+
+        # Бодигруппы (доп. геометрия из отдельных SMD) делят скелет с основным
+        # мешем, поэтому доливаются ДО применения позы.
+        for extra in part.extra_smd_paths:
+            if not os.path.exists(extra):
+                logger.warning(f"SMD→OBJ: extra SMD не найден: {extra}")
+                continue
+            extra_tris = SmdToObjService._parse_triangles_by_mat(extra)
+            for mat, tris in extra_tris.items():
+                triangles_by_mat.setdefault(mat, []).extend(tris)
+            logger.info(
+                f"SMD→OBJ: merged bodygroup '{os.path.basename(extra)}' "
+                f"({sum(len(v) for v in extra_tris.values())} треугольников)"
+            )
+
+        SmdToObjService._apply_skinning(
+            triangles_by_mat, part.skinning, os.path.basename(part.smd_path)
+        )
+
+        if part.include_mats is not None:
+            triangles_by_mat = {
+                k: v for k, v in triangles_by_mat.items() if k in part.include_mats
+            }
+        return triangles_by_mat
+
+    @staticmethod
+    def _pose_matrices(ref_smd: str, pose_smd: Optional[str]) -> Optional[dict]:
+        """Матрицы скиннинга по SMD анимации той же модели (кости по номерам)."""
+        if not pose_smd:
+            return None
+        try:
+            from src.services import smd_pose
+            return smd_pose.skinning_matrices(ref_smd, pose_smd)
+        except Exception as exc:
+            logger.debug(f"SMD→OBJ: поза не посчитана: {exc}")
+            return None
+
+    @staticmethod
+    def _apply_skinning(triangles_by_mat: Dict[str, List[List[dict]]],
+                        mats: Optional[dict], label: str) -> bool:
+        """
+        Двигает вершины части по матрицам скиннинга (на месте).
+
+        Любая неудача — молчаливый отказ: меш остаётся в bind-позе, как было.
 
         Returns:
             True, если поза применена.
         """
-        if not pose_smd:
-            return False
-        try:
-            from src.services import smd_pose
-            mats = smd_pose.skinning_matrices(ref_smd, pose_smd)
-        except Exception as exc:
-            logger.debug(f"SMD→OBJ: поза не посчитана: {exc}")
-            return False
         if not mats:
             return False
+        from src.services import smd_pose
 
         # Считаем в сторону, чтобы можно было отказаться: моделей в игре
         # тысячи, все не проверить, и на незнакомой поза может разъехаться.
         verts = [v for triangles in triangles_by_mat.values()
                  for tri in triangles for v in tri]
-        posed = []
-        for vert in verts:
-            posed.append(smd_pose.apply_to_vertex(
-                mats, vert.get("links") or (), vert["pos"], vert["nrm"]))
+        posed = [smd_pose.apply_to_vertex(
+                    mats, vert.get("links") or (), vert["pos"], vert["nrm"])
+                 for vert in verts]
 
         if not smd_pose.looks_sane([v["pos"] for v in verts],
                                    [p for p, _ in posed]):
             logger.warning(
-                f"SMD→OBJ: поза из {os.path.basename(pose_smd)} разъехалась — "
-                f"оставляем bind-позу")
+                f"SMD→OBJ: поза {label} разъехалась — оставляем bind-позу")
             return False
 
         for vert, (pos, nrm) in zip(verts, posed):
             vert["pos"], vert["nrm"] = pos, nrm
         logger.info(
-            f"SMD→OBJ: поза из {os.path.basename(pose_smd)} применена "
+            f"SMD→OBJ: поза {label} применена "
             f"({len(verts)} вершин, {len(mats)} костей)"
         )
         return True
@@ -255,7 +364,7 @@ class SmdToObjService:
         with open(smd_path, "r", encoding="utf-8", errors="replace") as f:
             content = f.read()
 
-        m = re.search(r"\btriangles\b(.*?)\bend\b", content, re.DOTALL | re.IGNORECASE)
+        m = _RE_TRIANGLES.search(content)
         if not m:
             return {}
 

@@ -25,6 +25,7 @@ class PreviewMode(Enum):
     CRITHIT = auto()     # спец-режим critHIT
     DEATH = auto()       # спец-режим эффекта смерти
     SKYBOX = auto()      # режим «Скайбокс»: фон-кубмапа вместо модели
+    FIRST_PERSON = auto()  # вид от первого лица: руки класса с оружием
 
 
 @dataclass
@@ -62,3 +63,7 @@ class PreviewState:
     @property
     def is_skybox(self) -> bool:
         return self.mode == PreviewMode.SKYBOX
+
+    @property
+    def is_first_person(self) -> bool:
+        return self.mode == PreviewMode.FIRST_PERSON

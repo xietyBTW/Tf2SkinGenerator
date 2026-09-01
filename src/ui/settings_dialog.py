@@ -504,14 +504,10 @@ class SettingsDialog(StyledDialog):
         self.config["debug_mode"]       = self.debug_mode_checkbox.isChecked()
 
         # Блэклист материалов: строки/запятые → уникальный список без пустых.
-        raw = self.blacklist_edit.toPlainText().replace(",", "\n")
-        seen, patterns = set(), []
-        for line in raw.splitlines():
-            p = line.strip()
-            if p and p.lower() not in seen:
-                seen.add(p.lower())
-                patterns.append(p)
-        self.config["material_blacklist"] = patterns
+        # Правило в material_filter — тем же пользуется веб-представление.
+        from src.data.material_filter import parse_blacklist
+        self.config["material_blacklist"] = parse_blacklist(
+            self.blacklist_edit.toPlainText())
 
         AppConfig.save_config(self.config)
 

@@ -14,7 +14,7 @@ from PySide6.QtCore import Qt
 
 from src.shared.constants import Team
 from src.shared.logging_config import get_logger
-from src.ui.texture_state import SINGLE_TEX_KEY
+from src.domain.preview.texture_state import SINGLE_TEX_KEY
 
 logger = get_logger(__name__)
 
@@ -42,6 +42,13 @@ class PreviewTeamMixin:
             return
         self._active_team = team
         self._sync_variant_buttons()
+        # В виде от первого лица командные не только текстуры оружия: у семи
+        # классов синими становятся рукава и перчатки, а они приходят из
+        # воркера вместе с мешем.
+        if self._pstate.is_first_person and self._pending_3d_params:
+            if not self._show_cached_scene():
+                self._start_fp_worker(*self._pending_3d_params)
+            return
         # Руки И force-team мульти-материал: на BLU показываем выбранные карточки +
         # «+» для добавления (та же логика). Хранение нативное (_textures[Team.BLU]).
         from src.data.player_hands import HAND_MODE_KEYS as _HMK_sw

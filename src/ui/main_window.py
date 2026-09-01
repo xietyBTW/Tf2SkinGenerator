@@ -779,6 +779,12 @@ class MainWindow(QMainWindow, ProgressDialogMixin, MainWindowVmtMixin,
                 self.particles_panel.set_tf2_root(tf2_root)
 
         if index == 1:
+            # Шапка ещё не выбрана — в превью не должно остаться оружие. Раньше
+            # вкладка не трогала 3D вовсе: модель (а в виде от первого лица —
+            # оружие в руках вместе с ригом и выбором анимации) висела в сцене
+            # до первого клика по шапке.
+            if hasattr(self, 'preview_panel'):
+                self.preview_panel.reset_3d_preview()
             # Загружаем шапки если ещё не загружены
             from src.config.app_config import AppConfig
             tf2_root = AppConfig.load_config().get("tf2_game_folder", "")
@@ -1682,6 +1688,14 @@ class MainWindow(QMainWindow, ProgressDialogMixin, MainWindowVmtMixin,
     
     def closeEvent(self, event) -> None:
         """Останавливаем фоновые воркеры и сохраняем геометрию перед закрытием."""
+        # Правки предмета: закрытие окна — второй момент (после смены предмета),
+        # когда работу можно потерять.
+        if getattr(self, 'preview_panel', None) is not None:
+            try:
+                self.preview_panel.save_work()
+            except Exception:
+                pass
+
         # Воркер редактора частиц живёт внутри панели — цикл ниже его не видит
         if getattr(self, 'particles_panel', None) is not None:
             try:

@@ -19,15 +19,17 @@ from dataclasses import dataclass, asdict, field
 from pathlib import Path
 from typing import List, Dict, Optional, Callable
 
+from src.data import items_game_kv
 from src.data.weapon_model_index import get_items_game_path
 
 logger = logging.getLogger(__name__)
 
 # ── Пути ─────────────────────────────────────────────────────────────────── #
 
-# v7: исключение кейсов/ящиков/крафт-инструментов из списка (не носибельные).
+# v8: добавлено поле icon (image_inventory) — иконка предмета из рюкзака.
+# v9: %s раскрывается токеном КЛАССА ИЗ ПУТЕЙ («demo», а не «demoman»).
 # Смена имени форсирует одноразовый перепарс старого кэша.
-_CACHE_FILE = Path("cache") / "hats_cache_v7.json"
+_CACHE_FILE = Path("cache") / "hats_cache_v9.json"
 
 _CLASS_NAMES = [
     "scout", "soldier", "pyro", "demoman",
@@ -35,6 +37,16 @@ _CLASS_NAMES = [
 ]
 
 _SLOT_COSMETIC = {"head", "misc", "hat", "secondary", "tertiary", "utility", "action"}
+
+#: Как класс называется В ПУТЯХ К МОДЕЛЯМ. Совпадает с именем класса везде,
+#: кроме подрывника: файлы у него `..._demo.mdl` (в игре 910 таких моделей и ни
+#: одной `_demoman`). Раскрывая %s именем класса, мы получали несуществующий
+#: путь — и подрывник молча оставался без шапки в собранном моде.
+_MODEL_CLASS_TOKEN = {"demoman": "demo"}
+
+
+def _model_token(class_name: str) -> str:
+    return _MODEL_CLASS_TOKEN.get(class_name.lower(), class_name)
 
 
 # ── Структура предмета ────────────────────────────────────────────────────── #
@@ -65,6 +77,10 @@ class HatItem:
     # Праздничное ограничение ("holiday_restriction"), напр.
     # "halloween_or_fullmoon" / "christmas" — по нему фильтруем сезонное.
     holiday: str = ""
+    # "image_inventory" — иконка рюкзака без расширения, напр.
+    # "backpack/player/items/soldier/soldier_officer". Пусто = не объявлена,
+    # тогда иконку ищут по имени модели (см. services/backpack_icons).
+    icon: str = ""
 
     @property
     def is_medal(self) -> bool:
@@ -96,20 +112,27 @@ class HatItem:
         """Возвращает True если предмет подходит под запрос и фильтр класса."""
         # Фильтр по классу
         if class_filter and class_filter != "all":
-            # Предметы без ограничений (classes == [] или все 9 классов)
-            # считаются «All classes» и показываются только при фильтре "all".
-            if not self.classes or len(self.classes) >= 9:
+            wanted = class_filter.lower().replace("_", "-")
+            # Предметы без ограничений (classes == [] или все 9 классов) —
+            # это и есть «All-Class»: под фильтром класса их быть не должно,
+            # а под своим собственным — только они.
+            all_class = not self.classes or len(self.classes) >= 9
+            if wanted == "all-class":
+                return all_class and self._matches_query(query_words)
+            if all_class:
                 return False
-            if class_filter.lower() not in [c.lower() for c in self.classes]:
+            if wanted not in [c.lower() for c in self.classes]:
                 return False
 
-        # Поисковый запрос — все слова должны встречаться в названии или классах
-        if query_words:
-            searchable = (self.name + " " + self.internal_name + " " + self.classes_str).lower()
-            if not all(w in searchable for w in query_words):
-                return False
+        return self._matches_query(query_words)
 
-        return True
+    def _matches_query(self, query_words: List[str]) -> bool:
+        """Все слова запроса должны встречаться в названии или классах."""
+        if not query_words:
+            return True
+        searchable = (self.name + " " + self.internal_name + " "
+                      + self.classes_str).lower()
+        return all(w in searchable for w in query_words)
 
     def relevance(self, query_words: List[str]) -> int:
         """Оценка релевантности (меньше — выше в списке)."""
@@ -126,46 +149,10 @@ class HatItem:
 
 # ── Низкоуровневые хелперы парсера KV ─────────────────────────────────────── #
 
-def _skip_to_close_brace(content: str, pos: int) -> int:
-    """
-    Начиная с pos (на символе '{'), возвращает позицию ПОСЛЕ закрывающей '}'.
-    Корректно обрабатывает вложенные блоки и строки в кавычках.
-    """
-    depth = 0
-    i = pos
-    n = len(content)
-    while i < n:
-        c = content[i]
-        if c == '"':
-            i += 1
-            while i < n:
-                if content[i] == '\\':
-                    i += 2
-                    continue
-                if content[i] == '"':
-                    i += 1
-                    break
-                i += 1
-        elif c == '{':
-            depth += 1
-            i += 1
-        elif c == '}':
-            depth -= 1
-            i += 1
-            if depth == 0:
-                return i
-        elif c == '/' and i + 1 < n and content[i + 1] == '/':
-            nl = content.find('\n', i)
-            i = nl + 1 if nl != -1 else n
-        else:
-            i += 1
-    return i
-
-
-def _flat_value(block: str, key: str) -> Optional[str]:
-    """Извлекает значение "key" "value" (не вложенное) из блока."""
-    m = re.search(rf'"{re.escape(key)}"\s+"([^"]*)"', block, re.IGNORECASE)
-    return m.group(1) if m else None
+# Разбор самого формата KeyValues живёт в items_game_kv: тот же файл читают
+# анимации вьюмодели, и две копии скобочного парсера расходились бы молча.
+_skip_to_close_brace = items_game_kv.skip_to_close_brace
+_flat_value = items_game_kv.flat_value
 
 
 def _extract_classes(block: str) -> List[str]:
@@ -257,7 +244,7 @@ def _extract_style_models(block: str, classes: List[str],
                 flat = flat.replace("\\", "/").lower()
                 target = classes if classes else list(_CLASS_NAMES)
                 if "%s" in flat:
-                    pcm = {c: flat.replace("%s", c) for c in target}
+                    pcm = {c: flat.replace("%s", _model_token(c)) for c in target}
                 else:
                     pcm = {c: flat for c in target}   # одна общая модель на все классы
         if not pcm:
@@ -273,69 +260,8 @@ def _extract_style_models(block: str, classes: List[str],
 
 
 def _find_items_section(content: str) -> int:
-    """
-    Надёжно находит открывающую { секции "items" — прямого дочернего элемента
-    "items_game". Не путает с вложенными секциями с тем же именем.
-
-    Возвращает позицию { или -1 если не найдено.
-    """
-    # Шаг 1: найти корневой блок "items_game"
-    root_idx = content.find('"items_game"')
-    if root_idx == -1:
-        logger.warning("Корневая секция 'items_game' не найдена")
-        return -1
-
-    root_brace = content.find('{', root_idx + len('"items_game"'))
-    if root_brace == -1:
-        return -1
-
-    # Шаг 2: сканировать ТОЛЬКО глубину 1 внутри items_game,
-    # пока не найдём ключ "items" на этом уровне.
-    pos = root_brace + 1
-    depth = 1
-    n = len(content)
-
-    while pos < n and depth > 0:
-        c = content[pos]
-
-        if c == '"':
-            # Читаем quoted string
-            pos += 1
-            key_start = pos
-            while pos < n:
-                if content[pos] == '\\':
-                    pos += 2
-                    continue
-                if content[pos] == '"':
-                    key = content[key_start:pos]
-                    pos += 1
-                    break
-                pos += 1
-            else:
-                break
-
-            # Если мы на глубине 1 и ключ == "items" → нашли нужную секцию
-            if depth == 1 and key == "items":
-                # Пропускаем пробелы и ищем {
-                while pos < n and content[pos] in ' \t\r\n':
-                    pos += 1
-                if pos < n and content[pos] == '{':
-                    return pos
-                # Если после "items" нет { — это значение, а не секция; продолжаем
-
-        elif c == '{':
-            depth += 1
-            pos += 1
-        elif c == '}':
-            depth -= 1
-            pos += 1
-        elif c == '/' and pos + 1 < n and content[pos + 1] == '/':
-            nl = content.find('\n', pos)
-            pos = nl + 1 if nl != -1 else n
-        else:
-            pos += 1
-
-    return -1
+    """Позиция '{' секции "items" — прямого потомка "items_game" (или -1)."""
+    return items_game_kv.find_section(content, "items")
 
 
 # ── Парсинг items_game.txt ─────────────────────────────────────────────────── #
@@ -506,10 +432,11 @@ def _parse_items_game(filepath: str,
         if "%s" in mdl_path:
             target_classes = classes if classes else list(_CLASS_NAMES)
             for cls in target_classes:
+                token = _model_token(cls)
                 try:
-                    per_class_models[cls] = mdl_path % cls
+                    per_class_models[cls] = mdl_path % token
                 except (TypeError, ValueError):
-                    per_class_models[cls] = mdl_path.replace("%s", cls)
+                    per_class_models[cls] = mdl_path.replace("%s", token)
         else:
             per_class_models = _extract_per_class_models(block)
 
@@ -520,6 +447,7 @@ def _parse_items_game(filepath: str,
         item_type = _flat_value(block, "item_type_name") or ""
         prefab = _flat_value(block, "prefab") or ""
         holiday = _flat_value(block, "holiday_restriction") or ""
+        icon = _flat_value(block, "image_inventory") or ""
 
         results.append(HatItem(
             defindex=defindex,
@@ -534,6 +462,7 @@ def _parse_items_game(filepath: str,
             prefab=prefab,
             item_name_token=item_name_token,
             holiday=holiday,
+            icon=icon,
         ))
 
         if progress_cb and items_parsed % 500 == 0:
@@ -554,6 +483,25 @@ def _parse_items_game(filepath: str,
 
 
 # ── Парсинг локализации ───────────────────────────────────────────────────── #
+
+#: Строка локализации: ключ и значение, кавычки внутри значения экранированы.
+#: Наивное `"([^"]*)"` обрывалось на первой же такой кавычке — «"Рыцарь
+#: Туфорта"» превращался в одинокий слеш, а разбор дальше съезжал на строку.
+#: Якорь на начало строки не даёт значению перескочить перевод строки.
+_LOC_LINE = re.compile(r'^\s*"((?:[^"\\]|\\.)+)"\s+"((?:[^"\\]|\\.)*)"', re.M)
+
+
+def _clean_display(value: str) -> str:
+    """Название предмета для показа: без экранирования и управляющих символов.
+
+    В локализации встречаются и то, и другое (цветовые коды чата, переносы
+    строк внутри описаний). В списке предметов они выглядят как мусор перед
+    именем.
+    """
+    text = value.replace('\\"', '"').replace('\\\\', '\\')
+    text = ''.join(ch for ch in text if ord(ch) >= 32 or ch == ' ')
+    return text.strip()
+
 
 def _parse_localization(tf2_root: str, lang: str = "english") -> Dict[str, str]:
     """
@@ -576,8 +524,8 @@ def _parse_localization(tf2_root: str, lang: str = "english") -> Dict[str, str]:
             return {}
 
     tokens: Dict[str, str] = {}
-    for m in re.finditer(r'"([^"]+)"\s+"([^"]*)"', content):
-        key, val = m.group(1), m.group(2)
+    for m in _LOC_LINE.finditer(content):
+        key, val = m.group(1), _clean_display(m.group(2))
         tokens[key] = val
         tokens[key.lower()] = val
 
@@ -631,8 +579,26 @@ def _save_cache(items: List[HatItem]) -> None:
             encoding="utf-8"
         )
         logger.info(f"Кэш шапок сохранён: {len(items)} предметов → {_CACHE_FILE}")
+        _drop_old_caches()
     except Exception as e:
         logger.warning(f"Не удалось сохранить кэш: {e}")
+
+
+def _drop_old_caches() -> None:
+    """Убирает кэши прошлых версий парсера.
+
+    Имя файла содержит версию, и при её смене старый файл просто оставался
+    лежать: у пользователей копились hats_cache_v3…v7 по несколько мегабайт
+    каждый, и было неясно, какой из них живой.
+    """
+    for old in _CACHE_FILE.parent.glob("hats_cache_v*.json"):
+        if old.name == _CACHE_FILE.name:
+            continue
+        try:
+            old.unlink()
+            logger.info(f"Старый кэш шапок удалён: {old.name}")
+        except OSError:
+            pass
 
 
 # ── Публичный API ─────────────────────────────────────────────────────────── #

@@ -20,7 +20,7 @@ import shutil
 import tempfile
 from typing import List, Optional
 
-from PySide6.QtCore import Signal
+from src.services.base_worker import Signal
 
 from src.services.base_worker import BaseWorker
 from src.services.game_vpk_reader import GameVpkReader
@@ -65,8 +65,12 @@ def _weapon_key_from_path(path: str) -> Optional[str]:
     return None
 
 
-def _is_base_vtf(vtf_path: str) -> bool:
-    """True если VTF скорее всего является основной текстурой (не служебной)."""
+def is_base_vtf(vtf_path: str) -> bool:
+    """True если VTF скорее всего является основной текстурой (не служебной).
+
+    Публичная: тем же правилом выбирается обложка мода в библиотеке — двух
+    списков «что считать служебным» быть не должно.
+    """
     low = vtf_path.lower()
     return not any(kw in low for kw in _SKIP_VTF_KEYWORDS)
 
@@ -224,7 +228,7 @@ class PreviewVpkModWorker(BaseWorker):
 
             if not weapon_key:
                 for vtf_rel in vtf_files:
-                    if _is_base_vtf(vtf_rel):
+                    if is_base_vtf(vtf_rel):
                         weapon_key = _weapon_key_from_path(vtf_rel)
                         if weapon_key:
                             break
@@ -323,7 +327,7 @@ class PreviewVpkModWorker(BaseWorker):
     def _build_cards_from_pak(self, pak, vtf_files: List[str], vmt_files: List[str]) -> list:
         """Строит карточки для ВСЕХ основных VTF мода прямо из открытого pak.
 
-        Служебные VTF (lightwarp/bump/normal/…) отброшены через _is_base_vtf.
+        Служебные VTF (lightwarp/bump/normal/…) отброшены через is_base_vtf.
         Имя карточки = стебель VTF; при коллизии добавляется папка. Превью —
         первый кадр VTF. vmt_path привязывается по совпадению стебля.
         """
@@ -333,7 +337,7 @@ class PreviewVpkModWorker(BaseWorker):
             stem = os.path.splitext(os.path.basename(vmt_rel))[0].lower()
             vmt_by_stem.setdefault(stem, vmt_rel)
 
-        base = sorted(v for v in vtf_files if _is_base_vtf(v))
+        base = sorted(v for v in vtf_files if is_base_vtf(v))
         # Подсчёт коллизий стеблей для дизамбигуации.
         stems = [os.path.splitext(os.path.basename(v))[0] for v in base]
         counts: dict = {}
@@ -518,74 +522,34 @@ class PreviewVpkModWorker(BaseWorker):
             )
             return None, None
 
-        from src.data.weapons import WEAPON_MDL_PATHS
-        from src.services import decompile_cache
+        from src.data.weapon_model_index import tf2_root_from_misc_vpk
+        from src.services import model_decompile_service as mds
         from src.services.extract_model_service import ExtractModelService
-        from src.services.model_build_service import ModelBuildService
-        from src.services.tf2_paths import TF2Paths
-        from src.services.tf2_vpk_extract_service import TF2VPKExtractService
 
-        mdl_rel = WEAPON_MDL_PATHS.get(
-            weapon_key,
-            f"models/weapons/c_models/{weapon_key}/{weapon_key}.mdl",
+        # Класс в fake_mode не важен — _build_paths_to_try смотрит на weapon_key.
+        candidates = ExtractModelService._build_paths_to_try(
+            f"scout_{weapon_key}", weapon_key,
+            tf2_root_from_misc_vpk(self.misc_vpk_path),
         )
 
-        # Проверяем кэш
-        decomp_dir: Optional[str] = None
-        cached = decompile_cache.get_cached_decompile(
-            weapon_key, self.misc_vpk_path, mdl_rel
-        )
-        if cached:
-            logger.info(f"VPK мод preview: кэш декомпила для {weapon_key}")
-            decomp_dir = cached
-            smd_path   = self._find_reference_smd(cached, weapon_key)
-        else:
-            # Ищем MDL в игровом VPK
-            fake_mode = f"scout_{weapon_key}"   # класс не важен, только weapon_key
-            from src.data.weapon_model_index import tf2_root_from_misc_vpk
-            _tf2_root = tf2_root_from_misc_vpk(self.misc_vpk_path)
-            paths_to_try = ExtractModelService._build_paths_to_try(
-                fake_mode, weapon_key, _tf2_root
+        try:
+            result = mds.ensure_decompiled(
+                weapon_key, self.misc_vpk_path, candidates,
+                cancelled=self.isInterruptionRequested,
+                on_progress=lambda stage: (
+                    self.progress.emit(self._p['decompiling_orig'])
+                    if stage is mds.Stage.DECOMPILING else None
+                ),
             )
+        except mds.DecompileError as exc:
+            logger.warning(f"VPK мод preview: {weapon_key}: {exc}")
+            return None, None
+        if result is None:
+            logger.warning(f"Оригинальный MDL не найден в VPK для {weapon_key}")
+            return None, None
 
-            found_rel: Optional[str] = None
-            for path in paths_to_try:
-                if self.isInterruptionRequested():
-                    return None, None
-                try:
-                    if TF2VPKExtractService.check_mdl_exists(self.misc_vpk_path, path):
-                        found_rel = path
-                        break
-                except Exception:
-                    continue
-
-            if not found_rel:
-                logger.warning(f"Оригинальный MDL не найден в VPK для {weapon_key}")
-                return None, None
-
-            mdl_dir = tempfile.mkdtemp(prefix="tf2sg_mdl_")
-            try:
-                extracted = TF2VPKExtractService.extract_file_set(
-                    self.misc_vpk_path, found_rel, mdl_dir
-                )
-                mdl_file = next((f for f in extracted if f.endswith(".mdl")), None)
-                if not mdl_file:
-                    return None, None
-
-                if self.isInterruptionRequested():
-                    return None, None
-
-                self.progress.emit(self._p['decompiling_orig'])
-                crowbar    = TF2Paths.get_crowbar_path()
-                decomp_dir = tempfile.mkdtemp(prefix="tf2sg_decomp_")
-                ModelBuildService.decompile(mdl_file, decomp_dir, crowbar)
-
-                decompile_cache.save_to_cache(
-                    weapon_key, self.misc_vpk_path, found_rel, decomp_dir
-                )
-                smd_path = self._find_reference_smd(decomp_dir, weapon_key)
-            finally:
-                shutil.rmtree(mdl_dir, ignore_errors=True)
+        decomp_dir: Optional[str] = result.directory
+        smd_path = self._find_reference_smd(decomp_dir, weapon_key)
 
         if not smd_path:
             # decomp_dir всё равно может помочь с определением текстуры
@@ -658,7 +622,7 @@ class PreviewVpkModWorker(BaseWorker):
             bt_stem = os.path.splitext(os.path.basename(basetexture_path))[0].lower()
             for vtf_rel in vtf_files:
                 vtf_stem = os.path.splitext(os.path.basename(vtf_rel))[0].lower()
-                if vtf_stem == bt_stem and _is_base_vtf(vtf_rel):
+                if vtf_stem == bt_stem and is_base_vtf(vtf_rel):
                     try:
                         vtf_data = pak[vtf_rel].read()
                         logger.info(f"Текстура мода (by $basetexture): {vtf_rel}")
@@ -671,7 +635,7 @@ class PreviewVpkModWorker(BaseWorker):
             wk_stem = weapon_key.lower()
             for vtf_rel in vtf_files:
                 vtf_stem = os.path.splitext(os.path.basename(vtf_rel))[0].lower()
-                if vtf_stem == wk_stem and _is_base_vtf(vtf_rel):
+                if vtf_stem == wk_stem and is_base_vtf(vtf_rel):
                     try:
                         vtf_data = pak[vtf_rel].read()
                         logger.info(f"Текстура мода (by weapon_key stem): {vtf_rel}")
@@ -682,7 +646,7 @@ class PreviewVpkModWorker(BaseWorker):
         # ── Приоритет 4: первый не-служебный VTF ─────────────────────────────
         if not vtf_data:
             for vtf_rel in vtf_files:
-                if not _is_base_vtf(vtf_rel):
+                if not is_base_vtf(vtf_rel):
                     continue
                 try:
                     vtf_data = pak[vtf_rel].read()
@@ -810,7 +774,7 @@ class PreviewVpkModWorker(BaseWorker):
         if not vtf_data:
             for vtf_rel in vtf_files:
                 stem = os.path.splitext(os.path.basename(vtf_rel))[0].lower()
-                if stem.endswith("_blue") and _is_base_vtf(vtf_rel):
+                if stem.endswith("_blue") and is_base_vtf(vtf_rel):
                     try:
                         vtf_data = pak[vtf_rel].read()
                         logger.info(f"BLU текстура мода (endswith _blue): {vtf_rel}")

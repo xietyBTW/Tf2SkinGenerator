@@ -914,7 +914,6 @@ class VPKService:
         extra_texture_callback=None,
         extra_model_callback=None,
         texture_mismatch_callback=None,
-        parent_window=None,
         emit_progress,
         emit_sub,
         is_cancelled,
@@ -1001,7 +1000,7 @@ class VPKService:
             # Диалог выбора файла показываем здесь, после декомпиляции (чтобы знать куда копировать)
             replace_model_smd_path = VpkModelPipeline._resolve_replace_model_smd(
                 replace_model_enabled, model_ready_path, replace_model_path,
-                model_file_callback, parent_window,
+                model_file_callback,
             )
 
             VpkModelPipeline._apply_model_replacement(
@@ -1334,7 +1333,6 @@ class VPKService:
     def build_vpk(
         request: Optional[BuildRequest] = None,
         *,
-        parent_window=None,  # Окно для диалогов (если нужно показать что-то юзеру)
         model_file_callback=None,  # Колбэк для запроса файла из UI потока (потому что Qt не любит мультипоточность)
         extra_texture_callback=None,  # Колбэк для запроса одной доп. текстуры: callback(material_name, weapon_key) -> Optional[str]
         extra_model_callback=None,  # Колбэк для запроса доп. модели: callback(smd_name, weapon_key) -> Optional[str]
@@ -1351,8 +1349,8 @@ class VPKService:
 
         Параметры сборки берутся из ``request`` (BuildRequest). Для обратной
         совместимости (и тестов) допускается старый вызов через kwargs —
-        тогда BuildRequest собирается из них. Колбэки и parent_window — это
-        runtime-функции UI-потока, они всегда передаются отдельно.
+        тогда BuildRequest собирается из них. Колбэки — это runtime-функции
+        UI-потока, они всегда передаются отдельно.
         """
         if request is None:
             request = BuildRequest(**legacy_kwargs)
@@ -1462,7 +1460,6 @@ class VPKService:
                     extra_texture_callback=extra_texture_callback,
                     extra_model_callback=extra_model_callback,
                     texture_mismatch_callback=texture_mismatch_callback,
-                    parent_window=parent_window,
                     emit_progress=emit_progress,
                     emit_sub=emit_sub,
                     is_cancelled=is_cancelled,

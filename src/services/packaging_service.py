@@ -62,9 +62,25 @@ class PackagingService:
             RequiredFileMissingError: vpk.exe не создал файл
         """
         from src.data.translations import TRANSLATIONS
-        from src.shared.exceptions import VPKCreationError, RequiredFileMissingError
+        from src.shared.exceptions import (
+            FileLockedError, RequiredFileMissingError, VPKCreationError,
+        )
 
         t = TRANSLATIONS.get(language, TRANSLATIONS['en'])
+
+        def _locked(path: Path, exc: OSError) -> FileLockedError:
+            """Понятная ошибка вместо сырого WinError 32.
+
+            Файл держит запущенная игра с примонтированным модом, GCFScape или
+            проводник с превью — самый частый сценарий повторной сборки. Раньше
+            сюда улетало системное сообщение, из которого не следует, что делать.
+            """
+            msg = t.get(
+                'error_vpk_locked',
+                'The file {path} is in use by another process.'
+            ).format(path=path)
+            logger.error(f"{msg} ({exc})")
+            return FileLockedError(str(path), msg)
 
         vpkroot_parent = vpkroot_dir.parent
         # vpk.exe называет результат по имени упакованной папки (<dir>.vpk),
@@ -72,7 +88,10 @@ class PackagingService:
         temp_vpk_path = vpkroot_parent / f"{vpkroot_dir.name}.vpk"
 
         if temp_vpk_path.exists():
-            temp_vpk_path.unlink()
+            try:
+                temp_vpk_path.unlink()
+            except OSError as exc:
+                raise _locked(temp_vpk_path, exc) from exc
 
         # vpk.exe берётся из bin установленной TF2 (или из бандла). Если ни того,
         # ни другого нет — сразу понятная ошибка «укажите папку TF2», а не сырой
@@ -121,9 +140,12 @@ class PackagingService:
         export_folder_path = Path(export_folder)
         ensure_directory_exists(export_folder_path)
         final_output = export_folder_path / filename
-        if final_output.exists():
-            final_output.unlink()
-        shutil.move(str(temp_vpk_path), str(final_output))
+        try:
+            if final_output.exists():
+                final_output.unlink()
+            shutil.move(str(temp_vpk_path), str(final_output))
+        except OSError as exc:
+            raise _locked(final_output, exc) from exc
 
         logger.info(f"VPK успешно создан: {final_output}")
         return str(final_output)

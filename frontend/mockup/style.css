@@ -1,0 +1,1365 @@
+/*
+ * Раскладка. Одна разметка, два размещения.
+ *
+ * Каталог предметов и параметры сборки нарисованы по одному разу. Настройка
+ * `data-panels` решает единственное: прибиты они к краям экрана или
+ * вызываются поверх него.
+ *
+ *   data-panels="pinned"  каталог слева, параметры справа, всегда видны
+ *   data-panels="float"   каталог на весь экран по клику на имя предмета,
+ *                         параметры выезжают над нижней полосой
+ *
+ * Всё остальное — заголовок, альбом текстур, вьюпорт, ряды действий, нижняя
+ * полоса — одинаково в обоих режимах и написано один раз.
+ *
+ * Токены и мелкие элементы — в base.css.
+ */
+
+/* ── Шапка ───────────────────────────────────────────────────────────── */
+.chrome {
+  flex: none;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: var(--gap);
+  height: 46px;
+  padding: 0 var(--rhythm);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.chrome__mark {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .22em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+}
+.chrome__nav { display: flex; gap: 26px; }
+.chrome__actions { display: flex; justify-content: flex-end; gap: 22px; }
+
+/* ── Заголовок-предмет ───────────────────────────────────────────────────
+   Имя набрано как название вещи и само служит входом в каталог, когда тот
+   не прибит. Отдельной кнопки «выбрать» нет — лишний элемент. */
+.title {
+  flex: none;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--gap);
+  padding: 22px var(--rhythm) 16px;
+}
+
+.title__item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.title__name {
+  font-size: 30px;
+  font-weight: 300;
+  letter-spacing: -.01em;
+  color: var(--ink);
+  border-bottom: 1px solid transparent;
+  transition: border-color var(--dur);
+}
+.title__item:hover .title__name { border-bottom-color: var(--accent); }
+
+.title__meta { font-family: var(--mono); font-size: 10.5px; color: var(--ink-mute); }
+
+.title__hint {
+  position: absolute;
+  margin-top: -34px;
+  font-size: 9px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--accent);
+  opacity: 0;
+  transition: opacity var(--dur);
+  pointer-events: none;
+}
+.title__item:hover .title__hint { opacity: 1; }
+
+/* Когда каталог прибит, он и так на экране — имя перестаёт быть кнопкой. */
+[data-panels="pinned"] .title__item { cursor: default; }
+[data-panels="pinned"] .title__item:hover .title__name { border-bottom-color: transparent; }
+[data-panels="pinned"] .title__hint { display: none; }
+
+.title__side { display: flex; align-items: center; gap: 26px; }
+.teams { display: flex; gap: 10px; }
+
+/* ── Меню инструментов ───────────────────────────────────────────────────
+   Извлечь модель, экспорт UV, извлечь текстуру, объединить VPK — операции
+   над предметом. К ним обращаются изредка, держать на виду незачем. */
+.menu { position: relative; }
+
+.menu__list {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 10px);
+  /* Выше панели параметров. У неё z-index 15, и она элемент грид-сетки —
+     а у таких z-index работает и без position, создавая свой слой. Меню с
+     десяткой уезжало ПОД панель и выглядело полупрозрачным. */
+  z-index: 25;
+  display: flex;
+  flex-direction: column;
+  min-width: 240px;
+  border: 1px solid var(--hairline-strong);
+  background: var(--overlay);
+}
+.menu__list[hidden] { display: none; }
+
+.menu__item {
+  padding: 10px 14px;
+  border: 0;
+  border-bottom: 1px solid var(--hairline);
+  background: none;
+  color: var(--ink-soft);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: color var(--dur), background var(--dur);
+}
+.menu__item:last-child { border-bottom: 0; }
+.menu__item:hover { color: var(--ink); background: var(--bg); }
+
+/* ── Сцена ───────────────────────────────────────────────────────────────
+   Здесь и живёт вся разница между режимами: меняются только колонки сетки
+   и способ показа двух боковых блоков. */
+.stage {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  gap: 30px;
+  padding: 0 var(--rhythm) var(--gap);
+}
+[data-panels="float"]  .stage { grid-template-columns: minmax(0, 1fr); }
+[data-panels="pinned"] .stage { grid-template-columns: 230px minmax(0, 1fr) 280px; }
+
+/* ── Работа: текстуры и модель ───────────────────────────────────────── */
+.work {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 30px;
+  min-width: 0;
+  min-height: 0;
+}
+.work[data-view="flat"],
+.work[data-view="model"],
+.work[data-view="fp"]   { grid-template-columns: minmax(0, 1fr); }
+.work[data-view="flat"]  .half--model { display: none; }
+.work[data-view="model"] .half--flat,
+.work[data-view="fp"]    .half--flat  { display: none; }
+
+.half {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.half__bar,
+.half__foot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  min-height: 20px;
+}
+.half__bar--right { justify-content: flex-end; }
+.half__foot--wrap { flex-wrap: wrap; row-gap: 10px; }
+
+/* Режимы показа стоят рядом с командами, а не внутри половины сцены: внутри
+   они исчезали вместе с ней при переключении на «Текстуру». */
+.modes { display: flex; gap: 22px; }
+.styles { display: flex; align-items: center; gap: 12px; }
+
+/* Ряд действий: операции над тем, что рядом. Все текстовые, чтобы ни одна
+   не спорила по весу с «Собрать VPK». */
+.acts {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 18px;
+  row-gap: 8px;
+  min-width: 0;   /* иначе ряд не сжимается и уезжает за край вместо переноса */
+}
+
+/* Условные контролы приходят от режима сборки (см. frontend/CONTROLS.md).
+   Скрываем, а не гасим: недоступная кнопка — шум, который всё равно нельзя
+   нажать. Место под них не резервируется, ряд просто короче.
+   Видимостью управляет applyControls через атрибут hidden (см. base.css). */
+
+/* ── Вкладки материалов ──────────────────────────────────────────────── */
+.mattabs {
+  display: flex;
+  gap: 16px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.mattabs::-webkit-scrollbar { display: none; }
+
+.mattab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 0 4px;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  background: none;
+  color: var(--ink-mute);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color var(--dur), border-color var(--dur);
+}
+.mattab:hover { color: var(--ink); }
+.mattab.is-active { color: var(--ink); border-bottom-color: var(--accent); }
+.mattab__mark { width: 4px; height: 4px; background: var(--accent); }
+
+/* ── Альбом текстур ──────────────────────────────────────────────────────
+   Материалов бывает много, каждый нужен в полный размер. Лента квадратов с
+   защёлкиванием: листается колесом, стрелками и вкладками. */
+.album__box {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  container-type: size;
+}
+
+.album {
+  display: flex;
+  align-items: stretch;
+  gap: 18px;
+  height: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x mandatory;
+  scroll-behavior: smooth;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+.album::-webkit-scrollbar { display: none; }
+
+/* Подпись входит В кадр: контейнер прокрутки режет всё, что вылезает.
+   --cap — её высота, на неё же уменьшается сторона квадрата. */
+.frame {
+  --cap: 26px;
+  position: relative;
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  inline-size: min(100cqw, calc(100cqh - var(--cap)));
+  scroll-snap-align: center;
+  cursor: pointer;
+}
+
+.frame__img {
+  position: relative;
+  aspect-ratio: 1;               /* текстуры всегда квадратные */
+  border: 1px solid var(--hairline-strong);
+  /* Шахматка под текстурой: у игровых текстур есть альфа, и на сплошном белом
+     они выглядят выцветшими — непонятно, где прозрачность, а где светлый
+     пиксель. */
+  background:
+    conic-gradient(var(--hairline) 25%, transparent 0 50%,
+                   var(--hairline) 0 75%, transparent 0)
+    0 0 / 16px 16px,
+    var(--surface);
+  transition: border-color var(--dur);
+  overflow: hidden;
+}
+
+/* Текстуру показываем целиком: обрезать её значило бы врать про содержимое. */
+.frame__img img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+.frame:hover .frame__img { border-color: var(--ink); }
+.frame.is-current .frame__img { border-color: var(--accent); }
+/* Кадр под перетаскиванием: рамка акцентом, чтобы было видно, куда упадёт. */
+.frame.is-drop .frame__img { border-color: var(--accent); border-style: dashed; }
+
+/* Инструменты кадра проявляются по наведению — в покое ничто не мешает
+   смотреть на текстуру. */
+.frame__tools {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: flex;
+  gap: 6px;
+  opacity: 0;
+  transition: opacity var(--dur);
+}
+.frame:hover .frame__tools { opacity: 1; }
+
+.frame__tool {
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--hairline-strong);
+  background: var(--surface);
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  transition: color var(--dur), border-color var(--dur);
+}
+.frame__tool:hover { color: var(--accent); border-color: var(--accent); }
+
+/* Наверху, а не внизу: снизу справа стоит размер, и в узком кадре они
+   наезжали друг на друга. */
+.frame__badge {
+  position: absolute;
+  left: 10px;
+  top: 10px;
+  padding: 3px 7px;
+  border: 1px solid var(--accent);
+  /* Пометка ложится поверх текстуры — без фона она читается через светлые
+     пиксели как каша. */
+  background: var(--surface);
+  color: var(--accent);
+  font-size: 9px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.frame__meta {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ink-mute);
+}
+
+.frame__name {
+  flex: none;
+  height: var(--cap);
+  padding-top: 8px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--ink-mute);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.frame.is-current .frame__name { color: var(--ink); }
+
+.album__step {
+  position: absolute;
+  top: calc(50% - 13px);
+  z-index: 2;
+  width: 30px;
+  height: 46px;
+  margin-top: -23px;
+  border: 1px solid var(--hairline-strong);
+  background: var(--surface);
+  color: var(--ink-soft);
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--dur), color var(--dur), border-color var(--dur);
+}
+.album__box:hover .album__step { opacity: 1; }
+.album__step:hover { color: var(--accent); border-color: var(--accent); }
+.album__step--prev { left: -1px; }
+.album__step--next { right: -1px; }
+
+.album__count { font-family: var(--mono); font-size: 10.5px; color: var(--ink-mute); }
+.album__count b { color: var(--ink); font-weight: 600; }
+
+/* ── Вьюпорт ─────────────────────────────────────────────────────────── */
+.viewport {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  border: 1px solid var(--hairline);
+  background: var(--viewport);
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+
+.viewport__frame {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  display: block;
+}
+
+/* Подпись поверх вьювера: пока модели нет, он пустой, а сказать что-то надо.
+   Указатель сквозь неё проходит — иначе она мешала бы вращать модель. */
+.viewport__hint {
+  position: relative;
+  z-index: 1;
+  padding: 4px 10px;
+  background: var(--viewport);
+  font-size: 10px;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+  pointer-events: none;
+}
+.viewport__hint[hidden] { display: none; }
+
+/* ── Каталог предметов ───────────────────────────────────────────────────
+   Один блок на оба режима. Прибитый — узкая колонка слева, сетка сама
+   становится в один столбец. Плавающий — на весь экран. */
+.catalog {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.catalog__head { flex: none; display: flex; align-items: center; gap: var(--gap); }
+.catalog__search { flex: 1; }
+
+.catalog__filters {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.catalog__grid {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 22px 18px;
+  padding-bottom: 4px;
+}
+
+.pick {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+/* Обложка — иконка предмета из рюкзака (materials/backpack/…), она квадратная. */
+.pick__box {
+  aspect-ratio: 1;
+  margin-bottom: 7px;
+  border: 1px solid var(--hairline-strong);
+  background: var(--viewport);
+  transition: border-color var(--dur);
+}
+/* Иконка вписывается целиком: у игровых картинок прозрачные поля, и обрезка
+   по краю срезала бы стволы и поля шляп. */
+.pick__icon {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.pick:hover .pick__box { border-color: var(--ink); }
+.pick.is-active .pick__box { border-color: var(--accent); }
+.pick__name { font-size: 13px; }
+
+/* Имя и путь режем многоточием: у косметики пути вида
+   models/player/items/demo/... длиннее плитки и налезали на соседние. */
+.pick__name,
+.pick .mono {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pick.is-active .pick__name { font-weight: 600; }
+
+.catalog__cat { flex: none; }
+
+/* Видимостью рядов фильтров управляет ТОЛЬКО applyCategory в app.js.
+   Правила `[data-for] { display: none }` здесь быть не должно: скрипт снимает
+   inline-стиль у видимых рядов, и такое правило оставляло бы их скрытыми. */
+.catalog__empty { margin: 0; color: var(--ink-mute); font-size: 12px; }
+
+/* Прибитый режим: узкая колонка. Большие обложки в 230 пикселях съедают
+   экран — видно четыре предмета вместо пятнадцати. Поэтому там сетка
+   становится списком, а обложка — маленькой меткой слева от имени.
+   Компонент тот же, меняется только плотность. */
+[data-panels="pinned"] .catalog { border-right: 1px solid var(--hairline); padding-right: var(--gap); }
+[data-panels="pinned"] #closecat { display: none; }
+[data-panels="pinned"] .catalog__filters { gap: 10px; }
+[data-panels="pinned"] .catalog__grid {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+  border-top: 1px solid var(--hairline);
+}
+[data-panels="pinned"] .pick {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  align-items: center;
+  column-gap: 10px;
+  padding: 7px 0 7px 10px;
+  border-bottom: 1px solid var(--hairline);
+  border-left: 2px solid transparent;
+  transition: border-color var(--dur);
+}
+[data-panels="pinned"] .pick:hover { border-left-color: var(--hairline-strong); }
+[data-panels="pinned"] .pick.is-active { border-left-color: var(--accent); }
+[data-panels="pinned"] .pick__box {
+  grid-row: 1 / 3;
+  width: 26px;
+  height: 26px;
+  margin: 0;
+}
+[data-panels="pinned"] .pick__name,
+[data-panels="pinned"] .pick .mono { grid-column: 2; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Вложенность системы частиц: ребёнка видно, что он ребёнок. */
+.pick__name, .pick .mono { padding-left: calc(var(--depth, 0) * 9px); }
+
+/* ── Параметры эффекта ─────────────────────────────────────────────────
+   Список «подпись — поле», а не сетка колонок: у крутилок частиц одна
+   природа, и разносить их по столбцам нечем. */
+.params { overflow: auto; }
+.params__note { margin: 0; color: var(--ink-mute); font-size: 12px; }
+/* Плавающая панель разворачивается на всю ширину экрана — одна колонка
+   растянула бы подпись и поле по разным краям. Прибитая узкая, и та же
+   сетка сама сворачивается в столбец. */
+.params__list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 10px 34px;
+}
+
+.params__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+}
+.params__name {
+  font-size: 12px;
+  color: var(--ink-soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.params__in { display: flex; gap: 6px; align-items: center; }
+.pair { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+
+/* Колонка узкая: подпись, дорожка и поле в одну строку не встают — подпись
+   съедалась до «Час…». Кладём её строкой выше. */
+.params__row { grid-template-columns: minmax(0, 1fr); gap: 3px; }
+.params__list { gap: 12px; }
+/* Диапазон — две пары «дорожка + поле»; рядом они не помещаются, и поле
+   обрезалось до «0,0». Ставим их одну под другой. */
+.params__in { flex-direction: column; align-items: stretch; }
+.params__in > .colorfield { align-self: flex-start; }
+/* А в экспертном дереве значение короткое и подпись рядом читается лучше. */
+.expert .params__row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 12px;
+  align-items: baseline;
+}
+.expert .params__in { flex-direction: row; align-items: center; justify-content: flex-end; }
+.expert .params__in .input--num { width: 62px; }
+
+/* Имена атрибутов в PCF длинные («control point to disable rendering if it is
+   the camera»). Многоточие превращало соседние в одинаковые огрызки, поэтому
+   здесь они переносятся целиком. */
+.expert .params__name { white-space: normal; overflow: visible; line-height: 1.35; }
+
+/* Строка и вектор: подпись сверху, поле во всю ширину — рядом они не влезали,
+   и третья компонента вектора уезжала за край панели. */
+.expert .params__row--wide { grid-template-columns: minmax(0, 1fr); }
+.expert .params__row--wide .params__in { justify-content: flex-start; gap: 8px; }
+.expert .params__row--wide .input { width: 100%; }
+.expert .params__row--wide .input--num { flex: 1; width: auto; min-width: 0; }
+
+.input--num { width: 74px; text-align: right; }
+/* Системные стрелки счётчика рисует браузер — они выбиваются из оформления
+   (рамка, фон, скругления) и съедают треть поля. Шаг с клавиатуры и колесом
+   работает и без них. */
+.input--num { appearance: textfield; -moz-appearance: textfield; }
+.input--num::-webkit-outer-spin-button,
+.input--num::-webkit-inner-spin-button { appearance: none; margin: 0; }
+/* Заготовка: модуля под параметром ещё нет, показано умолчание игры. */
+.input--num.is-placeholder { color: var(--ink-mute); border-bottom-style: dashed; }
+.input--num:disabled { color: var(--ink-mute); border-bottom-color: var(--hairline); }
+
+.colorfield {
+  width: 34px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--hairline-strong);
+  background: none;
+  cursor: pointer;
+}
+
+/* Ползунок: волосяная дорожка и квадратная ручка — как и всё остальное,
+   без скруглений и заливок. */
+.slider {
+  flex: 1;
+  min-width: 70px;
+  height: 18px;
+  margin: 0;
+  appearance: none;
+  background: none;
+  cursor: pointer;
+}
+.slider::-webkit-slider-runnable-track {
+  height: 1px;
+  background: var(--hairline-strong);
+}
+.slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 9px;
+  height: 9px;
+  margin-top: -4px;
+  background: var(--ink);
+  border: 0;
+}
+.slider:hover::-webkit-slider-thumb { background: var(--accent); }
+.slider::-moz-range-track { height: 1px; background: var(--hairline-strong); }
+.slider::-moz-range-thumb {
+  width: 9px; height: 9px; border: 0; border-radius: 0; background: var(--ink);
+}
+
+/* Переключатель «обычный / эксперт» — над списком, той же строкой. */
+.params__modes { display: flex; gap: 16px; margin-bottom: 4px; }
+
+/* ── Экспертный режим ──────────────────────────────────────────────────
+   Модуль — свёрнутый блок: групп шесть, модулей в каждой до десятка, и
+   развёрнутое дерево целиком не читается. */
+.expert { display: flex; flex-direction: column; }
+.expert__mod { border-bottom: 1px solid var(--hairline); padding: 7px 0; }
+.expert__mod summary {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  cursor: pointer;
+  list-style: none;
+}
+.expert__mod summary::-webkit-details-marker { display: none; }
+.expert__block { display: flex; flex-direction: column; }
+.expert__head { margin: 14px 0 2px; }
+.expert__block:first-child .expert__head { margin-top: 0; }
+.expert__name { font-size: 12px; }
+/* Раскрытый модуль отмечаем линией слева — видно, к чему относятся строки. */
+.expert__mod[open] { border-left: 1px solid var(--accent); padding-left: 9px; }
+.expert__warn { margin-left: auto; font-size: 10px; color: var(--accent); }
+.expert .params__row { padding: 4px 0 4px 14px; }
+
+/* Эффект правят, ГЛЯДЯ на него: шторка снизу закрывала ровно то, ради чего
+   правка и затевалась. Поэтому в разделе частиц панель всегда колонка справа,
+   даже когда панели откреплены. */
+[data-section="particles"][data-panels="float"] .stage {
+  grid-template-columns: minmax(0, 1fr) 300px;
+}
+[data-section="particles"][data-panels="float"] .params {
+  position: static;
+  max-height: none;
+  padding: 0 0 0 var(--gap);
+  border-top: 0;
+  border-left: 1px solid var(--hairline);
+  background: none;
+}
+/* Узкое окно: колонка съедает кадр, и там шторка честнее. */
+@media (max-width: 900px) {
+  [data-section="particles"][data-panels="float"] .stage {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  [data-section="particles"][data-panels="float"] .params {
+    position: fixed;
+    left: 0; right: 0; bottom: 56px;
+    max-height: 60vh;
+    padding: var(--rhythm);
+    border-top: 1px solid var(--hairline);
+    border-left: 0;
+    background: var(--surface);
+  }
+}
+
+.params__find { margin-bottom: 4px; }
+
+/* Действия живут в контекстных меню, как в панели приложения. Подсказка
+   нужна: правая кнопка — не самая заметная дверь. */
+.params__hint {
+  margin: 0 0 6px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--hairline);
+  font-size: 10.5px;
+  line-height: 1.4;
+  color: var(--ink-mute);
+}
+
+/* Контекстное меню — тот же список, что у «Инструментов», только у курсора. */
+/* right: auto обязателен: у .menu__list он прибит к правому краю родителя,
+   и меню растягивалось от курсора до края экрана. */
+.ctx { position: fixed; right: auto; top: auto; z-index: 30; min-width: 220px; }
+.ctx[hidden] { display: none; }
+.ctx__sep { height: 1px; background: var(--hairline-strong); }
+.ctx .menu__item:disabled { color: var(--ink-mute); cursor: default; }
+.ctx .menu__item:disabled:hover { background: none; }
+
+/* ── Дерево систем эффекта ─────────────────────────────────────────────
+   Ребёнок под родителем с отступом, у родителя — знак свёртки. Плоским
+   списком 104 системы одного файла читаются как свалка. */
+.catalog--tree .catalog__grid {
+  display: block;
+  border-top: 1px solid var(--hairline);
+}
+
+.tree__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-left: calc(var(--depth, 0) * 14px);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.tree__twist {
+  flex: none;
+  width: 16px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink-mute);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  transition: color var(--dur);
+}
+.tree__twist:hover { color: var(--accent); }
+.tree__twist:disabled { color: transparent; cursor: default; }
+
+.tree__name {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 0;
+  border: 0;
+  border-left: 2px solid transparent;
+  background: none;
+  color: var(--ink-soft);
+  font-size: 12px;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color var(--dur), border-color var(--dur);
+}
+.tree__name:hover { color: var(--ink); }
+.tree__name.is-active {
+  color: var(--ink);
+  font-weight: 600;
+  border-left-color: var(--accent);
+  padding-left: 8px;
+}
+
+/* ── Контрольные точки ──────────────────────────────────────────────────
+   Полоса под кадром: правят точку — смотрят на эффект. */
+.cp {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 0 2px;
+  border-top: 1px solid var(--hairline);
+}
+.cp__row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+.cp__row .input--num { width: 62px; }
+.cp__row .select { min-width: 180px; }
+.cp__pick { display: flex; gap: 4px; }
+.cp__pick .tag { padding: 3px 9px; }
+/* Точка, которую эффект действительно использует: без подсказки узнать,
+   что ему важна CP 9, можно только вычитав это в дереве свойств. */
+.cp__pick .tag.is-used { border-color: var(--accent); color: var(--accent); }
+.cp__pick .tag.is-used.is-active { background: var(--accent); color: var(--surface); }
+.cp__used { color: var(--accent); }
+.cp__hint { flex: 1; text-align: right; }
+.cp__scene { display: flex; }
+.cp__scene .tag { padding: 3px 12px; }
+
+/* Части модели. Крестик у покрашенной части виден всегда: искать его
+   наведением — то же самое, что прятать. */
+.parts .tag { position: relative; }
+.parts .tag.is-painted { border-color: var(--accent); color: var(--accent); }
+.parts .tag--shared { border-style: dashed; }
+.parts__x {
+  margin-left: 8px;
+  border: none;
+  background: none;
+  color: inherit;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+/* Палитра частей: образцы цвета кликаются так же, как кнопки-теги. */
+.parts__swatch {
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--hairline-strong);
+  cursor: pointer;
+  padding: 0;
+}
+.parts__swatch.is-active { outline: 2px solid var(--ink); outline-offset: 2px; }
+.parts__color {
+  width: 30px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--hairline-strong);
+  background: none;
+  cursor: pointer;
+}
+.parts__strength {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+.parts__strength input { width: 70px; }
+.parts__hint { font-size: 11px; color: var(--ink-soft); }
+/* Цвет, которым покрашена часть, виден на самой кнопке. */
+.parts .tag { position: relative; }
+.parts__dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-left: 8px;
+  border: 1px solid var(--hairline-strong);
+  vertical-align: middle;
+}
+
+/* Включённый режим на текстовой кнопке: у палитры их несколько подряд. */
+.parts .textbtn.is-active { color: var(--accent); border-color: var(--accent); }
+
+/* Место части на текстуре: подсвечивается при наведении на кусок модели. */
+.frame__uv {
+  position: absolute;
+  border: 1px solid var(--accent);
+  background: rgba(255, 179, 71, .18);
+  pointer-events: none;
+}
+.parts .tag.is-hover { border-color: var(--accent); color: var(--accent); }
+
+/* Карточка материала под перетаскиванием картинки. */
+.frame.is-drop .frame__img { outline: 1px solid var(--accent); outline-offset: 3px; }
+
+/* Дочерняя система в дереве свойств: строка-ссылка без параметров. */
+.expert__kid {
+  padding: 5px 0 5px 14px;
+  font-size: 12px;
+  color: var(--ink-soft);
+  border-bottom: 1px solid var(--hairline);
+}
+
+/* ── Диалог ────────────────────────────────────────────────────────────
+   Одно окно на выбор из списка, ввод имени и подтверждение. */
+.ask {
+  width: min(440px, 92vw);
+  padding: 0;
+  border: 1px solid var(--hairline-strong);
+  background: var(--overlay);
+  color: var(--ink);
+}
+.ask::backdrop { background: rgba(0, 0, 0, .45); }
+.ask__body { display: flex; flex-direction: column; gap: 14px; padding: var(--rhythm); }
+.ask__title { margin: 0; }
+.ask__text {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-soft);
+  white-space: pre-wrap;
+}
+.ask__list {
+  display: flex;
+  flex-direction: column;
+  max-height: 46vh;
+  overflow: auto;
+  border-top: 1px solid var(--hairline);
+}
+.ask__item {
+  padding: 8px 2px;
+  border: 0;
+  border-bottom: 1px solid var(--hairline);
+  background: none;
+  color: var(--ink-soft);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: color var(--dur), background var(--dur);
+}
+.ask__item:hover { color: var(--ink); background: var(--bg); }
+.ask__item.is-active { color: var(--ink); border-bottom-color: var(--accent); }
+.ask__acts { display: flex; align-items: center; justify-content: flex-end; gap: 18px; }
+
+/* Раздел частиц: командные цвета и стили к эффекту отношения не имеют.
+   Панель сборки здесь НЕ прячем правилом: панелей две (#build и #pbuild),
+   обе с классом .build, и селектор по классу убрал бы заодно крутилки
+   эффекта. Какая из двух на экране — решает applyRightPanel в app.js. */
+[data-section="particles"] .teams,
+[data-section="particles"] .styles,
+/* Карты материала, VMT и «прочее» — про модель оружия, не про эффект. */
+[data-section="particles"] .half--flat .acts { display: none; }
+
+/* Совсем без обложек — на случай, если и метка лишняя. */
+.catalog.no-icons .pick__box { display: none; }
+[data-panels="pinned"] .catalog.no-icons .pick { grid-template-columns: minmax(0, 1fr); }
+[data-panels="pinned"] .catalog.no-icons .pick__name,
+[data-panels="pinned"] .catalog.no-icons .pick .mono { grid-column: 1; }
+
+/* Плавающий режим: на весь экран поверх работы. */
+[data-panels="float"] .catalog {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  gap: var(--gap);
+  padding: var(--rhythm) var(--rhythm) 0;
+  background: var(--bg);
+}
+[data-panels="float"] .catalog[hidden] { display: none; }
+[data-panels="float"] .catalog__search { font-size: 22px; font-weight: 300; padding: 8px 0; }
+[data-panels="float"] .catalog__filters { gap: 20px; }
+[data-panels="float"] .catalog__grid {
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 26px 22px;
+  padding-bottom: var(--rhythm);
+}
+
+/* ── Параметры сборки ────────────────────────────────────────────────────
+   Тот же блок: прибитый — колонка справа, плавающий — накладка над нижней
+   полосой. Накладкой, а не распоркой: раздвигая работу, панель съедала
+   модель ради параметров, открытых на секунду. */
+.build { min-width: 0; min-height: 0; overflow: auto; }
+
+.build__grid { display: grid; gap: 22px; }
+.build__col { display: flex; flex-direction: column; gap: 9px; min-width: 0; }
+.build__col .field { gap: 6px; }
+
+.field__note { font-size: 10px; color: var(--ink-mute); }
+.input--tiny { width: 70px; margin-left: 23px; }
+.input--tiny:disabled { color: var(--ink-mute); border-bottom-style: dashed; }
+
+/* Радио отличается от чекбокса формой точки: квадрат был бы враньём —
+   выбор здесь одиночный. */
+.check input[type="radio"] { border-radius: 50%; }
+.check input[type="radio"]:checked { background: none; border-color: var(--ink); }
+.check input[type="radio"]:checked::after {
+  content: "";
+  position: absolute;
+  inset: 2px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--ink);
+  transform: none;
+}
+
+[data-panels="pinned"] .build { border-left: 1px solid var(--hairline); padding-left: var(--gap); }
+[data-panels="pinned"] #opensettings .dock__more { display: none; }
+
+[data-panels="float"] .build {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 56px;                  /* высота нижней полосы */
+  z-index: 15;
+  max-height: 60vh;
+  padding: var(--rhythm);
+  border-top: 1px solid var(--hairline);
+  background: var(--surface);
+}
+[data-panels="float"] .build[hidden] { display: none; }
+[data-panels="float"] .build__grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 34px; }
+
+/* ── Нижняя полоса ───────────────────────────────────────────────────── */
+.dock {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--gap);
+  height: 56px;
+  padding: 0 var(--rhythm);
+  border-top: 1px solid var(--hairline);
+  background: var(--surface);
+}
+
+.dock__summary {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+.dock__state {
+  font-size: 10px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.dock__state::before {
+  content: "";
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin-right: 8px;
+  background: var(--accent);
+  vertical-align: middle;
+}
+.dock__more {
+  font-size: 10px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+  border-bottom: 1px solid transparent;
+  transition: color var(--dur), border-color var(--dur);
+}
+.dock__summary:hover .dock__more { color: var(--ink); border-bottom-color: var(--ink); }
+.dock__tf2 { margin-left: auto; }
+
+/* ── Узкое окно ──────────────────────────────────────────────────────────
+   Прибитые панели съедают ширину, которой и так нет: каталог, две половины
+   работы и параметры в одну строку не встают. Ниже порога режим принудительно
+   переключается в плавающий (см. app.js) — поэтому здесь остаётся только
+   разложить две половины работы друг под друга. */
+@media (max-width: 1100px) {
+  .work { grid-template-columns: minmax(0, 1fr); grid-auto-rows: minmax(180px, 1fr); }
+  [data-panels="float"] .build__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* ── Баннер правки текстуры ──────────────────────────────────────────────
+   Панель сборки в этот момент показывает настройки ОДНОГО материала, а не
+   общие. Об этом надо сказать явно, иначе легко принять одно за другое. */
+.editbar {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  row-gap: 8px;
+  margin-bottom: var(--gap);
+  padding: 9px 12px;
+  border: 1px solid var(--accent);
+}
+.editbar[hidden] { display: none; }
+.editbar__what { font-size: 11px; color: var(--ink-soft); }
+.editbar__what b { font-family: var(--mono); font-size: 11px; color: var(--accent); font-weight: 400; }
+.editbar__acts { display: flex; gap: 16px; }
+
+
+/* ── Консоль ─────────────────────────────────────────────────────────────
+   Поток событий от Python и вызовов к нему. Панель поверх правого края:
+   раздвигать ради неё рабочую область не стоит, смотрят в неё редко. */
+.console {
+  position: fixed;
+  top: 46px;
+  right: 0;
+  bottom: 56px;
+  z-index: 25;
+  width: min(460px, 46vw);
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--hairline-strong);
+  background: var(--surface);
+}
+.console[hidden] { display: none; }
+
+.console__bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 10px var(--gap);
+  border-bottom: 1px solid var(--hairline);
+}
+.console__acts { display: flex; gap: 16px; }
+
+.console__body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 10px var(--gap) var(--gap);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  line-height: 1.7;
+}
+
+.logline { display: flex; gap: 10px; color: var(--ink-soft); }
+.logline__time { flex: none; color: var(--ink-mute); }
+/* Направление обмена важнее уровня: сразу видно, кто кого позвал. */
+.logline__dir { flex: none; width: 2.2em; color: var(--ink-mute); }
+.logline--in  .logline__dir { color: var(--accent); }
+.logline--err { color: var(--accent); }
+.logline__text { min-width: 0; overflow-wrap: anywhere; }
+
+
+/* ── Карты материала и редактор VMT ────────────────────────────────────
+   По общему языку: ни рамок-карточек, ни заливок. Ряды разделены волосяной
+   линией, включённая карта отмечена инверсией подписи и акцентной чертой —
+   так же, как вкладки и теги в остальном интерфейсе. */
+.maps { width: min(820px, 94vw); }
+.vmt  { width: min(860px, 94vw); }
+
+/* Заголовок диалога и предмет, к которому он относится, — в одну строку:
+   правка ВСЕГДА про конкретный материал, и забывать об этом нельзя. */
+.dlg__head { display: flex; align-items: baseline; gap: 14px; }
+.dlg__mat { color: var(--accent); }
+
+.maps__list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(330px, 1fr));
+  gap: 0 var(--rhythm);
+  max-height: 58vh;
+  overflow: auto;
+}
+
+.mapcard {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 15px 0;
+  border-top: 1px solid var(--hairline);
+}
+.mapcard__head { align-items: baseline; }
+.mapcard__title {
+  flex: 1;
+  font-size: 13px;
+  /* Выключенная карта приглушена, включённая — полным тоном: состояние видно
+     без заливок и рамок. */
+  color: var(--ink-soft);
+  transition: color var(--dur);
+}
+.mapcard.is-on .mapcard__title { color: var(--ink); }
+.mapcard__badge { flex: none; letter-spacing: .1em; }
+.mapcard.is-on .mapcard__badge { color: var(--accent); }
+
+.mapcard__tip {
+  margin: 0;
+  padding-left: 23px;             /* по левому краю подписи, а не чекбокса */
+  color: var(--ink-mute);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.mapcard__body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-left: 23px;
+  /* Тонкая акцентная черта вместо рамки: видно, докуда простирается карта. */
+  border-left: 1px solid var(--accent);
+  margin-left: 5px;
+}
+.mapcard__body[hidden] { display: none; }
+
+.mapcard__file { display: flex; align-items: center; gap: 12px; }
+.mapcard__file .input { flex: 1; min-width: 0; font-size: 12px; }
+.mapcard__params { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; }
+.mapcard__cell { display: flex; align-items: center; gap: 8px; }
+.mapcard__cell .label { white-space: nowrap; }
+.mapcard__cell .select select { font-size: 12px; }
+.mapcard .check:has(input:disabled),
+.mapcard__cell:has(input:disabled) .label { color: var(--ink-mute); }
+
+/* ── Редактор VMT ──────────────────────────────────────────────────────
+   Текст здесь — главная масса на экране, поэтому у него своя поверхность
+   и моноширинный набор; всё остальное отступает в подписи. */
+/* Поле и зеркало обязаны совпадать по метрике до пикселя, иначе подсветка
+   уедет от текста. Общие свойства заданы один раз на оба. */
+.vmt__wrap {
+  position: relative;
+  height: 52vh;
+  border-top: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--hairline);
+  background: var(--bg);
+}
+
+.vmt__text,
+.vmt__hl {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  padding: 16px 18px;
+  border: 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.6;
+  tab-size: 4;
+  white-space: pre;
+  overflow: auto;
+}
+
+.vmt__hl { color: var(--ink-soft); pointer-events: none; }
+/* Наведение на $параметр — единственное, ради чего зеркало ловит мышь. */
+.vmt__hl .vmt-par { color: var(--accent); pointer-events: auto; cursor: help; }
+.vmt__hl .vmt-str { color: var(--ink); }
+.vmt__hl .vmt-com { color: var(--ink-mute); font-style: italic; }
+
+/* Сам текст прозрачен: его видно через зеркало. Каретка и выделение —
+   свои, иначе печатать было бы вслепую. */
+.vmt__text {
+  background: none;
+  color: transparent;
+  caret-color: var(--accent);
+  resize: none;
+}
+.vmt__text::selection { background: var(--hairline-strong); color: transparent; }
+.vmt__text:focus { outline: none; }
+.vmt__wrap:focus-within { border-color: var(--accent); }
+
+.vmt__foot { display: flex; align-items: baseline; gap: 14px; }
+.vmt__status { margin: 0; flex: 1; }
+.vmt__status.is-bad { color: var(--accent); }
+.vmt__status.is-good { color: var(--ink-soft); }
+.vmt__keys { flex: none; }
+
+
+
+/* Поле без зеркала (QC): подсветки нет, значит текст рисует оно само. */
+.vmt__text--plain { color: var(--ink); caret-color: var(--accent); }
+.vmt__text--plain::selection { background: var(--hairline-strong); color: var(--ink); }
+
+
+/* ── Диагностика ───────────────────────────────────────────────────────
+   Уровень находки — цвет вертикальной черты. Заливок нет: в остальном
+   интерфейсе состояние тоже показано линией, а не плашкой. */
+.diag { width: min(760px, 94vw); }
+.diag__list { display: flex; flex-direction: column; max-height: 56vh; overflow: auto; }
+
+.finding {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 0 12px 14px;
+  border-top: 1px solid var(--hairline);
+  border-left: 2px solid var(--hairline-strong);
+}
+.finding--error { border-left-color: var(--accent); }
+.finding--warning { border-left-color: var(--ink-soft); }
+.finding--info { border-left-color: var(--hairline-strong); }
+
+.finding__title { font-size: 13px; color: var(--ink); }
+.finding--info .finding__title { color: var(--ink-soft); }
+.finding__where { color: var(--ink-mute); }
+.finding__detail { margin: 0; font-size: 11px; line-height: 1.5; color: var(--ink-soft); }
+.finding__fix { margin: 0; font-size: 11px; line-height: 1.5; color: var(--accent); }
+
+
+/* ── Настройки ─────────────────────────────────────────────────────────
+   Два столбца полей, дальше галочки и список исключений — тот же порядок,
+   что в окне приложения. */
+.cfg { width: min(720px, 94vw); }
+.cfg__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: var(--gap) var(--rhythm);
+}
+.cfg__checks { display: flex; flex-wrap: wrap; gap: 10px 24px; }
+.cfg__list {
+  min-height: 62px;
+  padding: 6px 0;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.6;
+  resize: vertical;
+}
+
+
+/* Карточка-дверь в каталоге («Открыть VPK-мод…»): обложки у неё нет и быть
+   не может, поэтому в пустой рамке — знак действия. */
+.pick--open .pick__box {
+  display: grid;
+  place-items: center;
+  color: var(--ink-mute);
+  font-size: 26px;
+  line-height: 1;
+}
+.pick--open .pick__box::after { content: "+"; }
+.pick--open:hover .pick__box { color: var(--accent); }
+
+
+/* Мод в библиотеке: удаление — на самой карточке. Крестик виден ВСЕГДА, а не
+   по наведению: у кадров в альбоме прятать инструменты можно (их там ищут
+   глазами по одному), а здесь способ удалить мод не должен быть тайной. В
+   покое он приглушён, чтобы список читался именами. */
+.pick--mod { position: relative; }
+.pick__drop {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  color: var(--ink-mute);
+  font-size: 14px;
+  line-height: 1;
+  transition: color var(--dur), border-color var(--dur);
+}
+.pick--mod:hover .pick__drop { border-color: var(--hairline-strong); }
+.pick__drop:hover { color: var(--accent); border-color: var(--accent); }
+
+/* В прибитом режиме карточка — узкая строка: крестик садится у правого края
+   по центру, а строке добавляется отступ, иначе имя уезжает под него. */
+[data-panels="pinned"] .pick--mod { padding-right: 30px; }
+[data-panels="pinned"] .pick--mod .pick__drop {
+  top: 50%;
+  right: 4px;
+  transform: translateY(-50%);
+  border: 0;
+  background: none;
+}
+
+
+
+/* Полоса вариантного стиля: объяснение слева, действие справа. */
+.stylebar {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--gap);
+  padding: 8px 0 0;
+}
+.stylebar .label { text-transform: none; letter-spacing: .04em; font-size: 11px; }
+
+/* Крестик «убрать из стиля» стоит рядом с шестерёнкой кадра. */
+.frame__off { font-size: 14px; }

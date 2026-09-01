@@ -1,40 +1,11 @@
-import importlib
-import sys
-import types
 import unittest
 from unittest.mock import Mock, patch
 
-
-def setup_fake_pyside6():
-    """Подменяет PySide6.QtCore заглушкой — воркер тестируется без реального Qt."""
-    qtcore = types.ModuleType("PySide6.QtCore")
-
-    class DummySignal:
-        def __init__(self, *args, **kwargs):
-            self.calls = []
-
-        def emit(self, *args, **kwargs):
-            self.calls.append(args)
-
-    class DummyThread:
-        def __init__(self, *args, **kwargs):
-            self._interrupted = False
-
-        def isInterruptionRequested(self):
-            return self._interrupted
-
-    qtcore.QThread = DummyThread
-    qtcore.Signal = DummySignal
-    qtcore.QMutex = object
-    qtcore.QWaitCondition = object
-    sys.modules.setdefault("PySide6", types.ModuleType("PySide6"))
-    sys.modules["PySide6.QtCore"] = qtcore
+from src.services.merge_vpk_worker import MergeVpkWorker
 
 
-setup_fake_pyside6()
-sys.modules.pop("src.services.base_worker", None)
-sys.modules.pop("src.services.merge_vpk_worker", None)
-MergeVpkWorker = importlib.import_module("src.services.merge_vpk_worker").MergeVpkWorker
+
+
 
 
 class MergeVpkWorkerTests(unittest.TestCase):
@@ -57,7 +28,7 @@ class MergeVpkWorkerTests(unittest.TestCase):
 
     def test_interruption_marks_cancelled(self):
         worker = self._make()
-        worker._interrupted = True
+        worker.requestInterruption()
         with patch(
             "src.services.merge_vpk_worker.MergeVPKService.merge_vpk_files",
             return_value=(True, "done"),

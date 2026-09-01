@@ -46,6 +46,21 @@ def _existing(path: Optional[str]) -> Optional[str]:
     return path if (path and os.path.exists(path)) else None
 
 
+def _lookup_ci(store: Dict[str, str], key: str) -> Optional[str]:
+    """Значение по ключу, с фолбэком на совпадение без учёта регистра.
+
+    Нужно моду из VPK: карточки там названы по VTF, а меши модели — по
+    материалам, и совпадают они через раз только регистром.
+    """
+    if key in store:
+        return store[key]
+    low = key.lower()
+    for name, value in store.items():
+        if name.lower() == low:
+            return value
+    return None
+
+
 @dataclass
 class PreviewTextureState:
     """Состояние текстур превью: пользовательские загрузки + данные модели."""
@@ -234,6 +249,16 @@ class PreviewTextureState:
             if p:
                 return p
 
+        return self.game_base(mat)
+
+    def game_base(self, mat: str) -> Optional[str]:
+        """Игровой оригинал материала — БЕЗ пользовательских правок.
+
+        Нужен склейке частей: картинки частей рисуются поверх игровой
+        текстуры, а не поверх прошлой склейки. Иначе правки копились бы
+        слоями, и «убрать картинку с части» ничего бы не возвращало.
+        """
+        active = self.active_team
         # Игровой оригинал текущей команды (карты ключуются RED-именами).
         vpk_map = self.vpk_red_tex_map if active == Team.RED else self.vpk_blu_tex_map
         g = _existing(vpk_map.get(mat))
@@ -242,7 +267,7 @@ class PreviewTextureState:
 
         # Нейтральные/служебные не зависят от команды — их оригинал только в
         # RED-карте; на BLU показываем его же (иначе «Прочее» на BLU пустое).
-        if active != Team.RED and not team_specific:
+        if active != Team.RED and not self.is_team_material(mat):
             g = _existing(self.vpk_red_tex_map.get(mat))
             if g:
                 return g
@@ -254,6 +279,18 @@ class PreviewTextureState:
                 return frames[0]
 
         return None
+
+    def resolve_mesh(self, mat: str) -> Optional[str]:
+        """
+        Текстура для МЕША загруженного мода: правка пользователя, иначе
+        оригинал из мода.
+
+        Отдельно от resolve_card, потому что ключи здесь чужие: карточки
+        названы по VTF мода, а меши — по материалам модели. Сравнение без
+        учёта регистра — единственное, что их связывает.
+        """
+        return (_existing(_lookup_ci(self.textures.get(Team.RED, {}), mat))
+                or _existing(_lookup_ci(self.vpk_red_tex_map, mat)))
 
     # ═══════════════════════════════════════════════════════════════════════ #
     # Что уходит в сборку

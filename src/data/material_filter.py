@@ -70,3 +70,21 @@ def is_user_blacklisted(name: str) -> bool:
 def filter_editable(names) -> list:
     """Оставляет только редактируемые (не служебные) материалы из списка имён."""
     return [n for n in names if is_editable_material(n)]
+
+
+def parse_blacklist(text: str) -> list:
+    """
+    Пользовательский список материалов-исключений из текста настроек.
+
+    Строки или запятые — один разделитель: люди пишут и так, и так. Пустые
+    отбрасываются, повторы (без учёта регистра) схлопываются — иначе один и тот
+    же паттерн попадал бы в список дважды и путал при следующем открытии.
+    """
+    seen: set = set()
+    out: list = []
+    for line in (text or '').replace(',', '\n').splitlines():
+        pattern = line.strip()
+        if pattern and pattern.lower() not in seen:
+            seen.add(pattern.lower())
+            out.append(pattern)
+    return out

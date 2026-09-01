@@ -1,6 +1,7 @@
 """Тесты мультиклассовых шапок в hats_parser: поле HatItem.per_class_models."""
 
 import unittest
+import unittest.mock
 import tempfile
 from pathlib import Path
 
@@ -239,6 +240,44 @@ class HatItemFlagTests(unittest.TestCase):
         n = self._hat()
         self.assertFalse(n.is_halloween)
         self.assertFalse(n.is_holiday)
+
+
+class DemomanModelTokenTests(unittest.TestCase):
+    """У подрывника файлы моделей называются `_demo`, а не `_demoman`."""
+
+    ITEMS = """
+"items_game"
+{
+    "items"
+    {
+        "200"
+        {
+            "name" "all_class_template_hat"
+            "item_name" "#template_hat"
+            "item_slot" "head"
+            "model_player" "models/player/items/all_class/template_%s.mdl"
+        }
+    }
+}
+"""
+
+    def test_template_expands_with_the_path_token(self):
+        """Раскрывая %s именем класса, мод оставался без модели подрывника —
+        такого файла в игре нет (там 910 моделей `_demo` и ни одной `_demoman`)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            items = root / "tf" / "scripts" / "items"
+            items.mkdir(parents=True)
+            (items / "items_game.txt").write_text(self.ITEMS, encoding="utf-8")
+            (root / "tf" / "resource").mkdir(parents=True)
+            with unittest.mock.patch.object(
+                    hats_parser, "_CACHE_FILE", root / "cache.json"):
+                hats = parse_hats(str(root), "en", force_reparse=True)
+
+        hat = next(h for h in hats if h.internal_name == "all_class_template_hat")
+        self.assertEqual(len(hat.per_class_models), 9)
+        self.assertTrue(hat.per_class_models["demoman"].endswith("template_demo.mdl"))
+        self.assertTrue(hat.per_class_models["scout"].endswith("template_scout.mdl"))
 
 
 if __name__ == "__main__":

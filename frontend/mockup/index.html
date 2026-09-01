@@ -1,0 +1,568 @@
+<!doctype html>
+<html lang="ru" data-theme="light" data-panels="float">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TF2 Skin Generator</title>
+<link rel="stylesheet" href="base.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ═══ Шапка ═══════════════════════════════════════════════════════════ -->
+<header class="chrome">
+  <div class="chrome__mark">TF2&nbsp;Skin&nbsp;Generator</div>
+  <nav class="chrome__nav">
+    <button class="underlined is-active">Оружие</button>
+    <button class="underlined">Шапки</button>
+    <button class="underlined">Частицы</button>
+    <button class="underlined">Диагностика</button>
+  </nav>
+  <div class="chrome__actions">
+    <button class="iconbtn" id="panels">Закрепить панели</button>
+    <button class="iconbtn" id="theme">Тёмная</button>
+    <button class="iconbtn" id="opencfg">Настройки</button>
+  </div>
+</header>
+
+<!-- ═══ Заголовок: предмет как название вещи ════════════════════════════ -->
+<div class="title">
+  <button class="title__item" id="opencat">
+    <span class="title__name">Scattergun</span>
+    <span class="title__meta">c_scattergun · Scout · 4 материала</span>
+    <span class="title__hint">Сменить предмет</span>
+  </button>
+
+  <div class="title__side">
+    <!-- Инструменты — операции над ПРЕДМЕТОМ, не параметры сборки. -->
+    <div class="menu">
+      <button class="textbtn" id="opentools">Инструменты</button>
+      <div class="menu__list" id="tools" hidden>
+        <button class="menu__item" data-for="model" data-tool="model">Извлечь модель (SMD)</button>
+        <button class="menu__item" data-for="model" data-tool="uv">Экспорт UV-шаблона (PNG)</button>
+        <button class="menu__item" data-for="model" data-tool="texture">Извлечь оригинальную текстуру</button>
+        <button class="menu__item" data-for="model" data-tool="merge">Собрать несколько VPK в один</button>
+        <!-- Работа с самим файлом эффекта. Справочник нужен, чтобы собрать
+             набор параметров снаружи и вставить его кнопкой «Вставить». -->
+        <button class="menu__item" data-for="particles" data-tool="open">Открыть PCF с диска…</button>
+        <button class="menu__item" data-for="particles" data-tool="save">Сохранить PCF…</button>
+        <button class="menu__item" data-for="particles" data-tool="ref">Справочник параметров (JSON)…</button>
+        <button class="menu__item" data-for="particles" data-tool="ref-ai">Справочник для ИИ (с заданием)…</button>
+      </div>
+    </div>
+
+    <div class="modes">
+      <button class="underlined is-active" data-view="both">Вместе</button>
+      <button class="underlined" data-view="flat">Текстура</button>
+      <button class="underlined" data-view="model">Модель</button>
+      <button class="underlined" data-view="fp" data-cond="firstperson">От первого лица</button>
+    </div>
+
+    <div class="teams">
+      <button class="tag is-active">RED</button>
+      <button class="tag">BLU</button>
+      <button class="tag" data-cond="aus">Australium</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Сцена ══════════════════════════════════════════════════════════════
+     Три блока в одной разметке. Настройка «панели» решает только, прибиты
+     каталог и сборка к краям или вызываются поверх. -->
+<main class="stage">
+
+  <!-- ── Каталог предметов ──────────────────────────────────────────── -->
+  <aside class="catalog" id="catalog">
+    <div class="catalog__head">
+      <input class="input catalog__search" type="search" placeholder="Название или файл">
+      <button class="iconbtn" id="closecat">Закрыть</button>
+    </div>
+
+    <!-- Всё ниже приходит из src/app/api.py: категории, классы, типы и сами
+         предметы. Разметка только описывает места. -->
+    <div class="field catalog__cat">
+      <label class="field__label" for="cat" id="catlabel">Категория</label>
+      <div class="select"><select id="cat"></select></div>
+    </div>
+
+    <div class="catalog__filters" id="f-class" hidden>
+      <span class="label label--inline">Класс</span>
+    </div>
+
+    <div class="catalog__filters" id="f-type" hidden>
+      <span class="label label--inline">Тип</span>
+    </div>
+
+    <!-- Фильтр категорий косметики: те же три, что в панели шапок приложения.
+         Значение хранится в общем конфиге, поэтому окно и веб показывают
+         одинаковый список. -->
+    <div class="catalog__filters" id="f-hat" hidden>
+      <span class="label label--inline">Скрыть</span>
+    </div>
+
+    <p class="catalog__empty" id="cat-note" hidden></p>
+
+    <div class="catalog__grid" id="grid"></div>
+  </aside>
+
+  <!-- ── Работа: текстуры и модель ──────────────────────────────────── -->
+  <div class="work" data-view="both">
+
+    <section class="half half--flat">
+      <div class="half__bar">
+        <div class="mattabs"></div>
+      </div>
+
+      <div class="album__box">
+        <button class="album__step album__step--prev" aria-label="Назад">‹</button>
+        <div class="album">
+        </div>
+        <button class="album__step album__step--next" aria-label="Вперёд">›</button>
+      </div>
+
+      <!-- Полоса вариантного стиля: он переопределяет базу выборочно, и
+           пустой альбом здесь означает «стиль пока наследует всё». -->
+      <div class="stylebar" id="stylebar" hidden>
+        <span class="label" id="style-note"></span>
+        <button class="textbtn textbtn--sm" type="button" id="style-add">Добавить материал</button>
+      </div>
+
+      <div class="half__foot">
+        <span class="album__count"><b>—</b></span>
+        <div class="acts">
+          <button class="textbtn textbtn--sm" data-cond="maps">Карты материала</button>
+          <button class="textbtn textbtn--sm" id="vmt">VMT</button>
+          <button class="textbtn textbtn--sm" id="misc" data-cond="misc">Прочее</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="half half--model">
+
+      <div class="viewport">
+        <!-- Тот же viewer3d.html, что работает в окне приложения: сервер
+             отдаёт его из src/static, второй копии нет. -->
+        <iframe class="viewport__frame" id="viewer" title="Модель"
+                src="/viewer/viewer3d.html"></iframe>
+        <!-- Частицы рисует свой движок (particles3d.html) — тот же, что в
+             приложении. Адрес ставится при первом входе в раздел: грузить
+             второй three.js ради неоткрытой вкладки незачем. -->
+        <iframe class="viewport__frame" id="particles" title="Частицы" hidden></iframe>
+        <span class="viewport__hint" id="stagehint">Выберите предмет</span>
+      </div>
+
+      <!-- ═══ Контрольные точки ═══════════════════════════════════════════
+           В игре их выставляет код (где оружие, какого цвета килстрик), в
+           превью — человек. Точку можно посадить на реальную точку крепления
+           модели: в игре анюжуал висит именно на attachment. -->
+      <div class="cp" id="cp" hidden>
+        <div class="cp__row">
+          <span class="label label--inline">Точка</span>
+          <div class="cp__pick" id="cp-index"></div>
+          <span class="mono cp__used" id="cp-used"></span>
+        </div>
+
+        <div class="cp__row">
+          <span class="label label--inline">Позиция</span>
+          <input class="input input--num" id="cp-x" type="number" step="1" value="0">
+          <input class="input input--num" id="cp-y" type="number" step="1" value="0">
+          <input class="input input--num" id="cp-z" type="number" step="1" value="0">
+          <span class="label label--inline">Углы</span>
+          <input class="input input--num" id="cp-p" type="number" step="5" value="0">
+          <input class="input input--num" id="cp-yaw" type="number" step="5" value="0">
+          <input class="input input--num" id="cp-r" type="number" step="5" value="0">
+          <span class="mono cp__hint">углы задают оси скорости и плоскость спрайтов</span>
+        </div>
+
+        <div class="cp__row">
+          <span class="label label--inline">Движение</span>
+          <div class="select"><select id="cp-motion">
+            <option value="none">Неподвижно</option>
+            <option value="bob">Покачивание вверх-вниз</option>
+            <option value="sway">Шаг вбок с подскоком</option>
+            <option value="orbit">По кругу</option>
+            <option value="spin">Разворот на месте</option>
+          </select></div>
+          <span class="label label--inline">Амплитуда</span>
+          <input class="input input--num" id="cp-amp" type="number" step="5" value="24">
+          <span class="label label--inline">Период, с</span>
+          <input class="input input--num" id="cp-period" type="number" step="0.5" value="2">
+          <button class="textbtn textbtn--sm" id="cp-reset">Сбросить</button>
+        </div>
+
+        <div class="cp__row">
+          <button class="textbtn textbtn--sm" id="cp-model">Модель…</button>
+          <span class="mono" id="cp-model-name"></span>
+          <div class="cp__scene">
+            <button class="tag is-active" data-scene="world">В мире</button>
+            <button class="tag" data-scene="model">На модели</button>
+          </div>
+          <span class="label label--inline">Точка крепления</span>
+          <div class="select"><select id="cp-attach" disabled></select></div>
+        </div>
+      </div>
+
+      <div class="half__foot half__foot--wrap">
+        <!-- Кнопки стилей приходят от воркера (skin_info): у каждой модели
+             свой набор, и заглушки в разметке показывали бы стили там, где их
+             нет. Ряд остаётся пустым до события. -->
+        <div class="styles" id="skinbar" data-cond="styles" hidden>
+          <span class="label label--inline">Стиль</span>
+        </div>
+        <!-- Классы мультиклассовой шапки: у каждого своя модель, и собирать
+             все девять ради одного незачем. -->
+        <div class="styles" id="hatclasses" hidden>
+          <span class="label label--inline">Классы</span>
+        </div>
+        <!-- Модельные стили шапки: у каждого своя геометрия. Список приходит
+             из каталога вместе с предметом. -->
+        <div class="styles" id="hatstyles" hidden>
+          <span class="label label--inline">Стиль шапки</span>
+        </div>
+        <!-- Части модели: куски геометрии одного материала. Список приходит
+             от Python по загруженной модели. -->
+        <div class="styles parts" id="partsbar" hidden>
+          <span class="label label--inline">Части</span>
+        </div>
+        <!-- Палитра частей: выбранный цвет применяется щелчком по куску
+             модели. Картинку кладут перетаскиванием — для неё кнопки нет. -->
+        <div class="styles parts" id="partspaint" hidden>
+          <span class="label label--inline">Цвет</span>
+          <input class="parts__color" type="color" id="part-color" value="#c83c3c"
+                 title="Свой цвет">
+          <button class="textbtn textbtn--sm" id="parts-grad"
+                  title="Красить переходом из первого цвета во второй">Градиент</button>
+          <input class="parts__color" type="color" id="part-color2" value="#2a2a2a"
+                 title="Второй цвет градиента" hidden>
+          <button class="textbtn textbtn--sm" id="parts-grad-dir" hidden
+                  title="Направление перехода">Сверху вниз</button>
+          <label class="parts__strength">
+            Сила
+            <input type="range" id="part-tint" min="20" max="100" value="100">
+          </label>
+          <button class="textbtn textbtn--sm" id="parts-undo">Отменить</button>
+          <button class="textbtn textbtn--sm" id="parts-random">Случайно</button>
+          <button class="textbtn textbtn--sm" id="parts-clear">Убрать всё</button>
+          <span class="parts__hint" id="parts-hint"></span>
+        </div>
+        <!-- Анимации вида от первого лица. Список приходит от воркера: у
+             каждого оружия свой набор, и общего перечня не существует. -->
+        <div class="styles" id="fpbar" hidden>
+          <span class="label label--inline">Анимация</span>
+        </div>
+        <!-- Управление проигрыванием эффекта. Живёт там же, где действия
+             над моделью: раздел меняет содержимое, а не раскладку. -->
+        <div class="acts" id="pacts" hidden>
+          <button class="textbtn textbtn--sm" id="prestart">Заново</button>
+          <button class="textbtn textbtn--sm" id="ppause">Пауза</button>
+          <button class="textbtn textbtn--sm" id="ploop">Повтор</button>
+          <button class="textbtn textbtn--sm" id="pcpbtn">Точки</button>
+        </div>
+        <div class="acts" id="model-acts">
+          <button class="textbtn textbtn--sm" data-cond="replace">Заменить модель</button>
+          <button class="textbtn textbtn--sm" data-cond="qc">Редактировать QC</button>
+          <button class="textbtn textbtn--sm" id="maketeam" data-cond="team">Сделать командным</button>
+          <button class="textbtn textbtn--sm" id="parts" data-cond="parts">Разделить на части</button>
+          
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+  <!-- ── Параметры сборки ───────────────────────────────────────────── -->
+  <aside class="build" id="build">
+    <!-- Шестерёнка на карточке не открывает диалог: она переводит эту панель
+         в режим правки настроек одного материала. Глобальные значения при
+         этом стэшатся и возвращаются на выходе. -->
+    <div class="editbar" id="editbar" hidden>
+      <span class="editbar__what">Текстура: <b id="editmat">scattergun</b></span>
+      <div class="editbar__acts">
+        <button class="textbtn textbtn--sm" id="editreset">Сбросить</button>
+        <button class="textbtn textbtn--sm" id="editdone">Готово</button>
+      </div>
+    </div>
+
+    <div class="build__grid">
+      <div class="build__col">
+        <span class="field__label">Разрешение</span>
+        <label class="check"><input type="radio" name="res"><span>256 × 256 · спрей</span></label>
+        <label class="check"><input type="radio" name="res" checked><span>512 × 512 · обычное</span></label>
+        <label class="check"><input type="radio" name="res"><span>1024 × 1024 · высокое</span></label>
+        <label class="check"><input type="radio" name="res"><span>2048 × 2048 · ультра</span></label>
+      </div>
+
+      <div class="build__col">
+        <div class="field">
+          <label class="field__label" for="fmt">Формат VTF</label>
+          <div class="select">
+            <select id="fmt">
+              <option>DXT5</option><option>DXT1</option>
+              <option>BGRA8888</option><option>RGBA8888</option>
+            </select>
+          </div>
+        </div>
+        <div class="field">
+          <label class="field__label" for="out">Имя VPK</label>
+          <input class="input" id="out" type="text" value="scattergun_mod.vpk">
+          <span class="field__note">Не более 50 символов, без \ / : * ? " &lt; &gt; |</span>
+        </div>
+      </div>
+
+      <div class="build__col">
+        <span class="field__label">Флаги VTF</span>
+        <label class="check"><input type="checkbox"><span>Clamp S</span></label>
+        <label class="check"><input type="checkbox"><span>Clamp T</span></label>
+        <label class="check"><input type="checkbox"><span>No Mipmap</span></label>
+        <label class="check"><input type="checkbox"><span>No LOD</span></label>
+        <label class="check"><input type="checkbox"><span>No minimum Mipmap</span></label>
+        <label class="check"><input type="checkbox"><span>Point Sample</span></label>
+      </div>
+
+      <div class="build__col">
+        <span class="field__label">Опции</span>
+          <label class="check"><input type="checkbox"><span>No Thumbnail</span></label>
+        <label class="check"><input type="checkbox"><span>No Reflectivity</span></label>
+        <label class="check" data-cond="gamma"><input type="checkbox" id="gamma"><span>Гамма-коррекция</span></label>
+        <input class="input input--tiny" id="gammaval" type="text" value="2.2" disabled data-cond="gamma">
+        <label class="check" data-cond="shoulders"><input type="checkbox"><span>Изолировать плечи</span></label>
+        <!-- Шапка красится командным цветом краской в VMT, а не текстурой:
+             без красок она будет одного цвета у обеих команд. -->
+        <label class="check" data-cond="hat_paints" title="С красками шапка красится командным цветом, как стоковая">
+          <input type="checkbox" id="hat-paints" checked><span>Краски из игры</span></label>
+        <label class="check" data-cond="normal"><input type="checkbox"><span>Normal Map</span></label>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ── Параметры эффекта ──────────────────────────────────────────
+       Те же крутилки, что в панели частиц приложения: схема одна
+       (services/simple_params), значения читает и пишет Python. -->
+  <aside class="build params" id="pbuild" hidden>
+    <!-- Два взгляда на одну систему: крутилки со смыслом и всё, что есть
+         в файле. Правки идут через одну и ту же службу, поэтому режимы
+         всегда показывают одно и то же состояние. -->
+    <div class="params__modes">
+      <button class="underlined is-active" data-pmode="simple">Обычный</button>
+      <button class="underlined" data-pmode="expert">Эксперт</button>
+    </div>
+
+    <!-- Действия открываются правой кнопкой — на системе в каталоге, на
+         группе, модуле и параметре в дереве, как в панели приложения.
+         Набор пунктов зависит от того, на чём щёлкнули. -->
+    <p class="params__hint">Правая кнопка — действия над системой, модулем и параметром</p>
+    <p class="params__note" id="pnote">Выберите систему частиц.</p>
+    <!-- В системе бывает под две сотни атрибутов; листать их глазами дольше,
+         чем набрать «radius». Ищет и по именам модулей. -->
+    <input class="input params__find" id="pfind" type="search"
+           placeholder="Поиск параметра" hidden>
+    <div class="params__list" id="plist"></div>
+    <div class="expert" id="pexpert" hidden></div>
+  </aside>
+
+</main>
+
+<!-- ═══ Нижняя полоса: состояние и сборка — всегда на месте ═══════════ -->
+<footer class="dock">
+  <button class="dock__summary" id="opensettings">
+    <span class="dock__state">Готово</span>
+    <span class="mono">512 × 512 · DXT5 · scattergun_mod.vpk</span>
+    <span class="dock__more">Параметры</span>
+  </button>
+  <span class="mono dock__tf2">TF2 найден · tf/tf2_misc_dir.vpk</span>
+  <button class="btn--primary">Собрать VPK</button>
+</footer>
+
+<!-- ═══ Диалог ══════════════════════════════════════════════════════════════
+     Один на всё: выбор из списка, ввод имени, подтверждение. Правка эффекта
+     состоит из таких шагов, а полтора десятка отдельных окон в этом макете
+     были бы полутора десятками способов выглядеть по-разному. -->
+<dialog class="ask" id="ask">
+  <form method="dialog" class="ask__body">
+    <p class="label ask__title"></p>
+    <p class="ask__text" hidden></p>
+    <input class="input ask__input" hidden>
+    <div class="ask__list" hidden></div>
+    <div class="ask__acts">
+      <button class="textbtn ask__cancel" type="button">Отмена</button>
+      <button class="btn--primary ask__ok" type="button">Готово</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- ═══ Карты материала ════════════════════════════════════════════════════
+     Не диалог ради диалога: карту нельзя завести редактором VMT — приложение
+     само генерит VTF с нужным под тип карты форматом и дописывает путь
+     (авто-патченный console\…, который пользователь знать не может). Список
+     карт и их параметры приходят из Python — второго их описания здесь нет. -->
+<dialog class="ask maps" id="maps">
+  <div class="ask__body">
+    <div class="dlg__head">
+      <p class="label ask__title"></p>
+      <span class="mono dlg__mat" id="maps-mat"></span>
+    </div>
+    <p class="ask__text" id="maps-intro"></p>
+    <div class="maps__list" id="maps-list"></div>
+    <div class="ask__acts">
+      <button class="textbtn" type="button" id="maps-cancel">Отмена</button>
+      <button class="btn--primary" type="button" id="maps-ok">Применить</button>
+    </div>
+  </div>
+</dialog>
+
+<!-- ═══ Редактор VMT ═══════════════════════════════════════════════════════
+     Открывается сохранённая правка, а если её нет — оригинал из игры.
+     Сломанный синтаксис Python не сохранит: в игре такой материал становится
+     невидимым, и причина находится далеко от места ошибки. -->
+<dialog class="ask vmt" id="vmtdlg">
+  <div class="ask__body">
+    <div class="dlg__head">
+      <p class="label ask__title">Материал</p>
+      <span class="mono dlg__mat" id="vmt-mat"></span>
+    </div>
+    <!-- Поле лежит ПОВЕРХ зеркала: сам textarea прозрачный, цвет и подсказки
+         рисует зеркало. Так подсветка и наведение на $параметр появляются без
+         своего редактора кода. -->
+    <div class="vmt__wrap">
+      <pre class="vmt__hl" id="vmt-hl" aria-hidden="true"></pre>
+      <textarea class="vmt__text" id="vmt-text" spellcheck="false"
+                autocomplete="off" autocapitalize="off"></textarea>
+    </div>
+    <div class="vmt__foot">
+      <p class="label vmt__status" id="vmt-status"></p>
+      <span class="label vmt__keys">Ctrl+S — сохранить · Esc — закрыть</span>
+    </div>
+    <div class="ask__acts">
+      <button class="textbtn" type="button" id="vmt-reset">Как в игре</button>
+      <button class="textbtn" type="button" id="vmt-close">Закрыть</button>
+      <button class="btn--primary" type="button" id="vmt-save">Сохранить</button>
+    </div>
+  </div>
+</dialog>
+
+<!-- ═══ Настройки ══════════════════════════════════════════════════════════
+     Тот же конфиг, что правит окно приложения: изменение здесь видно и там.
+     Пути вводятся текстом — выбрать папку из браузера нельзя. -->
+<dialog class="ask cfg" id="cfgdlg">
+  <div class="ask__body">
+    <div class="dlg__head">
+      <p class="label ask__title">Настройки</p>
+      <span class="mono dlg__mat" id="cfg-note"></span>
+    </div>
+
+    <div class="cfg__grid">
+      <div class="field">
+        <label class="field__label" for="cfg-tf2">Папка игры</label>
+        <input class="input" id="cfg-tf2" type="text"
+               placeholder="…/steamapps/common/Team Fortress 2">
+      </div>
+      <div class="field">
+        <label class="field__label" for="cfg-export">Папка экспорта</label>
+        <input class="input" id="cfg-export" type="text" placeholder="export">
+      </div>
+      <div class="field">
+        <label class="field__label" for="cfg-format">Формат извлечения</label>
+        <div class="select"><select id="cfg-format"></select></div>
+      </div>
+      <div class="field">
+        <label class="field__label" for="cfg-lang">Язык приложения</label>
+        <div class="select"><select id="cfg-lang"></select></div>
+      </div>
+      <div class="field">
+        <label class="field__label" for="cfg-theme">Тема приложения</label>
+        <div class="select"><select id="cfg-theme"></select></div>
+      </div>
+      <div class="field">
+        <label class="field__label" for="cfg-bypass">Обход sv_pure</label>
+        <div class="select"><select id="cfg-bypass"></select></div>
+        <span class="field__note" id="cfg-bypass-tip"></span>
+      </div>
+    </div>
+
+    <div class="cfg__checks">
+      <label class="check" title="Текстуры, карты и правки QC вернутся при следующем открытии предмета">
+        <input type="checkbox" id="cfg-save"><span>Сохранять правки предмета</span></label>
+      <label class="check"><input type="checkbox" id="cfg-tree"><span>Группировать дерево частиц</span></label>
+      <label class="check"><input type="checkbox" id="cfg-temp"><span>Хранить временные файлы при ошибке</span></label>
+      <label class="check"><input type="checkbox" id="cfg-debug"><span>Отладочный режим</span></label>
+    </div>
+
+    <div class="field">
+      <label class="field__label" for="cfg-blacklist">Скрытые материалы</label>
+      <textarea class="input cfg__list" id="cfg-blacklist" rows="3"
+                placeholder="по одному в строке или через запятую"></textarea>
+      <span class="field__note">Эти материалы не показываются в альбоме и не пишутся в мод.</span>
+    </div>
+
+    <div class="ask__acts">
+      <button class="textbtn" type="button" id="cfg-cancel">Отмена</button>
+      <button class="btn--primary" type="button" id="cfg-save">Сохранить</button>
+    </div>
+  </div>
+</dialog>
+
+<!-- ═══ Диагностика ════════════════════════════════════════════════════════
+     Проверяет СОБРАННЫЙ мод: читает VPK и говорит, что в игре сломается.
+     Отдельного раздела не занимает — это отчёт, а не рабочее место. -->
+<dialog class="ask diag" id="diagdlg">
+  <div class="ask__body">
+    <div class="dlg__head">
+      <p class="label ask__title">Диагностика мода</p>
+      <span class="mono dlg__mat" id="diag-file"></span>
+    </div>
+    <!-- Одной строкой: у .ask__text стоит pre-wrap (его используют
+         многострочные предупреждения), и перенос из разметки виден как
+         висячий отступ. -->
+    <p class="ask__text">Проверяет собранный VPK: пути в VMT, форматы VTF, структуру мода — то, что в игре превращается в фиолетовую текстуру или невидимую модель.</p>
+    <p class="label vmt__status" id="diag-status"></p>
+    <div class="diag__list" id="diag-list"></div>
+    <div class="ask__acts">
+      <button class="textbtn" type="button" id="diag-pick">Выбрать VPK…</button>
+      <button class="textbtn" type="button" id="diag-close">Закрыть</button>
+    </div>
+  </div>
+</dialog>
+
+<!-- ═══ Редактор QC ════════════════════════════════════════════════════════
+     Правится QC СВОЕЙ готовой модели: у замены геометрии сборка собирает его
+     сама под игровые материалы. Пустой текст возвращает авто-QC. -->
+<dialog class="ask vmt" id="qcdlg">
+  <div class="ask__body">
+    <div class="dlg__head">
+      <p class="label ask__title">QC модели</p>
+      <span class="mono dlg__mat" id="qc-state"></span>
+    </div>
+    <div class="vmt__wrap">
+      <textarea class="vmt__text vmt__text--plain" id="qc-text" spellcheck="false"
+                autocomplete="off" autocapitalize="off"></textarea>
+    </div>
+    <div class="vmt__foot">
+      <p class="label vmt__status" id="qc-status"></p>
+      <span class="label vmt__keys">Ctrl+S — сохранить · Esc — закрыть</span>
+    </div>
+    <div class="ask__acts">
+      <button class="textbtn" type="button" id="qc-reset">Вернуть авто-QC</button>
+      <button class="textbtn" type="button" id="qc-close">Закрыть</button>
+      <button class="btn--primary" type="button" id="qc-save">Сохранить</button>
+    </div>
+  </div>
+</dialog>
+
+<!-- ═══ Консоль ════════════════════════════════════════════════════════════
+     Что приходит от Python и что уходит обратно. Открывается по ` (тильда)
+     или щелчком по индикатору состояния. Отладочная, но не подпорка макета:
+     в приложении такая же пригодится, когда сборка пойдёт не так. -->
+<aside class="console" id="console" hidden>
+  <div class="console__bar">
+    <span class="label">Журнал</span>
+    <div class="console__acts">
+      <button class="textbtn textbtn--sm" id="logclear">Очистить</button>
+      <button class="textbtn textbtn--sm" id="logclose">Закрыть</button>
+    </div>
+  </div>
+  <div class="console__body" id="logbody"></div>
+</aside>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

@@ -21,7 +21,7 @@ import os
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import Signal
+from src.services.base_worker import Signal
 
 from src.services.base_worker import BaseWorker
 from src.services.game_vpk_reader import GameVpkReader

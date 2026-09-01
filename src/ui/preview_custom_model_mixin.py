@@ -14,7 +14,7 @@ from typing import Optional
 from PySide6.QtWidgets import QFileDialog
 
 from src.shared.logging_config import get_logger
-from src.ui.material_cards import editable_material_cards
+from src.domain.preview.material_cards import editable_material_cards
 
 logger = get_logger(__name__)
 
@@ -185,8 +185,10 @@ class PreviewCustomModelMixin:
                 return
 
             # Запоминаем путь — чтобы сборка переиспользовала ту же модель,
-            # а не просила выбрать SMD повторно.
+            # а не просила выбрать SMD повторно. Готовый OBJ тоже: из вида от
+            # первого лица возвращаются к НЕМУ, а не к стоковой модели.
             self._custom_smd_path = smd_path
+            self._custom_obj_path = obj_path
 
             # Спрашиваем тип модели: «готова» (свои материалы) или «замена
             # геометрии» (игровой материал). По умолчанию рекомендуем по числу
@@ -201,6 +203,15 @@ class PreviewCustomModelMixin:
             # текстура остаются поверх кастомной модели. Для geometry-only
             # фоновый QC-воркер при необходимости покажет команды заново.
             self._reset_team_vpk_state()
+
+            # В виде от первого лица геометрию показывает СВОЙ воркер: он
+            # сажает модель в руку тем же слиянием, что и сборка. Обычный OBJ
+            # тут только сломал бы сцену — руки бы исчезли.
+            if self._pstate.is_first_person and self._pending_3d_params:
+                self._update_3d_buttons_visibility()
+                if self._pstate.is_first_person:
+                    self._start_fp_worker(*self._pending_3d_params)
+                    return
 
             if self._custom_keep_materials:
                 # ── «Готовая» модель: карточки по материалам САМОГО SMD ──────

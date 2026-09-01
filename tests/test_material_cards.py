@@ -2,7 +2,7 @@
 
 import unittest
 
-from src.ui.material_cards import (
+from src.domain.preview.material_cards import (
     MaterialCardSpec, editable_material_cards, spy_mask_cards,
 )
 

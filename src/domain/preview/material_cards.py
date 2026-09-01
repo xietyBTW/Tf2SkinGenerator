@@ -55,3 +55,27 @@ def spy_mask_cards(vtf_names: Iterable[str], lang: str = "en") -> List[MaterialC
     from src.data.player_characters import SPY_DISGUISE_MASKS
     disp = {m[1]: (m[3] if lang == "ru" else m[2]) for m in SPY_DISGUISE_MASKS}
     return [MaterialCardSpec(n, disp.get(n, n)) for n in _dedup_keep_order(vtf_names)]
+
+
+def misc_material_names(material_names: Iterable[str],
+                        card_names: Iterable[str]) -> List[str]:
+    """
+    Материалы для просмотра «Прочее»: служебные, не попавшие в карточки.
+
+    Это ровно дополнение к ``editable_material_cards``: глаза, зубы,
+    sheen-оверлеи. Пользовательский ЧС скрывает материал и отсюда — но в мод он
+    всё равно пишется оригиналом, поэтому фильтр здесь только про показ.
+    """
+    from src.data.material_filter import is_editable_material, is_user_blacklisted
+    cards = set(card_names)
+    out: List[str] = []
+    seen: set = set()
+    for name in material_names:
+        low = (name or '').lower()
+        if not name or low in seen or name in cards:
+            continue
+        if is_editable_material(name) or is_user_blacklisted(name):
+            continue
+        seen.add(low)
+        out.append(name)
+    return out

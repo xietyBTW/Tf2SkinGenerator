@@ -13,7 +13,7 @@ import os
 
 from src.shared.constants import Team
 from src.shared.logging_config import get_logger
-from src.ui.material_cards import editable_material_cards
+from src.domain.preview.material_cards import editable_material_cards
 
 logger = get_logger(__name__)
 
@@ -34,8 +34,35 @@ class Preview3DMixin:
     # Управление воркерами
     # ═══════════════════════════════════════════════════════════════════════════
 
+    def _connect_preview3d(self) -> None:
+        """Подписывает панель на события контроллера загрузки игровой модели.
+
+        Обработчики ниже занимаются ТОЛЬКО показом: состояние сеанса контроллер
+        меняет до того, как эмитит событие.
+        """
+        c = self._preview3d
+        c.progress.connect(
+            lambda txt: self._3d_widget and self._3d_widget.show_loading(txt))
+        c.model_ready.connect(self._on_3d_ready)
+        c.animated.connect(self._on_3d_animated)
+        c.materials.connect(self._on_3d_multi_material)
+        c.blu_ready.connect(self._on_3d_blu_ready)
+        c.blu_materials.connect(self._on_3d_blu_multi_material)
+        c.blu_same_as_red.connect(self._on_blu_same_as_red)
+        c.australium_ready.connect(self._on_australium_ready)
+        c.render_hints.connect(self._on_3d_render_hints)
+        c.failed.connect(self._on_3d_failed)
+
     def _stop_worker(self, attr: str) -> None:
-        """Останавливает воркер по имени атрибута и зануляет его."""
+        """Останавливает воркер по имени атрибута и зануляет его.
+
+        Загрузку обычной игровой модели ведёт контроллер и воркер держит он;
+        режим QC-карточек пока кладёт свой на панель. Поэтому под именем
+        `_3d_worker` гасятся оба — иначе остановка зависела бы от того, каким
+        путём модель загружали.
+        """
+        if attr == '_3d_worker':
+            self._preview3d.stop()
         w = getattr(self, attr, None)
         if w is not None:
             w.stop(3000)  # BaseWorker: requestInterruption + wait
@@ -51,27 +78,16 @@ class Preview3DMixin:
         if not self._3d_available or not self._3d_widget:
             return
         self._stop_worker('_3d_worker')
-        # Новая загрузка модели: сбрасываем флаг авто-обновления 2D (его заново
-        # поставит trigger_pending_load при смене стиля шапки).
-        self._pending_2d_refresh = False
-        # Возврат к ИГРОВОЙ модели: сбрасываем кастомное состояние, иначе
-        # селекторы доп-стилей и их текстуры остаются от загруженной ранее
-        # кастомной модели. Останавливаем и фоновый детектор стилей, чтобы
-        # его поздний колбэк не пересоздал кнопки уже после сброса.
+        # Останавливаем фоновый детектор стилей, чтобы его поздний колбэк не
+        # пересоздал кнопки уже после сброса.
         self._stop_worker('_skin_worker')
-        # Признак, что уходим ИМЕННО с кастомной модели (до сброса флагов).
-        was_custom = bool(
-            self._custom_smd_path or self._custom_keep_materials
-            or self._original_skin_info or self._custom_smd_mode
-        )
-        self._reset_skin_state()
-        self._custom_smd_path = None
-        self._custom_keep_materials = False
-        self._reset_team_vpk_state()
-        # Новая модель — сбрасываем «Прочее» (его пересоберёт _on_3d_multi_material).
-        self._misc_materials = []
-        self._misc_mode = False
-        self._main_material_name = None
+
+        # Что помним — чистит сессия (правила перехода и порядок сбросов там,
+        # см. PreviewSession.begin_game_model). Здесь остаётся только то, что
+        # рисуем.
+        was_custom = self._session.begin_game_model()
+        self._clear_skin_buttons()
+        self._sync_team_widgets()
         if hasattr(self, 'btn_misc'):
             self.btn_misc.setVisible(False)
         self._sync_variant_buttons()
@@ -85,27 +101,189 @@ class Preview3DMixin:
         self.btn_load_3d.setEnabled(False)
         self._3d_widget.show_loading(self.t.get('3d_preparing', 'Preparing 3D model...'))
 
-        from src.services.preview_3d_worker import Preview3DWorker
-        w = Preview3DWorker(
+        self._preview3d.load_game_model(
+            weapon_key, mode, misc_vpk, textures_vpk, lang=self._lang)
+
+    # ── Вид от первого лица ──────────────────────────────────────────────── #
+
+    def _start_fp_worker(
+        self,
+        weapon_key: str,
+        mode: str,
+        misc_vpk: str,
+        textures_vpk: str,
+    ) -> None:
+        """Собирает сцену «руки класса с оружием» и показывает её в 3D-виджете.
+
+        Модель ставится БЕЗ вписывания в кадр: сцена уже стоит там, где надо
+        относительно глаза, и центрирование развалило бы вид.
+        """
+        if not self._3d_available or not self._3d_widget:
+            return
+        self._stop_worker('_3d_worker')
+        self._stop_worker('_fp_worker')
+
+        from src.data import viewmodel_anims
+        from src.services.viewmodel_worker import ViewmodelPreviewWorker
+
+        self.btn_load_3d.setEnabled(False)
+        # Копим сцену по кусочкам: сигналы приходят порознь, а в кэш она
+        # должна попасть целиком (см. remember_scene).
+        self._fp_scene = {'obj_path': '', 'animated': None,
+                          'textures': {}, 'editable': []}
+        self._3d_widget.show_loading(
+            self.t.get('3d_preparing', 'Preparing 3D model...'))
+
+        from src.services.weapon_anim_catalog import Action
+        w = ViewmodelPreviewWorker(
             weapon_key=weapon_key,
-            mode=mode,
             misc_vpk_path=misc_vpk,
             textures_vpk_path=textures_vpk,
+            tf2_root=self._tf2_root_for_fp(misc_vpk),
+            # Класс берём из режима: всеклассовое оружие принадлежит сразу
+            # девяти классам, и в руках его надо показать у выбранного.
+            tf2_class=viewmodel_anims.class_from_mode(mode),
+            action=Action[self._fp_action_name()],
+            # Подменённая модель едет в сцену тем же слиянием, что и в мод:
+            # иначе в руках оказался бы сток вместо пользовательской геометрии.
+            custom_smd_path=self._custom_smd_path or "",
+            custom_keep_materials=bool(self._custom_keep_materials),
+            # Рукава и перчатки у семи классов командные: на синей стороне
+            # оружие красит панель, а руки — воркер, больше их красить некому.
+            team=self._active_team,
             lang=self._lang,
             parent=self,
         )
         w.progress.connect(lambda txt: self._3d_widget and self._3d_widget.show_loading(txt))
-        w.ready.connect(self._on_3d_ready)
-        w.animated.connect(self._on_3d_animated)
-        w.multi_material.connect(self._on_3d_multi_material)
-        w.blu_ready.connect(self._on_3d_blu_ready)
-        w.blu_multi_material.connect(self._on_3d_blu_multi_material)
-        w.australium_ready.connect(self._on_australium_ready)
-        w.blu_same_as_red.connect(self._on_blu_same_as_red)
+        w.ready.connect(self._on_fp_ready)
+        w.animated_ready.connect(self._on_fp_animated_ready)
+        w.actions_available.connect(self._on_fp_actions_available)
+        w.editable_materials.connect(self._on_fp_editable_materials)
+        w.multi_material.connect(self._on_fp_multi_material)
         w.render_hints.connect(self._on_3d_render_hints)
-        w.failed.connect(self._on_3d_failed)
+        w.failed.connect(self._on_fp_failed)
         w.start()
-        self._3d_worker = w
+        self._fp_worker = w
+
+    def _start_fp_clip_worker(
+        self,
+        weapon_key: str,
+        mode: str,
+        misc_vpk: str,
+        textures_vpk: str,
+    ) -> None:
+        """Догружает ТОЛЬКО дорожки новой анимации к уже показанной сцене.
+
+        Меш, скелет, материалы и текстуры у одного оружия одни и те же, так что
+        трогать их при смене анимации незачем.
+        """
+        if not self._3d_available or not self._3d_widget:
+            return
+        self._stop_worker('_fp_worker')
+
+        from src.data import viewmodel_anims
+        from src.services.viewmodel_worker import ViewmodelPreviewWorker
+        from src.services.weapon_anim_catalog import Action
+
+        w = ViewmodelPreviewWorker(
+            weapon_key=weapon_key,
+            misc_vpk_path=misc_vpk,
+            textures_vpk_path=textures_vpk,
+            tf2_root=self._tf2_root_for_fp(misc_vpk),
+            tf2_class=viewmodel_anims.class_from_mode(mode),
+            action=Action[self._fp_action_name()],
+            clip_only=True,
+            lang=self._lang,
+            parent=self,
+        )
+        w.clip_ready.connect(self._on_fp_clip_ready)
+        w.actions_available.connect(self._on_fp_actions_available)
+        w.failed.connect(self._on_fp_failed)
+        w.start()
+        self._fp_worker = w
+
+    def _on_fp_clip_ready(self, clip: dict) -> None:
+        """Новая анимация легла на уже собранную сцену."""
+        if not self._3d_widget or not clip:
+            return
+        if not self._3d_widget.set_viewmodel_clip(clip):
+            # Сцены на экране почему-то нет — собираем целиком.
+            if self._pending_3d_params:
+                self._start_fp_worker(*self._pending_3d_params)
+
+    @staticmethod
+    def _tf2_root_for_fp(misc_vpk: str) -> str:
+        from src.data.weapon_model_index import tf2_root_from_misc_vpk
+        return tf2_root_from_misc_vpk(misc_vpk) or ""
+
+    def _on_fp_ready(self, obj_path: str, _texture_path: str) -> None:
+        self.btn_load_3d.setEnabled(True)
+        if not self._3d_widget:
+            return
+        self._3d_widget.load_model_files(obj_path, "", normalize=False)
+        self._remember_fp_scene(obj_path=obj_path)
+        # Материалы оружия в сцене названы так же, как в обычном превью, а
+        # пользовательские текстуры хранятся по именам материалов. Значит вид
+        # от первого лица обязан показывать ТУ ЖЕ текстуру, что и 3D: без
+        # этого переход сбрасывал модель на сток. Порядок — как в _on_3d_ready:
+        # по подтверждению из JS, чтобы стоковые текстуры воркера успели лечь
+        # первыми и пользовательские легли поверх.
+        self._run_after_model_load(
+            lambda: self._reapply_textures_to_3d(delay_ms=0), fallback_ms=400)
+
+    def _on_fp_animated_ready(self, scene: dict) -> None:
+        """Анимированная сцена: меш один раз, движение — дорожками костей.
+
+        Дальше она ведёт себя как обычная модель: меши названы по материалам,
+        поэтому и текстуры, и фильтр редактируемых работают тем же путём.
+        """
+        self.btn_load_3d.setEnabled(True)
+        if not self._3d_widget or not scene:
+            return
+        self._3d_widget.load_viewmodel_animated(scene)
+        self._remember_fp_scene(animated=scene)
+        self._run_after_model_load(
+            lambda: self._reapply_textures_to_3d(delay_ms=0), fallback_ms=400)
+
+    def _on_fp_editable_materials(self, mat_names: list) -> None:
+        """Правится только оружие: руки в сцене стоковые и чужие.
+
+        Без этого пользовательская текстура легла бы и на кисти.
+        """
+        if self._3d_widget:
+            self._3d_widget.set_editable_mesh_names(list(mat_names or []))
+        self._remember_fp_scene(editable=list(mat_names or []))
+
+    def _on_fp_multi_material(self, tex_map: dict) -> None:
+        if self._3d_widget and tex_map:
+            self._3d_widget.apply_material_map(tex_map)
+        self._remember_fp_scene(textures=dict(tex_map or {}))
+
+    def _remember_fp_scene(self, **fields) -> None:
+        """Копит части сцены и кладёт её в кэш видов.
+
+        Сигналы воркера приходят порознь (модель, материалы, текстуры), а
+        запомнить надо целую сцену — иначе при возврате она восстановится
+        без текстур.
+        """
+        scene = getattr(self, '_fp_scene', None)
+        if scene is None:
+            scene = self._fp_scene = {'obj_path': '', 'animated': None,
+                                      'textures': {}, 'editable': []}
+        scene.update(fields)
+        if scene['obj_path'] or scene['animated']:
+            self.remember_scene(scene['obj_path'], scene['textures'],
+                                scene['editable'], animated=scene['animated'],
+                                action=self._fp_action_name())
+
+    def _on_fp_failed(self, error: str) -> None:
+        self.btn_load_3d.setEnabled(True)
+        # Сцены нет — предлагать выбор анимации не из чего. Забываем выученное
+        # для этого предмета, иначе список остался бы висеть над ошибкой.
+        self._fp_actions.pop(self._fp_mode_key(), None)
+        self._update_fp_action_combo()
+        if self._3d_widget:
+            self._3d_widget.show_error(error)
 
     def _start_qc_cards_worker(self) -> None:
         """Извлекает текстуры/карточки из QC игровой модели, НЕ трогая геометрию.
@@ -207,15 +385,9 @@ class Preview3DMixin:
     # ── Коллбэки воркеров ─────────────────────────────────────────────────────
 
     def _on_3d_ready(self, obj_path: str, texture_path: str) -> None:
+        # Состояние (команда, кадры, _cur_obj, per-mesh) контроллер уже applied
+        # — здесь только показ.
         self.btn_load_3d.setEnabled(True)
-        self._per_mesh_active = False
-        self._per_mesh_base_image = None
-        self._active_team = Team.RED   # всегда синхронизируем (кнопки уже сброшены)
-        if texture_path:
-            self._red_frames = [texture_path]
-        # Запоминаем загруженную модель для мини-памяти (мгновенное восстановление)
-        _loaded_mode = self._pending_3d_params[1] if self._pending_3d_params else self._weapon_mode
-        self._cur_obj = (_loaded_mode, obj_path, texture_path)
         if self._3d_widget:
             self._3d_widget.load_model_files(obj_path, texture_path)
             # Применяем уже загруженную в 2D текстуру к свежей модели — по
@@ -375,9 +547,6 @@ class Preview3DMixin:
 
     def _on_3d_animated(self, frame_paths: list, framerate: float) -> None:
         """Воркер нашёл многокадровый VTF для RED команды."""
-        if frame_paths:
-            self._red_frames = frame_paths
-            self._team_framerate = framerate
         if self._3d_widget and frame_paths:
             self._3d_widget.update_animated_texture_files(frame_paths, framerate)
 
@@ -385,9 +554,6 @@ class Preview3DMixin:
         """Воркер нашёл BLU текстуру — показываем переключатель команд."""
         if not frame_paths:
             return
-        self._blu_frames = frame_paths
-        if framerate > 0:
-            self._team_framerate = framerate
         # Видимость — единым правилом (для рук учитывает реальный командный материал).
         self._update_team_btn_visibility()
 
@@ -400,42 +566,19 @@ class Preview3DMixin:
         должна честно говорить, что сейчас команды выглядят одинаково —
         иначе пользователь ищет разницу, которой нет.
         """
-        self._blu_matches_red = True
         hint = self.t.get('3d_team_blu_same_tip')
         if hint:
             self.btn_blu.setToolTip(hint)
 
-    def _on_3d_blu_multi_material(self, payload) -> None:
-        """Воркер нашёл BLU текстуры для многоматериальной модели (персонажи).
+    def _on_3d_blu_multi_material(self, tex_map: dict, name_map: dict) -> None:
+        """У многоматериальной модели (персонажи) есть BLU-вариант.
 
-        payload — кортеж (tex_map, name_map):
-            tex_map:  {red_mat_name: blu_png_path}
-            name_map: {red_mat_name: blu_display_name}
+        Текстуры и маппинг имён контроллер уже положил в сессию — здесь только
+        видимость кнопок RED/BLU, по единому правилу (для рук командным
+        считается лишь материал с ОТЛИЧНЫМ синим именем).
 
-        Сохраняем для восстановления 3D при переключении на BLU.
-        Не применяем сразу — пользователь пока на RED.
+        Сразу не применяем: пользователь пока на RED.
         """
-        if not payload:
-            return
-        if isinstance(payload, tuple) and len(payload) == 2:
-            tex_map, name_map = payload
-        else:
-            tex_map, name_map = payload, {}
-
-        # Маппинг имён обновляем всегда — он нужен для лейблов карточек
-        # даже если BLU VTF-текстуры не были найдены в VPK.
-        if name_map:
-            self._vpk_blu_name_map = dict(name_map)
-
-        if tex_map:
-            self._vpk_blu_tex_map = dict(tex_map)
-
-        logger.debug(
-            f"[Panel] BLU multi-material: {len(tex_map)} текстур, "
-            f"{len(name_map)} имён"
-        )
-        # Видимость кнопок RED/BLU — единым правилом (для рук учитывает, что
-        # командным считается только материал с ОТЛИЧНЫМ синим именем).
         self._update_team_btn_visibility()
 
     def _on_3d_render_hints(self, hints: dict) -> None:
@@ -478,19 +621,9 @@ class Preview3DMixin:
         mat_keys = [s.name for s in editable_material_cards(tex_map.keys())]
 
         # «Прочее»: служебные материалы модели, НЕ попавшие в основные карточки.
-        # Пользовательский ЧС скрывает их и отсюда (но в мод они пишутся оригиналом).
-        from src.data.material_filter import (
-            is_editable_material as _is_ed_misc,
-            is_user_blacklisted as _is_hidden_misc,
-        )
-        _seen_misc: set = set()
-        self._misc_materials = []
-        for _m in tex_map.keys():
-            _ml = (_m or '').lower()
-            if (_m and _ml not in _seen_misc and not _is_ed_misc(_m)
-                    and not _is_hidden_misc(_m) and _m not in mat_keys):
-                _seen_misc.add(_ml)
-                self._misc_materials.append(_m)
+        # Правило в домене — то же множество показывает веб-представление.
+        from src.domain.preview.material_cards import misc_material_names
+        self._misc_materials = misc_material_names(tex_map.keys(), mat_keys)
         self._misc_mode = False
         self._sync_variant_buttons()
 

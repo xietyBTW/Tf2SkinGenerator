@@ -18,7 +18,7 @@ from src.shared.constants import Team
 from src.shared.file_utils import get_temp_file_path
 from src.shared.logging_config import get_logger
 from src.ui.preview_widgets import _load_pixmap
-from src.ui.texture_state import SINGLE_TEX_KEY
+from src.domain.preview.texture_state import SINGLE_TEX_KEY
 
 logger = get_logger(__name__)
 

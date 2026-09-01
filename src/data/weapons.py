@@ -6,7 +6,7 @@ TF2_WEAPONS = {
             "body": {"ru": "Скин персонажа", "en": "Player Skin"},
         },
         "Primary": {
-            "c_scattergun": {"ru": "Стандартное Обрез", "en": "Scattergun"},
+            "c_scattergun": {"ru": "Обрез", "en": "Scattergun"},
             "c_double_barrel": {"ru": "Неумолимая сила", "en": "Force-A-Nature"},
             "c_shortstop": {"ru": "Прерыватель", "en": "Shortstop"},
             "c_soda_popper": {"ru": "Газировщик", "en": "Soda Popper"},
@@ -15,28 +15,28 @@ TF2_WEAPONS = {
             "c_scattergun_xmas": {"ru": "Праздничный обрез", "en": "Festive Scattergun"}
         },
         "Secondary": {
-            "c_pistol": {"ru": "Стандартный Пистолет", "en": "Pistol"},
+            "c_pistol": {"ru": "Пистолет", "en": "Pistol"},
             "c_ttg_max_gun": {"ru": "Люгерморф", "en": "Lugermorph"},
             "c_invasion_pistol": {"ru": "З.А.Х.В.А.Т.Ч.И.К.", "en": "C.A.P.P.E.R"},
-            "c_sd_cleaver": {"ru": "Окрыленный", "en": "Flying Guillotine"},
-            "c_energy_drink": {"ru": "Дамский пистолет Красавчика", "en": "Bonk! Atomic Punch"},
+            "c_sd_cleaver": {"ru": "Летающая гильотина", "en": "Flying Guillotine"},
+            "c_energy_drink": {"ru": "Бонк! Атомный залп", "en": "Bonk! Atomic Punch"},
             "c_madmilk": {"ru": "Зломолоко", "en": "Mad Milk"},
-            "c_winger_pistol": {"ru": "Дрёма", "en": "Winger"},
-            "c_pep_pistol": {"ru": "Критокола", "en": "Crit-A-Cola"},
+            "c_winger_pistol": {"ru": "Окрыленный", "en": "Winger"},
+            "c_pep_pistol": {"ru": "Дамский пистолет Красавчика", "en": "Pretty Boy's Pocket Pistol"},
             "c_breadmonster_milk": {"ru": "Мутировавшее молоко", "en": "Mutated Milk"}
         },
         "Melee": {
-            "c_bat": {"ru": "Стандартная Бита", "en": "Bat"},
-            "c_wooden_bat": {"ru": "Поддай леща", "en": "Sandman"},
-            "c_holymackerel": {"ru": "Голая рука", "en": "Holy Mackerel"},
-            "c_bonk_bat": {"ru": "Световая бита", "en": "Atomizer"},
+            "c_bat": {"ru": "Бита", "en": "Bat"},
+            "c_wooden_bat": {"ru": "Дрёма", "en": "Sandman"},
+            "c_holymackerel": {"ru": "Поддай леща", "en": "Holy Mackerel"},
+            "c_bonk_bat": {"ru": "Расщепитель", "en": "Atomizer"},
             "c_candy_cane": {"ru": "Карамельная трость", "en": "Candy Cane"},
             "c_boston_basher": {"ru": "Бостонский раздолбай", "en": "Boston Basher"},
             "c_scout_sword": {"ru": "Трехрунный меч", "en": "Three-Rune Blade"},
             "c_rift_fire_mace": {"ru": "Солнце на палочке", "en": "Sun-On-A-Stick"},
             "c_xms_giftwrap": {"ru": "Обёрточный убийца", "en": "Wrap Assassin"},
-            "c_invasion_bat": {"ru": "Веер войны", "en": "The Batsaber"},
-            "c_shogun_warfan": {"ru": "Боевой веер", "en": "Fan O'War"},
+            "c_invasion_bat": {"ru": "Световая бита", "en": "Batsaber"},
+            "c_shogun_warfan": {"ru": "Веер войны", "en": "Fan O'War"},
             "c_crossing_guard": {"ru": "Регулировщик", "en": "Crossing Guard"},
             "c_bat_xmas": {"ru": "Праздничная бита", "en": "Festive Bat"}
         },
@@ -49,39 +49,39 @@ TF2_WEAPONS = {
             "body": {"ru": "Скин персонажа", "en": "Player Skin"},
         },
         "Primary": {
-            "c_rocketlauncher": {"ru": "Стандартное Ракетомёт", "en": "Rocket Launcher"},
+            "c_rocketlauncher": {"ru": "Ракетомёт", "en": "Rocket Launcher"},
             "c_bet_rocketlauncher": {"ru": "Прародитель", "en": "Original"},
             "c_directhit": {"ru": "Прямое попадание", "en": "Direct Hit"},
             "c_blackbox": {"ru": "Чёрный ящик", "en": "Black Box"},
-            "c_dumpster_device": {"ru": "Тренировочный ракетомёт", "en": "Beggar's Bazooka"},
+            "c_dumpster_device": {"ru": "Базука бродяги", "en": "Beggar's Bazooka"},
             "c_liberty_launcher": {"ru": "Освободитель", "en": "Liberty Launcher"},
             "c_drg_cowmangler": {"ru": "Линчеватель скота 5000", "en": "Cow Mangler 5000"},
             "c_atom_launcher": {"ru": "Авиаудар", "en": "Air Strike"},
-            "c_rocketjumper": {"ru": "Прыгатель", "en": "Rocket Jumper"},
+            "c_rocketjumper": {"ru": "Тренировочный ракетомёт", "en": "Rocket Jumper"},
             "c_rocketlauncher_xmas": {"ru": "Праздничный ракетомёт", "en": "Festive Rocket Launcher"}
         },
         "Secondary": {
-            "c_shotgun": {"ru": "Стандартный Дробовик", "en": "Shotgun"},
+            "c_shotgun": {"ru": "Дробовик", "en": "Shotgun"},
             "c_reserve_shooter": {"ru": "Офицер запаса", "en": "Reserve Shooter"},
             "c_batt_buffpack": {"ru": "Вдохновляющее знамя", "en": "Buff Banner"},
             "c_rocketboots_soldier": {"ru": "Штурмботинки", "en": "Gunboats"},
             "c_shogun_warpack": {"ru": "Поддержка батальона", "en": "Battalion's Backup"},
             "c_drg_righteousbison": {"ru": "Благочестивый бизон", "en": "Righteous Bison"},
             "tankerboots": {"ru": "Людодавы", "en": "Mantreads"},
-            "c_paratrooper_pack": {"ru": "Парашютист", "en": "B.A.S.E Jumper"},
+            "c_paratrooper_pack": {"ru": "Парашютист", "en": "B.A.S.E. Jumper"},
             "c_trenchgun": {"ru": "Паническая атака", "en": "Panic Attack"},
-            "c_shogun_warhorn": {"ru": "Командирский рожок", "en": "Concheror"},
-            "c_buffpack_xmas": {"ru": "Праздничное вдохновляющее знамя", "en": "Festive Buff Banner"}
+            "c_shogun_warhorn": {"ru": "Завоеватель", "en": "Concheror"},
+            "c_buffpack_xmas": {"ru": "Праздничное Вдохновляющее знамя", "en": "Festive Buff Banner"}
         },
         "Melee": {
-            "c_shovel": {"ru": "Стандартная Лопата", "en": "Shovel"},
+            "c_shovel": {"ru": "Лопата", "en": "Shovel"},
             "c_pickaxe_s2": {"ru": "Уравнитель", "en": "Equalizer"},
             "c_shogun_katana_soldier": {"ru": "Полудзатоити", "en": "Half-Zatoichi"},
             "c_riding_crop": {"ru": "Дисциплинарное взыскание", "en": "Disciplinary Action"},
             "c_market_gardener": {"ru": "Землекоп", "en": "Market Gardener"},
             "c_pickaxe": {"ru": "План эвакуации", "en": "Escape Plan"},
-            "c_ham": {"ru": "Кадавр", "en": "Ham Shank"},
-            "c_paintrain": {"ru": "Болевой поезд", "en": "Pain Train"}
+            "c_ham": {"ru": "Свиной окорок", "en": "Ham Shank"},
+            "c_paintrain": {"ru": "Костыль", "en": "Pain Train"}
         },
         "Hands": {
             "hands": {"ru": "Руки", "en": "Hands"},
@@ -92,39 +92,39 @@ TF2_WEAPONS = {
             "body": {"ru": "Скин персонажа", "en": "Player Skin"},
         },
         "Primary": {
-            "c_flamethrower": {"ru": "Стандартное Огнемёт", "en": "Flamethrower"},
+            "c_flamethrower": {"ru": "Огнемёт", "en": "Flame Thrower"},
             "c_rainblower": {"ru": "Радужигатель", "en": "Rainblower"},
             "c_ai_flamethrower": {"ru": "Ностромский пламемет", "en": "Nostromo Napalmer"},
             "c_backburner": {"ru": "Дожигатель", "en": "Backburner"},
             "c_degreaser": {"ru": "Чистильщик", "en": "Degreaser"},
             "c_drg_phlogistinator": {"ru": "Флогистонатор", "en": "Phlogistinator"},
             "c_flameball": {"ru": "Ярость дракона", "en": "Dragon's Fury"},
-            "c_flamethrower_xmas": {"ru": "Праздничный огнемёт", "en": "Festive Flamethrower"},
+            "c_flamethrower_xmas": {"ru": "Праздничный огнемёт", "en": "Festive Flame Thrower"},
             "c_backburner_xmas": {"ru": "Праздничный дожигатель", "en": "Festive Backburner"}
         },
         "Secondary": {
-            "c_shotgun": {"ru": "Стандартный Дробовик", "en": "Shotgun"},
+            "c_shotgun": {"ru": "Дробовик", "en": "Shotgun"},
             "c_reserve_shooter": {"ru": "Офицер запаса", "en": "Reserve Shooter"},
             "c_flaregun_pyro": {"ru": "Ракетница", "en": "Flare Gun"},
             "c_detonator": {"ru": "Детонатор", "en": "Detonator"},
-            "c_scorch_shot": {"ru": "Людоплав", "en": "Scorch Shot"},
-            "c_rocketpack": {"ru": "Обжигающий выстрел", "en": "Thermal Thruster"},
+            "c_scorch_shot": {"ru": "Обжигающий выстрел", "en": "Scorch Shot"},
+            "c_rocketpack": {"ru": "Термическая тяга", "en": "Thermal Thruster"},
             "c_trenchgun": {"ru": "Паническая атака", "en": "Panic Attack"},
-            "c_drg_manmelter": {"ru": "Испепелятор", "en": "Manmelter"},
-            "c_gascan": {"ru": "Газовый террорист", "en": "Gas Passer"}
+            "c_drg_manmelter": {"ru": "Людоплав", "en": "Manmelter"},
+            "c_gascan": {"ru": "Запасной бак", "en": "Gas Passer"}
         },
         "Melee": {
-            "c_fireaxe": {"ru": "Стандартный Пожарный топор", "en": "Fire Axe"},
+            "c_fireaxe": {"ru": "Пожарный топор", "en": "Fire Axe"},
             "c_axtinguisher_pyro": {"ru": "Огнетопор", "en": "Axtinguisher"},
             "c_mailbox": {"ru": "Почтовый дебошир", "en": "Postal Pummeler"},
-            "c_powerjack": {"ru": "Крушитель", "en": "Powerjack"},
-            "c_sledgehammer": {"ru": "Молот", "en": "Homewrecker"},
+            "c_powerjack": {"ru": "Разъединитель", "en": "Powerjack"},
+            "c_sledgehammer": {"ru": "Крушитель", "en": "Homewrecker"},
             "c_back_scratcher": {"ru": "Спиночёс", "en": "Back Scratcher"},
             "c_drg_thirddegree": {"ru": "Третья степень", "en": "Third Degree"},
             "c_sd_neonsign": {"ru": "Неоновый аннигилятор", "en": "Neon Annihilator"},
             "c_slapping_glove": {"ru": "Горячая рука", "en": "Hot Hand"},
-            "c_lollichop": {"ru": "Заостренный осколок вулкана", "en": "Lollichop"},
-            "c_rift_fire_axe": {"ru": "Заточенный осколок вулкана", "en": "Sharpened Volcano Fragment"},
+            "c_lollichop": {"ru": "Кледенец", "en": "Lollichop"},
+            "c_rift_fire_axe": {"ru": "Заостренный осколок вулкана", "en": "Sharpened Volcano Fragment"},
             "c_fireaxe_pyro_xmas": {"ru": "Праздничный огнетопор", "en": "Festive Axtinguisher"}
         },
         "Hands": {
@@ -136,7 +136,7 @@ TF2_WEAPONS = {
             "body": {"ru": "Скин персонажа", "en": "Player Skin"},
         },
         "Primary": {
-            "c_grenadelauncher": {"ru": "Стандартное Гранатомёт", "en": "Grenade Launcher"},
+            "c_grenadelauncher": {"ru": "Гранатомёт", "en": "Grenade Launcher"},
             "c_lochnload": {"ru": "Подкидыш", "en": "Loch-N-Load"},
             "demo_booties": {"ru": "Ботиночки Али-Бабы", "en": "Ali Baba's Wee Booties"},
             "pegleg": {"ru": "Бутлегер", "en": "Bootlegger"},
@@ -145,28 +145,28 @@ TF2_WEAPONS = {
             "c_grenadelauncher_xmas": {"ru": "Праздничный гранатомёт", "en": "Festive Grenade Launcher"}
         },
         "Secondary": {
-            "c_stickybomb_launcher": {"ru": "Стандартное Липучкомёт", "en": "Stickybomb Launcher"},
+            "c_stickybomb_launcher": {"ru": "Липучкомёт", "en": "Stickybomb Launcher"},
             "c_scottish_resistance": {"ru": "Шотландское сопротивление", "en": "Scottish Resistance"},
-            "c_sticky_jumper": {"ru": "Штурмовой щит", "en": "Sticky Jumper"},
-            "c_targe": {"ru": "Роскошное прикрытие", "en": "Chargin' Targe"},
-            "c_persian_shield": {"ru": "Верный штурвал", "en": "Splendid Screen"},
+            "c_sticky_jumper": {"ru": "Тренировочный липучкомёт", "en": "Sticky Jumper"},
+            "c_targe": {"ru": "Штурмовой щит", "en": "Chargin' Targe"},
+            "c_persian_shield": {"ru": "Роскошное прикрытие", "en": "Splendid Screen"},
             "c_kingmaker_sticky": {"ru": "Быстромёт", "en": "Quickiebomb Launcher"},
-            "c_wheel_shield": {"ru": "Переломный момент", "en": "Tide Turner"},
+            "c_wheel_shield": {"ru": "Верный штурвал", "en": "Tide Turner"},
             "c_stickybomb_launcher_xmas": {"ru": "Праздничный липучкомёт", "en": "Festive Stickybomb Launcher"},
-            "c_targe_xmas": {"ru": "Праздничное роскошное прикрытие", "en": "Festive Targe"}
+            "c_targe_xmas": {"ru": "Праздничный Штурмовой щит", "en": "Festive Chargin' Targe"}
         },
         "Melee": {
-            "c_bottle": {"ru": "Стандартная Бутылка", "en": "Bottle"},
+            "c_bottle": {"ru": "Бутылка", "en": "Bottle"},
             "c_claymore": {"ru": "Одноглазый горец", "en": "Eyelander"},
-            "c_battleaxe": {"ru": "Секира Пешего всадника без головы", "en": "Scotsman's Skullcutter"},
-            "c_headtaker": {"ru": "Шотландский головорез", "en": "Horseless Headless Horsemann's Headtaker"},
+            "c_battleaxe": {"ru": "Шотландский головорез", "en": "Scotsman's Skullcutter"},
+            "c_headtaker": {"ru": "Секира Пешего всадника без головы", "en": "Horseless Headless Horsemann's Headtaker"},
             "c_caber": {"ru": "Аллапульское бревно", "en": "Ullapool Caber"},
             "c_claidheamohmor": {"ru": "Клеймор", "en": "Claidheamh Mòr"},
             "c_shogun_katana": {"ru": "Полудзатоити", "en": "Half-Zatoichi"},
             "c_demo_sultan_sword": {"ru": "Персидский заклинатель", "en": "Persian Persuader"},
-            "c_scotland_shard": {"ru": "Шотландское рукопожатие", "en": "Scottish Handshake"},
-            "c_golfclub": {"ru": "Девятка Несси", "en": "Nessie's Nine Iron"},
-            "c_paintrain": {"ru": "Болевой поезд", "en": "Pain Train"},
+            "c_scotland_shard": {"ru": "Шотландское рукобитие", "en": "Scottish Handshake"},
+            "c_golfclub": {"ru": "Железная девятка Несси", "en": "Nessie's Nine Iron"},
+            "c_paintrain": {"ru": "Костыль", "en": "Pain Train"},
             "c_claymore_xmas": {"ru": "Праздничный одноглазый горец", "en": "Festive Eyelander"}
         },
         "Hands": {
@@ -178,7 +178,7 @@ TF2_WEAPONS = {
             "body": {"ru": "Скин персонажа", "en": "Player Skin"},
         },
         "Primary": {
-            "c_minigun": {"ru": "Стандартное Пулемёт", "en": "Minigun"},
+            "c_minigun": {"ru": "Пулемёт", "en": "Minigun"},
             "c_iron_curtain": {"ru": "Железный занавес", "en": "Iron Curtain"},
             "c_minigun_natascha": {"ru": "Наташа", "en": "Natascha"},
             "c_gatling_gun": {"ru": "Латунный монстр", "en": "Brass Beast"},
@@ -187,26 +187,26 @@ TF2_WEAPONS = {
             "c_minigun_xmas": {"ru": "Праздничный пулемёт", "en": "Festive Minigun"}
         },
         "Secondary": {
-            "c_shotgun": {"ru": "Стандартный Дробовик", "en": "Shotgun"},
+            "c_shotgun": {"ru": "Дробовик", "en": "Shotgun"},
             "c_sandwich": {"ru": "Бутерброд", "en": "Sandvich"},
-            "c_chocolate": {"ru": "Плитка «Далокош»", "en": "Dalokohs Bar"},
+            "c_chocolate": {"ru": "Плитка \"Далокош\"", "en": "Dalokohs Bar"},
             "c_fishcake": {"ru": "Рыбный батончик", "en": "Fishcake"},
             "c_buffalo_steak": {"ru": "Бутерброд из мяса буйвола", "en": "Buffalo Steak Sandvich"},
             "c_trenchgun": {"ru": "Паническая атака", "en": "Panic Attack"},
             "c_banana": {"ru": "Утешительный банан", "en": "Second Banana"},
             "c_robo_sandwich": {"ru": "Робо-бутерброд", "en": "Robo-Sandvich"},
-            "c_russian_riot": {"ru": "Семейный бизнес", "en": "Family Business"},
+            "c_russian_riot": {"ru": "Семейное дело", "en": "Family Business"},
             "c_sandwich_xmas": {"ru": "Праздничный бутерброд", "en": "Festive Sandvich"}
         },
         "Melee": {
-            "c_sr3_punch": {"ru": "Стандартные Кулаки", "en": "Apoco-Fists"},
-            "c_fists_of_steel": {"ru": "Кулакопокалипсис", "en": "Fists Of Steel"},
+            "c_sr3_punch": {"ru": "Кулакопокалипсис", "en": "Apoco-Fists"},
+            "c_fists_of_steel": {"ru": "Стальные кулаки", "en": "Fists Of Steel"},
             "c_boxing_gloves": {"ru": "Кулаки грозного боксёра", "en": "Killing Gloves Of Boxing"},
             "c_breadmonster_gloves": {"ru": "Кусай-хлеб", "en": "Bread Bite"},
             "c_bear_claw": {"ru": "Воинский дух", "en": "Warrior's Spirit"},
             "c_eviction_notice": {"ru": "Уведомление о выселении", "en": "Eviction Notice"},
             "c_xms_gloves": {"ru": "Праздничный удар", "en": "Holiday Punch"},
-            "c_boxing_gloves_xmas": {"ru": "Праздничные боксёрские перчатки", "en": "Festive KGB"}
+            "c_boxing_gloves_xmas": {"ru": "Праздничные Горящие Рукавицы Ускорения", "en": "Festive Gloves of Running Urgently"}
         },
         "Hands": {
             "hands": {"ru": "Руки", "en": "Hands"},
@@ -217,33 +217,33 @@ TF2_WEAPONS = {
             "body": {"ru": "Скин персонажа", "en": "Player Skin"},
         },
         "Primary": {
-            "c_shotgun": {"ru": "Стандартный Дробовик", "en": "Shotgun"},
-            "c_drg_pomson": {"ru": "Самосуд", "en": "Pomson 6000"},
+            "c_shotgun": {"ru": "Дробовик", "en": "Shotgun"},
+            "c_drg_pomson": {"ru": "Помсон 6000", "en": "Pomson 6000"},
             "c_dex_shotgun": {"ru": "Овдовитель", "en": "Widowmaker"},
             "c_tele_shotgun": {"ru": "Спасатель", "en": "Rescue Ranger"},
             "c_trenchgun": {"ru": "Паническая атака", "en": "Panic Attack"},
-            "c_frontierjustice": {"ru": "Карабинер", "en": "Frontier Justice"},
-            "c_frontierjustice_xmas": {"ru": "Праздничный карабинер", "en": "Festive Frontier Justice"}
+            "c_frontierjustice": {"ru": "Самосуд", "en": "Frontier Justice"},
+            "c_frontierjustice_xmas": {"ru": "Праздничный Самосуд", "en": "Festive Frontier Justice"}
         },
         "Secondary": {
-            "c_pistol": {"ru": "Стандартный Пистолет", "en": "Pistol"},
+            "c_pistol": {"ru": "Пистолет", "en": "Pistol"},
             "c_ttg_max_gun": {"ru": "Люгерморф", "en": "Lugermorph"},
             "c_invasion_pistol": {"ru": "З.А.Х.В.А.Т.Ч.И.К.", "en": "C.A.P.P.E.R"},
             "c_wrangler": {"ru": "Поводырь", "en": "Wrangler"},
             "c_invasion_wrangler": {"ru": "Счётчик Гигера", "en": "Giger Counter"},
-            "c_dex_arm": {"ru": "Короткое замыкание", "en": "Short Curcuit"},
+            "c_dex_arm": {"ru": "Короткое замыкание", "en": "Short Circuit"},
             "c_wrangler_xmas": {"ru": "Праздничный поводырь", "en": "Festive Wrangler"}
         },
         "Melee": {
-            "c_wrench": {"ru": "Стандартный Гаечный ключ", "en": "Wrench"},
+            "c_wrench": {"ru": "Гаечный ключ", "en": "Wrench"},
             "c_spikewrench": {"ru": "Южное гостеприимство", "en": "Southern Hospitality"},
             "c_jag": {"ru": "Острозуб", "en": "Jag"},
             "c_drg_wrenchmotron": {"ru": "Озарение", "en": "Eureka Effect"},
             "c_wrench_xmas": {"ru": "Праздничный гаечный ключ", "en": "Festive Wrench"}
         },
         "PDA": {
-            "c_builder": {"ru": "КПК строительства", "en": "Construction PDA"},
-            "c_pda_engineer": {"ru": "КПК сноса", "en": "Destruction PDA"},
+            "c_builder": {"ru": "КПК постройки", "en": "Construction PDA"},
+            "c_pda_engineer": {"ru": "КПК разрушения", "en": "Destruction PDA"},
         },
         "Hands": {
             "hands": {"ru": "Руки", "en": "Hands"},
@@ -255,25 +255,25 @@ TF2_WEAPONS = {
             "body": {"ru": "Скин персонажа", "en": "Player Skin"},
         },
         "Primary": {
-            "c_syringegun": {"ru": "Стандартное Шприцемёт", "en": "Syringe Gun"},
+            "c_syringegun": {"ru": "Шприцемёт", "en": "Syringe Gun"},
             "c_leechgun": {"ru": "Кровопийца", "en": "Blutsauger"},
             "c_crusaders_crossbow": {"ru": "Арбалет крестоносца", "en": "Crusader's Crossbow"},
             "c_proto_syringegun": {"ru": "Передоз", "en": "Overdose"}
         },
         "Secondary": {
-            "c_medigun": {"ru": "Стандартная Лечебная пушка", "en": "Medigun"},
-            "c_proto_medigun": {"ru": "Быстроправ", "en": "Quickfix"},
+            "c_medigun": {"ru": "Лечебная пушка", "en": "Medi Gun"},
+            "c_proto_medigun": {"ru": "Быстроправ", "en": "Quick-Fix"},
             "c_medigun_defence": {"ru": "Вакцинатор", "en": "Vaccinator"},
             "c_medigun_xmas": {"ru": "Праздничная лечебная пушка", "en": "Festive Medi Gun"}
         },
         "Melee": {
-            "c_bonesaw": {"ru": "Стандартная Медицинская пила", "en": "Bonesaw"},
+            "c_bonesaw": {"ru": "Медицинская пила", "en": "Bonesaw"},
             "c_ubersaw": {"ru": "Убер-пила", "en": "Übersaw"},
             "c_uberneedle": {"ru": "Вита-пила", "en": "Vita-Saw"},
             "c_amputator": {"ru": "Ампутатор", "en": "Amputator"},
             "c_hippocrates_bust": {"ru": "Священная клятва", "en": "Solemn Vow"},
             "c_bonesaw_xmas": {"ru": "Праздничная медицинская пила", "en": "Festive Bonesaw"},
-            "c_ubersaw_xmas": {"ru": "Праздничная убер-пила", "en": "Festive Ubersaw"}
+            "c_ubersaw_xmas": {"ru": "Праздничная убер-пила", "en": "Festive Übersaw"}
         },
         "Hands": {
             "hands": {"ru": "Руки", "en": "Hands"},
@@ -284,21 +284,21 @@ TF2_WEAPONS = {
             "body": {"ru": "Скин персонажа", "en": "Player Skin"},
         },
         "Primary": {
-            "c_sniperrifle": {"ru": "Стандартная Снайперская винтовка", "en": "Sniper Rifle"},
+            "c_sniperrifle": {"ru": "Снайперская винтовка", "en": "Sniper Rifle"},
             "c_csgo_awp": {"ru": "Слонобой", "en": "AWPer Hand"},
             "c_bow": {"ru": "Охотник", "en": "Huntsman"},
             "c_bow_thief": {"ru": "Укрепленный составной лук", "en": "Fortified Compound"},
             "c_dartgun": {"ru": "Сиднейский соня", "en": "Sydney Sleeper"},
             "c_bazaar_sniper": {"ru": "Базарная безделушка", "en": "Bazaar Bargain"},
             "c_dex_sniperrifle": {"ru": "Махина", "en": "Machina"},
-            "c_invasion_sniperrifle": {"ru": "Падающая звезда", "en": "The Shooting Star"},
+            "c_invasion_sniperrifle": {"ru": "Падающая звезда", "en": "Shooting Star"},
             "c_pro_rifle": {"ru": "Разжигатель разбойника", "en": "Hitman's Heatmaker"},
             "c_tfc_sniperrifle": {"ru": "Классика", "en": "Classic"},
             "c_sniperrifle_xmas": {"ru": "Праздничная снайперская винтовка", "en": "Festive Sniper Rifle"},
             "c_bow_xmas": {"ru": "Праздничный охотник", "en": "Festive Huntsman"}
         },
         "Secondary": {
-            "c_smg": {"ru": "Стандартный Пистолет-пулемёт", "en": "Submachine Gun"},
+            "c_smg": {"ru": "Пистолет-пулемёт", "en": "SMG"},
             "c_pro_smg": {"ru": "Карабин Чистильщика", "en": "Cleaner's Carbine"},
             "urinejar": {"ru": "Банкате", "en": "Jarate"},
             "c_breadmonster": {"ru": "Родинка с самосознанием", "en": "Self-Aware Beauty Mark"},
@@ -308,7 +308,7 @@ TF2_WEAPONS = {
             "c_smg_xmas": {"ru": "Праздничный пистолет-пулемёт", "en": "Festive SMG"}
         },
         "Melee": {
-            "c_machete": {"ru": "Стандартный Кукри", "en": "Kukri"},
+            "c_machete": {"ru": "Кукри", "en": "Kukri"},
             "c_wood_machete": {"ru": "Заточка дикаря", "en": "Tribalman's Shiv"},
             "c_croc_knife": {"ru": "Кустолом", "en": "Bushwacka"},
             "c_scimitar": {"ru": "Шаханшах", "en": "Shahanshah"},
@@ -324,10 +324,10 @@ TF2_WEAPONS = {
             "masks": {"ru": "Маски маскировки", "en": "Disguise Masks"},
         },
         "Primary": {
-            "c_revolver": {"ru": "Стандартный Револьвер", "en": "Revolver"},
-            "c_snub_nose": {"ru": "Грандиозный убийца", "en": "Enforcer"},
+            "c_revolver": {"ru": "Револьвер", "en": "Revolver"},
+            "c_snub_nose": {"ru": "Принудитель", "en": "Enforcer"},
             "c_ambassador": {"ru": "Амбассадор", "en": "Ambassador"},
-            "c_letranger": {"ru": "Незнакомец", "en": "L'Etranger"},
+            "c_letranger": {"ru": "Незнакомец", "en": "L'Étranger"},
             "c_dex_revolver": {"ru": "Алмазный змей", "en": "Diamondback"},
             "c_revolver_xmas": {"ru": "Праздничный револьвер", "en": "Festive Revolver"},
             "c_ambassador_xmas": {"ru": "Праздничный амбассадор", "en": "Festive Ambassador"}
@@ -337,25 +337,25 @@ TF2_WEAPONS = {
             "c_p2rec": {"ru": "Жучок-Уитличок", "en": "Ap-Sap"},
             "c_breadmonster_sapper": {"ru": "Закусочная атака", "en": "Snack Attack"},
             "w_sd_sapper": {"ru": "Откатофон", "en": "Red-Tape Recorder"},
-            "c_ttg_sam_gun": {"ru": "Большой улов", "en": "Big Kill"},
+            "c_ttg_sam_gun": {"ru": "Грандиозный убийца", "en": "Big Kill"},
             "c_sapper_xmas": {"ru": "Праздничный жучок", "en": "Festive Sapper"}
         },
         "Melee": {
-            "c_knife": {"ru": "Стандартный Нож", "en": "Knife"},
+            "c_knife": {"ru": "Нож", "en": "Knife"},
             "c_acr_hookblade": {"ru": "Одетый с иголочки", "en": "Sharp Dresser"},
             "c_ava_roseknife": {"ru": "Чёрная роза", "en": "Black Rose"},
             "c_eternal_reward": {"ru": "Вечный покой", "en": "Your Eternal Reward"},
-            "c_voodoo_pin": {"ru": "Иголка вуду", "en": "Wanga Voodoo Knife"},
+            "c_voodoo_pin": {"ru": "Иголка вуду", "en": "Wanga Prick"},
             "c_shogun_kunai": {"ru": "Кунай заговорщика", "en": "Conniver's Kunai"},
             "c_switchblade": {"ru": "Главный делец", "en": "Big Earner"},
             "c_xms_cold_shoulder": {"ru": "Сосулька", "en": "Spy-Cicle"},
-            "c_unarmed_combat": {"ru": "Рукопашная", "en": "Unarmed Combat"},
+            "c_unarmed_combat": {"ru": "Голая рука", "en": "Unarmed Combat"},
             "c_knife_xmas": {"ru": "Праздничный нож", "en": "Festive Knife"}
         },
         "Watch": {
             "c_spy_watch": {"ru": "Часы невидимости", "en": "Invis Watch"},
             "c_leather_watch": {"ru": "Плащ и кинжал", "en": "Cloak and Dagger"},
-            "c_pocket_watch": {"ru": "Запасной выход", "en": "Dead Ringer"},
+            "c_pocket_watch": {"ru": "Звон смерти", "en": "Dead Ringer"},
         },
         "Hands": {
             "hands": {"ru": "Руки", "en": "Hands"},
@@ -367,10 +367,10 @@ TF2_WEAPONS = {
         },
         "Melee": {
             "c_frying_pan": {"ru": "Сковорода", "en": "Frying Pan"},
-            "c_saxxy": {"ru": "Саксси", "en": "Saxxy"},
-            "c_picket": {"ru": "Идейный борец", "en": "Conscientious Objector"},
-            "c_carnival_mallet": {"ru": "Сокрушитель", "en": "Necro Smasher"},
-            "c_skullbat": {"ru": "Бита из ада", "en": "Bat Outta Hell"},
+            "c_saxxy": {"ru": "Сакси", "en": "Saxxy"},
+            "c_picket": {"ru": "Идейный уклонист", "en": "Conscientious Objector"},
+            "c_carnival_mallet": {"ru": "Трупоколотушка", "en": "Necro Smasher"},
+            "c_skullbat": {"ru": "Дубина из ада", "en": "Bat Outta Hell"},
             "c_tw_eagle": {"ru": "Посох свободы", "en": "Freedom Staff"}
         },
     }

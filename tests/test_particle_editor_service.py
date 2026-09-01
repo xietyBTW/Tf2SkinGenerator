@@ -1096,3 +1096,24 @@ def test_module_catalog_covers_everything_preview_simulates():
         listed |= {aliases.get(name, name) for name in listed}
         missing = sorted(simulated - listed - not_in_tf2)
         assert missing == [], (group, missing)
+
+
+def test_material_key_collapses_doubled_separators():
+    """В PCF стока попадаются задвоенные разделители: `effects\\crit`.
+
+    Для архива `materials/effects//crit.vmt` — другой путь, которого там нет,
+    и боевой крит-эффект оставался без текстуры. Ключ материала обязан быть
+    один и тот же, как бы путь ни записали.
+    """
+    from src.services.particle_editor_service import _norm_mat
+
+    canonical = "effects/crit.vmt"
+    for written in (r"effects\\crit", "effects//crit", r"effects\crit",
+                    "effects/crit.vmt", "materials/effects/crit.vmt",
+                    "/effects/crit/", r"Effects\CRIT"):
+        assert _norm_mat(written) == canonical, written
+
+    assert _norm_mat(r"effects\\workshop\\utaunt\\voidsmoke") == \
+        "effects/workshop/utaunt/voidsmoke.vmt"
+    assert _norm_mat(r"effects\\crit", ".vtf") == "effects/crit.vtf"
+    assert _norm_mat("") == ""

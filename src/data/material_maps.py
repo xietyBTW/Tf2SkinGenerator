@@ -125,3 +125,47 @@ MAP_ORDER = ("detail", "selfillum", "phongexp", "envmapmask", "rimlight",
 # Порядок ОТОБРАЖЕНИЯ в диалоге (сетка 2 столбца, ряд за рядом).
 MAP_DISPLAY_ORDER = ("phongexp", "rimlight", "envmapmask", "selfillum",
                      "detail", "phongwarp", "lightwarp")
+
+
+def normalize_maps(maps) -> dict:
+    """
+    Оставляет от присланного набора карт только осмысленное.
+
+    Проверка нужна не «на всякий случай»: запись уходит в генератор VTF и в
+    VMT, и мусорный ключ там превращается в сломанный материал. Правила те же,
+    что складывает диалог приложения (``MaterialMapsDialog.get_maps``):
+
+      • параметрическая карта (rimlight) — только ``{"enabled": True}``;
+      • авто-режим — ``{"derive": True}`` и необязательный порог;
+      • файл — существующий путь в ``image``;
+      • числовые параметры — только те, что карта объявила в ``numeric``.
+    """
+    import os
+
+    result = {}
+    for map_id, entry in (maps or {}).items():
+        cfg = MATERIAL_MAPS.get(map_id)
+        if not cfg or not isinstance(entry, dict):
+            continue
+
+        if cfg.get('vmt_only'):
+            if not entry.get('enabled'):
+                continue
+            clean = {'enabled': True}
+        elif entry.get('derive') and cfg.get('derive_kind'):
+            clean = {'derive': True}
+            threshold = str(entry.get('threshold', '')).strip()
+            if threshold:
+                clean['threshold'] = threshold
+        else:
+            image = str(entry.get('image', '')).strip()
+            if not image or not os.path.isfile(image):
+                continue
+            clean = {'image': image}
+
+        for param in cfg.get('numeric', ()):
+            value = str(entry.get(param, '')).strip()
+            if value:
+                clean[param] = value
+        result[map_id] = clean
+    return result

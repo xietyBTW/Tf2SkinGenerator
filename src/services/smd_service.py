@@ -8,12 +8,56 @@ SMD сервис — замена секций nodes/skeleton/material в SMD ф
 """
 
 import os
+import re
 import time
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 #: Подстроки в имени SMD, по которым файл НЕ является видимым reference-мешем
 #: (физика, анимации, позы). Единый источник для всех мест, что ищут reference SMD.
 NON_REFERENCE_SMD_KEYWORDS: Tuple[str, ...] = ("physics", "phys", "anim", "idle", "pose")
+
+#: Уровни детализации — в превью нужен нулевой, самый подробный.
+_LOD_MARKER = "lod"
+
+
+def find_reference_smd(directory: str, prefer: str = "") -> Optional[str]:
+    """
+    Видимый меш модели среди декомпилированных SMD.
+
+    Приоритет: `*_reference.smd` → имя содержит `prefer` → самый крупный
+    оставшийся файл. Крупнейший как последний рубеж не случаен: у моделей без
+    `_reference` в имени основной меш всё равно тяжелее любого куска.
+
+    Физика, анимации, позы и LOD-и исключаются всегда.
+
+    Returns:
+        Путь к SMD или None, если подходящих файлов нет.
+    """
+    import glob
+
+    def usable(path: str) -> bool:
+        name = os.path.basename(path).lower()
+        return (_LOD_MARKER not in name
+                and not any(kw in name for kw in NON_REFERENCE_SMD_KEYWORDS))
+
+    candidates = [p for p in glob.glob(os.path.join(directory or "", "*.smd"))
+                  if usable(p)]
+    if not candidates:
+        return None
+    for group in (
+        [p for p in candidates if "_reference" in os.path.basename(p).lower()],
+        [p for p in candidates if prefer and prefer.lower() in os.path.basename(p).lower()],
+    ):
+        if group:
+            return min(group, key=lambda p: len(os.path.basename(p)))
+    return max(candidates, key=os.path.getsize)
+
+
+#: Имена костей-хватов в TF2: за них оружие и держат.
+_GRIP_PREFIXES = ("weapon_bone", "vm_weapon_bone")
+
+#: Строка секции nodes: `0 "weapon_bone" -1`.
+_NODE_RE = re.compile(r'\s*(\d+)\s+"([^"]*)"\s+(-?\d+)')
 
 
 class SMDService:
@@ -124,6 +168,12 @@ class SMDService:
             # keep_user_materials → передаём пустой список оригинальных имён,
             # тогда _write_merged_triangles сохраняет материалы пользователя.
             _orig_mat_names = [] if keep_user_materials else orig_parts.get('material_names', [])
+            # Кости сопоставляются по ИМЕНИ: номера у риггера свои, а порядок в
+            # декомпиляции произвольный (у Детонатора weapon_bone,
+            # weapon_bone_3, weapon_bone_4, weapon_bone_2). Что не опознали —
+            # на главный хват, то есть на кость, несущую бо́льшую часть
+            # оригинального меша: у модели «только геометрия» кость одна и
+            # зовётся `root`, в игровой таблице такой нет.
             SMDService._write_merged_triangles(
                 out,
                 user_parts.get('triangles_data', []),
@@ -131,6 +181,11 @@ class SMDService:
                 progress_cb=_cb,
                 pct_start=80,
                 pct_end=100,
+                bone_mapping=SMDService._bone_mapping(user_parts.get('nodes'),
+                                                     orig_parts.get('nodes')),
+                fallback_bone=SMDService._grip_bone(
+                    orig_parts.get('nodes'),
+                    orig_parts.get('triangles_data', [])),
             )
 
         _cb(100)
@@ -256,6 +311,120 @@ class SMDService:
         return result
 
     @staticmethod
+    def _node_names(nodes_lines: Optional[List[str]]) -> Dict[int, str]:
+        """{номер кости: имя} из секции nodes."""
+        names: Dict[int, str] = {}
+        for line in nodes_lines or ():
+            m = _NODE_RE.match(line)
+            if m:
+                names[int(m.group(1))] = m.group(2)
+        return names
+
+    @staticmethod
+    def _bone_mapping(user_nodes: Optional[List[str]],
+                      orig_nodes: Optional[List[str]]) -> Dict[int, int]:
+        """{номер кости у пользователя: номер той же кости по ИМЕНИ в игре}.
+
+        Номера костей у риггера свои, и совпасть с игровыми они не могут:
+        порядок в декомпиляции произвольный (у Детонатора `weapon_bone`,
+        `weapon_bone_3`, `weapon_bone_4`, `weapon_bone_2`). Пока переносились
+        одни номера, модель, зарриганная под игровые ИМЕНА, садилась на чужие
+        кости — а угадать нужный порядок риггер не может никак.
+        """
+        by_name = {name: bone
+                   for bone, name in SMDService._node_names(orig_nodes).items()}
+        return {bone: by_name[name]
+                for bone, name in SMDService._node_names(user_nodes).items()
+                if name in by_name}
+
+    @staticmethod
+    def _mesh_bones(triangles_data: List[Tuple[str, List[str]]]) -> set:
+        """Номера костей, которые меш действительно использует."""
+        used: set = set()
+        for _material, lines in triangles_data or ():
+            for line in lines:
+                parts = line.split()
+                if len(parts) < 9:
+                    continue
+                try:
+                    used.add(int(parts[0]))
+                    count = int(parts[9]) if len(parts) > 9 else 0
+                    for k in range(count):
+                        used.add(int(parts[10 + k * 2]))
+                except (ValueError, IndexError):
+                    continue
+        return used
+
+    @staticmethod
+    def _grip_bone(nodes_lines: Optional[List[str]],
+                   triangles_data: List[Tuple[str, List[str]]]) -> int:
+        """Кость, за которую оружие держат. -1 — определить нечем.
+
+        На неё садятся вершины, чью кость по имени не опознали: у модели
+        «только геометрия» кость обычно одна и зовётся `root`. Берётся самая
+        ВЕРХНЯЯ из костей меша, названных по-хватовому (`weapon_bone`,
+        `weapon_bone_L` у медигана, `vm_weapon_bone` у кулаков); если таких
+        нет — просто самая верхняя из используемых.
+
+        Ни номер ноль, ни «самая нагруженная» не годятся: нулевой у медигана
+        `weapon_bone_L`, а у Фалломорфера узел по имени модели, который к руке
+        не крепится вовсе; больше всего вершин у минигана несёт вращающийся
+        `barrel`, а у Святой макрели — `jiggle3`.
+        """
+        names, parents = {}, {}
+        for line in nodes_lines or ():
+            m = _NODE_RE.match(line)
+            if m:
+                bone = int(m.group(1))
+                names[bone] = m.group(2)
+                parents[bone] = int(m.group(3))
+        used = SMDService._mesh_bones(triangles_data) & set(names)
+        if not used:
+            used = set(names)
+        if not used:
+            return -1
+
+        def depth(bone: int) -> int:
+            steps, seen = 0, set()
+            while bone in parents and parents[bone] >= 0 and bone not in seen:
+                seen.add(bone)
+                bone = parents[bone]
+                steps += 1
+            return steps
+
+        grips = {b for b in used if names[b].startswith(_GRIP_PREFIXES)}
+        return min(grips or used, key=lambda b: (depth(b), b))
+
+    @staticmethod
+    def _remap_vertex_line(line: str, mapping: Dict[int, int],
+                           fallback: int) -> str:
+        """Переписывает номера костей в строке вершины на игровые."""
+        parts = line.split()
+        if len(parts) < 9:
+            return line
+        tail = "\n" if line.endswith("\n") else ""
+
+        def swap(raw: str) -> str:
+            try:
+                bone = int(raw)
+            except ValueError:
+                return raw
+            if bone in mapping:
+                return str(mapping[bone])
+            return str(fallback) if fallback >= 0 else raw
+
+        parts[0] = swap(parts[0])
+        try:
+            count = int(parts[9]) if len(parts) > 9 else 0
+        except ValueError:
+            count = 0
+        for k in range(count):
+            idx = 10 + k * 2
+            if idx < len(parts):
+                parts[idx] = swap(parts[idx])
+        return " ".join(parts) + tail
+
+    @staticmethod
     def _write_merged_triangles(
         out,
         user_triangles_data: List[Tuple[str, List[str]]],
@@ -263,10 +432,16 @@ class SMDService:
         progress_cb: Optional[Callable[[int], None]] = None,
         pct_start: int = 80,
         pct_end: int = 100,
+        bone_mapping: Optional[Dict[int, int]] = None,
+        fallback_bone: int = -1,
     ) -> None:
         """
         Записывает секцию triangles прямо в открытый файл.
-        Геометрия — из user_triangles_data, имена материалов — из original_material_names.
+
+        Геометрия — из user_triangles_data, имена материалов — из
+        original_material_names, номера костей — переписаны по именам
+        (`bone_mapping`, см. `_bone_mapping`). Без отображения строки идут как
+        есть.
         """
         if not user_triangles_data:
             out.write('triangles')
@@ -288,7 +463,13 @@ class SMDService:
 
             out.write(mat)
             out.write('\n')
-            out.writelines(tri_lines)
+            if bone_mapping:
+                out.writelines(
+                    SMDService._remap_vertex_line(line, bone_mapping, fallback_bone)
+                    for line in tri_lines
+                )
+            else:
+                out.writelines(tri_lines)
 
             if progress_cb:
                 ratio = (idx + 1) / n_total

@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QThread, Signal
+from src.services.base_worker import BaseWorker, Signal
 
 from src.shared.logging_config import get_logger
 
 logger = get_logger(__name__)
 
 
-class DiagnosticsWorker(QThread):
+class DiagnosticsWorker(BaseWorker):
     """Гоняет inspect_vpk в отдельном потоке. Сигнал finished несёт
     DiagnosticReport (или None при неожиданной ошибке — тогда шлём error)."""
 

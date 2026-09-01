@@ -23,15 +23,23 @@ logger = get_logger(__name__)
 class PreviewSkinsMixin:
     """Скины и стили оригинальной модели (см. модуль)."""
 
-    def _reset_skin_state(self) -> None:
-        """Убирает кнопки стилей (смена оружия / выход из кастома)."""
-        self._state.reset_skins()
-        self._skin_chosen = {}
+    def _clear_skin_buttons(self) -> None:
+        """Виджетная половина сброса стилей: убирает кнопки."""
         for b in self._skin_buttons:
             b.setParent(None)
             b.deleteLater()
         self._skin_buttons = []
         self._skin_button_indices = []
+
+    def _reset_skin_state(self) -> None:
+        """Забывает вариантные стили и убирает их кнопки.
+
+        Половинки разделены намеренно: сессия чистит память, панель — виджеты.
+        Переход к игровой модели зовёт их порознь (см. _start_3d_worker), потому
+        что память там сбрасывается разом в PreviewSession.begin_game_model.
+        """
+        self._session.reset_skins()
+        self._clear_skin_buttons()
 
     def _start_skin_detection(self) -> None:
         """Запускает фоновое определение стилей оригинальной модели.

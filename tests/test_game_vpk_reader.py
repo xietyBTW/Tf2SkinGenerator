@@ -53,6 +53,24 @@ class GameVpkReaderTests(unittest.TestCase):
         r = _reader({"materials/models/x/c_w.vtf": b"VTF"})
         self.assertEqual(r.find_vtf_for_basetexture("models\\x\\c_w"), b"VTF")
 
+    def test_source_extension_in_the_vmt_is_ignored(self):
+        """У праздничного Правосудия и Уберпилы Valve оставила `.psd`.
+
+        Движок читает такой путь без расширения, и без этого у них не было
+        текстуры вовсе — ни в превью, ни в сборке.
+        """
+        r = _reader({"materials/models/weapons/c_items/c_ubersaw_xms.vtf": b"VTF"})
+        self.assertEqual(
+            r.find_vtf_for_basetexture("models/weapons/c_items/c_ubersaw_xms.psd"),
+            b"VTF")
+        self.assertEqual(
+            r.find_vtf_for_basetexture("models/weapons/c_items/c_ubersaw_xms.vtf"),
+            b"VTF")
+
+    def test_dot_in_a_folder_name_is_not_an_extension(self):
+        r = _reader({"materials/models/v1.5/c_w.vtf": b"VTF"})
+        self.assertEqual(r.find_vtf_for_basetexture("models/v1.5/c_w"), b"VTF")
+
     def test_find_vtf_for_basetexture_none(self):
         self.assertIsNone(_reader({}).find_vtf_for_basetexture(""))
 

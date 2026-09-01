@@ -8,7 +8,7 @@ SkyboxFacesWorker — извлекает 6 стоковых граней выб�
 
 from typing import List
 
-from PySide6.QtCore import Signal
+from src.services.base_worker import Signal
 
 from src.data.skyboxes import SKY_FACES
 from src.services.base_worker import BaseWorker

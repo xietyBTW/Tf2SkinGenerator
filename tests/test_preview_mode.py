@@ -2,7 +2,7 @@
 
 import unittest
 
-from src.ui.preview_mode import PreviewMode, PreviewState
+from src.domain.preview.mode import PreviewMode, PreviewState
 
 
 class PreviewStateTests(unittest.TestCase):

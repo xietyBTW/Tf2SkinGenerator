@@ -80,13 +80,33 @@ def setup_fake_pyside6():
     sys.modules["PySide6.QtCore"] = qtcore
 
 
+#: Модули, которые импортируются ПОД заглушкой и поэтому запоминают фейковый Qt.
+#: Их надо выбросить вместе с ней, иначе они утекут в соседние тесты.
+_TAINTED = ("src.core.app_factory", "src.utils.themes")
+
+
 class AppFactoryTests(unittest.TestCase):
     def setUp(self):
+        # Заглушку обязательно снимаем в tearDown. Раньше она оставалась в
+        # sys.modules до конца прогона, и всё, что импортировалось после,
+        # живого Qt уже не видело — три тест-модуля падали на сборе.
+        self._saved = {k: sys.modules.get(k) for k in
+                       ("PySide6", "PySide6.QtWidgets", "PySide6.QtGui",
+                        "PySide6.QtCore") + _TAINTED}
         setup_fake_pyside6()
-        if "src.core.app_factory" in sys.modules:
-            del sys.modules["src.core.app_factory"]
+        for name in _TAINTED:
+            sys.modules.pop(name, None)
         self.module = importlib.import_module("src.core.app_factory")
         self.AppFactory = self.module.AppFactory
+
+    def tearDown(self):
+        for name in _TAINTED:
+            sys.modules.pop(name, None)
+        for name, mod in self._saved.items():
+            if mod is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = mod
 
     def test_setup_working_directory_dev(self):
         with patch.object(sys, "frozen", False, create=True):

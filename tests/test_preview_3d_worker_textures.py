@@ -343,3 +343,102 @@ def test_missing_blu_texture_among_several_materials(app):
         assert raw["auto_1"][0], "у первого своя BLU-текстура"
         assert raw["auto"] == (None, "auto"), "второй — общий, а не пустой"
 
+
+
+# ── Какой столбец даёт синюю текстуру предмета ────────────────────────────── #
+#
+# Строка $texturegroup описывает ВСЮ модель, а показываем мы иногда лишь её
+# часть: Dead Ringer рисуется вьюмоделью, где рядом с часами лежат руки шпиона.
+# Раньше синей текстурой предмета становился первый столбец, который удалось
+# найти, — то есть чужие руки.
+
+QC_VIEWMODEL_WITH_ARMS = """
+$modelname "v_watch_pocket_spy.mdl"
+$cdmaterials "models\\weapons\\c_items\\"
+
+$texturegroup "skinfamilies"
+{
+\t{ "spy_hands_red"  "c_pocket_watch" "spy_hands_blue" }
+\t{ "spy_hands_blue" "c_pocket_watch" "spy_hands_blue" }
+}
+"""
+
+
+def _layout_model(qc_text: str, tmp: str):
+    from src.services import qc_skin_parser
+    path = Path(tmp) / "model.qc"
+    path.write_text(qc_text, encoding="utf-8")
+    return qc_skin_parser.load_model(tmp)
+
+
+def test_blu_comes_from_the_column_of_our_own_material(app):
+    """Показываем только часы — синими стать могут лишь они, а не руки рядом."""
+    with TemporaryDirectory() as tmp:
+        model = _layout_model(QC_VIEWMODEL_WITH_ARMS, tmp)
+        assert Preview3DWorker._own_blu_names(model, ["c_pocket_watch"]) == [], \
+            "столбец часов в обеих строках один — команды у предмета нет"
+
+
+def test_blu_of_a_neighbouring_column_is_not_stolen(app):
+    """Руки командные, но красить пользователь просил не их."""
+    with TemporaryDirectory() as tmp:
+        model = _layout_model(QC_VIEWMODEL_WITH_ARMS, tmp)
+        names = Preview3DWorker._own_blu_names(model, ["spy_hands_red"])
+        assert names == ["spy_hands_blue"], "у своего столбца синяя пара своя"
+
+
+def test_unmatched_materials_leave_the_decision_open(app):
+    """Имена мешей с $texturegroup не сошлись — врать про команду нечем."""
+    with TemporaryDirectory() as tmp:
+        model = _layout_model(QC_SIMPLE_TEAM, tmp)
+        assert Preview3DWorker._own_blu_names(model, ["чужой_материал"]) is None
+        assert Preview3DWorker._own_blu_names(model, ["hat"]) == ["hat_blue"]
+
+
+#: Команда меняет НЕ материал геометрии, а добавку из $texturegroup: у
+#: quadball это граната, у Loose Cannon — ядро, у часов шпиона — руки. Модель
+#: при этом одноматериальная.
+QC_TEAM_ONLY_IN_EXTRA = r"""
+$modelname "gun.mdl"
+$cdmaterials "models\workshop\player\items\demo\hat\"
+
+$texturegroup "skinfamilies"
+{
+	{ "gun" "ball_red" }
+	{ "gun" "ball_blue" }
+}
+"""
+
+
+def test_team_material_outside_geometry_still_gets_blu(app):
+    """
+    BLU ищется по КАРТОЧКАМ, а не только по материалам геометрии.
+
+    У quadball, Loose Cannon и часов шпиона командная текстура лежит в
+    добавке из $texturegroup, а геометрия одноматериальная. Пока решение
+    принималось по длине списка материалов модели, такое оружие уходило в
+    ветку одиночного BLU — и не получало его вовсе: переключатель RED/BLU
+    был, а картинка не менялась ни в 2D, ни в 3D.
+    """
+    with TemporaryDirectory() as tmp:
+        files = _files(
+            gun=("models/gun/gun", (10, 0, 0, 255)),
+            ball_red=("models/gun/ball_red", (20, 0, 0, 255)),
+            ball_blue=("models/gun/ball_blue", (0, 0, 20, 255)),
+        )
+        # BLU ищется и прямым путём по имени материала — кладём VTF и туда.
+        files[f"materials/{CD}/ball_blue.vtf"] = _png_bytes((0, 0, 20, 255))
+
+        w, decomp = _worker(files, QC_TEAM_ONLY_IN_EXTRA, tmp)
+        w._decomp_dir = decomp
+
+        seen = {}
+        w.blu_multi_material.connect(lambda pair: seen.update(blu=pair))
+
+        # Геометрия знает ровно один материал — как у настоящей модели.
+        w._emit_weapon_textures(str(Path(tmp) / "model.obj"), ["gun"])
+
+        assert "blu" in seen, "команда у добавки должна дать BLU-карту"
+        tex_map, name_map = seen["blu"]
+        assert name_map.get("ball_red") == "ball_blue"
+        assert tex_map.get("ball_red"), "у гранаты своя BLU-картинка"

@@ -1,7 +1,7 @@
 """Пер-режимный набор VTF-форматов и план перезаполнения комбобокса.
 
 Чистая логика (без Qt): используется SettingsPanel и покрывается тестами без
-импорта PySide6 (тестовая среда местами подменяет PySide6 заглушкой без QtWidgets).
+импорта Qt: правила формата к виджетам отношения не имеют.
 """
 
 from src.data.skyboxes import SKYBOX_MODE
@@ -24,6 +24,10 @@ CRIT_ALLOWED_FORMATS = ("DXT5", "RGBA8888", "DXT3")
 SKYBOX_ALLOWED_FLAGS = ("POINTSAMPLE",)
 
 
+#: Скайбокс склеивается из граней без альфы — форматы с ней дали бы швы.
+SKYBOX_ALLOWED_FORMATS = ("DXT1", "BGR888")
+
+
 def allowed_flags_for_mode(mode):
     """Галки флагов/опций VTF, осмысленные для режима (имена флагов).
 
@@ -40,7 +44,6 @@ def allowed_formats_for_mode(mode):
     None → ограничений нет, показываем полный список VTF_FORMATS.
     """
     if mode == SKYBOX_MODE:
-        from src.services.skybox_service import SKYBOX_ALLOWED_FORMATS
         return list(SKYBOX_ALLOWED_FORMATS)
     if mode == "critHIT":
         return list(CRIT_ALLOWED_FORMATS)

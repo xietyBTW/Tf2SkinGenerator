@@ -254,6 +254,10 @@ import * as THREE        from 'three';
 import { OBJLoader }     from 'three/addons/loaders/OBJLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { makeMeshMaterial as _makeMeshMaterial } from './js/viewer_materials.js';
+import { firstPersonCamera as _firstPersonCamera } from './js/viewer_camera.js';
+import { firstEditableHit as _firstEditableHit } from './js/viewer_meshes.js';
+import { buildSkinnedScene as _buildSkinnedScene,
+         applyClip as _applyViewmodelClip } from './js/viewer_skinned.js';
 
 // ── Python bridge (QWebChannel JS → Python) ──────────────────────────────── //
 // Инициализируется асинхронно; вызовы _notifyTextureDrop() безопасны до готовности.
@@ -360,6 +364,23 @@ renderer.setPixelRatio(window.devicePixelRatio);
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.setClearColor(0x1a1a1a);
+
+// ── Фон под тему хоста ────────────────────────────────────────────────────
+// Вьювер живёт и в окне приложения, и в веб-интерфейсе, а тема там своя.
+// Хост зовёт это при старте и при смене темы; без вызова остаётся тёмный фон,
+// как было.
+window.setViewerBackground = function(css) {
+  if (!css) return;
+  document.body.style.background = css;
+  const probe = document.createElement('div');
+  probe.style.color = css;
+  document.body.appendChild(probe);
+  const rgb = getComputedStyle(probe).color.match(/\d+/g);
+  probe.remove();
+  if (rgb && rgb.length >= 3) {
+    renderer.setClearColor((+rgb[0] << 16) + (+rgb[1] << 8) + (+rgb[2]));
+  }
+};
 document.getElementById('canvas-container').appendChild(renderer.domElement);
 
 // ── Scene / Camera ───────────────────────────────────────────────────────── //
@@ -391,6 +412,11 @@ scene.add(rim);
 
 // ── State ────────────────────────────────────────────────────────────────── //
 let currentModel  = null;
+// Риг камеры: null — орбита, объект — вид от первого лица (setViewRig).
+let _viewRig      = null;
+// Анимированная сцена вьюмодели: { group, mixer, action, meshes } либо null.
+let _skinned      = null;
+const _animClock  = new THREE.Clock();
 let _animTimer    = null;
 let _animFrames   = [];
 let _pendingAnim        = null;
@@ -529,6 +555,7 @@ function startAnimation(textures, framerate, meshFilter) {
 
 // ── Geometry helpers ─────────────────────────────────────────────────────── //
 function applyTransform(object, cx, cy, cz, scale) {
+  if (_viewRig) { _applyFirstPersonRig(object); return; }
   object.position.set(-cx * scale, -cy * scale, -cz * scale);
   object.scale.setScalar(scale);
   const fovRad   = (camera.fov * Math.PI) / 180;
@@ -538,6 +565,39 @@ function applyTransform(object, cx, cy, cz, scale) {
   controls.target.set(0, 0, 0);
   controls.update();
 }
+
+// Вид от первого лица: сцена уже стоит там, где надо относительно глаза,
+// поэтому модель не центрируется и не масштабируется — двигается камера.
+function _applyFirstPersonRig(object) {
+  const rig = _firstPersonCamera(_viewRig);
+  object.position.set(0, 0, 0);
+  object.scale.setScalar(1);
+  camera.up.set(rig.up[0], rig.up[1], rig.up[2]);
+  camera.position.set(rig.position[0], rig.position[1], rig.position[2]);
+  camera.fov = rig.fov;
+  camera.updateProjectionMatrix();
+  camera.lookAt(rig.target[0], rig.target[1], rig.target[2]);
+  controls.target.set(rig.target[0], rig.target[1], rig.target[2]);
+  controls.update();
+}
+
+// Как ставить камеру: null — орбита вокруг модели (обычное превью),
+// объект — вид от первого лица (см. js/viewer_camera.js).
+// Задаётся ДО загрузки модели: applyTransform читает его при показе.
+window.setViewRig = function(rig) {
+  _viewRig = rig || null;
+  // Орбита в кадре от первого лица бессмысленна: там важно именно то, что
+  // видит игрок, а не свободный осмотр.
+  controls.enabled = !_viewRig;
+  if (!_viewRig) {
+    camera.up.set(0, 1, 0);
+    camera.fov = DEFAULT_FOV;
+    camera.updateProjectionMatrix();
+  }
+  // Переставляем камеру сразу только при входе в режим: выход из него всегда
+  // сопровождается загрузкой другой модели, а её габариты здесь неизвестны.
+  if (_viewRig && currentModel) _applyFirstPersonRig(currentModel);
+};
 
 function applyTexture(object, tex) {
   object.traverse(child => {
@@ -831,6 +891,7 @@ window.loadModelFromContent = function(objContent, texDataUrl, cx, cy, cz, scale
   setStatus(_t.loading, false, true);
   stopAnimation();
   _exitSkyboxView();
+  _disposeSkinned();           // уходим с анимированной сцены — гасим микшер
   if (currentModel) { scene.remove(currentModel); currentModel = null; }
   if (_critSprite)  { scene.remove(_critSprite);  _critSprite  = null; }
 
@@ -901,6 +962,76 @@ window.loadModelFromContent = function(objContent, texDataUrl, cx, cy, cz, scale
     }
   );
 };
+
+// Анимированная вьюмодель: меш приходит один раз в bind-позе, движение — в
+// дорожках костей (см. js/viewer_skinned.js). Дальше сцена ведёт себя как
+// обычная модель: меши названы по материалам, текстуры кладутся тем же
+// applyMaterialMap, дроп и фильтр редактируемых работают без изменений.
+window.loadViewmodelAnimated = function(data, loadSeq) {
+  const gen = ++_sceneGeneration;
+  const seqForAck = loadSeq | 0;
+  _isCritHitMode = false;
+  _editableMeshNames = null;
+  setStatus(_t.loading, false, true);
+  stopAnimation();
+  _exitSkyboxView();
+  _disposeSkinned();
+  if (currentModel) { scene.remove(currentModel); currentModel = null; }
+  if (_critSprite)  { scene.remove(_critSprite);  _critSprite  = null; }
+
+  try {
+    _skinned = _buildSkinnedScene(THREE, data || {}, name =>
+      makeMeshMaterial({ map: null, name }));
+  } catch (err) {
+    console.error('viewmodel build error:', err);
+    setStatus(_t.error_model, true);
+    return;
+  }
+  if (_sceneGeneration !== gen) { _disposeSkinned(); return; }
+
+  scene.add(_skinned.group);
+  currentModel = _skinned.group;
+  applyTransform(currentModel, 0, 0, 0, 1);
+  hideStatus();
+
+  if (_pendingMaterialMap) {
+    const map = _pendingMaterialMap;
+    _pendingMaterialMap = null;
+    window.applyMaterialMap(map);
+  }
+  if (_pendingTexUrl) {
+    const url = _pendingTexUrl;
+    _pendingTexUrl = null;
+    window.updateTextureFromDataUrl(url);
+  }
+  _notifyModelLoaded(seqForAck);
+};
+
+// Смена анимации на уже показанной сцене: меш, скелет и текстуры остаются,
+// меняются только дорожки. Так переключение стоит миллисекунды, а не секунду
+// на распаковку тех же самых текстур.
+window.setViewmodelClip = function(clip) {
+  if (!_skinned) return false;
+  return Boolean(_applyViewmodelClip(THREE, _skinned, clip));
+};
+
+// Пауза/продолжение проигрывания. Кадр при этом остаётся тот, что был.
+window.setViewmodelPlaying = function(on) {
+  if (_skinned && _skinned.action) _skinned.action.paused = !on;
+};
+
+function _disposeSkinned() {
+  if (!_skinned) return;
+  if (_skinned.mixer) _skinned.mixer.stopAllAction();
+  if (_skinned.group && _skinned.group.parent) {
+    _skinned.group.parent.remove(_skinned.group);
+  }
+  _skinned.meshes.forEach(({ mesh }) => {
+    if (mesh.geometry) mesh.geometry.dispose();
+    if (mesh.material && mesh.material.dispose) mesh.material.dispose();
+  });
+  _skinned = null;
+}
 
 // Задаёт список имён мешей, которые получают текстуру при обновлении.
 // names: массив строк (совпадают с 'g'-именами в OBJ) или null — обновлять все.
@@ -1056,8 +1187,10 @@ window.resetViewer = function() {
   ++_sceneGeneration;
   _isCritHitMode    = false;
   _editableMeshNames = null;
+  window.setViewRig(null);      // сброс режима — обратно к орбите
   stopAnimation();
   _exitSkyboxView();
+  _disposeSkinned();
   if (currentModel) { scene.remove(currentModel); currentModel = null; }
   if (_critSprite)  { scene.remove(_critSprite);  _critSprite  = null; }
   setStatus(_t.select_weapon);
@@ -1419,10 +1552,24 @@ function _ndcFromEvent(e) {
 }
 
 function _hitMeshAt(ndc) {
-  if (!currentModel || _isCritHitMode) return null;
-  _raycaster.setFromCamera(ndc, camera);
-  const hits = _raycaster.intersectObject(currentModel, true);
+  const hits = _hitsAt(ndc);
   return hits.length > 0 ? hits[0].object : null;
+}
+
+// Ближайший меш, который пользователю РАЗРЕШЕНО перекрашивать.
+//
+// Нередактируемые пропускаются насквозь: в сцене вида от первого лица рядом с
+// оружием стоят чужие руки, и дроп на них красил именно их — как и подсветка,
+// которая это обещала. Инспектору материалов, наоборот, нужен любой меш,
+// поэтому фильтр живёт здесь, а не в _hitMeshAt.
+function _hitEditableMeshAt(ndc) {
+  return _firstEditableHit(_hitsAt(ndc), _editableMeshNames);
+}
+
+function _hitsAt(ndc) {
+  if (!currentModel || _isCritHitMode) return [];
+  _raycaster.setFromCamera(ndc, camera);
+  return _raycaster.intersectObject(currentModel, true);
 }
 
 // Подсвечивает меш при перетаскивании над ним
@@ -1469,6 +1616,12 @@ document.addEventListener('dragenter', e => {
   e.preventDefault();
   _dragDepth++;
   if (_dragDepth === 1) dropOverlay.classList.add('visible');
+  // Разбор модели на части считает Python. Просим его при первом же
+  // перетаскивании: до него это никому не нужно, а ждать кнопки — значит
+  // потерять единственный момент, когда подсветка что-то объясняет.
+  if (!_partsMap && typeof window.onPartsNeeded === 'function') {
+    window.onPartsNeeded();
+  }
 });
 
 document.addEventListener('dragleave', () => {
@@ -1476,29 +1629,46 @@ document.addEventListener('dragleave', () => {
   if (_dragDepth === 0) {
     dropOverlay.classList.remove('visible');
     _clearDragHover();
+    if (!_partsMode) _clearPartHover();
   }
 });
 
 document.addEventListener('dragover', e => {
   e.preventDefault();
   e.dataTransfer.dropEffect = 'copy';
-  // Подсвечиваем меш под курсором во время перетаскивания
-  if (_dragDepth > 0) _setDragHover(_hitMeshAt(_ndcFromEvent(e)));
+  if (_dragDepth <= 0) return;
+  // Подсвечиваем КУСОК под курсором, если части уже разобраны: обещать
+  // подсветкой целый меш там, где картинка ляжет на одну часть, — врать про
+  // результат.
+  const overPart = _partsMap ? _partAt(_ndcFromEvent(e)) : null;
+  if (overPart) { _clearDragHover(); _setPartHover(overPart); }
+  else if (!_partsMode) _setDragHover(_hitEditableMeshAt(_ndcFromEvent(e)));
 });
 
 document.addEventListener('drop', e => {
   e.preventDefault();
-  _dragDepth = 0;
   dropOverlay.classList.remove('visible');
 
-  // Фиксируем целевой меш ДО асинхронного чтения файла
-  const hitMesh = _hitMeshAt(_ndcFromEvent(e));
+  // Фиксируем целевую часть/меш ДО асинхронного чтения файла и ДО сброса
+  // счётчика перетаскивания: по нему части работают без включённого режима.
+  const hitPart = _partAt(_ndcFromEvent(e));
+  const hitMesh = _hitEditableMeshAt(_ndcFromEvent(e));
+  _dragDepth = 0;
+  _clearPartHover();
   _clearDragHover();
 
   const file = e.dataTransfer?.files?.[0];
   if (!file) return;
   const isImage = file.type.startsWith('image/') || IMAGE_EXTS.test(file.name);
   if (!isImage) return;
+
+  // Режим частей: картинку в текстуру вклеивает Python — вьювер только
+  // говорит, на какой кусок её принесли. Сам он этого сделать не может: у
+  // всей модели один материал и одна текстура.
+  if (hitPart && typeof window.onPartDropped === 'function') {
+    window.onPartDropped(hitPart.material, hitPart.part, file);
+    return;
+  }
 
   const isGif = file.type === 'image/gif' || /\.gif$/i.test(file.name);
 
@@ -1582,6 +1752,143 @@ document.addEventListener('drop', e => {
       _notifyTextureDrop(dataUrl, staticMatName);
     };
     reader.readAsDataURL(file);
+  }
+});
+
+// ── Части модели: подсветка куска под курсором ─────────────────────────────── //
+//
+// Материал у оружия почти всегда один, поэтому «покрасить только ствол» — это
+// не второй материал, а кусок геометрии. Хозяин разбиения — Python (он же
+// потом вклеивает картинку в развёртку); сюда приезжает готовая карта «номер
+// треугольника → номер части», и по ней подсвечивается то, во что попала мышь.
+let _partsMap  = null;   // {материал: [номер части для каждого треугольника]}
+let _partsMode = false;
+let _partHover = null;   // {mesh, material, part, overlay}
+
+window.setModelParts = function(map) {
+  _partsMap = (map && Object.keys(map).length) ? map : null;
+  _clearPartHover();
+};
+
+window.setPartsMode = function(on) {
+  _partsMode = !!on;
+  document.getElementById('canvas-container').classList.toggle('inspecting', _partsMode);
+  if (!_partsMode) _clearPartHover();
+};
+
+// Номера частей для меша. Имя материала — единственная связь с разбором из
+// Python; у одноматериальной модели связывать нечего, берём единственный набор.
+function _partListFor(mesh) {
+  if (!_partsMap || !mesh) return null;
+  const name = (mesh.material && !Array.isArray(mesh.material) && mesh.material.name)
+    || mesh.name || '';
+  if (_partsMap[name]) return _partsMap[name];
+  const only = Object.keys(_partsMap);
+  return only.length === 1 ? _partsMap[only[0]] : null;
+}
+
+function _partAt(ndc) {
+  // Во время перетаскивания части работают и без включённого режима: человек
+  // тащит картинку на ствол, а не «сначала жмёт кнопку».
+  if (!_partsMode && _dragDepth <= 0) return null;
+  const hit = _hitsAt(ndc)[0];
+  if (!hit || hit.faceIndex == null) return null;
+  const list = _partListFor(hit.object);
+  if (!list) return null;
+  const part = list[hit.faceIndex];
+  return (part == null) ? null : { mesh: hit.object, part,
+                                   material: (hit.object.material || {}).name || '' };
+}
+
+// Подсветка — отдельный полупрозрачный меш из треугольников части, а не
+// подмена материала: материал у всей модели общий, и подменять его значило бы
+// подсветить модель целиком.
+function _partOverlay(mesh, list, part) {
+  const src = mesh.geometry.attributes.position;
+  const keep = [];
+  for (let tri = 0; tri < list.length; tri++) {
+    if (list[tri] !== part) continue;
+    for (let corner = 0; corner < 3; corner++) {
+      const v = tri * 3 + corner;
+      keep.push(src.getX(v), src.getY(v), src.getZ(v));
+    }
+  }
+  if (!keep.length) return null;
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position',
+    new THREE.BufferAttribute(new Float32Array(keep), 3));
+  const overlay = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({
+    color: 0xffb347, transparent: true, opacity: 0.45,
+    depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2,
+  }));
+  overlay.renderOrder = 999;
+  mesh.add(overlay);            // геометрия в локальных координатах меша
+  return overlay;
+}
+
+// Меш, для которого у нас есть разбор на части. Ищем обходом сцены: имя
+// материала — единственная связь с разбором, а мешей в кадре бывает несколько.
+function _meshWithParts() {
+  let found = null;
+  if (currentModel) {
+    currentModel.traverse(obj => {
+      if (!found && obj.isMesh && _partListFor(obj)) found = obj;
+    });
+  }
+  return found;
+}
+
+// Подсветка части по номеру — для наведения на список частей на странице.
+window.highlightPart = function(part) {
+  const mesh = (part === null || part === undefined) ? null : _meshWithParts();
+  if (!mesh) { _clearPartHover(); return; }
+  _setPartHover({ mesh, part,
+                  material: (mesh.material || {}).name || '' });
+};
+
+function _setPartHover(found) {
+  if (_partHover && found && _partHover.mesh === found.mesh
+      && _partHover.part === found.part) return;
+  _clearPartHover();
+  // О наведении сообщаем наружу: страница подсвечивает тот же кусок на
+  // развёртке и в списке частей.
+  if (typeof window.onPartHover === 'function') {
+    window.onPartHover(found ? found.part : null);
+  }
+  if (!found) return;
+  const list = _partListFor(found.mesh);
+  const overlay = list ? _partOverlay(found.mesh, list, found.part) : null;
+  if (overlay) _partHover = { ...found, overlay };
+}
+
+function _clearPartHover() {
+  if (_partHover && _partHover.overlay) {
+    _partHover.overlay.removeFromParent();
+    _partHover.overlay.geometry.dispose();
+    _partHover.overlay.material.dispose();
+  }
+  _partHover = null;
+}
+
+renderer.domElement.addEventListener('mousemove', e => {
+  if (_partsMode) _setPartHover(_partAt(_ndcFromEvent(e)));
+});
+
+// Клик по части. Вращение камеры — тоже зажатая кнопка, поэтому выбором
+// считаем только клик без протяжки.
+let _partDownAt = null;
+renderer.domElement.addEventListener('pointerdown', e => {
+  _partDownAt = _partsMode ? { x: e.clientX, y: e.clientY } : null;
+});
+renderer.domElement.addEventListener('pointerup', e => {
+  const down = _partDownAt;
+  _partDownAt = null;
+  if (!_partsMode || !down) return;
+  if (Math.abs(e.clientX - down.x) + Math.abs(e.clientY - down.y) > 4) return;
+  const found = _partAt(_ndcFromEvent(e));
+  if (found && typeof window.onPartPicked === 'function') {
+    window.onPartPicked(found.material, found.part);
   }
 });
 
@@ -1678,6 +1985,10 @@ renderer.domElement.addEventListener('mouseleave', () => {
 // ── Render loop ──────────────────────────────────────────────────────────── //
 function animate() {
   requestAnimationFrame(animate);
+  // Дельту снимаем КАЖДЫЙ кадр, даже без анимации: иначе после паузы
+  // накопленное время прыгнет в микшер одним куском.
+  const delta = _animClock.getDelta();
+  if (_skinned && _skinned.mixer) _skinned.mixer.update(delta);
   controls.update();
   // Кнопка инспекции доступна только когда есть обычная модель (не CritHIT)
   const _inspectAvail = !!currentModel && !_isCritHitMode;

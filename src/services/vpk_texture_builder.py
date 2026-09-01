@@ -1010,20 +1010,23 @@ class VpkTextureBuilder:
                     )
                     if _src_vmt:
                         break
-                _bl_orig = VpkTextureBuilder._get_original_vtf_bytes(
-                    _bl_mat, slots.original_cdmaterials_paths,
-                    slots.tf2_textures_vpk, slots.tf2_misc_vpk,
-                )
-                if not _src_vmt and not _bl_orig:
-                    continue   # ни VMT, ни VTF — движковый эффект, пропуск
                 if _src_vmt and os.path.exists(_src_vmt):
+                    # Родной VMT ссылается на текстуру ИГРОВЫМ путём, и он в
+                    # игре есть — своя копия VTF была бы мёртвым весом в моде
+                    # (у тела персонажа это мегабайты на голову и зомби-скины).
                     copy_file_safe(_src_vmt, _bl_vmt)
                 else:
                     # Нет родного VMT — производный от главного (как раньше).
+                    # Он смотрит в console-путь, значит текстуру надо положить.
+                    _bl_orig = VpkTextureBuilder._get_original_vtf_bytes(
+                        _bl_mat, slots.original_cdmaterials_paths,
+                        slots.tf2_textures_vpk, slots.tf2_misc_vpk,
+                    )
+                    if not _bl_orig:
+                        continue   # ни VMT, ни VTF — движковый эффект, пропуск
                     VpkTextureBuilder._write_material_vmt(
                         _bl_vmt, slots.vmt_path, slots.patched_cdmaterials_path,
                         _bl_mat)
-                if _bl_orig:
                     with open(slots.vtf(_bl_mat), "wb") as _f:
                         _f.write(_bl_orig)
                 logger.info(f"Служебный материал записан оригиналом: {_bl_mat}")
@@ -1553,26 +1556,13 @@ class VpkTextureBuilder:
             else:
                 raw_paths = list(cdmaterials_paths)
 
-            def _normalize(raw: str) -> Optional[str]:
-                """Снять console/ prefix, пропустить пути с '..'."""
-                p = raw.strip("/\\").replace("\\", "/")
-                # Crowbar добавляет "console/" — снимаем
-                if p.lower().startswith("console/"):
-                    p = p[len("console/"):]
-                # Пути типа "../../effects" — не текстурные, пропускаем
-                if ".." in p:
-                    return None
-                return p.rstrip("/")
-
             candidates: list = []
 
-            # Кандидаты из QC ($cdmaterials), все строки
-            seen_cdmat = set()
-            for raw in raw_paths:
-                cdmat = _normalize(raw)
-                if cdmat and cdmat not in seen_cdmat:
-                    seen_cdmat.add(cdmat)
-                    candidates.append(f"materials/{cdmat}/{mat_lower}.vtf")
+            # Кандидаты из QC ($cdmaterials) — общей нормализацией: она же
+            # разрешает относительные пути ('../../effects' рядом с
+            # 'models/player/spy' — это 'models/effects', где лежит убер-эффект).
+            cdmats = qc_skin_parser.resolve_cdmaterials(raw_paths)
+            candidates += [f"materials/{cdmat}/{mat_lower}.vtf" for cdmat in cdmats]
 
             # Стандартные fallback-пути для оружий и персонажей
             candidates += [
@@ -1600,6 +1590,25 @@ class VpkTextureBuilder:
                 except Exception as _e:
                     logger.debug(f"VPK ошибка при поиске оригинала {mat_name}: {_e}")
 
+            # Прямые пути угадывают не всё: у служебных материалов персонажей
+            # (глаза, убер-скин, зомби) VTF лежит не рядом со своим VMT, а в
+            # общей папке — `models/player/spy/eyeball_r.vmt` указывает на
+            # `models/player/shared/eyeball_r`. Знает об этом только сам VMT,
+            # поэтому последним шагом идём общей цепочкой VMT → $basetexture.
+            data, has_own_texture = VpkTextureBuilder._vtf_via_vmt(
+                mat_lower, cdmats, textures_vpk, misc_vpk)
+            if data:
+                return data
+            if not has_own_texture:
+                # Не потеря, а неверный вопрос: у EyeRefract (глаза персонажей)
+                # $basetexture нет вовсе — картинка собирается из $Iris и
+                # $CorneaTexture. Копировать в мод тут нечего.
+                logger.info(
+                    f"У материала '{mat_name}' нет своей текстуры "
+                    f"($basetexture в VMT отсутствует) — оригинал не нужен"
+                )
+                return None
+
             if log_not_found:
                 logger.warning(
                     f"Оригинальный VTF не найден в игре для '{mat_name}' "
@@ -1614,4 +1623,34 @@ class VpkTextureBuilder:
         except Exception as exc:
             logger.warning(f"_get_original_vtf_bytes: {exc}")
             return None
+
+    @staticmethod
+    def _vtf_via_vmt(mat_lower: str, cdmaterials: list,
+                     textures_vpk: str, misc_vpk: str) -> Tuple[Optional[bytes], bool]:
+        """Сырые байты VTF через цепочку VMT → $basetexture → VTF.
+
+        Та же единая цепочка, что у превью (MaterialResolver), но БЕЗ краски и
+        без PNG: в мод должен лечь ровно тот файл, что лежит в игре — командный
+        цвет из VMT движок накладывает сам.
+
+        Returns:
+            (байты | None, есть ли у материала своя текстура). Второе нужно
+            ради лога: у шейдеров вроде EyeRefract $basetexture нет вовсе, и
+            «оригинал не найден» для них — не потеря, а неверный вопрос.
+        """
+        try:
+            from src.services.game_vpk_reader import GameVpkReader
+            from src.services.material_resolver import MaterialResolver
+            reader = GameVpkReader([textures_vpk, misc_vpk])
+            try:
+                resolver = MaterialResolver(reader, "", apply_tint=False)
+                info = resolver.describe(mat_lower, list(cdmaterials))
+                if info.vmt_path and not info.basetexture:
+                    return None, False
+                return resolver.vtf_bytes(mat_lower, list(cdmaterials)), True
+            finally:
+                reader.close()
+        except Exception as exc:                       # noqa: BLE001
+            logger.debug(f"VTF через VMT не найден для '{mat_lower}': {exc}")
+            return None, True
 

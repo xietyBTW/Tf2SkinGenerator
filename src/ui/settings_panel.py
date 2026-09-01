@@ -15,7 +15,7 @@ from src.data.player_characters import PLAYER_BODY_MODE_KEYS
 from src.data.skyboxes import SKYBOX_MODE
 from src.utils.themes import get_modern_styles
 from src.config.app_config import AppConfig
-from src.ui.format_choices import (
+from src.domain.format_choices import (
     VTF_FORMATS, allowed_flags_for_mode, allowed_formats_for_mode, plan_format_choices,
 )
 

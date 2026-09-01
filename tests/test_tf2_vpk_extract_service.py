@@ -20,6 +20,12 @@ class FakeEntry:
 class FakeVPK:
     def __init__(self, files):
         self._files = files
+        #: Как у настоящего vpk: каталог пуст, пока его не разобрали.
+        #: Кэш строит его сам, чтобы объект дальше был только для чтения.
+        self.tree = None
+
+    def read_index(self):
+        self.tree = dict.fromkeys(self._files)
 
     def __contains__(self, key):
         return key in self._files

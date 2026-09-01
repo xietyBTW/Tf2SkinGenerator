@@ -52,32 +52,92 @@ POSE_EPSILON = 1e-4
 
 # ── Разбор SMD ───────────────────────────────────────────────────────────── #
 
+#: Строка секции nodes: id "имя" родитель. Имя в кавычках и может быть с пробелами.
+_RE_NODE = re.compile(r'^(\d+)\s+"(.*)"\s+(-?\d+)\s*$')
+
+
 def parse_nodes(smd_path: str) -> Dict[int, int]:
     """{кость: родитель} из секции nodes (−1 у корня). Пусто, если секции нет."""
-    parents: Dict[int, int] = {}
+    return {bone: parent for bone, (_name, parent) in parse_node_table(smd_path).items()}
+
+
+def parse_node_names(smd_path: str) -> Dict[int, str]:
+    """{кость: имя} из секции nodes.
+
+    Имя — единственное, что связывает скелеты РАЗНЫХ моделей: номера костей у
+    рук, оружия и модели анимаций свои, а bonemerge в Source сопоставляет их
+    именно по имени.
+    """
+    return {bone: name for bone, (name, _parent) in parse_node_table(smd_path).items()}
+
+
+def parse_node_table(smd_path: str) -> Dict[int, Tuple[str, int]]:
+    """{кость: (имя, родитель)} — один разбор секции nodes на оба запроса."""
+    nodes: Dict[int, Tuple[str, int]] = {}
     for line in _section(smd_path, "nodes"):
+        m = _RE_NODE.match(line)
+        if m:
+            nodes[int(m.group(1))] = (m.group(2), int(m.group(3)))
+            continue
+        # Экспортёр без кавычек вокруг имени: id имя родитель.
         parts = line.split()
-        if len(parts) < 2:
+        if len(parts) < 3:
             continue
         try:
-            # id "имя может быть в кавычках с пробелами" parent
-            parents[int(parts[0])] = int(parts[-1])
+            nodes[int(parts[0])] = (" ".join(parts[1:-1]), int(parts[-1]))
         except ValueError:
             continue
-    return parents
+    return nodes
 
 
 def parse_frame0(smd_path: str) -> Dict[int, Tuple[Tuple[float, float, float],
                                                    Tuple[float, float, float]]]:
     """{кость: (позиция, углы)} из ПЕРВОГО кадра секции skeleton."""
-    frame: Dict[int, Tuple[tuple, tuple]] = {}
-    started = False
+    return parse_frame(smd_path, 0)
+
+
+def parse_frames(smd_path: str) -> List[Dict[int, Tuple[tuple, tuple]]]:
+    """Все кадры секции skeleton за ОДИН проход файла.
+
+    Анимация — это десятки кадров, и читать файл заново на каждый (как делает
+    `parse_frame`) значит разобрать мегабайтный SMD полсотни раз.
+    """
+    frames: List[Dict[int, Tuple[tuple, tuple]]] = []
     for line in _section(smd_path, "skeleton"):
-        low = line.lower()
-        if low.startswith("time"):
-            if started:
-                break                       # начался второй кадр — хватит
-            started = True
+        if line.lower().startswith("time"):
+            frames.append({})
+            continue
+        if not frames:
+            continue
+        parts = line.split()
+        if len(parts) < 7:
+            continue
+        try:
+            bone = int(parts[0])
+            values = [float(x) for x in parts[1:7]]
+        except ValueError:
+            continue
+        frames[-1][bone] = (tuple(values[:3]), tuple(values[3:]))
+    return frames
+
+
+def parse_frame(smd_path: str, index: int = 0
+                ) -> Dict[int, Tuple[Tuple[float, float, float],
+                                     Tuple[float, float, float]]]:
+    """{кость: (позиция, углы)} из кадра `index` секции skeleton.
+
+    Кадр за концом анимации даёт пустой результат — вызывающий сам решает, что
+    это значит.
+    """
+    frame: Dict[int, Tuple[tuple, tuple]] = {}
+    current = -1
+    for line in _section(smd_path, "skeleton"):
+        if line.lower().startswith("time"):
+            current += 1
+            if current > index:
+                break                       # нужный кадр кончился
+            continue
+        if current != index:
             continue
         parts = line.split()
         if len(parts) < 7:

@@ -42,9 +42,28 @@ from src.utils.themes import get_modern_styles
 logger = get_logger(__name__)
 
 # Фильтр служебных материалов (глаза/зубы/sheen-оверлеи) — общий для UI и сборки.
-from src.ui.preview_mode import PreviewMode, PreviewState
+from src.domain.preview.mode import PreviewMode, PreviewState
+from src.app.preview_controller import Preview3DController
+from src.domain.preview.session import PreviewSession
+
+#: Подписи анимаций в выборе вида от первого лица. Ключи — имена Action из
+#: weapon_anim_catalog; чего нет в таблице, показывается как есть.
+_FP_ACTION_LABELS = {
+    'IDLE':           {'ru': 'Покой',          'en': 'Idle'},
+    'DRAW':           {'ru': 'Достать',        'en': 'Draw'},
+    'HOLSTER':        {'ru': 'Убрать',         'en': 'Holster'},
+    # Нейтрально: у стрелкового это выстрел, у ножа и биты — удар.
+    'FIRE':           {'ru': 'Атака',          'en': 'Attack'},
+    'ALT_FIRE':       {'ru': 'Альт. атака',    'en': 'Alt attack'},
+    'RELOAD':         {'ru': 'Перезарядка',    'en': 'Reload'},
+    'RELOAD_START':   {'ru': 'Перезарядка: начало', 'en': 'Reload start'},
+    'RELOAD_FINISH':  {'ru': 'Перезарядка: конец',  'en': 'Reload finish'},
+    'INSPECT_START':  {'ru': 'Осмотр: начало', 'en': 'Inspect start'},
+    'INSPECT_IDLE':   {'ru': 'Осмотр',         'en': 'Inspect'},
+    'INSPECT_END':    {'ru': 'Осмотр: конец',  'en': 'Inspect end'},
+}
 # Единый источник правды о текстурах превью (команды/стили/вариант) — см. модуль.
-from src.ui.texture_state import PreviewTextureState
+from src.domain.preview.texture_state import PreviewTextureState
 
 # Вынесенные из этого модуля строительные блоки панели превью
 # (векторные иконки, карточка слота, скролл-область, воркер масок шпиона).
@@ -104,11 +123,13 @@ class PreviewPanel(Preview3DMixin, PreviewSkinsMixin, PreviewCustomModelMixin,
         self._weapon_key: str = '\x00'   # sentinel — не совпадёт с реальным ключом
         self._weapon_mode: str = ''
 
-        # ── ЕДИНЫЙ источник правды о текстурах (команды/стили/вариант) ─────── #
-        # Хранение, маршрутизация и разрешение — в PreviewTextureState
-        # (src/ui/texture_state.py). Старые поля (_textures, _skin_overrides,
-        # _vpk_*_tex_map, австралий-слоты и т.п.) — property-делегаты ниже.
-        self._state = PreviewTextureState()
+        # ── ЕДИНЫЙ источник правды о сеансе превью ────────────────────────── #
+        # Всё, что панель ПОМНИТ (в отличие от того, что рисует), живёт в
+        # PreviewSession (src/domain/preview/session.py): текстуры, режим,
+        # кастомная модель, «Прочее», командные кадры. Старые имена полей
+        # (_state, _pstate, _textures, _misc_mode, _custom_smd_path и т.п.) —
+        # property-делегаты ниже, чтобы точки обращения не переписывать.
+        self._session = PreviewSession()
         # «Сделать командным»: пользователь включил синтез BLU у некомандного оружия.
         self._force_team: bool = False
 
@@ -120,30 +141,18 @@ class PreviewPanel(Preview3DMixin, PreviewSkinsMixin, PreviewCustomModelMixin,
 
         # ── «Прочее»: служебные материалы (глаза/убер/зомби), скрытые блэклистом ─ #
         # Их можно опционально отредактировать через отдельный селектор-тоггл.
-        self._misc_materials: List[str] = []   # блэклист-материалы текущей модели
-        self._misc_mode: bool = False          # активен ли просмотр «Прочее»
-        self._cards_before_misc: List[str] = []  # нормальный набор (для возврата)
-        # Материалы, которые пользователь ЯВНО добавил в вариантный стиль через
-        # «+» (карточка показывается даже пустой). Скин 0 тут не участвует.
-        self._skin_chosen: Dict[int, set] = {}
         self._skin_worker = None
         self._skin_buttons: List[QPushButton] = []
         self._skin_button_indices: List[int] = []   # сырой индекс скина на кнопку
         # Режим загруженного custom-VPK мода: карточки строятся из VTF мода
         # (_on_vpk_mod_cards_ready). Защищает их от перетирания обычной
         # фильтрацией материалов модели в _on_3d_multi_material.
-        self._custom_vpk_mode: bool = False
-        # Точные имена материалов модели (из SMD) — для наложения текстур мода
-        # на правильные меши в custom-VPK режиме.
-        self._custom_model_materials: List[str] = []
-        # Что сейчас реально показано в 3D по материалам — чтобы при переключении
-        # стилей перезагружать в webview ТОЛЬКО изменившиеся текстуры (меньше лагов).
-        self._applied_3d_tex: Dict[str, str] = {}
         # Пер-текстурные оверрайды настроек: {material: {size,format,flags,options}}.
         # Есть запись ⟺ у материала свои настройки (иначе — глобальные).
-        self._tex_overrides: Dict[str, dict] = {}
-        # Пер-текстурные файловые карты: {material: {map_id: spec}} из MaterialMapsDialog.
-        self._tex_maps: Dict[str, dict] = {}
+        # Хранятся в сеансе — оттуда же их берёт веб-представление.
+        # Пер-текстурные файловые карты: {material: {map_id: spec}} из
+        # MaterialMapsDialog. Хранятся в сеансе — тем же полем пользуется
+        # веб-представление, и сборка берёт их из одного места.
 
         # ── 2D состояние ──────────────────────────────────────────────────── #
         # image_path — путь к активному изображению (None если не загружено)
@@ -154,7 +163,24 @@ class PreviewPanel(Preview3DMixin, PreviewSkinsMixin, PreviewCustomModelMixin,
 
         # ── 3D состояние ──────────────────────────────────────────────────── #
         self._3d_widget = None
+        # Загрузку игровой модели ведёт контроллер (src/app): он держит воркер
+        # и применяет к сессии всё, что следует из его сигналов, ДО того как
+        # об этом узнает панель. Здесь остаётся только показ.
+        self._preview3d = Preview3DController(self._session)
+        self._connect_preview3d()
+        #: Воркер режима QC-карточек — единственный путь, который ещё держит
+        #: воркер сам (см. _start_qc_cards_worker).
         self._3d_worker = None
+        self._fp_worker = None   # воркер вида от первого лица
+        #: Собранные сцены: {(режим, вид, действие): {obj_path, textures, editable}}.
+        #: Переключение видов не должно пересобирать геометрию заново.
+        self._scene_cache: dict = {}
+        #: Какую анимацию показываем в виде от первого лица (имя Action).
+        self._fp_action: str = 'IDLE'
+        #: Что умеет оружие каждого режима: {режим: [имя Action]}. Список
+        #: приносит воркер, но показывать выбор надо и тогда, когда сцену взяли
+        #: из кэша и воркер не запускался (см. _update_fp_action_combo).
+        self._fp_actions: Dict[str, list] = {}
         self._vpk_mod_worker = None
         self._3d_available: bool = False
         self._pending_3d_params: Optional[tuple] = None   # (key, mode, vpk, tex_vpk)
@@ -180,17 +206,6 @@ class PreviewPanel(Preview3DMixin, PreviewSkinsMixin, PreviewCustomModelMixin,
         self._pending_edit_state: Optional[dict] = None
         # Обновить 2D после загрузки модели (смена стиля без своих правок —
         # иначе в 2D остаётся пустое/старое окно, а текстура только в 3D).
-        self._pending_2d_refresh: bool = False
-        # Явный режим превью вместо россыпи взаимоисключающих булевых флагов
-        # (_custom_smd_mode/_spy_mask_mode/_crithit_mode/_death_effect_mode теперь
-        # — свойства, читающие из _pstate). Источник правды по «что показываем».
-        self._pstate = PreviewState()
-        self._custom_smd_path: Optional[str] = None   # путь загруженной кастомной модели
-        # True — модель «готова»: сохранять её материалы как есть (многотекстурная).
-        # False — заменить только геометрию (адаптировать под игровой материал).
-        self._custom_keep_materials: bool = False
-        # Отредактированный пользователем QC (исправленный). None = авто-QC.
-        self._custom_qc_text: Optional[str] = None
         self._crithit_class: str = 'soldier'
         # Режим «эффект смерти»: та же модель-персонаж, что у крита, но
         # пользовательская текстура накладывается на саму МОДЕЛЬ (лёд/золото/огонь),
@@ -205,13 +220,6 @@ class PreviewPanel(Preview3DMixin, PreviewSkinsMixin, PreviewCustomModelMixin,
         # Сбрасывается при смене изображения или загрузке новой модели.
         self._per_mesh_active: bool = False
         self._per_mesh_base_image: Optional[str] = None
-
-        # ── Командные кадры из VPK ────────────────────────────────────────── #
-        # Данные (кадры/карты/маппинг) — в self._state; здесь только framerate.
-        self._team_framerate: float = 0.0
-        #: У модели есть BLU-скин, но в стоке он не отличается от RED
-        #: (та же текстура и та же краска в VMT) — влияет только на подпись.
-        self._blu_matches_red: bool = False
 
         # ── GIF кэш {gif_path: (frame_paths, fps)} ───────────────────────── #
         self._gif_cache: Dict[str, tuple] = {}
@@ -232,6 +240,153 @@ class PreviewPanel(Preview3DMixin, PreviewSkinsMixin, PreviewCustomModelMixin,
 
         self.setAcceptDrops(True)
         self._build_ui()
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # Делегаты сеанса (единый источник — self._session)
+    #
+    # Поля переехали в PreviewSession, но обращений к ним в панели и миксинах
+    # сотни; делегаты позволяют держать состояние в домене, не переписывая
+    # каждую точку. Новый код лучше писать сразу через self._session.
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    @property
+    def _state(self) -> PreviewTextureState:
+        """Состояние текстур сеанса."""
+        return self._session.textures
+
+    @property
+    def _pstate(self) -> PreviewState:
+        """Режим превью сеанса."""
+        return self._session.mode
+
+    @property
+    def _misc_materials(self):
+        return self._session.misc_materials
+
+    @_misc_materials.setter
+    def _misc_materials(self, value) -> None:
+        self._session.misc_materials = value
+
+    @property
+    def _misc_mode(self):
+        return self._session.misc_mode
+
+    @_misc_mode.setter
+    def _misc_mode(self, value) -> None:
+        self._session.misc_mode = value
+
+    @property
+    def _cards_before_misc(self):
+        return self._session.cards_before_misc
+
+    @_cards_before_misc.setter
+    def _cards_before_misc(self, value) -> None:
+        self._session.cards_before_misc = value
+
+    @property
+    def _skin_chosen(self):
+        return self._session.skin_chosen
+
+    @_skin_chosen.setter
+    def _skin_chosen(self, value) -> None:
+        self._session.skin_chosen = value
+
+    @property
+    def _tex_overrides(self) -> Dict[str, dict]:
+        return self._session.texture_overrides
+
+    @_tex_overrides.setter
+    def _tex_overrides(self, value) -> None:
+        self._session.texture_overrides = value
+
+    @property
+    def _tex_maps(self) -> Dict[str, dict]:
+        return self._session.texture_maps
+
+    @_tex_maps.setter
+    def _tex_maps(self, value) -> None:
+        self._session.texture_maps = value
+
+    @property
+    def _custom_vpk_mode(self):
+        return self._session.custom_vpk_mode
+
+    @_custom_vpk_mode.setter
+    def _custom_vpk_mode(self, value) -> None:
+        self._session.custom_vpk_mode = value
+
+    @property
+    def _custom_obj_path(self):
+        return self._session.custom_obj_path
+
+    @_custom_obj_path.setter
+    def _custom_obj_path(self, value) -> None:
+        self._session.custom_obj_path = value
+
+    @property
+    def _custom_model_materials(self):
+        return self._session.custom_model_materials
+
+    @_custom_model_materials.setter
+    def _custom_model_materials(self, value) -> None:
+        self._session.custom_model_materials = value
+
+    @property
+    def _applied_3d_tex(self):
+        return self._session.applied_3d_tex
+
+    @_applied_3d_tex.setter
+    def _applied_3d_tex(self, value) -> None:
+        self._session.applied_3d_tex = value
+
+    @property
+    def _pending_2d_refresh(self):
+        return self._session.pending_2d_refresh
+
+    @_pending_2d_refresh.setter
+    def _pending_2d_refresh(self, value) -> None:
+        self._session.pending_2d_refresh = value
+
+    @property
+    def _custom_smd_path(self):
+        return self._session.custom_smd_path
+
+    @_custom_smd_path.setter
+    def _custom_smd_path(self, value) -> None:
+        self._session.custom_smd_path = value
+
+    @property
+    def _custom_keep_materials(self):
+        return self._session.custom_keep_materials
+
+    @_custom_keep_materials.setter
+    def _custom_keep_materials(self, value) -> None:
+        self._session.custom_keep_materials = value
+
+    @property
+    def _custom_qc_text(self):
+        return self._session.custom_qc_text
+
+    @_custom_qc_text.setter
+    def _custom_qc_text(self, value) -> None:
+        self._session.custom_qc_text = value
+
+    @property
+    def _team_framerate(self):
+        return self._session.team_framerate
+
+    @_team_framerate.setter
+    def _team_framerate(self, value) -> None:
+        self._session.team_framerate = value
+
+    @property
+    def _blu_matches_red(self):
+        return self._session.blu_matches_red
+
+    @_blu_matches_red.setter
+    def _blu_matches_red(self, value) -> None:
+        self._session.blu_matches_red = value
+
 
     # ═══════════════════════════════════════════════════════════════════════════
     # Режим превью (взаимоисключающие флаги → свойства поверх _pstate)
@@ -486,14 +641,31 @@ class PreviewPanel(Preview3DMixin, PreviewSkinsMixin, PreviewCustomModelMixin,
 
         self.btn_3d = QPushButton("3D")
         self.btn_2d = QPushButton("2D")
-        self.btn_3d.setFixedHeight(26)
-        self.btn_2d.setFixedHeight(26)
+        # Вид от первого лица: руки класса с оружием, как в игре.
+        self.btn_fp = QPushButton("FP")
+        for _b in (self.btn_3d, self.btn_2d, self.btn_fp):
+            _b.setFixedHeight(26)
+            _b.setStyleSheet(self._btn_style_inactive)
         self.btn_3d.setStyleSheet(self._btn_style_active)
-        self.btn_2d.setStyleSheet(self._btn_style_inactive)
+        self.btn_fp.setToolTip(
+            'Вид от первого лица' if self._lang == 'ru' else 'First-person view')
+        self.btn_fp.setVisible(False)   # только для оружия (см. _update_fp_button)
         self.btn_3d.clicked.connect(self._switch_to_3d)
         self.btn_2d.clicked.connect(self._switch_to_2d)
+        self.btn_fp.clicked.connect(self._switch_to_fp)
         lay.addWidget(self.btn_3d)
+        lay.addWidget(self.btn_fp)
         lay.addWidget(self.btn_2d)
+
+        # Выбор анимации — только в виде от первого лица; наполняется тем, что
+        # это оружие действительно умеет (см. _on_fp_actions_available).
+        from PySide6.QtWidgets import QComboBox
+        self.fp_action_combo = QComboBox()
+        self.fp_action_combo.setFixedHeight(26)
+        self.fp_action_combo.setMinimumWidth(130)
+        self.fp_action_combo.setVisible(False)
+        self.fp_action_combo.currentIndexChanged.connect(self._on_fp_action_chosen)
+        lay.addWidget(self.fp_action_combo)
 
         # Кнопки-иконки (куб / vpk)
         lay.addSpacing(12)
@@ -892,8 +1064,14 @@ class PreviewPanel(Preview3DMixin, PreviewSkinsMixin, PreviewCustomModelMixin,
         иначе после крита кнопки не возвращаются.
         """
         show = self.is_3d_mode() and not self._crithit_mode and not self._pstate.is_skybox
-        self.btn_load_3d.setVisible(show)
-        self.btn_load_vpk.setVisible(show)
+        # В виде от первого лица кнопки загрузки не при чём: сцену собирает
+        # свой воркер, а подменять модель в руках нечем.
+        show_load = show and not self._pstate.is_first_person
+        self.btn_load_3d.setVisible(show_load)
+        self.btn_load_vpk.setVisible(show_load)
+        self._update_fp_button()
+        # Выбор анимации — часть того же тулбара, и живёт по тем же правилам.
+        self._update_fp_action_combo()
         if hasattr(self, 'btn_replace_model'):
             # Замену модели НЕ предлагаем для тела персонажа: у игрока сложный
             # скелет + flex + много bodygroups/LOD — подмена одной геометрией
@@ -906,7 +1084,7 @@ class PreviewPanel(Preview3DMixin, PreviewSkinsMixin, PreviewCustomModelMixin,
                 or self._weapon_mode
             )
             is_player_body = cur_mode in PLAYER_BODY_MODE_KEYS
-            self.btn_replace_model.setVisible(show and not is_player_body)
+            self.btn_replace_model.setVisible(show_load and not is_player_body)
 
     def _variant_display_texture(self) -> Optional[str]:
         """
@@ -920,6 +1098,7 @@ class PreviewPanel(Preview3DMixin, PreviewSkinsMixin, PreviewCustomModelMixin,
         return self._state.variant_display_texture()
 
     def _switch_to_2d(self) -> None:
+        self._leave_first_person()
         self.view_stack.setCurrentIndex(0)
         self.btn_2d.setStyleSheet(self._btn_style_active)
         self.btn_3d.setStyleSheet(self._btn_style_inactive)
@@ -939,10 +1118,22 @@ class PreviewPanel(Preview3DMixin, PreviewSkinsMixin, PreviewCustomModelMixin,
     def _switch_to_3d(self) -> None:
         if self._3d_widget is None:
             return
+        was_first_person = self._pstate.is_first_person
+        restored = self._leave_first_person()
         self.view_stack.setCurrentIndex(1)
         self.btn_3d.setStyleSheet(self._btn_style_active)
         self.btn_2d.setStyleSheet(self._btn_style_inactive)
         self._update_3d_buttons_visibility()
+
+        # В сцене стояла вьюмодель. Обычная модель уже собрана и лежит на
+        # диске — её вернул сам выход из режима; воркер нужен, только если
+        # файла нет.
+        if was_first_person:
+            if restored:
+                return
+            if self._pending_3d_params:
+                self._start_3d_worker(*self._pending_3d_params)
+                return
 
         if self._crithit_mode:
             if self._3d_available:
@@ -962,6 +1153,266 @@ class PreviewPanel(Preview3DMixin, PreviewSkinsMixin, PreviewCustomModelMixin,
         # Переприменяем текущие текстуры к 3D если они загружены
         # (например, пользователь переключился в 2D, загрузил текстуру, вернулся в 3D)
         self._reapply_textures_to_3d()
+
+    # ── Вид от первого лица ──────────────────────────────────────────────── #
+
+    def _switch_to_fp(self) -> None:
+        """Показывает оружие в руках класса — так, как его видит игрок."""
+        if self._3d_widget is None or not self._pending_3d_params:
+            return
+        from src.services.viewmodel_scene import VIEWMODEL_RIG
+        self._pstate.enter(PreviewMode.FIRST_PERSON)
+        self.view_stack.setCurrentIndex(1)
+        self.btn_fp.setStyleSheet(self._btn_style_active)
+        self.btn_3d.setStyleSheet(self._btn_style_inactive)
+        self.btn_2d.setStyleSheet(self._btn_style_inactive)
+        self._update_3d_buttons_visibility()
+        # Риг ставим здесь, а не в воркере: это состояние вида, и вход в режим
+        # обязан быть симметричен выходу (см. _leave_first_person).
+        self._3d_widget.set_view_rig(dict(VIEWMODEL_RIG))
+        if not self._show_cached_scene():
+            self._start_fp_worker(*self._pending_3d_params)
+
+    # ── Кэш собранных сцен ───────────────────────────────────────────────── #
+    #
+    # Геометрия обычного превью и вида от первого лица разная: в руке у
+    # оружия расходятся подвижные части (у дробовика цевьё сдвинуто на 30
+    # единиц относительно ствола), так что одним мешем обойтись нельзя. Зато
+    # ПЕРЕСОБИРАТЬ её на каждое нажатие незачем — на прогретом кэше это
+    # секунда с лишним. Собранный OBJ лежит на диске, и вернуться к нему
+    # стоит десятки миллисекунд.
+    #
+    # Текстуры сюда не входят намеренно: они адресуются по имени материала,
+    # имена в обеих сценах одинаковы, и пользовательские накладывает общий
+    # _reapply_textures_to_3d.
+
+    #: Сколько сцен держим. Каждая — временная папка с OBJ и PNG, поэтому
+    #: память не бесконечная. Четырёх хватает на «потыкать туда-сюда».
+    _SCENE_CACHE_LIMIT = 4
+
+    def _fp_action_name(self) -> str:
+        """Какое действие сейчас показываем в виде от первого лица."""
+        return getattr(self, '_fp_action', 'IDLE')
+
+    def _fp_mode_key(self) -> str:
+        """Режим (класс + предмет), к которому относится вид от первого лица."""
+        return ((self._pending_3d_params[1] if self._pending_3d_params else None)
+                or self._weapon_mode or '')
+
+    def _on_fp_actions_available(self, names: list) -> None:
+        """Воркер разобрал модель анимаций класса: вот что умеет это оружие.
+
+        Список приходит из модели анимаций: у одного оружия есть перезарядка,
+        у другого только бросок — предлагать одинаковый набор всем значило бы
+        обещать несуществующее. Здесь его только ЗАПОМИНАЕМ; показывает список
+        _update_fp_action_combo.
+        """
+        self._fp_actions[self._fp_mode_key()] = list(names or [])
+        self._update_fp_action_combo()
+
+    def _update_fp_action_combo(self) -> None:
+        """Выбор анимации — чистая функция состояния, а не отклик на сигнал.
+
+        Раньше список наполнялся и показывался ТОЛЬКО из `actions_available`.
+        Но воркер запускается не всегда: повторный вход в режим, смена команды
+        и возврат к уже показанной анимации берут сцену из кэша — сигнала нет,
+        и выпадающий список молча исчезал (его гасит выход из режима). Поэтому
+        выученные действия помнятся по режиму, а список строится по ним при
+        каждом обновлении тулбара — вместе с остальными его кнопками.
+        """
+        combo = getattr(self, 'fp_action_combo', None)
+        if combo is None:
+            return
+        names = self._fp_actions.get(self._fp_mode_key()) or []
+        if not names or not self._pstate.is_first_person:
+            combo.setVisible(False)
+            return
+        current = self._fp_action_name()
+        if current not in names:
+            # Действия у оружия разные: перезарядки у биты нет. Оставить
+            # выбранным недоступное значит подписать одно, а показать другое —
+            # воркер в этом случае берёт первое доступное (см. _find_sequence).
+            current = names[0]
+            self._fp_action = current
+        combo.blockSignals(True)
+        combo.clear()
+        for name in names:
+            combo.addItem(_FP_ACTION_LABELS.get(name, {}).get(
+                self._lang, name.replace('_', ' ').title()), name)
+        combo.setCurrentIndex(max(0, combo.findData(current)))
+        combo.blockSignals(False)
+        combo.setVisible(True)
+
+    def _on_fp_action_chosen(self, index: int) -> None:
+        """Смена анимации: сцена другая, поэтому собираем её заново."""
+        if index < 0 or not hasattr(self, 'fp_action_combo'):
+            return
+        name = self.fp_action_combo.itemData(index)
+        if not name or name == self._fp_action_name():
+            return
+        previous = self._fp_action_name()
+        self._fp_action = name
+        if not (self._pstate.is_first_person and self._pending_3d_params):
+            return
+        if self._show_cached_scene(name):
+            return
+        # Сцена того же оружия уже на экране — меняются только дорожки. Полная
+        # пересборка распаковывала бы те же самые текстуры заново (замер: около
+        # секунды против нескольких миллисекунд). На границе перезарядки так
+        # нельзя: там меняется сама геометрия рук (ракета солдата).
+        from src.services.viewmodel_worker import same_arms_mesh
+        if (self._scene_cache.get(self._scene_cache_key(previous))
+                and same_arms_mesh(previous, name)):
+            self._start_fp_clip_worker(*self._pending_3d_params)
+        else:
+            self._start_fp_worker(*self._pending_3d_params)
+
+    def _scene_cache_key(self, action: Optional[str] = None) -> tuple:
+        """Ключ сцены: режим (класс + оружие) и что в ней происходит.
+
+        Действие входит в ключ, поэтому покой, перезарядка и осмотр одного
+        оружия — разные сцены, и переключение между ними тоже не пересобирает
+        уже собранное. Без явного действия берётся текущее. Подменённая модель
+        и команда входят туда же: с ними сцена другая, хотя оружие то же.
+        """
+        mode = (
+            (self._pending_3d_params[1] if self._pending_3d_params else None)
+            or self._weapon_mode or ''
+        )
+        # Подменённая модель — другая сцена того же оружия. Без неё в ключе
+        # возврат в FP показывал бы сток из кэша поверх кастомной геометрии.
+        # Команда — тоже часть сцены: руки у семи классов командные, и их
+        # текстуры приходят из воркера вместе с мешем.
+        return (mode, 'fp', action or self._fp_action_name(),
+                self._custom_smd_path or '', self._active_team)
+
+    def remember_scene(self, obj_path: str, textures: dict, editable: list,
+                       animated: Optional[dict] = None,
+                       action: Optional[str] = None) -> None:
+        """Запоминает собранную сцену, чтобы не пересобирать её при возврате.
+
+        Сцена бывает двух видов: запечённая поза (файл OBJ) и анимация (данные
+        скелета с дорожками). Кэшу разница безразлична — он хранит то, чем её
+        показали.
+        """
+        if not animated and (not obj_path or not os.path.exists(obj_path)):
+            return
+        cache = self._scene_cache
+        key = self._scene_cache_key(action)
+        cache.pop(key, None)                       # освежаем позицию
+        cache[key] = {'obj_path': obj_path,
+                      'animated': animated,
+                      'textures': dict(textures or {}),
+                      'editable': list(editable or [])}
+        while len(cache) > self._SCENE_CACHE_LIMIT:
+            cache.pop(next(iter(cache)))           # самая давняя
+
+    def _show_cached_scene(self, action: Optional[str] = None) -> bool:
+        """Показывает сцену из кэша. False — её там нет, надо собирать.
+
+        Показ идёт напрямую в виджет, а не через слоты воркера: слоты копят
+        сцену по кусочкам (сигналы приходят порознь), и прогон кэша через них
+        успел бы записать в кэш неполные данные.
+        """
+        key = self._scene_cache_key(action)
+        data = self._scene_cache.get(key)
+        if not data or not self._3d_widget:
+            return False
+        if data.get('animated'):
+            self._3d_widget.load_viewmodel_animated(
+                data['animated'], editable_mesh_names=list(data['editable']))
+        elif not os.path.exists(data['obj_path']):
+            self._scene_cache.pop(key, None)       # временную папку убрали
+            return False
+        else:
+            self._3d_widget.load_model_files(
+                data['obj_path'], "", normalize=False,
+                editable_mesh_names=list(data['editable']))
+        if data['textures']:
+            self._3d_widget.apply_material_map(dict(data['textures']))
+        self._run_after_model_load(
+            lambda: self._reapply_textures_to_3d(delay_ms=0), fallback_ms=400)
+        return True
+
+    def _restore_plain_model(self) -> bool:
+        """Возвращает обычную модель без перезапуска воркера.
+
+        Вход в вид от первого лица состояние панели не трогает — карточки,
+        текстуры и команда остаются от обычного превью, а `_cur_obj` всё ещё
+        указывает на его OBJ. Значит достаточно снова показать тот файл.
+        """
+        if not self._3d_widget:
+            return False
+        # Подменённая модель тоже «обычное превью»: `_cur_obj` о ней не знает
+        # (её показывает не воркер, а конвертер SMD), и без этой ветки возврат
+        # из вида от первого лица подсовывал бы сток вместо пользовательской.
+        custom = self._custom_obj_path
+        if self._custom_smd_path and custom and os.path.exists(custom):
+            self._3d_widget.load_model_files(custom, self.image_path or '',
+                                             editable_mesh_names=[])
+            self._run_after_model_load(
+                lambda: self._reapply_textures_to_3d(delay_ms=0), fallback_ms=400)
+            return True
+
+        cur = self._cur_obj
+        mode = (
+            (self._pending_3d_params[1] if self._pending_3d_params else None)
+            or self._weapon_mode
+        )
+        if not cur or cur[0] != mode:
+            return False
+        if not cur[1] or not os.path.exists(cur[1]):
+            return False
+        # Ограничение мешей снимаем вместе с загрузкой: обычная модель — вся
+        # пользовательская, и фильтр от вьюмодели на ней остаться не должен.
+        self._3d_widget.load_model_files(cur[1], cur[2], editable_mesh_names=[])
+        self._run_after_model_load(
+            lambda: self._reapply_textures_to_3d(delay_ms=0), fallback_ms=400)
+        return True
+
+    def _leave_first_person(self) -> bool:
+        """Возврат к обычному превью: риг, воркер и сама сцена.
+
+        Идемпотентно — вызывается из обоих переключателей вида и при смене
+        предмета. Убрать вьюмодель из сцены обязан тот же метод, что её туда
+        поставил: раньше это делал только `_switch_to_3d`, и путь FP → 2D → 3D
+        (как и переход на шапки) оставлял оружие в руках уже после выхода.
+
+        Returns:
+            True — обычная модель уже вернулась в сцену (файл был на диске).
+            False — вернуть нечего, решать вызывающему.
+        """
+        if not self._pstate.is_first_person:
+            return False
+        self._pstate.reset()
+        self._stop_worker('_fp_worker')
+        self.btn_fp.setStyleSheet(self._btn_style_inactive)
+        if hasattr(self, 'fp_action_combo'):
+            self.fp_action_combo.setVisible(False)
+        if self._3d_widget:
+            self._3d_widget.set_view_rig(None)
+        return self._restore_plain_model()
+
+    def _update_fp_button(self) -> None:
+        """Кнопка есть только у оружия: у шапок и тел вида от первого лица нет.
+
+        Единая точка — вызывается оттуда же, откуда обновляется видимость
+        прочих кнопок 3D-вида.
+        """
+        if not hasattr(self, 'btn_fp'):
+            return
+        from src.data.item_kinds import kind_of
+        mode = self._fp_mode_key()
+        # Подменённую модель вид от первого лица показывает наравне с игровой:
+        # сцена собирается тем же слиянием, что и мод. А вот загруженный VPK
+        # так не разобрать — там уже скомпилированная MDL, и оружие в нём может
+        # быть любым; предлагать по нему руки нечестно.
+        custom = self._custom_vpk_mode
+        available = (bool(self._pending_3d_params)
+                     and kind_of(mode).is_weapon and not custom)
+        self.btn_fp.setVisible(available and self._3d_available)
+        if not available and self._pstate.is_first_person:
+            self._leave_first_person()
 
     def _reapply_textures_to_3d(self, delay_ms: int = 50) -> None:
         """
@@ -1075,11 +1526,7 @@ class PreviewPanel(Preview3DMixin, PreviewSkinsMixin, PreviewCustomModelMixin,
         self.btn_aus.setVisible(bool(self._australium_frame))
         # «+ Команда»: обычное оружие без нативной команды и без австралия —
         # предлагаем сделать командным (синтез BLU-строки при сборке).
-        _can_force = (
-            not has_blu and not self._force_team and not self._australium_frame
-            and self._weapon_mode not in _HMK_vis and not self._spy_mask_mode
-            and self._is_force_team_eligible()
-        )
+        _can_force = self._is_force_team_eligible()
         if hasattr(self, 'btn_make_team'):
             self.btn_make_team.setVisible(bool(_can_force))
         # «Прочее» — если у модели есть служебные (блэклист) материалы. Не для
@@ -1119,37 +1566,23 @@ class PreviewPanel(Preview3DMixin, PreviewSkinsMixin, PreviewCustomModelMixin,
             )
 
     def _is_force_team_eligible(self) -> bool:
-        """Можно ли предложить «сделать командным» — обычное оружие/снаряд/насмешка
-        (не шапка/персонаж/спец-режим/кастом/руки/пикап). Модель должна быть
-        загружена (есть _weapon_key) — для одно-материального оружия _material_names
-        может быть пустым, поэтому на него не опираемся.
+        """Стоит ли предлагать «сделать командным».
 
-        Пикапы (Health & Ammo) исключены: аптечки/патроны — нейтральные мировые
-        предметы, командного варианта у них нет и синтезировать его нельзя."""
-        mode = self._weapon_mode or ''
-        if not mode or not self._weapon_key or self._weapon_key == '\x00':
-            return False
-        if mode in ('hat', 'custom'):
-            return False
-        from src.data.pickups import PICKUP_MODE_PREFIX
-        if mode.startswith(PICKUP_MODE_PREFIX):
-            return False
-        from src.data.weapons import SPECIAL_MODES
-        if mode in set(SPECIAL_MODES):
-            return False
-        from src.data.player_characters import PLAYER_BODY_MODE_KEYS, SPY_MASK_MODE_KEY
-        if mode in PLAYER_BODY_MODE_KEYS or mode == SPY_MASK_MODE_KEY:
-            return False
-        return True
+        Правило целиком в домене (PreviewSession.can_force_team): его же
+        спрашивает веб-представление, поэтому переписывать его здесь второй раз
+        нельзя — разъедется.
+
+        Ключ и режим панель хранит у себя, поэтому передаёт их явно.
+        """
+        return self._session.can_force_team(self._weapon_key, self._weapon_mode)
 
     def _enable_force_team(self) -> None:
         """Включает «сделать командным»: показываем RED/BLU, прячем кнопку."""
-        self._force_team = True
+        self._session.enable_force_team()
         if hasattr(self, 'btn_make_team'):
             self.btn_make_team.setVisible(False)
         self.btn_red.setVisible(True)
         self.btn_blu.setVisible(True)
-        self._active_team = Team.RED
         self._sync_variant_buttons()
 
     def get_force_team(self) -> bool:
@@ -1240,12 +1673,10 @@ class PreviewPanel(Preview3DMixin, PreviewSkinsMixin, PreviewCustomModelMixin,
         """
         if not self._misc_materials:
             return
-        self._misc_mode = not self._misc_mode
-        # «Прочее» — просмотр обычных (не вариантных) текстур: активный
-        # австралий гасим, как это делает и переключение команды.
-        self._australium_active = False
+        # Флаг и гашение варианта — правило домена (то же спрашивает веб).
+        on = self._session.toggle_misc()
         self._sync_variant_buttons()
-        if self._misc_mode:
+        if on:
             # Запоминаем обычный набор и показываем служебные карточки.
             self._cards_before_misc = list(self._material_names)
             self._set_material_slots(self._misc_materials, force_cards=True)
@@ -1349,6 +1780,7 @@ class PreviewPanel(Preview3DMixin, PreviewSkinsMixin, PreviewCustomModelMixin,
                 self._refresh_views_after_style_restore()
                 return
             self._custom_smd_path = None
+            self._custom_obj_path = None
 
         # Единое надёжное обновление обеих вкладок (3D + 2D) из восстановленного
         # состояния — вместо разрозненных таймеров.
@@ -1391,7 +1823,8 @@ class PreviewPanel(Preview3DMixin, PreviewSkinsMixin, PreviewCustomModelMixin,
         if not outgoing_mode or outgoing_mode in ('hat', 'spray', 'critHIT',
                                                   'custom', 'skybox'):
             return None
-        if self._spy_mask_mode or self._australium_active or self._custom_smd_mode:
+        if (self._spy_mask_mode or self._australium_active
+                or self._custom_smd_mode or self._custom_smd_path):
             return None
         # Состояние панели уже не принадлежит уходящему режиму (напр. выбор
         # шапки вызывает update_extra_slots → _begin_new_weapon ДО set_3d_params,
@@ -1470,6 +1903,10 @@ class PreviewPanel(Preview3DMixin, PreviewSkinsMixin, PreviewCustomModelMixin,
 
         self._last_3d_params = new_params
         self._pending_3d_params = new_params
+        # Сменился предмет — вид от первого лица показывает уже не его. Выходим
+        # явно: `_pstate.reset()` ниже снял бы только флаг, оставив в сцене
+        # оружие, риг камеры и выбор анимации от прошлого предмета.
+        self._leave_first_person()
         # Обычная игровая модель — гасим спец-режимы (custom/critHIT/death/skybox).
         if self._pstate.is_skybox:
             self._exit_skybox_mode()
@@ -1521,6 +1958,9 @@ class PreviewPanel(Preview3DMixin, PreviewSkinsMixin, PreviewCustomModelMixin,
         self._stop_worker('_3d_worker')
         self._stop_worker('_vpk_mod_worker')
         self._reset_team_vpk_state()
+        # Выбора больше нет: кнопка «от первого лица» и выбор анимации обязаны
+        # уйти вместе с ним (переход на вкладку шапок оставлял их висеть).
+        self._update_3d_buttons_visibility()
         if self._3d_widget:
             self._3d_widget.reset()
         self.btn_load_3d.setEnabled(False)
@@ -1535,8 +1975,10 @@ class PreviewPanel(Preview3DMixin, PreviewSkinsMixin, PreviewCustomModelMixin,
                                  PreviewMode.DEATH, PreviewMode.SKYBOX):
             self._pstate.reset()
         self._death_default_tex = ''
+        self._cur_obj = None
         self._stop_worker('_3d_worker')
         self._reset_team_vpk_state()
+        self._update_3d_buttons_visibility()
         if self._3d_widget:
             self._3d_widget.show_prompt(
                 self.t.get('3d_prompt_no_tf2', 'Set TF2 folder in Settings to load original models')
@@ -1563,6 +2005,7 @@ class PreviewPanel(Preview3DMixin, PreviewSkinsMixin, PreviewCustomModelMixin,
         self._pending_3d_params = None
         if not enabled:
             self._custom_smd_path = None   # вышли из режима — забываем модель
+            self._custom_obj_path = None
         self._stop_worker('_3d_worker')
         if enabled:
             if self._3d_widget:
@@ -1728,7 +2171,14 @@ class PreviewPanel(Preview3DMixin, PreviewSkinsMixin, PreviewCustomModelMixin,
         update_extra_slots: сбрасывает и пользовательское состояние
         (текстуры/стили/оверрайды), и командные VPK-данные с вариантом
         (через _reset_team_vpk_state — повторный вызов безвреден).
+
+        Здесь же проходит граница работы: всё, что человек сделал над ПРОШЛЫМ
+        предметом, сохраняется до сброса, а работа нового возвращается после.
+        Правила — в work_keeper, общем со страницей.
         """
+        # Работа уходящего предмета — пока поля ещё его.
+        self.save_work()
+
         self._weapon_key = weapon_key
         self._weapon_mode = mode
 
@@ -1751,6 +2201,7 @@ class PreviewPanel(Preview3DMixin, PreviewSkinsMixin, PreviewCustomModelMixin,
         self._per_mesh_active = False
         self._per_mesh_base_image = None
         self._custom_smd_path = None   # сменили оружие — забываем кастомную модель
+        self._custom_obj_path = None
         self._custom_keep_materials = False
         self._custom_qc_text = None
         if hasattr(self, 'btn_edit_qc'):
@@ -1768,6 +2219,46 @@ class PreviewPanel(Preview3DMixin, PreviewSkinsMixin, PreviewCustomModelMixin,
         # на порядок вызова (отсюда залипал австралий/кнопки при смене оружия).
         self._reset_team_vpk_state()
         self._stop_gif()
+
+        # Работа над НОВЫМ предметом — после всех сбросов, иначе они бы её и
+        # стёрли. Карточки покажут вернувшиеся текстуры, когда приедут
+        # материалы модели: разрешение идёт через то же состояние.
+        self.restore_work()
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # Работа над предметом (сохранение правок между запусками)
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    def _work_key(self) -> str:
+        """Ключ работы текущего предмета (пустой — предмет ещё не опознан)."""
+        from src.services import work_keeper
+        # Показанный мод — это предмет 'custom' (так его называет
+        # MainWindow.apply_selection_auto), иначе работа над модом легла бы под
+        # ключ оружия, поверх которого он показан, — и разошлась бы со
+        # страницей, где ключ считается по тому же правилу.
+        mode = 'custom' if self._custom_vpk_mode else (self._weapon_mode or '')
+        return work_keeper.key_for(
+            mode, self._weapon_key or '',
+            getattr(self, '_loaded_vpk_mod_path', '') or '')
+
+    def save_work(self) -> None:
+        """Сохраняет правки текущего предмета. Зовётся при смене предмета и
+        при закрытии окна — двух моментах, когда работу можно потерять."""
+        from src.services import work_keeper
+        try:
+            work_keeper.save(self._session, self._work_key())
+        except Exception as exc:                      # noqa: BLE001
+            # Сохранение работы не должно мешать самой работе.
+            logger.warning(f"работа не сохранена: {exc}")
+
+    def restore_work(self) -> bool:
+        """Возвращает правки предмета в состояние панели."""
+        from src.services import work_keeper
+        try:
+            return work_keeper.restore(self._session, self._work_key())
+        except Exception as exc:                      # noqa: BLE001
+            logger.warning(f"работа не восстановлена: {exc}")
+            return False
 
     # ═══════════════════════════════════════════════════════════════════════════
     # Роутинг текстур в 3D
@@ -1945,25 +2436,17 @@ class PreviewPanel(Preview3DMixin, PreviewSkinsMixin, PreviewCustomModelMixin,
     # Сброс командных VPK-данных
     # ═══════════════════════════════════════════════════════════════════════════
 
-    def _reset_team_vpk_state(self) -> None:
-        """Сбрасывает VPK-кадры команд и скрывает кнопки переключения."""
-        self._custom_vpk_mode = False
-        self._applied_3d_tex = {}   # webview перезагружается → состояние сбрасываем
-        self._team_framerate = 0.0
-        # Данные команд и вариант — одним сбросом в модели.
-        self._state.reset_team_data()
-        self._state.reset_australium()
-        # Признак «BLU в стоке не отличается от RED» относится к прошлой
-        # модели — вместе с ним возвращаем обычную подпись кнопки
-        self._blu_matches_red = False
+    def _sync_team_widgets(self) -> None:
+        """Виджетная половина сброса команд: прячет кнопки и карточку варианта.
+
+        Подпись BLU возвращается к обычной, потому что «в стоке не отличается
+        от RED» относилось к прошлой модели.
+        """
         if hasattr(self, 'btn_blu'):
             self.btn_blu.setToolTip(self.t.get('3d_team_blu_tip', 'BLU team texture'))
+            self.btn_blu.setVisible(False)
         if hasattr(self, 'btn_red'):
             self.btn_red.setVisible(False)
-        if hasattr(self, 'btn_blu'):
-            self.btn_blu.setVisible(False)
-        # Сбрасываем «+ Команда» (force_team) — покажется снова при загрузке модели.
-        self._force_team = False
         if hasattr(self, 'btn_make_team'):
             self.btn_make_team.setVisible(False)
         if hasattr(self, 'btn_aus'):
@@ -1973,6 +2456,15 @@ class PreviewPanel(Preview3DMixin, PreviewSkinsMixin, PreviewCustomModelMixin,
             self._aus_card.setParent(None)
             self._aus_card.deleteLater()
             self._aus_card = None
+
+    def _reset_team_vpk_state(self) -> None:
+        """Забывает командные кадры и вариант, скрывает их кнопки.
+
+        Половинки разделены намеренно: сессия чистит память, панель — виджеты
+        (см. _reset_skin_state, там то же разделение).
+        """
+        self._session.reset_team_frames()
+        self._sync_team_widgets()
 
     # ═══════════════════════════════════════════════════════════════════════════
     # Drag & Drop (в 2D область)

@@ -13,7 +13,7 @@ from typing import Dict, List, Optional
 
 from src.shared.constants import Team
 from src.shared.logging_config import get_logger
-from src.ui.material_cards import spy_mask_cards
+from src.domain.preview.material_cards import spy_mask_cards
 from src.ui.preview_widgets import _ExtraSlotCard, _SpyMaskVtfWorker
 
 logger = get_logger(__name__)

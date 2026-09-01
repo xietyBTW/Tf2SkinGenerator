@@ -65,8 +65,13 @@ class ModelService:
             uv_filename = f"{weapon_key}_uv_layout.png"
             uv_output_path = Path(export_folder) / uv_filename
             ensure_directory_exists(uv_output_path.parent)
-            if UVLayoutService.generate_uv_layout_from_smd(smd_path, str(uv_output_path), image_size):
-                logger.info(f"UV разметка сохранена: {uv_output_path}")
+            written = UVLayoutService.generate_uv_layout_from_smd(
+                smd_path, str(uv_output_path), image_size)
+            if written:
+                # У многоматериальной модели файлов несколько: развёртки
+                # материалов живут в одних координатах и на общей картинке
+                # накладываются друг на друга.
+                logger.info(f"UV разметка сохранена: {', '.join(written)}")
             else:
                 logger.error(f"Ошибка при создании UV разметки для {weapon_key}")
         except Exception as e:

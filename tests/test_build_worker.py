@@ -1,43 +1,12 @@
-import importlib
-import sys
-import types
 import unittest
 from unittest.mock import Mock, patch
 
 from src.data.weapons import SPECIAL_MODES
+from src.services.build_worker import BuildWorker
 
 
-def setup_fake_pyside6():
-    qtcore = types.ModuleType("PySide6.QtCore")
-    pyside = types.ModuleType("PySide6")
-
-    class DummySignal:
-        def __init__(self, *args, **kwargs):
-            self.calls = []
-
-        def emit(self, *args, **kwargs):
-            self.calls.append((args, kwargs))
-
-    class DummyThread:
-        def __init__(self, *args, **kwargs):
-            self._interrupted = False
-
-        def isInterruptionRequested(self):
-            return self._interrupted
-
-    qtcore.QThread = DummyThread
-    qtcore.Signal = DummySignal
-    qtcore.QTimer = object
-    qtcore.QMutex = object
-    qtcore.QWaitCondition = object
-    sys.modules["PySide6"] = pyside
-    sys.modules["PySide6.QtCore"] = qtcore
 
 
-setup_fake_pyside6()
-sys.modules.pop("src.services.base_worker", None)
-sys.modules.pop("src.services.build_worker", None)
-BuildWorker = importlib.import_module("src.services.build_worker").BuildWorker
 
 
 class BuildWorkerTests(unittest.TestCase):

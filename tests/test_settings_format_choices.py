@@ -1,4 +1,4 @@
-"""Пер-режимный фильтр списка VTF-форматов (src/ui/format_choices.py).
+"""Пер-режимный фильтр списка VTF-форматов (src/domain/format_choices.py).
 
 Чистая логика без Qt: резолвер допустимого набора (источник истины — сервис
 режима) + план перезаполнения комбобокса, включая edge-case «crit после skybox»
@@ -6,7 +6,7 @@
 """
 import unittest
 
-from src.ui.format_choices import (
+from src.domain.format_choices import (
     VTF_FORMATS, CRIT_ALLOWED_FORMATS, SKYBOX_ALLOWED_FLAGS,
     allowed_flags_for_mode, allowed_formats_for_mode, plan_format_choices,
 )

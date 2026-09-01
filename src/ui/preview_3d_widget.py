@@ -16,6 +16,9 @@ import json
 import os
 from typing import Optional
 
+# Габариты вынесены в домен: ими пользуется и веб-фронт, а к виджету они
+# отношения не имеют.
+from src.domain.preview.obj_bounds import compute_obj_bounds as _compute_obj_bounds
 from src.shared.logging_config import get_logger
 
 
@@ -125,6 +128,8 @@ class _Real3DWidget:
         #: Свойства материалов, пришедшие до готовности страницы (см. set_material_hints).
         self._pending_hints = None
         self._pending: Optional[tuple] = None          # (obj_path, tex_path)
+        #: Риг камеры, заданный до готовности страницы (см. set_view_rig).
+        self._view_rig: Optional[dict] = None
         self._lang: str = 'en'
         # Номер загрузки модели: инкрементируется на каждый loadModelFromContent,
         # JS возвращает его в notifyModelLoaded — приёмник отсеивает устаревшие.
@@ -191,10 +196,14 @@ class _Real3DWidget:
         if self._pending_hints is not None:
             hints, self._pending_hints = self._pending_hints, None
             self.set_material_hints(hints)
+        # Риг — тоже ДО модели: applyTransform читает его в момент показа, и
+        # опоздавший риг оставил бы вьюмодель в орбитальном кадре.
+        if self._view_rig is not None:
+            self.set_view_rig(self._view_rig)
         if self._pending:
-            obj_path, tex_path = self._pending
+            obj_path, tex_path, normalize, editable = self._pending
             self._pending = None
-            self.load_model_files(obj_path, tex_path)
+            self.load_model_files(obj_path, tex_path, normalize, editable)
 
     # ── Публичный API ────────────────────────────────────────────────────── #
 
@@ -206,10 +215,33 @@ class _Real3DWidget:
                 f"window.setLanguage({json.dumps(lang)})"
             )
 
-    def load_model_files(self, obj_path: str, texture_path: str = "") -> None:
-        """Загружает модель из OBJ файла (читает содержимое и передаёт в JS)."""
+    def set_view_rig(self, rig: Optional[dict]) -> None:
+        """Как ставить камеру: None — орбита вокруг модели, dict — вид от первого лица.
+
+        Задавать ДО load_model_files: вьювер читает риг в момент показа модели.
+        """
+        self._view_rig = rig
         if not self._ready:
-            self._pending = (obj_path, texture_path)
+            return                      # применим в _on_load_finished
+        self._view.page().runJavaScript(f"window.setViewRig({json.dumps(rig)})")
+
+    def load_model_files(self, obj_path: str, texture_path: str = "",
+                         normalize: bool = True,
+                         editable_mesh_names: Optional[list] = None) -> None:
+        """Загружает модель из OBJ файла (читает содержимое и передаёт в JS).
+
+        Args:
+            normalize: вписывать ли модель в кадр (центр + масштаб). Для вида от
+                первого лица — нет: сцена уже стоит там, где надо относительно
+                глаза, и сдвинуть её значит развалить кадр.
+            editable_mesh_names: какие меши разрешено перекрашивать. Передаётся
+                СЮДА, а не отдельным вызовом, потому что загрузка модели сбрасывает
+                этот список: выставленный заранее фильтр молча пропадал, и
+                пользовательская текстура ложилась в том числе на руки.
+        """
+        if not self._ready:
+            self._pending = (obj_path, texture_path, normalize,
+                             editable_mesh_names)
             return
 
         try:
@@ -221,13 +253,55 @@ class _Real3DWidget:
             return
 
         # Вычисляем центр и масштаб в Python — надёжнее чем Three.js bbox после загрузки
-        cx, cy, cz, scale = _compute_obj_bounds(obj_content)
+        cx, cy, cz, scale = (
+            _compute_obj_bounds(obj_content) if normalize else (0.0, 0.0, 0.0, 1.0))
 
         tex_data_url = ""
         if texture_path and os.path.exists(texture_path):
             tex_data_url = _file_to_data_url(texture_path)
 
         self._js_load(obj_content, tex_data_url, cx, cy, cz, scale)
+        # Строго ПОСЛЕ загрузки: loadModelFromContent сбрасывает фильтр, и
+        # выставленный до неё список молча пропадал.
+        if editable_mesh_names is not None:
+            self.set_editable_mesh_names(editable_mesh_names)
+
+    def load_viewmodel_animated(self, scene: dict,
+                                editable_mesh_names: Optional[list] = None) -> None:
+        """
+        Загружает анимированную вьюмодель: меш в bind-позе + дорожки костей.
+
+        Скелет и клип собирает уже JS (js/viewer_skinned.js). Список
+        редактируемых мешей — здесь же, а не отдельным вызовом: загрузка модели
+        его сбрасывает, и выставленный заранее молча пропадал.
+        """
+        if not self._ready or not scene:
+            return
+        self.load_seq += 1
+        self._view.page().runJavaScript(
+            f"window.loadViewmodelAnimated({json.dumps(scene)}, {self.load_seq})")
+        if editable_mesh_names is not None:
+            self.set_editable_mesh_names(editable_mesh_names)
+
+    def set_viewmodel_clip(self, clip: dict) -> bool:
+        """Меняет анимацию на уже показанной сцене.
+
+        Returns:
+            False — сцены нет или страница не готова; вызывающему придётся
+            собирать её целиком.
+        """
+        if not self._ready or not clip:
+            return False
+        self._view.page().runJavaScript(
+            f"window.setViewmodelClip({json.dumps(clip)})")
+        return True
+
+    def set_viewmodel_playing(self, playing: bool) -> None:
+        """Пауза/продолжение анимации. Кадр при этом остаётся тот, что был."""
+        if not self._ready:
+            return
+        self._view.page().runJavaScript(
+            f"window.setViewmodelPlaying({json.dumps(bool(playing))})")
 
     def set_editable_mesh_names(self, mat_names: list) -> None:
         """
@@ -478,7 +552,11 @@ class _Fallback3DWidget:
 
     def set_language(self, lang: str): pass
     def show_prompt(self, text: str = ""): pass
-    def load_model_files(self, *_): pass
+    def load_model_files(self, *_, **__): pass
+    def load_viewmodel_animated(self, *_, **__): pass
+    def set_viewmodel_clip(self, *_): return False
+    def set_viewmodel_playing(self, *_): pass
+    def set_view_rig(self, *_): pass
     def apply_material_map(self, *_): pass
     def set_material_hints(self, *_): pass
     def set_editable_mesh_names(self, *_): pass
@@ -556,40 +634,3 @@ def _file_to_data_url(path: str) -> str:
     return f"data:{mime};base64,{b64}"
 
 
-def _compute_obj_bounds(obj_content: str):
-    """
-    Парсит вершины OBJ и возвращает (cx, cy, cz, scale) где:
-      cx, cy, cz — центр bounding box
-      scale      — коэффициент для масштабирования в диапазон 2 единицы
-
-    Вычисляется в Python чтобы не зависеть от Three.js bbox,
-    который ненадёжен сразу после загрузки модели.
-    """
-    xs, ys, zs = [], [], []
-    for line in obj_content.splitlines():
-        if not line.startswith("v "):
-            continue
-        parts = line.split()
-        if len(parts) < 4:
-            continue
-        try:
-            xs.append(float(parts[1]))
-            ys.append(float(parts[2]))
-            zs.append(float(parts[3]))
-        except ValueError:
-            continue
-
-    if not xs:
-        return 0.0, 0.0, 0.0, 1.0
-
-    cx = (min(xs) + max(xs)) / 2
-    cy = (min(ys) + max(ys)) / 2
-    cz = (min(zs) + max(zs)) / 2
-
-    extent = max(
-        max(xs) - min(xs),
-        max(ys) - min(ys),
-        max(zs) - min(zs),
-    )
-    scale = (2.0 / extent) if extent > 0 else 1.0
-    return cx, cy, cz, scale

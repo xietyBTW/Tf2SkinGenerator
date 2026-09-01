@@ -1,55 +1,27 @@
-import importlib
-import sys
-import types
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
-
-def setup_fake_pyside6():
-    qtcore = types.ModuleType("PySide6.QtCore")
-    pyside = types.ModuleType("PySide6")
-
-    class DummySignal:
-        def __init__(self, *args, **kwargs):
-            self.calls = []
-
-        def emit(self, *args, **kwargs):
-            self.calls.append((args, kwargs))
-
-    class DummyThread:
-        def __init__(self, *args, **kwargs):
-            self._interrupted = False
-
-        def isInterruptionRequested(self):
-            return self._interrupted
-
-    qtcore.QThread = DummyThread
-    qtcore.Signal = DummySignal
-    qtcore.QMutex = object
-    qtcore.QWaitCondition = object
-    sys.modules["PySide6"] = pyside
-    sys.modules["PySide6.QtCore"] = qtcore
+from src.services.extract_texture_worker import ExtractTextureWorker
 
 
 class ExtractTextureWorkerTests(unittest.TestCase):
-    def setUp(self):
-        setup_fake_pyside6()
-        for _m in ("src.services.base_worker", "src.services.extract_texture_worker"):
-            sys.modules.pop(_m, None)
-        self.module = importlib.import_module("src.services.extract_texture_worker")
-        self.ExtractTextureWorker = self.module.ExtractTextureWorker
+    def _make(self, *args, **kwargs):
+        worker = ExtractTextureWorker(*args, **kwargs)
+        worker.finished_calls = Mock()
+        worker.finished.connect(worker.finished_calls)
+        return worker
 
     def test_run_success(self):
-        worker = self.ExtractTextureWorker("file.vpk", "c_test", "out", export_format="PNG", language="en")
+        worker = self._make("file.vpk", "c_test", "out", export_format="PNG", language="en")
         with patch("src.services.extract_texture_worker.TF2VPKExtractService.extract_texture_with_progress", return_value=(True, "ok", False)):
             worker.run()
-        self.assertTrue(worker.finished.calls)
+        worker.finished_calls.assert_called_once()
 
     def test_run_fail(self):
-        worker = self.ExtractTextureWorker("file.vpk", "c_test", "out", export_format="PNG", language="en")
+        worker = self._make("file.vpk", "c_test", "out", export_format="PNG", language="en")
         with patch("src.services.extract_texture_worker.TF2VPKExtractService.extract_texture_with_progress", return_value=(False, "fail", False)):
             worker.run()
-        self.assertTrue(worker.finished.calls)
+        worker.finished_calls.assert_called_once()
 
 
 if __name__ == "__main__":

@@ -508,30 +508,30 @@ class VMTEditorDialog(QDialog):
             )
             return False
 
-        content = self.text_edit.toPlainText()
-
-        # Дописываем ватермарк только если его ещё нет
-        watermark = "// made on Tf2SkinGenerator https://steamcommunity.com/id/sosatihackeri - Developer(xiety)"
-        if watermark.strip() not in content:
-            content = content.rstrip() + "\n" + watermark + "\n"
-            # Обновляем редактор тоже (чтобы не было расхождения)
+        # Ватермарк, бэкап оригинала и запись в кэш — общая политика
+        # (vmt_source_service.save_edit): её же выполняет веб-страница.
+        from src.services import vmt_source_service
+        ok, error, content = vmt_source_service.save_edit(
+            self.edit_key, self.text_edit.toPlainText(), self._orig_content)
+        if not ok:
+            QMessageBox.warning(
+                self,
+                self.t.get('vmt_invalid_title', 'Invalid VMT'),
+                self.t.get('vmt_invalid_msg',
+                           'The VMT has a syntax error and cannot be saved:')
+                + f'\n\n{error}',
+            )
+            return False
+        if content != self.text_edit.toPlainText():
             self._set_text_silently(content)
 
-        # Сохраняем во временный файл (для текущего сеанса)
+        # Временный файл текущего сеанса — его открывает редактор в следующий раз.
         if self.vmt_path:
             try:
                 with open(self.vmt_path, "w", encoding="utf-8") as f:
                     f.write(content)
             except OSError:
                 pass
-
-        # Сохраняем в постоянный кэш (tools/edited_vmt/)
-        if self.edit_key:
-            # Один раз фиксируем чистый игровой оригинал — чтобы «Reset to game
-            # original» после повторного открытия правки вернул именно его.
-            if not EditedVMTService.has_original_backup(self.edit_key):
-                EditedVMTService.save_original_backup(self.edit_key, self._orig_content)
-            EditedVMTService.save_edited_vmt(self.edit_key, content)
 
         self._modified = False
         self._update_title()

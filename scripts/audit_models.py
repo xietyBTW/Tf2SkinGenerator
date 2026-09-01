@@ -26,7 +26,7 @@ from src.data.taunt_props import TAUNT_PROPS
 from src.data.player_characters import PLAYER_CHARACTERS
 from src.services import decompile_cache
 from src.services.smd_service import SMDService
-from src.ui.material_cards import editable_material_cards
+from src.domain.preview.material_cards import editable_material_cards
 from src.services import qc_skin_parser as qsp
 
 CACHED_ONLY = "--cached" in sys.argv

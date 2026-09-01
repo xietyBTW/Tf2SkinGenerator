@@ -12,7 +12,7 @@ import os
 
 from src.shared.file_utils import get_temp_file_path
 from src.shared.logging_config import get_logger
-from src.ui.preview_mode import PreviewMode
+from src.domain.preview.mode import PreviewMode
 
 logger = get_logger(__name__)
 
@@ -101,7 +101,7 @@ class PreviewCritHitMixin:
             candidates = [f"{rel_url}/{vtf}"]
             if vtf.lower() != vtf:
                 candidates.append(f"{rel_url}/{vtf.lower()}")
-            # Игровые VPK — через общий потоко-локальный кэш (vpk.open парсит
+            # Игровые VPK — через общий кэш (разбор каталога
             # весь индекс, повторные переключения эффекта смерти мгновенны).
             from src.services import vtf_preview_service as vps
             paks = vps.open_vpks(vpk_paths)

@@ -18,7 +18,7 @@ from src.data.skyboxes import (
 )
 from src.shared.constants import Team
 from src.shared.logging_config import get_logger
-from src.ui.preview_mode import PreviewMode
+from src.domain.preview.mode import PreviewMode
 
 logger = get_logger(__name__)
 

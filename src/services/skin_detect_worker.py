@@ -16,18 +16,14 @@
 
 import os
 import glob
-import shutil
-import tempfile
 from typing import Optional
 
-from PySide6.QtCore import Signal
+from src.services.base_worker import Signal
 
 from src.data.weapons import WEAPON_MDL_PATHS
-from src.services import decompile_cache
+from src.services import decompile_cache, model_decompile_service
 from src.services.base_worker import BaseWorker
 from src.services.model_build_service import ModelBuildService
-from src.services.tf2_paths import TF2Paths
-from src.services.tf2_vpk_extract_service import TF2VPKExtractService
 from src.shared.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -102,69 +98,40 @@ class SkinDetectWorker(BaseWorker):
             f"models/weapons/c_models/{self.weapon_key}/{self.weapon_key}.mdl",
         )
 
-    def _extract_and_decompile(self) -> Optional[str]:
-        if not self.misc_vpk_path or not os.path.exists(self.misc_vpk_path):
-            logger.warning(f"[SKIN] misc VPK не найден: {self.misc_vpk_path}")
-            return None
-        crowbar = os.path.abspath(TF2Paths.get_crowbar_path())
-        if not os.path.exists(crowbar):
-            logger.warning(f"[SKIN] Crowbar не найден: {crowbar}")
-            return None
-
-        mdl_rel = self._mdl_rel()
+    def _mdl_candidates(self) -> list:
+        """Пути MDL внутри VPK в порядке приоритета."""
         from src.data.weapons import PREVIEW_MDL_OVERRIDE
         from src.data.player_characters import PLAYER_BODY_MODE_KEYS as _PBK
-        from src.services.extract_model_service import ExtractModelService
 
+        mdl_rel = self._mdl_rel()
         if self.mode == "hat" or self.mode in _PBK or self.weapon_key in PREVIEW_MDL_OVERRIDE:
-            paths_to_try = [mdl_rel]
-        else:
-            from src.data.weapon_model_index import tf2_root_from_misc_vpk
-            _tf2_root = tf2_root_from_misc_vpk(self.misc_vpk_path)
-            paths_to_try = ExtractModelService._build_paths_to_try(self.mode, self.weapon_key, _tf2_root)
+            return [mdl_rel]
 
-        found_rel: Optional[str] = None
-        for path in paths_to_try:
-            if self.isInterruptionRequested():
-                return None
-            try:
-                if TF2VPKExtractService.check_mdl_exists(self.misc_vpk_path, path):
-                    found_rel = path
-                    break
-            except Exception:
-                continue
-        if not found_rel:
-            logger.warning(f"[SKIN] MDL не найден в VPK для {self.weapon_key}")
-            return None
+        from src.data.weapon_model_index import tf2_root_from_misc_vpk
+        from src.services.extract_model_service import ExtractModelService
+        return ExtractModelService._build_paths_to_try(
+            self.mode, self.weapon_key, tf2_root_from_misc_vpk(self.misc_vpk_path)
+        )
 
-        mdl_dir = decomp_dir = None
-        cached_dir = None
+    def _extract_and_decompile(self) -> Optional[str]:
+        """QC после извлечения из VPK и Crowbar. None — показывать нечего.
+
+        Определение стилей — фоновая подсказка, а не основная работа: любая
+        неудача здесь означает «стилей не знаем», и наверх уходит пустой
+        результат, а не ошибка.
+        """
         try:
-            mdl_dir = tempfile.mkdtemp(prefix="tf2sg_skin_mdl_")
-            extracted = TF2VPKExtractService.extract_file_set(
-                self.misc_vpk_path, found_rel, mdl_dir
+            result = model_decompile_service.ensure_decompiled(
+                self.weapon_key,
+                self.misc_vpk_path,
+                self._mdl_candidates(),
+                cancelled=self.isInterruptionRequested,
             )
-            mdl_file = next((f for f in extracted if f.endswith(".mdl")), None)
-            if not mdl_file:
-                return None
-            if self.isInterruptionRequested():
-                return None
-            decomp_dir = tempfile.mkdtemp(prefix="tf2sg_skin_decomp_")
-            ModelBuildService.decompile(mdl_file, decomp_dir, crowbar)
-            cached_dir = decompile_cache.save_to_cache(
-                self.weapon_key, self.misc_vpk_path, found_rel, decomp_dir
-            )
-            # QC читаем из кэш-копии, чтобы temp-папку можно было удалить.
-            search_dir = cached_dir or decomp_dir
-            qcs = glob.glob(os.path.join(search_dir, "*.qc"))
-            return qcs[0] if qcs else None
-        except Exception as exc:
-            logger.warning(f"[SKIN] decompile error для {self.weapon_key}: {exc}")
+        except model_decompile_service.DecompileError as exc:
+            logger.warning(f"[SKIN] {self.weapon_key}: {exc}")
             return None
-        finally:
-            if mdl_dir:
-                shutil.rmtree(mdl_dir, ignore_errors=True)
-            # temp-папку декомпиляции удаляем только если QC сохранён в кэш —
-            # иначе вызывающий код продолжает читать из decomp_dir.
-            if decomp_dir and cached_dir:
-                shutil.rmtree(decomp_dir, ignore_errors=True)
+        if result is None:
+            return None
+
+        qcs = glob.glob(os.path.join(result.directory, "*.qc"))
+        return qcs[0] if qcs else None

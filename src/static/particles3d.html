@@ -1182,6 +1182,10 @@ function disposeBatches() {
   ropeBatches = {};
 }
 
+//: Что движок умеет симулировать. Через мост Qt это уходит панели окна
+//: (reportSupport); веб-странице тот же список нужен прямо из окна кадра.
+window.implementedModules = implementedModules;
+
 window.loadParticleData = function(dataJson) {
   try {
     const data = (typeof dataJson === 'string') ? JSON.parse(dataJson) : dataJson;

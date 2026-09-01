@@ -42,6 +42,19 @@ class VTFCreationError(TF2SkinGeneratorError):
         super().__init__(message)
 
 
+class FileLockedError(TF2SkinGeneratorError):
+    """Файл занят другим процессом (Windows не даёт его перезаписать).
+
+    Отдельно от прочих ошибок сборки: причина всегда одна и чинится не
+    настройками, а закрытием того, кто держит файл (запущенная TF2 с
+    примонтированным модом, GCFScape, проводник с превью). Сообщение уже
+    готово к показу пользователю — сырой WinError 32 ему ничего не говорит.
+    """
+    def __init__(self, file_path: str, message: Optional[str] = None):
+        self.file_path = file_path
+        super().__init__(message or f"Файл занят другим процессом: {file_path}")
+
+
 class VPKCreationError(TF2SkinGeneratorError):
     """Ошибка создания VPK файла"""
     def __init__(self, stdout: str = "", stderr: str = ""):

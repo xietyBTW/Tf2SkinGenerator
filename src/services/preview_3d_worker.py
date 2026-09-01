@@ -12,23 +12,19 @@
 
 import glob
 import os
-import shutil
 import tempfile
 from typing import Optional
 
-from PySide6.QtCore import Signal
+from src.services.base_worker import Signal
 
 from src.data.item_kinds import kind_of
 from src.data.weapons import WEAPON_MDL_PATHS
-from src.services import decompile_cache
+from src.services import model_decompile_service
 from src.services import qc_skin_parser, vmt_tint
 from src.services.base_worker import BaseWorker
 from src.services.game_vpk_reader import GameVpkReader
 from src.services.material_resolver import MaterialResolver
-from src.services.model_build_service import ModelBuildService
 from src.services.smd_service import NON_REFERENCE_SMD_KEYWORDS
-from src.services.tf2_paths import TF2Paths
-from src.services.tf2_vpk_extract_service import TF2VPKExtractService
 from src.shared.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -161,7 +157,8 @@ class Preview3DWorker(BaseWorker):
             from src.data.weapons import PREVIEW_MAT_WHITELIST
             _wl = PREVIEW_MAT_WHITELIST.get(self.weapon_key)
             if _wl:
-                _all_mats = self._scan_smd_mat_names([smd_path] + bodygroup_smds)
+                _all_mats = SmdToObjService.scan_material_names(
+                    [smd_path] + bodygroup_smds)
                 _keep = {m for m in _all_mats if any(s in m.lower() for s in _wl)}
                 if _keep:
                     _include_mats = _keep
@@ -278,7 +275,7 @@ class Preview3DWorker(BaseWorker):
                 else:
                     # Fallback: ищем единственный BLU VTF через QC
                     blu_paths, blu_fps = self._extract_blu_via_qc(
-                        self._decomp_dir, 0.0
+                        self._decomp_dir, 0.0, mat_names
                     )
                     if blu_paths:
                         self.blu_ready.emit(blu_paths, blu_fps)
@@ -340,7 +337,8 @@ class Preview3DWorker(BaseWorker):
                 if len(tex_map) == 1 and len(_editable or mat_names) <= 1:
                     self.blu_ready.emit(list(tex_map.values()), 0.0)
             else:
-                blu_paths, blu_fps = self._extract_blu_via_qc(_qc_dir, 0.0)
+                blu_paths, blu_fps = self._extract_blu_via_qc(
+                    _qc_dir, 0.0, mat_names)
                 if blu_paths:
                     self.blu_ready.emit(blu_paths, blu_fps)
 
@@ -397,16 +395,22 @@ class Preview3DWorker(BaseWorker):
         # ── BLU + Australium через QC skinfamilies ───────────────────── #
         blu_paths, blu_fps = [], 0.0
         blu_multi_done = False
+        # Материалы, которые в итоге ПОКАЗЫВАЮТСЯ: геометрия плюс добавки из
+        # $texturegroup. Командной бывает только добавка — граната у quadball,
+        # ядро у cannon, руки шпиона у часов; их геометрия одноматериальная, и
+        # по одному имени модели BLU для них не искался вовсе.
+        card_names = list(dict.fromkeys(
+            list(mat_names) + list(tg_extras) + list(fixed_extras)))
         if self._decomp_dir:
             # Мульти-материальное командное оружие (напр. праздничное:
             # клинок и lights меняются по команде в РАЗНЫХ колонках
             # $texturegroup) — BLU строим как карту {материал: blu_png}.
             # Одиночный BLU тут наложил бы одну текстуру на всю модель.
-            if len(mat_names) > 1:
+            if len(card_names) > 1:
                 _model = self._model(self._decomp_dir)
                 if _model and _model.spec.team:
                     try:
-                        raw = self._extract_blu_multi_textures_via_qc(mat_names)
+                        raw = self._extract_blu_multi_textures_via_qc(card_names)
                         tex_map  = {k: v[0] for k, v in raw.items() if v[0]}
                         name_map = {k: v[1] for k, v in raw.items()}
                         if name_map:
@@ -416,7 +420,7 @@ class Preview3DWorker(BaseWorker):
                         logger.debug(f"[3D] BLU multi (оружие): {_exc}")
             if not blu_multi_done:
                 blu_paths, blu_fps = self._extract_blu_via_qc(
-                    self._decomp_dir, framerate
+                    self._decomp_dir, framerate, mat_names
                 )
             # Вариантные строки (Australium/Gold/Festive) проверяем
             # НЕЗАВИСИМО от BLU: у большинства австралиум-оружий
@@ -450,106 +454,41 @@ class Preview3DWorker(BaseWorker):
                 f"models/weapons/c_models/{self.weapon_key}/{self.weapon_key}.mdl",
             )
 
-        cached = decompile_cache.get_cached_decompile(
-            self.weapon_key, self.misc_vpk_path, mdl_rel
+        result = model_decompile_service.ensure_decompiled(
+            self.weapon_key,
+            self.misc_vpk_path,
+            self._mdl_candidates(mdl_rel),
+            cancelled=self.isInterruptionRequested,
+            on_progress=self._emit_decompile_stage,
         )
-        if cached:
-            logger.info(f"3D Preview: кэш декомпила для {self.weapon_key}")
-            return self._find_reference_smd(cached)
-
-        return self._extract_and_decompile(mdl_rel)
-
-    def _extract_and_decompile(self, mdl_rel_hint: str) -> Optional[str]:
-        """Извлекает MDL из VPK и декомпилирует через Crowbar."""
-        from src.services.extract_model_service import ExtractModelService
-
-        self.progress.emit(self._p['extracting'])
-
-        # ── Диагностика: проверяем доступность VPK и инструментов ─────────── #
-        if not os.path.exists(self.misc_vpk_path):
-            logger.error(f"[3D] misc VPK не найден: {self.misc_vpk_path}")
-            self.failed.emit(f"VPK not found: {self.misc_vpk_path}")
+        if result is None:
             return None
+        return self._find_reference_smd(result.directory)
 
-        crowbar = TF2Paths.get_crowbar_path()
-        crowbar_abs = os.path.abspath(crowbar)
-        if not os.path.exists(crowbar_abs):
-            logger.error(f"[3D] Crowbar не найден: {crowbar_abs}")
-            self.failed.emit(f"Crowbar not found: {crowbar_abs}")
-            return None
+    def _emit_decompile_stage(self, stage: model_decompile_service.Stage) -> None:
+        """Стадия из сервиса → переведённая строка прогресса."""
+        self.progress.emit(self._p[stage.value])
 
-        logger.info(f"[3D] cwd={os.getcwd()} | crowbar={crowbar_abs} | vpk={self.misc_vpk_path}")
+    def _mdl_candidates(self, mdl_rel_hint: str) -> list:
+        """Пути MDL внутри VPK в порядке приоритета.
 
+        Шапка лежит не там, где записано в предмете (workshop/, суффикс класса),
+        поэтому её путь раскрывается в список кандидатов. У персонажей, масок и
+        превью-подмен путь известен точно.
+        """
         from src.data.weapons import PREVIEW_MDL_OVERRIDE
         if self.kind.is_hat:
             from src.services.tf2_paths import build_hat_mdl_candidates
-            paths_to_try = build_hat_mdl_candidates(mdl_rel_hint)
-        elif (self.kind.is_character or self.kind.is_spy_mask
+            return build_hat_mdl_candidates(mdl_rel_hint)
+        if (self.kind.is_character or self.kind.is_spy_mask
                 or self.weapon_key in PREVIEW_MDL_OVERRIDE):
-            # Персонажи, маски шпиона и превью-подмены: прямой путь (weapon_key —
-            # это уже полный путь MDL, не ключ из WEAPON_MDL_PATHS).
-            paths_to_try = [mdl_rel_hint]
-        else:
-            from src.data.weapon_model_index import tf2_root_from_misc_vpk
-            _tf2_root = tf2_root_from_misc_vpk(self.misc_vpk_path)
-            paths_to_try = ExtractModelService._build_paths_to_try(
-                self.mode, self.weapon_key, _tf2_root
-            )
+            return [mdl_rel_hint]
 
-        found_rel: Optional[str] = None
-        for path in paths_to_try:
-            if self.isInterruptionRequested():
-                return None
-            try:
-                if TF2VPKExtractService.check_mdl_exists(self.misc_vpk_path, path):
-                    found_rel = path
-                    logger.info(f"[3D] MDL найден: {path}")
-                    break
-            except Exception as e:
-                logger.debug(f"[3D] check_mdl_exists ошибка для {path}: {e}")
-                continue
-
-        if not found_rel:
-            logger.warning(f"[3D] MDL не найден в VPK для {self.weapon_key}. Пробовали: {paths_to_try[:3]}")
-            return None
-
-        try:
-            mdl_dir = tempfile.mkdtemp(prefix="tf2sg_mdl_")
-            extracted = TF2VPKExtractService.extract_file_set(
-                self.misc_vpk_path, found_rel, mdl_dir
-            )
-            mdl_file = next((f for f in extracted if f.endswith(".mdl")), None)
-            if not mdl_file:
-                logger.error(f"[3D] MDL файл не найден после извлечения: {extracted}")
-                shutil.rmtree(mdl_dir, ignore_errors=True)
-                return None
-
-            if self.isInterruptionRequested():
-                shutil.rmtree(mdl_dir, ignore_errors=True)
-                return None
-
-            self.progress.emit(self._p['decompiling'])
-            decomp_dir = tempfile.mkdtemp(prefix="tf2sg_decomp_")
-            logger.info(f"[3D] Запускаем Crowbar: mdl={mdl_file} → {decomp_dir}")
-            ModelBuildService.decompile(mdl_file, decomp_dir, crowbar)
-            logger.info("[3D] Crowbar завершён успешно")
-
-            cached_dir = decompile_cache.save_to_cache(
-                self.weapon_key, self.misc_vpk_path, found_rel, decomp_dir
-            )
-
-            shutil.rmtree(mdl_dir, ignore_errors=True)
-            # Дальше работаем с копией в кэше, а temp-папку удаляем —
-            # иначе tf2sg_decomp_* копились бы в %TEMP% бесконечно.
-            if cached_dir:
-                shutil.rmtree(decomp_dir, ignore_errors=True)
-                return self._find_reference_smd(cached_dir)
-            return self._find_reference_smd(decomp_dir)
-
-        except Exception as exc:
-            logger.error(f"[3D] Ошибка декомпиляции для {self.weapon_key}: {exc}", exc_info=True)
-            self.failed.emit(f"Decompile error: {exc}")
-            return None
+        from src.data.weapon_model_index import tf2_root_from_misc_vpk
+        from src.services.extract_model_service import ExtractModelService
+        return ExtractModelService._build_paths_to_try(
+            self.mode, self.weapon_key, tf2_root_from_misc_vpk(self.misc_vpk_path)
+        )
 
     def _find_reference_smd(self, directory: str) -> Optional[str]:
         """Находит reference SMD (исключая physics/anim) в директории."""
@@ -692,36 +631,6 @@ class Preview3DWorker(BaseWorker):
                 f"({[os.path.basename(p) for p in removed]}) — у неё своя секция"
             )
         return kept
-
-    @staticmethod
-    def _scan_smd_mat_names(smd_paths: list) -> set:
-        """
-        Быстрое сканирование имён материалов из нескольких SMD файлов.
-
-        Читает только имена материалов (без парсинга вершин) — в 10-30 раз
-        быстрее чем полный _parse_triangles_by_mat.
-
-        Returns:
-            Множество всех имён материалов из всех SMD файлов.
-        """
-        import re
-        result: set = set()
-        for path in smd_paths:
-            if not os.path.exists(path):
-                continue
-            try:
-                with open(path, "r", encoding="utf-8", errors="replace") as f:
-                    content = f.read()
-                m = re.search(r"\btriangles\b(.*?)\bend\b", content,
-                              re.DOTALL | re.IGNORECASE)
-                if not m:
-                    continue
-                lines = [ln.strip() for ln in m.group(1).splitlines() if ln.strip()]
-                # Каждые 4 строки: имя_материала, вершина1, вершина2, вершина3
-                result.update(lines[i] for i in range(0, len(lines), 4))
-            except Exception:
-                pass
-        return result
 
     # ── Извлечение нескольких текстур (мульти-материал) ──────────────────── #
 
@@ -1206,12 +1115,20 @@ class Preview3DWorker(BaseWorker):
 
     # ── QC-парсинг текстур (единая логика — см. qc_skin_parser) ─────────── #
 
-    def _extract_blu_via_qc(self, decomp_dir: str, red_framerate: float) -> tuple:
+    def _extract_blu_via_qc(self, decomp_dir: str, red_framerate: float,
+                            mat_names: Optional[list] = None) -> tuple:
         """
         Извлекает BLU-вариант текстуры используя QC $texturegroup skinfamilies.
 
         Читает QC из decomp_dir, парсит skin family 1 (BLU),
         ищет соответствующие VTF в VPK (сначала прямой путь, затем через VMT).
+
+        Args:
+            mat_names: материалы, которые реально показаны в превью. Строка
+                $texturegroup описывает ВСЮ модель, а показываем мы иногда лишь
+                её часть (Dead Ringer рисуется вьюмоделью, где рядом с часами
+                лежат руки шпиона) — без этого списка синей текстурой предмета
+                становился первый попавшийся столбец, то есть чужие руки.
 
         Returns:
             (frame_paths: list[str], framerate: float)
@@ -1238,7 +1155,17 @@ class Preview3DWorker(BaseWorker):
             )
             return [], 0.0
 
-        blu_tex_names = layout.second_row
+        own = self._own_blu_names(model, mat_names)
+        if own is None:
+            blu_tex_names = layout.second_row      # сопоставить не с чем — как раньше
+        elif not own:
+            logger.info(
+                f"[3D] {self.weapon_key}: столбцы модели в $texturegroup командными "
+                f"не являются — BLU у предмета нет (строка {layout.second_row})"
+            )
+            return [], 0.0
+        else:
+            blu_tex_names = own
 
         logger.info(
             f"[3D] QC BLU skin family: cdmaterials={cdmaterials}, "
@@ -1332,6 +1259,43 @@ class Preview3DWorker(BaseWorker):
             logger.warning(f"[3D] _extract_blu_via_qc: {exc}", exc_info=True)
 
         return [], 0.0
+
+    @staticmethod
+    def _own_blu_names(model, mat_names: Optional[list]) -> Optional[list]:
+        """Синие имена ТОЛЬКО тех столбцов, что принадлежат материалам модели.
+
+        Команда в Source меняет материалы поколоночно, поэтому синюю пару надо
+        брать из столбца СВОЕГО материала. Пробегать всю строку нельзя: в ней
+        стоят и чужие столбцы (у вьюмодели часов рядом с самими часами лежат
+        руки шпиона), и общие для команд — и первый же попавшийся `*_blue`
+        уезжал предмету на текстуру.
+
+        Returns:
+            Список синих имён; пустой список — свои столбцы командными не
+            оказались (BLU у предмета нет); None — сопоставить не удалось,
+            решать вызывающему.
+        """
+        by_lower = {k.lower(): v for k, v in (model.team_map or {}).items()}
+        if not by_lower or not mat_names:
+            return None
+        names: list = []
+        matched = False
+        for mat in mat_names:
+            ml = (mat or "").lower()
+            if not ml:
+                continue
+            blu = by_lower.get(ml)
+            if blu is None:
+                # Имена материалов SMD и $texturegroup иногда расходятся
+                # префиксом пути — сверяем по хвосту, как в мульти-ветке.
+                blu = next((v for k, v in by_lower.items()
+                            if ml.endswith(k) or k.endswith(ml)), None)
+            if blu is None:
+                continue
+            matched = True
+            if not qc_skin_parser.is_shared_column(ml, blu) and blu not in names:
+                names.append(blu)
+        return names if matched else None
 
     def _extract_variant_via_qc(self, decomp_dir: str) -> Optional[str]:
         """
@@ -1667,7 +1631,21 @@ class Preview3DWorker(BaseWorker):
             pak = paks_tex[0] if paks_tex else None
             vtf_data: Optional[bytes] = None
 
-            if pak:
+            # ── Сначала — путь из QC ТОЙ модели, которую показываем ──────── #
+            # У части оружия в игре ДВЕ версии: старая в models/weapons/c_items
+            # и мастерская в models/workshop/weapons/c_models. Геометрию мы
+            # берём по MDL модели, а список ниже перебирается по порядку, и
+            # c_items стоит в нём раньше workshop — у c_shortstop и
+            # c_soda_popper из-за этого бралась текстура 512×512 от СТАРОЙ
+            # версии, а развёртка была от мастерской. Текстура не совпадала с
+            # моделью. $cdmaterials из QC указывает на материалы именно той
+            # модели, поэтому спрашиваем его первым.
+            if self._decomp_dir:
+                vtf_data = self._extract_red_texture_via_qc(paks_tex)
+                if vtf_data:
+                    logger.debug(f"3D Preview текстура: по $cdmaterials из QC")
+
+            if pak and not vtf_data:
                 for path in vtf_search:
                     try:
                         vtf_data = pak[path].read()
@@ -1675,12 +1653,6 @@ class Preview3DWorker(BaseWorker):
                         break
                     except KeyError:
                         continue
-
-            # ── Fallback: QC $cdmaterials → materials/{cdmat}/{skin0}.vtf ── #
-            # Используется для оружий с нестандартным расположением текстур
-            # (например c_items, где путь не совпадает с weapon_key).
-            if not vtf_data and self._decomp_dir:
-                vtf_data = self._extract_red_texture_via_qc(paks_tex)
 
             if not vtf_data:
                 logger.warning(f"Текстура для {self.weapon_key} не найдена в VPK")

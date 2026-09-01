@@ -106,15 +106,12 @@ class ModelExportDialog(StyledDialog):
         self.resize(520, 480)
 
     def _apply_default_selection(self) -> None:
-        lower = [n.lower() for n in self._file_names]
-        for i, n in enumerate(lower):
-            if n.endswith("_reference.smd") or ("reference" in n and n.endswith(".smd")):
+        """Отмечает то же, что и веб-страница: правило в ExtractModelService."""
+        from src.services.extract_model_service import ExtractModelService
+        chosen = set(ExtractModelService.default_export_selection(self._file_names))
+        for i, name in enumerate(self._file_names):
+            if name in chosen:
                 self.list_widget.item(i).setCheckState(Qt.Checked)
-                return
-        for i, n in enumerate(lower):
-            if n.endswith(".smd"):
-                self.list_widget.item(i).setCheckState(Qt.Checked)
-                break
 
     def _select_all(self) -> None:
         for i in range(self.list_widget.count()):

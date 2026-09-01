@@ -13,6 +13,7 @@ from src.services.qc_skin_parser import (
     SkinLayout,
     VARIANT_SUFFIXES,
     classify_rows,
+    parse_bonemerge,
     parse_cdmaterials,
     parse_skin_layout,
     parse_texturegroup_rows,
@@ -182,8 +183,37 @@ class CorpusTests(unittest.TestCase):
 class CdmaterialsTests(unittest.TestCase):
     def test_normalization(self):
         cdmats = parse_cdmaterials(_qc("hat_blueprints.qc"))
-        # console\ срезан, бэкслеши → /, relative-путь с .. отброшен
-        self.assertEqual(cdmats, ["models/player/items/engineer"])
+        # console\ срезан, бэкслеши → /, relative-путь разрешён по соседнему.
+        # Свой путь всегда первый: он и есть папка материалов предмета, а
+        # разрешённый relative — лишь дополнительный кандидат поиска.
+        self.assertEqual(cdmats, ["models/player/items/engineer", "models/debug"])
+
+    def test_relative_path_resolves_against_the_neighbour(self):
+        """В QC тела шпиона '../../effects' рядом с 'models/player/spy'.
+
+        Вместе это `models/effects` — там лежат invulnfx_red/blue (убер-эффект).
+        Пока такие строки выбрасывались, эти материалы оставались без текстуры
+        и в превью, и в моде.
+        """
+        from src.services.qc_skin_parser import resolve_cdmaterials
+
+        self.assertEqual(
+            resolve_cdmaterials(["\\..\\..\\effects", "models\\player\\spy\\", ""]),
+            ["models/player/spy", "models/effects"],
+        )
+
+    def test_relative_path_above_materials_is_dropped(self):
+        from src.services.qc_skin_parser import resolve_cdmaterials
+
+        self.assertEqual(resolve_cdmaterials(["models", "../../../.."]), ["models"])
+
+    def test_duplicates_collapse(self):
+        from src.services.qc_skin_parser import resolve_cdmaterials
+
+        self.assertEqual(
+            resolve_cdmaterials(["models/hat/", "console\\models\\hat", "MODELS/HAT"]),
+            ["models/hat"],
+        )
 
     def test_regular_path(self):
         cdmats = parse_cdmaterials(_qc("flaregun_team_shell.qc"))
@@ -191,6 +221,24 @@ class CdmaterialsTests(unittest.TestCase):
 
     def test_missing_file(self):
         self.assertEqual(parse_cdmaterials(_qc("does_not_exist.qc")), [])
+
+
+class BonemergeTests(unittest.TestCase):
+    """$bonemerge перечисляет кости, которые модель отдаёт родителю.
+
+    Список исчерпывающий: у револьвера `weapon_bone_1` — его собственный
+    барабан, и сажать его в руку по совпадению имени нельзя (см. viewmodel_pose).
+    """
+
+    def test_only_declared_bones(self):
+        self.assertEqual(parse_bonemerge(_qc("weapon_bonemerge.qc")),
+                         ["weapon_bone", "c_weapon_stattrack"])
+
+    def test_model_without_the_directive(self):
+        self.assertEqual(parse_bonemerge(_qc("flaregun_team_shell.qc")), [])
+
+    def test_missing_file(self):
+        self.assertEqual(parse_bonemerge(_qc("does_not_exist.qc")), [])
 
 
 class VariantKindTests(unittest.TestCase):

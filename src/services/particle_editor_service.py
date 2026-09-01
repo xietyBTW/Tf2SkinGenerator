@@ -240,12 +240,20 @@ MODULE_CATALOG = {
 # Якорь по началу строки: иначе матчились закомментированные строки и ссылки
 # на $basetexture внутри proxies; хвостовой //-комментарий отсекается.
 # \r?$ обязателен: VMT Valve с CRLF-концами строк.
-def _norm_mat(name: str) -> str:
+def _norm_mat(name: str, ext: str = ".vmt") -> str:
     """Материал → нормализованный rel-путь под materials/ (effects/crit.vmt).
-    Ключ для сопоставления материалов с разным регистром/слэшами."""
-    n = name.replace("\\", "/").lower()
-    if not n.endswith(".vmt"):
-        n += ".vmt"
+
+    Ключ для сопоставления материалов с разным регистром и разделителями.
+    Задвоенные разделители схлопываются: в PCF стока встречается
+    `effects\\\\crit` (а у эффекта из мастерской — задвоенные во ВСЕХ
+    сегментах), и без этого `effects//crit.vmt` считался бы другим материалом,
+    которого в архиве нет — крит-эффект оставался без текстуры.
+    """
+    n = re.sub(r"[\\/]+", "/", (name or "").strip()).strip("/").lower()
+    if not n:
+        return ""
+    if not n.endswith(ext):
+        n += ext
     if n.startswith("materials/"):
         n = n[len("materials/"):]
     return n
@@ -697,11 +705,9 @@ class ParticleEditorService:
         return out
 
     def _resolve_material(self, paks: list, mat: str) -> Optional[dict]:
-        vmt_rel = mat.replace("\\", "/").lower()
-        if not vmt_rel.endswith(".vmt"):
-            vmt_rel += ".vmt"
-        if not vmt_rel.startswith("materials/"):
-            vmt_rel = "materials/" + vmt_rel
+        # Путь строим той же нормализацией, что и ключ материала: иначе
+        # искали бы в архиве не то, с чем потом сопоставляем.
+        vmt_rel = "materials/" + _norm_mat(mat)
 
         vmt_raw = read_from_vpks(paks, vmt_rel)
         if vmt_raw is None:
@@ -723,11 +729,7 @@ class ParticleEditorService:
                 "width": 0,
                 "height": 0,
             }
-        vtf_rel = base
-        if not vtf_rel.endswith(".vtf"):
-            vtf_rel += ".vtf"
-        if not vtf_rel.startswith("materials/"):
-            vtf_rel = "materials/" + vtf_rel
+        vtf_rel = "materials/" + _norm_mat(base, ".vtf")
 
         vtf_raw = read_from_vpks(paks, vtf_rel)
         if vtf_raw is None:

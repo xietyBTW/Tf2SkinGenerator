@@ -1,4 +1,4 @@
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 from src.services.base_worker import StandardWorker
 from src.services.extract_model_service import ExtractModelService
@@ -32,6 +32,8 @@ class UVTemplateWorker(StandardWorker):
         self.export_folder = export_folder
         self.language = language
         self.output_path: Optional[str] = None
+        #: Все нарисованные файлы: у многоматериальной модели их несколько.
+        self.output_paths: List[str] = []
 
     def work(self) -> Tuple[bool, str]:
         temp_dir = None
@@ -53,7 +55,7 @@ class UVTemplateWorker(StandardWorker):
             if not decompile_dir:
                 return False, message
 
-            ok, result = ExtractModelService.generate_uv_template(
+            ok, result, written = ExtractModelService.generate_uv_template(
                 decompile_dir=decompile_dir,
                 weapon_key=self.weapon_key,
                 image_size=self.image_size,
@@ -61,6 +63,7 @@ class UVTemplateWorker(StandardWorker):
             )
             if ok:
                 self.output_path = result
+                self.output_paths = written
             return ok, result
         finally:
             if temp_dir:

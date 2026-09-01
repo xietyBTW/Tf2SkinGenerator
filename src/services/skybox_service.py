@@ -19,7 +19,8 @@ logger = get_logger(__name__)
 
 # Форматы без альфы, осмысленные для граней неба (DXT1 — сжатый дефолт,
 # BGR888 — без потерь для градиентов, где DXT даёт полосы).
-SKYBOX_ALLOWED_FORMATS = ("DXT1", "BGR888")
+# Список допустимых форматов — правило, живёт в домене.
+from src.domain.format_choices import SKYBOX_ALLOWED_FORMATS  # noqa: F401 — реэкспорт
 
 # Шаблон VMT грани: стоковый минимум (шейдер sky + $nofog/$ignorez), как в
 # оригинальных материалах TF2. И LDR-, и _hdr-вариант пишутся с одинаковым

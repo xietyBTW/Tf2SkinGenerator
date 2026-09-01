@@ -244,5 +244,45 @@ class DeriveConfigTests(unittest.TestCase):
         self.assertIsNone(MATERIAL_MAPS['detail'].get('derive_kind'))
 
 
+class NormalizeMapsTests(unittest.TestCase):
+    """Проверка присланного набора карт: мусор до генератора VTF не доходит."""
+
+    def test_unknown_map_is_dropped(self):
+        from src.data.material_maps import normalize_maps
+        self.assertEqual(normalize_maps({'glitter': {'enabled': True}}), {})
+
+    def test_file_entry_needs_an_existing_file(self):
+        from src.data.material_maps import normalize_maps
+        self.assertEqual(normalize_maps({'detail': {'image': 'C:/нет.png'}}), {})
+        with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as f:
+            path = f.name
+        try:
+            got = normalize_maps({'detail': {'image': path}})
+            self.assertEqual(got['detail']['image'], path)
+        finally:
+            os.unlink(path)
+
+    def test_only_declared_numeric_params_survive(self):
+        from src.data.material_maps import normalize_maps
+        got = normalize_maps({'rimlight': {'enabled': True,
+                                           '$rimlightboost': '3',
+                                           '$basetexture': 'взлом'}})
+        self.assertEqual(got, {'rimlight': {'enabled': True, '$rimlightboost': '3'}})
+
+    def test_parametric_map_without_enabled_is_dropped(self):
+        from src.data.material_maps import normalize_maps
+        self.assertEqual(normalize_maps({'rimlight': {'$rimlightboost': '3'}}), {})
+
+    def test_auto_mode_keeps_threshold(self):
+        from src.data.material_maps import normalize_maps
+        got = normalize_maps({'selfillum': {'derive': True, 'threshold': '128'}})
+        self.assertEqual(got, {'selfillum': {'derive': True, 'threshold': '128'}})
+
+    def test_auto_mode_only_where_the_map_supports_it(self):
+        """У detail нет вывода из базы — «авто» для него бессмысленно."""
+        from src.data.material_maps import normalize_maps
+        self.assertEqual(normalize_maps({'detail': {'derive': True}}), {})
+
+
 if __name__ == "__main__":
     unittest.main()

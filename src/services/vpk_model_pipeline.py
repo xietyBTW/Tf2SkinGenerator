@@ -166,14 +166,17 @@ class VpkModelPipeline:
         model_ready_path: Optional[str],
         replace_model_path: Optional[str],
         model_file_callback,
-        parent_window,
     ) -> Optional[str]:
         """
         Определяет путь к пользовательскому SMD для режима «замена модели».
 
-        Источники по приоритету: прямой путь (тесты) → callback (UI-поток) →
-        диалог QFileDialog (если есть parent_window). Возвращает None, если
-        режим выключен, задан model_ready_path или пользователь отменил выбор.
+        Источники по приоритету: прямой путь (тесты) → callback (UI-поток).
+        Возвращает None, если режим выключен, задан model_ready_path или
+        пользователь отменил выбор.
+
+        Своего диалога здесь нет намеренно: показывать окна — дело слоя UI,
+        а сборка идёт в фоновом потоке. Кому нужен выбор файла — передаёт
+        model_file_callback, который UI исполняет в своём потоке.
         """
         if not replace_model_enabled or model_ready_path:
             return None
@@ -187,20 +190,6 @@ class VpkModelPipeline:
             file_path = model_file_callback()
             if file_path and os.path.exists(file_path):
                 logger.info(f"Выбран файл для замены модели через callback: {file_path}")
-                return file_path
-            logger.info("Выбор SMD файла отменен, продолжаем без замены модели")
-            return None
-
-        if parent_window:
-            from PySide6.QtWidgets import QFileDialog
-            file_path, _ = QFileDialog.getOpenFileName(
-                parent_window,
-                "Выберите SMD файл модели для замены",
-                "",
-                "SMD Files (*.smd);;All Files (*)",
-            )
-            if file_path and os.path.exists(file_path):
-                logger.info(f"Выбран файл для замены модели: {file_path}")
                 return file_path
             logger.info("Выбор SMD файла отменен, продолжаем без замены модели")
             return None

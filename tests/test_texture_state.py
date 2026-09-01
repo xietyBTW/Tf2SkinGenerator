@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 
 from src.shared.constants import Team
-from src.ui.texture_state import (
+from src.domain.preview.texture_state import (
     SINGLE_TEX_KEY,
     PreviewTextureState,
     team_priority,

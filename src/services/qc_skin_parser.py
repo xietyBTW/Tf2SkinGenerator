@@ -24,6 +24,7 @@
 
 import glob
 import os
+import posixpath
 import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
@@ -273,33 +274,87 @@ def parse_texturegroup_rows(qc_path: str) -> List[List[str]]:
     return rows
 
 
-def parse_cdmaterials(qc_path: str) -> List[str]:
+def parse_bonemerge(qc_path: str) -> List[str]:
     """
-    Все пути $cdmaterials из QC, нормализованные для поиска в VPK:
-      • backslashes → '/', срезаны слеши по краям;
-      • префикс 'console/' (добавляет Crowbar) убирается — в VPK его нет;
-      • относительные пути с '..' (системные папки движка) пропускаются.
+    Имена костей из $bonemerge — ровно те, что модель отдаёт родителю.
+
+    У оружия TF2 это обычно `weapon_bone` и `c_weapon_stattrack`, а вовсе не
+    все кости: `weapon_bone_1..4` у револьвера — это его собственные курок,
+    барабан и спуск. Сливать их с одноимёнными костями руки нельзя — у руки
+    это лесенка точек крепления под разную длину оружия, и револьвер от такого
+    слияния разлетается на 73 единицы вместо своих двадцати.
 
     Returns:
-        Список путей вида 'models/weapons/c_models/c_test' (без 'materials/').
+        Список имён в порядке объявления. Пусто — в QC директивы нет.
     """
     try:
         with open(qc_path, encoding='utf-8', errors='replace') as f:
             content = f.read()
     except Exception:
         return []
+    return re.findall(r'^\s*\$bonemerge\s+"([^"]+)"', content,
+                      re.IGNORECASE | re.MULTILINE)
 
-    result: List[str] = []
-    for raw in re.findall(r'\$cdmaterials\s+"([^"]+)"', content, re.IGNORECASE):
-        p = raw.replace('\\', '/').strip('/')
+
+def resolve_cdmaterials(raw_paths: List[str]) -> List[str]:
+    """
+    Пути $cdmaterials, готовые к поиску в VPK:
+      • backslashes → '/', срезаны слеши по краям;
+      • префикс 'console/' (добавляет Crowbar) убирается — в VPK его нет;
+      • путь с '..' разрешается ОТНОСИТЕЛЬНО соседних абсолютных строк.
+
+    Последнее — не мелочь. В QC тела шпиона рядом стоят
+
+        $cdmaterials "\\..\\..\\effects"
+        $cdmaterials "models\\player\\spy\\"
+
+    и вместе это `models/effects` — там лежат материалы убер-эффекта
+    (invulnfx_red/blue). Раньше строки с '..' просто выбрасывались, и такие
+    материалы оставались без текстуры и в превью, и в моде. Порядок строк в QC
+    не задан, поэтому сначала берутся абсолютные, а по ним разрешаются
+    относительные; ушедшие выше `materials/` отбрасываются.
+
+    Returns:
+        Список путей вида 'models/weapons/c_models/c_test' (без 'materials/'),
+        без повторов, в порядке приоритета поиска.
+    """
+    cleaned: List[str] = []
+    for raw in raw_paths or []:
+        p = (raw or '').replace('\\', '/').strip('/')
         if p.lower().startswith('console/'):
             p = p[len('console/'):]
-        if '..' in p:
-            continue
         p = p.strip('/')
         if p:
+            cleaned.append(p)
+
+    absolute = [p for p in cleaned if '..' not in p]
+    ordered = list(absolute)
+    for p in cleaned:
+        if '..' not in p:
+            continue
+        for base in absolute:
+            merged = posixpath.normpath(f'{base}/{p}').strip('/')
+            if merged and merged != '.' and not merged.startswith('..'):
+                ordered.append(merged)
+
+    seen: set = set()
+    result: List[str] = []
+    for p in ordered:
+        if p.lower() not in seen:
+            seen.add(p.lower())
             result.append(p)
     return result
+
+
+def parse_cdmaterials(qc_path: str) -> List[str]:
+    """Пути $cdmaterials из QC (см. resolve_cdmaterials)."""
+    try:
+        with open(qc_path, encoding='utf-8', errors='replace') as f:
+            content = f.read()
+    except Exception:
+        return []
+    return resolve_cdmaterials(
+        re.findall(r'\$cdmaterials\s+"([^"]+)"', content, re.IGNORECASE))
 
 
 # ── Классификация строк ─────────────────────────────────────────────────── #
@@ -608,6 +663,9 @@ class QcModel:
     qc_path: str
     cdmaterials: List[str] = field(default_factory=list)
     layout: SkinLayout = field(default_factory=SkinLayout)
+    #: Кости из $bonemerge — те, что в игре получают положение от РОДИТЕЛЬСКОЙ
+    #: модели. Остальные кости модели двигаются сами (курок, барабан, цевьё).
+    bonemerge: List[str] = field(default_factory=list)
 
     @property
     def team_map(self) -> Dict[str, str]:
@@ -638,6 +696,7 @@ def load_model(decomp_dir: str) -> Optional[QcModel]:
         qc_path=qc_path,
         cdmaterials=parse_cdmaterials(qc_path),
         layout=parse_skin_layout(qc_path),
+        bonemerge=parse_bonemerge(qc_path),
     )
 
 

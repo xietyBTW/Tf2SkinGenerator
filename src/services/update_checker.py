@@ -1,7 +1,7 @@
 """
 Проверка актуальности версии через GitHub Releases API.
 
-Выполняется в фоновом QThread чтобы не блокировать UI.
+Выполняется в фоновом потоке чтобы не блокировать UI.
 Сравнение версий: семантическое (major.minor.patch), без внешних зависимостей.
 
 Использование:
@@ -18,7 +18,7 @@ import urllib.request
 import urllib.error
 from typing import Optional, Tuple
 
-from PySide6.QtCore import QThread, Signal
+from src.services.base_worker import BaseWorker, Signal
 
 from src.shared.version import __version__, GITHUB_OWNER, GITHUB_REPO
 from src.shared.logging_config import get_logger
@@ -93,7 +93,7 @@ def fetch_latest_release() -> Optional[Tuple[str, str]]:
         return None
 
 
-class UpdateChecker(QThread):
+class UpdateChecker(BaseWorker):
     """
     Фоновый поток для проверки обновлений.
 

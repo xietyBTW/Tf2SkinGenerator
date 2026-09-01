@@ -1,4 +1,4 @@
-from PySide6.QtCore import Signal
+from src.services.base_worker import Signal
 from typing import Optional, Tuple
 from src.services.base_worker import StandardWorker, UiRequest
 from src.services.vpk_service import VPKService
@@ -27,7 +27,6 @@ class BuildWorker(StandardWorker):
             request = BuildRequest(**legacy_kwargs)
         self.request = request
         self.language = request.language
-        self.parent_window = parent
 
         # Синхронные запросы в UI-поток (диалоги выбора файла/подтверждения).
         # Протокол emit→wait→answer — в UiRequest (base_worker).

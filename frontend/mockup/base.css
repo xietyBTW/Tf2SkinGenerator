@@ -1,0 +1,273 @@
+/*
+ * Общий язык оформления. Оба варианта раскладки (style.css и alt.css) берут
+ * отсюда токены и мелкие элементы — тогда сравнивать можно именно раскладку,
+ * а не случайные расхождения в цветах и кнопках.
+ *
+ * Опорные принципы (взяты у модных домов и адаптированы под плотный инструмент):
+ *   • ни одного скругления и ни одной тени — только волосяные линии;
+ *   • монохром плюс ровно один акцент (#cc5522, он же в сплэше приложения);
+ *   • разделение воздухом и выравниванием, а не карточками и рамками;
+ *   • типографика вместо декора: капслок с трекингом для служебных подписей;
+ *   • состояние — инверсия и подчёркивание, никаких заливок и свечений;
+ *   • единственная визуальная масса на экране — текстура и модель.
+ */
+
+/* ── Токены ──────────────────────────────────────────────────────────── */
+:root {
+  --bg:        #f2f1ee;   /* тёплый офф-вайт, не стерильно белый */
+  --surface:   #ffffff;
+  /* Слой поверх страницы: меню и диалоги. Отдельно от --surface, потому что
+     в тёмной теме поверхность почти сливается с фоном — меню выглядело
+     прозрачным, и текст под ним читался сквозь него. */
+  --overlay:   #ffffff;
+  --ink:       #14120f;
+  --ink-soft:  #57534d;
+  --ink-mute:  #97918a;
+  --hairline:  #d9d5cf;
+  --hairline-strong: #b8b2aa;
+  --accent:    #cc5522;
+  --viewport:  #e6e3de;
+
+  --gap:    20px;
+  --rhythm: 26px;
+
+  --font: "Inter", "Helvetica Neue", Arial, "Segoe UI", sans-serif;
+  --mono: "SF Mono", "Cascadia Mono", "Consolas", monospace;
+
+  --dur: 140ms;
+}
+
+[data-theme="dark"] {
+  --bg:        #0f0f0e;
+  --surface:   #161615;
+  --overlay:   #232220;
+  --ink:       #ecebe8;
+  --ink-soft:  #a5a19b;
+  --ink-mute:  #6f6b65;
+  --hairline:  #2a2927;
+  --hairline-strong: #3d3b38;
+  --accent:    #e2662c;
+  --viewport:  #1c1b1a;
+}
+
+* { box-sizing: border-box; }
+
+/* Любое явное `display` в наших правилах перебивает атрибут hidden — он живёт
+   в таблице браузера и проигрывает по приоритету. Из-за этого скрытые ряды
+   фильтров оставались на экране: атрибут стоял, а flex его отменял. */
+[hidden] { display: none !important; }
+
+html, body { height: 100%; margin: 0; }
+
+body {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Ни одного скругления во всём интерфейсе — главный носитель характера. */
+button, input, select, fieldset { border-radius: 0; font-family: inherit; }
+
+/* Цвет кнопки по умолчанию системный (чёрный), а не наследуемый: в тёмной
+   теме название предмета оказывалось чёрным на чёрном. Наследование делает
+   правильным поведение по умолчанию, а не по недосмотру. */
+button, input, select, textarea { color: inherit; }
+
+/* ── Служебная подпись ───────────────────────────────────────────────── */
+.label {
+  margin: 0;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+}
+.label--inline { flex: none; }
+
+.mono {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--ink-mute);
+}
+
+/* ── Поля ────────────────────────────────────────────────────────────── */
+.field { display: flex; flex-direction: column; gap: 7px; }
+
+.field__label {
+  padding: 0;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+}
+
+/* Поля — линия снизу, а не коробка: меньше графики на единицу смысла. */
+.input,
+.select select {
+  width: 100%;
+  padding: 6px 0;
+  border: 0;
+  border-bottom: 1px solid var(--hairline-strong);
+  background: none;
+  color: var(--ink);
+  font-size: 13px;
+  transition: border-color var(--dur);
+}
+.input:focus,
+.select select:focus { outline: none; border-bottom-color: var(--accent); }
+.input::placeholder { color: var(--ink-mute); }
+
+.select { position: relative; }
+.select select { appearance: none; padding-right: 18px; cursor: pointer; }
+.select::after {
+  content: "";
+  position: absolute;
+  right: 2px;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  margin-top: -5px;
+  border-right: 1px solid var(--ink-soft);
+  border-bottom: 1px solid var(--ink-soft);
+  transform: rotate(45deg);
+  pointer-events: none;
+}
+
+/* ── Чекбоксы ────────────────────────────────────────────────────────── */
+.check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  color: var(--ink-soft);
+  transition: color var(--dur);
+}
+.check:hover { color: var(--ink); }
+
+/* Квадратный чекбокс с галочкой из двух линий: без картинок и без скруглений. */
+.check input {
+  appearance: none;
+  position: relative;
+  flex: none;
+  width: 13px;
+  height: 13px;
+  margin: 0;
+  border: 1px solid var(--hairline-strong);
+  background: none;
+  cursor: pointer;
+  transition: border-color var(--dur), background var(--dur);
+}
+.check input:hover { border-color: var(--ink); }
+.check input:checked { background: var(--ink); border-color: var(--ink); }
+.check input:checked::after {
+  content: "";
+  position: absolute;
+  left: 3.5px;
+  top: 0.5px;
+  width: 4px;
+  height: 8px;
+  border-right: 1.5px solid var(--surface);
+  border-bottom: 1.5px solid var(--surface);
+  transform: rotate(42deg);
+}
+.check input:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+
+/* ── Кнопки ──────────────────────────────────────────────────────────── */
+
+/* Единственная «тяжёлая» кнопка — та, ради которой всё затевалось. */
+.btn--primary {
+  padding: 13px 30px;
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  color: var(--surface);
+  font-size: 11px;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background var(--dur), color var(--dur), border-color var(--dur);
+}
+.btn--primary:hover { background: var(--accent); border-color: var(--accent); }
+
+.textbtn {
+  padding: 0 0 2px;
+  border: 0;
+  border-bottom: 1px solid var(--hairline-strong);
+  background: none;
+  color: var(--ink-soft);
+  font-size: 11px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: color var(--dur), border-color var(--dur);
+}
+.textbtn:hover { color: var(--ink); border-bottom-color: var(--ink); }
+.textbtn--sm { flex: none; font-size: 10px; }
+.textbtn.is-off { color: var(--ink-mute); border-bottom-color: transparent; }
+.textbtn.is-active { color: var(--ink); border-bottom-color: var(--accent); }
+
+/* Кнопка без рамки: только цвет и подчёркивание при наведении. */
+.iconbtn {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink-soft);
+  font-size: 11px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: color var(--dur);
+}
+.iconbtn:hover { color: var(--accent); }
+
+/* Подчёркивание вместо подложки — так отмечается всё выбранное в тексте. */
+.underlined {
+  padding: 0 0 3px;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  background: none;
+  color: var(--ink-mute);
+  font-size: 11px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: color var(--dur), border-color var(--dur);
+}
+.underlined:hover { color: var(--ink); }
+.underlined.is-active { color: var(--ink); border-bottom-color: var(--accent); }
+
+/* Обведённая метка — для того, что и правда про цвет (RED/BLU) или про выбор
+   из короткого ряда (стили). */
+.tag {
+  padding: 4px 12px;
+  border: 1px solid var(--hairline-strong);
+  background: none;
+  color: var(--ink-soft);
+  font-size: 10px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: color var(--dur), border-color var(--dur), background var(--dur);
+}
+.tag:hover { border-color: var(--ink); color: var(--ink); }
+.tag.is-active {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--surface);
+}
+
+/* ── Скроллбары под общий тон ────────────────────────────────────────── */
+* { scrollbar-width: thin; scrollbar-color: var(--hairline-strong) transparent; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: var(--hairline-strong); }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* Кому анимации мешают — всё происходит мгновенно. */
+@media (prefers-reduced-motion: reduce) {
+  * { transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+}
