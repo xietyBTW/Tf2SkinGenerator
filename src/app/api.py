@@ -341,10 +341,53 @@ def set_skin(index: int) -> Dict[str, object]:
     return session().set_skin(index)
 
 
-def load_first_person(action: str = 'IDLE', lang: str = 'ru') -> Dict[str, object]:
-    """Собирает сцену «руки класса с оружием»."""
+def set_part_detail(material: str = '', detail: float = 0.0) -> Dict[str, object]:
+    """Раздробить все куски одинаково (0 — геометрия, 1 — швы развёртки)."""
     from src.app.session import session
-    return session().load_first_person(action, lang=lang)
+    return session().set_part_detail(material, detail)
+
+
+def toggle_part_island(material: str = '', group: int = 0,
+                       island: int = 0) -> Dict[str, object]:
+    """Отрезать названный остров развёртки или прирастить его обратно."""
+    from src.app.session import session
+    return session().toggle_part_island(material, group, island)
+
+
+def part_mask(material: str = '', part: int = 0) -> Dict[str, object]:
+    """Картинка-подсветка части: её форма на развёртке."""
+    from src.app.session import session
+    return session().part_mask(material, part)
+
+
+def part_shape(material: str = '', part: int = 0) -> Dict[str, object]:
+    """Развёртка одной части — для окна посадки картинки."""
+    from src.app.session import session
+    return session().part_shape(material, part)
+
+
+def merge_part_islands(material: str = '', group: int = 0,
+                       islands: Optional[List[int]] = None) -> Dict[str, object]:
+    """Свести отрезки в один: их острова становятся одной частью."""
+    from src.app.session import session
+    return session().merge_part_islands(material, group, islands)
+
+
+def leave_first_person() -> Dict[str, object]:
+    """Возврат из вида от первого лица: снимает сцену рук."""
+    from src.app.session import session
+    return session().leave_first_person()
+
+
+def load_first_person(action: str = 'IDLE', lang: str = 'ru',
+                      full: bool = False) -> Dict[str, object]:
+    """Собирает сцену «руки класса с оружием».
+
+    full — собрать целиком, даже если сцена уже в кадре: обычная смена
+    анимации обходится одними дорожками.
+    """
+    from src.app.session import session
+    return session().load_first_person(action, lang=lang, full=full)
 
 
 def load_skybox(sky_name: str) -> Dict[str, object]:
@@ -468,17 +511,27 @@ def texture_badges() -> Dict[str, object]:
     return session().texture_badges()
 
 
-def parts(material: str = '') -> Dict[str, object]:
-    """Части модели: список кусков и номер части для каждого треугольника."""
+def parts(material: str = '', known_shape: str = '') -> Dict[str, object]:
+    """Части модели: список кусков и номер части для каждого треугольника.
+
+    ``known_shape`` — отпечаток разбиения, который уже есть у страницы. Совпал —
+    карты треугольников не отдаются: они занимают почти весь ответ, а меняются
+    только от резки.
+    """
     from src.app.session import session
-    return session().parts(material)
+    return session().parts(material, known_shape)
 
 
 def set_part_texture(material: str = '', part: int = 0,
-                     path: Optional[str] = None) -> Dict[str, object]:
-    """Кладёт картинку на одну часть модели (path=None — убирает)."""
+                     path: Optional[str] = None,
+                     options: Optional[Dict[str, object]] = None) -> Dict[str, object]:
+    """Кладёт картинку на одну часть модели (path=None — убирает).
+
+    options — посадка: вписать/заполнить/растянуть, поворот, масштаб, сдвиг.
+    Без пути, но с настройкой, — правка уже положенной картинки.
+    """
     from src.app.session import session
-    return session().set_part_texture(material, part, path)
+    return session().set_part_texture(material, part, path, options)
 
 
 def set_part_colors(material: str = '',
@@ -487,6 +540,13 @@ def set_part_colors(material: str = '',
     """Красит части: {часть: '#rrggbb'}; значение None снимает цвет."""
     from src.app.session import session
     return session().set_part_colors(material, colors, strength)
+
+
+def set_part_edge(material: str = '', width: float = 0.0,
+                  color: str = '') -> Dict[str, object]:
+    """Окантовка частей: ширина полосы по краю (в долях стороны) и её цвет."""
+    from src.app.session import session
+    return session().set_part_edge(material, width, color)
 
 
 def clear_parts(material: str = '') -> Dict[str, object]:

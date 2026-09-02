@@ -19,10 +19,10 @@ PreviewSession владеет двумя моделями, которые уже
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from src.domain.preview.mode import PreviewState
-from src.domain.preview.texture_state import PreviewTextureState
+from src.domain.preview.texture_state import SINGLE_TEX_KEY, PreviewTextureState
 from src.shared.constants import Team
 
 
@@ -68,17 +68,53 @@ class PreviewSession:
     #: куски модели. Сама текстура материала из них склеивается и лежит, как
     #: обычная пользовательская, в textures: дальше по конвейеру про части
     #: никто не знает.
-    part_textures: Dict[str, Dict[int, str]] = field(default_factory=dict)
+    #: Запись бывает строкой (путь) ИЛИ словарём с настройкой посадки: как
+    #: положить картинку на место части — вписать, повернуть, сдвинуть. Старые
+    #: работы писались строкой, и ломать их из-за новой возможности незачем.
+    part_textures: Dict[str, Dict[int, Any]] = field(default_factory=dict)
     #: {материал: {номер части: '#rrggbb'}} — тонировка отдельных кусков. Живёт
     #: рядом с картинками: у части либо своя картинка, либо цвет.
     part_colors: Dict[str, Dict[int, str]] = field(default_factory=dict)
     #: Сила тонировки, общая на предмет: 1.0 — в цвет, 0.3 — лёгкий оттенок.
     part_tint: float = 1.0
+    #: Окантовка частей: ширина полосы по краю в долях стороны текстуры и её
+    #: цвет. Общая на предмет, как и сила: обводят обычно всю работу разом, а
+    #: не одну деталь. 0 — окантовки нет.
+    part_edge: float = 0.0
+    part_edge_color: str = '#141210'
+    #: Окантовка частей: ширина полосы по краю в долях стороны текстуры и её
+    #: цвет. Общая на предмет, как и сила: обводят обычно всю работу разом, а
+    #: не одну деталь. 0 — окантовки нет.
+    part_edge: float = 0.0
+    part_edge_color: str = '#141210'
+    #: {номер группы: список НАБОРОВ отрезанных островов развёртки}. Поимённо,
+    #: а не счётчиком: счётчик резал острова в своём порядке, от крупного, и до
+    #: мизинца можно было добраться только разрезав перед ним всё остальное.
+    #: Набор, а не один остров: развёртка режет вещи не так, как их видит
+    #: человек — палец у неё нередко разложен на верх и низ, и свести их в одну
+    #: часть должно быть можно.
+    #: Группа — куски, делящие развёртку (левая и правая рука шпиона): в игре
+    #: у них общие пиксели, и режутся они вместе. Свойство ПРЕДМЕТА, а не
+    #: кисти: номера частей от разрезов зависят, и хранить их надо там же, где
+    #: саму покраску.
+    part_cuts: Dict[int, List[int]] = field(default_factory=dict)
 
     # ── Вариантные стили ──────────────────────────────────────────────────── #
     #: Материалы, ЯВНО добавленные пользователем в стиль через «+»: {skin: {mat}}.
     #: Скин 0 здесь не участвует.
     skin_chosen: Dict[int, set] = field(default_factory=dict)
+
+    # ── Чужая геометрия в кадре ───────────────────────────────────────────── #
+    #: {материал: png} для мешей, которые в кадре есть, а к предмету не
+    #: относятся: руки класса в виде от первого лица. Карточек у них не
+    #: строится и в сборку они не идут, но без текстур руки в кадре серые.
+    #: Подкладываются ПОД текстуры предмета, чтобы правка оружия их перебивала.
+    scene_extra_textures: Dict[str, str] = field(default_factory=dict)
+    #: Материалы ТОГО ЖЕ кадра, которые предмету всё-таки принадлежат — их
+    #: называет воркер сцены (editable_materials). Нужны, чтобы положить
+    #: текстуру предмета на настоящие имена мешей: у одноматериальной модели
+    #: она хранится под служебным ключом, а меша с таким именем не бывает.
+    scene_item_materials: List[str] = field(default_factory=list)
 
     # ── Что реально показано в 3D ─────────────────────────────────────────── #
     #: {material: path} — чтобы при смене стиля перезагружать в webview только
@@ -263,7 +299,7 @@ class PreviewSession:
                 path = t.resolve_mesh(mat)
                 if path:
                     out[mat] = path
-            return out
+            return {**self.scene_extra_textures, **out}
 
         # Вариантный стиль показывает СВОЁ поверх базы: материал без
         # переопределения наследует базовую текстуру, а не остаётся пустым.
@@ -279,7 +315,27 @@ class PreviewSession:
                 path = t.resolve_base(mat) if style else t.resolve_card(mat)
             if path:
                 out[mat] = path
-        return self._with_variant(out)
+        return {**self.scene_extra_textures,
+                **self._name_for_scene(self._with_variant(out))}
+
+    def _name_for_scene(self, out: Dict[str, str]) -> Dict[str, str]:
+        """
+        Переводит служебный ключ одноматериальной модели в имена мешей сцены.
+
+        ``SINGLE_TEX_KEY`` — ключ ХРАНЕНИЯ, а не имя меша: у модели с одним
+        материалом его настоящее имя превью не знает, и вьюверу такую текстуру
+        кладут глобально. Но в сцене вида от первого лица мешей несколько
+        (оружие и руки класса), глобально её класть нельзя — а под служебным
+        именем вьювер меш не находит и оставляет оружие СТОКОВЫМ. Имена
+        приходят от воркера сцены, поэтому здесь они уже есть.
+        """
+        if not self.scene_item_materials or SINGLE_TEX_KEY not in out:
+            return out
+        out = dict(out)
+        own = out.pop(SINGLE_TEX_KEY)
+        for mat in self.scene_item_materials:
+            out[mat] = own
+        return out
 
     # ═══════════════════════════════════════════════════════════════════════ #
     # «Прочее» и «сделать командным»
@@ -457,6 +513,8 @@ class PreviewSession:
         self.texture_overrides = {}
         self.part_textures = {}
         self.part_colors = {}
+        self.part_cuts = {}
+        self.part_edge = 0.0
         self.reset_custom_model()
         self.custom_qc_text = None
 
@@ -541,10 +599,14 @@ class PreviewSession:
         # другой кусок.
         self.part_textures = {}
         self.part_colors = {}
+        self.part_cuts = {}
+        self.part_edge = 0.0
         self.custom_qc_text = None
         self.per_mesh_active = False
         self.per_mesh_base_image = None
         self.current_object = None
+        self.scene_extra_textures = {}
+        self.scene_item_materials = []
         return True
 
     def begin_game_model(self) -> bool:

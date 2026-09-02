@@ -58,6 +58,13 @@ class Preview3DWorker(BaseWorker):
     # Без этого вьювер рисует всё непрозрачным и матовым: стекло банки
     # Мутировавшего молока ($additive) превращается в серый пластик.
     render_hints = Signal(object)
+    # Чужая геометрия в кадре: ({материал: png} носителя, [материалы предмета]).
+    # Праздничное оружие — это гирлянда, надетая на обычную пушку; пушка в
+    # кадре нужна, но предмету не принадлежит: карточек по ней не строится и в
+    # сборку она не идёт. Имена материалов ПРЕДМЕТА едут тем же сигналом: у
+    # одноматериальной модели текстура хранится под служебным ключом, меша с
+    # таким именем нет, и без настоящего имени гирлянда осталась бы стоковой.
+    scene_extra = Signal(object)
     # Ошибка
     failed   = Signal(str)
     # Текстовый прогресс для UI
@@ -104,6 +111,10 @@ class Preview3DWorker(BaseWorker):
         self._preview_dir: Optional[str] = None
         self._decomp_dir:  Optional[str] = None  # папка с декомпилированными QC/SMD
         self._hat_decomp_dir: Optional[str] = None  # алиас для режима hat
+        #: Папка декомпиляции пушки-носителя праздничной гирлянды. Её
+        #: $cdmaterials свои: гирлянда лежит в папке оружия, а сама пушка — в
+        #: своей, и без второго пути носитель остаётся серым.
+        self._carrier_dir: Optional[str] = None
         #: {материал: ResolvedMaterial} для RED — с чем сравнивать BLU,
         #: чтобы понять, отличаются ли команды вообще
         self._red_looks: dict = {}
@@ -175,6 +186,17 @@ class Preview3DWorker(BaseWorker):
             # bind, остаётся нетронутой — таких подавляющее большинство.
             _pose_smd = self._find_pose_smd()
 
+            # Пушка, НА КОТОРОЙ висит эта модель. Праздничное оружие — не
+            # отдельная пушка, а навесная гирлянда: в `c_scattergun_xmas`
+            # лежат одни огоньки. Без носителя в кадре висела гирлянда, а
+            # оружия не было вовсе.
+            carrier_smds = self._carrier_smds()
+            carrier_mats: set = set()
+            if carrier_smds:
+                carrier_mats = set(
+                    SmdToObjService.scan_material_names(carrier_smds))
+                bodygroup_smds = bodygroup_smds + carrier_smds
+
             ok, mat_names = SmdToObjService.convert(
                 smd_path, obj_path,
                 include_mats=_include_mats,
@@ -187,6 +209,20 @@ class Preview3DWorker(BaseWorker):
                 return
             if self.isInterruptionRequested():
                 return
+
+            # Носитель в кадре есть, но предмету он не принадлежит: его
+            # материалы уходят подложкой сцены, а не в состав предмета. Иначе
+            # база оружия стала бы карточкой альбома, и человек красил бы
+            # обычный обрез, собирая мод на праздничный.
+            if carrier_mats:
+                own = [m for m in mat_names if m not in carrier_mats]
+                extra = self._extract_multi_textures(
+                    [m for m in mat_names if m in carrier_mats])
+                if extra:
+                    self.scene_extra.emit((extra, own))
+                logger.info(f"[3D] {self.weapon_key}: носитель добавлен в кадр, "
+                            f"его материалы {sorted(carrier_mats)} — подложкой")
+                mat_names = own
 
             # ── 3. Текстура ───────────────────────────────────────────────── #
             self.progress.emit(self._p['texture'])
@@ -464,6 +500,23 @@ class Preview3DWorker(BaseWorker):
         if result is None:
             return None
         return self._find_reference_smd(result.directory)
+
+    def _carrier_smds(self) -> list:
+        """SMD пушки-носителя, если модель на ней висит. См. carrier_model."""
+        # Только у оружия: у шапок и персонажей weapon_key — путь к MDL, и
+        # носителя у них не бывает.
+        if self.kind.is_hat or self.kind.is_character or self.kind.is_spy_mask:
+            return []
+        from src.data.weapon_model_index import tf2_root_from_misc_vpk
+        from src.services import carrier_model
+        found = carrier_model.find(
+            self.weapon_key, self.misc_vpk_path,
+            tf2_root_from_misc_vpk(self.misc_vpk_path),
+            cancelled=self.isInterruptionRequested,
+            on_progress=self._emit_decompile_stage,
+        )
+        self._carrier_dir = found.directory or None
+        return list(found.smds)
 
     def _emit_decompile_stage(self, stage: model_decompile_service.Stage) -> None:
         """Стадия из сервиса → переведённая строка прогресса."""
@@ -1029,7 +1082,13 @@ class Preview3DWorker(BaseWorker):
         try:
             model = self._model(getattr(self, '_decomp_dir', None))
             if model:
-                cdmats = model.cdmaterials
+                cdmats = list(model.cdmaterials)
+            # У пушки-носителя путь материалов свой: гирлянда лежит в папке
+            # оружия, а сама пушка — в своей. Ищем по обеим, порядок значения
+            # не имеет: имена материалов не пересекаются.
+            carrier = self._model(self._carrier_dir)
+            if carrier:
+                cdmats += [c for c in carrier.cdmaterials if c not in cdmats]
         except Exception as exc:
             logger.debug(f"[3D] Не удалось распарсить $cdmaterials: {exc}")
         self._cached_cdmaterials = cdmats

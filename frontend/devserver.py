@@ -45,6 +45,9 @@ _FILE_ROOTS = [
     (ROOT.parent / "export").resolve(),
     # Библиотека чужих модов и их обложки.
     (ROOT.parent / "mods").resolve(),
+    # Сохранённые правки человека: work/<ключ предмета>/files. Без этого корня
+    # восстановленная текстура отдаётся 403 и карточка в альбоме битая.
+    (ROOT.parent / "work").resolve(),
 ]
 
 
@@ -153,6 +156,7 @@ ALLOWED = {
     "set_part_texture": api.set_part_texture,
     "set_part_colors": api.set_part_colors,
     "clear_parts": api.clear_parts,
+    "set_part_edge": api.set_part_edge,
     "undo_parts": api.undo_parts,
     "vmt_params": api.vmt_params,
     "mod_library": api.mod_library,
@@ -172,6 +176,12 @@ ALLOWED = {
     "reset_vmt": api.reset_vmt,
     "set_skin": api.set_skin,
     "load_first_person": api.load_first_person,
+    "leave_first_person": api.leave_first_person,
+    "set_part_detail": api.set_part_detail,
+    "toggle_part_island": api.toggle_part_island,
+    "merge_part_islands": api.merge_part_islands,
+    "part_shape": api.part_shape,
+    "part_mask": api.part_mask,
     "load_skybox": api.load_skybox,
     "set_texture": api.set_texture,
     "build": api.build,

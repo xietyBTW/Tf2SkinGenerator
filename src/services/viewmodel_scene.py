@@ -21,7 +21,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Optional, Sequence
 
 from src.services import viewmodel_pose
@@ -58,10 +58,15 @@ class ViewmodelScene:
     weapon_materials: List[str]
     #: Материалы рук — стоковые, показываются, но не редактируются.
     arms_materials: List[str]
+    #: Материалы пушки-НОСИТЕЛЯ: праздничное оружие — это гирлянда, надетая на
+    #: обычную пушку. Пушка в кадре нужна (иначе огоньки висят в пустой руке),
+    #: но правит человек гирлянду, поэтому список отдельный от weapon_materials.
+    carrier_materials: List[str] = field(default_factory=list)
 
     @property
     def materials(self) -> List[str]:
-        return self.weapon_materials + self.arms_materials
+        return (self.weapon_materials + self.carrier_materials
+                + self.arms_materials)
 
 
 def build(
@@ -76,6 +81,8 @@ def build(
     weapon_include_mats: Optional[set] = None,
     weapon_merge_bones: Optional[Sequence[str]] = None,
     arms_include_mats: Optional[set] = None,
+    weapon_carrier_smd: str = "",
+    carrier_extra_smds: Sequence[str] = (),
 ) -> Optional[ViewmodelScene]:
     """
     Собирает OBJ + MTL со сценой вьюмодели.
@@ -90,6 +97,12 @@ def build(
         *_include_mats: Оставить у части только эти материалы.
         weapon_merge_bones: Кости из `$bonemerge` в QC оружия — только
             они сажаются в руку (см. viewmodel_pose).
+        weapon_carrier_smd: reference SMD пушки, НА КОТОРОЙ висит модель.
+            Праздничное оружие — навесная гирлянда, и без носителя в руке
+            оказывались одни огоньки. Свой список костей ей не нужен: их
+            отбирает `bonemerge_skinning` сама.
+        carrier_extra_smds: бодигруппы носителя — шланг медигана лежит
+            отдельным SMD, и без него пушка в кадре обрублена.
 
     Returns:
         ViewmodelScene, либо None — если позу собрать не удалось. Отказ здесь
@@ -115,19 +128,37 @@ def build(
     if arms_mats is None:
         return None
 
+    parts = [
+        MeshPart(smd_path=weapon_ref_smd,
+                 extra_smd_paths=tuple(weapon_extra_smds),
+                 skinning=weapon_mats,
+                 include_mats=weapon_include_mats),
+        MeshPart(smd_path=arms_ref_smd,
+                 extra_smd_paths=tuple(arms_extra_smds),
+                 skinning=arms_mats,
+                 include_mats=arms_include_mats),
+    ]
+    carrier_names: set = set()
+    if weapon_carrier_smd:
+        # Носитель садится в руку теми же костями, что и сама модель: у
+        # праздничного минигана гирлянда и миниган ложатся одинаково. Не
+        # получилось — показываем сцену без него: гирлянда в руке лучше, чем
+        # отказ собрать вид целиком.
+        carrier_mats = viewmodel_pose.bonemerge_skinning(weapon_carrier_smd, pose)
+        if carrier_mats is None:
+            logger.info(f"[vm] носитель не сел в руку: "
+                        f"{os.path.basename(weapon_carrier_smd)}")
+        else:
+            parts.insert(1, MeshPart(smd_path=weapon_carrier_smd,
+                                     extra_smd_paths=tuple(carrier_extra_smds),
+                                     skinning=carrier_mats))
+            carrier_names = set(SmdToObjService.scan_material_names(
+                [weapon_carrier_smd, *carrier_extra_smds]))
+
     ok, produced = SmdToObjService.convert_parts(
-        [
-            MeshPart(smd_path=weapon_ref_smd,
-                     extra_smd_paths=tuple(weapon_extra_smds),
-                     skinning=weapon_mats,
-                     include_mats=weapon_include_mats),
-            MeshPart(smd_path=arms_ref_smd,
-                     extra_smd_paths=tuple(arms_extra_smds),
-                     skinning=arms_mats,
-                     include_mats=arms_include_mats),
-        ],
+        parts,
         obj_path,
-        source_zup=True,   # обе части уже в общем пространстве вьюмодели
+        source_zup=True,   # все части уже в общем пространстве вьюмодели
     )
     if not ok:
         return None
@@ -138,10 +169,15 @@ def build(
     scene = ViewmodelScene(
         obj_path=obj_path,
         weapon_materials=[m for m in produced if m in weapon_names],
-        arms_materials=[m for m in produced if m not in weapon_names],
+        # Общий материал (гирлянда и пушка на одной текстуре) остаётся за
+        # ПРЕДМЕТОМ: его человек и правит.
+        carrier_materials=[m for m in produced
+                           if m in carrier_names and m not in weapon_names],
+        arms_materials=[m for m in produced
+                        if m not in weapon_names and m not in carrier_names],
     )
     logger.info(
         f"[vm] сцена собрана: оружие {scene.weapon_materials}, "
-        f"руки {scene.arms_materials}"
+        f"носитель {scene.carrier_materials}, руки {scene.arms_materials}"
     )
     return scene

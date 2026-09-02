@@ -59,6 +59,14 @@ def _folder(key: str) -> Path:
     return folder
 
 
+def _own_part_image(spec, files_dir: Path):
+    """Копия картинки части рядом с работой; настройка посадки сохраняется."""
+    if isinstance(spec, dict):
+        owned = _own_file(spec.get('path'), files_dir)
+        return {**spec, 'path': owned} if owned else None
+    return _own_file(spec, files_dir)
+
+
 def _own_file(path: Optional[str], files_dir: Path) -> Optional[str]:
     """
     Кладёт файл рядом с работой и отдаёт новый путь.
@@ -107,10 +115,12 @@ def _own_paths(edits: Dict[str, object], files_dir: Path) -> Dict[str, object]:
         for skin, paths in (edits.get('skin_overrides') or {}).items()
     }
     # Картинки частей: без своей копии «покрасил ствол» пропадало бы, стоило
-    # человеку переложить исходник в другую папку.
+    # человеку переложить исходник в другую папку. Запись бывает и строкой (так
+    # писали до окна посадки), и словарём с настройкой — копируем файл, а
+    # остальное оставляем как есть.
     out['part_textures'] = {
-        mat: {part: owned for part, path in (items or {}).items()
-              if (owned := _own_file(path, files_dir))}
+        mat: {part: owned for part, spec in (items or {}).items()
+              if (owned := _own_part_image(spec, files_dir))}
         for mat, items in (edits.get('part_textures') or {}).items()
     }
     out['australium_user_tex'] = _own_file(

@@ -97,3 +97,6 @@ wscan.json
 wpaths.json
 # Правки над предметами: свои текстуры и их копии.
 work/
+
+# Тулинг фронта: TypeScript ставится локально в frontend/.
+frontend/node_modules/

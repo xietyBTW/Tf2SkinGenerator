@@ -106,6 +106,61 @@ class SceneTests(unittest.TestCase):
         self.assertTrue((self.dir / "scene.mtl").exists())
         self.assertEqual(sorted(_obj_groups(self.obj)), ["c_test", "test_hands"])
 
+    def test_carrier_joins_the_scene_but_not_the_editable_list(self):
+        """Праздничное оружие — гирлянда, надетая на обычную пушку.
+
+        Пушка в кадре нужна (иначе огоньки висят в пустой руке), но правит
+        человек гирлянду: материалы носителя идут отдельным списком и в
+        `weapon_materials` не попадают.
+        """
+        carrier = self.dir / "c_carrier_reference.smd"
+        carrier.write_text(_smd(
+            [("weapon_bone", None)],
+            {},
+            [("c_carrier", [((0, 0, 0), "weapon_bone"),
+                            ((2, 0, 0), "weapon_bone"),
+                            ((0, 0, 2), "weapon_bone")])],
+        ), encoding="utf-8")
+
+        scene = self._build(weapon_carrier_smd=str(carrier))
+        self.assertIsNotNone(scene)
+        self.assertEqual(scene.weapon_materials, ["c_test"])
+        self.assertEqual(scene.carrier_materials, ["c_carrier"])
+        # В кадре носитель есть — иначе показывать было бы нечего.
+        self.assertIn("c_carrier", _obj_groups(self.obj))
+        self.assertIn("c_carrier", scene.materials)
+
+    def test_carrier_bodygroups_come_along(self):
+        """Шланг медигана — отдельный SMD: без него пушка обрублена."""
+        carrier = self.dir / "c_carrier_reference.smd"
+        carrier.write_text(_smd(
+            [("weapon_bone", None)], {},
+            [("c_carrier", [((0, 0, 0), "weapon_bone"),
+                            ((2, 0, 0), "weapon_bone"),
+                            ((0, 0, 2), "weapon_bone")])],
+        ), encoding="utf-8")
+        hose = self.dir / "c_carrier_hose.smd"
+        hose.write_text(_smd(
+            [("weapon_bone", None)], {},
+            [("c_carrier_hose", [((0, 1, 0), "weapon_bone"),
+                                 ((3, 1, 0), "weapon_bone"),
+                                 ((0, 1, 3), "weapon_bone")])],
+        ), encoding="utf-8")
+
+        scene = self._build(weapon_carrier_smd=str(carrier),
+                            carrier_extra_smds=[str(hose)])
+        self.assertIsNotNone(scene)
+        self.assertEqual(sorted(scene.carrier_materials),
+                         ["c_carrier", "c_carrier_hose"])
+        self.assertEqual(scene.weapon_materials, ["c_test"])
+
+    def test_scene_without_carrier_is_unchanged(self):
+        """Обычное оружие носителя не знает — список пуст, а не None."""
+        scene = self._build()
+        self.assertEqual(scene.carrier_materials, [])
+        self.assertEqual(scene.materials,
+                         scene.weapon_materials + scene.arms_materials)
+
     def test_materials_are_split_by_part(self):
         """Панель редактирует оружие; руки показываются, но не правятся."""
         scene = self._build()

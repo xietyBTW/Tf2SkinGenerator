@@ -809,13 +809,86 @@
 .cp__scene { display: flex; }
 .cp__scene .tag { padding: 3px 12px; }
 
-/* Части модели. Крестик у покрашенной части виден всегда: искать его
-   наведением — то же самое, что прятать. */
-.parts .tag { position: relative; }
+/* ── Части модели ───────────────────────────────────────────────────────
+   Это РЕЖИМ, а не ещё два ряда кнопок. Пока он включён, ряд действий над
+   моделью уходит — так же, как editbar убирает параметры сборки. Иначе
+   подсказка выдавливала «Заменить модель» на третью строку, и подвал
+   переставал быть выровненным по правому краю. */
+.half__foot.parts-on #model-acts { display: none; }
+
+/* Каждая полоса занимает строку целиком: соседство их только путало. */
+.parts {
+  flex: 1 0 100%;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  min-width: 0;
+}
+
+/* Ряд инструментов: слева что настраиваем, справа что сделать со всей
+   работой. Между ними — воздух, который и разводит их по смыслу. */
+.parts__tools {
+  flex-wrap: wrap;
+  gap: 8px 14px;
+}
+.parts__tabs { display: flex; gap: 14px; flex: none; }
+.parts__tabs .underlined { padding-bottom: 2px; }
+
+/* Волосяная черта между «что настраиваем» и самими настройками: групп три,
+   и без неё вкладки читаются как первый параметр кисти. */
+.parts__sep {
+  flex: none;
+  width: 1px;
+  height: 14px;
+  background: var(--hairline-strong);
+}
+
+/* Видна ровно одна группа: человек в момент времени либо режет, либо красит,
+   либо обводит. Показ всего разом давал четыре строки под моделью. */
+.parts__group {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  /* Занимает столько, сколько нужно, и жмётся первой: действия остаются в
+     той же строке, пока она их вмещает, а не выталкиваются вниз. */
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+/* Действия над всей работой прижаты вправо — как и во всех рядах приложения.
+   «Убрать всё» необратимо, и стоять вплотную к ползункам ему не место. */
+.parts__acts {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-left: auto;
+  flex: none;
+}
+/* Частей бывает под три десятка — они уезжают вбок, а не разваливают подвал. */
+#partsbar { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 3px; }
+
+/* Номер вместо «Часть 7 · 3%»: доля развёртки уехала в подсказку. Двухстрочные
+   чипы были втрое шире любого другого тега в приложении. */
+.parts .tag {
+  position: relative;
+  flex: none;
+  padding: 4px 9px;
+  font-variant-numeric: tabular-nums;
+}
 .parts .tag.is-painted { border-color: var(--accent); color: var(--accent); }
+/* Отмечен для слияния. Инверсия, как у всего выбранного в этом интерфейсе, —
+   и она не спорит с рамкой покраски: та про цвет, эта про выбор. */
+.parts .tag.is-marked {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--surface);
+}
+.parts .tag.is-hover { border-color: var(--ink); color: var(--ink); }
 .parts .tag--shared { border-style: dashed; }
+/* Крестик у покрашенной части виден всегда: искать его наведением — то же
+   самое, что прятать. */
 .parts__x {
-  margin-left: 8px;
+  margin-left: 6px;
   border: none;
   background: none;
   color: inherit;
@@ -823,54 +896,152 @@
   line-height: 1;
   cursor: pointer;
 }
-
-/* Палитра частей: образцы цвета кликаются так же, как кнопки-теги. */
-.parts__swatch {
-  width: 22px;
-  height: 22px;
-  border: 1px solid var(--hairline-strong);
+/* Кнопки дробления на чипе. Тот же вес, что у крестика: это соседние по
+   смыслу действия над одной и той же частью. */
+.parts__cut {
+  margin-left: 6px;
+  border: none;
+  background: none;
+  color: var(--ink-mute);
+  font-size: 12px;
+  line-height: 1;
   cursor: pointer;
-  padding: 0;
 }
-.parts__swatch.is-active { outline: 2px solid var(--ink); outline-offset: 2px; }
+.parts__cut:hover { color: var(--accent); }
+
+/* Цвет, которым покрашена часть, виден на самой кнопке. */
+.parts__dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 6px;
+  border: 1px solid var(--hairline-strong);
+  vertical-align: middle;
+}
+
+/* Образцы цвета — единственное цветное пятно в монохроме, поэтому они мелкие
+   и в такой же волосяной рамке, как всё остальное. Свой цвет — тот же
+   квадрат: нативный input рисует рамку и подложку от системы. */
+.parts__swatch,
 .parts__color {
-  width: 30px;
-  height: 22px;
+  flex: none;
+  width: 18px;
+  height: 18px;
   padding: 0;
   border: 1px solid var(--hairline-strong);
   background: none;
   cursor: pointer;
 }
+.parts__color { appearance: none; -webkit-appearance: none; }
+.parts__color::-webkit-color-swatch-wrapper { padding: 0; }
+.parts__color::-webkit-color-swatch { border: none; }
+.parts__color::-moz-color-swatch { border: none; }
+.parts__swatch:hover,
+.parts__color:hover { border-color: var(--ink); }
+.parts__swatch.is-active,
+.parts__color.is-active { outline: 1px solid var(--ink); outline-offset: 2px; }
+
+/* Подробность резки живёт в полосе ЧАСТЕЙ, а не в палитре: она меняет сам
+   список, а не то, чем красят. Ползунок тот же, что у силы тонировки. */
+.parts__detail,
 .parts__strength {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   font-size: 10px;
   letter-spacing: .14em;
   text-transform: uppercase;
-  color: var(--ink-soft);
+  color: var(--ink-mute);
 }
-.parts__strength input { width: 70px; }
-.parts__hint { font-size: 11px; color: var(--ink-soft); }
-/* Цвет, которым покрашена часть, виден на самой кнопке. */
-.parts .tag { position: relative; }
-.parts__dot {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  margin-left: 8px;
+/* Свой ползунок: нативный рисуется системным акцентом и круглой ручкой —
+   единственное скругление и единственная заливка на экране. */
+.parts__detail input,
+.parts__strength input {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 64px;
+  height: 18px;
+  margin: 0;
+  background: none;
+  cursor: pointer;
+}
+.parts__detail input::-webkit-slider-runnable-track,
+.parts__strength input::-webkit-slider-runnable-track {
+  height: 1px;
+  background: var(--hairline-strong);
+}
+.parts__detail input::-webkit-slider-thumb,
+.parts__strength input::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 3px;
+  height: 11px;
+  margin-top: -5px;
+  border: 0;
+  background: var(--ink);
+}
+.parts__detail input::-moz-range-track,
+.parts__strength input::-moz-range-track { height: 1px; background: var(--hairline-strong); }
+.parts__detail input::-moz-range-thumb,
+.parts__strength input::-moz-range-thumb {
+  width: 3px;
+  height: 11px;
+  border: 0;
+  border-radius: 0;
+  background: var(--ink);
+}
+
+/* Ручка направления градиента. Круг с волосяной стрелкой: угол в цифрах
+   человеку не нужен, ему нужно видеть, куда пойдёт переход. Значение в
+   градусах уходит в подсказку под полосой, пока ручку тянут. */
+.parts__dial {
+  flex: none;
+  position: relative;
+  width: 20px;
+  height: 20px;
+  padding: 0;
   border: 1px solid var(--hairline-strong);
-  vertical-align: middle;
+  border-radius: 50%;   /* единственное скругление: это и есть круг */
+  background: none;
+  cursor: grab;
+  touch-action: none;
+}
+.parts__dial:hover { border-color: var(--ink); }
+.parts__dial:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+/* Стрелка растёт из центра к краю: половина высоты, начало — в середине. */
+.parts__needle {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 1px;
+  height: 9px;
+  margin-left: -0.5px;
+  background: var(--ink);
+  transform-origin: 50% 0;
 }
 
 /* Включённый режим на текстовой кнопке: у палитры их несколько подряд. */
 .parts .textbtn.is-active { color: var(--accent); border-color: var(--accent); }
 
-/* Место части на текстуре: подсвечивается при наведении на кусок модели. */
+/* Подсказка — своя строка с зарезервированной высотой: в ряду кнопок она
+   растягивала его и подвал прыгал на каждое действие. */
+.parts__hint {
+  flex: 1 0 100%;
+  min-height: 15px;
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+
+/* Место части на текстуре: подсвечивается при наведении на кусок модели.
+   Картинка-маска на весь кадр, а не прямоугольник: у детали, лежащей на
+   развёртке наискось, прямоугольник накрывал половину текстуры и соседей
+   заодно. Заливку и контур рисует Python — те же треугольники, по которым
+   красит склейка. */
 .frame__uv {
   position: absolute;
-  border: 1px solid var(--accent);
-  background: rgba(255, 179, 71, .18);
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
   pointer-events: none;
 }
 .parts .tag.is-hover { border-color: var(--accent); color: var(--accent); }
@@ -1363,3 +1534,120 @@
 
 /* Крестик «убрать из стиля» стоит рядом с шестерёнкой кадра. */
 .frame__off { font-size: 14px; }
+
+/* ── Выбор цвета ─────────────────────────────────────────────────────────
+   Свой поповер вместо системного диалога Windows: тот нарисован не нами и в
+   интерфейсе без скруглений, заливок и теней выглядит чужим. */
+.picker {
+  position: fixed;
+  z-index: 40;
+  width: 184px;
+  padding: 10px;
+  border: 1px solid var(--hairline-strong);
+  background: var(--overlay);
+}
+
+/* Насыщенность по горизонтали, яркость по вертикали — два градиента поверх
+   тона. Канва тут не нужна: точку в цвет переводит арифметика, а не пиксель. */
+.picker__sv {
+  position: relative;
+  height: 118px;
+  cursor: crosshair;
+  touch-action: none;
+}
+.picker__hue {
+  position: relative;
+  height: 10px;
+  margin-top: 10px;
+  background: linear-gradient(to right,
+    #f00 0%, #ff0 17%, #0f0 33%, #0ff 50%, #00f 67%, #f0f 83%, #f00 100%);
+  cursor: ew-resize;
+  touch-action: none;
+}
+
+/* Метки — белая рамка с тёмной обводкой, а не токен темы: они лежат на
+   произвольном цвете, и любой цвет интерфейса на нём где-нибудь пропадёт. */
+.picker__dot,
+.picker__bar {
+  position: absolute;
+  border: 1px solid #fff;
+  outline: 1px solid rgba(0, 0, 0, .55);
+  pointer-events: none;
+}
+.picker__dot { width: 9px; height: 9px; margin: -5px 0 0 -5px; }
+.picker__bar { top: -2px; width: 3px; height: 12px; margin-left: -2px; }
+
+.picker__foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+.picker__now {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--hairline-strong);
+}
+.picker__hex {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 0;
+  border: 0;
+  border-bottom: 1px solid var(--hairline-strong);
+  background: none;
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+.picker__hex:focus { outline: none; border-bottom-color: var(--accent); }
+
+/* ── Посадка картинки на часть ───────────────────────────────────────────
+   Канва — единственная «масса» в окне: всё остальное подписи и волосяные
+   линии, как и везде. Развёртка рисуется под картинкой, а не рамкой вокруг:
+   склейка маскирует по треугольникам, и рамка обещала бы лишнее. */
+/* Ширину задаёт САМ диалог (у `.ask` она 440px), а не его тело: у окна
+   посадки в ряду настроек три кнопки, ручка и ползунок, и в 440 они не
+   помещались — ряд вылезал за край вместе с «Готово». */
+.place { width: min(600px, 94vw); }
+.place .ask__body { max-height: 92vh; overflow: auto; }
+/* Канва квадратная (развёртка — квадрат), поэтому ограничиваем её ПО ВЫСОТЕ:
+   иначе окно с рядами настроек и кнопками не помещается в экран, и «Готово»
+   уезжает под край. */
+.place__box {
+  display: flex;
+  justify-content: center;
+  margin: 4px 0 12px;
+  border: 1px solid var(--hairline-strong);
+  background: var(--viewport);
+}
+.place__canvas {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: min(46vh, 420px);
+  aspect-ratio: 1;
+  cursor: grab;
+  touch-action: none;
+}
+.place__canvas:active { cursor: grabbing; }
+/* Холст берёт фокус ради стрелок-поворота: рамка по умолчанию тут была бы
+   лишней линией поверх картинки, поэтому только по клавиатуре. */
+.place__canvas:focus { outline: none; }
+.place__canvas:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+.place__row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  min-width: 0;
+}
+.place__row .tag { flex: none; }
+.place__row .tag.is-active {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--surface);
+}
+.place__hint { margin: 10px 0 0; color: var(--ink-mute); }
+.place__bare { flex: none; font-size: 11px; }

@@ -16,6 +16,7 @@
 
   #canvas-container { width: 100%; height: 100%; }
   #canvas-container.inspecting { cursor: help; }
+  #canvas-container.cutting  { cursor: crosshair; }
 
   /* ── Кнопка инспекции материала (?) ───────────────────────────────── */
   #inspect-btn {
@@ -1238,6 +1239,33 @@ function _exitSkyboxView() {
   }
 }
 
+// ── Режим резки: щелчок по куску отделяет ещё один шов развёртки ─────────── //
+// Резать надо ТАМ, где смотрят: человек видит на модели руку и хочет пальцы, а
+// не ищет её номер в полосе частей.
+//
+// Режим, а не модификатор. Alt+колесо здесь уже было — и провалилось: жест
+// невидим, ему надо учить, и первое, что делает человек, — щёлкает по модели.
+// Теперь щелчок и режет.
+let _cutMode = false;
+
+window.setCutMode = function(on) {
+  _cutMode = !!on;
+  document.getElementById('canvas-container').classList.toggle('cutting', _cutMode);
+  // Обводка строится по разным картам в разных режимах — старую снимаем, иначе
+  // на экране останется контур части поверх режима островов.
+  _clearPartHover();
+};
+
+// Щелчок отрезает обведённый остров или приращивает его обратно — то же
+// действие в обе стороны, поэтому ни колеса, ни второй кнопки не нужно.
+function _cutAt(e) {
+  const found = _partAt(_ndcFromEvent(e));
+  if (found && typeof window.onPartCut === 'function') {
+    window.onPartCut(found.material, found.owner, found.part);
+  }
+  return !!found;
+}
+
 // ── FOV-зум колесом (только скайбокс) ────────────────────────────────────── //
 // Фон-кубмапа бесконечно далёкая: долли-зум OrbitControls для неё ничего не
 // меняет, поэтому в режиме скайбокса колесо крутит угол обзора камеры
@@ -1778,14 +1806,21 @@ window.setPartsMode = function(on) {
 
 // Номера частей для меша. Имя материала — единственная связь с разбором из
 // Python; у одноматериальной модели связывать нечего, берём единственный набор.
-function _partListFor(mesh) {
-  if (!_partsMap || !mesh) return null;
+function _listFrom(map, mesh) {
+  if (!map || !mesh) return null;
   const name = (mesh.material && !Array.isArray(mesh.material) && mesh.material.name)
     || mesh.name || '';
-  if (_partsMap[name]) return _partsMap[name];
-  const only = Object.keys(_partsMap);
-  return only.length === 1 ? _partsMap[only[0]] : null;
+  if (map[name]) return map[name];
+  const only = Object.keys(map);
+  return only.length === 1 ? map[only[0]] : null;
 }
+
+function _partListFor(mesh) { return _listFrom(_partsMap, mesh); }
+
+// Карта «треугольник → остров развёртки». В режиме резки обводится и режется
+// именно остров: увидеть, ЧТО отрежется, нужно до щелчка, а не после.
+let _islandsMap = null;
+window.setModelIslands = function(map) { _islandsMap = map || null; };
 
 function _partAt(ndc) {
   // Во время перетаскивания части работают и без включённого режима: человек
@@ -1793,11 +1828,17 @@ function _partAt(ndc) {
   if (!_partsMode && _dragDepth <= 0) return null;
   const hit = _hitsAt(ndc)[0];
   if (!hit || hit.faceIndex == null) return null;
-  const list = _partListFor(hit.object);
+  // В режиме резки подсвечиваем и берём ОСТРОВ, иначе — часть. Обводка рисуется
+  // одним и тем же кодом: ему всё равно, по какой карте группировать.
+  const map = (_cutMode && _islandsMap) ? _islandsMap : _partsMap;
+  const list = _listFrom(map, hit.object);
   if (!list) return null;
   const part = list[hit.faceIndex];
-  return (part == null) ? null : { mesh: hit.object, part,
-                                   material: (hit.object.material || {}).name || '' };
+  if (part == null) return null;
+  const parts = _partListFor(hit.object);
+  return { mesh: hit.object, part, list,
+           owner: parts ? parts[hit.faceIndex] : null,
+           material: (hit.object.material || {}).name || '' };
 }
 
 // Подсветка — отдельный полупрозрачный меш из треугольников части, а не
@@ -1857,7 +1898,7 @@ function _setPartHover(found) {
     window.onPartHover(found ? found.part : null);
   }
   if (!found) return;
-  const list = _partListFor(found.mesh);
+  const list = found.list || _partListFor(found.mesh);
   const overlay = list ? _partOverlay(found.mesh, list, found.part) : null;
   if (overlay) _partHover = { ...found, overlay };
 }
@@ -1886,6 +1927,10 @@ renderer.domElement.addEventListener('pointerup', e => {
   _partDownAt = null;
   if (!_partsMode || !down) return;
   if (Math.abs(e.clientX - down.x) + Math.abs(e.clientY - down.y) > 4) return;
+  // В режиме резки щелчок режет, а не красит: два ответа на один щелчок —
+  // это и есть та неоднозначность, из-за которой человек вместо разреза
+  // получал окно выбора текстуры.
+  if (_cutMode) { _cutAt(e); return; }
   const found = _partAt(_ndcFromEvent(e));
   if (found && typeof window.onPartPicked === 'function') {
     window.onPartPicked(found.material, found.part);

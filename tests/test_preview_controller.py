@@ -28,6 +28,7 @@ class _FakeWorker(BaseWorker):
     blu_same_as_red = Signal()
     australium_ready = Signal(str, str)
     render_hints = Signal(object)
+    scene_extra = Signal(object)
     failed = Signal(str)
 
     def __init__(self, **kwargs):

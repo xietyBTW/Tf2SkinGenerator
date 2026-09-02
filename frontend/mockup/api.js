@@ -44,7 +44,16 @@ const memo = new Map();
 
 function cached(method, params) {
   const key = method + JSON.stringify(params);
-  if (!memo.has(key)) memo.set(key, call(method, params));
+  if (!memo.has(key)) {
+    // Кэшируется ОБЕЩАНИЕ, а не ответ: иначе два одновременных запроса ушли бы
+    // оба. Но неудачное обещание надо забыть — список игровых материалов
+    // падает, пока не указан путь к игре, и закэшированный отказ держался бы
+    // до перезапуска, хотя путь уже поправили в настройках.
+    memo.set(key, call(method, params).catch((err) => {
+      memo.delete(key);
+      throw err;
+    }));
+  }
   return memo.get(key);
 }
 
@@ -157,12 +166,22 @@ export const textureSettings = (material) => call('texture_settings', { material
 export const setTextureSettings = (material, settings) =>
   call('set_texture_settings', { material, settings });
 export const textureBadges = () => call('texture_badges');
-export const parts          = (material = '') => call('parts', { material });
-export const setPartTexture = (material, part, path = null) =>
-  call('set_part_texture', { material, part, path });
+// known_shape — отпечаток разбиения, который у страницы уже есть. Совпал —
+// Python не шлёт карты треугольников: они почти весь ответ, а меняются только
+// от резки, тогда как сам запрос идёт после каждого мазка кистью.
+export const parts          = (material = '', known_shape = '') =>
+  call('parts', { material, known_shape });
+export const setPartTexture = (material, part, path = null, options = null) =>
+  call('set_part_texture', { material, part, path, options });
+export const partShape = (material, part) =>
+  call('part_shape', { material, part });
+export const partMask = (material, part) =>
+  call('part_mask', { material, part });
 export const setPartColors  = (material, colors, strength = null) =>
   call('set_part_colors', { material, colors, strength });
 export const clearParts     = (material = '') => call('clear_parts', { material });
+export const setPartEdge    = (material, width, color) =>
+  call('set_part_edge', { material, width, color });
 export const undoParts      = (material = '') => call('undo_parts', { material });
 
 // Работа над предметом: правки сохраняются молча, если это не выключено.
@@ -195,7 +214,18 @@ export const openVmt      = (material) => call('open_vmt', { material });
 export const saveVmt      = (material, content, original) =>
   call('save_vmt', { material, content, original });
 export const resetVmt     = (material) => call('reset_vmt', { material });
-export const loadFirstPerson = (action = 'IDLE') => call('load_first_person', { action });
+// full — собрать сцену целиком: страница просит это, когда дорожки не
+// легли (сцены в кадре не оказалось). Обычная смена анимации идёт без
+// него и обходится одними дорожками.
+export const loadFirstPerson = (action = 'IDLE', full = false) =>
+  call('load_first_person', { action, full });
+export const leaveFirstPerson = () => call('leave_first_person');
+export const setPartDetail = (material, detail) =>
+  call('set_part_detail', { material, detail });
+export const togglePartIsland = (material, group, island) =>
+  call('toggle_part_island', { material, group, island });
+export const mergePartIslands = (material, group, islands) =>
+  call('merge_part_islands', { material, group, islands });
 export const loadSkybox   = (sky_name) => call('load_skybox', { sky_name });
 export const setTexture   = (material, path) => call('set_texture', { material, path });
 export const build        = (params) => call('build', { params });
@@ -244,7 +274,10 @@ export function subscribe(onEvent) {
 }
 
 /** URL файла, который сделал воркер (модель, текстура). */
-export const fileUrl = (path) => '/file?path=' + encodeURIComponent(path);
+// opaque=1 — PNG без альфы: в игровых текстурах она маска бликов, и на плоском
+// показе картинка выглядела бы призраком (см. devserver._drop_alpha).
+export const fileUrl = (path, opaque = false) =>
+  '/file?path=' + encodeURIComponent(path) + (opaque ? '&opaque=1' : '');
 
 /** То же, но без альфа-канала — для плоского показа текстуры.
  *  В игровых VTF альфа обычно маска бликов, и на карточке текстура из-за неё

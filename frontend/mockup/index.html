@@ -221,28 +221,89 @@
         </div>
         <!-- Части модели: куски геометрии одного материала. Список приходит
              от Python по загруженной модели. -->
-        <div class="styles parts" id="partsbar" hidden>
+        <!-- Полоса частей. Разбита на три группы настроек, из которых видна
+             ОДНА: человек в момент времени либо режет, либо красит, либо
+             обводит, а показывать всё разом — четыре строки под моделью, где
+             «Толщина» отрывается переносом и уезжает к «Убрать всё».
+
+             Порядок сверху вниз тот же, что в работе: сперва из чего состоит
+             модель, потом чем это правят, потом что сделать со всем разом. -->
+        <div class="styles parts parts__list" id="partsbar" hidden>
           <span class="label label--inline">Части</span>
         </div>
-        <!-- Палитра частей: выбранный цвет применяется щелчком по куску
-             модели. Картинку кладут перетаскиванием — для неё кнопки нет. -->
-        <div class="styles parts" id="partspaint" hidden>
-          <span class="label label--inline">Цвет</span>
-          <input class="parts__color" type="color" id="part-color" value="#c83c3c"
-                 title="Свой цвет">
-          <button class="textbtn textbtn--sm" id="parts-grad"
-                  title="Красить переходом из первого цвета во второй">Градиент</button>
-          <input class="parts__color" type="color" id="part-color2" value="#2a2a2a"
-                 title="Второй цвет градиента" hidden>
-          <button class="textbtn textbtn--sm" id="parts-grad-dir" hidden
-                  title="Направление перехода">Сверху вниз</button>
-          <label class="parts__strength">
-            Сила
-            <input type="range" id="part-tint" min="20" max="100" value="100">
-          </label>
-          <button class="textbtn textbtn--sm" id="parts-undo">Отменить</button>
-          <button class="textbtn textbtn--sm" id="parts-random">Случайно</button>
-          <button class="textbtn textbtn--sm" id="parts-clear">Убрать всё</button>
+
+        <div class="styles parts parts__tools" id="partspaint" hidden>
+          <!-- Что настраиваем. Подчёркиванием, как отмечено всё выбранное в
+               этом интерфейсе (см. режимы показа над вьюпортом). -->
+          <div class="parts__tabs">
+            <button class="underlined is-active" data-tool="brush">Кисть</button>
+            <button class="underlined" data-tool="cut">Нарезка</button>
+            <button class="underlined" data-tool="edge">Окантовка</button>
+          </div>
+
+          <span class="parts__sep"></span>
+
+          <!-- ── Кисть ─────────────────────────────────────────────────── -->
+          <div class="parts__group" data-group="brush">
+            <input class="parts__color" type="color" id="part-color" value="#7d6a58"
+                   title="Свой цвет">
+            <button class="textbtn textbtn--sm" id="parts-grad"
+                    title="Красить переходом из первого цвета во второй">Градиент</button>
+            <input class="parts__color" type="color" id="part-color2" value="#2a2a2a"
+                   title="Второй цвет градиента" hidden>
+            <!-- Направление перехода задаётся ручкой: двух вариантов
+                 («сверху вниз» / «слева направо») не хватает — наклонный
+                 переход на детали и есть то, что читается как объём. -->
+            <button class="parts__dial" id="parts-grad-dir" hidden
+                    title="Направление перехода — потяни или стрелками">
+              <i class="parts__needle"></i>
+            </button>
+            <label class="parts__strength">
+              Сила
+              <input type="range" id="part-tint" min="20" max="100" value="100">
+            </label>
+          </div>
+
+          <!-- ── Нарезка ───────────────────────────────────────────────── -->
+          <div class="parts__group" data-group="cut" hidden>
+            <!-- Резать надо там, где смотрят: человек видит на модели руку и
+                 хочет пальцы. Это РЕЖИМ с видимой кнопкой, а не жест: щелчок
+                 по модели в обычном состоянии красит, и два ответа на один
+                 щелчок означали бы, что один из них молча проигрывает. -->
+            <button class="textbtn textbtn--sm" id="parts-cut"
+                    title="Щёлкать по кускам модели, чтобы дробить их мельче">Резать</button>
+            <!-- Развёртка режет вещи не так, как их видит человек: палец у неё
+                 нередко разложен на верх и низ. Кнопка появляется, только
+                 когда отмечено больше одного отрезка одного куска. -->
+            <button class="textbtn textbtn--sm" id="parts-join" hidden
+                    title="Свести отмеченные отрезки в одну часть">Объединить</button>
+            <label class="parts__strength">
+              Дробление
+              <input type="range" id="part-detail" min="0" max="100" value="0">
+            </label>
+          </div>
+
+          <!-- ── Окантовка ─────────────────────────────────────────────── -->
+          <div class="parts__group" data-group="edge" hidden>
+            <button class="textbtn textbtn--sm" id="parts-edge"
+                    title="Обвести края покрашенных частей">Обводить</button>
+            <input class="parts__color" type="color" id="part-edge-color"
+                   value="#141210" title="Цвет окантовки" hidden>
+            <label class="parts__strength" id="part-edge-box" hidden>
+              Толщина
+              <input type="range" id="part-edge-width" min="1" max="30" value="6">
+            </label>
+          </div>
+
+          <!-- Действия над всей работой — справа и отдельно: «Убрать всё»
+               рядом с ползунком толщины стояло как равное, а оно необратимо. -->
+          <div class="parts__acts">
+            <button class="textbtn textbtn--sm" id="parts-undo">Отменить</button>
+            <button class="textbtn textbtn--sm" id="parts-random">Случайно</button>
+            <button class="textbtn textbtn--sm" id="parts-clear">Убрать всё</button>
+            <button class="textbtn textbtn--sm" id="parts-done">Готово</button>
+          </div>
+
           <span class="parts__hint" id="parts-hint"></span>
         </div>
         <!-- Анимации вида от первого лица. Список приходит от воркера: у
@@ -406,6 +467,53 @@
     <div class="ask__acts">
       <button class="textbtn" type="button" id="maps-cancel">Отмена</button>
       <button class="btn--primary" type="button" id="maps-ok">Применить</button>
+    </div>
+  </div>
+</dialog>
+
+<!-- ═══ Посадка картинки на часть ══════════════════════════════════════════
+     Картинка ложится не в прямоугольник, а на РАЗВЁРТКУ части: склейка
+     маскирует по её треугольникам, и всё, что вне них, при сборке исчезает.
+     Поэтому под картинкой рисуется настоящая маска, а не рамка — иначе окно
+     показывало бы одно, а в игре получалось другое.
+
+     Тянуть, а не вводить числа: подобрать поворот логотипа на глаз можно, а
+     назвать его в градусах — нет. -->
+<dialog class="ask place" id="placedlg">
+  <div class="ask__body">
+    <div class="dlg__head">
+      <p class="label ask__title">Как положить картинку</p>
+      <span class="mono dlg__mat" id="place-part"></span>
+    </div>
+    <div class="place__box">
+      <canvas class="place__canvas" id="place-canvas" width="512" height="512"
+              tabindex="0"></canvas>
+    </div>
+    <div class="place__row">
+      <span class="label label--inline">Вписать</span>
+      <button class="tag" data-fit="contain">Целиком</button>
+      <button class="tag" data-fit="cover">Заполнить</button>
+      <button class="tag" data-fit="stretch">Растянуть</button>
+      <label class="parts__detail">
+        Размер
+        <input type="range" id="place-scale" min="10" max="400" value="100">
+      </label>
+      <!-- Кусок занимает малую часть развёртки: класть на него картинку,
+           глядя на всю текстуру, — то же, что целиться в спичку с другого
+           конца комнаты. По умолчанию включено, выключается для контекста:
+           иногда надо видеть, где деталь лежит относительно соседних. -->
+      <label class="check place__bare">
+        <input type="checkbox" id="place-zoom" checked><span>Приблизить</span>
+      </label>
+      <label class="check place__bare">
+        <input type="checkbox" id="place-bare"><span>Без игровой</span>
+      </label>
+      <button class="textbtn textbtn--sm" id="place-reset">Сбросить</button>
+    </div>
+    <p class="ask__text place__hint" id="place-hint">Тяни картинку мышью, поворачивай за маркер сверху (стрелки — на 15°), колесо — приблизить к курсору</p>
+    <div class="ask__acts">
+      <button class="textbtn" type="button" id="place-cancel">Отмена</button>
+      <button class="btn--primary" type="button" id="place-ok">Готово</button>
     </div>
   </div>
 </dialog>

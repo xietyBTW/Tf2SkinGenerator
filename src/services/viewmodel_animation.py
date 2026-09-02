@@ -64,6 +64,7 @@ def build_scene(
     loop: bool = True,
     weapon_merge_bones: Optional[Sequence[str]] = None,
     weapon_carrier_smd: str = "",
+    carrier_extra_smds: Sequence[str] = (),
     weapon_extra_smds: Sequence[str] = (),
     editable_mats: Optional[Sequence[str]] = None,
     arms_extra_smds: Sequence[str] = (),
@@ -87,6 +88,8 @@ def build_scene(
             Crowbar `$bonemerge` выводит не всегда, а там, где выводит,
             он оказывается уже отобранного по кадрам (у револьвера одна
             кость вместо четырёх, и барабан оставался неподвижным).
+        carrier_extra_smds: бодигруппы носителя — шланг медигана лежит
+            отдельным SMD, и без него пушка в кадре обрублена.
         weapon_carrier_smd: reference SMD пушки, НА КОТОРОЙ висит модель.
             Праздничное оружие — гирлянда, а не пушка: в `c_medigun_xmas`
             лежат одни огоньки, и без носителя они висели бы в пустой
@@ -124,7 +127,8 @@ def build_scene(
             return None
         editable = list(editable_mats or weapon_part["materials"])
         if weapon_carrier_smd:
-            _add_carrier(weapon_part, weapon_carrier_smd, bind, index_of, anim_smd)
+            _add_carrier(weapon_part, weapon_carrier_smd, bind, index_of,
+                         anim_smd, carrier_extra_smds)
     arms_part = _arms_part(arms_ref_smd, bind, index_of,
                            arms_extra_smds, arms_include_mats)
     if arms_part is None:
@@ -354,7 +358,8 @@ def _weapon_part(weapon_ref_smd: str, bind: viewmodel_pose.Rig,
 
 
 def _add_carrier(part: dict, carrier_smd: str, bind: viewmodel_pose.Rig,
-                 index_of: Dict[str, int], anim_smd: str) -> None:
+                 index_of: Dict[str, int], anim_smd: str,
+                 extra_smds: Sequence[str] = ()) -> None:
     """Дописывает в часть с оружием пушку-носитель. Не вышло — молча пропускаем.
 
     Носитель — обычная модель оружия, только собранная теми же костями: у
@@ -364,7 +369,7 @@ def _add_carrier(part: dict, carrier_smd: str, bind: viewmodel_pose.Rig,
     """
     try:
         carrier = _weapon_part(carrier_smd, bind, index_of,
-                               _merge_names(carrier_smd, anim_smd))
+                               _merge_names(carrier_smd, anim_smd), extra_smds)
     except viewmodel_pose.NotHeldInHands:
         carrier = None
     if carrier is None:

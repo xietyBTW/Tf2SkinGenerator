@@ -392,7 +392,7 @@ class ViewmodelPreviewWorker(BaseWorker):
         weapon_extra = _default_body_parts(
             weapon_dir, smd_service.find_reference_smd(weapon_dir, self.weapon_key))
         arms_extra = _default_body_parts(arms_dir, arms_smd)
-        carrier_smd, carrier_dir = self._carrier_smd()
+        carrier_smd, carrier_extra, carrier_dir = self._carrier_smd()
 
         if self.animate:
             return viewmodel_animation.build_scene(
@@ -404,6 +404,7 @@ class ViewmodelPreviewWorker(BaseWorker):
                 loop=sequence.loop,
                 weapon_merge_bones=merge_bones,
                 weapon_carrier_smd=carrier_smd,
+                carrier_extra_smds=carrier_extra,
                 weapon_extra_smds=weapon_extra,
                 arms_extra_smds=arms_extra,
                 arms_include_mats=self._arms_whitelist(arms_smd, arms_extra),
@@ -418,6 +419,8 @@ class ViewmodelPreviewWorker(BaseWorker):
             arms_extra_smds=arms_extra,
             weapon_merge_bones=merge_bones,
             arms_include_mats=self._arms_whitelist(arms_smd, arms_extra),
+            weapon_carrier_smd=carrier_smd,
+            carrier_extra_smds=carrier_extra,
         ), carrier_dir
 
     def _weapon_smd(self, weapon_dir: str) -> str:
@@ -448,26 +451,21 @@ class ViewmodelPreviewWorker(BaseWorker):
         return merged
 
     def _carrier_smd(self) -> tuple:
-        """(reference SMD пушки-носителя, её папка) либо ("", "").
+        """(меш носителя, его бодигруппы, папка) либо ("", [], "").
 
-        Праздничное оружие — навесная гирлянда: в `c_minigun_xmas` лежат одни
-        огоньки, а сам миниган остаётся в `model_player` предмета. Носитель
-        достаём и показываем, иначе в руке висят огоньки без пушки.
+        Праздничное оружие — навесная гирлянда: сама пушка остаётся в
+        `model_player` предмета. Без носителя в руке висят одни огоньки.
+        Кого и как искать — в `carrier_model`, общем с обычным превью.
         """
-        info = viewmodel_anims.anim_info(self.weapon_key, self.tf2_root)
-        base = info.carried_on if info else ""
-        if not base:
-            return "", ""
-        result = mds.ensure_decompiled(
-            base, self.misc_vpk_path, self._mdl_candidates(base),
+        from src.services import carrier_model
+        found = carrier_model.find(
+            self.weapon_key, self.misc_vpk_path, self.tf2_root,
             cancelled=self.isInterruptionRequested,
             on_progress=self._emit_stage,
         )
-        if result is None:
-            logger.info(f"[fp] {self.weapon_key}: носитель {base} не достали")
-            return "", ""
-        smd = smd_service.find_reference_smd(result.directory, base)
-        return (smd or ""), (result.directory if smd else "")
+        if not found:
+            return "", [], ""
+        return found.smds[0], list(found.smds[1:]), found.directory
 
     def _arms_whitelist(self, arms_smd: str, extra: list) -> Optional[set]:
         """Материалы рук, которые показываем.
@@ -521,7 +519,7 @@ class ViewmodelPreviewWorker(BaseWorker):
         # в превью есть, но текстуру на неё не бросишь.
         self.editable_materials.emit(
             list(scene.get("weaponMaterials") or weapon_names)
-            if isinstance(scene, dict) else list(weapon_names))
+            if isinstance(scene, dict) else list(scene.weapon_materials))
         if textures:
             self.multi_material.emit(textures)
         missing = [n for n in (*weapon_names, *arms_names) if n not in textures]
@@ -583,7 +581,10 @@ def _scene_materials(scene) -> tuple:
     текстур разницы нет, и разводить две ветки ниже незачем.
     """
     if not isinstance(scene, dict):
-        return list(scene.weapon_materials), list(scene.arms_materials)
+        # Носитель идёт к оружию: текстуры ему нужны так же, а редактируемым
+        # его делает не этот список, а `editable_materials` ниже.
+        return (list(scene.weapon_materials) + list(scene.carrier_materials),
+                list(scene.arms_materials))
     weapon, arms = [], []
     for part in scene.get("parts", ()):
         (weapon if part.get("kind") == "weapon" else arms).extend(

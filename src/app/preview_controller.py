@@ -61,12 +61,21 @@ class Preview3DController:
     blu_same_as_red = Signal()              # BLU есть, но в стоке равен RED
     australium_ready = Signal(str, str)     # (png, имя материала)
     render_hints = Signal(object)           # свойства рисования материалов
+    # ({материал: png} чужой геометрии, [материалы предмета]) — праздничная
+    # гирлянда висит на обычной пушке: она в кадре есть, но предмету не
+    # принадлежит, и карточек по ней не бывает.
+    scene_extra = Signal(object, object)
     cards_ready = Signal(str)               # (texture) — геометрия НЕ трогается
     failed = Signal(str)                    # (текст ошибки)
 
     def __init__(self, session: PreviewSession):
         self._session = session
         self._worker = None
+        #: Последняя подложка ОБЫЧНОЙ модели: (текстуры чужой геометрии,
+        #: материалы предмета). Поля сеанса под неё общие с видом от первого
+        #: лица, и выход оттуда их чистит — а у праздничного оружия подложка
+        #: нужна и обычной модели. Помнит её тот, кто её и произвёл.
+        self._scene_extra: Tuple[dict, list] = ({}, [])
 
     # ═══════════════════════════════════════════════════════════════════════ #
     # Управление
@@ -106,6 +115,9 @@ class Preview3DController:
         из игрового QC нужны (режим «заменить только геометрию»).
         """
         self.stop()
+        # Подложка прошлой модели к новой не относится: у неё свой носитель
+        # или его нет вовсе.
+        self._scene_extra = ({}, [])
 
         from src.services.preview_3d_worker import Preview3DWorker
         w = Preview3DWorker(
@@ -130,6 +142,7 @@ class Preview3DController:
         w.blu_same_as_red.connect(self._on_blu_same_as_red)
         w.australium_ready.connect(self._on_australium_ready)
         w.render_hints.connect(lambda hints: self.render_hints.emit(hints or {}))
+        w.scene_extra.connect(self._on_scene_extra)
         w.failed.connect(self.failed.emit)
 
     # ═══════════════════════════════════════════════════════════════════════ #
@@ -200,6 +213,44 @@ class Preview3DController:
     def _on_blu_same_as_red(self) -> None:
         self._session.blu_matches_red = True
         self.blu_same_as_red.emit()
+
+    def _on_scene_extra(self, payload) -> None:
+        """
+        Текстуры чужой геометрии кадра — подложкой, а не составом предмета.
+
+        Праздничное оружие висит на обычной пушке: она в кадре нужна, иначе
+        гирлянда болтается в пустоте, — но предмету не принадлежит. Карточки
+        по ней не строятся и в сборку она не идёт; ложится ПОД текстуры
+        предмета, чтобы правка предмета их перебивала. Тот же приём, что у рук
+        класса в виде от первого лица (``_on_materials`` ниже).
+
+        Вторым в паре едут материалы САМОГО предмета. Без них одноматериальная
+        гирлянда осталась бы стоковой: её текстура хранится под служебным
+        ключом, меша с таким именем в сцене нет, а класть её глобально теперь
+        нельзя — глобальная легла бы и на пушку.
+        """
+        tex_map, own = payload if isinstance(payload, tuple) else (payload, [])
+        if not tex_map:
+            return
+        self._scene_extra = (dict(tex_map), list(own))
+        self.apply_scene_extra()
+        self.scene_extra.emit(dict(tex_map), list(own))
+
+    def apply_scene_extra(self) -> None:
+        """Кладёт подложку обычной модели в сеанс.
+
+        Зовётся не только по сигналу воркера, но и после выхода из вида от
+        первого лица: тот чистит те же поля за собой, и без возврата
+        праздничная гирлянда красилась ЦЕЛИКОМ на модель — вместе с пушкой,
+        на которой висит. Пусто — ничего не трогаем: у обычного оружия
+        подложки нет, и обнулять чужое не за что.
+        """
+        tex_map, own = self._scene_extra
+        if not tex_map:
+            return
+        self._session.scene_extra_textures = dict(tex_map)
+        if own:
+            self._session.scene_item_materials = list(own)
 
     def _on_multi_material(self, tex_map: dict) -> None:
         if not tex_map:
@@ -445,17 +496,31 @@ class ViewmodelController:
     materials = Signal(object)      # {материал: png}
     editable = Signal(object)       # какие меши разрешено перекрашивать
     actions = Signal(object)        # какие анимации есть у этого оружия
+    clip = Signal(object)           # только дорожки: сцена на экране остаётся
     render_hints = Signal(object)
     failed = Signal(str)
 
     def __init__(self, session: PreviewSession):
         self._session = session
         self._worker = None
+        #: Что сейчас в кадре: (предмет, режим, команда). По нему решается,
+        #: можно ли сменить анимацию одними дорожками.
+        self._shown: Optional[tuple] = None
 
     def stop(self) -> None:
+        self._stop_worker()
+        self._shown = None
+
+    def _stop_worker(self) -> None:
+        """Гасит воркер, НЕ забывая сцену: смена анимации её не убирает."""
         if self._worker is not None:
             self._worker.stop(3000)
             self._worker = None
+
+    def shows(self, weapon_key: str, mode: str) -> bool:
+        """Та же сцена уже в кадре — значит хватит одних дорожек."""
+        return self._shown == (weapon_key, mode,
+                               self._session.textures.active_team)
 
     def load(self, weapon_key: str, mode: str, misc_vpk: str, textures_vpk: str,
              tf2_root: str, action: str = 'IDLE', lang: str = 'en') -> None:
@@ -482,27 +547,78 @@ class ViewmodelController:
         w.ready.connect(lambda obj, _tex: self.ready.emit(obj))
         w.animated_ready.connect(self.animated.emit)
         w.multi_material.connect(self._on_materials)
-        w.editable_materials.connect(lambda n: self.editable.emit(list(n or [])))
+        w.editable_materials.connect(self._on_editable)
         w.actions_available.connect(lambda n: self.actions.emit(list(n or [])))
         w.render_hints.connect(lambda h: self.render_hints.emit(h or {}))
+        w.failed.connect(self.failed.emit)
+        self._worker = w
+        self._shown = (weapon_key, mode, self._session.textures.active_team)
+        w.start()
+
+    def load_clip(self, weapon_key: str, mode: str, misc_vpk: str,
+                  textures_vpk: str, tf2_root: str, action: str = 'IDLE',
+                  lang: str = 'en') -> None:
+        """Догружает ТОЛЬКО дорожки анимации к уже показанной сцене.
+
+        Меш, скелет, материалы и текстуры у одного оружия одни и те же — от
+        выбора анимации зависят только кадры. Полная пересборка ради них
+        заново распаковывала текстуры и перечитывала SMD: переключение
+        действий стоило секунды вместо миллисекунд.
+        """
+        self._stop_worker()          # сцену НЕ забываем: она остаётся в кадре
+        from src.data import viewmodel_anims
+        from src.services.viewmodel_worker import ViewmodelPreviewWorker
+        from src.services.weapon_anim_catalog import Action
+
+        w = ViewmodelPreviewWorker(
+            weapon_key=weapon_key,
+            misc_vpk_path=misc_vpk,
+            textures_vpk_path=textures_vpk,
+            tf2_root=tf2_root,
+            tf2_class=viewmodel_anims.class_from_mode(mode),
+            action=Action[action],
+            clip_only=True,
+            lang=lang,
+        )
+        w.progress.connect(self.progress.emit)
+        w.clip_ready.connect(lambda c: self.clip.emit(c or {}))
+        w.actions_available.connect(lambda n: self.actions.emit(list(n or [])))
         w.failed.connect(self.failed.emit)
         self._worker = w
         w.start()
 
     def _on_materials(self, tex_map: dict) -> None:
         """
-        Материалы сцены — в сессию, как и у обычной модели.
+        Текстуры сцены — подложкой, а НЕ составом предмета.
 
-        Без этого view_state о них не знает, и текстуры не на что разрешать:
-        сцена показывалась серой.
+        В сцене есть чужая геометрия — руки класса. Её материалы приходят тем
+        же сигналом, но предмету не принадлежат: карточек у них нет и в сборку
+        они не идут. Раньше сюда писался ``material_names``, и это давало сразу
+        два перекоса: руки становились карточкой в альбоме, а сами оставались
+        серыми — базовой текстуры для них не появлялось, если у предмета
+        ``vpk_red_tex_map`` уже была заполнена.
+
+        Теперь весь набор ложится подложкой сцены: предмет свои материалы
+        перекрывает сам (вместе с пользовательской правкой), а руки берут
+        оставшееся.
         """
         if not tex_map:
             return
-        t = self._session.textures
-        t.material_names = list(tex_map)
-        if not t.vpk_red_tex_map:
-            t.vpk_red_tex_map = dict(tex_map)
+        self._session.scene_extra_textures = dict(tex_map)
         self.materials.emit(tex_map)
+
+    def _on_editable(self, names) -> None:
+        """
+        Какие меши сцены — сам предмет.
+
+        Не только вьюверу: по этим именам текстура предмета ложится на меши
+        (см. ``PreviewSession._name_for_scene``). У модели с одним материалом
+        она хранится под служебным ключом, и без настоящего имени оружие в
+        руках оставалось стоковым, чего этот режим как раз и не должен делать.
+        """
+        own = list(names or [])
+        self._session.scene_item_materials = own
+        self.editable.emit(own)
 
 
 class SkyboxController:

@@ -51,6 +51,7 @@ class Preview3DMixin:
         c.blu_same_as_red.connect(self._on_blu_same_as_red)
         c.australium_ready.connect(self._on_australium_ready)
         c.render_hints.connect(self._on_3d_render_hints)
+        c.scene_extra.connect(self._on_3d_scene_extra)
         c.failed.connect(self._on_3d_failed)
 
     def _stop_worker(self, attr: str) -> None:
@@ -253,6 +254,23 @@ class Preview3DMixin:
         if self._3d_widget:
             self._3d_widget.set_editable_mesh_names(list(mat_names or []))
         self._remember_fp_scene(editable=list(mat_names or []))
+
+    def _on_3d_scene_extra(self, tex_map: dict, own_names) -> None:
+        """Чужая геометрия кадра: красим её, но карточек не заводим.
+
+        Праздничное оружие — гирлянда, надетая на обычную пушку: пушка в кадре
+        нужна, иначе огоньки висят в пустоте, но предмету она не принадлежит.
+
+        Имена мешей ПРЕДМЕТА обязательны: одноматериальную текстуру вьювер
+        кладёт глобально, и без этого списка пользовательская картинка легла бы
+        и на пушку-носитель. Тот же приём, что у рук в виде от первого лица.
+        """
+        if not self._3d_widget:
+            return
+        if own_names:
+            self._3d_widget.set_editable_mesh_names(list(own_names))
+        if tex_map:
+            self._3d_widget.apply_material_map(dict(tex_map))
 
     def _on_fp_multi_material(self, tex_map: dict) -> None:
         if self._3d_widget and tex_map:
