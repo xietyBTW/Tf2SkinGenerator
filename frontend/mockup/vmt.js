@@ -9,6 +9,8 @@
 import * as api from './api.js';
 import { escapeHtml } from './util.js';
 import { say } from './stage.js';
+import { ask } from './ask.js';
+import { contextMenu } from './menu.js';
 import { currentMaterial } from './album.js';
 
 // ── Редактор VMT ────────────────────────────────────────────────────────
@@ -20,7 +22,9 @@ const vmtDlg = document.getElementById('vmtdlg');
 const vmtText = document.getElementById('vmt-text');
 const vmtHl = document.getElementById('vmt-hl');
 const vmtStatus = document.getElementById('vmt-status');
-let vmtState = { material: '', original: '' };
+//: `custom` — стоит ли своя правка: от неё зависит и строка состояния, и
+//: кнопка «Как в игре».
+let vmtState = { material: '', original: '', custom: false };
 
 //: {$параметр: описание} — тот же словарь, что знает редактор в приложении.
 let vmtDocs = {};
@@ -62,7 +66,7 @@ function paintVmt() {
   vmtHl.scrollLeft = vmtText.scrollLeft;
 }
 
-vmtText.addEventListener('input', paintVmt);
+vmtText.addEventListener('input', () => { paintVmt(); markVmtState(); });
 // Зеркало прокручивается вместе с полем, иначе подсветка съезжает.
 vmtText.addEventListener('scroll', () => {
   vmtHl.scrollTop = vmtText.scrollTop;
@@ -96,18 +100,82 @@ vmtHl.addEventListener('mouseout', (e) => {
     + (vmtBaseStatus.kind ? ' is-' + vmtBaseStatus.kind : '');
 });
 
+/**
+ * Меню «Вставить»: параметр, прокси или целый шаблон.
+ *
+ * Набор общий с окном приложения (`src/data/vmt_snippets.py`) — держать
+ * второй список в JS значило бы его разъезд. Пункт-ШАБЛОН заменяет весь
+ * документ, поэтому о нём спрашивают отдельно: человек мог уже что-то
+ * написать.
+ */
+async function insertMenu(e) {
+  const data = await api.vmtSnippets();
+  const items = [];
+  for (const group of data.groups || []) {
+    if (items.length) items.push(null);          // разделитель между группами
+    for (const it of group.items) {
+      items.push({ label: it.label, value: it });
+    }
+  }
+  const picked = await contextMenu(e, items);
+  if (!picked) return;
+
+  if (picked.template) {
+    const body = (data.templates || {})[picked.label] || '';
+    if (!body) return;
+    if (vmtText.value.trim()) {
+      const go = await ask({ title: 'Применить шаблон',
+                             text: 'Заменить весь VMT этим шаблоном?',
+                             ok: 'Заменить' });
+      if (!go) return;
+    }
+    vmtText.value = body;
+  } else {
+    // Под курсор — но только если курсор ставил человек. Окно открывается с
+    // кареткой в нуле, и вставка «под курсор» уехала бы ПЕРЕД шейдером:
+    // получался бы битый VMT с первого же нажатия. Поэтому по умолчанию
+    // кладём внутрь блока — сразу за открывающей скобкой.
+    const at = vmtText.selectionStart || afterBrace(vmtText.value);
+    // Начинаем с перевода строки: вставка идёт и сразу за «{», и в конец
+    // строки, где поставил каретку человек — в обоих случаях нужен свой ряд.
+    const snippet = '\n\t' + picked.snippet;
+    vmtText.value = vmtText.value.slice(0, at) + snippet + vmtText.value.slice(at);
+    vmtText.selectionStart = vmtText.selectionEnd = at + snippet.length;
+  }
+  paintVmt();
+  vmtText.focus();
+  markVmtState();
+}
+
+/** Позиция сразу после открывающей скобки блока; её нет — конец файла. */
+function afterBrace(text) {
+  const at = text.indexOf('{');
+  return at < 0 ? text.length : at + 1;
+}
+
+/**
+ * Строка состояния: что сейчас в окне — оригинал игры, сохранённая правка или
+ * несохранённые изменения. Раньше об этом можно было судить только по памяти.
+ */
+function markVmtState() {
+  const changed = vmtText.value !== vmtState.original;
+  if (changed) { vmtSay('● Есть несохранённые изменения', 'warn'); return; }
+  vmtSay(vmtState.custom ? '✓ Используется свой VMT'
+                         : 'Показывается оригинал из игры');
+}
+
 export async function openVmtEditor() {
   const [res, params] = await Promise.all([api.openVmt(currentMaterial()),
                                            api.vmtParams()]);
   if (res.error) { say(res.error); return; }
   vmtDocs = Object.fromEntries(params.map((p) => [p.param.toLowerCase(), p.doc]));
 
-  vmtState = { material: res.material, original: res.original };
+  vmtState = { material: res.material, original: res.original,
+               custom: Boolean(res.edited) };
   document.getElementById('vmt-mat').textContent = res.material;
   vmtText.value = res.content;
   paintVmt();
-  vmtSay(res.edited ? 'Своя правка активна' : 'Показан игровой оригинал',
-         res.edited ? 'good' : '');
+  markVmtState();
   document.getElementById('vmt-reset').hidden = !res.edited;
   vmtDlg.showModal();
   // Прокрутка сбрасывается ТОЛЬКО после показа: у скрытого поля нет раскладки,
@@ -123,6 +191,10 @@ document.getElementById('vmt-save').addEventListener('click', async () => {
   if (res.error) { vmtSay(res.error, 'bad'); return; }
   vmtText.value = res.content;          // с дописанным ватермарком
   paintVmt();
+  // Сохранённое становится новым «оригиналом» окна: иначе маркер «есть
+  // несохранённые» висел бы сразу после сохранения.
+  vmtState.original = res.content;
+  vmtState.custom = true;
   document.getElementById('vmt-reset').hidden = false;
   vmtSay('Сохранено', 'good');
 });
@@ -132,10 +204,12 @@ document.getElementById('vmt-reset').addEventListener('click', async () => {
   if (res.error) { vmtSay(res.error, 'bad'); return; }
   vmtText.value = vmtState.original;
   paintVmt();
+  vmtState.custom = false;
   document.getElementById('vmt-reset').hidden = true;
   vmtSay('Правка удалена, показан игровой оригинал');
 });
 
+document.getElementById('vmt-insert').addEventListener('click', insertMenu);
 document.getElementById('vmt-close').addEventListener('click', () => vmtDlg.close());
 
 // Ctrl+S — привычка любого, кто правит текст. Браузерное «сохранить страницу»

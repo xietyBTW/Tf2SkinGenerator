@@ -105,6 +105,20 @@ class WorkStoreTests(unittest.TestCase):
         self.assertNotIn('/', key)
         self.assertNotIn('\\\\', key)
 
+    def test_long_keys_do_not_collide(self):
+        """У мастерской пути длинные и различаются В КОНЦЕ: обрезка сводила
+        два предмета в одну папку, и работа над вторым ложилась поверх первой."""
+        base = ('models/workshop/player/items/demoman/'
+                'hwn2019_the_horrible_horns_of_the_haunted/'
+                'hwn2019_the_horrible_horns_of_the_haunted')
+        first = work_store.key_for('hat', base + '_demo.mdl')
+        second = work_store.key_for('hat', base + '_soldier.mdl')
+        self.assertNotEqual(first, second)
+        self.assertLessEqual(len(first), 120)
+        # Короткий ключ остаётся прежним: старые работы никуда не переезжают.
+        self.assertEqual(work_store.key_for('scout_c_scattergun', 'c_scattergun'),
+                         'scout_c_scattergun__c_scattergun')
+
     def test_referenced_files_are_copied_next_to_the_work(self):
         """Текстура пришла через браузер и лежит во временной папке системы:
         оставить ссылку на неё — значит потерять работу при первой чистке."""
@@ -132,6 +146,94 @@ class WorkStoreTests(unittest.TestCase):
         work_store.save(self.key, first)
         files = list((Path(self._tmp.name) / 'work' / self.key / 'files').iterdir())
         self.assertEqual(len(files), 1)
+
+    def test_same_name_same_size_but_different_files_do_not_merge(self):
+        """Два `texture.png` одного размера — обычное дело (одна программа,
+        одни размеры). По размеру работа показывала вместо второй первую."""
+        first = Path(self._tmp.name) / 'a' / 'texture.png'
+        second = Path(self._tmp.name) / 'b' / 'texture.png'
+        for path, data in ((first, b'AAAA'), (second, b'BBBB')):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+
+        work_store.save(self.key, {'textures': {
+            'red': {'one': str(first), 'two': str(second)}}})
+        saved = work_store.load(self.key)['textures']['red']
+        self.assertNotEqual(saved['one'], saved['two'])
+        self.assertEqual(Path(saved['one']).read_bytes(), b'AAAA')
+        self.assertEqual(Path(saved['two']).read_bytes(), b'BBBB')
+
+    def test_orphaned_copies_are_swept_after_the_write(self):
+        """Склейка частей приходит каждый раз новым именем, и её копия
+        оставалась в работе навсегда: 24 МБ там, где нужен один файл."""
+        first, second = self._texture('parts_1.png'), self._texture('parts_2.png')
+        Path(second).write_bytes(b'png-2')          # другой размер, другое имя
+        files = Path(self._tmp.name) / 'work' / self.key / 'files'
+
+        work_store.save(self.key, {'textures': {'red': {'mat': first}}})
+        self.assertEqual([f.name for f in files.iterdir()], ['parts_1.png'])
+
+        work_store.save(self.key, {'textures': {'red': {'mat': second}}})
+        self.assertEqual([f.name for f in files.iterdir()], ['parts_2.png'])
+
+    def test_sweep_spares_files_the_caller_still_needs(self):
+        """Снимки неактивных стилей шапки живут в памяти сеанса: хранилище о
+        них не знает, и без подсказки картинка соседнего стиля исчезла бы."""
+        keep_me = self._texture('style0.png')
+        files = Path(self._tmp.name) / 'work' / self.key / 'files'
+        work_store.save(self.key, {'textures': {'red': {'mat': keep_me}}})
+        owned = str(next(files.iterdir()))
+
+        other = self._texture('style1.png')
+        work_store.save(self.key, {'textures': {'red': {'mat': other}}},
+                        keep=[owned])
+        self.assertEqual(sorted(f.name for f in files.iterdir()),
+                         ['style0.png', 'style1.png'])
+
+    def test_sweep_never_touches_a_failed_write(self):
+        """Правки не легли на диск — значит на диске осталась прошлая работа,
+        и удалять её файлы нельзя."""
+        source = self._texture()
+        work_store.save(self.key, {'textures': {'red': {'mat': source}}})
+        files = Path(self._tmp.name) / 'work' / self.key / 'files'
+        with patch.object(Path, 'write_text', side_effect=OSError('диск полон')):
+            self.assertIsNone(
+                work_store.save(self.key, {'force_team': True}))
+        self.assertEqual([f.name for f in files.iterdir()], ['skin.png'])
+
+    def test_item_identity_survives_and_is_not_lost_by_a_blind_save(self):
+        """По имени папки шапку не найти: слаг от `…/hat.mdl` не ведёт ни к
+        имени в каталоге, ни к иконке, ни к самой модели."""
+        item = {'mode': 'hat', 'key': 'models/player/items/scout/hat.mdl',
+                'per_class': {'scout': 'models/player/items/scout/hat.mdl'}}
+        work_store.save(self.key, {'force_team': True}, item=item)
+        self.assertEqual(work_store.item_of(self.key), item)
+
+        # Вызов, который про опознание не думал, не должен его стирать.
+        work_store.save(self.key, {'force_team': False})
+        self.assertEqual(work_store.item_of(self.key)['key'], item['key'])
+        self.assertEqual(work_store.list_drafts()[0]['item'], item)
+
+    def test_work_without_identity_is_not_an_error(self):
+        """Работы, записанные до опознания, обязаны читаться как раньше."""
+        work_store.save(self.key, {'force_team': True})
+        self.assertEqual(work_store.item_of(self.key), {})
+        self.assertEqual(work_store.item_of('никогда-не-было'), {})
+
+    def test_drafts_and_saved_works_are_separate_lists(self):
+        source = self._texture()
+        work_store.save(self.key, {'textures': {'red': {'mat': source}}})
+        self.assertEqual([w['key'] for w in work_store.list_drafts()], [self.key])
+        self.assertEqual(work_store.list_saved(), [])
+
+        work_store.keep(self.key)
+        self.assertEqual(work_store.list_drafts(), [])
+        self.assertEqual([w['key'] for w in work_store.list_saved()], [self.key])
+
+    def test_size_counts_the_files_of_the_work(self):
+        work_store.save(self.key, {'textures': {'red': {'mat': self._texture()}}})
+        self.assertGreater(work_store.size_of(self.key), 0)
+        self.assertEqual(work_store.size_of('никогда-не-было'), 0)
 
     def test_vanished_files_are_dropped_not_fatal(self):
         source = self._texture()

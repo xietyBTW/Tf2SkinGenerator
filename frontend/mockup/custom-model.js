@@ -12,6 +12,14 @@ import { chooseFile } from './util.js';
 import { say } from './stage.js';
 import { refreshView } from './preview.js';
 
+/** Возвращает игровую модель вместо своей. */
+export async function dropModel() {
+  const res = await api.dropCustomModel();
+  if (res.error) { say(res.error); return; }
+  say('Своя модель убрана');
+  refreshView();
+}
+
 // ── Своя модель и её QC ─────────────────────────────────────────────────
 // Замена включается самим фактом загрузки: отдельной галочки нет ни здесь, ни
 // в приложении. Тип модели («готова» / «только геометрия») решает всё
@@ -107,6 +115,7 @@ qcText.addEventListener('keydown', (e) => {
 document.getElementById('model-acts').addEventListener('click', (e) => {
   const btn = e.target.closest('.textbtn');
   if (!btn) return;
+  if (btn.id === 'dropmodel') { dropModel(); return; }
   if (btn.dataset.cond === 'replace') replaceModel();
   else if (btn.dataset.cond === 'qc') openQcEditor();
 });

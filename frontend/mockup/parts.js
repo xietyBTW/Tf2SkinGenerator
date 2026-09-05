@@ -12,6 +12,7 @@
 
 import * as api from './api.js';
 import { plural } from './util.js';
+import { t } from './i18n.js';
 import { withViewer, viewer } from './stage.js';
 import { applyView } from './preview.js';
 import { askPartPlacement, repositionPart } from './place.js';
@@ -294,10 +295,10 @@ export function showParts(res) {
                   + (part.sub ? '\u00b7' + part.sub : '');
     // Куски, делящие развёртку, в игре красятся вместе — сказать об этом надо
     // до того, как человек нарисует и удивится.
-    b.title = 'Часть ' + b.textContent + ' · ' + share + ' развёртки'
+    b.title = t('Часть ') + b.textContent + ' · ' + share + t(' развёртки')
       + (part.shared.length
-        ? '\nДелит развёртку с другими: в игре они покрасятся вместе, '
-          + 'разными их сделать нельзя'
+        ? '\n' + t('Делит развёртку с другими: в игре они покрасятся вместе, '
+          + 'разными их сделать нельзя')
         : '');
     // Наведение на пункт списка подсвечивает кусок на модели: иначе «Часть 3»
     // — это просто номер, и какой именно кусок за ним, узнать неоткуда.

@@ -7,8 +7,6 @@
 проверяется именно логика: какой материал берётся для команды и когда команда
 вообще что-то меняет.
 
-Тест пропускается, если PySide6 недоступен или подменён заглушкой соседних
-worker-тестов (см. test_particles_cp_controls).
 """
 
 import os
@@ -19,13 +17,6 @@ from tempfile import TemporaryDirectory
 import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-
-_pyside = sys.modules.get("PySide6")
-if _pyside is not None and not hasattr(_pyside, "__path__"):
-    pytest.skip("PySide6 подменён заглушкой соседних тестов",
-                allow_module_level=True)
-
-pytest.importorskip("PySide6.QtWidgets")
 
 from src.services.preview_3d_worker import Preview3DWorker   # noqa: E402
 from tests.fake_vpk import fake_reader, vmt                   # noqa: E402
@@ -65,12 +56,6 @@ def _png_bytes(color=(20, 20, 20, 255)) -> bytes:
     buf = BytesIO()
     Image.new("RGBA", (4, 4), color).save(buf, format="PNG")
     return buf.getvalue()
-
-
-@pytest.fixture(scope="module")
-def app():
-    from PySide6.QtWidgets import QApplication
-    return QApplication.instance() or QApplication([])
 
 
 @pytest.fixture(autouse=True)
@@ -122,7 +107,7 @@ def _files(**materials) -> dict:
     return out
 
 
-def test_hat_blu_is_per_material(app):
+def test_hat_blu_is_per_material():
     """Команда переключает не все материалы: общие остаются собой.
 
     Именно из-за одной общей BLU-текстуры линза Alcoholic Automaton получала
@@ -149,7 +134,7 @@ def test_hat_blu_is_per_material(app):
         assert raw["auto_blue"] == (None, "auto_blue")
 
 
-def test_identical_blu_reports_no_difference(app):
+def test_identical_blu_reports_no_difference():
     """BLU-материал есть, но он копия RED — панель должна об этом узнать."""
     with TemporaryDirectory() as tmp:
         files = _files(
@@ -167,7 +152,7 @@ def test_identical_blu_reports_no_difference(app):
         assert fired, "но сообщаем, что команды выглядят одинаково"
 
 
-def test_different_blu_texture_is_a_real_difference(app):
+def test_different_blu_texture_is_a_real_difference():
     with TemporaryDirectory() as tmp:
         files = _files(
             hat=("models/hat/red", (40, 0, 0, 255)),
@@ -184,7 +169,7 @@ def test_different_blu_texture_is_a_real_difference(app):
         assert not fired
 
 
-def test_single_blu_fallback_still_works(app):
+def test_single_blu_fallback_still_works():
     """Запасной путь (одна BLU-текстура на модель) не должен падать.
 
     Он сравнивает BLU с RED, и когда вид RED стал объектом ResolvedMaterial,
@@ -202,7 +187,7 @@ def test_single_blu_fallback_still_works(app):
         assert frames and Path(frames[0]).is_file()
 
 
-def test_team_tint_from_vmt_makes_blu_different(app):
+def test_team_tint_from_vmt_makes_blu_different():
     """Одна текстура на обе команды, цвет — только в VMT: разница есть."""
     from PIL import Image
 
@@ -232,7 +217,7 @@ def test_team_tint_from_vmt_makes_blu_different(app):
         assert blu_px[2] > red_px[2], f"BLU синее: {blu_px} vs {red_px}"
 
 
-def test_styles_are_not_a_team(app):
+def test_styles_are_not_a_team():
     """Второй скин — стиль (bloody), а не команда: BLU не собираем."""
     qc = QC_SIMPLE_TEAM.replace('"hat_blue"', '"hat_bloody"')
     with TemporaryDirectory() as tmp:
@@ -245,7 +230,7 @@ def test_styles_are_not_a_team(app):
         assert w._extract_hat_blu_textures(decomp, ["hat"]) == {}
 
 
-def test_qc_is_parsed_once_per_run(app):
+def test_qc_is_parsed_once_per_run():
     """Разбор QC кэшируется: раньше один и тот же файл читался по 11 раз."""
     from src.services import qc_skin_parser
 
@@ -264,7 +249,7 @@ def test_qc_is_parsed_once_per_run(app):
         qc_skin_parser.parse_texturegroup_rows = orig
     assert len(calls) == 1, calls
 
-def test_single_material_hat_also_emits_a_blu_frame(app):
+def test_single_material_hat_also_emits_a_blu_frame():
     """Одноматериальная шапка: карточек нет, и панель ищет BLU кадром.
 
     Battle Balaclava «No Gloves» — ровно этот случай: покомпонентная карта
@@ -289,7 +274,7 @@ def test_single_material_hat_also_emits_a_blu_frame(app):
         assert frames and Path(frames[0][0]).is_file(), "и кадр для панели"
 
 
-def test_multi_material_hat_does_not_emit_a_single_frame(app):
+def test_multi_material_hat_does_not_emit_a_single_frame():
     """У многоматериальной шапки одиночный кадр лёг бы на все меши сразу."""
     with TemporaryDirectory() as tmp:
         files = _files(
@@ -308,7 +293,7 @@ def test_multi_material_hat_does_not_emit_a_single_frame(app):
 
         assert not frames, "только покомпонентная карта"
 
-def test_missing_blu_texture_is_treated_as_shared(app):
+def test_missing_blu_texture_is_treated_as_shared():
     """BLU-материал есть в QC, а его текстуры в игре нет.
 
     Показать нечего; пометить материал командным — значит оставить у синей
@@ -325,7 +310,7 @@ def test_missing_blu_texture_is_treated_as_shared(app):
         assert raw == {}, "различий показать не можем — карты нет"
 
 
-def test_missing_blu_texture_among_several_materials(app):
+def test_missing_blu_texture_among_several_materials():
     """Тот же случай, но материалов несколько: остальные не страдают."""
     with TemporaryDirectory() as tmp:
         files = _files(
@@ -371,7 +356,7 @@ def _layout_model(qc_text: str, tmp: str):
     return qc_skin_parser.load_model(tmp)
 
 
-def test_blu_comes_from_the_column_of_our_own_material(app):
+def test_blu_comes_from_the_column_of_our_own_material():
     """Показываем только часы — синими стать могут лишь они, а не руки рядом."""
     with TemporaryDirectory() as tmp:
         model = _layout_model(QC_VIEWMODEL_WITH_ARMS, tmp)
@@ -379,7 +364,7 @@ def test_blu_comes_from_the_column_of_our_own_material(app):
             "столбец часов в обеих строках один — команды у предмета нет"
 
 
-def test_blu_of_a_neighbouring_column_is_not_stolen(app):
+def test_blu_of_a_neighbouring_column_is_not_stolen():
     """Руки командные, но красить пользователь просил не их."""
     with TemporaryDirectory() as tmp:
         model = _layout_model(QC_VIEWMODEL_WITH_ARMS, tmp)
@@ -387,7 +372,7 @@ def test_blu_of_a_neighbouring_column_is_not_stolen(app):
         assert names == ["spy_hands_blue"], "у своего столбца синяя пара своя"
 
 
-def test_unmatched_materials_leave_the_decision_open(app):
+def test_unmatched_materials_leave_the_decision_open():
     """Имена мешей с $texturegroup не сошлись — врать про команду нечем."""
     with TemporaryDirectory() as tmp:
         model = _layout_model(QC_SIMPLE_TEAM, tmp)
@@ -410,7 +395,7 @@ $texturegroup "skinfamilies"
 """
 
 
-def test_team_material_outside_geometry_still_gets_blu(app):
+def test_team_material_outside_geometry_still_gets_blu():
     """
     BLU ищется по КАРТОЧКАМ, а не только по материалам геометрии.
 

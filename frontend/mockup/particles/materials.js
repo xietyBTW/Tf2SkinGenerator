@@ -7,6 +7,7 @@
  */
 
 import * as api from '../api.js';
+import { t } from '../i18n.js';
 import { ask } from '../ask.js';
 import { chooseImage } from '../util.js';
 import { contextMenu } from '../menu.js';
@@ -111,7 +112,7 @@ export async function showParticleMaterials() {
                   + '<figcaption class="frame__name"></figcaption>';
     fig.querySelector('.frame__name').textContent = mat.name;
     fig.title = `${mat.width}×${mat.height}`
-              + (mat.sheet ? ' · покадровая анимация' : '');
+              + (mat.sheet ? t(' · покадровая анимация') : '');
     if (mat.dataUrl) {
       const img = document.createElement('img');
       img.src = mat.dataUrl;

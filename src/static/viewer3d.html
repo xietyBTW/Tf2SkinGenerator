@@ -258,7 +258,8 @@ import { makeMeshMaterial as _makeMeshMaterial } from './js/viewer_materials.js'
 import { firstPersonCamera as _firstPersonCamera } from './js/viewer_camera.js';
 import { firstEditableHit as _firstEditableHit } from './js/viewer_meshes.js';
 import { buildSkinnedScene as _buildSkinnedScene,
-         applyClip as _applyViewmodelClip } from './js/viewer_skinned.js';
+         applyClip as _applyViewmodelClip,
+         updateHidden as _updateSkinnedHidden } from './js/viewer_skinned.js';
 
 // ── Python bridge (QWebChannel JS → Python) ──────────────────────────────── //
 // Инициализируется асинхронно; вызовы _notifyTextureDrop() безопасны до готовности.
@@ -964,6 +965,22 @@ window.loadModelFromContent = function(objContent, texDataUrl, cx, cy, cz, scale
   );
 };
 
+// Запасные габариты: у сцены их считает Python (viewmodel_animation._bounds),
+// как и у OBJ. Здесь — если сцена пришла без них.
+function _sceneBounds(object) {
+  // Матрицы группы (поворот корня из осей Source) считаются рендером на
+  // следующем кадре — до него габариты вышли бы от неповёрнутой сцены.
+  object.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(object);
+  if (box.isEmpty()) return [0, 0, 0, 1];
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+  const longest = Math.max(size.x, size.y, size.z, 1e-6);
+  // Наибольшая сторона в две единицы — то же правило, что у OBJ
+  // (domain/preview/obj_bounds.TARGET_EXTENT), иначе сцена вдвое мельче.
+  return [center.x, center.y, center.z, 2 / longest];
+}
+
 // Анимированная вьюмодель: меш приходит один раз в bind-позе, движение — в
 // дорожках костей (см. js/viewer_skinned.js). Дальше сцена ведёт себя как
 // обычная модель: меши названы по материалам, текстуры кладутся тем же
@@ -992,7 +1009,14 @@ window.loadViewmodelAnimated = function(data, loadSeq) {
 
   scene.add(_skinned.group);
   currentModel = _skinned.group;
-  applyTransform(currentModel, 0, 0, 0, 1);
+  // Вид от первого лица ставит камеру ригом, и габариты ему не нужны. Сцену
+  // же, которую смотрят со стороны (насмешка), надо вписать в кадр самим:
+  // персонаж TF2 — это шесть десятков единиц, и камера по умолчанию
+  // оказывалась у него внутри.
+  const b = (data && data.bounds) || null;
+  const fit = _viewRig ? [0, 0, 0, 1]
+            : (b ? [b.cx, b.cy, b.cz, b.scale] : _sceneBounds(currentModel));
+  applyTransform(currentModel, fit[0], fit[1], fit[2], fit[3]);
   hideStatus();
 
   if (_pendingMaterialMap) {
@@ -1553,6 +1577,20 @@ window.loadCritHitSceneWithModel = function(objContent, critTexDataUrl, cx, cy, 
 
 
 // Публичная функция: обновляет только текстуру CritHIT billboard.
+// Билборд крита над УЖЕ показанной анимированной сценой.
+//
+// Сцену смерти строит общий loadViewmodelAnimated (персонаж, скелет, дорожки),
+// и спрайт к ней добавляется отдельно: он есть только у крита. Флаг режима
+// поднимаем здесь же — по нему работает updateCritHitTexture, когда человек
+// меняет картинку.
+window.setCritSprite = function(critTexDataUrl) {
+  _isCritHitMode  = true;
+  _lastCritTexUrl = critTexDataUrl || '';
+  // Сцена вписана в две единицы вокруг нуля (TARGET_EXTENT), значит её верх —
+  // ровно единица. Тело лежит, поэтому «над головой» здесь — над сценой.
+  _placeCritSprite(_lastCritTexUrl, 1.0);
+};
+
 window.updateCritHitTexture = function(critTexDataUrl) {
   if (!_isCritHitMode) return;
   _lastCritTexUrl = critTexDataUrl || '';
@@ -2034,6 +2072,7 @@ function animate() {
   // накопленное время прыгнет в микшер одним куском.
   const delta = _animClock.getDelta();
   if (_skinned && _skinned.mixer) _skinned.mixer.update(delta);
+  _updateSkinnedHidden(_skinned);
   controls.update();
   // Кнопка инспекции доступна только когда есть обычная модель (не CritHIT)
   const _inspectAvail = !!currentModel && !_isCritHitMode;

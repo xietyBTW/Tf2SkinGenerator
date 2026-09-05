@@ -571,6 +571,23 @@ TRANSLATIONS = {
         'texture_extract_failed': 'Не удалось извлечь текстуру для оружия: {weapon}',
         'success': 'Успех',
         
+        # Тема страницы и безымянный стиль косметики: подписи выбора, а не
+        # сообщения — им положено следовать языку приложения.
+        'theme_light': 'Светлая',
+        'theme_dark': 'Тёмная',
+        'hat_style_n': 'Стиль {n}',
+
+        # Фильтр списка косметики: это переключатели «скрыть», а не «показать»
+        # (одних медалей 7628 из 9504). Короткое имя — на кнопку, полное — в
+        # подсказку: в ряду фильтров «Скрыть сезонные (Christmas и др.)» не
+        # помещается.
+        'hat_filter_medals': 'Медали',
+        'hat_filter_medals_tip': 'Скрыть медали',
+        'hat_filter_halloween': 'Halloween',
+        'hat_filter_halloween_tip': 'Скрыть Halloween',
+        'hat_filter_holiday': 'Сезонные',
+        'hat_filter_holiday_tip': 'Скрыть сезонные (Christmas и др.)',
+
         # Hat Game Paints Dialog
         'hat_game_paints_title': 'Краски из игры',
         'hat_game_paints_question': 'Хотите ли вы чтобы краски из игры применялись к вашей текстуре?\n\nЕсли "Да" — VMT файл будет загружен с оригинальными настройками красок.\nЕсли "Нет" — краски будут отключены, ваша текстура будет отображаться без окраски игрой.',
@@ -1188,6 +1205,21 @@ TRANSLATIONS = {
         'texture_extract_failed': 'Failed to extract texture for weapon: {weapon}',
         'success': 'Success',
         
+        # Page theme and an unnamed cosmetic style: these are choices, not
+        # messages, so they follow the application language.
+        'theme_light': 'Light',
+        'theme_dark': 'Dark',
+        'hat_style_n': 'Style {n}',
+
+        # Cosmetics list filter: these hide, not show (medals alone are 7628
+        # of 9504). Short name goes on the button, full one into the tooltip.
+        'hat_filter_medals': 'Medals',
+        'hat_filter_medals_tip': 'Hide medals',
+        'hat_filter_halloween': 'Halloween',
+        'hat_filter_halloween_tip': 'Hide Halloween',
+        'hat_filter_holiday': 'Seasonal',
+        'hat_filter_holiday_tip': 'Hide seasonal (Christmas and others)',
+
         # Hat Game Paints Dialog
         'hat_game_paints_title': 'Game Paints',
         'hat_game_paints_question': 'Do you want game paints to apply to your texture?\n\nIf "Yes" — the VMT file will be loaded with original paint settings.\nIf "No" — paints will be disabled, your texture will display without game coloring.',

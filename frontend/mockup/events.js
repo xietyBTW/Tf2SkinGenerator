@@ -19,7 +19,10 @@ import {
   showMaterials,
   showSkins,
   showFirstPerson,
-  showFpActions, applyFpClip,
+  showFpActions,
+  showTauntClasses, applyFpClip,
+  showSpecialAnimated,
+  specialSceneFailed,
   showSpecialScene,
   showSkybox,
   addFrame,
@@ -97,6 +100,19 @@ api.subscribe((ev) => {
       applyFpClip(ev.clip);
       break;
 
+    // Насмешка: сцена та же по устройству, но камера свободная — рига нет.
+    case 'taunt_animated':
+      withViewer((w) => {
+        w.setViewRig(null);
+        w.loadViewmodelAnimated(ev.scene, 0);
+      });
+      say('');
+      break;
+
+    case 'taunt_classes':
+      showTauntClasses(ev.classes);
+      break;
+
     case 'fp_actions':
       showFpActions(ev.actions);
       break;
@@ -113,6 +129,12 @@ api.subscribe((ev) => {
       refreshView();
       break;
 
+    // Настоящая сцена спец-режима: солдат умирает нужной смертью. Приходит
+    // позже кубиков-заглушки — её надо собрать из модели и анимаций.
+    case 'special_animated':
+      showSpecialAnimated(ev);
+      break;
+
     case 'skybox':
       showSkybox(ev.faces);
       break;
@@ -125,7 +147,7 @@ api.subscribe((ev) => {
     // Пока человек думает, воркер держит паузу (300 секунд), поэтому вопрос
     // задаём сразу и не копим.
     case 'need_texture':
-      askForTexture(ev.material);
+      askForTexture(ev.material, ev.remaining || 0);
       break;
 
     case 'build_done':
@@ -181,7 +203,9 @@ api.subscribe((ev) => {
       break;
 
     case 'failed':
-      say(ev.error);
+      // У спец-режима есть запасной кадр: не собралась настоящая сцена —
+      // показываем прежнего человечка, а не пустоту с ошибкой.
+      if (!specialSceneFailed(ev.error)) say(ev.error);
       break;
 
     default:

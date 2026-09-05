@@ -8,6 +8,7 @@
  */
 
 import * as api from './api.js';
+import { t } from './i18n.js';
 
 export const root = document.documentElement;
 export const catalog = document.getElementById('catalog');
@@ -40,7 +41,6 @@ export function applyRightPanel() {
 // Единственная настройка, которая меняет раскладку. Каталог и параметры
 // нарисованы по одному разу; здесь только их видимость в плавающем режиме —
 // в прибитом они видны всегда.
-const panelsBtn = document.getElementById('panels');
 
 // Ниже этого порога три прибитые панели в строку не встают — они налезали бы
 // друг на друга. Режим тогда принудительно плавающий, а кнопка гаснет: честнее
@@ -59,16 +59,22 @@ function applyPanels() {
   catalog.hidden = !pinned;
   applyRightPanel();
 
-  panelsBtn.textContent = wantPinned ? 'Открепить панели' : 'Закрепить панели';
-  panelsBtn.disabled = narrow.matches;
-  panelsBtn.title = narrow.matches
-    ? 'Для закреплённых панелей нужно окно шире 1100 px' : '';
 }
 
-panelsBtn.addEventListener('click', () => {
-  wantPinned = !wantPinned;
+/**
+ * Закрепить панели или отпустить. Значение приходит из настроек и там же
+ * хранится: кнопкой в шапке оно не переживало перезапуск, а раскладка — не то,
+ * что хочется выбирать заново каждый раз.
+ */
+export function setPinned(on) {
+  wantPinned = Boolean(on);
   applyPanels();
-});
+}
+
+/** Влезают ли прибитые панели в это окно. Узкому окну их не предлагаем. */
+export function pinnedFits() {
+  return !narrow.matches;
+}
 
 // Слушаем и медиазапрос, и resize: change у MediaQueryList приходит не во
 // всех окружениях (проверено — в эмулированном вьюпорте не пришёл), а
@@ -101,9 +107,45 @@ gamma.addEventListener('change', () => {
 });
 
 /** Строка состояния внизу окна; занятость гасит кнопку сборки. */
+/**
+ * Разворот кадра на всё окно и обратно.
+ *
+ * Эффект частиц смотрят целиком, а на обычном экране под него отведена
+ * половина. Прячем всё, кроме сцены: каталог, панели, альбом, шапку и низ.
+ * Выход — тем же F11 или Esc, как в окне приложения.
+ */
+export function toggleExpanded(on) {
+  const want = on === undefined ? root.dataset.expanded !== '1' : Boolean(on);
+  if (want) root.dataset.expanded = '1';
+  else delete root.dataset.expanded;
+  // Вьювер живёт в iframe и о смене размера сам не узнает.
+  const frames = [document.getElementById('viewer'),
+                  document.getElementById('particles')];
+  for (const f of frames) {
+    const w = f && f.contentWindow;
+    if (w && typeof w.resize === 'function') w.resize();
+  }
+}
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'F11') { e.preventDefault(); toggleExpanded(); return; }
+  // Esc сворачивает только развёрнутое: в обычном виде он закрывает окна и
+  // меню, и перехватывать его здесь нельзя.
+  if (e.key === 'Escape' && root.dataset.expanded === '1') {
+    e.stopPropagation();
+    toggleExpanded(false);
+  }
+}, true);
+
 export function setStatus(text, busy) {
   document.querySelector('.dock__state').textContent = text;
-  document.querySelector('.btn--primary').disabled = Boolean(busy);
+  // Пока идёт сборка, кнопка сборки уступает место отмене: собрать второй раз
+  // всё равно нельзя, а бросить начатое — надо.
+  const build = document.getElementById('buildvpk');
+  const stop = document.getElementById('buildstop');
+  build.disabled = Boolean(busy);
+  build.hidden = Boolean(busy);
+  stop.hidden = !busy;
 }
 
 /**
@@ -115,7 +157,11 @@ export function setStatus(text, busy) {
 export async function showTf2Path() {
   const el = document.querySelector('.dock__tf2');
   const paths = await api.call('tf2_paths');
-  el.textContent = paths.error
-    ? 'TF2 не найдена — укажите папку игры в настройках'
-    : 'TF2 найдена · ' + paths.root;
+  if (paths.error) { el.textContent = 'TF2 не найдена — укажите папку игры в настройках'; return; }
+  // Crowbar — вторая обязательная половина: без него модель не разобрать, а
+  // узнать об этом раньше было можно только по ошибке сборки.
+  // Через t(): строка собирается из трёх кусков, и целиком её в словаре не
+  // найти — переводим каждый кусок отдельно.
+  el.textContent = t('TF2 найдена · ') + paths.root
+    + (paths.crowbar ? t(' · Crowbar готов') : t(' · Crowbar НЕ НАЙДЕН'));
 }

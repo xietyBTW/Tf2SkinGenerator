@@ -466,6 +466,7 @@
 }
 /* Обложка — иконка предмета из рюкзака (materials/backpack/…), она квадратная. */
 .pick__box {
+  position: relative;
   aspect-ratio: 1;
   margin-bottom: 7px;
   border: 1px solid var(--hairline-strong);
@@ -1651,3 +1652,147 @@
 }
 .place__hint { margin: 10px 0 0; color: var(--ink-mute); }
 .place__bare { flex: none; font-size: 11px; }
+
+/* Счётчик найденного под фильтрами каталога. */
+.catalog__count {
+  margin: 0 0 8px;
+  padding: 0 var(--pad-x, 14px);
+  color: var(--ink-mute);
+  font-size: 11px;
+}
+
+/* Маркер «у предмета несколько стилей»: точка слева от подписи класса. */
+/* Сколько у шапки модельных стилей.
+   Голосом страницы, а не цветным пятном: мелкая прописная с разрядкой — тот
+   же .label, что у всех микроподписей. СЛЕВА СВЕРХУ, потому что в альбоме там
+   же стоит пометка кадра: место уже означает «пометка», а справа сверху —
+   инструменты. Акцент приберегаем для наведения и выбранного: он на странице
+   значит «твоё/активное», и 224 оранжевых чипа это значение бы стёрли. */
+.pick__styles {
+  position: absolute;
+  left: 0;
+  top: 0;
+  padding: 2px 5px;
+  border-right: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--hairline);
+  background: var(--surface);
+  color: var(--ink-mute);
+  font-size: 8px;
+  font-style: normal;
+  font-weight: 500;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  transition: color var(--dur), border-color var(--dur);
+}
+.pick:hover .pick__styles,
+.pick.is-active .pick__styles {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* ── Кадр на всё окно (F11) ────────────────────────────────────────────
+   Эффект частиц и модель смотрят целиком, а на обычном экране под сцену
+   отведена половина. Прячем всё, кроме неё: возврат — F11 или Esc. */
+:root[data-expanded="1"] .chrome,
+:root[data-expanded="1"] .dock,
+:root[data-expanded="1"] .title,
+:root[data-expanded="1"] .catalog,
+:root[data-expanded="1"] #build,
+:root[data-expanded="1"] #pbuild,
+:root[data-expanded="1"] .half--flat,
+:root[data-expanded="1"] .half__bar { display: none; }
+
+:root[data-expanded="1"] .half__foot { display: none; }
+
+/* Сцена во всё окно: отступы страницы под неё не нужны. */
+:root[data-expanded="1"] .stage {
+  padding: 0;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* Сцена занимает всю сетку: колонка одна, половина текстур убрана. */
+:root[data-expanded="1"] .work { grid-template-columns: minmax(0, 1fr); }
+:root[data-expanded="1"] .half--model { display: flex; }
+
+/* Отмена сборки стоит на месте «Собрать VPK», поэтому и весит так же —
+   но не зовёт: это не главное действие, а выход из него. */
+.btn--stop {
+  background: var(--surface);
+  border: 1px solid var(--hairline-strong);
+  color: var(--ink-soft);
+}
+.btn--stop:hover { border-color: var(--accent); color: var(--accent); }
+
+/* Галка-приписка к ответу в окне вопроса: стоит под списком вариантов и
+   относится к выбранному, поэтому и отбита от него, а не от кнопок. */
+.ask__check {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--hairline);
+}
+
+/* Обслуживание в настройках: действие и число рядом, одной строкой. */
+.cfg__maint {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-top: 4px;
+}
+.cfg__maint .mono { color: var(--ink-mute); }
+
+/* Ссылка автора — тем же голосом, что остальные текстовые кнопки, и прижата
+   к левому краю ряда действий: браузерная синева тут чужая. */
+.cfg__support {
+  margin-right: auto;
+  text-decoration: none;
+}
+
+/* ── Свой список вместо нативного попапа <select> (dropdown.js) ─────────
+   Нативный настраивается ровно на цвет пунктов: ни рамки, ни отступа, ни
+   перехода. Здесь тот же язык, что у остальных всплывающих слоёв (.menu__list,
+   .picker): слой --overlay, волосяная рамка, никаких скруглений. */
+.dropdown {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  z-index: 40;
+  max-height: 240px;
+  overflow: auto;
+  margin-top: 2px;
+  border: 1px solid var(--hairline-strong);
+  background: var(--overlay);
+  /* Появление: короткий сдвиг вверх и проявление. Длительность общая с
+     остальным интерфейсом, чтобы список не выбивался темпом. */
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity var(--dur), transform var(--dur);
+}
+.dropdown.is-open { opacity: 1; transform: none; }
+
+/* Снизу места нет — раскрываемся вверх (поля стоят и у нижнего края). */
+.dropdown--up { top: auto; bottom: 100%; margin: 0 0 2px; transform: translateY(4px); }
+
+.dropdown__item {
+  display: block;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  background: none;
+  color: var(--ink-soft);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition: color var(--dur), background var(--dur);
+}
+.dropdown__item:hover { color: var(--ink); background: var(--surface); }
+.dropdown__item:disabled { color: var(--ink-mute); cursor: default; }
+/* Выбранное отмечается акцентом слева — как всё активное на странице. */
+.dropdown__item.is-active {
+  color: var(--ink);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* Пока список открыт, поле подчёркнуто акцентом: связь между ними видна. */
+.select:has(.dropdown) select { border-bottom-color: var(--accent); }

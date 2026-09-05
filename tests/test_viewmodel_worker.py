@@ -16,22 +16,9 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-_pyside = sys.modules.get("PySide6")
-if _pyside is not None and not hasattr(_pyside, "__path__"):
-    pytest.skip("PySide6 подменён заглушкой соседних тестов",
-                allow_module_level=True)
-
-pytest.importorskip("PySide6.QtWidgets")
-
 from src.services import viewmodel_worker as vw            # noqa: E402
 from src.services.model_decompile_service import DecompileError, Decompiled  # noqa: E402
 from src.services.weapon_anim_catalog import Action, AnimSequence  # noqa: E402
-
-
-@pytest.fixture(scope="module")
-def app():
-    from PySide6.QtWidgets import QApplication
-    return QApplication.instance() or QApplication([])
 
 
 class _Recorder:
@@ -57,6 +44,10 @@ SEQUENCE = AnimSequence(name="sg_idle", smd_path="anims/sg_idle.smd",
 SCENE = SimpleNamespace(
     obj_path="scene.obj",
     weapon_materials=["c_scattergun"],
+    # Пушка-носитель праздничной гирлянды: в кадре есть, предмету не
+    # принадлежит. У обычного оружия список пуст, но само поле обязано быть —
+    # `_scene_materials` читает его у любой сцены.
+    carrier_materials=[],
     arms_materials=["scout_hands"],
     materials=["c_scattergun", "scout_hands"],
 )
@@ -135,7 +126,7 @@ def _worker(key="c_scattergun", **kwargs):
 
 # ── Успешный путь ─────────────────────────────────────────────────────────── #
 
-def test_scene_and_textures_reach_the_ui(app):
+def test_scene_and_textures_reach_the_ui():
     """По умолчанию отдаётся анимация: она оказалась не дороже запекания позы."""
     rec = _run(_worker())
     assert rec.data["animated_ready"] is ANIMATED
@@ -144,27 +135,27 @@ def test_scene_and_textures_reach_the_ui(app):
     assert "failed" not in rec.data
 
 
-def test_static_pose_is_still_available(app):
+def test_static_pose_is_still_available():
     """Запечённая поза осталась запасным путём — через OBJ, без скиннинга."""
     rec = _run(_worker(animate=False))
     assert rec.data["ready"] == ("scene.obj", "")
     assert "animated_ready" not in rec.data
 
 
-def test_only_the_weapon_is_editable(app):
+def test_only_the_weapon_is_editable():
     """Руки показываются, но пользовательская текстура относится к оружию."""
     rec = _run(_worker())
     assert rec.data["editable_materials"] == ["c_scattergun"]
 
 
-def test_render_hints_go_before_the_model(app):
+def test_render_hints_go_before_the_model():
     """Иначе вьювер соберёт материалы дважды, и стекло успеет побыть пластиком."""
     rec = _run(_worker())
     assert rec.order.index("render_hints") < rec.order.index("animated_ready")
     assert rec.order.index("animated_ready") < rec.order.index("multi_material")
 
 
-def test_textures_of_both_parts_are_collected(app):
+def test_textures_of_both_parts_are_collected():
     """У рук свои $cdmaterials — их текстуры лежат не там, где у оружия."""
     seen = []
 
@@ -185,14 +176,14 @@ def test_textures_of_both_parts_are_collected(app):
                                           "scout_hands": "scout_hands.png"}
 
 
-def test_material_without_a_texture_is_dropped_not_passed_as_none(app):
+def test_material_without_a_texture_is_dropped_not_passed_as_none():
     rec = _run(_worker(), textures={"c_scattergun": "gun.png"})
     assert rec.data["multi_material"] == {"c_scattergun": "gun.png"}
 
 
 # ── Отказы ────────────────────────────────────────────────────────────────── #
 
-def test_item_without_a_viewmodel_is_refused(app):
+def test_item_without_a_viewmodel_is_refused():
     """У щита нет последовательности — показывать нечего."""
     rec = _run(_worker("c_targe"), sequence=None)
     assert "failed" in rec.data
@@ -200,7 +191,7 @@ def test_item_without_a_viewmodel_is_refused(app):
     assert "ready" not in rec.data
 
 
-def test_unknown_weapon_class_is_refused_before_any_work(app):
+def test_unknown_weapon_class_is_refused_before_any_work():
     rec = _Recorder(w := _worker("не_оружие"))
     with patch.object(vw.mds, "ensure_decompiled",
                       side_effect=AssertionError("до декомпиляции доходить нельзя")):
@@ -209,19 +200,19 @@ def test_unknown_weapon_class_is_refused_before_any_work(app):
     assert "class" in rec.data["failed"]
 
 
-def test_missing_model_is_refused(app):
+def test_missing_model_is_refused():
     rec = _run(_worker(), decompile=lambda *_a, **_k: None)
     assert "failed" in rec.data
     assert "not found" in rec.data["failed"]
 
 
-def test_scene_that_did_not_build_is_refused(app):
+def test_scene_that_did_not_build_is_refused():
     rec = _run(_worker(), animated=None)
     assert "failed" in rec.data
     assert "animated_ready" not in rec.data
 
 
-def test_decompile_error_is_reported_not_swallowed(app):
+def test_decompile_error_is_reported_not_swallowed():
     def boom(*_a, **_k):
         raise DecompileError("Crowbar not found: nope.exe")
 
@@ -231,7 +222,7 @@ def test_decompile_error_is_reported_not_swallowed(app):
 
 # ── Кэш и параметры ───────────────────────────────────────────────────────── #
 
-def test_arms_and_animations_are_cached_per_class_not_per_weapon(app):
+def test_arms_and_animations_are_cached_per_class_not_per_weapon():
     """Иначе смена оружия вытесняла бы из кэша общие модели класса."""
     keys = []
     _run(_worker(), decompile=lambda key, *a, **k: (
@@ -239,7 +230,7 @@ def test_arms_and_animations_are_cached_per_class_not_per_weapon(app):
     assert keys == ["c_scattergun", "__arms_scout", "__anims_scout"]
 
 
-def test_action_and_frame_are_passed_through(app):
+def test_action_and_frame_are_passed_through():
     """Основа для будущего выбора анимации: воркер ничего не зашивает.
 
     Действие уходит в каталог, кадр — в сборку сцены.
@@ -252,7 +243,7 @@ def test_action_and_frame_are_passed_through(app):
     assert built["frame_index"] == 7
 
 
-def test_clip_only_skips_geometry_and_textures(app):
+def test_clip_only_skips_geometry_and_textures():
     """Смена анимации не должна трогать ничего, кроме дорожек.
 
     Иначе каждое нажатие заново распаковывает те же самые VTF: замер дал
@@ -282,14 +273,14 @@ def test_clip_only_skips_geometry_and_textures(app):
     assert "animated_ready" not in rec.data
 
 
-def test_clip_that_did_not_build_is_reported(app):
+def test_clip_that_did_not_build_is_reported():
     with patch.object(vw.viewmodel_animation, "build_clip", lambda **_k: None):
         rec = _run(_worker(clip_only=True))
     assert "failed" in rec.data
     assert "clip_ready" not in rec.data
 
 
-def test_activity_replacement_reaches_the_catalog(app):
+def test_activity_replacement_reaches_the_catalog():
     """Слот у куная melee, а набор — ITEM2; знает об этом только items_game.
 
     Если подмена не доедет до каталога, все ножи шпиона снова покажут анимацию
@@ -302,19 +293,19 @@ def test_activity_replacement_reaches_the_catalog(app):
     assert rec.asked["replacement"] == kunai
 
 
-def test_weapon_without_a_replacement_asks_with_an_empty_table(app):
+def test_weapon_without_a_replacement_asks_with_an_empty_table():
     with patch.object(vw.viewmodel_anims, "anim_info", lambda *_a: None):
         rec = _run(_worker())
     assert rec.asked["replacement"] == {}
 
 
-def test_available_actions_are_reported_for_the_selector(app):
+def test_available_actions_are_reported_for_the_selector():
     """Интерфейс предлагает только то, что это оружие действительно умеет."""
     rec = _run(_worker(), catalog_actions=[Action.IDLE, Action.RELOAD])
     assert rec.data["actions_available"] == ["IDLE", "RELOAD"]
 
 
-def test_slot_comes_from_items_game_not_from_our_own_table(app):
+def test_slot_comes_from_items_game_not_from_our_own_table():
     """У револьвера шпиона наша вкладка говорит primary, а игра — secondary.
 
     Последовательностей `primary_*` у шпиона нет вовсе, так что ошибка здесь
@@ -353,7 +344,7 @@ def test_unknown_action_name_counts_as_no_prop():
 # руки приходят из воркера вместе с мешем, и без этого на синей стороне они
 # оставались красными.
 
-def test_blue_team_gets_the_blue_arms_texture(app):
+def test_blue_team_gets_the_blue_arms_texture():
     """Картинка синяя, а ключ красный: меши в сцене названы по первому скину."""
     rec = _run(_worker(team="blu"),
                team_map={"scout_hands": "scout_hands_blue"},
@@ -362,7 +353,7 @@ def test_blue_team_gets_the_blue_arms_texture(app):
     assert rec.data["multi_material"]["scout_hands"] == "hands_blue.png"
 
 
-def test_red_team_is_left_alone(app):
+def test_red_team_is_left_alone():
     rec = _run(_worker(),
                team_map={"scout_hands": "scout_hands_blue"},
                textures={"c_scattergun": "gun.png", "scout_hands": "hands.png",
@@ -370,14 +361,14 @@ def test_red_team_is_left_alone(app):
     assert rec.data["multi_material"]["scout_hands"] == "hands.png"
 
 
-def test_neutral_material_keeps_its_texture_on_blue(app):
+def test_neutral_material_keeps_its_texture_on_blue():
     """У скаута и хэви руки нейтральные — подменять нечего."""
     rec = _run(_worker(team="blu"),
                team_map={"scout_hands": "scout_hands"})
     assert rec.data["multi_material"]["scout_hands"] == "hands.png"
 
 
-def test_missing_blue_texture_does_not_wipe_the_red_one(app):
+def test_missing_blue_texture_does_not_wipe_the_red_one():
     """Синего файла может не оказаться — руки остаются красными, а не пустыми."""
     rec = _run(_worker(team="blu"),
                team_map={"scout_hands": "scout_hands_blue"})
@@ -395,7 +386,7 @@ def _view_worker(key="c_pocket_watch", **kwargs):
     return _worker(key, tf2_class="spy", **kwargs)
 
 
-def test_watch_is_built_from_its_own_viewmodel(app):
+def test_watch_is_built_from_its_own_viewmodel():
     asked = {}
 
     def decompile(key, *_a, **_k):
@@ -411,7 +402,7 @@ def test_watch_is_built_from_its_own_viewmodel(app):
     assert "__vm_c_pocket_watch" in asked["keys"]
 
 
-def test_watch_scene_is_built_without_a_weapon_mesh(app):
+def test_watch_scene_is_built_without_a_weapon_mesh():
     """Руки и часы там в одном меше — сажать в руку нечего."""
     seen = {}
     _run(_view_worker(), on_build=lambda kwargs: seen.update(kwargs),
@@ -421,7 +412,7 @@ def test_watch_scene_is_built_without_a_weapon_mesh(app):
     assert seen.get("editable_mats") is not None
 
 
-def test_ordinary_weapon_still_goes_the_usual_way(app):
+def test_ordinary_weapon_still_goes_the_usual_way():
     seen = {}
     _run(_worker(), on_build=lambda kwargs: seen.update(kwargs))
     assert seen.get("weapon_ref_smd")

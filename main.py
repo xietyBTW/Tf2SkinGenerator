@@ -22,70 +22,14 @@ logger = setup_logging(
     log_file=_log_file,
 )
 
-# Нативные падения (access violation в Qt/драйвере) не оставляют
-# Python-трейсбека — faulthandler допишет стек прямо в лог
+# Нативные падения (access violation в распаковке VPK, в драйвере WebView2)
+# не оставляют Python-трейсбека — faulthandler допишет стек прямо в лог
 try:
     import faulthandler
     _fault_log = open(_log_dir / "tf2sg_crash.log", "a", buffering=1)
     faulthandler.enable(file=_fault_log)
 except Exception:  # диагностика не должна мешать запуску
     pass
-
-
-def _make_splash(app):
-    """Создаёт и показывает сплэш-экран."""
-    from PySide6.QtWidgets import QSplashScreen
-    from PySide6.QtGui import QPixmap, QPainter, QColor, QFont, QPen
-    from PySide6.QtCore import Qt
-
-    W, H = 420, 220
-
-    # Рисуем сплэш вручную
-    pixmap = QPixmap(W, H)
-    pixmap.fill(QColor("#111111"))
-
-    painter = QPainter(pixmap)
-    painter.setRenderHint(QPainter.Antialiasing)
-
-    # Рамка
-    painter.setPen(QPen(QColor("#2a2a2a"), 1))
-    painter.drawRect(0, 0, W - 1, H - 1)
-
-    # Оранжевая полоска сверху
-    painter.fillRect(0, 0, W, 3, QColor("#cc5522"))
-
-    # Название приложения
-    font = QFont("Segoe UI", 22, QFont.Weight.Bold)
-    painter.setFont(font)
-    painter.setPen(QColor("#eeeeee"))
-    painter.drawText(0, 50, W, 40, Qt.AlignCenter, "TF2 Skin Generator")
-
-    # Версия
-    from src.shared.version import __version__
-    font_ver = QFont("Segoe UI", 10, QFont.Weight.Normal)
-    painter.setFont(font_ver)
-    painter.setPen(QColor("#555555"))
-    painter.drawText(0, 88, W, 24, Qt.AlignCenter, f"v{__version__}")
-
-    painter.end()
-
-    splash = QSplashScreen(pixmap, Qt.WindowStaysOnTopHint)
-    splash.setFont(QFont("Segoe UI", 9))
-    splash.show()
-    app.processEvents()
-    return splash
-
-
-def _splash_msg(splash, app, text: str):
-    """Обновляет статус на сплэше."""
-    from PySide6.QtCore import Qt
-    from PySide6.QtGui import QColor
-    splash.showMessage(
-        f"  {text}",
-        Qt.AlignBottom | Qt.AlignLeft,
-        QColor("#666666"),
-    )
-    app.processEvents()
 
 
 def _cleanup_stale_temp() -> None:
@@ -116,40 +60,16 @@ def main():
     logger.info("Запуск TF2 Skin Generator")
 
     try:
-        from src.core.app_factory import AppFactory
-
         DirectoryPaths.ensure_exists()
         _cleanup_stale_temp()
 
-        # ── Создаём приложение и сразу показываем сплэш ──────────────────── #
-        app = AppFactory.create_app(apply_theme=True)
-
-        # Воркеры (src/services) эмитят сигналы в своём потоке и про Qt ничего
-        # не знают. Диспетчер перекидывает слоты в UI-поток — без него первый
-        # же обработчик тронул бы виджеты из фонового потока. Ставим до
-        # создания окна, чтобы ни один ранний воркер не эмитил мимо очереди.
-        from src.ui.qt_dispatch import install as install_dispatcher
-        install_dispatcher()
-
-        splash = _make_splash(app)
-
-        # ── Тяжёлые импорты с обновлением статуса ────────────────────────── #
-        _splash_msg(splash, app, "Loading modules...")
-
-        from src.ui.main_window import MainWindow
-
-        _splash_msg(splash, app, "Initializing interface...")
-
-        window = MainWindow()
-
-        _splash_msg(splash, app, "Starting...")
-
-        window.show()
-        splash.finish(window)   # закрываем сплэш как только окно готово
+        # Интерфейс — веб-страница в окне WebView2 (см. frontend/app.py).
+        # Qt здесь больше не участвует: воркеры (src/services) живут на своих
+        # сигналах, а страница ходит в тот же src/app/api.py.
+        from frontend.app import main as run_ui
 
         logger.info("Приложение успешно запущено")
-
-        sys.exit(app.exec())
+        run_ui()
 
     except Exception as e:
         logger.critical(f"Критическая ошибка при запуске: {e}", exc_info=True)

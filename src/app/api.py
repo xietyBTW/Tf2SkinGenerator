@@ -43,24 +43,40 @@ _CATEGORY_MODE = {
 }
 
 
+def _lang(lang: str = '') -> str:
+    """
+    Язык ответа: тот, что назвали, иначе — из настроек.
+
+    Раньше умолчанием стояло 'ru', и страница его ни разу не переопределяла:
+    настройка «Язык приложения» писалась в конфиг и не значила ничего.
+    Спрашивать конфиг здесь, а не на странице, потому что отвечает на языке
+    Python: знать о выборе должен один, и это он.
+    """
+    if lang:
+        return lang
+    from src.config.app_config import AppConfig
+    return AppConfig.load_config().get('language') or 'en'
+
+
 def _t(lang: str) -> dict:
     from src.data.translations import TRANSLATIONS
     return TRANSLATIONS.get(lang, TRANSLATIONS['en'])
 
 
-def categories(lang: str = 'ru') -> List[dict]:
+def categories(lang: str = '') -> List[dict]:
     """Верхний уровень выбора: что вообще меняем."""
+    lang = _lang(lang)
     t = _t(lang)
     return [{'key': k, 'name': t.get(f'category_{k}', k)} for k in CATEGORY_KEYS]
 
 
-def classes(lang: str = 'ru') -> List[dict]:
+def classes(lang: str = '') -> List[dict]:
     """Классы TF2. Ключ — он же имя в данных, отдельного перевода у них нет."""
     from src.data.weapons import TF2_WEAPONS
     return [{'key': k, 'name': k} for k in TF2_WEAPONS]
 
 
-def weapon_types(tf2_class: Optional[str] = None, lang: str = 'ru') -> List[dict]:
+def weapon_types(tf2_class: Optional[str] = None, lang: str = '') -> List[dict]:
     """
     Типы оружия, по которым можно фильтровать.
 
@@ -74,6 +90,8 @@ def weapon_types(tf2_class: Optional[str] = None, lang: str = 'ru') -> List[dict
     from src.data.weapons import (
         TF2_WEAPONS, WEAPON_SLOT_TYPES, get_weapon_type_name,
     )
+
+    lang = _lang(lang)
     if tf2_class:
         have = TF2_WEAPONS.get(tf2_class, {})
         keys = [k for k in WEAPON_SLOT_TYPES if have.get(k)]
@@ -112,34 +130,64 @@ def _weapon_items(tf2_class: Optional[str], weapon_type: Optional[str],
 def _character_items(tf2_class: Optional[str], lang: str) -> List[dict]:
     """Тело и руки класса. Ключ режима строится как в приложении: класс_часть."""
     from src.data.weapons import TF2_WEAPONS, get_character_parts
+    from src.domain.preview.model_key import model_key_for
 
     out: List[dict] = []
     for cls in ([tf2_class] if tf2_class else list(TF2_WEAPONS)):
         for key, name in get_character_parts(cls, lang):
+            mode = f'{cls.lower()}_{key}'
             out.append({
                 'key': key,
                 'name': name,
                 'cls': cls,
                 'type': 'character',
-                'mode': f'{cls.lower()}_{key}',
+                'mode': mode,
+                # Обложка — текстура той же модели, что грузится в превью: ни
+                # тела, ни рук в рюкзаке нет.
+                'icon': model_key_for(mode) or '',
             })
     return out
 
 
+def _search(rows: List[dict], query: str) -> List[dict]:
+    """
+    Отбор по строке поиска — тем же правилом, что у косметики.
+
+    Слова, а не подстрока целиком: «обрез мал» обязано находить «Обрез
+    Малыша», порядок слов человек помнить не должен. Ищем и по имени файла с
+    классом: поле подписано «Название или файл», а классом удобно сузить
+    список, когда фильтр стоит на «Все».
+    """
+    words = [w for w in str(query or '').lower().split() if w]
+    if not words:
+        return rows
+
+    def haystack(row: dict) -> str:
+        return ' '.join(str(row.get(field, '') or '').lower()
+                        for field in ('name', 'key', 'label', 'cls'))
+
+    return [row for row in rows if all(w in haystack(row) for w in words)]
+
+
 def items(category: str = 'weapon', tf2_class: Optional[str] = None,
-          weapon_type: Optional[str] = None, lang: str = 'ru') -> List[dict]:
+          weapon_type: Optional[str] = None, lang: str = '',
+          query: str = '') -> List[dict]:
     """
     Предметы категории — то, из чего выбирают в каталоге.
 
     Пустые ``tf2_class`` / ``weapon_type`` означают «все»: каталог показывает
     полный список, пока фильтры не сузили его.
+
+    ``query`` — строка поиска. Раньше её принимала только косметика, и поле над
+    списком оружия не делало ничего.
     """
+    lang = _lang(lang)
     t = _t(lang)
 
     if category == 'weapon':
-        return _weapon_items(tf2_class, weapon_type, lang)
+        return _search(_weapon_items(tf2_class, weapon_type, lang), query)
     if category == 'character':
-        return _character_items(tf2_class, lang)
+        return _search(_character_items(tf2_class, lang), query)
     if category == 'special':
         from src.data.weapons import SPECIAL_MODES
         # Подписи те же, что в приложении: ключ режима человеку ничего не
@@ -148,27 +196,40 @@ def items(category: str = 'weapon', tf2_class: Optional[str] = None,
                   'death_ice': 'special_death_ice',
                   'death_gold': 'special_death_gold',
                   'death_fire': 'special_death_fire'}
-        return [{'key': m, 'name': t.get(labels.get(m, ''), m),
-                 'cls': '', 'type': 'special', 'mode': m}
-                for m in SPECIAL_MODES]
+        return _search([{'key': m, 'name': t.get(labels.get(m, ''), m),
+                         'cls': '', 'type': 'special', 'mode': m}
+                        for m in SPECIAL_MODES], query)
     if category == 'skybox':
         from src.data.skyboxes import SKYBOX_MODE, STOCK_SKY_NAMES
-        return [{'key': n, 'name': n, 'cls': '', 'type': 'skybox',
-                 'mode': SKYBOX_MODE, 'sky': n} for n in STOCK_SKY_NAMES]
+        # Обложка — боковая грань самого неба: иконки в рюкзаке у него нет и
+        # быть не может, а узнают небо по горизонту.
+        return _search([{'key': n, 'name': n, 'cls': '', 'type': 'skybox',
+                         'mode': SKYBOX_MODE, 'sky': n, 'icon': f'skybox/{n}'}
+                        for n in STOCK_SKY_NAMES], query)
 
     # Снаряды, пикапы и реквизит насмешек устроены одинаково: таблица
     # {ключ: {ru, en, mdl_path}} плюс префикс режима. Реестр общий с
     # приложением — новая такая категория подключится сама.
     from src.data.simple_models import SIMPLE_MODEL_CATEGORIES, model_display_name
+    from src.data.taunt_catalog import ensure as _ensure_taunts
+    # Насмешек в игре вчетверо больше, чем в выверенной руками таблице;
+    # остальные берутся из items_game при первом показе каталога.
+    _ensure_taunts()
     simple = SIMPLE_MODEL_CATEGORIES.get(category)
     if simple:
-        return [{'key': key,
-                 'name': model_display_name(simple.table, key, lang),
-                 'cls': '', 'type': category,
-                 # Режим у них — «префикс + ключ» (pickup_medkit_small): по нему
-                 # дальше находится MDL, и просто ключ не годится.
-                 'mode': f'{simple.mode_prefix}{key}'}
-                for key in simple.table]
+        return _search([{'key': key,
+                         'name': model_display_name(simple.table, key, lang),
+                         'cls': '', 'type': category,
+                         # Режим у них — «префикс + ключ» (pickup_medkit_small):
+                         # по нему дальше находится MDL, и ключ не годится.
+                         'mode': f'{simple.mode_prefix}{key}',
+                         # Обложка — текстура самой модели: аптечки, патроны и
+                         # снаряды это мировые объекты, в рюкзаке их нет, и
+                         # карточки стояли пустыми. У насмешек иконка всё же
+                         # есть — сам предмет-насмешка лежит в инвентаре.
+                         'icon': (simple.table[key].get('icon')
+                                  or simple.table[key].get('mdl_path', ''))}
+                        for key in simple.table], query)
 
     # Кастомный мод — не список: предмет здесь файл, его выбирают в каталоге.
     if category != 'custom':
@@ -258,6 +319,9 @@ def controls_for(mode: str) -> Dict[str, object]:
         'load_model': not (is_crit or is_skybox or is_spray),
         'replace_model': not (is_crit or is_skybox or is_spray or is_body),
         'first_person': is_normal and kind_of(mode).is_weapon,
+        # Насмешка: персонаж играет тонт с реквизитом. Есть только у самого
+        # реквизита — у оружия своего тонта нет, а у шапки нет и реквизита.
+        'taunt': mode.startswith('taunt_'),
         'misc': not (is_hands or is_spy_mask),
         'styles': not (is_spray or is_crit or is_skybox),
         # Команды и вариант зависят от загруженной модели, не от режима:
@@ -276,30 +340,66 @@ def tf2_paths() -> Dict[str, object]:
     return session().tf2_paths()
 
 
-def load_preview(mode: str, lang: str = 'ru',
+def load_preview(mode: str, lang: str = '',  # noqa: PLR0913 — зеркало сеанса
                  model_key: Optional[str] = None,
                  per_class: Optional[Dict[str, str]] = None,
-                 style: Optional[int] = None) -> Dict[str, object]:
-    """Начинает загрузку 3D-превью. Модель приезжает событиями, не ответом."""
+                 style: Optional[int] = None,
+                 restore: bool = False) -> Dict[str, object]:
+    """Начинает загрузку 3D-превью. Модель приезжает событиями, не ответом.
+
+    restore — открыть с сохранённой работой. Из каталога предмет открывается
+    игровым; работы живут своим списком (`works`).
+    """
     from src.app.session import session
+
+    lang = _lang(lang)
     return session().load_preview(mode, lang=lang, model_key=model_key,
-                                  per_class=per_class, style=style)
+                                  per_class=per_class, style=style,
+                                  restore=restore)
 
 
 def icon_png(key: str) -> Optional[bytes]:
     """
-    PNG иконки предмета из рюкзака, либо None.
+    PNG обложки предмета, либо None.
 
     Ключ — то, что каталог знает о предмете: ``icon`` из items_game, ключ
-    оружия или путь к модели. Разбираться с этим — дело backpack_icons.
+    оружия, путь к модели или `skybox/<имя>`.
+
+    Источников два, и порядок важен. Сначала рюкзак: это готовая иконка на
+    прозрачном фоне, ровно та, что игрок видит в инвентаре. Но она есть только
+    у предметов инвентаря — у аптечек, патронов, снарядов, реквизита насмешек,
+    тел, рук и неба её нет и не будет, и карточки стояли пустыми. Для них
+    берём текстуру самой модели (у неба — грань), см. `model_icons`.
     """
     from src.app.session import session
+    from src.services import model_icons
     from src.services.backpack_icons import png_bytes
 
     paths = session().tf2_paths()
     if 'error' in paths:
         return None
-    return png_bytes(key, paths['textures_vpk'])
+
+    key = (key or '').replace('\\', '/').strip()
+    if key.lower().startswith('skybox/'):
+        return model_icons.sky_png(key[len('skybox/'):], paths['textures_vpk'])
+
+    icon = png_bytes(key, paths['textures_vpk'])
+    if icon is not None:
+        return icon
+
+    from src.data.weapons import WEAPON_MDL_PATHS
+    mdl = key if key.lower().endswith('.mdl') else WEAPON_MDL_PATHS.get(key, '')
+    if not mdl:
+        return None
+    return model_icons.model_png(mdl, paths['misc_vpk'], paths['textures_vpk'])
+
+
+def load_taunt(tf2_class: str = '', lang: str = '') -> Dict[str, object]:
+    """Собирает сцену насмешки: персонаж играет тонт с этим реквизитом."""
+    from src.app.session import session
+
+    lang = _lang(lang)
+    return session().load_taunt(tf2_class, lang=lang)
 
 
 def stop_preview() -> Dict[str, object]:
@@ -379,7 +479,7 @@ def leave_first_person() -> Dict[str, object]:
     return session().leave_first_person()
 
 
-def load_first_person(action: str = 'IDLE', lang: str = 'ru',
+def load_first_person(action: str = 'IDLE', lang: str = '',
                       full: bool = False) -> Dict[str, object]:
     """Собирает сцену «руки класса с оружием».
 
@@ -387,6 +487,8 @@ def load_first_person(action: str = 'IDLE', lang: str = 'ru',
     анимации обходится одними дорожками.
     """
     from src.app.session import session
+
+    lang = _lang(lang)
     return session().load_first_person(action, lang=lang, full=full)
 
 
@@ -408,10 +510,33 @@ def build(params: Optional[Dict[str, object]] = None) -> Dict[str, object]:
     return session().build(dict(params or {}))
 
 
-def material_map_schema(lang: str = 'ru') -> Dict[str, object]:
+def vtf_estimate(size: int = 512, format: str = 'DXT5',
+                 flags: Optional[List[str]] = None) -> Dict[str, object]:
+    """Сколько примерно займёт VTF при этих настройках.
+
+    Оценка, а не измерение: считать по-настоящему значит прогнать кодировщик,
+    а число нужно на каждое движение переключателя. Единственное в сводке, что
+    нельзя увидеть глазами: 2048 DXT5 весит 5.3 МБ, а 1024 DXT5 — 1.3 МБ, и
+    это решает, влезет мод в раздачу или нет.
+    """
+    from src.services.vtf_size import human_size, vtf_bytes
+
+    side = max(1, int(size or 512))
+    total = vtf_bytes(side, side, str(format or 'DXT5'), flags or ())
+    return {'bytes': total, 'text': human_size(total)}
+
+
+def cancel_build() -> Dict[str, object]:
+    """Просит идущую сборку остановиться."""
+    from src.app.session import session
+    return session().cancel_build()
+
+
+def material_map_schema(lang: str = '') -> Dict[str, object]:
     """Какие карты материала бывают и что у них настраивается."""
     from src.data.material_maps import MAP_DISPLAY_ORDER, MATERIAL_MAPS
 
+    lang = _lang(lang)
     t = _t(lang)
 
     def numeric_fields(cfg: dict) -> List[dict]:
@@ -467,10 +592,160 @@ def set_texture_maps(material: str = '',
     return session().set_texture_maps(material, maps)
 
 
+def works(lang: str = '') -> List[dict]:
+    """
+    Сохранённые работы — списком, как предметы каталога.
+
+    Раньше работа возвращалась молча при открытии предмета: каталог показывал
+    «Обрез», а на экране был ТВОЙ обрез, и вернуться к игровому можно было
+    только через «Забыть правки». Теперь список оружия показывает игру, а свои
+    работы открываются отсюда — осознанно.
+
+    Имя и обложку берём по опознанию, записанному в самой работе: показывать
+    человеку `scout_c_scattergun__c_scattergun` незачем.
+    """
+    from src.services import work_store
+
+    lang = _lang(lang)
+    return [{
+        **row,
+        'type': 'work',
+        # Обложка — иконка предмета: без неё все работы выглядят одинаково.
+        # У косметики это объявленная иконка, у оружия — ключ модели: слаг из
+        # имени папки не годился ни там, ни там.
+        'icon': row['item_icon'] or row['item_key'] or row['work_item'],
+        # Открывается как обычный предмет, только с восстановлением.
+        'mode': row['work_mode'],
+    } for row in _named(work_store.list_saved(), lang)]
+
+
+def _named(rows: List[dict], lang: str) -> List[dict]:
+    """
+    Работы с человеческим именем предмета и тем, из чего они открываются.
+
+    Опознание пишется в саму работу (`work_store.item_of`). Работы, записанные
+    до этого, его не имеют — для них остаётся разбор имени папки: у оружия он
+    даёт верный ключ, у шапки — слаг пути к модели.
+    """
+    hats = _hat_index(lang) if any(
+        (r.get('item') or {}).get('mode') == 'hat' for r in rows) else {}
+
+    out: List[dict] = []
+    for row in rows:
+        item = row.get('item') or {}
+        mode, _, slug = str(row['key']).partition('__')
+        mode = item.get('mode') or mode
+        key = item.get('key') or ''
+        name, icon = hats.get(key.lower(), ('', ''))
+        out.append({**row,
+                    'work_mode': mode,
+                    'work_item': slug,
+                    # Ключ модели и покласcовые модели: без них шапка не
+                    # открывается — из режима «hat» её путь не вывести.
+                    'item_key': key,
+                    'per_class': dict(item.get('per_class') or {}),
+                    'mod': item.get('mod') or '',
+                    # Иконка косметики объявлена в items_game: по имени модели
+                    # её не найти — у покласcовой шапки оно с суффиксом класса
+                    # (`all_domination_scout`), а иконка одна на предмет.
+                    'item_icon': icon,
+                    'name': (name
+                             or _work_title(mode, key.lower() or slug, lang))})
+    return out
+
+
+def _hat_index(lang: str) -> Dict[str, tuple]:
+    """
+    Косметика по пути к модели: (имя, иконка из items_game).
+
+    Собирается один раз на список: косметики 9504, и спрашивать каталог на
+    каждую работу значило бы разбирать items_game по разу на карточку.
+
+    Путей у предмета несколько. В работе лежит тот, что показывали: у
+    мультиклассовой шапки это модель КЛАССА, у стиля — модель стиля, и ни та,
+    ни другая не равна основной (`all_domination_%s.mdl`). Поэтому в указателе
+    все, а основная кладётся последней — при совпадении верна она.
+    """
+    from src.app.session import session
+    from src.data.hats_parser import parse_hats
+
+    paths = session().tf2_paths()
+    if 'error' in paths:
+        return {}
+
+    index: Dict[str, tuple] = {}
+    for hat in parse_hats(paths['root'], lang):
+        entry = (hat.name, hat.icon)
+        for style in hat.styles or ():
+            for path in (style.get('per_class_models') or {}).values():
+                index[str(path).lower()] = entry
+        for path in (hat.per_class_models or {}).values():
+            index[str(path).lower()] = entry
+        index[hat.mdl_path.lower()] = entry
+    return index
+
+
+def drafts(lang: str = '') -> List[dict]:
+    """
+    Черновики автосохранения — для уборки.
+
+    В библиотеке их нет намеренно: оно пишет всё, к чему прикоснулись, и
+    «просто открыл предмет» становилось модом. Но копии текстур при этом
+    остаются на диске, и добраться до них можно было только заново открыв тот
+    же предмет — то есть на практике никак. Размер отдаём рядом: «удалить 12
+    черновиков» и «удалить 12 черновиков на 280 МБ» — разные решения.
+    """
+    from src.services import work_store
+
+    lang = _lang(lang)
+    return [{**row, 'size': work_store.size_of(row['key'])}
+            for row in _named(work_store.list_drafts(), lang)]
+
+
+def forget_drafts(keys: Optional[List[str]] = None) -> Dict[str, object]:
+    """Удаляет черновики (пустой список — все). Сохранённые работы не трогает."""
+    from src.app.session import session
+    return session().forget_drafts(keys)
+
+
+def _work_title(mode: str, item: str, lang: str) -> str:
+    """Человеческое имя предмета работы; не нашли — показываем ключ.
+
+    Ищем по тому же каталогу, что и список оружия: у работы своего имени нет,
+    а показывать `scout_c_scattergun__c_scattergun` человеку незачем.
+
+    Косметику здесь не ищем — она приходит из items_game, и для списка её имена
+    собирает `_hat_titles` один раз. Сюда шапка попадает, только когда предмет
+    в игре не нашёлся: тогда имя файла модели честнее полного пути.
+    """
+    from src.data.weapons import TF2_WEAPONS
+
+    for groups in TF2_WEAPONS.values():
+        for weapons in groups.values():
+            for key, names in weapons.items():
+                if key.lower() == item:
+                    return names.get(lang) or names.get('en') or key
+    if item.endswith('.mdl'):
+        return _model_file_name(item)
+    return item or mode
+
+
 def work_state() -> Dict[str, object]:
     """Есть ли у предмета правки и сохраняются ли они молча."""
     from src.app.session import session
     return session().work_state()
+
+
+def keep_work() -> Dict[str, object]:
+    """Сохраняет работу над предметом в библиотеку — по нажатию, не молча."""
+    from src.app.session import session
+    return session().keep_work()
+
+
+def restore_work() -> Dict[str, object]:
+    """Возвращает отложенную работу над открытым сейчас предметом."""
+    from src.app.session import session
+    return session().restore_work()
 
 
 def forget_work() -> Dict[str, object]:
@@ -567,10 +842,12 @@ _SETTINGS_KEYS = (
     'tf2_game_folder', 'export_folder', 'export_image_format', 'language',
     'theme', 'sv_pure_bypass', 'particles_group_tree', 'keep_temp_files',
     'debug_mode', 'material_blacklist', 'save_edits',
+    # Раскладка окна: раньше жила кнопкой в шапке и не переживала перезапуск.
+    'panels_pinned',
 )
 
 
-def settings(lang: str = 'ru') -> Dict[str, object]:
+def settings(lang: str = '') -> Dict[str, object]:
     """
     Текущие настройки приложения и варианты выбора для них.
 
@@ -580,6 +857,7 @@ def settings(lang: str = 'ru') -> Dict[str, object]:
     from src.config.app_config import AppConfig
     from src.shared.constants import SVPURE_BYPASS_DEFAULT
 
+    lang = _lang(lang)
     t = _t(lang)
     cfg = AppConfig.load_config()
     values = {key: cfg.get(key) for key in _SETTINGS_KEYS}
@@ -601,14 +879,21 @@ def settings(lang: str = 'ru') -> Dict[str, object]:
     # а человек не должен помнить про «сохранить».
     if values.get('save_edits') is None:
         values['save_edits'] = True
+    # Плавающие панели — умолчание: прибитые требуют широкого окна, и в узком
+    # они всё равно откажутся. None здесь ломал круг «прочитал → сохранил»:
+    # чтение отдавало None, запись — False, и настройки «менялись» сами.
+    if values.get('panels_pinned') is None:
+        values['panels_pinned'] = False
 
     return {
         'values': values,
         'formats': ['VTF', 'PNG', 'TGA', 'JPG'],
         'languages': [{'value': 'ru', 'label': 'Русский'},
                       {'value': 'en', 'label': 'English'}],
-        'themes': [{'value': 'dark', 'label': t.get('theme_dark', 'Dark')},
-                   {'value': 'blue', 'label': t.get('theme_blue', 'Blue')}],
+        # Темы страницы, а не бывшего Qt-окна: другого интерфейса больше нет,
+        # и предлагать «синюю» из старого тулкита было бы обещанием впустую.
+        'themes': [{'value': 'light', 'label': t.get('theme_light', 'Light')},
+                   {'value': 'dark', 'label': t.get('theme_dark', 'Dark')}],
         # Куда класть материалы, чтобы их пропустил sv_pure в казуале. Оба
         # способа рабочие; переключатель — страховка, если одну папку прикроют.
         'bypass': [
@@ -617,11 +902,64 @@ def settings(lang: str = 'ru') -> Dict[str, object]:
              'label': t.get('bypass_vgui', 'vgui\\replay\\thumbnails\\')},
         ],
         'bypass_tip': t.get('bypass_tooltip', ''),
+        # Размер кэша декомпиляции — рядом с кнопкой очистки: «очистить»
+        # без числа не подсказывает, надо ли вообще это делать.
+        'cache_mb': _cache_mb(),
+        'support_url': SUPPORT_URL,
     }
 
 
+#: Куда ведёт «Поддержать автора». Тот же адрес, что в окне приложения.
+SUPPORT_URL = ('https://steamcommunity.com/tradeoffer/new/'
+               '?partner=394814324&token=GNGCagXk')
+
+
+def _cache_mb() -> float:
+    """Размер кэша декомпилированных моделей в мегабайтах."""
+    try:
+        from src.services.decompile_cache import get_cache_size_mb
+        return round(float(get_cache_size_mb()), 1)
+    except Exception:                                         # noqa: BLE001
+        return 0.0
+
+
+def clear_model_cache() -> Dict[str, object]:
+    """Удаляет кэш декомпилированных моделей.
+
+    Нужен после обновления игры: старые разобранные модели остаются в кэше и
+    собираются с прежней геометрией. Первая сборка каждого оружия после этого
+    будет медленнее — кэш ради того и живёт.
+    """
+    from src.services.decompile_cache import clear_cache
+
+    was = _cache_mb()
+    removed = int(clear_cache())
+    return {'removed': removed, 'freed_mb': was}
+
+
+def vmt_snippets(lang: str = '') -> Dict[str, object]:
+    """Что предлагает меню «Вставить» в редакторе VMT.
+
+    Категории → пункты. `snippet` пустой означает ПОЛНЫЙ шаблон: он заменяет
+    весь документ, а не вставляется под курсор, и страница обязана спросить.
+    Тексты живут в `src/data/vmt_snippets.py` — общие с окном приложения.
+    """
+    from src.data.vmt_snippets import VMT_FULL_TEMPLATES, VMT_SNIPPETS
+
+    groups = []
+    for category, items in VMT_SNIPPETS.items():
+        groups.append({
+            'name': category,
+            'items': [{'label': label, 'snippet': snippet or '',
+                       'hint': hint or '',
+                       'template': bool(snippet is None)}
+                      for label, snippet, hint in items],
+        })
+    return {'groups': groups, 'templates': dict(VMT_FULL_TEMPLATES)}
+
+
 def set_settings(values: Optional[Dict[str, object]] = None,
-                 lang: str = 'ru') -> Dict[str, object]:
+                 lang: str = '') -> Dict[str, object]:
     """
     Сохраняет настройки. Принимаются только известные ключи.
 
@@ -632,6 +970,7 @@ def set_settings(values: Optional[Dict[str, object]] = None,
     from src.config.app_config import AppConfig
     from src.data.material_filter import parse_blacklist
 
+    lang = _lang(lang)
     cfg = AppConfig.load_config()
     for key, value in (values or {}).items():
         if key not in _SETTINGS_KEYS:
@@ -642,7 +981,7 @@ def set_settings(values: Optional[Dict[str, object]] = None,
         elif key == 'export_folder':
             cfg[key] = str(value or '').strip() or 'export'
         elif key in ('particles_group_tree', 'keep_temp_files', 'debug_mode',
-                     'save_edits'):
+                     'save_edits', 'panels_pinned'):
             cfg[key] = bool(value)
         else:
             cfg[key] = str(value or '').strip()
@@ -650,9 +989,11 @@ def set_settings(values: Optional[Dict[str, object]] = None,
     return settings(lang)
 
 
-def diagnose(path: str = '', lang: str = 'ru') -> Dict[str, object]:
+def diagnose(path: str = '', lang: str = '') -> Dict[str, object]:
     """Проверяет собранный мод; находки приходят событием diagnostics."""
     from src.app.session import session
+
+    lang = _lang(lang)
     return session().diagnose(path, lang=lang)
 
 
@@ -694,16 +1035,20 @@ def remove_mod(name: str = '') -> Dict[str, object]:
     return {'removed': name}
 
 
-def load_vpk_mod(path: str = '', lang: str = 'ru') -> Dict[str, object]:
+def load_vpk_mod(path: str = '', lang: str = '') -> Dict[str, object]:
     """Показывает чужой мод из VPK: его модель и его текстуры."""
     from src.app.session import session
+
+    lang = _lang(lang)
     return session().load_vpk_mod(path, lang=lang)
 
 
 def load_custom_model(path: str = '', keep: Optional[bool] = None,
-                      lang: str = 'ru') -> Dict[str, object]:
+                      lang: str = '') -> Dict[str, object]:
     """Подставляет свою геометрию (SMD) вместо игровой."""
     from src.app.session import session
+
+    lang = _lang(lang)
     return session().load_custom_model(path, keep, lang=lang)
 
 
@@ -725,7 +1070,7 @@ def save_qc(text: str = '') -> Dict[str, object]:
     return session().save_qc(text)
 
 
-def vmt_params(lang: str = 'ru') -> List[dict]:
+def vmt_params(lang: str = '') -> List[dict]:
     """
     Известные $-параметры VMT с описанием — для подсказок в редакторе.
 
@@ -734,13 +1079,17 @@ def vmt_params(lang: str = 'ru') -> List[dict]:
     подсказки разойдутся с тем, что редактор действительно знает.
     """
     from src.data.vmt_snippets import all_param_names, param_doc
+
+    lang = _lang(lang)
     return [{'param': name, 'doc': param_doc(name, lang)}
             for name in all_param_names()]
 
 
-def open_vmt(material: str = '', lang: str = 'ru') -> Dict[str, object]:
+def open_vmt(material: str = '', lang: str = '') -> Dict[str, object]:
     """Текст VMT материала: сохранённая правка либо игровой оригинал."""
     from src.app.session import session
+
+    lang = _lang(lang)
     return session().open_vmt(material, lang=lang)
 
 
@@ -757,23 +1106,29 @@ def reset_vmt(material: str = '') -> Dict[str, object]:
     return session().reset_vmt(material)
 
 
-def extract_model(lang: str = 'ru') -> Dict[str, object]:
+def extract_model(lang: str = '') -> Dict[str, object]:
     """Декомпилирует модель; список файлов приходит событием extract_files."""
     from src.app.session import session
+
+    lang = _lang(lang)
     return session().extract_model(lang=lang)
 
 
 def export_model_files(files: Optional[List[str]] = None,
-                       lang: str = 'ru') -> Dict[str, object]:
+                       lang: str = '') -> Dict[str, object]:
     """Сохраняет выбранные файлы модели (пустой список — отказ и уборка)."""
     from src.app.session import session
+
+    lang = _lang(lang)
     return session().export_model_files(files, lang=lang)
 
 
 def extract_texture(textures: Optional[List[str]] = None,
-                    lang: str = 'ru') -> Dict[str, object]:
+                    lang: str = '') -> Dict[str, object]:
     """Извлекает оригинальные текстуры предмета в папку экспорта."""
     from src.app.session import session
+
+    lang = _lang(lang)
     return session().extract_texture(textures, lang=lang)
 
 
@@ -784,9 +1139,11 @@ def export_vpks() -> List[str]:
 
 
 def merge_vpk(files: Optional[List[str]] = None, name: str = '',
-              confirmed: bool = False, lang: str = 'ru') -> Dict[str, object]:
+              confirmed: bool = False, lang: str = '') -> Dict[str, object]:
     """Сливает выбранные моды в один VPK."""
     from src.app.session import session
+
+    lang = _lang(lang)
     return session().merge_vpk(files, name, confirmed=confirmed, lang=lang)
 
 
@@ -825,15 +1182,19 @@ def load_particles(source: str) -> Dict[str, object]:
     return session().load_particles(source)
 
 
-def particle_params(system: str, lang: str = 'ru') -> List[dict]:
+def particle_params(system: str, lang: str = '') -> List[dict]:
     """Крутилки простого режима для системы частиц."""
     from src.app.session import session
+
+    lang = _lang(lang)
     return session().particle_params(system, lang)
 
 
-def particle_system(system: str, lang: str = 'ru') -> Dict[str, object]:
+def particle_system(system: str, lang: str = '') -> Dict[str, object]:
     """Модули и атрибуты системы целиком — экспертный режим."""
     from src.app.session import session
+
+    lang = _lang(lang)
     return session().particle_system(system, lang)
 
 
@@ -863,9 +1224,11 @@ def remove_particle_module(system: str, group: str,
 
 
 def particle_missing_attrs(system: str, group=None, index: int = 0,
-                           lang: str = 'ru') -> List[dict]:
+                           lang: str = '') -> List[dict]:
     """Параметры, которых у модуля ещё нет, со значениями как в игре."""
     from src.app.session import session
+
+    lang = _lang(lang)
     return session().particle_missing_attrs(system, group, index, lang)
 
 
@@ -1001,9 +1364,11 @@ def use_particle_texture_colors(system: str) -> Dict[str, object]:
     return session().use_particle_texture_colors(system)
 
 
-def particle_lint(system: str = '', lang: str = 'ru') -> Dict[str, object]:
+def particle_lint(system: str = '', lang: str = '') -> Dict[str, object]:
     """Что в эффекте сломает его в игре."""
     from src.app.session import session
+
+    lang = _lang(lang)
     return session().particle_lint(system, lang)
 
 
@@ -1018,8 +1383,10 @@ def save_particles(path: str) -> Dict[str, object]:
 
 
 def export_particles_vpk(name: str = 'particles_mod.vpk',
-                         lang: str = 'ru') -> Dict[str, object]:
+                         lang: str = '') -> Dict[str, object]:
     from src.app.session import session
+
+    lang = _lang(lang)
     return session().export_particles_vpk(name, lang)
 
 
@@ -1044,23 +1411,25 @@ def set_particle_param(system: str, key: str, value) -> Dict[str, object]:
 #: одинаков и в окне, и здесь.
 HAT_TAGS = ('medals', 'halloween', 'holiday')
 
-#: Подписи берём из панели шапок, чтобы не расходились формулировки.
-HAT_TAG_LABELS = {
-    'medals': 'Скрыть медали',
-    'halloween': 'Скрыть Halloween',
-    'holiday': 'Скрыть сезонные (Christmas и др.)',
-}
-
-
 def _model_file_name(mdl_path: str) -> str:
     """Имя файла модели без пути и расширения — подпись карточки косметики."""
     return mdl_path.replace(chr(92), "/").rsplit("/", 1)[-1].removesuffix(".mdl")
 
 
-def hat_filters() -> List[dict]:
-    """Какие категории косметики можно скрыть и что скрыто сейчас."""
+def hat_filters(lang: str = '') -> List[dict]:
+    """
+    Какие категории косметики можно скрыть и что скрыто сейчас.
+
+    Имя короткое, подсказка полная: в ряду фильтров «Скрыть сезонные
+    (Christmas и др.)» не помещается, а на кнопке нужно одно слово.
+    """
+    lang = _lang(lang)
+    t = _t(lang)
     hidden = hidden_hat_tags()
-    return [{'key': k, 'name': HAT_TAG_LABELS[k], 'hidden': k in hidden}
+    return [{'key': k,
+             'name': t.get(f'hat_filter_{k}', k),
+             'tip': t.get(f'hat_filter_{k}_tip', ''),
+             'hidden': k in hidden}
             for k in HAT_TAGS]
 
 
@@ -1090,7 +1459,7 @@ def set_hat_filter(tag: str, hidden: bool) -> List[dict]:
 
 
 def hats(query: str = '', tf2_class: Optional[str] = None,
-         lang: str = 'ru') -> List[dict]:
+         lang: str = '') -> List[dict]:
     """
     Косметика TF2 из items_game.txt.
 
@@ -1102,6 +1471,8 @@ def hats(query: str = '', tf2_class: Optional[str] = None,
     from src.app.session import session
     from src.data.hats_parser import parse_hats
 
+    lang = _lang(lang)
+    t = _t(lang)
     paths = session().tf2_paths()
     if 'error' in paths:
         return []
@@ -1138,7 +1509,8 @@ def hats(query: str = '', tf2_class: Optional[str] = None,
             # показ, и то, что уйдёт в сборку. Числа мало: по нему стиль не
             # загрузить.
             'styles': [
-                {'name': st.get('name') or f'Стиль {i + 1}',
+                {'name': (st.get('name')
+                          or t.get('hat_style_n', 'Style {n}').format(n=i + 1)),
                  'per_class': dict(st.get('per_class_models') or {})}
                 for i, st in enumerate(h.styles or [])
             ],

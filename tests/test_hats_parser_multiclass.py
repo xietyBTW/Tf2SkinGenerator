@@ -107,12 +107,13 @@ class ParseHatsMulticlassTests(unittest.TestCase):
         items_dir.mkdir(parents=True)
         (items_dir / "items_game.txt").write_text(_ITEMS_GAME, encoding="utf-8")
         self.root = str(root)
-        # Изолируем кэш, чтобы не трогать реальный cache/.
-        self._cache_backup = hats_parser._CACHE_FILE
-        hats_parser._CACHE_FILE = root / "cache.json"
+        # Изолируем кэш, чтобы не трогать реальный cache/. Подменяем ПАПКУ:
+        # имя файла кэша зависит от языка (см. hats_parser._cache_file).
+        self._cache_backup = hats_parser._CACHE_DIR
+        hats_parser._CACHE_DIR = root
 
     def tearDown(self):
-        hats_parser._CACHE_FILE = self._cache_backup
+        hats_parser._CACHE_DIR = self._cache_backup
         self._tmp.cleanup()
 
     def _by_name(self, items):
@@ -190,11 +191,11 @@ class ParseHatsCaseExclusionTests(unittest.TestCase):
         items_dir.mkdir(parents=True)
         (items_dir / "items_game.txt").write_text(_ITEMS_GAME_CASES, encoding="utf-8")
         self.root = str(root)
-        self._cache_backup = hats_parser._CACHE_FILE
-        hats_parser._CACHE_FILE = root / "cache.json"
+        self._cache_backup = hats_parser._CACHE_DIR
+        hats_parser._CACHE_DIR = root
 
     def tearDown(self):
-        hats_parser._CACHE_FILE = self._cache_backup
+        hats_parser._CACHE_DIR = self._cache_backup
         self._tmp.cleanup()
 
     def test_cases_excluded_hats_kept(self):
@@ -270,8 +271,7 @@ class DemomanModelTokenTests(unittest.TestCase):
             items.mkdir(parents=True)
             (items / "items_game.txt").write_text(self.ITEMS, encoding="utf-8")
             (root / "tf" / "resource").mkdir(parents=True)
-            with unittest.mock.patch.object(
-                    hats_parser, "_CACHE_FILE", root / "cache.json"):
+            with unittest.mock.patch.object(hats_parser, "_CACHE_DIR", root):
                 hats = parse_hats(str(root), "en", force_reparse=True)
 
         hat = next(h for h in hats if h.internal_name == "all_class_template_hat")

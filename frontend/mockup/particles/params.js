@@ -11,6 +11,7 @@ import { plist, pnote } from '../layout.js';
 import { pSystem, pMode, setSystem, setMode } from './state.js';
 import { pairedField, colorField, editParam } from './fields.js';
 import { pfind, filterExpert, showExpert } from './expert.js';
+import { syncHistory } from './playback.js';
 
 /** Рисует панель параметров выбранной системы. */
 export async function showParams(system) {
@@ -73,6 +74,11 @@ export async function showParams(system) {
     }
     plist.appendChild(row);
   }
+  // Доступность отмены зависит от ЛЮБОЙ правки, а не только структурной:
+  // сюда сходятся и смена системы, и правка параметра (editParam зовёт нас
+  // следом). Без этого кнопки «Отменить»/«Вернуть» показывали состояние на
+  // момент загрузки файла.
+  syncHistory();
 }
 
 document.querySelector('.params__modes').addEventListener('click', (e) => {

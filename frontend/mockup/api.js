@@ -8,6 +8,14 @@
  * Сам набор методов и их результаты живут в src/app/api.py.
  */
 
+//: Язык интерфейса. Ответам Python он не нужен — их язык берётся из общего
+//: конфига (см. `api._lang` в Python), и раньше страница глушила настройку,
+//: подставляя в каждый вызов 'ru'. Здесь он остался ради вьюверов: они живут
+//: в отдельных документах и в конфиг не ходят.
+let uiLang = 'en';
+export const lang = () => uiLang;
+export function setLang(value) { uiLang = value || 'en'; }
+
 //: Куда писать обмен с Python. Ставится журналом; по умолчанию — никуда.
 let sink = null;
 export function setLogSink(fn) { sink = fn; }
@@ -57,19 +65,20 @@ function cached(method, params) {
   return memo.get(key);
 }
 
-export const categories   = (lang = 'ru') => cached('categories', { lang });
-export const classes      = (lang = 'ru') => cached('classes', { lang });
-export const weaponTypes  = (tf2_class, lang = 'ru') => cached('weapon_types', { tf2_class, lang });
+/** Забывает закэшированные справочники: сменился язык — сменились имена. */
+export function forgetCached() { memo.clear(); }
+
+export const categories   = () => cached('categories', {});
+export const classes      = () => cached('classes', {});
+export const weaponTypes  = (tf2_class) => cached('weapon_types', { tf2_class });
 export const items        = (params) => call('items', params);
 export const hats         = (params) => call('hats', params);
 export const particleFiles = () => cached('particle_files', {});
 export const loadParticles = (source) => call('load_particles', { source });
-export const particleParams = (system, lang = 'ru') =>
-  call('particle_params', { system, lang });
+export const particleParams = (system) => call('particle_params', { system });
 export const setParticleParam = (system, key, value) =>
   call('set_particle_param', { system, key, value });
-export const particleSystem = (system, lang = 'ru') =>
-  call('particle_system', { system, lang });
+export const particleSystem = (system) => call('particle_system', { system });
 export const setParticleAttr = (system, group, index, attr, value) =>
   call('set_particle_attr', { system, group, index, attr, value });
 
@@ -132,9 +141,12 @@ export const particleReference = (path = '', for_ai = false) =>
 export const hatFilters   = () => call('hat_filters');
 export const setHatFilter = (tag, hidden) => call('set_hat_filter', { tag, hidden });
 export const modeFor      = (category, subtype = null) => call('mode_for', { category, subtype });
-export const loadPreview  = (mode, lang = 'ru', model_key = null,
-                             per_class = null, style = null) =>
-  call('load_preview', { mode, lang, model_key, per_class, style });
+// restore — открыть предмет с сохранённой работой. Из каталога он
+// открывается ИГРОВЫМ: свои работы лежат своим списком (`works`).
+export const loadPreview  = (mode, lang = null, model_key = null,
+                             per_class = null, style = null, restore = false) =>
+  call('load_preview', { mode, lang, model_key, per_class, style, restore });
+export const works        = () => call('works', {});
 export const stopPreview  = () => call('stop_preview');
 export const viewState    = () => call('view_state');
 export const setTeam      = (team) => call('set_team', { team });
@@ -184,9 +196,15 @@ export const setPartEdge    = (material, width, color) =>
   call('set_part_edge', { material, width, color });
 export const undoParts      = (material = '') => call('undo_parts', { material });
 
-// Работа над предметом: правки сохраняются молча, если это не выключено.
+// Работа над предметом. Автосохранение пишет черновик молча (если это не
+// выключено), а в библиотеку работа попадает только по `keepWork`.
 export const workState    = () => call('work_state');
+export const keepWork     = () => call('keep_work');
+export const restoreWork  = () => call('restore_work');
 export const forgetWork   = () => call('forget_work');
+// Черновики: их не видно в библиотеке, поэтому убираются отдельно, из настроек.
+export const drafts       = () => call('drafts', {});
+export const forgetDrafts = (keys = null) => call('forget_drafts', { keys });
 
 // Библиотека модов: папка на диске, она же список. Открытый мод сохраняется
 // туда, чтобы вернуться к нему потом.
@@ -199,6 +217,9 @@ export const diagnose     = (path) => call('diagnose', { path });
 
 // Настройки приложения: конфиг общий с окном, поэтому правка видна обоим.
 export const settings     = () => call('settings');
+export const clearModelCache = () => call('clear_model_cache');
+//: Меню «Вставить» в редакторе VMT: набор не меняется за сеанс.
+export const vmtSnippets  = () => cached('vmt_snippets', {});
 export const setSettings  = (values) => call('set_settings', { values });
 
 // Своя модель: сначала спрашиваем тип (keep=null), потом грузим с ответом.
@@ -217,6 +238,9 @@ export const resetVmt     = (material) => call('reset_vmt', { material });
 // full — собрать сцену целиком: страница просит это, когда дорожки не
 // легли (сцены в кадре не оказалось). Обычная смена анимации идёт без
 // него и обходится одними дорожками.
+// Насмешка: персонаж играет тонт с реквизитом. Класс выбирают на странице —
+// одну и ту же насмешку умеют до девяти классов, и модель у каждого своя.
+export const loadTaunt    = (tf2_class = '') => call('load_taunt', { tf2_class });
 export const loadFirstPerson = (action = 'IDLE', full = false) =>
   call('load_first_person', { action, full });
 export const leaveFirstPerson = () => call('leave_first_person');
@@ -229,6 +253,10 @@ export const mergePartIslands = (material, group, islands) =>
 export const loadSkybox   = (sky_name) => call('load_skybox', { sky_name });
 export const setTexture   = (material, path) => call('set_texture', { material, path });
 export const build        = (params) => call('build', { params });
+//: Сборка шапки на девять классов идёт минуты — передумать надо давать.
+export const cancelBuild  = () => call('cancel_build');
+export const vtfEstimate  = (size, format, flags) =>
+  call('vtf_estimate', { size, format, flags });
 export const answerTexture = (choice, path = '', apply_all = false) =>
   call('answer_texture', { choice, path, apply_all });
 export const exportUv     = (size = 1024) => call('export_uv', { size });

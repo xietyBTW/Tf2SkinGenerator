@@ -2,15 +2,16 @@
 Воркеры превью скайбокса.
 
 SkyboxFacesWorker — извлекает 6 стоковых граней выбранного неба из VPK игры
-(VMT → $basetexture → VTF; фолбэк — прямой путь materials/skybox/<sky><face>.vtf,
-т.к. у части небес VMT ссылается на текстуры другого неба) и конвертирует в PNG.
+(VMT → $basetexture → VTF; фолбэк — прямые пути, см. `stock_face_stems`:
+у стоковых небес VMT ссылается на текстуру, которой в игре нет) и конвертирует
+в PNG.
 """
 
 from typing import List
 
 from src.services.base_worker import Signal
 
-from src.data.skyboxes import SKY_FACES
+from src.data.skyboxes import SKY_FACES, stock_face_stems
 from src.services.base_worker import BaseWorker
 from src.services.game_vpk_reader import GameVpkReader
 from src.services.vtf_preview_service import vtf_bytes_to_png
@@ -92,7 +93,14 @@ class SkyboxFacesWorker(BaseWorker):
         return result
 
     def _read_face_vtf(self, reader: GameVpkReader, face: str):
-        """VTF грани: через $basetexture VMT-ки, иначе по прямому пути."""
+        """VTF грани: через $basetexture VMT-ки, иначе по прямым именам.
+
+        Прямой путь — не запасной вариант, а основной для стоковых небес: их
+        VMT-ки ссылаются на `skybox/cloud<грань>`, которой в игре нет, а сами
+        текстуры лежат под `<имя>side` одной на все четыре боковые грани. Пока
+        имя строилось как `<имя><грань>`, у любого стокового неба находились
+        только верх и низ, а бока в превью оставались пустыми.
+        """
         vmt = reader.read(f"materials/skybox/{self._sky_name}{face}.vmt")
         if vmt is not None:
             base = GameVpkReader.parse_basetexture(
@@ -101,4 +109,8 @@ class SkyboxFacesWorker(BaseWorker):
                 data = reader.find_vtf_for_basetexture(base)
                 if data is not None:
                     return data
-        return reader.read(f"materials/skybox/{self._sky_name}{face}.vtf")
+        for stem in stock_face_stems(self._sky_name, face):
+            data = reader.read(f"materials/skybox/{stem}.vtf")
+            if data is not None:
+                return data
+        return None

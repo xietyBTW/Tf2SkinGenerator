@@ -8,13 +8,13 @@
 узнает тот, кто рисует.
 
 Контракт простой: контроллер владеет воркером, применяет к сессии всё, что
-следует из его сигналов, и только потом эмитит СВОЁ событие. Подписчик
-(сейчас — Qt-панель, потом — что угодно) занимается исключительно
-отображением и про воркеры не знает.
+следует из его сигналов, и только потом эмитит СВОЁ событие. Подписчик —
+страница в окне WebView2 — занимается исключительно отображением и про воркеры
+не знает. Ради этой границы слой и появился, и она же позволила снять Qt.
 
 Сигналы взяты из `src/services/base_worker` — того же механизма, на котором
-работают воркеры: он без Qt, а доставку в поток UI обеспечивает диспетчер
-(`src/ui/qt_dispatch.py`), если он установлен.
+работают воркеры: он без Qt. Слот вызывается в потоке воркера; страница
+разбирает события своей очередью, поэтому диспетчер ей не нужен.
 """
 
 from __future__ import annotations
@@ -496,6 +496,7 @@ class ViewmodelController:
     materials = Signal(object)      # {материал: png}
     editable = Signal(object)       # какие меши разрешено перекрашивать
     actions = Signal(object)        # какие анимации есть у этого оружия
+    classes = Signal(object)        # кто умеет эту насмешку (для сцены тонта)
     clip = Signal(object)           # только дорожки: сцена на экране остаётся
     render_hints = Signal(object)
     failed = Signal(str)
@@ -553,6 +554,66 @@ class ViewmodelController:
         w.failed.connect(self.failed.emit)
         self._worker = w
         self._shown = (weapon_key, mode, self._session.textures.active_team)
+        w.start()
+
+    def load_taunt(self, prop_key: str, prop_mdl: str, misc_vpk: str,
+                   textures_vpk: str, tf2_root: str, tf2_class: str = '',
+                   lang: str = 'en') -> None:
+        """
+        Сцена насмешки: персонаж с реквизитом.
+
+        Собирает её другой воркер, но приходит она теми же сигналами: сцена с
+        дорожками костей, текстуры, редактируемые материалы. Разница с видом от
+        первого лица только в источнике — поэтому и контроллер тот же, просто
+        отдельным экземпляром: две сцены не должны гасить воркер друг друга.
+        """
+        self.stop()
+        from src.services.taunt_worker import TauntPreviewWorker
+
+        w = TauntPreviewWorker(
+            prop_key=prop_key,
+            prop_mdl=prop_mdl,
+            misc_vpk_path=misc_vpk,
+            textures_vpk_path=textures_vpk,
+            tf2_root=tf2_root,
+            tf2_class=tf2_class,
+            lang=lang,
+        )
+        w.progress.connect(self.progress.emit)
+        w.animated_ready.connect(self.animated.emit)
+        w.multi_material.connect(self._on_materials)
+        w.editable_materials.connect(self._on_editable)
+        w.classes_available.connect(lambda c: self.classes.emit(list(c or [])))
+        w.render_hints.connect(lambda h: self.render_hints.emit(h or {}))
+        w.failed.connect(self.failed.emit)
+        self._worker = w
+        self._shown = (prop_key, tf2_class, self._session.textures.active_team)
+        w.start()
+
+    def load_death(self, mode: str, misc_vpk: str, textures_vpk: str,
+                   lang: str = 'en') -> None:
+        """
+        Сцена спец-режима: солдат умирает нужной смертью.
+
+        Тот же случай, что и насмешка: сцену собирает свой воркер, а приходит
+        она общими сигналами — дорожки костей, текстуры, свойства материалов.
+        """
+        self.stop()
+        from src.services.death_scene_worker import DeathScenePreviewWorker
+
+        w = DeathScenePreviewWorker(
+            mode=mode,
+            misc_vpk_path=misc_vpk,
+            textures_vpk_path=textures_vpk,
+            lang=lang,
+        )
+        w.progress.connect(self.progress.emit)
+        w.animated_ready.connect(self.animated.emit)
+        w.multi_material.connect(self._on_materials)
+        w.render_hints.connect(lambda h: self.render_hints.emit(h or {}))
+        w.failed.connect(self.failed.emit)
+        self._worker = w
+        self._shown = (mode, '', self._session.textures.active_team)
         w.start()
 
     def load_clip(self, weapon_key: str, mode: str, misc_vpk: str,

@@ -108,7 +108,8 @@ DATA = {
 
 def _run(body: str, data=None) -> dict:
     script = f"""
-import {{ buildSkinnedScene, applyClip, createBones, createClip }} from {MODULE.as_uri()!r};
+import {{ buildSkinnedScene, applyClip, createBones, createClip,
+         updateHidden }} from {MODULE.as_uri()!r};
 {STUB}
 const DATA = {json.dumps(data if data is not None else DATA)};
 const out = (() => {{ {body} }})();
@@ -290,6 +291,58 @@ def test_clip_without_tracks_leaves_the_scene_alone():
         const result = applyClip(THREE, s, { times: [], tracks: [] });
         return { result, meshes: s.meshes.length, action: s.action };""")
     assert out == {"result": None, "meshes": 2, "action": None}
+
+
+# ── Показ реквизита по событиям насмешки ──────────────────────────────────── #
+
+def test_prop_is_hidden_only_within_its_ranges():
+    """Медик лезет за снимком за пазуху и убирает его в конце.
+
+    Секунды приходят из Python (`taunt_worker.hidden_ranges`) по событиям
+    AE_WPN_HIDE/UNHIDE из QC. Конец `null` — «до конца клипа».
+    """
+    data = json.loads(json.dumps(DATA))
+    data["weaponHidden"] = [[0, 0.77], [5.53, None]]
+    out = _run("""const s = buildSkinnedScene(THREE, DATA, makeMaterial);
+        const prop = s.meshes.find(m => m.kind === 'weapon').mesh;
+        const arm  = s.meshes.find(m => m.kind === 'arms').mesh;
+        const at = t => { s.action.time = t; updateHidden(s);
+                          return [prop.visible, arm.visible]; };
+        return { start: at(0.1), middle: at(3), tail: at(6) };""", data)
+    # Рука видна всегда: события про то, что персонаж держит, а не про него.
+    assert out == {"start": [False, None], "middle": [True, None],
+                   "tail": [False, None]}
+
+
+def test_without_events_the_prop_is_always_visible():
+    """У обычной насмешки скрывать нечего — и трогать меши незачем."""
+    out = _run("""const s = buildSkinnedScene(THREE, DATA, makeMaterial);
+        s.action.time = 0;
+        updateHidden(s);
+        return { props: s.props.length,
+                 visible: s.meshes.map(m => m.mesh.visible) };""")
+    assert out == {"props": 0, "visible": [None, None]}
+
+
+def test_hold_lengthens_the_clip_so_the_pose_stays():
+    """Замороженная смерть: тело доигрывает удар и застывает в этой позе.
+
+    Отдельной логики это не требует — за концом дорожки three.js отдаёт её
+    последнее значение, поэтому пауза это просто более длинный клип.
+    """
+    data = json.loads(json.dumps(DATA))
+    data["clip"]["duration"] = 1.23
+    data["clip"]["hold"] = 3.0
+    out = _run("""const s = buildSkinnedScene(THREE, DATA, makeMaterial);
+        return { duration: s.duration, tracks: s.action.clip.tracks.length };""",
+               data)
+    assert out == {"duration": 4.23, "tracks": 2}
+
+
+def test_clip_without_hold_is_unchanged():
+    out = _run("""const s = buildSkinnedScene(THREE, DATA, makeMaterial);
+        return s.duration;""")
+    assert out == DATA["clip"]["duration"]
 
 
 def test_empty_data_does_not_explode():

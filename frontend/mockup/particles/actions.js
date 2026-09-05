@@ -12,6 +12,7 @@ import { say, withParticles } from '../stage.js';
 import { setStatus } from '../layout.js';
 import { pcfNodes, pcfTree, pSystem, setTree, setSystem } from './state.js';
 import { fillTree } from './tree.js';
+import { syncHistory } from './playback.js';
 import { showParams } from './params.js';
 
 
@@ -34,6 +35,7 @@ export async function applyStructure(res, { reselect = null } = {}) {
     withParticles((w) => w.updateSystems(res.systems, pSystem));
   }
   if (pSystem) await showParams(pSystem);
+  await syncHistory();
   return true;
 }
 

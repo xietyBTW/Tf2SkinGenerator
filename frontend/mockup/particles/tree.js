@@ -7,12 +7,14 @@
  */
 
 import * as api from '../api.js';
+import { t } from '../i18n.js';
 import { stage, say, withParticles } from '../stage.js';
 import { closeCat } from '../layout.js';
 import { els } from '../catalog.js';
 import { pcfNodes, pcfTree, pcfCollapsed, pSystem, setTree } from './state.js';
 import { systemMenu } from './actions.js';
 import { showParams } from './params.js';
+import { syncHistory } from './playback.js';
 import { showParticleMaterials } from './materials.js';
 import { cpBox, cpFillIndexes } from './points.js';
 
@@ -94,18 +96,19 @@ export async function loadPcf(source, label = '') {
   for (const n of pcfNodes) if (n.kids.length) pcfCollapsed.add(n.key);
 
   withParticles((w) => {
-    w.setLanguage && w.setLanguage('ru');
+    w.setLanguage && w.setLanguage(api.lang());
     w.loadParticleData(data);
   });
   document.querySelector('.title__name').textContent =
     short.replace(/\.pcf$/, '');
   document.querySelector('.title__meta').textContent =
-    short + ' · ' + pcfTree.length + ' систем, корней ' + pcfNodes.length;
+    short + ' · ' + pcfTree.length + t(' систем, корней ') + pcfNodes.length;
 
   fillTree(pcfNodes, data.rootName);
   els.note.hidden = pcfTree.length > 0;
   els.note.textContent = 'В этом файле систем нет.';
   say('');
+  await syncHistory();
   if (data.rootName) await showParams(data.rootName);
   await showParticleMaterials();
 }

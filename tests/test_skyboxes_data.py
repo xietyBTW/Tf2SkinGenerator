@@ -6,7 +6,9 @@ from src.data.skyboxes import (
     SKY_FACES,
     SKY_PANO_KEY,
     SKY_PREVIEW_DEFAULT,
+    SKY_SIDE_FACES,
     STOCK_SKY_NAMES,
+    stock_face_stems,
 )
 from src.services.skybox_service import SkyboxService
 
@@ -34,6 +36,34 @@ class SkyboxesDataTests(unittest.TestCase):
     def test_preview_default_is_stock(self):
         # На SKY_PREVIEW_DEFAULT держится превью пункта «Все карты».
         self.assertIn(SKY_PREVIEW_DEFAULT, STOCK_SKY_NAMES)
+
+
+class StockFaceNamesTests(unittest.TestCase):
+    """Как в игре зовутся текстуры стоковых небес.
+
+    Пока грань искали одним именем `<небо><грань>`, у любого стокового неба
+    находились только верх и низ: боковые грани у всех четыре, а текстура одна
+    и зовётся `side`.
+    """
+
+    def test_side_faces_fall_back_to_the_shared_texture(self):
+        for face in SKY_SIDE_FACES:
+            stems = stock_face_stems('sky_dustbowl_01', face)
+            self.assertIn('sky_dustbowl_01side', stems, face)
+            self.assertIn('sky_dustbowl_01_side', stems, face)
+            # Своё имя грани идёт первым: у неба с настоящими шестью
+            # текстурами общая `side` не должна их перебивать.
+            self.assertEqual(stems[0], f'sky_dustbowl_01{face}')
+
+    def test_top_and_bottom_have_no_side_fallback(self):
+        for face in ('up', 'dn'):
+            stems = stock_face_stems('sky_harvest_01', face)
+            self.assertEqual(stems, ['sky_harvest_01' + face,
+                                     'sky_harvest_01_' + face])
+
+    def test_every_face_is_covered(self):
+        for face in SKY_FACES:
+            self.assertTrue(stock_face_stems('sky_tf2_04', face), face)
 
 
 class EnumerateSkyNamesTests(unittest.TestCase):

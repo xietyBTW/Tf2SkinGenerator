@@ -70,6 +70,13 @@ def build_scene(
     arms_extra_smds: Sequence[str] = (),
     arms_include_mats: Optional[set] = None,
     frame_step: int = 1,
+    root_rotation_x: float = ROOT_ROTATION_X,
+    anim_rotation_x: float = 0.0,
+    merge_by_name: bool = False,
+    weapon_hidden: Sequence[Sequence[Optional[float]]] = (),
+    clip_hold: float = 0.0,
+    clip_cut: float = 0.0,
+    anim_layer_smd: str = "",
 ) -> Optional[dict]:
     """
     Готовит данные анимированной сцены для вьювера.
@@ -97,6 +104,41 @@ def build_scene(
             перекрашивают гирлянду, а не медиган под ней.
         *_extra_smds:   бодигруппы соответствующей части, видимые по
             умолчанию: правая рука пиро и инженера объявлена именно так.
+        merge_by_name: сливать ВСЕ одноимённые кости, как это делает игра
+            (EF_BONEMERGE), а не выбирать одну «хватом». Нужно реквизиту
+            насмешки: у рентгена медика хват `weapon_bone` — это медиган,
+            которого в насмешке нет, и анимация уводит его на полсотни единиц
+            от кисти. Сам снимок висит на `joint_hose01/02`, и они всё это
+            время остаются в руке.
+        anim_layer_smd: разностный слой поверх кадров (Source зовёт такие
+            `delta`): у горящего игрока это вздрагивание от урона поверх
+            спокойной стойки. В SMD у него нули вместо поз — это добавка к
+            базовой анимации, а не самостоятельная. Кадров в слое обычно
+            меньше: он проигрывается один раз в начале и дальше не мешает.
+        clip_cut: на какой секунде оборвать движение. Ноль — играть до конца.
+            Замороженная смерть застывает ПОСРЕДИ падения, а не после него:
+            статуя стоит там, где тело было в тот миг, и доигранная до конца
+            анимация вместо неё кладёт солдата на землю.
+        clip_hold: сколько секунд держать ПОСЛЕДНИЙ кадр, прежде чем клип
+            пойдёт заново. Ноль — обычная петля. Нужно тем смертям, где игра
+            замораживает тело: от Спайсикла и золотой сковороды жертва
+            доигрывает свою анимацию смерти и застывает в этой позе, и без
+            паузы статуи в превью не видно вовсе.
+        weapon_hidden: секунды, когда оружия (реквизита) в кадре нет —
+            парами [начало, конец]; конец None значит «до конца клипа». Игра
+            прячет и достаёт его событиями AE_WPN_HIDE/UNHIDE, и без них снимок
+            медика висел бы в руке всю насмешку, включая то время, пока он ещё
+            лезет за ним за пазуху.
+        anim_rotation_x: поворот, переводящий кадры анимации в оси меша.
+            Ноль — они уже в одних осях. У персонажей это не так: модель
+            класса экспортирована `$upaxis Y`, а модель её анимаций — обычной
+            Source Z-вверх, и без поворота персонаж складывался в комок.
+            Поворачивается ТОЛЬКО корень: остальные кости заданы относительно
+            родителя и едут за ним.
+        root_rotation_x: поворот корня сцены. Умолчание переводит оси Source
+            (Z вверх) в оси Three.js. Ноль нужен моделям с `$upaxis Y` —
+            персонажи экспортируются уже Y-вверх, и общий поворот укладывал
+            их набок.
         arms_include_mats: оставить у рук только эти материалы — ракета
             солдата лежит в модели рук и вне перезарядки не нужна.
         frame_step:     брать каждый N-й кадр. Для длинных анимаций способ
@@ -120,7 +162,9 @@ def build_scene(
     weapon_part = None
     editable = list(editable_mats or ())
     if weapon_ref_smd:
-        merge = _merge_names(weapon_ref_smd, anim_smd) or weapon_merge_bones
+        merge = (_shared_bones(weapon_ref_smd, bind) if merge_by_name
+                 else _merge_names(weapon_ref_smd, anim_smd)
+                 or weapon_merge_bones)
         weapon_part = _weapon_part(weapon_ref_smd, bind, index_of, merge,
                                    weapon_extra_smds)
         if weapon_part is None:
@@ -134,19 +178,103 @@ def build_scene(
     if arms_part is None:
         return None
 
-    clip = _clip(anim_smd, order, clip_name, fps, frame_step)
+    clip = _clip(anim_smd, order, clip_name, fps, frame_step,
+                 root_name=_root_name(bind), root_fix=anim_rotation_x,
+                 layer_smd=anim_layer_smd, cut=clip_cut)
     if clip is None:
         logger.warning(f"[anim] нет кадров: {_short(anim_smd)}")
         return None
     clip["loop"] = bool(loop)
+    clip["hold"] = float(clip_hold)
 
+    parts = [p for p in (weapon_part, arms_part) if p]
     return {
-        "rootRotationX": ROOT_ROTATION_X,
+        "rootRotationX": root_rotation_x,
         "bones": _bones(bind, order, index_of),
-        "parts": [p for p in (weapon_part, arms_part) if p],
+        "parts": parts,
         "weaponMaterials": editable,
+        "weaponHidden": [list(pair) for pair in weapon_hidden],
         "clip": clip,
+        # Габариты считаем здесь по той же причине, что и у OBJ
+        # (`domain/preview/obj_bounds`): bounding box у Three.js сразу после
+        # загрузки ненадёжен, а от них зависит, попадёт сцена в кадр. Виду от
+        # первого лица они не нужны — там камеру ставит риг.
+        "bounds": _bounds(parts, root_rotation_x, clip, bind),
     }
+
+
+def _bounds(parts: Sequence[dict], rotation_x: float = ROOT_ROTATION_X,
+            clip: Optional[dict] = None,
+            bind: Optional["viewmodel_pose.Rig"] = None) -> dict:
+    """
+    Центр и масштаб сцены для свободной камеры.
+
+    Основа — bind-поза: она и есть меш, который показывают. Но насмешка водит
+    персонажа по площадке, и кадром по bind-позе он уходил бы за край: к
+    габаритам добавляется ХОД КОРНЯ по всей анимации.
+
+    Центр поворачиваем тем же углом, каким сцена поворачивает корень, — иначе
+    камера смотрит мимо.
+    """
+    from src.domain.preview.obj_bounds import TARGET_EXTENT
+
+    lows = [float('inf')] * 3
+    highs = [float('-inf')] * 3
+    for part in parts:
+        positions = part.get("positions") or ()
+        for axis in range(3):
+            values = positions[axis::3]
+            if not values:
+                continue
+            lows[axis] = min(lows[axis], min(values))
+            highs[axis] = max(highs[axis], max(values))
+    if lows[0] > highs[0]:
+        return {"cx": 0.0, "cy": 0.0, "cz": 0.0, "scale": 1.0}
+
+    travel = _root_travel(clip, bind)
+    if travel is not None:
+        # Меш стоит вокруг корня, поэтому занятое место — это путь корня плюс
+        # габарит самого персонажа.
+        for axis in range(3):
+            lows[axis] += travel[axis][0]
+            highs[axis] += travel[axis][1]
+
+    center = [(lows[i] + highs[i]) / 2 for i in range(3)]
+    extent = max(highs[i] - lows[i] for i in range(3))
+    cos, sin = math.cos(rotation_x), math.sin(rotation_x)
+    return {
+        "cx": round(center[0], POSITION_DIGITS),
+        "cy": round(center[1] * cos - center[2] * sin, POSITION_DIGITS),
+        "cz": round(center[1] * sin + center[2] * cos, POSITION_DIGITS),
+        "scale": round(TARGET_EXTENT / extent if extent > 0 else 1.0, 6),
+    }
+
+
+def _root_travel(clip: Optional[dict], bind) -> Optional[list]:
+    """Насколько корень уезжает от своего места в bind-позе, по осям.
+
+    Возвращает [(мин, макс)] по трём осям или None, если считать нечего.
+    """
+    if not clip or bind is None:
+        return None
+    root = next((i for i, parent in bind.parents.items() if parent < 0), None)
+    if root is None:
+        return None
+    name = bind.names.get(root, "")
+    track = next((t for t in clip.get("tracks", ()) if t.get("name") == name),
+                 None)
+    if not track or not track.get("positions"):
+        return None
+
+    start = bind.frame.get(root, ((0.0, 0.0, 0.0), ()))[0]
+    values = track["positions"]
+    out = []
+    for axis in range(3):
+        column = values[axis::3]
+        if not column:
+            return None
+        out.append((min(column) - start[axis], max(column) - start[axis]))
+    return out
 
 
 def build_clip(
@@ -178,6 +306,19 @@ def build_clip(
         return None
     clip["loop"] = bool(loop)
     return clip
+
+
+def _shared_bones(weapon_ref_smd: str, bind: viewmodel_pose.Rig) -> List[str]:
+    """Все кости модели, одноимённые с костями ведущего скелета.
+
+    Ровно то, что делает EF_BONEMERGE: каждая совпавшая по имени кость идёт за
+    своей, а не за общим «хватом». Отбор по твёрдому телу (`_merge_names`)
+    здесь мешает: он выбирает ОДНУ кость и подвешивает под неё всё остальное,
+    а у реквизита насмешки хват — кость спрятанного оружия.
+    """
+    names = smd_pose.parse_node_names(weapon_ref_smd)
+    known = set(bind.names.values())
+    return sorted({name for name in names.values() if name in known})
 
 
 def _merge_names(weapon_ref_smd: str, anim_smd: str) -> Optional[List[str]]:
@@ -438,9 +579,55 @@ def _weights(links: List[Tuple[int, float]]) -> Tuple[List[int], List[float]]:
 
 # ── Дорожки ───────────────────────────────────────────────────────────────── #
 
+def _root_name(bind) -> str:
+    """Имя корневой кости скелета (у неё нет родителя)."""
+    if bind is None:
+        return ""
+    root = next((i for i, parent in bind.parents.items() if parent < 0), None)
+    return bind.names.get(root, "") if root is not None else ""
+
+
+def _turn_x(vector: Sequence[float], angle: float) -> Tuple[float, float, float]:
+    """Поворот вектора вокруг X: им и отличаются оси Z-вверх и Y-вверх."""
+    cos, sin = math.cos(angle), math.sin(angle)
+    x, y, z = float(vector[0]), float(vector[1]), float(vector[2])
+    return x, y * cos - z * sin, y * sin + z * cos
+
+
+def _quat_mul(a: Sequence[float], b: Sequence[float]) -> Tuple[float, ...]:
+    """Произведение кватернионов (x, y, z, w): сначала b, потом a."""
+    ax, ay, az, aw = a
+    bx, by, bz, bw = b
+    return (aw * bx + ax * bw + ay * bz - az * by,
+            aw * by - ax * bz + ay * bw + az * bx,
+            aw * bz + ax * by - ay * bx + az * bw,
+            aw * bw - ax * bx - ay * by - az * bz)
+
+
+def _layer_frames(layer_smd: str, names: Dict[int, str]) -> List[dict]:
+    """Разностный слой как {имя кости: (смещение, доворот)} по кадрам.
+
+    Кости в слое свои по номерам, поэтому сразу переводим в имена: складывать
+    его с базовой анимацией придётся по ним.
+    """
+    if not layer_smd or not os.path.isfile(layer_smd):
+        return []
+    layer_names = smd_pose.parse_node_names(layer_smd)
+    return [{layer_names.get(bone, ""): value
+             for bone, value in frame.items()}
+            for frame in smd_pose.parse_frames(layer_smd)]
+
+
 def _clip(anim_smd: str, order: List[str], name: str,
-          fps: float, frame_step: int) -> Optional[dict]:
-    """Кадры анимации → дорожки положения и поворота по костям."""
+          fps: float, frame_step: int, root_name: str = "",
+          root_fix: float = 0.0, layer_smd: str = "",
+          cut: float = 0.0) -> Optional[dict]:
+    """Кадры анимации → дорожки положения и поворота по костям.
+
+    ``root_fix`` поворачивает КОРЕНЬ: кадры бывают в других осях, чем меш (см.
+    `build_scene`). Остальные кости заданы относительно родителя и едут за
+    ним, поэтому их трогать нельзя — иначе скелет вывернет дважды.
+    """
     names = smd_pose.parse_node_names(anim_smd)
     frames = smd_pose.parse_frames(anim_smd)
     if not frames or not names:
@@ -449,12 +636,21 @@ def _clip(anim_smd: str, order: List[str], name: str,
     step = max(1, int(frame_step))
     used = list(range(0, len(frames), step))
     rate = float(fps) if fps > 0 else 30.0
+    if cut > 0:
+        kept = [i for i in used if i / rate <= cut]
+        # Хотя бы два кадра: из одного дорожки не выйдет, а «замереть сразу»
+        # это не то, что просили.
+        used = kept if len(kept) >= 2 else used[:2]
     times = [i / rate for i in used]
 
     slot_of = {name: i for i, name in enumerate(order)}
+    layer = _layer_frames(layer_smd, names)
     tracks: Dict[int, dict] = {}
     for frame_no in used:
         frame = frames[frame_no]
+        # Слой короче базы и играется один раз в начале: дальше кадров нет, и
+        # анимация идёт как была.
+        added = layer[frame_no] if frame_no < len(layer) else {}
         for bone, (pos, rot) in frame.items():
             slot = slot_of.get(names.get(bone, ""))
             if slot is None:
@@ -463,10 +659,27 @@ def _clip(anim_smd: str, order: List[str], name: str,
                                              "name": order[slot],
                                              "positions": [],
                                              "quaternions": []})
+            # Корень слоя несёт не движение, а поправку осей (у вздрагивания
+            # солдата там ровно -90 градусов): сложив её с базой, персонажа
+            # кладёт набок. Двигают тело остальные кости.
+            shift = (None if order[slot] == root_name
+                     else added.get(names.get(bone, "")))
+            if shift is not None:
+                # Разность Source складывает в МЕСТНЫХ осях кости: смещение
+                # прибавляется, поворот домножается.
+                pos = tuple(a + b for a, b in zip(pos, shift[0]))
+            turn = root_fix and order[slot] == root_name
+            place = _turn_x(pos, root_fix) if turn else pos
+            spin = quaternion_from_euler(rot)
+            if shift is not None:
+                spin = _quat_mul(spin, quaternion_from_euler(shift[1]))
+            if turn:
+                spin = _quat_mul(quaternion_from_euler((root_fix, 0.0, 0.0)),
+                                 spin)
             track["positions"].extend(round(float(p), POSITION_DIGITS)
-                                      for p in pos)
+                                      for p in place)
             track["quaternions"].extend(
-                round(q, QUATERNION_DIGITS) for q in quaternion_from_euler(rot))
+                round(q, QUATERNION_DIGITS) for q in spin)
 
     ready = [t for t in tracks.values()
              if len(t["positions"]) == len(times) * 3]

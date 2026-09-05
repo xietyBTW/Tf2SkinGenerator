@@ -28,6 +28,7 @@
 
 import { group } from './util.js';
 import './picker.js';
+import './dropdown.js';
 import './layout.js';
 import './album.js';
 import './controls.js';
@@ -45,6 +46,28 @@ import './tools.js';
 import './events.js';
 import { boot, els } from './catalog.js';
 import { syncViewerTheme } from './log.js';
+import { say } from './stage.js';
+
+/*
+ * Последняя сеть под всеми обработчиками.
+ *
+ * Обработчики кнопок асинхронные, а `api.call` бросает на ошибке Python и на
+ * обрыве связи. Непойманное такой обработчик хоронил молча: кнопка просто не
+ * срабатывала, а текст оставался в журнале — который может быть и закрыт.
+ * Пусть лучше человек увидит, что именно сломалось.
+ */
+const shout = (err) => {
+  const text = (err && err.message) || String(err || 'неизвестная ошибка');
+  say(text);
+  console.error(err);
+};
+window.addEventListener('unhandledrejection', (e) => shout(e.reason));
+window.addEventListener('error', (e) => {
+  // Не загрузилась картинка или иконка — это не поломка страницы: карточки
+  // такие случаи разбирают сами (иконки предмета в игре может не быть).
+  if (e.target && e.target !== window) return;
+  shout(e.error || e.message);
+});
 
 // Взаимоисключающий выбор в рядах, где кнопка ничего не грузит: команда,
 // вариант оружия, анимация вида от первого лица.

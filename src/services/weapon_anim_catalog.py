@@ -47,6 +47,11 @@ _SMD_RE = re.compile(r'"([^"]+\.smd)"', re.I)
 _FPS_RE = re.compile(r'^\s*fps\s+([\d.]+)', re.M)
 _LOOP_RE = re.compile(r'^\s*loop\s*$', re.M)
 
+#: `{ event AE_WPN_HIDE 0 "" }` — кадр, на котором игра прячет или достаёт то,
+#: что персонаж держит в руке. Насмешка ими показывает реквизит не с начала:
+#: медик сперва лезет за пазуху и только на 23-м кадре достаёт снимок.
+_EVENT_RE = re.compile(r'\{\s*event\s+AE_WPN_(HIDE|UNHIDE)\s+(\d+)', re.I)
+
 
 #: Слоты, чьи активности названы не по слоту. Инструменты инженера единственные
 #: выбиваются из общей грамматики, и это видно прямо в QC:
@@ -105,6 +110,8 @@ class AnimSequence:
     activity: str = ""
     fps: float = 30.0
     loop: bool = False
+    #: ((кадр, спрятано), …) по возрастанию кадра — события AE_WPN_HIDE/UNHIDE.
+    hide_events: tuple = ()
 
     @property
     def exists(self) -> bool:
@@ -181,6 +188,9 @@ def load(decompiled_dir: str) -> Optional[AnimCatalog]:
             activity=activity.group(1).upper() if activity else "",
             fps=float(fps.group(1)) if fps else 30.0,
             loop=bool(_LOOP_RE.search(body)),
+            hide_events=tuple(sorted(
+                (int(frame), kind.upper() == 'HIDE')
+                for kind, frame in _EVENT_RE.findall(body))),
         ))
 
     if not sequences:

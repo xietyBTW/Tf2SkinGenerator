@@ -399,7 +399,9 @@ class VPKServiceTests(unittest.TestCase):
                   "extra_materials": ["c_scattergun_shell"], "blu_is_team": False,
                   "main_texture": "c_scattergun"}
 
-            def extra_cb(mat, wk):
+            # Третий аргумент — сколько материалов спросят ПОСЛЕ этого:
+            # по нему вопрос решает, предлагать ли «и так для остальных».
+            def extra_cb(mat, wk, remaining=0):
                 return str(shell_img) if mat == "c_scattergun_shell" else None
 
             def fake_create_vtf(png_path, output_path, fmt, flags, options=None):
@@ -1281,7 +1283,7 @@ class BuildVpkCharacterizationTests(unittest.TestCase):
             detail_png = base / "detail.png"
             Image.new("RGB", (4, 4), color="white").save(detail_png)
 
-            def extra_cb(material_name, weapon_key):
+            def extra_cb(material_name, weapon_key, remaining=0):
                 return str(shell_png)
 
             ok, msg, vtf_names = self._run_build(

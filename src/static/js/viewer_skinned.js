@@ -53,8 +53,16 @@ export function buildSkinnedScene(THREE, data, makeMaterial) {
     mesh.bind(skeleton, mesh.matrixWorld);
   }
 
+  // Реквизит насмешки в кадре не всё время: игра прячет и достаёт его
+  // событиями AE_WPN_HIDE/UNHIDE, а Python переводит их в секунды клипа
+  // (см. taunt_worker.hidden_ranges). Медик до 23-го кадра только лезет за
+  // снимком за пазуху — без этого снимок висел бы в руке с самого начала.
+  const hidden = data.weaponHidden || [];
   const built = { group, skeleton, mixer: new THREE.AnimationMixer(group),
-                  action: null, meshes, duration: 0 };
+                  action: null, meshes, duration: 0, hidden,
+                  props: hidden.length
+                    ? meshes.filter(e => e.kind === 'weapon').map(e => e.mesh)
+                    : [] };
   applyClip(THREE, built, data.clip);
   return built;
 }
@@ -85,6 +93,17 @@ export function applyClip(THREE, built, clipData) {
   built.duration = clip.duration;
   return action;
 }
+
+// Прячет и показывает реквизит по времени клипа. Зовётся каждый кадр.
+export function updateHidden(built) {
+  if (!built || !built.props || !built.props.length || !built.action) return;
+  const t = built.action.time;
+  // Конец null значит «до конца клипа»: последний AE_WPN_HIDE пары не имеет.
+  const off = built.hidden.some(
+    ([from, to]) => t >= from && (to === null || t < to));
+  for (const mesh of built.props) mesh.visible = !off;
+}
+
 
 // Кости в bind-позе. Порядок из Python гарантирует, что родитель уже создан.
 export function createBones(THREE, list) {
@@ -150,6 +169,11 @@ export function createClip(THREE, clip, bones) {
     }
   }
   if (tracks.length === 0) return null;
-  return new THREE.AnimationClip(clip.name || 'viewmodel',
-                                 clip.duration || -1, tracks);
+  // `hold` — сколько держать последний кадр. Отдельной логики он не требует:
+  // за концом дорожки three.js отдаёт её последнее значение, поэтому лишние
+  // секунды в длине клипа и есть застывшая поза (см. build_scene.clip_hold).
+  const duration = clip.duration
+    ? clip.duration + (Number(clip.hold) || 0)
+    : -1;
+  return new THREE.AnimationClip(clip.name || 'viewmodel', duration, tracks);
 }

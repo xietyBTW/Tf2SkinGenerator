@@ -17,6 +17,7 @@ import { root, work } from './layout.js';
 import { bindAlbum, goTo, SINGLE_TEX } from './album.js';
 import { modeControls, restoreBadges } from './controls.js';
 import { closeParts, bindParts } from './parts.js';
+import { updateDockSummary } from './build.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Данные из Python
@@ -117,7 +118,7 @@ export function showHatStyles(item) {
       say('Загрузка стиля: ' + style.name + '…');
       // Индекс нужен сеансу: по нему он и запоминает правки стиля, и понимает,
       // что это стиль ТОЙ ЖЕ шапки, а не новый предмет.
-      const res = await api.loadPreview('hat', 'ru', first, models, index);
+      const res = await api.loadPreview('hat', null, first, models, index);
       if (res.error) say(res.error);
       else markEditedStyles(res.edited_styles);
     });
@@ -146,10 +147,29 @@ export function markEditedStyles(indexes) {
  * шапки, человек уходит от оружия, а его текстура оставалась висеть в альбоме
  * — над чужим каталогом, с чужими карточками.
  */
+/**
+ * Возвращает обычный вид «Вместе».
+ *
+ * Вид от первого лица и насмешка — это СЦЕНЫ, собранные под конкретный
+ * предмет. У нового предмета такой сцены ещё нет, и оставленный выбор
+ * показывал бы пустой кадр с активной кнопкой: человек уже сменил предмет, а
+ * приложение всё ещё «в насмешке».
+ */
+export function resetView() {
+  document.querySelectorAll('.modes .underlined').forEach(
+    (b) => b.classList.toggle('is-active', b.dataset.view === 'both'));
+  work.dataset.view = 'both';
+  document.getElementById('fpbar').hidden = true;
+  document.getElementById('tauntbar').hidden = true;
+  // Камера возвращается к свободной орбите: риг остался от вида от первого лица.
+  withViewer((w) => w.setViewRig(null));
+}
+
 export function clearPreview() {
   cardTitles = {};        // подписи прошлого мода к новому предмету не относятся
   sceneKind = '';         // и спец-сцена: у обычной модели её нет
   lastModel = null;       // и кадр превью: вернуться к чужой модели нельзя
+  resetView();
   document.getElementById('hatstyles').hidden = true;
   document.getElementById('hatclasses').hidden = true;
   // Части считаны по ПРОШЛОЙ модели: у новой под тем же номером другой кусок.
@@ -178,7 +198,7 @@ export async function startPreview(item) {
   const models = hatModels(item, 0);
   showHatClasses({ per_class: models });
   showHatStyles(item);
-  const res = await api.loadPreview(item.mode, 'ru',
+  const res = await api.loadPreview(item.mode, null,
                                     item.type === 'hat' ? item.key : null,
                                     models || null);
   if (res.error) say(res.error);
@@ -306,8 +326,15 @@ export function applyView(st) {
   document.querySelector('[data-cond="parts"]').hidden =
     !(modeControls.replace_model && st.can_split);
 
+  // «Убрать свою модель» — только когда своя геометрия и правда стоит.
+  // Без неё замена была билетом в один конец: вернуть игровую можно было
+  // только выбрав предмет заново.
+  document.getElementById('dropmodel').hidden = !st.has_custom;
+
   // Альбом только что пересобран — вернуть пометки «свои настройки».
   restoreBadges();
+  // Сводка внизу зависит от параметров предмета: у нового они свои.
+  updateDockSummary();
 }
 
 /**
@@ -469,11 +496,47 @@ export function showFpActions(actions) {
   }
 }
 
+//: Класс, чью насмешку показываем. Пусто — первый, кто её умеет.
+export let tauntClass = '';
+
+/**
+ * Ряд классов насмешки.
+ *
+ * Одну и ту же насмешку играют до девяти классов, и у каждого своя модель
+ * реквизита — выбор меняет и персонажа, и то, что у него в руках.
+ */
+export function showTauntClasses(classes) {
+  const bar = document.getElementById('tauntbar');
+  bar.querySelectorAll('.tag').forEach((b) => b.remove());
+  const list = classes || [];
+  bar.hidden = list.length < 2 || work.dataset.view !== 'taunt';
+  if (bar.hidden) return;
+
+  if (!list.includes(tauntClass)) tauntClass = list[0];
+  for (const name of list) {
+    const b = document.createElement('button');
+    b.className = 'tag' + (name === tauntClass ? ' is-active' : '');
+    b.textContent = name;
+    b.addEventListener('click', async () => {
+      tauntClass = name;
+      bar.querySelectorAll('.tag').forEach(
+        (x) => x.classList.toggle('is-active', x === b));
+      sayBusy('Сборка сцены: ' + name + '…');
+      const res = await api.loadTaunt(name);
+      if (res.error) say(res.error);
+    });
+    bar.appendChild(b);
+  }
+}
+
 //: Какая спец-сцена сейчас в кадре: '' | 'none' | 'crit' | 'death'.
 //: От неё зависит, КУДА кладётся текстура — на билборд или на персонажа.
 export let sceneKind = '';
 //: Текстура персонажа в сцене (у эффекта смерти — игровая по умолчанию).
 export let sceneModelTex = '';
+//: Что человек положил сам. Сцена приходит позже текстуры и наоборот —
+//: помним последнее, иначе сборка сцены стирала уже выбранную картинку.
+let userTextures = {};
 
 /**
  * Сцена спец-режима.
@@ -484,6 +547,7 @@ export let sceneModelTex = '';
 export function showSpecialScene(ev) {
   sceneKind = ev.scene_kind || 'none';
   sceneModelTex = ev.model_texture || '';
+  userTextures = {};
   // Кнопки стилей прошлого предмета к спец-режиму не относятся: своего
   // события skins тут не будет, и они остались бы в ряду навсегда.
   document.querySelectorAll('#skinbar .tag').forEach((b) => b.remove());
@@ -494,11 +558,63 @@ export function showSpecialScene(ev) {
     return;
   }
 
+  // Настоящую сцену — солдата с анимацией смерти — собирает воркер, и это
+  // секунды на распаковку модели. Кубики в это время показывать нельзя: при
+  // каждом переключении режима в кадре мелькал бы человечек из коробок.
+  if (ev.pending) {
+    say('Собираем сцену…');
+    return;
+  }
+  specialFallback();
+}
+
+//: Кубики вместо персонажа. Запасной кадр: сюда приходят, если сцену собрать
+//: не вышло — игры нет или модель не разобралась.
+function specialFallback() {
   const modelUrl = sceneModelTex ? api.fileUrl(sceneModelTex) : '';
   withViewer((w) => w.loadCritHitScene('', modelUrl));
   say(sceneKind === 'crit'
     ? 'Картинка ляжет билбордом над персонажем'
     : 'Картинка ляжет на персонажа — так эффект выглядит в игре');
+}
+
+/** Сцену собрать не вышло: показываем то, что показывали раньше. */
+export function specialSceneFailed(error) {
+  if (!sceneKind || sceneKind === 'none') return false;
+  specialFallback();
+  if (error) say(error);       // причина важнее подсказки про картинку
+  return true;
+}
+
+/**
+ * Настоящая сцена спец-режима: солдат играет ту смерть, что подходит режиму.
+ *
+ * Крит — выстрел в голову и билборд над телом; лёд и золото — удар в спину;
+ * огонь — своя анимация горения. Сцена та же, что у насмешки, поэтому и
+ * показывает её общий загрузчик.
+ */
+export function showSpecialAnimated(ev) {
+  const url = specialTextureUrl();
+  withViewer((w) => {
+    w.setViewRig(null);
+    w.loadViewmodelAnimated(ev.scene, 0);
+    if (sceneKind === 'crit') w.setCritSprite(url);
+    // У эффекта смерти игра ЗАМЕНЯЕТ материалы трупа целиком: одна картинка
+    // ложится на всё тело, а не по материалам.
+    else if (url) w.updateTextureFromDataUrl(url);
+  });
+  // Сообщение о сборке иначе висит поверх кадра до конца сеанса: своего
+  // события «готово» у прогресса нет.
+  say('');
+  // Текстуры персонажа приехали раньше сцены — разложить их некуда было.
+  if (sceneKind === 'crit') refreshView();
+}
+
+//: Что сейчас показывать в спец-сцене: своя картинка человека, иначе игровая.
+function specialTextureUrl() {
+  const own = Object.values(userTextures || {})[0];
+  if (own) return api.fileUrl(own);
+  return sceneModelTex ? api.fileUrl(sceneModelTex) : '';
 }
 
 /**
@@ -509,12 +625,18 @@ export function showSpecialScene(ev) {
  */
 export function applySpecialTexture(textures) {
   if (!sceneKind || sceneKind === 'none') return false;
-  const path = Object.values(textures || {})[0];
-  const url = path ? api.fileUrl(path) : '';
-  withViewer((w) => {
-    if (sceneKind === 'crit') w.updateCritHitTexture(url);
-    else w.loadCritHitScene('', url || (sceneModelTex ? api.fileUrl(sceneModelTex) : ''));
-  });
+  userTextures = textures || {};
+  const url = specialTextureUrl();
+  if (sceneKind === 'crit') {
+    // Крит забирает на себя ТОЛЬКО билборд: сам солдат красится своими
+    // игровыми текстурами, и обычную раздачу по материалам перебивать нельзя
+    // — иначе он остаётся серым.
+    withViewer((w) => w.updateCritHitTexture(url));
+    return false;
+  }
+  // На кубиках-заглушке это тоже работает: текстура кладётся на все меши
+  // сцены, чем бы она ни была.
+  withViewer((w) => w.updateTextureFromDataUrl(url));
   return true;
 }
 
@@ -644,7 +766,14 @@ document.querySelector('.modes').addEventListener('click', async (e) => {
 
   // Вид от первого лица — не другой ракурс, а другая сцена: её собирает
   // отдельный воркер слиянием рук класса с оружием.
-  if (btn.dataset.view === 'fp') {
+  if (btn.dataset.view === 'taunt') {
+    // Насмешка — тоже не ракурс, а другая сцена: персонаж с реквизитом.
+    // Камера у неё свободная, поэтому рига нет.
+    say('Сборка насмешки…');
+    withViewer((w) => w.setViewRig(null));
+    const res = await api.loadTaunt(tauntClass);
+    if (res.error) say(res.error);
+  } else if (btn.dataset.view === 'fp') {
     say('Сборка вида от первого лица…');
     const res = await api.loadFirstPerson(fpAction);
     if (res.error) say(res.error);
@@ -655,6 +784,7 @@ document.querySelector('.modes').addEventListener('click', async (e) => {
     // не участвует — дёргать его незачем.
     withViewer((w) => w.setViewRig(null));
     document.getElementById('fpbar').hidden = true;
+    document.getElementById('tauntbar').hidden = true;
     // Свободная камера — это ещё не выход: сцену рук собирал отдельный воркер,
     // и без возврата обычной модели оружие оставалось в руках, только вертеть
     // его теперь можно было свободно. Кадр обычного превью уже есть, поэтому

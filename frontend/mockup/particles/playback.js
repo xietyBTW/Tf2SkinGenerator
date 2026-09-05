@@ -26,7 +26,18 @@ export async function historyGo(delta) {
     await showParticleMaterials();
   }
   say(delta < 0 ? 'Правка отменена' : 'Правка возвращена');
+  await syncHistory();
 }
+
+/** Гасит кнопки отмены, когда откатываться некуда. */
+export async function syncHistory() {
+  const st = await api.particleHistory();
+  document.getElementById('pundo').disabled = !st.undo;
+  document.getElementById('predo').disabled = !st.redo;
+}
+
+document.getElementById('pundo').addEventListener('click', () => historyGo(-1));
+document.getElementById('predo').addEventListener('click', () => historyGo(1));
 
 document.addEventListener('keydown', (e) => {
   if (root.dataset.section !== 'particles' || !e.ctrlKey) return;

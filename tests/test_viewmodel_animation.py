@@ -198,6 +198,80 @@ if __name__ == "__main__":
     unittest.main()
 
 
+class LayerTests(BuildSceneTests):
+    """Разностный слой поверх кадров: вздрагивание горящего игрока.
+
+    В SMD у такого слоя нули вместо поз — это добавка, а не поза. Складывается
+    он в местных осях кости, а КОРЕНЬ пропускается: там лежит не движение, а
+    поправка осей, и вместе с базой она кладёт персонажа набок.
+    """
+
+    def _layer(self, frame):
+        path = self.dir / "layer.smd"
+        path.write_text(_smd(
+            [("root", None), ("bip_hand_R", "root"),
+             ("weapon_bone", "bip_hand_R")], frame), encoding="utf-8")
+        return str(path)
+
+    def _hand(self, **kwargs):
+        clip = self._build(**kwargs)["clip"]
+        return next(t for t in clip["tracks"] if t["name"] == "bip_hand_R")
+
+    def test_offset_is_added_to_the_bone(self):
+        was = self._hand()
+        now = self._hand(anim_layer_smd=self._layer(
+            {"bip_hand_R": ((0, 3, 0), (0, 0, 0))}))
+        self.assertEqual(now["positions"][1] - was["positions"][1], 3)
+
+    def test_root_of_the_layer_is_ignored(self):
+        """У вздрагивания солдата в корне ровно -90 градусов — оси, не поза."""
+        clip = self._build(anim_layer_smd=self._layer(
+            {"root": ((0, 0, 0), (0, 0, -HALF_PI))}))["clip"]
+        plain = self._build()["clip"]
+        root = next(t for t in clip["tracks"] if t["name"] == "root")
+        before = next(t for t in plain["tracks"] if t["name"] == "root")
+        self.assertEqual(root["quaternions"], before["quaternions"])
+
+    def test_scene_without_a_layer_is_unchanged(self):
+        self.assertEqual(self._hand(anim_layer_smd=""), self._hand())
+
+
+class CutTests(BuildSceneTests):
+    """Обрыв движения: замороженная смерть застывает посреди падения."""
+
+    def _times(self, **kwargs):
+        scene = viewmodel_animation.build_scene(
+            arms_ref_smd=str(self.arms), weapon_ref_smd=str(self.weapon),
+            **kwargs)
+        return scene["clip"]["times"]
+
+    def _long_anim(self, frames=10):
+        """Анимация на несколько кадров: поза одна, важны их номера."""
+        lines = ["version 1", "nodes",
+                 '0 "root" -1', '1 "bip_hand_R" 0', '2 "weapon_bone" 1',
+                 "end", "skeleton"]
+        for i in range(frames):
+            lines.append(f"time {i}")
+            lines += [f"{b} 0 0 0 0 0 0" for b in range(3)]
+        lines += ["end", ""]
+        path = self.dir / "long.smd"
+        path.write_text("\n".join(lines), encoding="utf-8")
+        return str(path)
+
+    def test_frames_past_the_cut_are_dropped(self):
+        anim = self._long_anim()
+        whole = self._times(anim_smd=anim, fps=10.0)
+        cut = self._times(anim_smd=anim, fps=10.0, clip_cut=0.5)
+        self.assertEqual(len(whole), 10)
+        self.assertEqual(len(cut), 6)          # 0.0…0.5 включительно
+
+    def test_cut_never_leaves_a_single_frame(self):
+        """Из одного кадра дорожки не выйдет, и «замереть сразу» — не то."""
+        self.assertGreaterEqual(
+            len(self._times(anim_smd=self._long_anim(), fps=10.0,
+                            clip_cut=0.0001)), 2)
+
+
 class OwnViewmodelTests(BuildSceneTests):
     """Предмет со СВОЕЙ моделью вида: часы шпиона.
 

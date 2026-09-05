@@ -10,7 +10,7 @@
  */
 
 import * as api from './api.js';
-import { fileSize, chooseFile } from './util.js';
+import { fileSize, chooseFile, plural } from './util.js';
 import { ask } from './ask.js';
 import { say } from './stage.js';
 import {
@@ -32,6 +32,7 @@ import {
   setSystem,
 } from './particles/index.js';
 import { diagDlg, diagSay } from './diagnostics.js';
+import { applyLook } from './settings.js';
 import { setMode } from './controls.js';
 import { startPreview, clearPreview } from './preview.js';
 
@@ -74,10 +75,13 @@ export function fillGrid(list) {
     // Вложенность системы в PCF: ребёнок принадлежит родителю, и без
     // отступа список из 114 имён читается как каша.
     if (item.depth) b.style.setProperty('--depth', item.depth);
-    // Обложка — та же иконка, что у предмета в рюкзаке. Грузим лениво: на
-    // экране три сотни карточек, а браузер запросит только видимые.
-    // У частиц иконок нет вовсе — незачем стучаться за 404 сто раз.
-    const key = item.type === 'particle' ? '' : (item.icon || item.key);
+    // Обложка: иконка из рюкзака, а у кого её нет — текстура самой модели
+    // (см. api.icon_png). Грузим лениво: на экране три сотни карточек, а
+    // браузер запросит только видимые.
+    // У частиц и спец-режимов картинки нет вовсе — спрей и эффекты смерти не
+    // предметы, и стучаться за 404 на каждую карточку незачем.
+    const noIcon = item.type === 'particle' || item.type === 'special';
+    const key = noIcon ? '' : (item.icon || item.key);
     if (key) {
       const img = document.createElement('img');
       img.className = 'pick__icon';
@@ -90,7 +94,23 @@ export function fillGrid(list) {
       b.querySelector('.pick__box').appendChild(img);
     }
     b.querySelector('.pick__name').textContent = item.name;
-    b.querySelector('.mono').textContent = item.label ?? item.key;
+    // У косметики подпись — КЛАСС, а не имя файла: у мультиклассовой шапки в
+    // пути стоит подстановка (`bak_teufort_knight_%s`), и показывать её
+    // человеку незачем. Длинный список сворачивается в «N классов», иначе он
+    // отъедает место у названия — как в панели приложения.
+    b.querySelector('.mono').textContent = item.type === 'hat'
+      ? classTag(item) : (item.label ?? item.key);
+    // Пометка у шапки с модельными стилями: у каждого стиля СВОЯ геометрия, и
+    // до выбора об этом узнать было неоткуда — а стилей больше одного у 224
+    // предметов из 1822. Пометка на обложке, а не в подписи: подпись занята
+    // классом, и число стилей спорило бы с ним за место.
+    const styles = (item.styles || []).length;
+    if (styles > 1) {
+      const mark = document.createElement('i');
+      mark.className = 'pick__styles';
+      mark.textContent = styles + ' ' + plural(styles, 'стиль', 'стиля', 'стилей');
+      b.querySelector('.pick__box').appendChild(mark);
+    }
     b.addEventListener('click', () => (item.type === 'particle'
       ? pickSystem(b, item) : choose(b, item)));
     // Правая кнопка на системе — её меню, как в дереве систем приложения.
@@ -100,6 +120,24 @@ export function fillGrid(list) {
     els.grid.appendChild(b);
   }
   els.grid.hidden = list.length === 0;
+  showCount(list.length);
+}
+
+/** Класс предмета короткой подписью: длинный список — числом. */
+function classTag(item) {
+  const list = String(item.cls || '').split(',').map((c) => c.trim()).filter(Boolean);
+  if (list.length === 0) return item.label ?? item.key;
+  if (list.length === 1) return list[0];
+  // Девять классов = «все»: перечислять их незачем, это половина косметики.
+  return list.length >= 9 ? 'все классы' : list.length + ' ' + plural(
+    list.length, 'класс', 'класса', 'классов');
+}
+
+/** Сколько предметов показано. Пусто — счётчик прячется, о нуле скажет note. */
+function showCount(n) {
+  const el = document.getElementById('cat-count');
+  el.hidden = n === 0;
+  el.textContent = n + ' ' + plural(n, 'предмет', 'предмета', 'предметов');
 }
 
 /**
@@ -112,8 +150,10 @@ export function fillGrid(list) {
 export async function showModLibrary() {
   els.grid.innerHTML = '';
   els.note.hidden = false;
-  els.note.textContent = 'Мод откроется как предмет: его модель и текстуры '
-    + 'станут тем, что на экране, а сам файл уйдёт в сборку основой.';
+  els.note.textContent = 'Свои работы и моды из VPK. Предмет из списка оружия '
+    + 'открывается игровым — сохранённая работа открывается отсюда.';
+
+  const works = await showWorks();
 
   const open = document.createElement('button');
   open.className = 'pick pick--open';
@@ -123,7 +163,8 @@ export async function showModLibrary() {
   open.addEventListener('click', pickVpkMod);
   els.grid.append(open);
 
-  for (const mod of await api.modLibrary()) {
+  const mods = await api.modLibrary();
+  for (const mod of mods) {
     const card = document.createElement('button');
     card.className = 'pick pick--mod';
     card.innerHTML = `<span class="pick__box"></span>
@@ -157,6 +198,9 @@ export async function showModLibrary() {
     card.append(drop);
     els.grid.append(card);
   }
+  // Счётчик строится мимо fillGrid, обновить его надо самим: иначе тут
+  // висит число от прошлой категории.
+  showCount(works + mods.length);
 }
 
 /**
@@ -181,6 +225,74 @@ async function showModIcon(card, mod) {
   const res = await api.modIcon(mod.name);
   // Карточка могла уехать, пока строилась обложка (удалили, сменили раздел).
   if (card.isConnected) put(res.icon);
+}
+
+/**
+ * Сохранённые работы — карточками, как предметы.
+ *
+ * Раньше работа возвращалась молча при открытии предмета: в каталоге «Обрез»,
+ * на экране — твой обрез, и вернуться к игровому нечем. Теперь список оружия
+ * показывает игру, а работа открывается отсюда, осознанно.
+ */
+async function showWorks() {
+  const list = await api.works();
+  if (!list.length) return 0;
+
+  for (const work of list) {
+    const card = document.createElement('button');
+    card.className = 'pick pick--work';
+    card.innerHTML = `<span class="pick__box"></span>
+      <span class="pick__name"></span><span class="mono"></span>`;
+    card.querySelector('.pick__name').textContent = work.name;
+    card.querySelector('.mono').textContent = whenSaved(work.saved_at);
+    if (work.icon) {
+      const img = document.createElement('img');
+      img.className = 'pick__icon';
+      img.loading = 'lazy';
+      img.alt = '';
+      img.addEventListener('error', () => img.remove());
+      img.src = api.iconUrl(work.icon);
+      card.querySelector('.pick__box').appendChild(img);
+    }
+    card.addEventListener('click', () => openWork(work));
+    els.grid.append(card);
+  }
+  return list.length;
+}
+
+/** Когда сохранено — словами: точное время тут ничего не решает. */
+function whenSaved(stamp) {
+  const days = Math.floor((Date.now() / 1000 - (stamp || 0)) / 86400);
+  if (days <= 0) return 'сегодня';
+  if (days === 1) return 'вчера';
+  return days + ' ' + plural(days, 'день', 'дня', 'дней') + ' назад';
+}
+
+/**
+ * Открывает работу: тот же предмет, но с восстановленными правками.
+ *
+ * Ключ модели передаём явно. Из режима его выводит Python, но только у
+ * оружия: у шапки модель задаётся выбором в каталоге, и без ключа работа по
+ * шапке не открывалась вовсе. Мод из VPK — вообще не предмет каталога:
+ * он грузится файлом, а правки к нему возвращаются следом.
+ */
+async function openWork(work) {
+  document.querySelector('.title__name').textContent = work.name;
+  document.querySelector('.title__meta').textContent = 'сохранённая работа';
+  closeCat();
+  say('Открываю работу…');
+
+  if (work.mod) {
+    await openMod({ name: work.name, path: work.mod });
+    const back = await api.restoreWork();
+    if (back.error) say(back.error);
+    return;
+  }
+
+  await setMode(work.mode);
+  const res = await api.loadPreview(work.mode, null, work.item_key || null,
+                                    work.per_class || null, null, true);
+  if (res.error) say(res.error);
 }
 
 /**
@@ -237,9 +349,11 @@ let reloadSeq = 0;
 export async function reload() {
   const seq = ++reloadSeq;
   const list = sel.section === 'hats'
-    ? await api.hats({ query: sel.query || '', tf2_class: sel.cls, lang: 'ru' })
+    ? await api.hats({ query: sel.query || '', tf2_class: sel.cls })
+    // Поиск работает во всех разделах, а не только у косметики: поле над
+    // списком одно, и «не ищет» у оружия читалось как поломка.
     : await api.items({ category: sel.category, tf2_class: sel.cls,
-                        weapon_type: sel.type, lang: 'ru' });
+                        weapon_type: sel.type, query: sel.query || '' });
   if (seq !== reloadSeq) return;               // выбор успел смениться
 
   // Кастомный мод: предмет здесь — файл на диске. Список берётся не из
@@ -261,6 +375,31 @@ export async function reload() {
 }
 
 /**
+ * Перерисовывает списки на другом языке, сохраняя выбор.
+ *
+ * Имена предметов приходят из игры вместе с языком: сменив его в настройках,
+ * человек ждёт список на новом языке, а не после перезапуска. Раздел, класс и
+ * тип при этом остаются — перебрасывать его в «Оружие» было бы наказанием за
+ * настройку.
+ */
+export async function relabel() {
+  if (sel.section === 'particles') return;   // имена систем приходят из PCF
+  await fillCategories();
+  els.cat.value = sel.category;
+  if (sel.section === 'hats') {
+    await fillHatFilters();
+  } else {
+    if (!els.fClass.hidden) {
+      fillFilters(els.fClass, await api.classes(), sel.cls, pickClass);
+    }
+    if (!els.fType.hidden) {
+      fillFilters(els.fType, await api.weaponTypes(sel.cls), sel.type, pickType);
+    }
+  }
+  await reload();
+}
+
+/**
  * Переключение раздела.
  *
  * «Оружие» ходит в items() с категориями и типами, «Шапки» — в hats() с
@@ -270,7 +409,7 @@ export async function reload() {
 export async function pickSection(name) {
   // Диагностика — отчёт, а не рабочее место: открываем окно и оставляем
   // текущий раздел на месте.
-  if (name === 'Диагностика') {
+  if (name === 'diagnostics') {
     diagDlg.showModal();
     if (!document.getElementById('diag-status').textContent) {
       diagSay('Выберите собранный VPK-мод');
@@ -279,7 +418,7 @@ export async function pickSection(name) {
   }
 
   const было = sel.section;
-  sel.section = { 'Шапки': 'hats', 'Частицы': 'particles' }[name] || 'weapons';
+  sel.section = name === 'hats' || name === 'particles' ? name : 'weapons';
   root.dataset.section = sel.section;
 
   // Смена раздела — это уход от предмета. Воркер останавливаем ПЕРВЫМ: иначе
@@ -354,7 +493,7 @@ export async function pickSection(name) {
     return;
   }
 
-  if (name !== 'Оружие') {
+  if (name !== 'weapons') {
     els.grid.innerHTML = '';
     els.note.hidden = false;
     els.note.textContent = 'Раздел «' + name + '» ещё не подключён.';
@@ -399,8 +538,10 @@ export async function fillHatFilters() {
   for (const f of await api.hatFilters()) {
     const b = document.createElement('button');
     b.className = 'tag' + (f.hidden ? ' is-active' : '');
-    b.textContent = f.name.replace(/^Скрыть /, '');
-    b.title = f.name;
+    // Имя короткое, подсказка полная: обрезать здесь по «Скрыть » значило бы
+    // держать в разметке правило одного языка.
+    b.textContent = f.name;
+    b.title = f.tip || f.name;
     b.addEventListener('click', async () => {
       const state = await api.setHatFilter(f.key, !b.classList.contains('is-active'));
       const now = state.find((x) => x.key === f.key);
@@ -457,6 +598,9 @@ export function applyToolsMenu(particlesSection) {
 }
 
 export async function boot() {
+  // Внешний вид — до всего остального: иначе первые кадры страница показывает
+  // светлой и перекрашивается на глазах.
+  applyLook((await api.settings()).values || {});
   applyToolsMenu(false);
   showTf2Path();
   await fillCategories();
@@ -471,7 +615,8 @@ export async function boot() {
 document.querySelector('.chrome__nav').addEventListener('click', async (e) => {
   const btn = e.target.closest('.underlined');
   if (!btn) return;
-  if (await pickSection(btn.textContent.trim()) === false) return;
+  // Ключ из data-section, а не подпись: подпись переводится.
+  if (await pickSection(btn.dataset.section) === false) return;
   document.querySelectorAll('.chrome__nav .underlined')
           .forEach((b) => b.classList.remove('is-active'));
   btn.classList.add('is-active');

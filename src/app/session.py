@@ -136,6 +136,12 @@ class AppSession:
         self.controller = Preview3DController(self.preview)
         self.skins = SkinDetectController(self.preview)
         self.viewmodel = ViewmodelController(self.preview)
+        #: Сцена насмешки — тот же контроллер, но свой экземпляр: у него свой
+        #: воркер, и вид от первого лица не должен его гасить.
+        self.taunt = ViewmodelController(self.preview)
+        # Спец-режимы: крит и эффекты смерти показывают ту же анимированную
+        # сцену, только вместо предмета в ней умирающий солдат.
+        self.death = ViewmodelController(self.preview)
         self.skybox = SkyboxController(self.preview)
         self.vpk_mod = VpkModController(self.preview)
         #: Воркер сборки. Один на сеанс: две сборки разом писали бы в одну
@@ -244,6 +250,28 @@ class AppSession:
         v.editable.connect(lambda n: self._put('fp_editable', names=list(n)))
         v.actions.connect(lambda n: self._put('fp_actions', actions=list(n)))
         v.clip.connect(lambda c: self._put('fp_clip', clip=c or {}))
+
+        # Насмешка: та же анимированная сцена, но камера свободная — рига у
+        # неё нет, персонажа смотрят со стороны.
+        t = self.taunt
+        t.progress.connect(lambda text: self._put('progress', text=text))
+        t.failed.connect(lambda err: self._put('failed', error=err))
+        t.animated.connect(lambda scene: self._put('taunt_animated', scene=scene))
+        t.materials.connect(lambda m: self._put('materials', materials=dict(m or {})))
+        t.editable.connect(lambda n: self._put('fp_editable', names=list(n)))
+        t.classes.connect(lambda c: self._put('taunt_classes', classes=list(c)))
+        t.render_hints.connect(lambda h: self._put('render_hints', hints=h or {}))
+
+        # Спец-режим: сцена приходит своим событием — странице надо знать, что
+        # с ней делать (у крита билборд, у эффекта смерти текстура на всё тело).
+        d = self.death
+        d.progress.connect(lambda text: self._put('progress', text=text))
+        d.failed.connect(lambda err: self._put('failed', error=err))
+        d.animated.connect(
+            lambda scene: self._put('special_animated', scene=scene,
+                                    mode=getattr(self, '_mode', '')))
+        d.materials.connect(lambda m: self._put('materials', materials=dict(m or {})))
+        d.render_hints.connect(lambda h: self._put('render_hints', hints=h or {}))
         v.render_hints.connect(lambda h: self._put('render_hints', hints=h or {}))
         v.failed.connect(lambda error: self._put('failed', error=error))
 
@@ -339,9 +367,15 @@ class AppSession:
     def load_preview(self, mode: str, lang: str = 'ru',
                      model_key: Optional[str] = None,
                      per_class: Optional[Dict[str, str]] = None,
-                     style: Optional[int] = None) -> Dict[str, Any]:
+                     style: Optional[int] = None,
+                     restore: bool = False) -> Dict[str, Any]:
         """
         Начинает загрузку 3D-превью предмета.
+
+        restore — вернуть сохранённую работу. По умолчанию НЕТ: каталог
+        показывает предмет таким, какой он в игре. Свои работы открываются
+        своим списком (`works`), иначе выбор «Обрез» молча давал бы чужой
+        обрез, и вернуться к игровому было нечем.
 
         Возвращает не результат, а факт запуска: модель приезжает событиями.
         Ошибку конфигурации (нет TF2) отдаём сразу — гонять ради неё воркер
@@ -375,7 +409,7 @@ class AppSession:
             # не сообщение о поломке.
             from src.data.weapons import SPECIAL_MODES
             if mode in set(SPECIAL_MODES):
-                return self._load_texture_only(mode)
+                return self._load_texture_only(mode, restore, lang)
             return {'error': f'Для режима «{mode}» 3D-модели нет'}
 
         # Состояние сеанса чистит переход, а не контроллер: правила «что
@@ -393,12 +427,20 @@ class AppSession:
             self._obj_path = ''
         self.vpk_mod.stop()
         self._vpk_mod_path = None
+        # Собранные сцены принадлежали ПРОШЛОМУ предмету: и вид от первого
+        # лица, и насмешка. Не погасив их, мы получили бы кадр чужого
+        # предмета поверх нового — воркер досчитает и пришлёт свою сцену.
+        self.viewmodel.stop()
+        self.taunt.stop()
+        self.death.stop()
 
         # Правки возвращаем ДО запуска воркера: они лягут на карточки, как
         # только приедут материалы, и человек не увидит пустой альбом там, где
-        # вчера была работа.
+        # вчера была работа. Но ТОЛЬКО если работу и просили открыть: каталог
+        # показывает предмет игровым.
         self._mode = mode
-        self._restore_work()
+        if restore:
+            self._restore_work()
         # Память стилей свежее диска: с неё вернулись минуту назад, а автосохранение
         # человек мог и выключить.
         with self._lock:
@@ -468,7 +510,8 @@ class AppSession:
         """Сцена без модели: резать больше нечего, путь к OBJ забываем."""
         self._obj_path = ''
 
-    def _load_texture_only(self, mode: str) -> Dict[str, Any]:
+    def _load_texture_only(self, mode: str, restore: bool = False,
+                           lang: str = 'ru') -> Dict[str, Any]:
         """
         Режим без модели: спрей и эффекты смерти.
 
@@ -486,17 +529,59 @@ class AppSession:
             self.preview.begin_game_model()
             self.preview.textures.material_names = [SINGLE_TEX_KEY]
             self.preview.textures.main_material = SINGLE_TEX_KEY
+            # Карточка стояла пустой: у режима один материал, и что именно
+            # заменяешь, было не видно. Кладём в неё игровую текстуру — ту
+            # самую, что сейчас в игре.
+            self.preview.textures.vpk_red_tex_map = (
+                {SINGLE_TEX_KEY: self._game_texture(mode)}
+                if self._game_texture(mode) else {})
             self._forget_model()
         self._mode = mode
         self._vpk_mod_path = None
-        self._restore_work()
+        if restore:
+            self._restore_work()
 
         logger.info(f"режим без модели: {mode}")
         # У крита и эффектов смерти сцена ЕСТЬ — персонаж: у крита текстура
         # висит билбордом над ним, у эффекта ложится на него самого. Модель
         # процедурная, если своя не положена в tools/Model.
-        self._put('texture_only', mode=mode, **self._scene_for(mode))
+        # `pending` говорит странице, что настоящая сцена уже собирается:
+        # кубики-заглушку показывать не надо, иначе при каждом переключении
+        # режима в кадре мелькает человечек из коробок.
+        from src.services.death_scene_worker import SEQUENCES as _DEATHS
+
+        self._put('texture_only', mode=mode, pending=(mode in _DEATHS),
+                  **self._scene_for(mode))
+        # Кубики-заглушка остаются запасным кадром: настоящую сцену собирает
+        # воркер, и это секунды на распаковку модели и анимаций.
+        self._start_death_scene(mode, lang)
         return {'texture_only': True, 'mode': mode}
+
+    def _start_death_scene(self, mode: str, lang: str = 'ru') -> None:
+        """Сцена смерти солдата под спец-режим — если игра на месте."""
+        from src.services.death_scene_worker import SEQUENCES
+
+        if mode not in SEQUENCES:
+            return
+        paths = self.tf2_paths()
+        if 'error' in paths:
+            return
+        self.controller.stop()
+        self.viewmodel.stop()
+        self.taunt.stop()
+        self.death.load_death(mode, paths['misc_vpk'], paths['textures_vpk'],
+                              lang=lang)
+
+    def _game_texture(self, mode: str) -> str:
+        """Игровая текстура спец-режима как PNG. Считается один раз на режим."""
+        if getattr(self, '_game_tex_mode', '') != mode:
+            from src.services import special_scene_service as scene
+
+            paths = self.tf2_paths()
+            self._game_tex_mode = mode
+            self._game_tex = ('' if 'error' in paths else scene.game_texture(
+                mode, [paths['misc_vpk'], paths['textures_vpk']]))
+        return self._game_tex
 
     def _scene_for(self, mode: str) -> Dict[str, Any]:
         """Из чего собрать сцену спец-режима: своя модель и текстура по умолчанию."""
@@ -515,7 +600,7 @@ class AppSession:
             # человек должен видеть то же, что и в игре.
             paths = self.tf2_paths()
             if not model_texture and 'error' not in paths:
-                model_texture = scene.death_effect_texture(
+                model_texture = scene.game_texture(
                     mode, [paths['misc_vpk'], paths['textures_vpk']])
             return {'scene_kind': 'death', 'model': model,
                     'model_texture': model_texture}
@@ -573,6 +658,9 @@ class AppSession:
         — у неё есть последний кадр превью, пересобирать его незачем.
         """
         self.viewmodel.stop()
+        # Сцена насмешки уходит тем же выходом: она собрана так же и так же
+        # держит подложку с текстурами персонажа.
+        self.taunt.stop()
         with self._lock:
             self.preview.scene_extra_textures = {}
             self.preview.scene_item_materials = []
@@ -583,6 +671,37 @@ class AppSession:
             # кладёт её глобально.
             self.controller.apply_scene_extra()
         return self.view_state()
+
+    def load_taunt(self, tf2_class: str = '', lang: str = 'ru') -> Dict[str, Any]:
+        """
+        Собирает сцену насмешки для выбранного реквизита.
+
+        Реквизит опознаётся режимом (`taunt_<ключ>`): в нём и лежит ключ
+        таблицы моделей. Класс задаёт человек — одну и ту же насмешку играют
+        до девяти классов, и модель реквизита у каждого своя.
+        """
+        from src.data.simple_models import SIMPLE_MODEL_CATEGORIES
+
+        mode = getattr(self, '_mode', '')
+        simple = SIMPLE_MODEL_CATEGORIES.get('taunt')
+        prefix = simple.mode_prefix if simple else ''
+        if not simple or not mode.startswith(prefix):
+            return {'error': 'Насмешку показывает только реквизит'}
+        prop_key = mode[len(prefix):]
+        item = simple.table.get(prop_key)
+        if not item:
+            return {'error': 'Насмешку показывает только реквизит'}
+
+        paths = self.tf2_paths()
+        if 'error' in paths:
+            return paths
+
+        self.controller.stop()
+        self.viewmodel.stop()
+        self.taunt.load_taunt(prop_key, item['mdl_path'], paths['misc_vpk'],
+                              paths['textures_vpk'], paths['root'],
+                              tf2_class=tf2_class, lang=lang)
+        return {'started': True, 'prop': prop_key, 'tf2_class': tf2_class}
 
     def load_skybox(self, sky_name: str) -> Dict[str, Any]:
         """Готовит грани стокового неба для показа кубмапой."""
@@ -713,6 +832,24 @@ class AppSession:
         w.start()
         return {'started': True, 'filename': request.filename}
 
+    def cancel_build(self) -> Dict[str, Any]:
+        """Останавливает идущую сборку.
+
+        Сборка шапки на девять классов с текстурами 2048 идёт минуты, и
+        передумать посреди неё человек должен иметь право. Воркер проверяет
+        отмену между шагами сам — здесь только просьба остановиться; о
+        завершении скажет его же `finished`.
+        """
+        build = self._build
+        if build is None or not build.isRunning():
+            return {'running': False}
+        build.requestInterruption()
+        # Ждущий вопрос о текстуре держит воркер на паузе: без ответа он не
+        # дойдёт до проверки отмены и висел бы до таймаута в 300 секунд.
+        if hasattr(build, 'set_extra_texture_result'):
+            build.set_extra_texture_result(None)
+        return {'running': True, 'cancelling': True}
+
     def _hat_models_for(self, classes) -> Optional[Dict[str, str]]:
         """
         Модели мультиклассовой шапки под выбранные классы.
@@ -732,7 +869,8 @@ class AppSession:
 
     # ── Недостающая текстура: вопрос страницы, ответ человека ────────────── #
 
-    def _on_build_needs_texture(self, material: str, weapon_key: str) -> None:
+    def _on_build_needs_texture(self, material: str, weapon_key: str,
+                                remaining: int = 0) -> None:
         """
         Сборке не хватает текстуры для материала.
 
@@ -747,7 +885,8 @@ class AppSession:
         if self._texture_choice is not _NO_CHOICE:
             self._answer_texture_request(self._texture_choice)
             return
-        self._put('need_texture', material=material, weapon_key=weapon_key)
+        self._put('need_texture', material=material, weapon_key=weapon_key,
+                  remaining=int(remaining))
 
     def _answer_texture_request(self, value) -> None:
         """Отдаёт ответ ждущему воркеру сборки."""
@@ -1918,13 +2057,53 @@ class AppSession:
     def _autosave(self) -> None:
         """Пишет правки предмета. Зовётся после КАЖДОГО изменения."""
         from src.services import work_keeper
-        work_keeper.save(self.preview, self._work_key())
+        work_keeper.save(self.preview, self._work_key(),
+                         self._style_files(), self._item_id())
 
-    def _restore_work(self) -> bool:
+    def _item_id(self) -> Dict[str, Any]:
+        """
+        Чем опознать предмет работы, кроме имени её папки.
+
+        Имя папки — слаг: у шапки от `models/player/items/…/hat.mdl` в нём
+        остаётся `models_player_items_…_hat.mdl`. По такому ключу не найти ни
+        имени в каталоге, ни иконки, ни самой модели — работа по шапке
+        показывалась строкой из подчёркиваний и не открывалась. Поэтому в
+        работу кладём то, из чего она открывается.
+        """
+        return {'mode': getattr(self, '_mode', ''),
+                'key': self.preview.weapon_key or '',
+                # Мультиклассовая шапка: у каждого класса своя модель, и без
+                # них вернётся только та, что была показана.
+                'per_class': dict(self._hat_models),
+                # Мод из VPK предметом каталога не опознаётся — только файлом.
+                'mod': self._vpk_mod_path or ''}
+
+    def _style_files(self) -> List[str]:
+        """
+        Файлы, на которые ссылаются снимки НЕактивных стилей шапки.
+
+        Хранилище после записи убирает копии, которых нет в правках: иначе
+        каждая склейка частей оставляла там свой файл навсегда. Но снимки
+        стилей живут только в памяти сеанса, и без этой подсказки картинка
+        соседнего стиля исчезла бы с диска — а в мод он собирается по ней.
+        """
+        out: List[str] = []
+        for snap in self._hat_styles.values():
+            edits = snap.get('edits') or {}
+            out.append(snap.get('image_path'))
+            out.append(edits.get('custom_smd_path'))
+            out.append(edits.get('australium_user_tex'))
+            for paths in (edits.get('textures') or {}).values():
+                out.extend((paths or {}).values())
+            for paths in (edits.get('skin_overrides') or {}).values():
+                out.extend((paths or {}).values())
+        return [p for p in out if p]
+
+    def _restore_work(self, asked: bool = False) -> bool:
         """Возвращает сохранённые правки предмета."""
         from src.services import work_keeper
         with self._lock:
-            restored = work_keeper.restore(self.preview, self._work_key())
+            restored = work_keeper.restore(self.preview, self._work_key(), asked)
             self._adopt_composites()
         return restored
 
@@ -1964,10 +2143,65 @@ class AppSession:
             self._hat_styles = {}
         return self.view_state()
 
+    def keep_work(self) -> Dict[str, Any]:
+        """Сохраняет работу над предметом в библиотеку — по просьбе человека."""
+        from src.services import work_keeper
+        with self._lock:
+            ok = work_keeper.keep(self.preview, self._work_key(),
+                                  self._style_files(), self._item_id())
+        if not ok:
+            return {'error': 'Сохранять нечего: правок нет'}
+        return self.work_state()
+
+    def restore_work(self) -> Dict[str, Any]:
+        """Возвращает отложенную работу над открытым предметом."""
+        # Замок берёт сам `_restore_work` — он же зовётся при открытии предмета.
+        if not self._restore_work(asked=True):
+            return {'error': 'Сохранённых правок у этого предмета нет'}
+        return self.view_state()
+
+    def forget_drafts(self, keys: Optional[List[str]] = None) -> Dict[str, Any]:
+        """
+        Удаляет черновики автосохранения. Сохранённые работы не трогает.
+
+        ``keys`` — что именно удалять; None означает «все черновики», а пустой
+        список — ничего: «снял все отметки» не должно означать «удали всё».
+        Ключ, за которым лежит СОХРАНЁННАЯ работа, отбрасывается: страница
+        присылает список, а удалить чужое по опечатке в нём нельзя.
+
+        Черновик открытого сейчас предмета сбрасывается ещё и в сеансе —
+        иначе автосохранение перепишет его на следующей же правке.
+        """
+        from src.services import work_store
+
+        drafts = [d['key'] for d in work_store.list_drafts()]
+        wanted = set(drafts) if keys is None else set(keys)
+        current = self._work_key()
+        removed, reset = 0, False
+        for key in drafts:
+            if key not in wanted:
+                continue
+            if key == current:
+                self.forget_work()
+                reset = True
+                removed += 1
+            elif work_store.forget(key):
+                removed += 1
+        logger.info(f"черновиков удалено: {removed}")
+        # `reset` — знак странице перечитать вид: правки открытого предмета
+        # ушли вместе с его черновиком.
+        return {'removed': removed, 'reset': reset}
+
     def work_state(self) -> Dict[str, Any]:
-        """Есть ли сейчас правки и сохраняются ли они."""
+        """Есть ли сейчас правки, лежит ли что-то на диске и как оно попало."""
+        from src.services import work_store
+        key = self._work_key()
         return {'has_edits': self.preview.has_user_edits(),
-                'autosave': self._autosave_on()}
+                'autosave': self._autosave_on(),
+                # Черновик автосохранения тоже «есть на диске»: его можно и
+                # вернуть, и забыть — просто в библиотеке его не показывают.
+                'has_saved': bool(key) and work_store.has(key),
+                'kept': work_store.is_kept(key)}
 
     # ═══════════════════════════════════════════════════════════════════════ #
     # Карты материала и правка VMT
@@ -2635,13 +2869,21 @@ class AppSession:
                 pass          # уже нет или занят — не повод падать на покраске
 
     def _work_dir(self) -> str:
-        """Своя папка сеанса для склеек. Живёт до перезапуска, как и превью."""
+        """Своя папка сеанса для склеек. Живёт до перезапуска, как и превью.
+
+        Убирается на выходе: склейки весят по 2-3 МБ, держим четыре, и каждый
+        запуск оставлял в %TEMP% свою папку `tf2sg_parts_*` навсегда. К этому
+        моменту нужное уже скопировано в work/ автосохранением.
+        """
+        import atexit
+        import shutil
         import tempfile
 
         folder = getattr(self, '_tmp_dir', '')
         if not folder or not os.path.isdir(folder):
             folder = tempfile.mkdtemp(prefix='tf2sg_parts_')
             self._tmp_dir = folder
+            atexit.register(shutil.rmtree, folder, ignore_errors=True)
         return folder
 
     def _vmt_target(self, material: str = '') -> Any:
@@ -3050,6 +3292,8 @@ class AppSession:
             # геометрии сборка собирает QC сама под игровые материалы.
             'custom_keep': bool(self.preview.custom_smd_path
                                 and self.preview.custom_keep_materials),
+            # Своя геометрия в кадре — можно предложить вернуть игровую.
+            'has_custom': bool(self.preview.custom_smd_path),
             'framerate': self.preview.team_framerate,
             'skins': self.preview.textures.skin_info,
             'active_skin': self.preview.textures.active_skin,
@@ -3111,8 +3355,17 @@ class AppSession:
             return {'error': f'Не удалось разобрать папку игры: {exc}'}
         if not misc_vpk:
             return {'error': 'В папке игры не найден tf2_misc_dir.vpk'}
+        # Crowbar — вторая обязательная половина: без него модель не
+        # разобрать, а узнать об этом сейчас можно только по ошибке сборки.
+        crowbar_ok, _ = TF2Paths.check_crowbar()
+        # Насмешек с реквизитом в игре вчетверо больше, чем в выверенной
+        # руками таблице, и список их лежит в items_game. Здесь первое место,
+        # где путь к игре уже известен; повторные вызовы — сразу выход.
+        from src.data import taunt_catalog
+        taunt_catalog.merge(root)
         return {'root': root, 'tf_dir': tf_dir,
-                'misc_vpk': misc_vpk, 'textures_vpk': textures_vpk or ''}
+                'misc_vpk': misc_vpk, 'textures_vpk': textures_vpk or '',
+                'crowbar': bool(crowbar_ok)}
 
 
 #: Единственный сеанс процесса. Создаётся лениво: импорт модуля не должен

@@ -12,15 +12,15 @@
 <!-- ═══ Шапка ═══════════════════════════════════════════════════════════ -->
 <header class="chrome">
   <div class="chrome__mark">TF2&nbsp;Skin&nbsp;Generator</div>
+  <!-- data-section — ключ раздела для кода: подпись переводится, и искать
+       раздел по ней нельзя. -->
   <nav class="chrome__nav">
-    <button class="underlined is-active">Оружие</button>
-    <button class="underlined">Шапки</button>
-    <button class="underlined">Частицы</button>
-    <button class="underlined">Диагностика</button>
+    <button class="underlined is-active" data-section="weapons">Оружие</button>
+    <button class="underlined" data-section="hats">Шапки</button>
+    <button class="underlined" data-section="particles">Частицы</button>
+    <button class="underlined" data-section="diagnostics">Диагностика</button>
   </nav>
   <div class="chrome__actions">
-    <button class="iconbtn" id="panels">Закрепить панели</button>
-    <button class="iconbtn" id="theme">Тёмная</button>
     <button class="iconbtn" id="opencfg">Настройки</button>
   </div>
 </header>
@@ -56,6 +56,7 @@
       <button class="underlined" data-view="flat">Текстура</button>
       <button class="underlined" data-view="model">Модель</button>
       <button class="underlined" data-view="fp" data-cond="firstperson">От первого лица</button>
+      <button class="underlined" data-view="taunt" data-cond="taunt">Насмешка</button>
     </div>
 
     <div class="teams">
@@ -100,6 +101,10 @@
       <span class="label label--inline">Скрыть</span>
     </div>
 
+    <!-- Сколько нашлось. У косметики список из 1822 позиций, и без числа
+         непонятно, сузил фильтр выборку или нет. -->
+    <p class="catalog__count mono" id="cat-count" hidden></p>
+
     <p class="catalog__empty" id="cat-note" hidden></p>
 
     <div class="catalog__grid" id="grid"></div>
@@ -130,6 +135,12 @@
       <div class="half__foot">
         <span class="album__count"><b>—</b></span>
         <div class="acts">
+          <button class="textbtn textbtn--sm" id="keep" hidden
+                  title="Положить работу в раздел «Кастомный мод»">Сохранить работу</button>
+          <button class="textbtn textbtn--sm" id="restore" hidden
+                  title="У предмета остались отложенные правки">Вернуть правки</button>
+          <button class="textbtn textbtn--sm" id="forget" hidden
+                  title="Удалить сохранённые правки этого предмета">Забыть правки</button>
           <button class="textbtn textbtn--sm" data-cond="maps">Карты материала</button>
           <button class="textbtn textbtn--sm" id="vmt">VMT</button>
           <button class="textbtn textbtn--sm" id="misc" data-cond="misc">Прочее</button>
@@ -211,8 +222,9 @@
         </div>
         <!-- Классы мультиклассовой шапки: у каждого своя модель, и собирать
              все девять ради одного незачем. -->
-        <div class="styles" id="hatclasses" hidden>
-          <span class="label label--inline">Классы</span>
+        <div class="styles" id="hatclasses" hidden
+             title="Для каких классов положить шапку в мод. У каждого своя модель — снятые классы в мод не попадут">
+          <span class="label label--inline">Классы для сборки</span>
         </div>
         <!-- Модельные стили шапки: у каждого своя геометрия. Список приходит
              из каталога вместе с предметом. -->
@@ -311,6 +323,12 @@
         <div class="styles" id="fpbar" hidden>
           <span class="label label--inline">Анимация</span>
         </div>
+        <!-- Классы, которые играют эту насмешку. Список приходит из
+             items_game: у каждого класса своя модель реквизита и своя
+             последовательность. -->
+        <div class="styles" id="tauntbar" hidden>
+          <span class="label label--inline">Класс</span>
+        </div>
         <!-- Управление проигрыванием эффекта. Живёт там же, где действия
              над моделью: раздел меняет содержимое, а не раскладку. -->
         <div class="acts" id="pacts" hidden>
@@ -318,13 +336,21 @@
           <button class="textbtn textbtn--sm" id="ppause">Пауза</button>
           <button class="textbtn textbtn--sm" id="ploop">Повтор</button>
           <button class="textbtn textbtn--sm" id="pcpbtn">Точки</button>
+          <!-- Ctrl+Z мышью не нажмёшь: у отмены должна быть и кнопка. -->
+          <button class="textbtn textbtn--sm" id="pundo" disabled
+                  title="Отменить правку (Ctrl+Z)">Отменить</button>
+          <button class="textbtn textbtn--sm" id="predo" disabled
+                  title="Вернуть правку (Ctrl+Y)">Вернуть</button>
         </div>
         <div class="acts" id="model-acts">
           <button class="textbtn textbtn--sm" data-cond="replace">Заменить модель</button>
           <button class="textbtn textbtn--sm" data-cond="qc">Редактировать QC</button>
           <button class="textbtn textbtn--sm" id="maketeam" data-cond="team">Сделать командным</button>
           <button class="textbtn textbtn--sm" id="parts" data-cond="parts">Разделить на части</button>
-          
+          <!-- Своя модель — не билет в один конец: вернуть игровую надо уметь
+               не только сменой предмета. -->
+          <button class="textbtn textbtn--sm" id="dropmodel" hidden
+                  title="Вернуть игровую модель вместо своей">Убрать свою модель</button>
         </div>
       </div>
     </section>
@@ -345,7 +371,7 @@
     </div>
 
     <div class="build__grid">
-      <div class="build__col">
+      <div class="build__col" data-col="size">
         <span class="field__label">Разрешение</span>
         <label class="check"><input type="radio" name="res"><span>256 × 256 · спрей</span></label>
         <label class="check"><input type="radio" name="res" checked><span>512 × 512 · обычное</span></label>
@@ -353,7 +379,7 @@
         <label class="check"><input type="radio" name="res"><span>2048 × 2048 · ультра</span></label>
       </div>
 
-      <div class="build__col">
+      <div class="build__col" data-col="out">
         <div class="field">
           <label class="field__label" for="fmt">Формат VTF</label>
           <div class="select">
@@ -370,7 +396,7 @@
         </div>
       </div>
 
-      <div class="build__col">
+      <div class="build__col" data-col="flags">
         <span class="field__label">Флаги VTF</span>
         <label class="check"><input type="checkbox"><span>Clamp S</span></label>
         <label class="check"><input type="checkbox"><span>Clamp T</span></label>
@@ -380,17 +406,17 @@
         <label class="check"><input type="checkbox"><span>Point Sample</span></label>
       </div>
 
-      <div class="build__col">
+      <div class="build__col" data-col="options">
         <span class="field__label">Опции</span>
           <label class="check"><input type="checkbox"><span>No Thumbnail</span></label>
         <label class="check"><input type="checkbox"><span>No Reflectivity</span></label>
-        <label class="check" data-cond="gamma"><input type="checkbox" id="gamma"><span>Гамма-коррекция</span></label>
+        <label class="check" data-cond="gamma"><input type="checkbox" id="gamma"><span data-name="Гамма-коррекция">Гамма-коррекция</span></label>
         <input class="input input--tiny" id="gammaval" type="text" value="2.2" disabled data-cond="gamma">
-        <label class="check" data-cond="shoulders"><input type="checkbox"><span>Изолировать плечи</span></label>
+        <label class="check" data-cond="shoulders"><input type="checkbox"><span data-name="Изолировать плечи">Изолировать плечи</span></label>
         <!-- Шапка красится командным цветом краской в VMT, а не текстурой:
              без красок она будет одного цвета у обеих команд. -->
         <label class="check" data-cond="hat_paints" title="С красками шапка красится командным цветом, как стоковая">
-          <input type="checkbox" id="hat-paints" checked><span>Краски из игры</span></label>
+          <input type="checkbox" id="hat-paints" checked><span data-name="Краски из игры">Краски из игры</span></label>
         <label class="check" data-cond="normal"><input type="checkbox"><span>Normal Map</span></label>
       </div>
     </div>
@@ -427,11 +453,17 @@
 <footer class="dock">
   <button class="dock__summary" id="opensettings">
     <span class="dock__state">Готово</span>
-    <span class="mono">512 × 512 · DXT5 · scattergun_mod.vpk</span>
+    <!-- Сводка того, что соберётся. Заполняется из настоящих параметров
+         (см. build.js): захардкоженные значения показывали одно и то же
+         независимо от выбора. -->
+    <span class="mono" id="docksum"></span>
     <span class="dock__more">Параметры</span>
   </button>
   <span class="mono dock__tf2">TF2 найден · tf/tf2_misc_dir.vpk</span>
-  <button class="btn--primary">Собрать VPK</button>
+  <button class="btn--primary" id="buildvpk">Собрать VPK</button>
+  <!-- Занимает место «Собрать VPK», пока идёт сборка: две кнопки
+       рядом спорили бы, а собрать второй раз всё равно нельзя. -->
+  <button class="btn--primary btn--stop" id="buildstop" hidden>Отменить</button>
 </footer>
 
 <!-- ═══ Диалог ══════════════════════════════════════════════════════════════
@@ -444,6 +476,10 @@
     <p class="ask__text" hidden></p>
     <input class="input ask__input" hidden>
     <div class="ask__list" hidden></div>
+    <!-- Приписка к выбору: «и так для остальных». Отдельной галкой, а не
+         вторым набором пунктов — это то же действие, только шире. -->
+    <label class="check ask__check" hidden>
+      <input type="checkbox"><span></span></label>
     <div class="ask__acts">
       <button class="textbtn ask__cancel" type="button">Отмена</button>
       <button class="btn--primary ask__ok" type="button">Готово</button>
@@ -541,6 +577,7 @@
       <span class="label vmt__keys">Ctrl+S — сохранить · Esc — закрыть</span>
     </div>
     <div class="ask__acts">
+      <button class="textbtn" type="button" id="vmt-insert">Вставить ▾</button>
       <button class="textbtn" type="button" id="vmt-reset">Как в игре</button>
       <button class="textbtn" type="button" id="vmt-close">Закрыть</button>
       <button class="btn--primary" type="button" id="vmt-save">Сохранить</button>
@@ -588,8 +625,10 @@
     </div>
 
     <div class="cfg__checks">
-      <label class="check" title="Текстуры, карты и правки QC вернутся при следующем открытии предмета">
-        <input type="checkbox" id="cfg-save"><span>Сохранять правки предмета</span></label>
+      <label class="check" title="Черновик пишется молча и предлагается кнопкой «Вернуть правки». В раздел «Кастомный мод» работа попадает только по кнопке «Сохранить работу»">
+        <input type="checkbox" id="cfg-edits"><span>Вести черновик правок</span></label>
+      <label class="check" title="Каталог и параметры прибиты к краям, а не вызываются поверх. Нужно окно шире 1100 px">
+        <input type="checkbox" id="cfg-panels"><span>Закрепить панели</span></label>
       <label class="check"><input type="checkbox" id="cfg-tree"><span>Группировать дерево частиц</span></label>
       <label class="check"><input type="checkbox" id="cfg-temp"><span>Хранить временные файлы при ошибке</span></label>
       <label class="check"><input type="checkbox" id="cfg-debug"><span>Отладочный режим</span></label>
@@ -602,7 +641,27 @@
       <span class="field__note">Эти материалы не показываются в альбоме и не пишутся в мод.</span>
     </div>
 
+    <!-- Обслуживание: после обновления игры старые разобранные модели
+         остаются в кэше и собираются с прежней геометрией. Размер рядом —
+         иначе «очистить» не подсказывает, надо ли вообще. -->
+    <div class="cfg__maint">
+      <button class="textbtn" id="cfg-cache" type="button">Очистить кэш моделей</button>
+      <span class="mono" id="cfg-cache-size"></span>
+    </div>
+
+    <!-- Черновики в библиотеке не показываются (иначе «просто открыл предмет»
+         становилось модом), а копии текстур на диске остаются. Убрать их можно
+         было только заново открыв каждый предмет — то есть никак. -->
+    <div class="cfg__maint">
+      <button class="textbtn" id="cfg-drafts" type="button">Удалить черновики…</button>
+      <span class="mono" id="cfg-drafts-size"></span>
+    </div>
+
     <div class="ask__acts">
+      <!-- Ссылка автора прижата влево: это не действие над настройками, и
+           спорить по весу с «Сохранить» ей незачем. -->
+      <a class="textbtn cfg__support" id="cfg-support" href="#" target="_blank"
+         rel="noreferrer">Поддержать автора</a>
       <button class="textbtn" type="button" id="cfg-cancel">Отмена</button>
       <button class="btn--primary" type="button" id="cfg-save">Сохранить</button>
     </div>

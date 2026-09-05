@@ -100,3 +100,7 @@ work/
 
 # Тулинг фронта: TypeScript ставится локально в frontend/.
 frontend/node_modules/
+frontend/CONTROLS.md
+scratch_ui_all.json
+scratch_ui_have.json
+scratch_ui_missing.json

@@ -12,7 +12,9 @@ logger = get_logger(__name__)
 class BuildWorker(StandardWorker):
     # finished/progress/error наследуются от StandardWorker; добавляем свои:
     sub_progress = Signal(int, str)   # (pct 0-100 или -1=indeterminate, label)
-    request_extra_texture = Signal(str, str)  # (material_name, weapon_key) — запрос одной доп. текстуры
+    # (material_name, weapon_key, remaining) — запрос одной доп. текстуры.
+    # remaining: сколько материалов спросят ПОСЛЕ этого; 0 — этот последний.
+    request_extra_texture = Signal(str, str, int)
     request_extra_model = Signal(str, str)    # (smd_name, weapon_key) - запрос доп. модели (shell и т.д.)
     texture_mismatch_warning = Signal(str)    # (warning_message) — предупреждение о несовпадении текстур
 
@@ -59,9 +61,10 @@ class BuildWorker(StandardWorker):
     # -----------------------------------------------------------------------
     # Запросы в UI-поток: callback для VPKService + set-метод для main_window
     # -----------------------------------------------------------------------
-    def _request_extra_texture_callback(self, material_name: str, weapon_key: str) -> Optional[str]:
+    def _request_extra_texture_callback(self, material_name: str, weapon_key: str,
+                                        remaining: int = 0) -> Optional[str]:
         """Запрашивает дополнительную текстуру из UI потока."""
-        result = self._extra_texture_req.ask(material_name, weapon_key)
+        result = self._extra_texture_req.ask(material_name, weapon_key, remaining)
         logger.debug(f"Получена доп. текстура: {result}")
         return result
 

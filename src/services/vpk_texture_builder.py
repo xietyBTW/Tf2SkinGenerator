@@ -852,14 +852,20 @@ class VpkTextureBuilder:
         """
         extra_materials_vtf_paths = {}
 
-        for extra_mat_name in extra_materials:
+        # Сколько ещё спросим после этого. Число едет в вопрос: предлагать
+        # «и так для остальных», когда остальных нет, — врать человеку.
+        # Считается только здесь: остальные вызовы callback условные (BLU,
+        # главный материал), и обещать по ним нечего.
+        for _asked, extra_mat_name in enumerate(extra_materials):
             logger.info(f"Создаем текстуры для дополнительного материала: {extra_mat_name}")
 
             extra_vtf_path = slots.vtf(extra_mat_name)
             extra_vmt_path = slots.vmt(extra_mat_name)
 
             # Спрашиваем пользователя — нужна ли отдельная текстура для этого материала
-            extra_image_path = extra_texture_callback(extra_mat_name, weapon_key) if extra_texture_callback else None
+            extra_image_path = extra_texture_callback(
+                extra_mat_name, weapon_key,
+                len(extra_materials) - _asked - 1) if extra_texture_callback else None
             # «Использовать из игры» — копируем ОРИГИНАЛЬНЫЙ VMT материала.
             # Его $basetexture абсолютный (напр. голова demoman_head_red →
             # "models/player/demo/demoman_head") → берёт верную игровую

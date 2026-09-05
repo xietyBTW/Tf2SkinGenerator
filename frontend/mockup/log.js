@@ -43,7 +43,12 @@ api.setLogSink((dir, text, kind) => {
 const toggleConsole = () => { consoleBox.hidden = !consoleBox.hidden; };
 document.getElementById('logclose').addEventListener('click', toggleConsole);
 document.getElementById('logclear').addEventListener('click', () => { logBody.innerHTML = ''; });
-document.querySelector('.dock__state').addEventListener('click', toggleConsole);
+// Состояние лежит ВНУТРИ кнопки «Параметры», и без остановки всплытия щелчок
+// по нему открывал заодно панель настроек — журнал и параметры вылезали вместе.
+document.querySelector('.dock__state').addEventListener('click', (e) => {
+  e.stopPropagation();
+  toggleConsole();
+});
 document.addEventListener('keydown', (e) => {
   if (e.key === '`' || e.key === 'ё') { e.preventDefault(); toggleConsole(); }
 });
@@ -56,10 +61,12 @@ export function syncViewerTheme() {
   withViewer((w) => w.setViewerBackground && w.setViewerBackground(bg));
 }
 
-const themeBtn = document.getElementById('theme');
-themeBtn.addEventListener('click', () => {
-  const dark = root.dataset.theme === 'dark';
-  root.dataset.theme = dark ? 'light' : 'dark';
-  themeBtn.textContent = dark ? 'Тёмная' : 'Светлая';
+/**
+ * Ставит тему страницы. Выбор живёт в настройках (`theme` в общем конфиге) —
+ * кнопкой в шапке он не сохранялся, а при следующем запуске приложение опять
+ * открывалось светлым.
+ */
+export function setTheme(name) {
+  root.dataset.theme = name === 'dark' ? 'dark' : 'light';
   syncViewerTheme();
-});
+}

@@ -37,7 +37,15 @@
   --dur: 140ms;
 }
 
+/* Что рисует БРАУЗЕР, а не мы: список внутри <select>, полосы прокрутки,
+   каретка, стрелки числовых полей. Без этой строки они остаются светлыми, и в
+   тёмной теме раскрытый список получался белым, а его пункты — наш светлый
+   текст на белом, то есть нечитаемыми. Токены тут не помогают: до нативного
+   попапа наш CSS не достаёт, он слушает только color-scheme. */
+:root { color-scheme: light; }
+
 [data-theme="dark"] {
+  color-scheme: dark;
   --bg:        #0f0f0e;
   --surface:   #161615;
   --overlay:   #232220;
@@ -121,6 +129,14 @@ button, input, select, textarea { color: inherit; }
 }
 .input:focus,
 .select select:focus { outline: none; border-bottom-color: var(--accent); }
+
+/* Раскрытый список рисует БРАУЗЕР. `color-scheme` он слушает не везде: в
+   WebView2 попап оставался белым, а пункты брали наш светлый текст — то есть
+   белым по белому. Цвета пунктов задаём явно, это Chromium уважает всегда. */
+.select select option {
+  background: var(--overlay);
+  color: var(--ink);
+}
 .input::placeholder { color: var(--ink-mute); }
 
 .select { position: relative; }

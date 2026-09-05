@@ -71,12 +71,14 @@ def vtf_to_png(vtf_path: str) -> str:
         return ''
 
 
-def death_effect_texture(mode: str, vpk_paths: List[Optional[str]]) -> str:
+def game_texture(mode: str, vpk_paths: List[Optional[str]]) -> str:
     """
-    Игровая текстура эффекта смерти (лёд, золото, огонь) как PNG.
+    Игровая текстура спец-режима как PNG: лёд, золото, огонь, крит.
 
-    Нужна для показа по умолчанию: пока человек не дал свою, персонаж должен
-    выглядеть так, как выглядит в игре. Пусто — покажем без текстуры.
+    Нужна дважды. Во-первых, для показа по умолчанию: пока человек не дал
+    свою, сцена должна выглядеть так, как выглядит в игре. Во-вторых, для
+    карточки — она стояла пустой, и было не видно, что именно заменяешь.
+    Пусто — покажем без текстуры.
     """
     try:
         from src.services import vtf_preview_service as vps
@@ -104,8 +106,8 @@ def death_effect_texture(mode: str, vpk_paths: List[Optional[str]]) -> str:
                 except OSError:
                     pass
                 if png:
-                    logger.info(f"[эффект смерти] игровая текстура: {candidate}")
+                    logger.info(f"[спец-режим] игровая текстура: {candidate}")
                     return png
     except Exception as exc:                      # noqa: BLE001
-        logger.debug(f"[эффект смерти] игровую текстуру не достать: {exc}")
+        logger.debug(f"[спец-режим] игровую текстуру не достать: {exc}")
     return ''

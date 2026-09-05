@@ -159,6 +159,65 @@ class ControlsTests(unittest.TestCase):
             self.assertEqual(set(api.controls_for(mode)), base, mode)
 
 
+class SearchTests(unittest.TestCase):
+    """Поиск в каталоге. Поле над списком одно, а искало только у косметики."""
+
+    def test_weapons_are_searchable_by_name(self):
+        found = api.items('weapon', query='scattergun')
+        self.assertTrue(found)
+        self.assertLess(len(found), len(api.items('weapon')))
+        self.assertTrue(all('scattergun' in i['key'] for i in found))
+
+    def test_all_words_must_match_in_any_order(self):
+        """«обрез мал» обязано находить «Обрез Малыша»."""
+        found = api.items('weapon', lang='ru', query='обрез мал')
+        self.assertTrue(found)
+        self.assertTrue(all('Обрез' in i['name'] for i in found))
+        self.assertEqual(api.items('weapon', query='обрез мал зелёный'), [])
+
+    def test_search_narrows_the_other_categories_too(self):
+        pickups = api.items('pickup', lang='en')
+        self.assertTrue(pickups)
+        self.assertTrue(api.items('pickup', lang='en', query='ammo'))
+        self.assertLess(len(api.items('pickup', lang='en', query='ammo')),
+                        len(pickups))
+
+    def test_empty_query_changes_nothing(self):
+        self.assertEqual(len(api.items('weapon', query='   ')),
+                         len(api.items('weapon')))
+
+
+class CoverTests(unittest.TestCase):
+    """Обложка карточки: у чего нет иконки в рюкзаке — своя модель или небо."""
+
+    def test_world_models_point_at_their_mdl(self):
+        """Аптечек, патронов и снарядов в рюкзаке нет вовсе.
+
+        Реквизит насмешек — исключение: сама насмешка лежит в инвентаре, и
+        иконка у неё есть (см. [taunt_catalog]). Тогда берётся она.
+        """
+        from src.data.simple_models import SIMPLE_MODEL_CATEGORIES
+
+        for category, simple in SIMPLE_MODEL_CATEGORIES.items():
+            for item in api.items(category):
+                row = simple.table[item['key']]
+                self.assertEqual(item['icon'],
+                                 row.get('icon') or row['mdl_path'])
+                if not row.get('icon'):
+                    self.assertTrue(item['icon'].endswith('.mdl'),
+                                    f"{category}/{item['key']}: {item['icon']!r}")
+
+    def test_sky_points_at_itself(self):
+        for item in api.items('skybox'):
+            self.assertEqual(item['icon'], f"skybox/{item['key']}")
+
+    def test_character_points_at_the_model_it_previews(self):
+        from src.domain.preview.model_key import model_key_for
+
+        for item in api.items('character', 'Scout'):
+            self.assertEqual(item['icon'], model_key_for(item['mode']))
+
+
 class SpecialCategoryTests(unittest.TestCase):
     """Спец-режимы: спрей, крит и эффекты смерти."""
 

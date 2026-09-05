@@ -7,6 +7,8 @@
  * превращается в свалку, куда стекается общее состояние.
  */
 
+import { t } from './i18n.js';
+
 /** Делает элементы внутри контейнера взаимоисключающими. */
 export function groupIn(root, itemSelector) {
   if (!root) return;
@@ -39,13 +41,24 @@ export function fillSelect(id, options, value) {
 /** Размер файла человеческим языком: точность тут не нужна, порядок — да. */
 export function fileSize(bytes) {
   const mb = bytes / (1024 * 1024);
-  return mb >= 1 ? mb.toFixed(1) + ' МБ' : Math.max(1, Math.round(bytes / 1024)) + ' КБ';
+  return mb >= 1 ? mb.toFixed(1) + ' ' + t('МБ')
+                 : Math.max(1, Math.round(bytes / 1024)) + ' ' + t('КБ');
 }
 
-/** Русское склонение по числу: 1 часть, 2 части, 5 частей. */
+/**
+ * Русское склонение по числу: 1 часть, 2 части, 5 частей.
+ *
+ * Выбранную форму переводим здесь же: её склеивают с числом («235 предметов»),
+ * и в готовой строке словарь такое слово уже не найдёт. Английскому хватает
+ * двух форм — они и стоят в словаре против трёх русских.
+ */
 export function plural(n, one, few, many) {
-  const t = n % 100;
-  if (t >= 11 && t <= 14) return many;
+  return t(pick(n, one, few, many));
+}
+
+function pick(n, one, few, many) {
+  const rest = n % 100;
+  if (rest >= 11 && rest <= 14) return many;
   const d = n % 10;
   return d === 1 ? one : (d >= 2 && d <= 4 ? few : many);
 }

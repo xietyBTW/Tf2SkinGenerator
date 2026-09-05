@@ -5,8 +5,8 @@
   {tf2_root}/tf/scripts/items/items_game.txt  — данные предметов + MDL-пути
   {tf2_root}/tf/resource/tf_english.txt       — локализованные названия
 
-Результат кэшируется в cache/ (имя файла — в _CACHE_FILE) и инвалидируется
-по mtime.
+Результат кэшируется в cache/ (имя файла — в _cache_file) и инвалидируется
+по mtime. Кэш свой на каждый язык: имена в нём уже локализованы.
 """
 
 from __future__ import annotations
@@ -28,8 +28,23 @@ logger = logging.getLogger(__name__)
 
 # v8: добавлено поле icon (image_inventory) — иконка предмета из рюкзака.
 # v9: %s раскрывается токеном КЛАССА ИЗ ПУТЕЙ («demo», а не «demoman»).
-# Смена имени форсирует одноразовый перепарс старого кэша.
-_CACHE_FILE = Path("cache") / "hats_cache_v9.json"
+# Смена версии форсирует одноразовый перепарс старого кэша.
+_CACHE_VERSION = "v9"
+_CACHE_DIR = Path("cache")
+
+#: Как называется файл локализации у языка приложения. Один словарь на модуль:
+#: по нему и читают tf_*.txt, и разводят кэши — иначе первый разобранный язык
+#: становился единственным, и переключение в настройках ничего не меняло.
+_LANG_FILES = {"en": "english", "ru": "russian"}
+
+
+def _lang_file(language: str) -> str:
+    return _LANG_FILES.get(language, "english")
+
+
+def _cache_file(language: str = "en") -> Path:
+    """Кэш этого языка. Имена в нём локализованы, общий файл их бы смешал."""
+    return _CACHE_DIR / f"hats_cache_{_CACHE_VERSION}_{_lang_file(language)}.json"
 
 _CLASS_NAMES = [
     "scout", "soldier", "pyro", "demoman",
@@ -503,7 +518,7 @@ def _clean_display(value: str) -> str:
     return text.strip()
 
 
-def _parse_localization(tf2_root: str, lang: str = "english") -> Dict[str, str]:
+def parse_localization(tf2_root: str, lang: str = "english") -> Dict[str, str]:
     """
     Парсит tf_english.txt (или tf_{lang}.txt) и возвращает {token: display_name}.
     """
@@ -535,33 +550,34 @@ def _parse_localization(tf2_root: str, lang: str = "english") -> Dict[str, str]:
 
 # ── Кэш ──────────────────────────────────────────────────────────────────── #
 
-def _cache_valid(tf2_root: str) -> bool:
+def _cache_valid(tf2_root: str, language: str = "en") -> bool:
     """Проверяет, актуален ли кэш (не устарел по mtime и не пустой)."""
-    if not _CACHE_FILE.exists():
+    cache = _cache_file(language)
+    if not cache.exists():
         return False
     # Пустой кэш считается невалидным — принудительно перепарсим
     try:
-        if _CACHE_FILE.stat().st_size < 10:
+        if cache.stat().st_size < 10:
             return False
-        data = json.loads(_CACHE_FILE.read_text(encoding="utf-8"))
+        data = json.loads(cache.read_text(encoding="utf-8"))
         if not data:   # пустой список
             logger.warning("Кэш пустой — будет перепарсен")
             return False
     except Exception:
         return False
-    cache_mtime = _CACHE_FILE.stat().st_mtime
+    cache_mtime = cache.stat().st_mtime
     items_file = Path(tf2_root) / "tf" / "scripts" / "items" / "items_game.txt"
     if not items_file.exists():
         return False
     return items_file.stat().st_mtime <= cache_mtime
 
 
-def _load_cache(tf2_root: str) -> Optional[List[HatItem]]:
+def _load_cache(tf2_root: str, language: str = "en") -> Optional[List[HatItem]]:
     """Загружает список шапок из кэша если он актуален."""
-    if not _cache_valid(tf2_root):
+    if not _cache_valid(tf2_root, language):
         return None
     try:
-        data = json.loads(_CACHE_FILE.read_text(encoding="utf-8"))
+        data = json.loads(_cache_file(language).read_text(encoding="utf-8"))
         items = [HatItem(**d) for d in data]
         logger.info(f"Шапки загружены из кэша: {len(items)} предметов")
         return items
@@ -570,15 +586,16 @@ def _load_cache(tf2_root: str) -> Optional[List[HatItem]]:
         return None
 
 
-def _save_cache(items: List[HatItem]) -> None:
+def _save_cache(items: List[HatItem], language: str = "en") -> None:
     """Сохраняет список шапок в кэш."""
+    cache = _cache_file(language)
     try:
-        _CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
-        _CACHE_FILE.write_text(
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        cache.write_text(
             json.dumps([asdict(i) for i in items], ensure_ascii=False, indent=None),
             encoding="utf-8"
         )
-        logger.info(f"Кэш шапок сохранён: {len(items)} предметов → {_CACHE_FILE}")
+        logger.info(f"Кэш шапок сохранён: {len(items)} предметов → {cache}")
         _drop_old_caches()
     except Exception as e:
         logger.warning(f"Не удалось сохранить кэш: {e}")
@@ -590,9 +607,13 @@ def _drop_old_caches() -> None:
     Имя файла содержит версию, и при её смене старый файл просто оставался
     лежать: у пользователей копились hats_cache_v3…v7 по несколько мегабайт
     каждый, и было неясно, какой из них живой.
+
+    Кэши ДРУГИХ ЯЗЫКОВ текущей версии не трогаем: иначе переключение языка
+    туда-обратно каждый раз стоило бы полного перепарса items_game.
     """
-    for old in _CACHE_FILE.parent.glob("hats_cache_v*.json"):
-        if old.name == _CACHE_FILE.name:
+    alive = f"hats_cache_{_CACHE_VERSION}_"
+    for old in _CACHE_DIR.glob("hats_cache_v*.json"):
+        if old.name.startswith(alive):
             continue
         try:
             old.unlink()
@@ -613,16 +634,14 @@ def parse_hats(
     Возвращает список всех косметических предметов TF2 с MDL-путями.
     """
     if not force_reparse:
-        cached = _load_cache(tf2_root)
+        cached = _load_cache(tf2_root, language)
         if cached is not None:
             return cached
 
     if progress_cb:
         progress_cb(0, "Loading localization...")
 
-    lang_map = {"en": "english", "ru": "russian"}
-    lang_filename = lang_map.get(language, "english")
-    localization = _parse_localization(tf2_root, lang_filename)
+    localization = parse_localization(tf2_root, _lang_file(language))
 
     items_path = get_items_game_path(tf2_root)
     if not items_path:
@@ -640,7 +659,7 @@ def parse_hats(
     if progress_cb:
         progress_cb(95, "Saving cache...")
 
-    _save_cache(items)
+    _save_cache(items, language)
 
     if progress_cb:
         progress_cb(100, f"Done — {len(items)} cosmetics found")

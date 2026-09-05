@@ -7,7 +7,7 @@
 
 import pytest
 
-from src.ui.preview_panel import human_size, vtf_bytes
+from src.services.vtf_size import human_size, vtf_bytes
 
 BPP = {'DXT1': 4, 'DXT5': 8, 'RGB888': 24, 'RGBA16161616': 64}
 

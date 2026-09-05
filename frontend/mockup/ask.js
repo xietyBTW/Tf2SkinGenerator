@@ -13,11 +13,13 @@
 const askEl = document.getElementById('ask');
 
 export function ask({ title, text = '', value = null, list = null, multi = false,
-               chosen = [], ok = 'Готово' }) {
+               chosen = [], ok = 'Готово', check = '' }) {
   const titleEl = askEl.querySelector('.ask__title');
   const textEl = askEl.querySelector('.ask__text');
   const input = askEl.querySelector('.ask__input');
   const listEl = askEl.querySelector('.ask__list');
+  const checkBox = askEl.querySelector('.ask__check');
+  const checkInput = checkBox.querySelector('input');
   const okBtn = askEl.querySelector('.ask__ok');
   const cancelBtn = askEl.querySelector('.ask__cancel');
 
@@ -29,6 +31,11 @@ export function ask({ title, text = '', value = null, list = null, multi = false
   listEl.hidden = !list;
   listEl.innerHTML = '';
   askEl.querySelector('.ask__ok').textContent = ok;
+  // Галка-приписка к ответу: с ней окно отдаёт {value, checked}, без неё —
+  // просто значение, как и раньше.
+  checkBox.hidden = !check;
+  checkInput.checked = false;
+  checkBox.querySelector('span').textContent = check || '';
 
   return new Promise((resolve) => {
     // Один выбор — значение; множественный — набор отмеченного.
@@ -50,10 +57,12 @@ export function ask({ title, text = '', value = null, list = null, multi = false
       if (askEl.open) askEl.close();
       resolve(result);
     };
+    const wrap = (result) => (check
+      ? { value: result, checked: checkInput.checked } : result);
     const onOk = (e) => {
       e.preventDefault();
-      if (list) { settle(multi ? [...marks] : picked); return; }
-      settle(value === null ? true : input.value.trim());
+      if (list) { settle(wrap(multi ? [...marks] : picked)); return; }
+      settle(wrap(value === null ? true : input.value.trim()));
     };
     const onCancel = () => settle(null);
 
@@ -86,7 +95,7 @@ export function ask({ title, text = '', value = null, list = null, multi = false
         if (!multi) {
           b.addEventListener('dblclick', () => {
             picked = value;
-            settle(picked);
+            settle(wrap(picked));
           });
         }
         listEl.appendChild(b);

@@ -12,12 +12,14 @@
  */
 
 import * as api from './api.js';
+import { say } from './stage.js';
 import { build, floating } from './layout.js';
 import { SINGLE_TEX } from './album.js';
 import { sel } from './catalog.js';
-import { buildParams } from './build.js';
+import { buildParams, checkName } from './build.js';
 import { openMaterialMaps } from './maps.js';
 import { openVmtEditor } from './vmt.js';
+import { applyView } from './preview.js';
 
 // ── Что показывать: решает Python ───────────────────────────────────────
 // Таблицы правил здесь нет намеренно. api.controls_for(mode) отдаёт готовый
@@ -34,6 +36,7 @@ const COND_KEY = {
   load: 'load_model',
   replace: 'replace_model',
   firstperson: 'first_person',
+  taunt: 'taunt',
   misc: 'misc',
   styles: 'styles',
   aus: 'teams',
@@ -89,12 +92,11 @@ export function applyControls(c) {
   fmt.disabled = Boolean(c.format_locked);
 
   // Флаги VTF.
-  const flagCol = [...document.querySelectorAll('.build__col')]
-    .find((col) => col.textContent.includes('Флаги VTF'));
+  const flagCol = document.querySelector('.build__col[data-col="flags"]');
   flagCol.querySelectorAll('input').forEach((b, i) => {
     // Список флагов режима (null — все); Point Sample у скайбокса единственный
     // осмысленный, остальное там выставляет SkyboxService.
-    const name = flagCol.querySelectorAll('.check span')[i].textContent;
+    const name = flagCol.querySelectorAll('.check span')[i].textContent.trim();
     const allowed = c.flags === null || c.flags.some((f) => name.toLowerCase().includes(f.toLowerCase()));
     b.disabled = !c.flags_enabled || !allowed;
   });
@@ -138,12 +140,11 @@ export function applySettings(st) {
 
   const flags = new Set(st.flags || []);
   const options = st.options || {};
-  for (const col of document.querySelectorAll('.build__col')) {
-    const isFlags = col.textContent.includes('Флаги VTF');
-    const isOptions = col.textContent.includes('Опции');
-    if (!isFlags && !isOptions) continue;
+  for (const col of document.querySelectorAll('.build__col[data-col]')) {
+    const isFlags = col.dataset.col === 'flags';
+    if (!isFlags && col.dataset.col !== 'options') continue;
     col.querySelectorAll('.check').forEach((l) => {
-      const name = l.querySelector('span').textContent.trim();
+      const name = checkName(l);
       const input = l.querySelector('input');
       input.checked = isFlags ? flags.has(name) : Boolean(options[name]);
     });
@@ -218,14 +219,64 @@ document.getElementById('editreset').addEventListener('click', async () => {
 // Кнопки под альбомом: обе про материал, который сейчас перед глазами.
 // Пометки «свои настройки» переживают перерисовку альбома: карточки
 // пересобираются на каждой модели, а записи живут в Python.
+/**
+ * Три кнопки про одну работу: сохранить, вернуть, забыть.
+ *
+ * Автосохранение пишет черновик молча — и раньше он же попадал в библиотеку:
+ * человек просто открывал предмет, что-то трогал, и получал «мод», которого не
+ * делал. Теперь молчаливая запись остаётся черновиком при предмете, а в раздел
+ * «Кастомный мод» работа попадает только отсюда, нажатием.
+ */
+async function keepWork() {
+  const res = await api.keepWork();
+  if (res.error) { say(res.error); return; }
+  say('Работа сохранена — она в разделе «Кастомный мод»');
+  showWork(res);
+}
+
+async function restoreWork() {
+  const res = await api.restoreWork();
+  if (res.error) { say(res.error); return; }
+  // applyView сам пересобирает альбом и через restoreBadges обновляет кнопки.
+  applyView(res);
+  say('Отложенные правки вернулись');
+}
+
+async function forgetWork() {
+  const res = await api.forgetWork();
+  if (res.error) { say(res.error); return; }
+  applyView(res);
+  say('Правки удалены');
+}
+
+/** Раскладывает кнопки по состоянию работы. */
+function showWork(st) {
+  const btn = (id) => document.getElementById(id);
+  // Сохранять нечего, пока нет правок; сохранённую второй раз не сохраняют —
+  // автосохранение и так пишет её дальше.
+  btn('keep').hidden = !(st.has_edits && !st.kept);
+  // Вернуть можно только то, чего сейчас на предмете нет.
+  btn('restore').hidden = !(st.has_saved && !st.has_edits);
+  btn('forget').hidden = !(st.has_saved || st.has_edits);
+  btn('forget').textContent = st.kept ? 'Удалить работу' : 'Забыть правки';
+}
+
+async function syncWork() {
+  showWork(await api.workState());
+}
+
 export async function restoreBadges() {
   const badges = await api.textureBadges();
   for (const [material, badge] of Object.entries(badges)) markBadge(material, badge);
+  await syncWork();
 }
 
 document.querySelector('.half--flat .acts').addEventListener('click', (e) => {
   const btn = e.target.closest('.textbtn');
   if (!btn) return;
+  if (btn.id === 'keep') { keepWork(); return; }
+  if (btn.id === 'restore') { restoreWork(); return; }
+  if (btn.id === 'forget') { forgetWork(); return; }
   if (btn.dataset.cond === 'maps') openMaterialMaps();
   else if (btn.id === 'vmt') openVmtEditor();
 });
