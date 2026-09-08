@@ -23,7 +23,10 @@ MOCKUP = ROOT / "frontend" / "mockup"
 
 #: Сообщения Python, которые доходят до человека подписью на странице.
 PY_SOURCES = ("src/app/api.py", "src/app/session.py",
-              "src/services/build_worker.py")
+              "src/services/build_worker.py",
+              # Подписи разделов и событий каталога звуков: их видит человек,
+              # а живут они у данных — страница только раскладывает.
+              "src/data/sound_catalog.py")
 
 CYRILLIC = re.compile("[А-яЁё]")
 LITERAL = re.compile(r"'([^'\n]*)'|\"([^\"\n]*)\"|`((?:[^`\\]|\\.)*)`", re.S)
@@ -37,8 +40,6 @@ NOT_SHOWN = {
     "битое событие", "битое событие:", "ё",
     # Имя языка пишется на нём самом.
     "Русский",
-    # Заглушка разметки: настоящую подпись ставит код по выбранному предмету.
-    "c_scattergun · Scout · 4 материала",
     # Записи в лог-файл (logger), а не подписи на странице.
     "api.items: категория {} ещё не подключена",
     "не прочитать OBJ для габаритов: {}",
@@ -51,10 +52,33 @@ NOT_SHOWN = {
     "Получена доп. текстура: {}",
     "Получена доп. модель: {}",
     "Решение пользователя по несовпадению текстур: {} → continue={}",
+    "[звук] сборка не удалась: {}",
+    "[звук] собрано: {}",
+    "[звук] сохранено из игры: {} в {}",
+    "[звук] не достали {}",
+    "[звук] записей: {} {}, ",
+    "с предметом: {}",
+    "api.set_ui_state: неизвестный ключ {}",
+    # Отказ `set_ui_state`: ключи в него подставляет наш же код, и чужой
+    # означает ошибку в странице, а не действие человека — на экран он не
+    # попадает, его читает разработчик в журнале обмена.
+    "неизвестная настройка: {}",
+    # Регулярное выражение, а не подпись.
+    "[^0-9a-zA-Zа-яёА-ЯЁ]+",
 }
 
 #: Файлы, где русские строки — это сам словарь и его разбор.
 SKIP_FILES = {"strings.js", "i18n.js"}
+
+
+def _no_block_comments(src: str) -> str:
+    """JS без блочных комментариев.
+
+    Комментарий начинается со СВОЕЙ строки. Без этой оговорки `'audio/*'`
+    сходил за его начало, и всё до ближайшего `*/` вырезалось вместе с живыми
+    подписями: три строки страницы молча не попадали в проверку.
+    """
+    return re.sub(r"(?ms)^[ 	]*/\*.*?\*/", "", src)
 
 
 def _markup_strings(html: str, add) -> None:
@@ -91,7 +115,7 @@ def _visible_strings() -> dict:
             continue
         source = path.name
         src = io.open(path, encoding="utf-8").read()
-        src = re.sub(r"/\*.*?\*/", "", src, flags=re.S)
+        src = _no_block_comments(src)
         src = re.sub(r"(?m)^\s*//.*$", "", src)
         previous = None
         while previous != src:                    # 'а' + 'б' → 'аб'
@@ -135,9 +159,48 @@ def test_every_visible_string_has_a_translation() -> None:
           "NOT_SHOWN этого теста.")
 
 
+def _logger_messages() -> set:
+    """
+    Тексты вызовов логгера во всём src/.
+
+    Консоль в окне показывает журнал Python (см. frontend/mockup/log.js), и
+    переводится он тем же способом — на границе показа. Значит такие строки
+    ЗАКОННЫ как ключи словаря. Требовать перевода для всех нельзя: их около
+    семисот, и INFO/DEBUG — диагностика для автора, а не подписи для человека.
+    Поэтому они участвуют только в проверке на мусор, но не в проверке
+    полноты.
+    """
+    import ast
+
+    levels = {"debug", "info", "warning", "error", "critical", "exception"}
+    found = set()
+
+    def literal(node):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return node.value
+        if isinstance(node, ast.JoinedStr):
+            return "".join(str(v.value) if isinstance(v, ast.Constant) else "{}"
+                           for v in node.values)
+        return None
+
+    for path in (ROOT / "src").rglob("*.py"):
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except (SyntaxError, OSError):
+            continue
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr in levels and node.args):
+                text = literal(node.args[0])
+                if text:
+                    found.add(text)
+    return found
+
+
 def test_dictionary_has_no_stale_keys() -> None:
     """Ключ, которого больше нет в интерфейсе, — мусор: подписи он не найдёт."""
-    visible = set(_visible_strings())
+    visible = set(_visible_strings()) | _logger_messages()
     stripped = {text.strip() for text in visible}
     stale = [key for key in _dictionary_keys()
              if key not in visible and key not in stripped]

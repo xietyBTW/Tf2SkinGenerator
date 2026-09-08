@@ -108,7 +108,8 @@ def restore(session: PreviewSession, key: str, asked: bool = False) -> bool:
     if not key or not (asked or is_enabled()):
         return False
     edits = work_store.load(key)
-    if not edits:
+    from src.domain.preview.session import has_real_edits
+    if not has_real_edits(edits):
         return False
     session.apply_user_edits(edits)
     logger.info(f"работа предмета возвращена: {key}")

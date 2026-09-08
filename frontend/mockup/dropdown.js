@@ -129,4 +129,10 @@ document.addEventListener('keydown', (e) => {
 
 // Список прибит к полю: при прокрутке и смене размера он уезжает.
 window.addEventListener('resize', close);
-window.addEventListener('scroll', close, true);
+window.addEventListener('scroll', (e) => {
+  // ...но прокрутка САМОГО списка его не закрывает. У него max-height 240px и
+  // `overflow: auto`, а в «Файле частиц» под сотню эффектов — колесо закрывало
+  // список на первом же движении, и до нижних пунктов было не добраться.
+  // Закрываем, только когда уехало то, к чему список прибит.
+  if (current && !current.box.contains(e.target)) close();
+}, true);

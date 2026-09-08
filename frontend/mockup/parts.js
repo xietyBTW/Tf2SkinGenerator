@@ -58,7 +58,8 @@ export async function togglePartsMode() {
     hintParts('Эта модель — один цельный кусок, делить нечего');
   } else if (res) {
     hintParts('Щёлкай по кускам модели — покрасятся. Нарезать мельче или '
-            + 'обвести края — вкладками слева');
+            + 'обвести края — вкладками слева. Ctrl+Z отменяет, Ctrl+Y '
+            + 'возвращает');
   }
 }
 
@@ -564,11 +565,25 @@ document.getElementById('parts-random').addEventListener('click', async () => {
 // Отмена — то, что позволяет пробовать: без неё каждый щелчок по модели
 // приходится обдумывать заранее.
 export async function undoParts() {
-  const res = await api.undoParts(partsMaterial);
+  return stepParts(api.undoParts, 'Отменено');
+}
+
+/** Возвращает вперёд то, что отменили. */
+export async function redoParts() {
+  return stepParts(api.redoParts, 'Возвращено');
+}
+
+/** Шаг по истории покраски — в любую сторону: движение одно и то же. */
+async function stepParts(step, said) {
+  const res = await step(partsMaterial);
   if (res.error) { hintParts(res.error); return; }
   applyView(res);
-  await refreshParts();
-  hintParts('Отменено');
+  // Не только полоса частей: шаг возвращает и силу тонировки с окантовкой, а
+  // они живут на ползунках. Без этого контролы показывали бы значения, от
+  // которых на модели уже ничего не осталось.
+  const fresh = await refreshParts();
+  if (fresh && !fresh.error) showPalette(fresh);
+  hintParts(said);
 }
 
 /**
@@ -669,7 +684,6 @@ document.getElementById('parts-edge').addEventListener('click', (e) => {
 document.getElementById('part-edge-width').addEventListener('change', applyEdge);
 document.getElementById('part-edge-color').addEventListener('change', applyEdge);
 
-document.getElementById('parts-undo').addEventListener('click', undoParts);
 document.getElementById('parts-done').addEventListener('click', closeParts);
 
 document.getElementById('parts-grad').addEventListener('click', (e) => {
@@ -729,13 +743,27 @@ function setGradientAngle(deg) {
   });
 })();
 
+/**
+ * Отмена и возврат — только с клавиатуры.
+ *
+ * Кнопки в полосе у них нет намеренно: красят десятками щелчков подряд, а
+ * откатывают редко, и ряд действий из-за неё стоял вчетвером. Раскладка та
+ * же, что везде: Ctrl+Z назад, Ctrl+Y (и Ctrl+Shift+Z, как в редакторах)
+ * вперёд.
+ *
+ * Пока курсор в поле ввода, клавиши принадлежат ему: там своя отмена текста.
+ */
 document.addEventListener('keydown', (e) => {
   const editing = /^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName || '');
-  if (e.key === 'z' && (e.ctrlKey || e.metaKey) && !editing
-      && !document.getElementById('partsbar').hidden) {
-    e.preventDefault();
-    undoParts();
-  }
+  if (!(e.ctrlKey || e.metaKey) || editing
+      || document.getElementById('partsbar').hidden) return;
+  const key = e.key.toLowerCase();
+  const back = key === 'z' && !e.shiftKey;
+  const forward = key === 'y' || (key === 'z' && e.shiftKey);
+  if (!back && !forward) return;
+  e.preventDefault();
+  if (back) undoParts();
+  else redoParts();
 });
 
 document.getElementById('parts-clear').addEventListener('click', async () => {

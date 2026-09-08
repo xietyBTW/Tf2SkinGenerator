@@ -27,12 +27,16 @@ tf2_textures + tf2_misc) стоит около полусекунды и про�
 import os
 import threading
 
+from src.shared.logging_config import get_logger
+
 try:
     import vpk as _vpk
     _VPK_AVAILABLE = True
 except ImportError:
     _VPK_AVAILABLE = False
     _vpk = None
+
+logger = get_logger(__name__)
 
 _LOCK = threading.Lock()
 #: путь → (mtime архива на момент разбора, открытый vpk-объект с каталогом)
@@ -66,6 +70,7 @@ def open_vpk_cached(dir_vpk_path: str):
         if cached is not None and cached[0] == stamp:
             return cached[1]
         pak = _vpk.open(dir_vpk_path)
+        _fix_archive_names(pak)
         # Каталог строим ЗДЕСЬ: после публикации объект только читают, и
         # ленивый разбор из чужого потока стал бы гонкой за общий словарь.
         # `tree` пуст ровно до первого разбора — не строим его дважды.
@@ -73,6 +78,29 @@ def open_vpk_cached(dir_vpk_path: str):
             pak.read_index()
         _CACHE[dir_vpk_path] = (stamp, pak)
         return pak
+
+
+def _fix_archive_names(pak) -> None:
+    """Чинит имена пронумерованных архивов у библиотеки vpk.
+
+    В `_make_vpkfile_path` она делает `path.replace('english', '')` — хак под
+    чужие сборки Source. У TF2 озвучка так и называется,
+    `tf2_sound_vo_english_dir.vpk`, и после замены библиотека ищет
+    несуществующий `tf2_sound_vo__001.vpk`: реплики молчали, а в лог падал
+    FileNotFoundError. Правило простое и без исключений: `_dir.vpk` меняется на
+    номер архива.
+    """
+    def path_for(metadata, _pak=pak):
+        path = _pak.vpk_path
+        index = metadata['archive_index']
+        if index != 0x7fff:
+            path = path[:-len('dir.vpk')] + '%03d.vpk' % index
+        return path
+
+    try:
+        pak._make_vpkfile_path = path_for
+    except (AttributeError, TypeError) as exc:      # чужая версия библиотеки
+        logger.debug(f"[vpk] имена архивов оставлены как есть: {exc}")
 
 
 def clear_vpk_cache() -> None:

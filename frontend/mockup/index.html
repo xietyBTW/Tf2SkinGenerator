@@ -18,6 +18,7 @@
     <button class="underlined is-active" data-section="weapons">Оружие</button>
     <button class="underlined" data-section="hats">Шапки</button>
     <button class="underlined" data-section="particles">Частицы</button>
+    <button class="underlined" data-section="sounds">Звуки</button>
     <button class="underlined" data-section="diagnostics">Диагностика</button>
   </nav>
   <div class="chrome__actions">
@@ -28,8 +29,12 @@
 <!-- ═══ Заголовок: предмет как название вещи ════════════════════════════ -->
 <div class="title">
   <button class="title__item" id="opencat">
-    <span class="title__name">Scattergun</span>
-    <span class="title__meta">c_scattergun · Scout · 4 материала</span>
+    <!-- Заголовок называет ВЫБРАННОЕ, а на старте не выбрано ничего: раздел
+         оружия открывается без pickSection, и заглушка «Scattergun» висела
+         над пустым кадром — предмет выглядел выбранным, хотя не был. Тот же
+         текст, что ставит смена раздела. -->
+    <span class="title__name">Выберите предмет</span>
+    <span class="title__meta"></span>
     <span class="title__hint">Сменить предмет</span>
   </button>
 
@@ -309,8 +314,11 @@
 
           <!-- Действия над всей работой — справа и отдельно: «Убрать всё»
                рядом с ползунком толщины стояло как равное, а оно необратимо. -->
+          <!-- Отмена и возврат живут только на клавишах (Ctrl+Z / Ctrl+Y):
+               красят десятками щелчков, и кнопка, которой пользуются раз в
+               десять действий, стояла в ряду наравне с «Убрать всё». Про
+               клавиши сказано в подсказке под полосой. -->
           <div class="parts__acts">
-            <button class="textbtn textbtn--sm" id="parts-undo">Отменить</button>
             <button class="textbtn textbtn--sm" id="parts-random">Случайно</button>
             <button class="textbtn textbtn--sm" id="parts-clear">Убрать всё</button>
             <button class="textbtn textbtn--sm" id="parts-done">Готово</button>
@@ -356,6 +364,71 @@
     </section>
 
   </div>
+
+  <!-- ── Звуки ──────────────────────────────────────────────────────── -->
+  <!-- Своя страница, а не вкладка предмета: звук привязан к СОБЫТИЮ, у одного
+       оружия их до восьми, и в карточку предмета они не помещаются. Модель и
+       текстуры здесь не при чём, поэтому раздел занимает стол целиком. -->
+  <section class="sounds" id="sounds" hidden>
+    <div class="sounds__bar">
+      <input class="input sounds__search" id="snd-q" type="search"
+             placeholder="Название, предмет или файл">
+      <div class="catalog__filters" id="snd-section">
+        <span class="label label--inline">Раздел</span>
+      </div>
+      <div class="catalog__filters" id="snd-family">
+        <span class="label label--inline">Событие</span>
+      </div>
+      <div class="catalog__filters" id="snd-class">
+        <span class="label label--inline">Класс</span>
+      </div>
+    </div>
+
+    <p class="catalog__count mono" id="snd-count"></p>
+
+    <!-- Кружок вместо списка, пока идёт чтение: разбор звуковых скриптов
+         занимает пару секунд, и пустой список за это время читается как
+         поломка. Тот же приём, что у вьювера моделей. -->
+    <div class="loading" id="snd-loading" hidden>
+      <span class="loading__ring"></span>
+      <span class="loading__text label"></span>
+    </div>
+
+    <div class="sounds__list" id="snd-list"></div>
+
+    <!-- Плеер. Движок — обычный <audio>, но без `controls`: браузерный пульт
+         выпадает из вида приложения. Полоса и громкость — <input type=range>:
+         перетаскивание и клавиатура у него уже свои. -->
+    <div class="player">
+      <audio id="snd-audio" preload="none"></audio>
+
+      <button class="player__play" id="snd-play" type="button"
+              aria-label="Играть"></button>
+
+      <div class="player__body">
+        <span class="player__what mono" id="snd-playing">Ничего не играет</span>
+        <input class="player__seek" id="snd-seek" type="range"
+               min="0" max="1000" value="0" step="1" aria-label="Перемотка">
+      </div>
+
+      <span class="player__time mono" id="snd-time">0:00 / 0:00</span>
+
+      <div class="player__vol">
+        <span class="label label--inline">Громкость</span>
+        <input class="player__level" id="snd-vol" type="range"
+               min="0" max="100" value="100" step="1" aria-label="Громкость">
+      </div>
+    </div>
+
+    <!-- Свой подвал вместо общего: тот собирает ТЕКСТУРУ выбранного предмета
+         и показывает её размер с форматом — к звукам это не относится. -->
+    <div class="sounds__foot">
+      <span class="label" id="snd-note">Своих звуков нет</span>
+      <input class="input sounds__name" id="snd-name" type="text"
+             placeholder="Имя VPK" value="sounds_mod">
+      <button class="btn--primary" id="snd-build">Собрать VPK</button>
+    </div>
+  </section>
 
   <!-- ── Параметры сборки ───────────────────────────────────────────── -->
   <aside class="build" id="build">
@@ -657,6 +730,15 @@
       <span class="mono" id="cfg-drafts-size"></span>
     </div>
 
+    <!-- Версия и обновление. Не «действие над настройками», поэтому стоит
+         рядом с обслуживанием, а не в ряду кнопок: человек сюда заходит
+         посмотреть, а не сохранить. -->
+    <div class="cfg__maint">
+      <button class="textbtn" id="cfg-update" type="button">Проверить обновления</button>
+      <span class="mono" id="cfg-version"></span>
+    </div>
+    <p class="field__note cfg__update-note" id="cfg-update-note" hidden></p>
+
     <div class="ask__acts">
       <!-- Ссылка автора прижата влево: это не действие над настройками, и
            спорить по весу с «Сохранить» ей незачем. -->
@@ -715,19 +797,58 @@
   </div>
 </dialog>
 
+<!-- ═══ Не получилось ══════════════════════════════════════════════════════
+     Провал работы объясняется словами, а не одной технической строкой:
+     заголовок и что делать приходят от error_classifier на языке интерфейса,
+     исходное сообщение спрятано под «Технические детали» — оно нужно тому,
+     кто полезет разбираться, и тому, кому его пришлют. -->
+<dialog class="ask fail" id="faildlg">
+  <div class="ask__body">
+    <p class="label ask__title" id="fail-title"></p>
+    <p class="ask__text" id="fail-text"></p>
+    <details class="fail__more">
+      <summary>Технические детали</summary>
+      <pre class="fail__raw mono" id="fail-raw"></pre>
+    </details>
+    <div class="ask__acts">
+      <button class="textbtn" type="button" id="fail-log">Открыть журнал</button>
+      <button class="textbtn" type="button" id="fail-copy">Копировать</button>
+      <button class="btn--primary" type="button" id="fail-close">Закрыть</button>
+    </div>
+  </div>
+</dialog>
+
 <!-- ═══ Консоль ════════════════════════════════════════════════════════════
      Что приходит от Python и что уходит обратно. Открывается по ` (тильда)
      или щелчком по индикатору состояния. Отладочная, но не подпорка макета:
      в приложении такая же пригодится, когда сборка пойдёт не так. -->
 <aside class="console" id="console" hidden>
+  <!-- Край тянут мышью; ширина запоминается (console_width в общих настройках). -->
+  <div class="console__grip" id="loggrip" title="Потянуть за край"></div>
   <div class="console__bar">
     <span class="label">Журнал</span>
     <div class="console__acts">
+      <button class="textbtn textbtn--sm" id="logwide">Во всё окно</button>
+      <button class="textbtn textbtn--sm" id="logcopy">Копировать</button>
+      <button class="textbtn textbtn--sm" id="logopen">Папка с логом</button>
       <button class="textbtn textbtn--sm" id="logclear">Очистить</button>
       <button class="textbtn textbtn--sm" id="logclose">Закрыть</button>
     </div>
   </div>
+  <!-- Чипы уровней. По умолчанию видно обмен, ошибки и предупреждения:
+       остальное — сотни строк на одну сборку, и в спокойной работе они мешают.
+       Выбор запоминается (console_filter). -->
+  <div class="console__filters">
+    <button class="underlined" data-lvl="exchange">Обмен</button>
+    <button class="underlined" data-lvl="error">Ошибки</button>
+    <button class="underlined" data-lvl="warning">Предупреждения</button>
+    <button class="underlined" data-lvl="info">Инфо</button>
+    <button class="underlined" data-lvl="debug">Отладка</button>
+    <input class="input console__find" id="logfind" type="search"
+           placeholder="Поиск по журналу">
+  </div>
   <div class="console__body" id="logbody"></div>
+  <p class="console__note" id="lognote" hidden></p>
 </aside>
 
 <script type="module" src="app.js"></script>

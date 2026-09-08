@@ -17,11 +17,17 @@ import os
 from typing import List, Optional, Tuple
 
 from src.shared.logging_config import get_logger
+from src.shared.paths import data_dir
 
 logger = get_logger(__name__)
 
 #: Куда класть свою модель персонажа для сцены (по папке на класс).
-MODEL_ROOT = os.path.join('tools', 'Model')
+#:
+#: Папка ДАННЫХ, а не установки: модель сюда кладёт человек, а папку установки
+#: обновление заменяет целиком (см. src/shared/paths.py). Пустых заготовок мы
+#: не создаём — `scan` спокойно переживает отсутствие папки, а девять пустых
+#: каталогов на всякий случай никому не помогают.
+MODEL_ROOT = str(data_dir() / 'tools' / 'Model')
 
 _MODEL_EXTS = ('.obj', '.smd')
 _TEXTURE_EXTS = ('.png', '.jpg', '.jpeg', '.bmp', '.tga', '.vtf', '.webp')

@@ -318,6 +318,9 @@ class VpkModController:
     cards = Signal(object)             # [{name, display_name, preview_png}]
     materials = Signal(object)         # имена материалов модели (меши)
     skins = Signal(object)             # стили модели (skinfamilies)
+    #: (ключ оружия, reference SMD мода) — что мод заменяет. По нему страница
+    #: открывает вид от первого лица: мод показывается в руках класса.
+    weapon = Signal(str, str)
     failed = Signal(str)
 
     def __init__(self, session: PreviewSession):
@@ -341,6 +344,7 @@ class VpkModController:
         # Режим включается ПОСЛЕ сбросов: reset_team_frames его гасит.
         s.custom_vpk_mode = True
         s.custom_model_materials = []
+        s.reset_custom_vpk()
 
         from src.services.preview_vpk_mod_worker import PreviewVpkModWorker
         w = PreviewVpkModWorker(
@@ -355,9 +359,16 @@ class VpkModController:
         w.cards_ready.connect(self._on_cards)
         w.materials_ready.connect(self._on_materials)
         w.skins_ready.connect(self._on_skins)
+        w.weapon_found.connect(self._on_weapon)
         w.failed.connect(self.failed.emit)
         self._worker = w
         w.start()
+
+    def _on_weapon(self, key: str, ref_smd: str) -> None:
+        """Мод опознан: чьё это оружие и где его меш."""
+        self._session.custom_vpk_weapon = key or None
+        self._session.custom_vpk_smd = ref_smd or None
+        self.weapon.emit(key or '', ref_smd or '')
 
     # ── Сигналы воркера: сначала сессия, потом событие ───────────────────── #
 
@@ -524,7 +535,14 @@ class ViewmodelController:
                                self._session.textures.active_team)
 
     def load(self, weapon_key: str, mode: str, misc_vpk: str, textures_vpk: str,
-             tf2_root: str, action: str = 'IDLE', lang: str = 'en') -> None:
+             tf2_root: str, action: str = 'IDLE', lang: str = 'en',
+             custom_smd: str = '', keep_materials: bool = False) -> None:
+        """Сцена «руки класса с оружием».
+
+        `custom_smd` — меш вместо игрового: так в руке показывается чужой мод
+        из VPK или своя модель. Скелет и анимации остаются игровыми, иначе
+        оружию нечем двигаться.
+        """
         self.stop()
         from src.data import viewmodel_anims
         from src.services.viewmodel_worker import ViewmodelPreviewWorker
@@ -542,6 +560,10 @@ class ViewmodelController:
             # Рукава и перчатки у семи классов командные: на синей стороне
             # руки красит воркер, больше их красить некому.
             team=self._session.textures.active_team,
+            custom_smd_path=custom_smd,
+            # У мода свои материалы и свои текстуры — переименовывать их в
+            # игровые значит показать пустую модель.
+            custom_keep_materials=keep_materials,
             lang=lang,
         )
         w.progress.connect(self.progress.emit)

@@ -21,6 +21,7 @@ from typing import List, Dict, Optional, Callable
 
 from src.data import items_game_kv
 from src.data.weapon_model_index import get_items_game_path
+from src.shared.paths import data_dir
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +31,7 @@ logger = logging.getLogger(__name__)
 # v9: %s раскрывается токеном КЛАССА ИЗ ПУТЕЙ («demo», а не «demoman»).
 # Смена версии форсирует одноразовый перепарс старого кэша.
 _CACHE_VERSION = "v9"
-_CACHE_DIR = Path("cache")
+_CACHE_DIR = data_dir() / "cache"
 
 #: Как называется файл локализации у языка приложения. Один словарь на модуль:
 #: по нему и читают tf_*.txt, и разводят кэши — иначе первый разобранный язык

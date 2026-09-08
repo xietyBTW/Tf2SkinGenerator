@@ -40,3 +40,17 @@ SIMPLE_MODEL_CATEGORIES: Dict[str, SimpleModelCategory] = {
     "pickup": SimpleModelCategory(PICKUPS, PICKUP_MODE_PREFIX),
     "taunt": SimpleModelCategory(TAUNT_PROPS, TAUNT_PROP_MODE_PREFIX),
 }
+
+
+def category_of_mode(mode: str) -> str:
+    """Имя простой категории по режиму, либо '' — режим не из них.
+
+    `kind_of` относит снаряды, пикапы и реквизит насмешек к оружию: таблицы
+    оружия у них нет, а pipeline тот же. Там, где спрашивают именно про
+    ОРУЖИЕ В РУКАХ (вид от первого лица), этого мало — у мировой модели
+    вьюмодели не существует, и вопрос задаётся сюда.
+    """
+    for name, cat in SIMPLE_MODEL_CATEGORIES.items():
+        if mode.startswith(cat.mode_prefix):
+            return name
+    return ""

@@ -5,6 +5,8 @@
 from pathlib import Path
 from typing import Optional
 
+from src.shared.paths import data_dir, install_dir
+
 
 # ============================================================================
 # Команды TF2
@@ -67,8 +69,9 @@ def bypass_prefix(method: Optional[str]) -> str:
 
 class ToolPaths:
     """Пути к внешним инструментам"""
-    VTF_TOOL = Path("tools/VTF/VTFCmd.exe")
-    VPK_TOOL = Path("tools/VPK/vpk.exe")
+    #: Бандл — только чтение, живёт рядом с .exe (см. src/shared/paths.py).
+    VTF_TOOL = install_dir() / "tools/VTF/VTFCmd.exe"
+    VPK_TOOL = install_dir() / "tools/VPK/vpk.exe"
 
     @classmethod
     def get_vtf_tool(cls) -> Path:
@@ -134,12 +137,14 @@ class ToolTimeouts:
 
 class DirectoryPaths:
     """Стандартные пути к директориям"""
-    BASE_TEMP_DIR = Path("tools/temp")
-    MOD_DATA_DIR = Path("tools/mod_data")
-    EXPORT_DIR = Path("export")
-    CONFIG_DIR = Path("config")
-    EDITED_VMT_DIR = Path("tools/edited_vmt")
-    TEMP_VMT_EXTRACT_DIR = Path("tools/temp_vmt_extract")
+    #: Всё это ПИШЕТСЯ, значит живёт в папке данных, а не в папке установки:
+    #: обновление заменяет установку целиком (см. src/shared/paths.py).
+    BASE_TEMP_DIR = data_dir() / "tools/temp"
+    MOD_DATA_DIR = data_dir() / "tools/mod_data"
+    EXPORT_DIR = data_dir() / "export"
+    CONFIG_DIR = data_dir() / "config"
+    EDITED_VMT_DIR = data_dir() / "tools/edited_vmt"
+    TEMP_VMT_EXTRACT_DIR = data_dir() / "tools/temp_vmt_extract"
 
     @classmethod
     def ensure_exists(cls) -> None:

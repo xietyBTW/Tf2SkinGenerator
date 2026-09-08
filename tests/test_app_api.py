@@ -107,6 +107,16 @@ class ControlsTests(unittest.TestCase):
         self.assertFalse(api.controls_for('hat')['first_person'])
         self.assertFalse(api.controls_for('engineer_hands')['first_person'])
 
+    def test_first_person_hidden_for_world_models(self):
+        """Снаряд, пикап и реквизит насмешки в руках не держат — вьюмодели нет.
+
+        `kind_of` зовёт их оружием (pipeline тот же), и вкладка «От первого
+        лица» открывалась, но собрать было нечего.
+        """
+        for mode in ('projectile_rocket', 'pickup_medkit_small', 'taunt_conga'):
+            self.assertFalse(api.controls_for(mode)['first_person'], mode)
+        self.assertTrue(api.controls_for('taunt_conga')['taunt'])
+
     def test_spray_pins_resolution_and_locks_format(self):
         c = api.controls_for('spray')
         self.assertEqual(c['resolutions'], ['256'])
@@ -211,11 +221,26 @@ class CoverTests(unittest.TestCase):
         for item in api.items('skybox'):
             self.assertEqual(item['icon'], f"skybox/{item['key']}")
 
-    def test_character_points_at_the_model_it_previews(self):
-        from src.domain.preview.model_key import model_key_for
+    def test_character_parts_have_their_own_covers(self):
+        """У каждой части свой ответ: тело — чьё, руки — руки, маски — маски.
 
-        for item in api.items('character', 'Scout'):
-            self.assertEqual(item['icon'], model_key_for(item['mode']))
+        Раньше все три брали текстуру своей модели: у половины классов
+        предплечья лежат на общем листе с телом, и «Руки» показывали ровно то
+        же, что «Скин», а маски — модель шпиона, то есть опять его же.
+        """
+        from src.data.player_characters import CLASS_ICON, DISGUISE_ICON
+
+        icons = {(i['cls'], i['key']): i['icon']
+                 for cls in ('Scout', 'Engineer', 'Spy')
+                 for i in api.items('character', cls)}
+
+        self.assertEqual(icons[('Spy', 'masks')], DISGUISE_ICON)
+        for cls in ('Scout', 'Engineer', 'Spy'):
+            self.assertEqual(icons[(cls, 'body')], CLASS_ICON.format(cls.lower()))
+            # Руки — своя текстура рук, и она не повторяет обложку тела.
+            self.assertIn('hands' if cls != 'Engineer' else 'hand',
+                          icons[(cls, 'hands')])
+            self.assertNotEqual(icons[(cls, 'hands')], icons[(cls, 'body')])
 
 
 class SpecialCategoryTests(unittest.TestCase):

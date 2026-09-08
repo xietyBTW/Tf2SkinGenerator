@@ -17,10 +17,11 @@ from pathlib import Path
 from typing import Dict, Optional
 
 from src.shared.logging_config import get_logger
+from src.shared.paths import data_dir
 
 logger = get_logger(__name__)
 
-_CACHE_FILE = Path("cache") / "weapon_paths_cache.json"
+_CACHE_FILE = data_dir() / "cache" / "weapon_paths_cache.json"
 _MODEL_RE = re.compile(r'"model_player[^"]*"\s+"([^"]+\.mdl)"', re.IGNORECASE)
 _MODEL_ANY_RE = re.compile(r'"model"\s+"([^"]+\.mdl)"', re.IGNORECASE)
 _ATTACHED_BLOCK_RE = re.compile(r'"attached_models"\s*\{(.*?)\n\s*\}', re.S | re.I)

@@ -21,9 +21,15 @@ let sink = null;
 export function setLogSink(fn) { sink = fn; }
 function log(dir, text, kind) { if (sink) sink(dir, text, kind); }
 
+//: Что НЕ пишем в журнал. Это опросы: страница дёргает их раз в секунду, и в
+//: ленте обмена они вытесняют всё остальное. Отдельно смешно с log_tail —
+//: открытая консоль засоряла бы сама себя.
+const QUIET = new Set(['log_tail', 'update_progress']);
+
 /** Вызывает метод прикладного API. Бросает Error с текстом от Python. */
 export async function call(method, params = {}) {
-  log('→', method + '(' + JSON.stringify(params).slice(0, 120) + ')');
+  const quiet = QUIET.has(method);
+  if (!quiet) log('→', method + '(' + JSON.stringify(params).slice(0, 120) + ')');
 
   // Хост-мост, когда страница открыта в окне приложения.
   const bridge = window.pywebview && window.pywebview.api;
@@ -38,10 +44,12 @@ export async function call(method, params = {}) {
   });
   const data = await res.json().catch(() => ({ error: `${res.status} ${res.statusText}` }));
   if (data.error) {
+    // Ошибку показываем ВСЕГДА, даже у тихих: молчащий опрос, который на
+    // самом деле падает, — худший вид тишины.
     log('!', method + ': ' + data.error, 'err');
     throw new Error(data.error);
   }
-  log('←', method + ' → ' + JSON.stringify(data.result).slice(0, 160));
+  if (!quiet) log('←', method + ' → ' + JSON.stringify(data.result).slice(0, 160));
   return data.result;
 }
 
@@ -67,6 +75,17 @@ function cached(method, params) {
 
 /** Забывает закэшированные справочники: сменился язык — сменились имена. */
 export function forgetCached() { memo.clear(); }
+
+//: Размер кэша моделей. Отдельно от settings(): считается обходом всей папки
+//: и на большой библиотеке занимает секунды — окно настроек его не ждёт.
+export const cacheSize = () => call('cache_size', {});
+
+//: Версия и обновление. update_status ходит в сеть, поэтому страница зовёт его
+//: после отрисовки; install_update качает установщик, запускает его и ГАСИТ
+//: приложение — ответ приходит раньше, чем оно закроется.
+export const updateStatus = (force = false) => call('update_status', { force });
+export const installUpdate = () => call('install_update', {});
+export const updateProgress = () => call('update_progress', {});
 
 export const categories   = () => cached('categories', {});
 export const classes      = () => cached('classes', {});
@@ -195,6 +214,7 @@ export const clearParts     = (material = '') => call('clear_parts', { material 
 export const setPartEdge    = (material, width, color) =>
   call('set_part_edge', { material, width, color });
 export const undoParts      = (material = '') => call('undo_parts', { material });
+export const redoParts      = (material = '') => call('redo_parts', { material });
 
 // Работа над предметом. Автосохранение пишет черновик молча (если это не
 // выключено), а в библиотеку работа попадает только по `keepWork`.
@@ -211,6 +231,21 @@ export const forgetDrafts = (keys = null) => call('forget_drafts', { keys });
 export const modLibrary   = () => call('mod_library');
 export const addMod       = (path) => call('add_mod', { path });
 export const modIcon      = (name) => call('mod_icon', { name });
+
+// ── Звуки ─────────────────────────────────────────────────────────────── //
+export const sounds        = (family = '', tf2_class = '', query = '',
+                              section = '') =>
+  call('sounds', { family, tf2_class, query, section });
+export const soundSections = () => call('sound_sections', {});
+export const soundFamilies = (section = '') =>
+  call('sound_families', { section });
+export const setSound      = (name, path = null, wave = '') =>
+  call('set_sound', { name, path, wave });
+export const saveSound     = (name, wave = '') => call('save_sound', { name, wave });
+export const buildSounds   = (filename = '') => call('build_sounds', { filename });
+
+/** URL игрового звука прямо из VPK. Путь — от корня `sound/`. */
+export const soundUrl = (path) => '/sound?wave=' + encodeURIComponent(path);
 export const removeMod    = (name) => call('remove_mod', { name });
 export const loadVpkMod   = (path) => call('load_vpk_mod', { path });
 export const diagnose     = (path) => call('diagnose', { path });
@@ -221,6 +256,15 @@ export const clearModelCache = () => call('clear_model_cache');
 //: Меню «Вставить» в редакторе VMT: набор не меняется за сеанс.
 export const vmtSnippets  = () => cached('vmt_snippets', {});
 export const setSettings  = (values) => call('set_settings', { values });
+//: Мелочь раскладки (ширина панели, громкость): её правят прямо на экране, и
+//: сохраняется она по одной, а не всем окном настроек разом.
+export const setUiState   = (key, value) => call('set_ui_state', { key, value });
+
+//: Журнал Python. Забирается опросом по номеру последней взятой записи и
+//: только пока консоль открыта (см. log.js — почему не потоком событий).
+export const logTail      = (since) => call('log_tail', { since });
+export const clearLog     = () => call('clear_log', {});
+export const logFolder    = () => call('log_folder', {});
 
 // Своя модель: сначала спрашиваем тип (keep=null), потом грузим с ответом.
 export const loadCustomModel = (path, keep = null) =>

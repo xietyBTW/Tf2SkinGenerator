@@ -233,6 +233,8 @@ class Preview3DWorker(BaseWorker):
 
             if self.kind.multi_material and mat_names:
                 self._emit_multi_tex_mode(obj_path, mat_names)
+            elif self.kind.is_spy_mask:
+                self._emit_spy_mask_textures(obj_path, mat_names)
             elif self.kind.is_hat:
                 self._emit_hat_textures(obj_path, mat_names)
             else:
@@ -317,6 +319,44 @@ class Preview3DWorker(BaseWorker):
                         self.blu_ready.emit(blu_paths, blu_fps)
             except Exception as _exc:
                 logger.debug(f"[3D] BLU detection (multi-tex): {_exc}")
+
+    def _emit_spy_mask_textures(self, obj_path: str, mat_names: list) -> None:
+        """Маски маскировки: девять текстур на один меш головы.
+
+        Раньше режим шёл общим путём оружия, и тот извлекал ОДНУ маску
+        (`mask_spy`), а вторую карточку давал материал ТЕЛА шпиона. В альбоме
+        оказывалось не то и не всё: масок девять, а тело предметом не
+        является — сборка кладёт в мод только `mask_*.vtf`
+        (``VpkService._build_spy_masks``), тело остаётся игровым.
+
+        Поэтому карточки — все девять масок, а материалы модели уходят
+        подложкой сцены: голова в кадре нужна, но правят на ней маску.
+        """
+        from src.data.player_characters import SPY_DISGUISE_MASKS, SPY_MASK_VTF_NAMES
+
+        masks: dict = {}
+        for _cls, vtf_name, *_rest in SPY_DISGUISE_MASKS:
+            if self.isInterruptionRequested():
+                return
+            frames, _fps = self._extract_spy_mask_texture(vtf_name)
+            if frames:
+                masks[vtf_name] = frames[0]
+
+        if not masks:
+            logger.warning("[3D] маски маскировки не извлечены — обычный путь")
+            self._emit_weapon_textures(obj_path, mat_names)
+            return
+
+        self.ready.emit(obj_path, next(iter(masks.values()), ""))
+        # Меши кадра предмету не принадлежат: маска — это ТЕКСТУРА на голове, а
+        # не своя геометрия. Их текстуры кладём подложкой, чтобы голова и тело
+        # не остались серыми, а вторым в паре называем тот меш, который маску и
+        # носит: какую из девяти на нём показать, решает альбом (см. card_mesh).
+        scene = self._extract_multi_textures(mat_names) if mat_names else {}
+        if scene:
+            worn = [m for m in mat_names if m in set(SPY_MASK_VTF_NAMES)]
+            self.scene_extra.emit((scene, worn))
+        self.multi_material.emit(masks)
 
     def _emit_hat_textures(self, obj_path: str, mat_names: list) -> None:
         """Шапки: QC → VMT → $baseTexture → VTF (+ BLU через skinfamilies skin 1)."""
@@ -1702,7 +1742,7 @@ class Preview3DWorker(BaseWorker):
             if self._decomp_dir:
                 vtf_data = self._extract_red_texture_via_qc(paks_tex)
                 if vtf_data:
-                    logger.debug(f"3D Preview текстура: по $cdmaterials из QC")
+                    logger.debug("3D Preview текстура: по $cdmaterials из QC")
 
             if pak and not vtf_data:
                 for path in vtf_search:

@@ -348,12 +348,22 @@ let reloadSeq = 0;
 
 export async function reload() {
   const seq = ++reloadSeq;
+  // Косметика при первом открытии разбирает items_game целиком — это пара
+  // секунд с пустым списком на экране. Ждём четверть секунды, прежде чем
+  // сказать: обычный отбор укладывается в миллисекунды, и мигать словом на
+  // каждую букву поиска незачем.
+  const wait = setTimeout(() => {
+    const el = document.getElementById('cat-count');
+    el.textContent = 'Читаю список…';
+    el.hidden = false;
+  }, 250);
   const list = sel.section === 'hats'
     ? await api.hats({ query: sel.query || '', tf2_class: sel.cls })
     // Поиск работает во всех разделах, а не только у косметики: поле над
     // списком одно, и «не ищет» у оружия читалось как поломка.
     : await api.items({ category: sel.category, tf2_class: sel.cls,
                         weapon_type: sel.type, query: sel.query || '' });
+  clearTimeout(wait);
   if (seq !== reloadSeq) return;               // выбор успел смениться
 
   // Кастомный мод: предмет здесь — файл на диске. Список берётся не из
@@ -418,8 +428,23 @@ export async function pickSection(name) {
   }
 
   const было = sel.section;
-  sel.section = name === 'hats' || name === 'particles' ? name : 'weapons';
+  sel.section = ['hats', 'particles', 'sounds'].includes(name)
+    ? name : 'weapons';
   root.dataset.section = sel.section;
+
+  // Звуки — раздел без предмета: ни модели, ни текстур, ни каталога. Стол он
+  // занимает целиком, поэтому остальную настройку разделов не проходит.
+  const { openSounds, closeSounds } = await import('./sounds.js');
+  if (sel.section === 'sounds') {
+    if (было !== 'sounds') {
+      await api.stopPreview();
+      clearPreview();
+      say('');
+    }
+    await openSounds();
+    return;
+  }
+  closeSounds();
 
   // Смена раздела — это уход от предмета. Воркер останавливаем ПЕРВЫМ: иначе
   // он ещё пришлёт model_ready, и текстура оружия вернётся в альбом уже поверх

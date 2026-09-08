@@ -145,11 +145,17 @@
 /* ── Работа: текстуры и модель ───────────────────────────────────────── */
 .work {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  /* Долю левой половины задаёт человек, потянув за зазор (см. split.js).
+     Пока не тянул — поровну. В `fr`, а не в точках: пропорция должна
+     пережить изменение размера окна. */
+  grid-template-columns: minmax(0, var(--split, 1fr)) minmax(0, 1fr);
   gap: 30px;
   min-width: 0;
   min-height: 0;
 }
+/* Курсор над зазором — единственное приглашение потянуть: рисовать там
+   полоску незачем, граница половин и так видна. */
+.work.is-split { cursor: col-resize; }
 .work[data-view="flat"],
 .work[data-view="model"],
 .work[data-view="fp"]   { grid-template-columns: minmax(0, 1fr); }
@@ -308,8 +314,15 @@
 .frame:hover .frame__tools { opacity: 1; }
 
 .frame__tool {
+  display: grid;                 /* внутри бывает и знак, и значок */
+  place-items: center;
   width: 22px;
   height: 22px;
+  /* Своё поле у кнопки браузер ставит сам (1px 6px). Знаку оно не мешало —
+     его центрует text-align, — а значок в оставшиеся 8 точек не влезал, и
+     выравнивание по центру откатывалось к левому краю: иконка стояла на
+     четыре точки правее середины. */
+  padding: 0;
   border: 1px solid var(--hairline-strong);
   background: var(--surface);
   color: var(--ink-soft);
@@ -380,6 +393,48 @@
 .album__step:hover { color: var(--accent); border-color: var(--accent); }
 .album__step--prev { left: -1px; }
 .album__step--next { right: -1px; }
+
+/* ── Узкая половина: альбом листается сверху вниз ─────────────────────────
+   Кадр — квадрат со стороной min(ширина, высота − подпись). Как только
+   половина становится выше, чем шире (границу двигают мышью, см. split.js),
+   сторону задаёт ШИРИНА, и над кадром с под ним остаётся пустое место, а
+   листать его всё равно предлагают вбок — колесом вниз влево.
+
+   Порог 1:1 и есть тот самый момент: пока половина шире, кадр упирается в
+   высоту и рядом помещается следующий; как только уже — в ширину, и место
+   есть только по вертикали. Порог считает CSS, а не JS: контейнер уже
+   объявлен (`container-type: size`), и второй копии правила не нужно. */
+@container (max-aspect-ratio: 1 / 1) {
+  .album {
+    flex-direction: column;
+    align-items: center;
+    overflow-x: hidden;
+    overflow-y: auto;
+    scroll-snap-type: y mandatory;
+    overscroll-behavior-x: auto;
+    overscroll-behavior-y: contain;
+  }
+  /* Сторона кадра НЕ меняется: та же `min(ширина, высота − подпись)`. Ниже
+     порога она равна ширине — текстура и так занимает столбец целиком, — а у
+     самого порога формула не даёт кадру вылезти за высоту и обрезаться. */
+
+  /* Стрелки переезжают под верх и низ. Знак тот же, только повёрнут: своей
+     разметки под «вверх/вниз» для этого не нужно. */
+  .album__step {
+    top: auto;
+    right: auto;
+    left: calc(50% - 23px);
+    width: 46px;
+    height: 30px;
+    margin: 0;
+    font-size: 0;                  /* горизонтальный знак из разметки прячем */
+  }
+  .album__step::before { display: inline-block; font-size: 17px; transform: rotate(90deg); }
+  .album__step--prev { top: -1px; }
+  .album__step--prev::before { content: "\2039"; }
+  .album__step--next { bottom: -1px; }
+  .album__step--next::before { content: "\203A"; }
+}
 
 .album__count { font-family: var(--mono); font-size: 10.5px; color: var(--ink-mute); }
 .album__count b { color: var(--ink); font-weight: 600; }
@@ -677,7 +732,18 @@
    правка и затевалась. Поэтому в разделе частиц панель всегда колонка справа,
    даже когда панели откреплены. */
 [data-section="particles"][data-panels="float"] .stage {
-  grid-template-columns: minmax(0, 1fr) 300px;
+  grid-template-columns: minmax(0, 1fr) var(--pw, 300px);
+}
+/* Ширину колонки задаёт человек, потянув за левый край (particles/resize.js).
+   Пока не тянул — та же, что у панели сборки. */
+[data-section="particles"][data-panels="pinned"] .stage {
+  grid-template-columns: 230px minmax(0, 1fr) var(--pw, 280px);
+}
+/* Селектор с разделом намеренно: границу панели красят и прибитый режим,
+   и плавающий, каждый своим правилом — подсветка края должна перебить оба. */
+[data-section="particles"] .params.is-grip {
+  cursor: col-resize;
+  border-left-color: var(--accent);
 }
 [data-section="particles"][data-panels="float"] .params {
   position: static;
@@ -1271,6 +1337,47 @@
   background: var(--surface);
 }
 .console[hidden] { display: none; }
+/* Ширину тянут за левый край, она живёт в --cw (см. log.js). */
+.console { width: var(--cw, min(460px, 46vw)); }
+/* «Во всё окно»: читать длинный трейсбек в колонке 460 px невозможно. */
+.console[data-wide="1"] { width: 100%; left: 0; }
+
+.console__grip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 8px;
+  cursor: ew-resize;
+  z-index: 1;
+}
+.console[data-wide="1"] .console__grip { display: none; }
+
+.console__filters {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 8px var(--gap);
+  border-bottom: 1px solid var(--hairline);
+}
+.console__find {
+  margin-left: auto;
+  width: 160px;
+  height: 24px;
+  font-size: 11px;
+}
+
+/* Разрыв в нумерации: записи вытеснены, пока журнал не читали. Молчать про
+   это нельзя — иначе кажется, что в тот момент ничего не происходило. */
+.console__note {
+  flex: none;
+  padding: 6px var(--gap);
+  border-top: 1px solid var(--hairline);
+  color: var(--ink-mute);
+  font-size: 11px;
+}
 
 .console__bar {
   flex: none;
@@ -1299,7 +1406,15 @@
 .logline__dir { flex: none; width: 2.2em; color: var(--ink-mute); }
 .logline--in  .logline__dir { color: var(--accent); }
 .logline--err { color: var(--accent); }
-.logline__text { min-width: 0; overflow-wrap: anywhere; }
+.logline__text { min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+/* Источник записи (модуль Python). У строк обмена его нет. */
+.logline__src { flex: none; color: var(--ink-mute); }
+/* Уровень виден цветом, а не значком: значки в моноширинном списке шумят. */
+.logline--warning .logline__text { color: var(--ink); }
+.logline--error .logline__text,
+.logline--critical .logline__text { color: var(--accent); }
+.logline--debug { opacity: .65; }
+.logline[hidden] { display: none; }
 
 
 /* ── Карты материала и редактор VMT ────────────────────────────────────
@@ -1796,3 +1911,302 @@
 
 /* Пока список открыт, поле подчёркнуто акцентом: связь между ними видна. */
 .select:has(.dropdown) select { border-bottom-color: var(--accent); }
+
+/* ── Звуки ───────────────────────────────────────────────────────────────
+   Раздел без предмета: ни модели, ни текстур. Стол занимает целиком — список
+   записей длинный, и делить его с пустым вьюпортом незачем. */
+[data-section="sounds"] .stage > :not(.sounds) { display: none; }
+
+/* Верхняя полоса — про ПРЕДМЕТ: его имя, инструменты и переключатель показа.
+   Здесь предмета нет, и «Вместе / Текстура / Модель» висели от прошлого
+   раздела. */
+[data-section="sounds"] .title { display: none; }
+
+/* Общий подвал собирает ТЕКСТУРУ выбранного предмета — с её размером,
+   форматом и именем файла. На странице звуков предмета нет, и кнопка там
+   собрала бы чужой мод. Свой подвал у раздела внутри. */
+[data-section="sounds"] .dock { display: none; }
+
+.sounds {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  gap: 14px;
+}
+
+.sounds__bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--rhythm);
+}
+
+.sounds__search { flex: 1 1 260px; max-width: 420px; }
+.sounds__name   { flex: 0 0 170px; }
+
+.sounds__list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  border-top: 1px solid var(--hairline);
+}
+
+/* Кружок ожидания. Тот же приём, что у вьювера моделей (viewer3d.html):
+   кольцо и подпись под ним по центру пустого места. */
+.loading {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.loading__ring {
+  width: 26px;
+  height: 26px;
+  border: 2px solid var(--hairline);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin .75s linear infinite;
+}
+
+/* Кому вращение мешает — тому статичное кольцо: подпись под ним и так всё
+   говорит. */
+@media (prefers-reduced-motion: reduce) {
+  .loading__ring { animation: none; }
+}
+
+/* ── Строка записи ───────────────────────────────────────────────────── */
+.snd {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 2fr) minmax(0, 1.2fr) minmax(0, 2.4fr) auto;
+  align-items: center;
+  gap: var(--rhythm);
+  padding: 9px 10px 9px 12px;
+  border-bottom: 1px solid var(--hairline);
+  /* Метка своей замены — полоска слева. Ставим её всегда прозрачной, чтобы
+     строки не прыгали на пиксель, когда звук заменили. */
+  box-shadow: inset 2px 0 0 transparent;
+  transition: background var(--dur), box-shadow var(--dur);
+}
+
+.snd:hover { background: var(--surface); }
+
+/* Картинка того, чей это звук: иконка предмета из рюкзака, портрет класса,
+   значок постройки. Вписываем целиком — у портретов свои пропорции. */
+.snd__icon {
+  width: 34px;
+  height: 34px;
+  object-fit: contain;
+}
+.snd__icon[hidden] { display: none; }
+
+.snd__what  { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.snd__title {
+  font-size: 13px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.snd__name,
+.snd__file {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--ink-mute);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Столбец файлов у записи с несколькими вариантами — кнопка: она их
+   раскрывает. У одиночных выглядит обычным текстом. */
+.snd__file {
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  font: inherit;
+}
+.snd__file.is-many { cursor: pointer; color: var(--ink-soft); }
+.snd__file.is-many:hover { color: var(--accent); }
+
+/* Раскрытые файлы записи: игра берёт из них случайный, и менять иногда надо
+   один вариант, а не все разом. */
+.snd__files {
+  padding: 2px 0 8px 44px;
+  border-bottom: 1px solid var(--hairline);
+  background: var(--surface);
+}
+
+.snd__file-row {
+  display: flex;
+  align-items: center;
+  gap: var(--rhythm);
+  padding: 4px 10px 4px 0;
+  box-shadow: inset 2px 0 0 transparent;
+}
+.snd__file-row.is-own { box-shadow: inset 2px 0 0 var(--accent); }
+.snd__file-name { flex: 1; min-width: 0; overflow: hidden;
+                  text-overflow: ellipsis; white-space: nowrap; }
+.snd__file-row .snd__acts .textbtn { border-bottom-color: transparent; }
+.snd__file-row:hover .snd__acts .textbtn {
+  border-bottom-color: var(--hairline-strong);
+}
+
+.snd__event {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+}
+
+/* Кнопки строки держим приглушёнными: их три на каждую из восьмисот строк, и
+   в полную силу они забивают собой список. Наводка возвращает контраст. */
+.snd__acts { display: flex; gap: 14px; }
+.snd__acts .textbtn { border-bottom-color: transparent; color: var(--ink-mute); }
+.snd:hover .snd__acts .textbtn { border-bottom-color: var(--hairline-strong); }
+.snd__acts .textbtn:hover { color: var(--accent); border-bottom-color: var(--accent); }
+
+.snd.is-own { box-shadow: inset 2px 0 0 var(--accent); }
+
+/* Слово, а не только полоска: в списке из восьмисот строк цвет слева легко
+   не заметить. В разметке, а не в `content`, — иначе его не перевести. */
+.snd__own {
+  margin-left: 8px;
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.snd.is-playing { background: var(--surface); }
+.snd.is-playing .snd__title { color: var(--accent); }
+
+/* ── Пульт ───────────────────────────────────────────────────────────────
+   Браузерный <audio controls> выпадает из вида приложения целиком: свои
+   скруглённые кнопки, свой шрифт, своя тень. Движок оставляем его, вид — наш. */
+.player {
+  display: flex;
+  align-items: center;
+  gap: var(--rhythm);
+  padding: 12px 2px 2px;
+  border-top: 1px solid var(--hairline);
+}
+
+.player__play {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--hairline-strong);
+  background: none;
+  cursor: pointer;
+  position: relative;
+  transition: border-color var(--dur);
+}
+.player__play:hover { border-color: var(--accent); }
+
+/* Треугольник и пауза рисуем рамками — как стрелку у select. Значков-картинок
+   в приложении нет нигде. */
+.player__play::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  transform: translate(-40%, -50%);
+  border-left: 8px solid var(--ink);
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+}
+.player__play.is-playing::before {
+  width: 8px;
+  height: 10px;
+  transform: translate(-50%, -50%);
+  border: 0;
+  border-left: 3px solid var(--ink);
+  border-right: 3px solid var(--ink);
+}
+.player__play:hover::before { border-left-color: var(--accent); }
+.player__play.is-playing:hover::before { border-right-color: var(--accent); }
+
+.player__body { flex: 1; min-width: 0; display: flex;
+                flex-direction: column; gap: 6px; }
+.player__what { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.player__time { flex: none; }
+.player__vol  { flex: none; display: flex; align-items: center; gap: 10px; }
+
+/* Полоса: у input type=range нет своей «пройденной» части — рисуем градиентом
+   по переменной, которую двигает скрипт. */
+.player__seek,
+.player__level {
+  appearance: none;
+  height: 3px;
+  border: 0;
+  background: var(--hairline-strong);
+  cursor: pointer;
+}
+.player__seek  { width: 100%; background:
+  linear-gradient(to right, var(--accent) var(--done, 0%),
+                            var(--hairline-strong) var(--done, 0%)); }
+.player__level { width: 90px; }
+
+.player__seek::-webkit-slider-thumb,
+.player__level::-webkit-slider-thumb {
+  appearance: none;
+  width: 3px;
+  height: 13px;
+  background: var(--ink);
+  border: 0;
+  cursor: pointer;
+}
+.player__seek:hover::-webkit-slider-thumb,
+.player__level:hover::-webkit-slider-thumb { background: var(--accent); }
+
+.sounds__foot {
+  display: flex;
+  align-items: center;
+  gap: var(--rhythm);
+  padding-top: 4px;
+}
+.sounds__foot #snd-note { flex: 1; }
+.sounds__foot .btn--primary:disabled { opacity: .4; cursor: default; }
+.sounds__foot .btn--primary:disabled:hover {
+  background: var(--ink);
+  border-color: var(--ink);
+}
+
+/* ── Не получилось ───────────────────────────────────────────────────────
+   Объяснение читают, поэтому текст в нормальной ширине; исходное сообщение
+   моноширинное и прокручивается — там бывают пути и вывод компилятора. */
+.fail .ask__body { max-width: 520px; }
+.fail__more { margin-top: 4px; }
+.fail__more summary {
+  cursor: pointer;
+  color: var(--ink-mute);
+  font-size: 12px;
+}
+.fail__raw {
+  max-height: 180px;
+  margin: 8px 0 0;
+  padding: 10px;
+  overflow: auto;
+  border: 1px solid var(--hairline);
+  background: var(--viewport);
+  color: var(--ink-soft);
+  font-size: 10.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

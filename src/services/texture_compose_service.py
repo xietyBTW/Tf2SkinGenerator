@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from typing import Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
-from PIL import Image, ImageChops, ImageDraw, ImageFilter
+from PIL import Image, ImageChops, ImageDraw
 
 from src.shared.logging_config import get_logger
 
@@ -370,11 +370,14 @@ def _frames_of(path: str) -> int:
 def _frame(path: str, index: int) -> Optional[Image.Image]:
     """Кадр анимации (или сама картинка). Короткая анимация зацикливается."""
     try:
-        img = Image.open(path)
-        count = max(1, int(getattr(img, 'n_frames', 1)))
-        if count > 1:
-            img.seek(index % count)
-        return img.convert('RGBA')
+        # with: convert() возвращает независимую картинку, а исходник надо
+        # закрыть. Без этого дескриптор GIF висел до сборки мусора — по одному
+        # на каждый кадр, и Windows не давала удалить временную папку сборки.
+        with Image.open(path) as img:
+            count = max(1, int(getattr(img, 'n_frames', 1)))
+            if count > 1:
+                img.seek(index % count)
+            return img.convert('RGBA')
     except (OSError, ValueError, EOFError) as exc:
         logger.warning(f"склейка частей: {path} не читается: {exc}")
         return None

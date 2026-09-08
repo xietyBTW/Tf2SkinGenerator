@@ -4,6 +4,7 @@ from pathlib import Path
 from threading import RLock
 
 from src.shared.logging_config import get_logger
+from src.shared.paths import install_dir
 
 logger = get_logger(__name__)
 
@@ -73,7 +74,7 @@ class VTFLib:
         if cls._dll is not None:
             return cls._dll
 
-        vtf_dir = Path("tools/VTF").resolve()
+        vtf_dir = (install_dir() / "tools/VTF").resolve()
         if not vtf_dir.exists():
             raise FileNotFoundError(f"tools/VTF not found: {vtf_dir}")
 

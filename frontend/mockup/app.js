@@ -46,6 +46,8 @@ import './tools.js';
 import './events.js';
 import { boot, els } from './catalog.js';
 import { syncViewerTheme } from './log.js';
+// Диалог «не получилось»: подписывается на свои кнопки при загрузке.
+import './fail.js';
 import { say } from './stage.js';
 
 /*

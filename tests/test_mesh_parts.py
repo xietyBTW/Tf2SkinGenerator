@@ -892,6 +892,34 @@ class SessionPartsTests(unittest.TestCase):
     def test_nothing_to_undo_is_said_plainly(self):
         self.assertIn('error', self.session.undo_parts('weapon'))
 
+    def test_undo_returns_the_strength_too(self):
+        """Ползунок силы — тоже правка. Без него отмена была холостой."""
+        self.session.set_part_colors('weapon', {'0': '#ff0000'}, strength=1.0)
+        self.session.set_part_colors('weapon', {}, strength=0.4)
+        self.session.undo_parts('weapon')
+        self.assertAlmostEqual(self.session.preview.part_tint, 1.0)
+
+    def test_undo_returns_the_outline_too(self):
+        self.session.set_part_colors('weapon', {'0': '#ff0000'})
+        self.session.set_part_edge('weapon', 0.01, '#000000')
+        self.session.undo_parts('weapon')
+        self.assertAlmostEqual(self.session.preview.part_edge, 0.0)
+
+    def test_redo_puts_the_undone_step_back(self):
+        self.session.set_part_colors('weapon', {'0': '#ff0000'})
+        self.session.set_part_colors('weapon', {'1': '#00ff00'})
+        self.session.undo_parts('weapon')
+        self.session.redo_parts('weapon')
+        self.assertEqual(self.session.preview.part_colors['weapon'],
+                         {0: '#ff0000', 1: '#00ff00'})
+
+    def test_a_new_stroke_forgets_the_way_forward(self):
+        """Вернуться в ветку, которой уже не будет, нельзя."""
+        self.session.set_part_colors('weapon', {'0': '#ff0000'})
+        self.session.undo_parts('weapon')
+        self.session.set_part_colors('weapon', {'1': '#00ff00'})
+        self.assertIn('error', self.session.redo_parts('weapon'))
+
     def test_unknown_file_is_an_error(self):
         self.assertIn('error', self.session.set_part_texture('weapon', 0, 'нет.png'))
 

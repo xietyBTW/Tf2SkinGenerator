@@ -8,7 +8,7 @@
 
 import * as api from '../api.js';
 import { t } from '../i18n.js';
-import { stage, say, withParticles } from '../stage.js';
+import { stage, say, sayBusy, withParticles } from '../stage.js';
 import { closeCat } from '../layout.js';
 import { els } from '../catalog.js';
 import { pcfNodes, pcfTree, pcfCollapsed, pSystem, setTree } from './state.js';
@@ -114,14 +114,19 @@ export async function loadPcf(source, label = '') {
 }
 
 /** Выбор системы: движок строит эффект от названного узла. */
-export function pickSystem(button, item) {
+export async function pickSystem(button, item) {
   els.grid.querySelectorAll('.tree__name, .pick')
           .forEach((b) => b.classList.remove('is-active'));
   button.classList.add('is-active');
   document.querySelector('.title__name').textContent = item.name;
   closeCat();
+  // Пока собирается, кадр остаётся прежним: у эффекта распаковываются
+  // текстуры, и без единого слова это читается как «ничего не произошло».
+  // sayBusy, а не say: маленький эффект успевает раньше, чем подпись нужна.
+  sayBusy('Собираю эффект…');
   withParticles((w) => w.setRootSystem(item.key));
-  showParams(item.key);
-  showParticleMaterials();
+  await showParams(item.key);
+  await showParticleMaterials();
+  say('');
   if (!cpBox.hidden) cpFillIndexes();
 }

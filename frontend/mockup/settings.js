@@ -11,8 +11,10 @@ import { fillSelect, fileSize, plural } from './util.js';
 import { ask } from './ask.js';
 import { say, withViewer } from './stage.js';
 import { showTf2Path, setPinned, pinnedFits } from './layout.js';
+import { setParamsWidth } from './particles/resize.js';
+import { setSplit } from './split.js';
 import { relabel } from './catalog.js';
-import { setTheme } from './log.js';
+import { setTheme, setConsoleWidth, setConsoleFilter } from './log.js';
 import { useDict, t } from './i18n.js';
 import { EN } from './strings.js';
 import { refreshView } from './preview.js';
@@ -35,6 +37,14 @@ const cfgDlg = document.getElementById('cfgdlg');
 export function applyLook(values) {
   setTheme(values.theme || 'light');
   setPinned(Boolean(values.panels_pinned));
+  // Ширина панели частиц и граница половин: их тянут мышью, а не выбирают в
+  // этом окне, но читаются они тем же ответом — настройки внешнего вида
+  // страница спрашивает один раз.
+  setParamsWidth(values.params_width);
+  setSplit(values.split_percent);
+  // Консоль: ширина, которую тянули за край, и выбранные категории.
+  setConsoleWidth(values.console_width);
+  setConsoleFilter(values.console_filter);
   // Язык: ответы Python берут его из общего конфига сами, а вьюверу сказать
   // некому — он живёт отдельным документом и до конфига не дотягивается.
   api.setLang(values.language);
@@ -66,15 +76,154 @@ export async function openSettings() {
   document.getElementById('cfg-note').textContent =
     pinnedFits() ? '' : 'для закреплённых панелей нужно окно шире 1100 px';
 
-  document.getElementById('cfg-cache-size').textContent =
-    cfg.cache_mb ? cfg.cache_mb + ' ' + t('МБ') : t('пусто');
   showDrafts();
   const supp = document.getElementById('cfg-support');
   supp.href = cfg.support_url || '#';
   supp.hidden = !cfg.support_url;
 
   cfgDlg.showModal();
+
+  // Размер кэша — ПОСЛЕ показа окна и без await: он считается обходом всей
+  // папки со stat на каждый файл, и на большой библиотеке это секунды. Число
+  // нужно только для подписи рядом с кнопкой «очистить», ждать его незачем.
+  const cacheSize = document.getElementById('cfg-cache-size');
+  cacheSize.textContent = t('считаю…');
+  api.cacheSize()
+    .then((r) => { cacheSize.textContent =
+      r.cache_mb ? r.cache_mb + ' ' + t('МБ') : t('пусто'); })
+    .catch(() => { cacheSize.textContent = t('пусто'); });
+
+  // Обновление — тоже после показа окна и тоже без await: это запрос к GitHub,
+  // и открытие настроек не должно ждать сеть.
+  showUpdate();
 }
+
+// ── Обновление приложения ───────────────────────────────────────────────
+// Ставит СОБРАННОЕ приложение установщиком из релиза: он умеет закрыть нас,
+// заменить файлы и починить ярлыки. Из репозитория обновляются через git —
+// тогда Python отвечает can_install: false, и остаётся только ссылка.
+
+//: Что делает кнопка обновления прямо сейчас. null — «проверить»; после
+//: проверки это либо установка, либо открытие страницы релиза. Состояние
+//: отдельной переменной, а не в onclick элемента: два обработчика на одной
+//: кнопке разъезжаются при первой же правке.
+let updateAction = null;
+
+/** Показывает версию и, если есть, предложение обновиться. */
+function showUpdate(force = false) {
+  const line = document.getElementById('cfg-version');
+  const note = document.getElementById('cfg-update-note');
+  const btn = document.getElementById('cfg-update');
+
+  line.textContent = force ? t('проверяю…') : '';
+  note.hidden = true;
+  btn.disabled = force;
+  updateAction = null;
+
+  api.updateStatus(force).then((u) => {
+    btn.disabled = false;
+    line.textContent = 'v' + u.current;
+    if (!u.checked) {
+      note.hidden = false;
+      note.textContent = t('Не удалось проверить обновления — нет связи с GitHub.');
+      return;
+    }
+    if (!u.available) {
+      note.hidden = false;
+      note.textContent = t('Установлена последняя версия.');
+      return;
+    }
+    note.hidden = false;
+    note.textContent = t('Доступна версия') + ' ' + u.version + '. '
+      + (u.can_install
+        ? t('Нажмите «Обновить» — приложение закроется и вернётся уже новым.')
+        : t('Скачайте её со страницы релиза.'));
+    btn.textContent = u.can_install ? t('Обновить') : t('Открыть страницу релиза');
+    updateAction = u.can_install
+      ? () => runUpdate(u)
+      : () => window.open(u.page_url, '_blank', 'noreferrer');
+  }).catch(() => {
+    btn.disabled = false;
+    note.hidden = false;
+    note.textContent = t('Не удалось проверить обновления.');
+  });
+}
+
+/** Качает установщик и отдаёт ему управление. Приложение после этого закроется. */
+async function runUpdate(u) {
+  const go = await ask({
+    title: t('Обновить до') + ' ' + u.version,
+    // eslint-disable-next-line max-len — ключ словаря должен быть одним литералом
+    text: t('Приложение закроется, установщик заменит его на новую версию и запустит заново. Ваши работы, моды и настройки не тронутся — они хранятся отдельно от папки установки.'),
+    ok: t('Обновить'),
+  });
+  if (!go) return;
+
+  const note = document.getElementById('cfg-update-note');
+  const btn = document.getElementById('cfg-update');
+  note.hidden = false;
+  note.textContent = t('Скачиваю установщик…');
+  // Кнопку выключаем: скачивание уже идёт, второе нажатие ничего не ускорит.
+  btn.disabled = true;
+  updateAction = null;
+
+  try {
+    await api.installUpdate();
+  } catch (err) {
+    btn.disabled = false;
+    note.textContent = t('Обновление не установлено') + ': ' + err.message;
+    return;
+  }
+  watchUpdate();
+}
+
+/**
+ * Опрашивает ход обновления и пишет его в подпись.
+ *
+ * Опрос, а не поток событий: установщик носит приложение внутри себя, это
+ * десятки мегабайт, и всё, что нужно показать, — сколько уже скачано.
+ * Заводить ради одной строки подписку не за чем.
+ */
+function watchUpdate() {
+  const note = document.getElementById('cfg-update-note');
+  const btn = document.getElementById('cfg-update');
+  const mb = (bytes) => (bytes / 1048576).toFixed(1);
+
+  const tick = async () => {
+    let p;
+    try {
+      p = await api.updateProgress();
+    } catch (err) {
+      // Приложение уже закрывается — опрос обрывается, и это норма.
+      return;
+    }
+    if (p.state === 'downloading') {
+      note.textContent = p.total
+        ? t('Скачиваю установщик…') + ' ' + mb(p.done) + ' / ' + mb(p.total) + ' ' + t('МБ')
+        : t('Скачиваю установщик…');
+      setTimeout(tick, 500);
+      return;
+    }
+    if (p.state === 'launching' || p.state === 'done') {
+      note.textContent = t('Установщик запущен, приложение закрывается…');
+      return;
+    }
+    if (p.state === 'error') {
+      btn.disabled = false;
+      note.textContent = t('Обновление не установлено') + ': ' + (p.error || '');
+      return;
+    }
+    setTimeout(tick, 500);
+  };
+  tick();
+}
+
+document.getElementById('cfg-update').addEventListener('click', () => {
+  // Пока проверки не было — кнопка спрашивает заново, минуя ответ,
+  // запомненный на сеанс. После — делает то, что предложила.
+  if (updateAction) updateAction();
+  else showUpdate(true);
+});
 
 // Обслуживание: после обновления игры старые разобранные модели остаются в
 // кэше и собираются с прежней геометрией. Спрашиваем — очистка не бесплатна:

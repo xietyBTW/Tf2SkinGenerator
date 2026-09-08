@@ -309,7 +309,6 @@ class VpkModStylesTests(unittest.TestCase):
     def test_mod_style_textures_become_overrides(self):
         """Иначе переключение стиля показывало бы пустые карточки вместо того,
         что лежит в файле мода."""
-        import os
         from src.app.preview_controller import VpkModController
 
         session = PreviewSession()
@@ -333,6 +332,28 @@ class VpkModStylesTests(unittest.TestCase):
             'skin_textures': {1: {'mat': 'C:/нет-такого.png'}},
         })
         self.assertEqual(session.textures.skin_overrides.get(1, {}), {})
+
+
+class CardMeshTests(unittest.TestCase):
+    """Одна геометрия, много карточек: маски маскировки шпиона."""
+
+    def _session(self, mode: str) -> PreviewSession:
+        s = PreviewSession()
+        s.current_object = (mode, "models/player/spy.mdl", "")
+        s.scene_item_materials = ["mask_spy"]
+        return s
+
+    def test_spy_masks_name_the_mesh_that_wears_the_card(self):
+        """Девять текстур на одну голову: какую надеть — решает альбом."""
+        from src.data.player_characters import SPY_MASK_MODE_KEY
+
+        self.assertEqual(self._session(SPY_MASK_MODE_KEY).card_mesh(),
+                         ["mask_spy"])
+
+    def test_ordinary_item_wears_nothing_extra(self):
+        """У всех остальных карточка — это материал, надевать нечего."""
+        for mode in ("scout_c_scattergun", "hat", "spy_body", ""):
+            self.assertEqual(self._session(mode).card_mesh(), [], mode)
 
 
 if __name__ == "__main__":

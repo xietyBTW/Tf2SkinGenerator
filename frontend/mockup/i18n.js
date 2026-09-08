@@ -35,8 +35,12 @@ function compile(map) {
   const out = [];
   for (const [from, to] of map) {
     if (!from.includes('{}')) continue;
-    out.push([new RegExp('^' + from.split('{}').map(escapeRx).join('(.*?)') + '$', 's'), to]);
+    out.push([new RegExp('^' + from.split('{}').map(escapeRx).join('(.*?)') + '$', 's'),
+              to, from.length]);
   }
+  // Длинные шаблоны — первыми. «Записей: {}» подходит и к «Записей: 400 из 869
+  // — уточните фильтр», и, попавшись раньше, съедает весь хвост непереведённым.
+  out.sort((a, b) => b[2] - a[2]);
   return out;
 }
 

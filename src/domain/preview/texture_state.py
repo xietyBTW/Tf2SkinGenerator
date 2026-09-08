@@ -243,7 +243,14 @@ class PreviewTextureState:
             return p
 
         team_specific = self.is_team_material(mat)
-        if not team_specific:
+        # Наследование чужой команды — одностороннее, когда команды РАЗДЕЛЕНЫ.
+        # Под «сделать командным» человек задаёт RED и BLU порознь: красная
+        # карточка, подхватившая синюю текстуру, читалась как «загрузка на BLU
+        # заменила и красную» — при том, что в состоянии красная пуста и врал
+        # только показ. Синяя красную наследует по-прежнему: это её дефолт,
+        # пока своей нет (см. set_texture).
+        borrows = not (self.force_team and active == Team.RED)
+        if not team_specific and borrows:
             other = Team.BLU if active == Team.RED else Team.RED
             p = _existing(self.textures.get(other, {}).get(mat))
             if p:
@@ -336,7 +343,10 @@ class PreviewTextureState:
                     return p
             return None
 
-        for team in (Team.RED, Team.BLU):
+        # То же одностороннее правило, что и в показе: под «сделать командным»
+        # красный слот сборки берёт только красную текстуру. Иначе на красный
+        # скин в игре уходил бы файл, который человек положил на синий.
+        for team in ((Team.RED,) if self.force_team else (Team.RED, Team.BLU)):
             p = _existing(self.textures.get(team, {}).get(mat))
             if p:
                 return p

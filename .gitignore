@@ -1,16 +1,8 @@
-# ══════════════════════════════════════════════════════════════
-#  Tf2SkinGenerator — .gitignore
-#  В репозитории: исходный код, src/, tools/mod_data, конфиги-шаблоны
-#  НЕ в репозитории: сборка, бинари, IDE, временные файлы
-# ══════════════════════════════════════════════════════════════
-
-# ── Python runtime ────────────────────────────────────────────
 .venv/
 __pycache__/
 *.py[cod]
 *.pyo
 
-# ── Тесты / покрытие ──────────────────────────────────────────
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
@@ -18,89 +10,48 @@ __pycache__/
 coverage.json
 coverage_baseline.json
 htmlcov/
-mainTest.py
-run_test.bat
 
-# ── Сборка (PyInstaller / distutils) ─────────────────────────
 build/
 dist/
+out/
 *.spec
-# кроме нашей: в ней описан состав сборки (исключения Qt/WebEngine)
 !Tf2SkinGenerator.spec
 
-# ── Скрипты сборки и установщик (не нужны пользователям) ─────
 *.bat
 *.ps1
+# Без этого исключения сборщик релиза пропадает из репозитория. Уже пропадал
+!build-release.ps1
 installer/
 
-# ── Временные выходные папки ──────────────────────────────────
-out/
-export/
-# Библиотека открытых чужих модов — рабочие файлы пользователя.
-mods/
-exportTest/
-
-# ── Конфигурация с машинными путями ──────────────────────────
-# Коммитить только примеры: config/*.example.json
+# Данные человека, а не проекта: в собранном приложении они в %LOCALAPPDATA%
+# при запуске из репозитория ложатся сюда
+cache/
 config/*.json
 !config/*.example.json
-
-# ── Инструменты: временные и генерируемые папки ───────────────
+export/
+exportTest/
+mods/
+work/
 tools/temp/
 tools/temp_vmt_extract/
 tools/edited_vmt/
 tools/backupVMT/
 
-# ── Инструменты: сторонние бинари ─────────────────────────────
-# Лицензии/источники см. THIRD_PARTY_LICENSES.md
-# crowbar (CC BY-SA 3.0) и VTF-тулзы (VTFLib LGPL / VTFCmd GPL) — в репозитории:
-# их лицензии разрешают редистрибуцию (и они всё равно попадают в релиз).
-# vpk.exe — вне репо: он проприетарный Valve, берётся из bin установленной TF2.
+# Контент Valve, распространять нельзя (см. THIRD_PARTY_LICENSES.md):
 tools/VPK/
+tools/Model/
+tools/mod_data/
 
-# ── Ассеты Valve/TF2: НЕ распространяются (чужой copyright) ────
-# Модели/текстуры берутся из локальной установки игры пользователя.
-# Папки-заглушки сохраняются через .gitkeep.
-tools/Model/**/*.vtf
-tools/Model/**/*.obj
-tools/Model/**/*.smd
-tools/Model/**/*.dmx
-tools/Model/**/*.mdl
-tools/Model/**/*.qc
-tools/mod_data/*.pcf
-tools/mod_data/*.vmt
-tools/mod_data/*.vtf
-
-# ── Логи и мусорные файлы ────────────────────────────────────
 *.log
+*.log.*
 *.tmp
-# Только мусорные txt (тестовые артефакты)
-out.txt
-err.txt
-test_*.txt
-*_err.txt
 
-# ── IDE ───────────────────────────────────────────────────────
 .vscode/
 .idea/
 .claude/
+frontend/node_modules/
 
-# ── OS ────────────────────────────────────────────────────────
 Thumbs.db
 Desktop.ini
-*.lnk
 .DS_Store
-cache/hats_cache.json
-/cache
-tf2sg.log.1
-wscan.json
-wpaths.json
-# Правки над предметами: свои текстуры и их копии.
-work/
-
-# Тулинг фронта: TypeScript ставится локально в frontend/.
-frontend/node_modules/
-frontend/CONTROLS.md
-scratch_ui_all.json
-scratch_ui_have.json
-scratch_ui_missing.json
+*.lnk

@@ -20,12 +20,13 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from src.shared.logging_config import get_logger
+from src.shared.paths import data_dir
 
 logger = get_logger(__name__)
 
 #: Куда складываются открытые моды. Рядом с export — это тоже рабочие файлы
 #: пользователя, а не служебный кэш.
-LIBRARY_DIR = Path('mods')
+LIBRARY_DIR = data_dir() / 'mods'
 
 
 def library_dir() -> Path:

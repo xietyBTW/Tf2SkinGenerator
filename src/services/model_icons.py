@@ -22,21 +22,28 @@ from pathlib import Path
 from typing import List, Optional
 
 from src.shared.logging_config import get_logger
+from src.shared.paths import data_dir
 
 logger = get_logger(__name__)
 
 #: Там же, где иконки рюкзака: это один и тот же кэш обложек каталога.
 #: Имена с приставкой — иначе `medkit_small` от модели и от рюкзака сошлись бы.
-_CACHE_DIR = Path("cache") / "icons"
+_CACHE_DIR = data_dir() / "cache" / "icons"
 
 #: Потолок стороны. Карточка каталога — 150 пикселей, а игровая текстура бывает
 #: 2048x2048: без этого кэш обложек весил бы сотни мегабайт.
 _MAX_SIDE = 256
 
 
+#: Версия отрисовки: входит в имя файла кэша. Менять вместе с тем, ЧТО
+#: кладётся в PNG — иначе у того, кто уже открывал каталог, останутся старые
+#: картинки. Версия 2 убрала альфу (см. `_flatten_and_shrink`).
+_RENDER = 2
+
+
 def _cache_path(name: str) -> Path:
     slug = re.sub(r'[^a-zA-Z0-9._-]+', '_', name).strip('_').lower()
-    return _CACHE_DIR / f"{slug[:100]}.png"
+    return _CACHE_DIR / f"{slug[:100]}.v{_RENDER}.png"
 
 
 def _render(vtf: Optional[bytes], cache: Path) -> Optional[bytes]:
@@ -48,22 +55,30 @@ def _render(vtf: Optional[bytes], cache: Path) -> Optional[bytes]:
     _CACHE_DIR.mkdir(parents=True, exist_ok=True)
     if vtf_bytes_to_png(vtf, str(cache)) is None:
         return None
-    _shrink(cache)
+    _flatten_and_shrink(cache)
     return cache.read_bytes()
 
 
-def _shrink(png: Path) -> None:
-    """Ужимает картинку до размера карточки. Ошибка здесь не фатальна."""
+def _flatten_and_shrink(png: Path) -> None:
+    """Убирает альфу и ужимает до размера карточки. Ошибка здесь не фатальна.
+
+    Альфа у текстуры МОДЕЛИ — не прозрачность, а служебная маска: Source
+    держит в ней блик ($basealphaenvmapmask и родня). Как прозрачность её
+    читать нельзя — у снарядов она почти нулевая (в среднем 9–71 из 255), и
+    карточки выходили пустыми: развёртка была на месте, но сквозь неё
+    просвечивал тёмный фон. Иконок рюкзака это не касается — там альфа
+    настоящая, и рисует их другой путь (`backpack_icons`).
+    """
     from PIL import Image
 
     try:
         with Image.open(png) as im:
-            if max(im.size) <= _MAX_SIDE:
-                return
-            im.thumbnail((_MAX_SIDE, _MAX_SIDE))
-            im.save(png)
+            out = im.convert("RGB")
+            if max(out.size) > _MAX_SIDE:
+                out.thumbnail((_MAX_SIDE, _MAX_SIDE))
+            out.save(png)
     except Exception as exc:                          # noqa: BLE001
-        logger.debug(f"[icons] не ужать {png.name}: {exc}")
+        logger.debug(f"[icons] не подготовить {png.name}: {exc}")
 
 
 def _basetexture(paks: list, material: str, cdmaterials: List[str]) -> Optional[str]:

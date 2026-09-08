@@ -27,6 +27,7 @@ from src.app.preview_controller import (
 )
 from src.domain.preview.session import PreviewSession
 from src.shared.logging_config import get_logger
+from src.shared.paths import data_dir
 
 logger = get_logger(__name__)
 
@@ -128,6 +129,28 @@ def _skybox_mode():
 MAX_PENDING = 500
 
 
+def _sound_title(entry, items: List[str], known: str,
+                 classes: Dict[str, str]) -> str:
+    """Подпись строки: чей это звук, человеческими словами.
+
+    Порядок источников — от точного к догадке. У реплики класс стоит прямо в
+    имени записи (`Scout.PainSharp01`), у оружейного звука предмет называет
+    items_game, а если молчат оба — опознаём по имени субъекта.
+    """
+    if entry.subject.lower() in classes:
+        return classes[entry.subject.lower()]
+    if items:
+        return items[0]
+    return known or entry.subject.replace('_', ' ')
+
+
+#: Строка без разделителей и регистра — для поиска. В именах записей звука
+#: Valve непоследователен: `Weapon_Scatter_Gun` рядом с `Weapon_Shotgun`, и
+#: буквальное совпадение подстроки половину названий не находит.
+def _plain(text: str) -> str:
+    return re.sub(r'[^0-9a-zA-Zа-яёА-ЯЁ]+', '', text or '').lower()
+
+
 class AppSession:
     """Состояние превью, контроллер загрузки и очередь событий для страницы."""
 
@@ -142,6 +165,15 @@ class AppSession:
         # Спец-режимы: крит и эффекты смерти показывают ту же анимированную
         # сцену, только вместо предмета в ней умирающий солдат.
         self.death = ViewmodelController(self.preview)
+        #: Выбранные свои звуки: {имя записи: файл}. Страница звуков живёт
+        #: отдельно от предмета, и в состоянии превью ей места нет.
+        self._sound_picks: Dict[str, str] = {}
+        #: Замены ОТДЕЛЬНЫХ файлов: {путь файла в игре: файл человека}. У 1274
+        #: записей файлов несколько — обычно варианты одного звука, чтобы не
+        #: приедался, — и менять иногда надо один, а не все сразу.
+        self._wave_picks: Dict[str, str] = {}
+        self._sound_cache: List[Dict[str, Any]] = []
+        self._sound_lang: Optional[str] = None
         self.skybox = SkyboxController(self.preview)
         self.vpk_mod = VpkModController(self.preview)
         #: Воркер сборки. Один на сеанс: две сборки разом писали бы в одну
@@ -165,6 +197,9 @@ class AppSession:
         #: Красят на ощупь — «попробовал, не понравилось» должно откатываться,
         #: иначе человек боится трогать.
         self._parts_history: List[Any] = []
+        #: Отменённое — чтобы вернуть его вперёд. Любая новая правка список
+        #: обнуляет: вернуться «в будущее», которого уже не будет, нельзя.
+        self._parts_future: List[Any] = []
         #: Склейки, которые сделали мы сами. Отличать их от своей текстуры
         #: пользователя обязательно: иначе следующая склейка легла бы поверх
         #: предыдущей и «убрать картинку с части» ничего не вернуло бы.
@@ -231,7 +266,7 @@ class AppSession:
         c.render_hints.connect(lambda h: self._put('render_hints', hints=h or {}))
         # «Только карточки»: текстура игровой модели без её геометрии.
         c.cards_ready.connect(lambda tex: self._put('cards_ready', texture=tex))
-        c.failed.connect(lambda error: self._put('failed', error=error))
+        c.failed.connect(self._fail)
 
         # Стили: приходят отдельным воркером после загрузки модели.
         self.skins.detected.connect(lambda info: self._put('skins', info=info))
@@ -255,7 +290,7 @@ class AppSession:
         # неё нет, персонажа смотрят со стороны.
         t = self.taunt
         t.progress.connect(lambda text: self._put('progress', text=text))
-        t.failed.connect(lambda err: self._put('failed', error=err))
+        t.failed.connect(self._fail)
         t.animated.connect(lambda scene: self._put('taunt_animated', scene=scene))
         t.materials.connect(lambda m: self._put('materials', materials=dict(m or {})))
         t.editable.connect(lambda n: self._put('fp_editable', names=list(n)))
@@ -266,14 +301,14 @@ class AppSession:
         # с ней делать (у крита билборд, у эффекта смерти текстура на всё тело).
         d = self.death
         d.progress.connect(lambda text: self._put('progress', text=text))
-        d.failed.connect(lambda err: self._put('failed', error=err))
+        d.failed.connect(self._fail)
         d.animated.connect(
             lambda scene: self._put('special_animated', scene=scene,
                                     mode=getattr(self, '_mode', '')))
         d.materials.connect(lambda m: self._put('materials', materials=dict(m or {})))
         d.render_hints.connect(lambda h: self._put('render_hints', hints=h or {}))
         v.render_hints.connect(lambda h: self._put('render_hints', hints=h or {}))
-        v.failed.connect(lambda error: self._put('failed', error=error))
+        v.failed.connect(self._fail)
 
         # Чужой мод из VPK: своя модель и свои карточки.
         m = self.vpk_mod
@@ -286,11 +321,15 @@ class AppSession:
         # обновлено контроллером, странице достаточно перечитать показ.
         m.materials.connect(lambda names: self._put('materials', materials={}))
         m.skins.connect(lambda info: self._put('skins', info=info))
-        m.failed.connect(lambda error: self._put('failed', error=error))
+        # Мод опознан: страница откроет вид от первого лица — там он и
+        # проверяется, в руках и в движении.
+        m.weapon.connect(
+            lambda key, smd: self._put('mod_weapon', key=key, ready=bool(smd)))
+        m.failed.connect(self._fail)
 
         # Скайбокс: шесть граней кубмапы.
         self.skybox.ready.connect(lambda faces: self._put('skybox', faces=faces))
-        self.skybox.failed.connect(lambda error: self._put('failed', error=error))
+        self.skybox.failed.connect(self._fail)
 
     def _on_model_ready(self, obj_path: str, texture: str) -> None:
         """
@@ -315,6 +354,33 @@ class AppSession:
         self._obj_path = obj_path
         self._put('model_ready', obj=obj_path, texture=texture,
                   bounds={'cx': cx, 'cy': cy, 'cz': cz, 'scale': scale})
+
+    def _fail(self, error: str) -> None:
+        """
+        Провал работы — с объяснением, а не одной технической строкой.
+
+        `error` приходит от воркера как есть: это может быть текст исключения,
+        вывод crowbar или studiomdl, сообщение Windows. На каком он языке —
+        неизвестно, и человеку он обычно ничего не говорит.
+
+        error_classifier разбирает его ПО СОДЕРЖИМОМУ и отдаёт понятный
+        заголовок с объяснением на языке интерфейса. Тем самым работает и на
+        английских сообщениях самих инструментов, и не требует, чтобы каждая
+        строка в приложении была переведена.
+
+        Исходный текст отдаём тоже: он нужен в «технических деталях» — тому,
+        кто полезет разбираться, и тому, кому это пришлют.
+        """
+        from src.shared.error_classifier import classify
+
+        try:
+            from src.config.app_config import AppConfig
+            language = AppConfig.load_config().get('language') or 'en'
+        except Exception:                                    # noqa: BLE001
+            language = 'en'
+
+        title, detail = classify(str(error), language=language)
+        self._put('failed', error=str(error), title=title, detail=detail)
 
     def _put(self, event: str, **payload: Any) -> None:
         """Раздаёт событие всем подписчикам. Зовётся из потока воркера."""
@@ -624,6 +690,13 @@ class AppSession:
             return paths
 
         key = model_key_for(mode)
+        # Чужой мод из VPK — тоже оружие, просто опознанное по путям внутри
+        # файла. Показываем его тем же видом: скелет и анимации игровые, меш
+        # из мода.
+        custom_smd = ''
+        if not key and self.preview.custom_vpk_mode:
+            key = self.preview.custom_vpk_weapon or ''
+            custom_smd = self.preview.custom_vpk_smd or ''
         if not key:
             return {'error': 'Вид от первого лица есть только у оружия'}
 
@@ -644,7 +717,9 @@ class AppSession:
         # откатывался на нашу таблицу, а гирлянда висела в руке без пушки.
         # Панель приложения берёт тот же корень (`_tf2_root_for_fp`).
         self.viewmodel.load(key, mode, paths['misc_vpk'], paths['textures_vpk'],
-                            paths['root'], action=action, lang=lang)
+                            paths['root'], action=action, lang=lang,
+                            custom_smd=custom_smd,
+                            keep_materials=bool(custom_smd))
         return {'started': True, 'action': action, 'rig': _viewmodel_rig()}
 
     def leave_first_person(self) -> Dict[str, Any]:
@@ -702,6 +777,415 @@ class AppSession:
                               paths['textures_vpk'], paths['root'],
                               tf2_class=tf2_class, lang=lang)
         return {'started': True, 'prop': prop_key, 'tf2_class': tf2_class}
+
+    # ── Звуки ─────────────────────────────────────────────────────────────── #
+
+    #: Сколько строк отдаём странице. Записей в игре десять с половиной тысяч,
+    #: и рисовать их все — секунды на пустом месте: до сотой человек всё равно
+    #: не долистает, он сузит фильтр.
+    SOUND_PAGE = 400
+
+    def sounds(self, family: str = '', tf2_class: str = '', query: str = '',
+               section: str = '', lang: str = 'ru') -> Dict[str, Any]:
+        """Записи под фильтрами страницы: {rows, total}."""
+        rows = self._sound_rows(lang)
+        family = (family or '').strip().lower()
+        tf2_class = (tf2_class or '').strip().lower()
+        section = (section or '').strip().lower()
+        # Разделители убираем с обеих сторон: скаттерган в игре записан
+        # `Weapon_Scatter_Gun`, и поиск «scattergun» его не находил.
+        words = [_plain(w) for w in (query or '').split() if _plain(w)]
+
+        def fits(row: Dict[str, Any]) -> bool:
+            if section and row['section'] != section:
+                return False
+            if family and row['family'] != family:
+                return False
+            # Класс знает только items_game: у стоковых записей его нет, и под
+            # фильтром класса они не показываются — иначе фильтр не фильтрует.
+            if tf2_class and tf2_class not in row['classes']:
+                return False
+            blob = _plain(f"{row['name']} {row['title']} "
+                          f"{' '.join(row['waves'])} {' '.join(row['items'])}")
+            return all(w in blob for w in words)
+
+        # `own` подставляем ЗДЕСЬ, а не храним в строках: иначе выбор одного
+        # звука обесценивал весь разобранный каталог, и следующий же список
+        # стоил секунду на пересборку десяти тысяч записей.
+        picks, by_wave = self._sound_picks, self._wave_picks
+        # Копию строки делаем только для той страницы, что уедет наружу:
+        # подходящих бывает десять тысяч, а показываем четыреста, и остальные
+        # девять с половиной копировались зря на каждую букву в поиске.
+        hits = [row for row in rows if fits(row)]
+        found = [{**row, 'own': picks.get(row['name'], ''),
+                  'own_waves': {w: by_wave[w] for w in row['waves']
+                                if w in by_wave}}
+                 for row in hits[:self.SOUND_PAGE]]
+        # `section` — сколько записей в разделе ВСЕГО, до остальных фильтров.
+        # По нему страница отличает «сузил до нуля» от «раздел не прочитался»:
+        # пустой список сам по себе об этом молчит.
+        in_section = sum(1 for row in rows
+                         if not section or row['section'] == section)
+        return {'rows': found, 'total': len(hits), 'section': in_section,
+                # Сколько своих звуков выбрано ВСЕГО. Страница видит только
+                # свою страницу списка, и считать по ней — значит терять
+                # выбранное, как только сменишь фильтр.
+                'picked': len(picks) + len(by_wave)}
+
+    def sound_sections(self, lang: str = 'ru') -> List[Dict[str, str]]:
+        """Разделы каталога: оружие, реплики, игрок, мир."""
+        from src.data import sound_catalog
+
+        names = sound_catalog.SECTION_NAMES
+        have = {row['section'] for row in self._sound_rows(lang)}
+        return [{'key': key, 'name': title}
+                for key, title in names.items() if key in have]
+
+    def sound_families(self, section: str = '',
+                       lang: str = 'ru') -> List[Dict[str, str]]:
+        """Семьи событий — только те, что есть в этом разделе.
+
+        Список общий на все разделы, но у оружия не бывает боли, а у реплик —
+        перезарядки: показывать пустые кнопки значит врать про фильтр.
+        """
+        from src.data import sound_catalog
+
+        names = sound_catalog.FAMILY_NAMES
+        section = (section or '').strip().lower()
+        have = {row['family'] for row in self._sound_rows(lang)
+                if not section or row['section'] == section}
+        return [{'key': key, 'name': title}
+                for key, title in names.items() if key in have]
+
+    def _by_item(self, guess: Dict[str, tuple], item: str):
+        """Предмет по его имени в игре. None — такого имени нет.
+
+        Половина названий в игре с артиклем («The Buff Banner»), а называют их
+        без него — пробуем оба вида.
+        """
+        for stem in (_plain(item), 'the' + _plain(item)):
+            found = guess.get(stem)
+            if found and found[2]:
+                return found
+        return None
+
+    def _rows_any(self) -> List[Dict[str, Any]]:
+        """Каталог на ТОМ языке, что уже разобран.
+
+        Проверке формата и сборке язык безразличен — им нужны имена и файлы.
+        Спросив каталог на своём языке, они выбрасывали чужой разбор, и
+        страница платила за него ещё раз: две лишних секунды на каждый выбор.
+        """
+        return self._sound_rows(self._sound_lang or 'en')
+
+    def _sound_rows(self, lang: str = 'ru') -> List[Dict[str, Any]]:
+        """Каталог звуков как словари. Считается один раз на язык."""
+
+        from src.app.api import classes as api_classes
+        from src.data import sound_catalog
+        from src.data.hats_parser import parse_localization
+        from src.data.weapon_model_index import get_items_game_path
+
+        if getattr(self, '_sound_lang', None) == lang:
+            return self._sound_cache
+        paths = self.tf2_paths()
+        if 'error' in paths:
+            return []
+        # Сам звук лежит в своём VPK: скрипты в общем, файлы в `tf2_sound_*`.
+        # Без него не нашлись бы «ничьи» файлы — те, чью связку с событием
+        # Valve держит в зашифрованных `tf_weapon_*.ctx`.
+        entries = sound_catalog.load(
+            [*self._sound_vpks(paths['tf_dir']),
+             paths['misc_vpk'], paths['textures_vpk']],
+            get_items_game_path(paths['root']))
+        # Предметы в items_game названы токенами (`TF_HamShank`) — человеку
+        # нужно имя из игры.
+        loc = parse_localization(paths['root'],
+                                 'russian' if lang == 'ru' else 'english')
+        titles = sound_catalog.FAMILY_NAMES
+        # items_game называет предмет лишь у каждой шестой записи. Остальные
+        # опознаём по имени субъекта: `Weapon_Ambassador` — это `TF_Ambassador`
+        # в локализации и `c_ambassador` в каталоге оружия. Без этого «посол» и
+        # «нож» в поиске не находились вовсе: имена записей латинские.
+        guess = self._subject_index(loc, lang)
+        classes = {c['key'].lower(): c['name']
+                   for c in api_classes(lang) if c.get('key')}
+        rows = []
+        for entry in entries:
+            items = [loc.get(token, loc.get(token.lower(), token))
+                     for token in entry.items]
+            stem = _plain(entry.subject.removeprefix('Weapon_')
+                          .removeprefix('Weapon'))
+            known, cls, weapon_key = guess.get(stem, ('', (), ''))
+            if not weapon_key:
+                # Рабочее имя Valve в звуке и имя предмета в игре сходятся не
+                # всегда: миниган там `Gatling`, «Мачина» — `SniperRailgun`.
+                named = sound_catalog.SUBJECT_ITEMS.get(entry.subject)
+                if named:
+                    known, cls, weapon_key = self._by_item(guess, named) or (
+                        known, cls, weapon_key)
+            rows.append({
+                'name': entry.name, 'event': entry.event,
+                'family': entry.family, 'section': entry.section,
+                'family_name': titles.get(entry.family, entry.family),
+                'waves': list(entry.waves),
+                'items': items,
+                'classes': list(entry.classes or cls),
+                # У предмета берём его иконку из рюкзака, у остального —
+                # картинку по субъекту: портрет класса, значок постройки.
+                'icon': (weapon_key
+                         or sound_catalog.icon_for(entry.subject,
+                                                   entry.section)),
+                # Подпись карточки: у связанной записи это сам предмет, иначе
+                # опознанное по имени, иначе само имя субъекта.
+                'title': _sound_title(entry, items, known, classes),
+            })
+        self._sound_lang, self._sound_cache = lang, rows
+        return rows
+
+    def _subject_index(self, loc: Dict[str, str],
+                       lang: str) -> Dict[str, tuple]:
+        """{сжатое имя субъекта: (название предмета, классы, иконка)}.
+
+        Два источника: локализация знает больше всего названий
+        (`Weapon_Scatter_Gun` → «Обрез»), каталог оружия — единственный, кто
+        знает КЛАСС и картинку. Чего нет ни там, ни там, получает значок
+        раздела (`icon_for`) — на строку без картинки это не похоже.
+
+        Совпадение ищется по «сжатому» виду: Valve пишет то `Scatter_Gun`, то
+        `Scattergun`, то `c_scattergun`.
+        """
+        from src.app.api import items as catalog_items
+
+        out: Dict[str, tuple] = {}
+        for token, value in loc.items():
+            if not token.lower().startswith('tf_'):
+                continue
+            stem = _plain(token[3:].removeprefix('Weapon_').removeprefix('weapon_'))
+            if stem and stem not in out:
+                out[stem] = (value, (), '')
+
+        for weapon in catalog_items('weapon', lang=lang):
+            cls = (weapon.get('cls') or '').lower()
+            bare = weapon['key'].removeprefix('c_').removeprefix('v_')
+            # Ключ каталога часто с хвостом класса (`c_flaregun_pyro`), а в
+            # звуке его нет — заводим и укороченный вид.
+            for stem in {_plain(bare), _plain(bare.removesuffix('_' + cls))}:
+                if not stem:
+                    continue
+                was_name = out.get(stem, ('', ()))[0]
+                out[stem] = (was_name or weapon['name'], cls.split(),
+                             weapon['key'])
+
+        return out
+
+    def set_sound(self, name: str, path: Optional[str],
+                  wave: str = '') -> Dict[str, Any]:
+        """Кладёт свой файл на запись целиком или на один её файл.
+
+        `wave` — путь файла в игре. Пусто — замена на всю запись: у неё файлов
+        бывает несколько, и обычно это варианты одного звука, которые меняют
+        разом.
+        """
+        name = (name or '').strip()
+        wave = (wave or '').strip()
+        from src.services.sound_build_service import check_wav
+
+        if not name:
+            return {'error': 'Не выбран звук'}
+        if wave:
+            return self._set_wave(name, wave, path)
+        if not path:
+            self._sound_picks.pop(name, None)
+        else:
+            # Записи с таким именем может не быть вовсе: тогда сборка её
+            # молча пропустит, а в подвале будет висеть «Своих звуков: 1».
+            row = self._row(name)
+            if row is None:
+                return {'error': 'Такой записи в игре нет'}
+            trouble = (self._wrong_format(row['waves'], path)
+                       or check_wav(path))
+            if trouble:
+                return {'error': f'Файл не подойдёт: {trouble}'}
+            self._sound_picks[name] = path
+        return {'name': name, 'own': self._sound_picks.get(name, ''),
+                'total': self._picked_total()}
+
+    def _row(self, name: str) -> Optional[Dict[str, Any]]:
+        """Запись каталога по имени. None — такой в игре нет."""
+        return next((r for r in self._rows_any() if r['name'] == name), None)
+
+    def _picked_total(self) -> int:
+        return len(self._sound_picks) + len(self._wave_picks)
+
+    def _set_wave(self, name: str, wave: str,
+                  path: Optional[str]) -> Dict[str, Any]:
+        """То же, но для ОДНОГО файла записи."""
+        row = self._row(name)
+        if row is None or wave not in row['waves']:
+            return {'error': 'Такого файла у этой записи нет'}
+        if not path:
+            self._wave_picks.pop(wave, None)
+            return {'name': name, 'wave': wave, 'own': '',
+                    'total': self._picked_total()}
+        from src.services.sound_build_service import check_wav
+
+        trouble = self._wrong_format([wave], path) or check_wav(path)
+        if trouble:
+            return {'error': f'Файл не подойдёт: {trouble}'}
+        self._wave_picks[wave] = path
+        return {'name': name, 'wave': wave, 'own': path,
+                'total': self._picked_total()}
+
+    @staticmethod
+    def _wrong_format(waves: List[str], path: str) -> str:
+        """Пусто, если расширение файла подходит этим путям. Иначе — чем плохо.
+
+        Игра зовёт файл по имени из записи, вместе с расширением: положив WAV
+        под именем `.mp3`, мы получим в игре тишину. Реплики почти все в MP3,
+        оружие почти всё в WAV — перепутать легко.
+
+        У полусотни записей файлы РАЗНЫХ расширений вперемешку (у моторки
+        разведчика и wav, и mp3). Годится файл, совпавший хоть с одним: свои
+        достанутся им, чужие останутся игровыми (см. `build_sounds`).
+        """
+        want = {w.rsplit('.', 1)[-1].lower() for w in waves}
+        got = (path or '').rsplit('.', 1)[-1].lower()
+        if not want or got in want:
+            return ''
+        return ('игра ждёт здесь {}, а это {} — звук просто не зазвучит'
+                .format('/'.join(sorted(k.upper() for k in want)),
+                        got.upper() or '?'))
+
+    def _sound_vpks(self, tf_dir: str) -> List[str]:
+        """Все звуковые VPK игры плюс общий.
+
+        Скрипты лежат в `tf2_misc`, а сами файлы — в отдельных архивах, и их
+        несколько: `tf2_sound_misc` и по одному на язык озвучки
+        (`tf2_sound_vo_english`). Имена не перечисляем — у человека может быть
+        поставлена другая озвучка, и реплики из неё молчали бы.
+        """
+        import os
+
+        out: List[str] = []
+        # Рядом с `tf` лежит `hl2` — общее содержимое движка. Часть звуков
+        # игрока и мира (`common/wpn_select.wav`, `items/smallmedkit1.wav`)
+        # взята оттуда, и в архивах TF2 их нет вовсе.
+        for folder in (tf_dir, os.path.join(os.path.dirname(tf_dir), 'hl2')):
+            try:
+                names = sorted(os.listdir(folder))
+            except OSError:
+                continue
+            out += [os.path.join(folder, name) for name in names
+                    if name.endswith('_dir.vpk') and '_sound' in name]
+        return out
+
+    def sound_bytes(self, wave_path: str) -> Optional[bytes]:
+        """Игровой звуковой файл как есть — странице его проигрывать."""
+
+        from src.services import vtf_preview_service as vps
+
+        paths = self.tf2_paths()
+        if 'error' in paths:
+            return None
+        name = 'sound/' + (wave_path or '').replace(chr(92), '/').lstrip('/')
+        # Скрипт пишет имя как попало (`vo/heavy_PainSevere01.mp3`), а в архиве
+        # всё лежит строчными: у Valve так во всех звуковых VPK. Игра при
+        # поиске регистр не различает, библиотека — различает.
+        for pak in vps.open_vpks([*self._sound_vpks(paths['tf_dir']),
+                                  paths['misc_vpk']]):
+            for candidate in (name, name.lower()):
+                try:
+                    return pak[candidate].read()
+                except KeyError:
+                    continue
+        return None
+
+    def save_sound(self, name: str, wave: str = '') -> Dict[str, Any]:
+        """Кладёт игровой звук записи в папку экспорта.
+
+        Чтобы переделать звук, его сперва надо достать. Раньше единственным
+        способом было прослушать его в приложении — а дальше человек оставался
+        без файла. Сохраняем ИГРОВОЙ звук, а не выбранный: свой у него и так
+        на диске.
+        """
+        row = self._row(name)
+        if row is None:
+            return {'error': 'Такой записи в игре нет'}
+
+        # Один файл или все — у записи их бывает до восьмидесяти.
+        wanted = ([wave] if wave in row['waves'] else
+                  [] if wave else list(row['waves']))
+        if not wanted:
+            return {'error': 'Такого файла у этой записи нет'}
+
+        export_folder, _ = self._export_settings()
+        os.makedirs(export_folder, exist_ok=True)
+        saved: List[str] = []
+        for wave in wanted:
+            data = self.sound_bytes(wave)
+            if not data:
+                continue
+            # Только имя файла: путь внутри игры сюда переносить незачем, а
+            # `..` в нём увёл бы запись мимо папки экспорта.
+            target = os.path.join(export_folder, os.path.basename(wave))
+            try:
+                with open(target, 'wb') as f:
+                    f.write(data)
+            except OSError as exc:
+                return {'error': f'Не удалось сохранить: {exc}'}
+            saved.append(target)
+        if not saved:
+            return {'error': 'Файла этого звука в игре нет'}
+        logger.info(f"[звук] сохранено из игры: {len(saved)} в {export_folder}")
+        return {'path': saved[0], 'files': len(saved)}
+
+    def build_sounds(self, filename: str = '') -> Dict[str, Any]:
+        """Собирает VPK из выбранных звуков.
+
+        Заменяем ВСЕ файлы записи: у полутора сотен записей их несколько, игра
+        берёт случайный, и подменив один мы бы слышали свой звук через раз.
+        """
+        from src.services import sound_build_service as builder
+
+        if not self._sound_picks and not self._wave_picks:
+            return {'error': 'Не выбрано ни одного своего звука'}
+        by_wave: Dict[str, str] = {}
+        skipped = 0
+        for row in self._rows_any():
+            own = self._sound_picks.get(row['name'])
+            if not own:
+                continue
+            kind = own.rsplit('.', 1)[-1].lower()
+            # Только совпавшие по расширению: у части записей файлы разных
+            # форматов вперемешку, и WAV, положенный под именем `.mp3`, дал бы
+            # в игре тишину вместо звука.
+            fit = [w for w in row['waves'] if w.lower().endswith('.' + kind)]
+            skipped += len(row['waves']) - len(fit)
+            by_wave.update({wave: own for wave in fit})
+        # Замена ОТДЕЛЬНОГО файла ложится поверх: человек выбрал её позже и
+        # прицельнее, чем «всю запись разом».
+        by_wave.update(self._wave_picks)
+
+        from src.shared.validators import validate_vpk_filename
+
+        export_folder, _ = self._export_settings()
+        name = (filename or 'sounds_mod').strip()
+        if not name.lower().endswith('.vpk'):
+            name += '.vpk'
+        # Имя приходит из поля на странице и становится путём файла: тем же
+        # правилом, что у сборки текстур, отсекаем слэши и точки-родители.
+        good, trouble = validate_vpk_filename(name)
+        if not good:
+            return {'error': trouble}
+        try:
+            path = builder.build(by_wave, name, export_folder)
+        except Exception as exc:                          # noqa: BLE001
+            logger.error(f"[звук] сборка не удалась: {exc}", exc_info=True)
+            return {'error': str(exc)}
+        logger.info(f"[звук] собрано: {path}")
+        return {'path': path, 'files': len(by_wave),
+                'sounds': self._picked_total(), 'skipped': skipped}
 
     def load_skybox(self, sky_name: str) -> Dict[str, Any]:
         """Готовит грани стокового неба для показа кубмапой."""
@@ -1716,7 +2200,7 @@ class AppSession:
         safe = Path(str(name)).name or 'particles_mod.vpk'
         if not safe.lower().endswith('.vpk'):
             safe += '.vpk'
-        dest = Path('export') / safe
+        dest = data_dir() / 'export' / safe
         dest.parent.mkdir(parents=True, exist_ok=True)
         try:
             out = self.particles.export_vpk(str(dest), language=lang)
@@ -2200,7 +2684,7 @@ class AppSession:
                 'autosave': self._autosave_on(),
                 # Черновик автосохранения тоже «есть на диске»: его можно и
                 # вернуть, и забыть — просто в библиотеке его не показывают.
-                'has_saved': bool(key) and work_store.has(key),
+                'has_saved': bool(key) and work_store.holds_edits(key),
                 'kept': work_store.is_kept(key)}
 
     # ═══════════════════════════════════════════════════════════════════════ #
@@ -2422,28 +2906,63 @@ class AppSession:
             out['tri_island'] = list(model.tri_island.get(obj_mat) or [])
         return out
 
-    def _remember_parts(self, card: str) -> None:
-        """Снимок покраски ДО изменения — для отмены."""
-        self._parts_history.append((
-            card,
+    def _parts_snapshot(self) -> tuple:
+        """Всё, что делает покраску такой, какая она есть.
+
+        Сила тонировки и окантовка входят наравне с картинками и цветами:
+        они тоже правки человека, и без них отмена ползунка была ХОЛОСТОЙ —
+        снимок совпадал с текущим состоянием, кнопка не меняла ничего, а
+        добравшись до начала, оставляла силу и окантовку от последнего шага.
+        """
+        return (
             {mat: dict(items) for mat, items in self.preview.part_textures.items()},
             {mat: dict(items) for mat, items in self.preview.part_colors.items()},
-        ))
+            self.preview.part_tint,
+            self.preview.part_edge,
+            self.preview.part_edge_color,
+        )
+
+    def _restore_parts(self, snap: tuple) -> None:
+        """Ставит снимок на место."""
+        (self.preview.part_textures, self.preview.part_colors,
+         self.preview.part_tint, self.preview.part_edge,
+         self.preview.part_edge_color) = snap
+
+    def _remember_parts(self, card: str) -> None:
+        """Снимок покраски ДО изменения — для отмены."""
+        self._parts_history.append(self._parts_snapshot())
         del self._parts_history[:-20]      # глубже двадцати шагов не помнит никто
+        # Новая правка отменяет «вперёд»: та ветка больше никогда не наступит.
+        self._parts_future.clear()
 
     def undo_parts(self, material: str = '') -> Dict[str, Any]:
         """Откатывает последнее изменение покраски частей."""
+        return self._step_parts(material, self._parts_history,
+                                self._parts_future, 'Отменять нечего')
+
+    def redo_parts(self, material: str = '') -> Dict[str, Any]:
+        """Возвращает вперёд то, что отменили."""
+        return self._step_parts(material, self._parts_future,
+                                self._parts_history, 'Возвращать нечего')
+
+    def _step_parts(self, material: str, take: List[Any], keep: List[Any],
+                    empty: str) -> Dict[str, Any]:
+        """Шаг по истории: снимок оттуда, текущее состояние — туда.
+
+        Отмена и возврат — одно и то же движение в разные стороны, поэтому и
+        код один: разъехавшись, они дали бы состояние, из которого не выйти
+        ни назад, ни вперёд.
+        """
         found = self._parts_model(material)
         if isinstance(found, dict):
             return found
         model, obj_mat, card = found
 
         with self._lock:
-            if not self._parts_history:
-                return {'error': 'Отменять нечего'}
-            _card, images, colors = self._parts_history.pop()
-            self.preview.part_textures = images
-            self.preview.part_colors = colors
+            if not take:
+                return {'error': empty}
+            keep.append(self._parts_snapshot())
+            self._restore_parts(take.pop())
             self._recompose(model, obj_mat, card)
         self._autosave()
         return self.view_state()
@@ -2745,6 +3264,7 @@ class AppSession:
                 self.preview.part_colors[card] = moved_colors
                 self._recompose(model, obj_mat, card)
             self._parts_history.clear()
+            self._parts_future.clear()
         self._autosave()
         return self.view_state()
 
@@ -3275,6 +3795,9 @@ class AppSession:
             # геометрия без текстуры осталась бы серой.
             'scene': self.preview.scene_textures(),
             'materials': self.preview.card_materials(),
+            # Меши, которые носят ВЫБРАННУЮ карточку (маски маскировки: девять
+            # текстур на одну голову). Пусто — обычное «карточка = материал».
+            'card_mesh': self.preview.card_mesh(),
             'team': t.active_team,
             'has_teams': self.preview.has_team_variant(is_hands) or t.force_team,
             'blu_matches_red': self.preview.blu_matches_red,

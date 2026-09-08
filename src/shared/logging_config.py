@@ -56,9 +56,27 @@ def setup_logging(
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
     
+    # Кольцо для консоли в окне: те же записи, что уходят в файл, но их можно
+    # показать человеку прямо в приложении (см. src/shared/log_bridge.py).
+    from src.shared.log_bridge import attach as attach_ring
+    attach_ring()
+
     logger.propagate = False
-    
+
     return logger
+
+
+def set_debug(enabled: bool) -> None:
+    """
+    Включает или гасит уровень DEBUG на ходу.
+
+    Нужно настройке «Режим отладки»: раньше она управляла только тем, сохранять
+    ли временные папки сборки, а уровень логирования был зашит в main.py как
+    INFO — то есть 147 вызовов logger.debug молчали при любом её положении.
+    Перезапуск для смены уровня не нужен: логгер один и живёт весь сеанс.
+    """
+    logging.getLogger('tf2_skin_generator').setLevel(
+        logging.DEBUG if enabled else logging.INFO)
 
 
 def get_logger(name: str) -> logging.Logger:

@@ -38,10 +38,16 @@ PROJECTILES: Dict[str, dict] = {
         "ru": "Липучка", "en": "Stickybomb",
         "mdl_path": "models/weapons/w_models/w_stickybomb.mdl",
     },
-    "w_stickybomb_defender": {
-        "ru": "Липучка (Защитник)", "en": "Stickybomb (Defender)",
-        "mdl_path": "models/weapons/w_models/w_stickybomb_defender.mdl",
-    },
+    # `w_stickybomb_defender` здесь БЫЛ, и это ошибка: снаряда с таким именем
+    # не существует. Это старая мировая модель САМОГО «Шотландского
+    # сопротивления» — пара к `v_stickybomb_defender` с общей текстурой,
+    # кость `weapon_bone`, точка крепления `lasersight` и длина 25 единиц
+    # против 12 у липучки. Игра её больше не грузит: `items_game` объявляет
+    # оружию `c_scottish_resistance`, а эта пара осталась с тех времён, когда
+    # оружие делили на v_/w_. Мод из неё ничего бы не изменил.
+    #
+    # Само оружие в каталоге есть: «Оружие» → Подрывник → Второе оружие, и
+    # текстуру оно правит ту же (см. WEAPON_TEXTURE_PATHS).
     "w_arrow": {
         "ru": "Стрела", "en": "Arrow",
         "mdl_path": "models/weapons/w_models/w_arrow.mdl",

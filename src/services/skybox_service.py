@@ -301,22 +301,26 @@ class SkyboxService:
         from PIL import Image, ImageSequence
 
         os.makedirs(out_dir, exist_ok=True)
-        im = Image.open(equirect_path)
-        w, h = im.size
-        smaps = {f: SkyboxService._face_sample_map(f, w, h, face_size)
-                 for f in SKY_FACES}
         per_face: Dict[str, list] = {f: [] for f in SKY_FACES}
         durations: List[int] = []
-        for frame in ImageSequence.Iterator(im):
-            if cancel_callback and cancel_callback():
-                return {}
-            durations.append(int(frame.info.get("duration", 0)
-                                 or im.info.get("duration", 0) or 100))
-            arr = SkyboxService._srgb_to_linear(np.asarray(frame.convert("RGB")))
-            for f in SKY_FACES:
-                per_face[f].append(Image.fromarray(
-                    SkyboxService._linear_to_srgb_u8(
-                        SkyboxService._gather_face(arr, smaps[f]))))
+        # with: панорама нужна открытой на весь обход ImageSequence, но после
+        # него дескриптор должен уйти — иначе исходник (и временная папка, где
+        # он лежит) остаётся занят до сборки мусора.
+        with Image.open(equirect_path) as im:
+            w, h = im.size
+            smaps = {f: SkyboxService._face_sample_map(f, w, h, face_size)
+                     for f in SKY_FACES}
+            for frame in ImageSequence.Iterator(im):
+                if cancel_callback and cancel_callback():
+                    return {}
+                durations.append(int(frame.info.get("duration", 0)
+                                     or im.info.get("duration", 0) or 100))
+                arr = SkyboxService._srgb_to_linear(
+                    np.asarray(frame.convert("RGB")))
+                for f in SKY_FACES:
+                    per_face[f].append(Image.fromarray(
+                        SkyboxService._linear_to_srgb_u8(
+                            SkyboxService._gather_face(arr, smaps[f]))))
 
         result: Dict[str, str] = {}
         for f in SKY_FACES:

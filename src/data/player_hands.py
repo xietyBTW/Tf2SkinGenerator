@@ -131,3 +131,21 @@ def get_hand_textures(mode_key: str) -> List[Tuple[str, str]]:
     return mode.get("textures", [])
 
 
+
+
+def hands_icon(mode_key: str) -> str:
+    """
+    Картинка карточки рук — ТА САМАЯ текстура, которую карточка и правит.
+
+    Не портрет класса: у портрета своя работа — сказать, чей это класс, — и
+    «Скин» с «Руками» под ним выглядели одинаково. Не текстура модели рук:
+    у части классов предплечья лежат на общем листе с телом, и обложка «Рук»
+    повторяла обложку «Скина» буквально.
+
+    Формат ключа общий с `api.icon_png`: `mat/…` — игровой материал.
+    """
+    tex = get_hand_textures(mode_key)
+    if not tex:
+        return ""
+    folder, name = tex[0]
+    return f"mat/models/player/{folder}/{name}"

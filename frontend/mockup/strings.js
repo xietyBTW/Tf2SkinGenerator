@@ -43,7 +43,6 @@ export const EN = {
   'Вместе': 'Together',
   'Текстура': 'Texture',
   'Текстура:': 'Texture:',
-  'c_scattergun · Scout · 4 материала': 'c_scattergun · Scout · 4 materials',
   'текстура': 'texture',
   'Модель': 'Model',
   'От первого лица': 'First person',
@@ -314,6 +313,71 @@ export const EN = {
   'Загрузка модели…': 'Loading the model…',
   'Загрузка текстуры…': 'Loading the texture…',
   'Сборка сцены:': 'Building the scene:',
+  // ── Звуки ──────────────────────────────────────────────────────────── //
+  'Звуки': 'Sounds',
+  'Событие': 'Event',
+  'Название, предмет или файл': 'Name, item or file',
+  'Своих звуков нет': 'No sounds of your own',
+  'Своих звуков: {}': 'Your sounds: {}',
+  'Записей: {}': 'Entries: {}',
+  'Записей: {} из {} — уточните фильтр':
+    'Entries: {} of {} — narrow the filter',
+  'Раздел': 'Section',
+  'Читаю звуки игры…': 'Reading the game sounds…',
+  'Читаю список…': 'Reading the list…',
+  'Собираю эффект…': 'Assembling the effect…',
+  'Мод заменяет {} — можно посмотреть в руках':
+    'The mod replaces {} — you can see it in hand',
+  'Ищу…': 'Searching…',
+  'Под этими фильтрами ничего нет': 'Nothing matches these filters',
+  'Раздел пуст: звуковые скрипты игры не прочитались':
+    'The section is empty: the game sound scripts were not read',
+  'Выстрел': 'Fire',
+  'Крит': 'Crit',
+  'Перезарядка': 'Reload',
+  'Удар': 'Hit',
+  'Достать': 'Draw',
+  'Взрыв': 'Explosion',
+  'Раскрутка': 'Spin-up',
+  'Реплики': 'Voice',
+  'Игрок': 'Player',
+  'Мир': 'World',
+  'Смерть': 'Death',
+  'Боль': 'Pain',
+  'Команда': 'Call',
+  'Настроение': 'Mood',
+  'Шпион': 'Spy',
+  '{} и ещё {}': '{} and {} more',
+  'Прослушать': 'Play',
+  'Оригинал': 'Original',
+  'Скачать': 'Save',
+  'Сохранено: {}': 'Saved: {}',
+  'Сохранено файлов: {}, рядом с {}': 'Files saved: {}, next to {}',
+  'Файла этого звука в игре нет': 'The game has no file for this sound',
+  'Не удалось сохранить: {}': 'Could not save: {}',
+  'Свой файл': 'Own file',
+  'Этот файл браузер проиграть не может': 'The browser cannot play this file',
+  'Базовый': 'Default',
+  'Перекодирую звук…': 'Converting the sound…',
+  'Не разобрать этот звук: {}': 'Cannot decode this sound: {}',
+  'Игра ждёт здесь MP3, а перекодировать в MP3 браузер не умеет':
+    'The game expects MP3 here, and the browser cannot encode MP3',
+  'Готово: {} файлов в {}': 'Done: {} files in {}',
+  'Готово: {} файлов в {}; {} другого формата остались игровыми':
+    'Done: {} files in {}; {} of another format stayed as they are',
+  'Такой записи в игре нет': 'There is no such entry in the game',
+  'Такого файла у этой записи нет': 'This entry has no such file',
+  'Не выбран звук': 'No sound selected',
+  'Файл не подойдёт: {}': 'That file will not do: {}',
+  'игра ждёт здесь {}, а это {} — звук просто не зазвучит':
+    'the game expects {} here, and this is {} — it simply will not play',
+  'Не выбрано ни одного своего звука': 'No sounds of your own were chosen',
+  'Ничего не играет': 'Nothing is playing',
+  '{} — свой файл': '{} — your file',
+  'Играть': 'Play',
+  'Перемотка': 'Seek',
+  'Громкость': 'Volume',
+  'Заменён': 'Replaced',
   'Собираем сцену…': 'Building the scene…',
   'Сборка вида от первого лица…': 'Building the first-person view…',
   'Извлечение граней неба…': 'Extracting the sky faces…',
@@ -367,8 +431,9 @@ export const EN = {
   'Цвет окантовки': 'Outline color',
   'Эта модель — один цельный кусок, делить нечего':
     'This model is a single solid piece, there is nothing to split',
-  'Щёлкай по кускам модели — покрасятся. Нарезать мельче или обвести края — вкладками слева':
-    'Click the pieces of the model to paint them. Cut finer or outline the edges with the tabs on the left',
+  'Щёлкай по кускам модели — покрасятся. Нарезать мельче или обвести края — вкладками слева. Ctrl+Z отменяет, Ctrl+Y возвращает':
+    'Click the pieces of the model to paint them. Cut finer or outline the edges '
+    + 'with the tabs on the left. Ctrl+Z undoes, Ctrl+Y redoes',
   'Красить этим цветом': 'Paint with this color',
   'Щёлкай по частям модели — покрасятся в этот цвет':
     'Click the parts of the model to paint them this color',
@@ -414,6 +479,7 @@ export const EN = {
   'Случайная раскраска — щёлкай по частям, чтобы поправить':
     'Random coloring — click the parts to fix it up',
   'Отменено': 'Undone',
+  'Возвращено': 'Redone',
   'Наведи на модель — обведётся кусок развёртки, который отрежется. Щелчок режет; щелчки по отрезанным в списке отмечают их, чтобы свести в одну часть':
     'Hover the model to outline the UV piece that will be cut. A click cuts it; clicking pieces already cut marks them so they can be merged into one part',
   'Объединяю…': 'Merging…',
@@ -644,6 +710,7 @@ export const EN = {
     'Only a material of the model can be added to a style',
   'У этого материала нет геометрии': 'This material has no geometry',
   'Отменять нечего': 'There is nothing to undo',
+  'Возвращать нечего': 'There is nothing to redo',
   'На этой части нет картинки': 'This part has no image',
   'У этой части нет развёртки': 'This part has no UV map',
   'Такой части нет': 'There is no such part',
@@ -699,4 +766,65 @@ export const EN = {
   'не удалось заменить материал': 'could not replace the material',
   'сборка VPK частиц не удалась: {}': 'building the particles VPK failed: {}',
   'не прочитать правку: {}': 'could not read the edit: {}',
+
+  // ── Обновление приложения ─────────────────────────────────────────────
+  'Проверить обновления': 'Check for updates',
+  'проверяю…': 'checking…',
+  'считаю…': 'counting…',
+  'Установлена последняя версия.': 'You have the latest version.',
+  'Не удалось проверить обновления.': 'Could not check for updates.',
+  'Не удалось проверить обновления — нет связи с GitHub.':
+    'Could not check for updates — no connection to GitHub.',
+  'Доступна версия': 'Version available',
+  'Нажмите «Обновить» — приложение закроется и вернётся уже новым.':
+    'Press Update — the app will close and come back updated.',
+  'Скачайте её со страницы релиза.': 'Download it from the release page.',
+  'Обновить': 'Update',
+  'Обновить до': 'Update to',
+  'Открыть страницу релиза': 'Open the release page',
+  'Приложение закроется, установщик заменит его на новую версию и запустит заново. Ваши работы, моды и настройки не тронутся — они хранятся отдельно от папки установки.':
+    'The app will close, the installer will replace it with the new version and start it again. Your works, mods and settings are untouched — they live outside the installation folder.',
+  'Скачиваю установщик…': 'Downloading the installer…',
+  'Установщик запущен, приложение закрывается…':
+    'Installer started, the app is closing…',
+  'Обновление не установлено': 'The update was not installed',
+  'Обновление не установлено: {}': 'the update was not installed: {}',
+  'нечего устанавливать': 'nothing to install',
+
+  // ── Журнал ────────────────────────────────────────────────────────────
+  // «Журнал» и «Свернуть» уже есть выше — второй раз их писать нельзя:
+  // TypeScript ловит это как ошибку, а без него молча побеждал бы последний.
+  'Во всё окно': 'Full width',
+  'Копировать': 'Copy',
+  'Папка с логом': 'Log folder',
+  'Потянуть за край': 'Drag the edge',
+  'Поиск по журналу': 'Search the log',
+  'Обмен': 'Calls',
+  'Ошибки': 'Errors',
+  'Предупреждения': 'Warnings',
+  'Инфо': 'Info',
+  'Отладка': 'Debug',
+  'Пропущено записей:': 'Entries dropped:',
+  '(журнал не успевали читать; всё есть в файле)':
+    '(the log was not read in time; the file has everything)',
+  'только Windows': 'Windows only',
+  'не открыть папку журнала: {}': 'could not open the log folder: {}',
+
+  // Записи логгера Python переводятся тем же способом, что и остальные
+  // подписи, — на границе показа. Начали с ошибок, где человеку сказано, что
+  // делать: их он читает и по ним действует. Диагностика уровня INFO/DEBUG
+  // остаётся русской намеренно — её читает автор по присланному файлу.
+  'items_game.txt не найден в {}': 'items_game.txt not found in {}',
+  "Секция 'items' не найдена в items_game.txt":
+    "the 'items' section was not found in items_game.txt",
+  'Библиотека vpk не установлена. Установите через: pip install vpk':
+    'the vpk library is not installed. Install it with: pip install vpk',
+  'Модель не найдена для {}. Проверенные пути: {}':
+    'no model found for {}. Paths tried: {}',
+
+  // ── Диалог «не получилось» ────────────────────────────────────────────
+  // Заголовок и объяснение приходят от Python уже на нужном языке
+  // (error_classifier), здесь только подписи самого окна.
+  'Технические детали': 'Technical details',
+  'Открыть журнал': 'Open the log',
 };

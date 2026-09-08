@@ -501,6 +501,28 @@ class ForceTeamTests(TextureStateBase):
         self.state.active_team = Team.BLU
         self.assertEqual(self.state.resolve_base("c_gun"), red)   # но показывается RED
 
+    def test_red_card_does_not_borrow_the_blue_texture(self):
+        """Загрузка на BLU не должна ВЫГЛЯДЕТЬ как замена красной.
+
+        Хранение чинили раньше, а показ — нет: красная карточка брала синюю
+        текстуру «как нейтральную», и человек видел ровно то, от чего
+        избавлялись, — «положил на синюю, заменилось у обеих».
+        """
+        blu = self.png("blu")
+        self.state.active_team = Team.BLU
+        self.state.set_texture("c_gun", blu)
+        self.state.active_team = Team.RED
+        self.assertNotEqual(self.state.resolve_base("c_gun"), blu)
+
+    def test_the_build_does_not_put_the_blue_texture_on_red(self):
+        """То же правило в сборке: иначе синий файл уехал бы на красный скин."""
+        blu = self.png("blu")
+        self.state.active_team = Team.BLU
+        self.state.set_texture("c_gun", blu)
+        self.assertIsNone(self.state.uploaded_for_mat("c_gun"))
+        # А синему слоту он достаётся — за ним и приходят по имени с суффиксом.
+        self.assertEqual(self.state.uploaded_for_mat("c_gun_blue"), blu)
+
     def test_without_force_team_dual_write_preserved(self):
         # Контроль: без force_team нейтральная по-прежнему пишется в обе команды.
         self.state.force_team = False

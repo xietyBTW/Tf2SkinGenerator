@@ -25,6 +25,48 @@ from src.domain.preview.mode import PreviewState
 from src.domain.preview.texture_state import SINGLE_TEX_KEY, PreviewTextureState
 from src.shared.constants import Team
 
+#: Поля работы, ради которых её стоит хранить и предлагать вернуть.
+#:
+#: Список НЕ совпадает с содержимым `user_edits()`, и это намеренно. Туда
+#: пишется всё состояние правки целиком, а работой предмет делает только то,
+#: что человек в нём изменил: положенная текстура, покрашенные части, своя
+#: геометрия. Остальное — спутники, и по одному их наличию говорить «у вас
+#: есть несохранённые правки» нельзя:
+#:
+#:   • `texture_overrides` — настройки СБОРКИ материала (размер, формат,
+#:     флаги VTF). Текстура от них не меняется ни на пиксель, а предмет с
+#:     одной такой записью всю жизнь предлагал «вернуть правки», которых
+#:     человек не делал. Записанными они остаются — просто вместе с работой,
+#:     а не вместо неё;
+#:   • `part_tint`, `skin_chosen`, `custom_keep_materials` — уточняют, как
+#:     показать уже выбранное, и сами по себе не меняют ничего.
+EDIT_FIELDS = (
+    'textures', 'skin_overrides', 'australium_user_tex', 'force_team',
+    'texture_maps', 'part_textures', 'part_colors',
+    'custom_smd_path', 'custom_qc_text',
+)
+
+
+def _filled(value: Any) -> bool:
+    """Есть ли внутри хоть что-нибудь. Пустая обёртка не считается.
+
+    `{'red': {}, 'blu': {}}` — это не правка: словари команд и материалов
+    заводятся сами и пустыми доезжают до записи на диск.
+    """
+    if isinstance(value, dict):
+        return any(_filled(inner) for inner in value.values())
+    return bool(value)
+
+
+def has_real_edits(edits: Optional[Dict[str, object]]) -> bool:
+    """Есть ли в работе то, ради чего её стоит хранить и возвращать.
+
+    Одно правило на всех: и на состояние сеанса, и на файл с диска. Пока их
+    было два — сеанс смотрел на поля, а диск на наличие `edits.json`, — они
+    расходились, и предмет предлагал вернуть правки, которых в файле нет.
+    """
+    return any(_filled((edits or {}).get(name)) for name in EDIT_FIELDS)
+
 
 @dataclass
 class PreviewSession:
@@ -47,6 +89,11 @@ class PreviewSession:
     #: Точные имена материалов модели из SMD — для наложения текстур мода на
     #: правильные меши в режиме custom-VPK.
     custom_model_materials: List[str] = field(default_factory=list)
+    #: Какое ИГРОВОЕ оружие заменяет открытый VPK-мод и чем: ключ и reference
+    #: SMD из мода. Определяется по путям внутри VPK; пусто — мод не про
+    #: оружие (шапка, эффект) или опознать не вышло.
+    custom_vpk_weapon: Optional[str] = None
+    custom_vpk_smd: Optional[str] = None
     #: Режим загруженного custom-VPK мода: карточки строятся из VTF мода и
     #: не должны перетираться обычной фильтрацией материалов модели.
     custom_vpk_mode: bool = False
@@ -318,6 +365,23 @@ class PreviewSession:
         return {**self.scene_extra_textures,
                 **self._name_for_scene(self._with_variant(out))}
 
+    def card_mesh(self) -> List[str]:
+        """
+        Меши, которые носят ВЫБРАННУЮ карточку — если карточек больше, чем мешей.
+
+        Маски маскировки шпиона: девять текстур на одну голову. Обычное
+        правило «карточка = материал» здесь не работает, и модель показывала
+        бы одну и ту же маску, какую бы человек ни листал.
+
+        Какая карточка выбрана, знает только альбом — положение прокрутки в
+        Python не живёт. Поэтому здесь называются МЕШИ, а надевает на них
+        текстуру страница (album.js → wearCard).
+        """
+        from src.data.item_kinds import kind_of
+
+        mode = (self.current_object or ('', '', ''))[0]
+        return list(self.scene_item_materials) if kind_of(mode).is_spy_mask else []
+
     def _name_for_scene(self, out: Dict[str, str]) -> Dict[str, str]:
         """
         Переводит служебный ключ одноматериальной модели в имена мешей сцены.
@@ -453,19 +517,7 @@ class PreviewSession:
 
     def has_user_edits(self) -> bool:
         """Есть ли что сохранять. Пустую работу на диск не пишем."""
-        t = self.textures
-        return bool(
-            any(t.textures.values())
-            or any(t.skin_overrides.values())
-            or t.australium_user_tex
-            or t.force_team
-            or self.texture_maps
-            or self.texture_overrides
-            or any(self.part_textures.values())
-            or any(self.part_colors.values())
-            or self.custom_smd_path
-            or self.custom_qc_text
-        )
+        return has_real_edits(self.user_edits())
 
     def apply_user_edits(self, edits: Optional[Dict[str, object]]) -> None:
         """
@@ -526,6 +578,11 @@ class PreviewSession:
         """Забывает вариантные стили: смена оружия или выход из кастома."""
         self.textures.reset_skins()
         self.skin_chosen = {}
+
+    def reset_custom_vpk(self) -> None:
+        """Забывает, что заменял прошлый мод."""
+        self.custom_vpk_weapon = None
+        self.custom_vpk_smd = None
 
     def reset_custom_model(self) -> None:
         """Забывает подставленную пользователем геометрию."""
@@ -625,6 +682,9 @@ class PreviewSession:
 
         self.reset_skins()
         self.reset_custom_model()
+        # Чужой мод остался позади вместе со своим оружием: иначе вид от
+        # первого лица показывал бы предмет прошлого мода.
+        self.reset_custom_vpk()
         self.reset_team_frames()
         self.reset_misc()
         # Режим (mode) здесь НЕ трогаем: из кастомного режима выходит

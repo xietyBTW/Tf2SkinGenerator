@@ -32,12 +32,31 @@ def read(path: str) -> str:
 
 def code_only(text: str) -> str:
     """Текст без комментариев: в них полно упоминаний методов и id."""
-    text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
+    # Блочный комментарий начинается со СВОЕЙ строки. Без этой оговорки
+    # `chooseFile('audio/*')` сходил за его начало, и до ближайшего `*/`
+    # вырезался живой код — вместе с именами, ради которых всё это.
+    text = re.sub(r"(?ms)^[ 	]*/\*.*?\*/", "", text)
     return re.sub(r"^\s*//.*$", "", text, flags=re.M)
 
 
+def page_code() -> str:
+    """Весь код страницы одной строкой, без комментариев.
+
+    Раньше здесь читался ОДИН app.js, и это молча сломалось, когда страницу
+    разложили по модулям: COND_KEY уехал в controls.js, разбор событий — в
+    events.js, и проверка начала ругаться на каждый data-cond и каждое
+    событие разом. Сорок семь выдуманных расхождений — это то же самое, что
+    ни одного: их перестают читать.
+    """
+    root = os.path.join("frontend", "mockup")
+    files = sorted(os.path.join(base, name)
+                   for base, _, names in os.walk(root)
+                   for name in names if name.endswith(".js"))
+    return "\n".join(code_only(read(p)) for p in files)
+
+
 def check() -> list:
-    app = code_only(read("frontend/mockup/app.js"))
+    app = page_code()
     html = read("frontend/mockup/index.html")
     api_js = read("frontend/mockup/api.js")
     server = read("frontend/devserver.py")

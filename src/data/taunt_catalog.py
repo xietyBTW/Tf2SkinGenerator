@@ -96,7 +96,8 @@ def load(tf2_root: str) -> Dict[str, dict]:
 
     path = get_items_game_path(tf2_root)
     try:
-        text = open(path, encoding='utf-8', errors='replace').read()
+        with open(path, encoding='utf-8', errors='replace') as fh:
+            text = fh.read()
     except OSError as exc:
         logger.warning(f"[taunt] items_game не прочитан: {exc}")
         return {}

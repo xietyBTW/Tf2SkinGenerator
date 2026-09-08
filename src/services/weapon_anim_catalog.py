@@ -170,7 +170,8 @@ def load(decompiled_dir: str) -> Optional[AnimCatalog]:
         logger.warning(f"[anim] QC не найден в {decompiled_dir}")
         return None
     try:
-        text = open(qc_path, "r", encoding="utf-8", errors="replace").read()
+        with open(qc_path, "r", encoding="utf-8", errors="replace") as fh:
+            text = fh.read()
     except OSError as exc:
         logger.warning(f"[anim] не прочитать {qc_path}: {exc}")
         return None

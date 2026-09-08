@@ -91,7 +91,8 @@ def _parse(items_game_path: str) -> Dict[str, Dict[str, tuple]]:
     реквизита, и последовательность.
     """
     try:
-        text = open(items_game_path, encoding='utf-8', errors='replace').read()
+        with open(items_game_path, encoding='utf-8', errors='replace') as fh:
+            text = fh.read()
     except OSError as exc:
         logger.warning(f"[taunt] items_game не прочитан: {exc}")
         return {}

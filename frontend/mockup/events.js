@@ -11,6 +11,7 @@ import { say, sayBusy, withViewer } from './stage.js';
 import { setStatus } from './layout.js';
 import { ask } from './ask.js';
 import { showReport } from './diagnostics.js';
+import { showFailure } from './fail.js';
 import { askForTexture } from './build.js';
 import {
   refreshView,
@@ -91,6 +92,10 @@ api.subscribe((ev) => {
         w.loadViewmodelAnimated(ev.scene, 0);
       });
       say('');
+      // Текстуры чужого мода воркер не находит: он ищет их в игре по её
+      // `$cdmaterials`, а лежат они в VPK человека. Раскладывает их состояние
+      // показа — его и перечитываем, иначе мод висит в руке серым.
+      refreshView();
       break;
 
     // Какие анимации есть у этого оружия — знает только воркер: список
@@ -134,6 +139,15 @@ api.subscribe((ev) => {
     case 'special_animated':
       showSpecialAnimated(ev);
       break;
+
+    // Мод из VPK опознан: стало известно, какое оружие он заменяет. Значит
+    // его можно посмотреть в руках — открываем вкладку вида от первого лица.
+    case 'mod_weapon': {
+      const tab = document.querySelector('.modes [data-view="fp"]');
+      if (tab) tab.hidden = !ev.ready;
+      if (ev.ready) say(`Мод заменяет ${ev.key} — можно посмотреть в руках`);
+      break;
+    }
 
     case 'skybox':
       showSkybox(ev.faces);
@@ -205,7 +219,7 @@ api.subscribe((ev) => {
     case 'failed':
       // У спец-режима есть запасной кадр: не собралась настоящая сцена —
       // показываем прежнего человечка, а не пустоту с ошибкой.
-      if (!specialSceneFailed(ev.error)) say(ev.error);
+      if (!specialSceneFailed(ev.error)) showFailure(ev);
       break;
 
     default:

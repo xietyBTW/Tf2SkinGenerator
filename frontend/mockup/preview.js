@@ -12,7 +12,7 @@
 
 import * as api from './api.js';
 import { ask } from './ask.js';
-import { stage, say, sayBusy, viewer, withViewer } from './stage.js';
+import { say, sayBusy, stage, viewer, withViewer } from './stage.js';
 import { root, work } from './layout.js';
 import { bindAlbum, goTo, SINGLE_TEX } from './album.js';
 import { modeControls, restoreBadges } from './controls.js';
@@ -236,6 +236,31 @@ export async function showModel(ev) {
   }
 }
 
+// ── Одна геометрия, много карточек ──────────────────────────────────────
+//: Меши, носящие ВЫБРАННУЮ карточку, и картинки карточек. У масок маскировки
+//: девять текстур на одну голову: какая из них на модели — решает альбом,
+//: положения прокрутки Python не знает (см. PreviewSession.card_mesh).
+let cardMesh = [];
+let cardTex = {};
+//: Материал карточки, надетой сейчас. Пусто — обычная модель.
+let cardWorn = '';
+
+/** {меш: png} для карточки, на которой стоит альбом. Пусто — красить нечего. */
+function wornCard() {
+  const png = cardTex[cardWorn];
+  if (!cardMesh.length || !png) return {};
+  return Object.fromEntries(cardMesh.map((m) => [m, png]));
+}
+
+/** Одевает модель в карточку, на которой остановился альбом. */
+export function wearCard(name) {
+  cardWorn = name || '';
+  const map = wornCard();
+  if (!Object.keys(map).length) return;
+  withViewer((w) => w.applyMaterialMap(Object.fromEntries(
+    Object.entries(map).map(([mat, png]) => [mat, api.fileUrl(png)]))));
+}
+
 /**
  * Применяет состояние показа, посчитанное Python.
  *
@@ -244,6 +269,11 @@ export async function showModel(ev) {
  * видимость кнопок команд.
  */
 export function applyView(st) {
+  // До перерисовки альбома: showMaterials пересобирает его и синхронизирует на
+  // первую карточку, а та сразу надевается на меш (wearCard из album.js).
+  cardMesh = st.card_mesh || [];
+  cardTex = st.textures || {};
+
   showMaterials(st.materials.length ? st.materials : Object.keys(st.textures),
                 st.textures, Boolean(st.style));
   showStyleBar(st);
@@ -254,7 +284,9 @@ export function applyView(st) {
   // Меши красим ПОЛНЫМ набором (st.scene): карточки отфильтрованы, а глаза и
   // зубы без текстуры остались бы серыми. Альбом при этом показывает только
   // редактируемое — как и панель приложения.
-  const entries = Object.entries(st.scene || st.textures);
+  // Выбранная карточка накрывает то, что Python положил на её меш: он о
+  // положении альбома не знает и кладёт первую попавшуюся (см. wearCard).
+  const entries = Object.entries({ ...(st.scene || st.textures), ...wornCard() });
   const single = entries.length === 1 && entries[0][0] === SINGLE_TEX;
 
   if (applySpecialTexture(st.textures)) {
@@ -682,6 +714,22 @@ export async function showFirstPerson(objPath, rig) {
  * настроек ЭТОГО материала (разрешение и формат бывают нужны свои — например
  * мелкой детали ни к чему 2048).
  */
+//: Значок настроек кадра. Раньше здесь стоял знак шестерни (U+2699): системный
+//: шрифт рисует его сплошным пятном, и рядом с интерфейсом из волосяных линий
+//: он выглядел чужим. Две дорожки с ползунками — та же толщина линии, что у
+//: рамок, и честнее по смыслу: за кнопкой параметры сборки, а не механизм.
+//: Рисуем 1:1 — единица `viewBox` равна точке экрана, а дорожки стоят на
+//: половинах (4.5, 9.5). Линия толщиной 1 ложится тогда РОВНО в пиксельный
+//: ряд; при 12 точках из шестнадцатеричной сетки она попадала между рядами и
+//: размывалась неравномерно — значок выглядел косым.
+const GEAR = `<svg viewBox="0 0 14 14" width="14" height="14" fill="none"
+                   stroke="currentColor" stroke-width="1" stroke-linecap="round"
+                   aria-hidden="true">
+                <path d="M1.5 4.5h11M1.5 9.5h11"/>
+                <circle cx="4.5" cy="4.5" r="1.75" fill="var(--surface)"/>
+                <circle cx="9.5" cy="9.5" r="1.75" fill="var(--surface)"/>
+              </svg>`;
+
 export function frameNode(name) {
   const fig = document.createElement('figure');
   fig.className = 'frame';
@@ -689,7 +737,7 @@ export function frameNode(name) {
   fig.innerHTML = `<div class="frame__img">
                      <div class="frame__tools">
                        <button class="frame__tool" type="button"
-                               title="Настройки этой текстуры">⚙</button>
+                               title="Настройки этой текстуры">${GEAR}</button>
                        <button class="frame__tool frame__off" type="button" hidden
                                title="Убрать материал из стиля">×</button>
                      </div>

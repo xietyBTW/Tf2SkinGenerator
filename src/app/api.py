@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import threading
 from typing import Dict, List, Optional
 
 from src.shared.logging_config import get_logger
@@ -130,23 +131,42 @@ def _weapon_items(tf2_class: Optional[str], weapon_type: Optional[str],
 def _character_items(tf2_class: Optional[str], lang: str) -> List[dict]:
     """Тело и руки класса. Ключ режима строится как в приложении: класс_часть."""
     from src.data.weapons import TF2_WEAPONS, get_character_parts
-    from src.domain.preview.model_key import model_key_for
 
     out: List[dict] = []
     for cls in ([tf2_class] if tf2_class else list(TF2_WEAPONS)):
         for key, name in get_character_parts(cls, lang):
-            mode = f'{cls.lower()}_{key}'
+            mode = f'{cls.lower()}_{key}'      # ключ режима как в приложении
             out.append({
                 'key': key,
                 'name': name,
                 'cls': cls,
                 'type': 'character',
                 'mode': mode,
-                # Обложка — текстура той же модели, что грузится в превью: ни
-                # тела, ни рук в рюкзаке нет.
-                'icon': model_key_for(mode) or '',
+                'icon': _character_icon(mode, cls),
             })
     return out
+
+
+def _character_icon(mode: str, cls: str) -> str:
+    """
+    Обложка карточки персонажа: у каждой части своя.
+
+    Раньше все три брали текстуру своей модели, и получалась каша: развёртка
+    класса — простыня из рукавов и лоскутов, по ней не читается ни класс, ни
+    часть. У половины классов предплечья лежат на общем листе с телом, и
+    «Руки» показывали ровно то же, что «Скин»; маски брали модель шпиона, то
+    есть опять его же.
+
+    Теперь каждая отвечает на свой вопрос: тело — ЧЕЙ (портрет класса, тот же,
+    что на странице звуков), руки — та самая текстура рук, которую карточка и
+    правит, маски — значок маскировки.
+    """
+    from src.data.player_characters import CLASS_ICON, DISGUISE_ICON, SPY_MASK_MODE_KEY
+    from src.data.player_hands import hands_icon
+
+    if mode == SPY_MASK_MODE_KEY:
+        return DISGUISE_ICON
+    return hands_icon(mode) or CLASS_ICON.format(cls.lower())
 
 
 def _search(rows: List[dict], query: str) -> List[dict]:
@@ -270,6 +290,7 @@ def controls_for(mode: str) -> Dict[str, object]:
     from src.data.player_characters import PLAYER_BODY_MODE_KEYS, SPY_MASK_MODE_KEY
     from src.data.item_kinds import kind_of
     from src.data.player_hands import HAND_MODE_KEYS
+    from src.data.simple_models import category_of_mode
     from src.data.skyboxes import SKYBOX_MODE
     from src.domain.format_choices import (
         allowed_flags_for_mode, allowed_formats_for_mode,
@@ -318,10 +339,14 @@ def controls_for(mode: str) -> Dict[str, object]:
         # эффектов смерти её нет вовсе, у неба — грани вместо неё.
         'load_model': not (is_crit or is_skybox or is_spray),
         'replace_model': not (is_crit or is_skybox or is_spray or is_body),
-        'first_person': is_normal and kind_of(mode).is_weapon,
+        # Вьюмодель есть только у оружия В РУКАХ. Снаряд, аптечка и реквизит
+        # насмешки — мировые модели: `kind_of` зовёт их оружием (pipeline тот
+        # же), но вида от первого лица у них нет, и вкладка вела в ошибку.
+        'first_person': (is_normal and kind_of(mode).is_weapon
+                         and not category_of_mode(mode)),
         # Насмешка: персонаж играет тонт с реквизитом. Есть только у самого
         # реквизита — у оружия своего тонта нет, а у шапки нет и реквизита.
-        'taunt': mode.startswith('taunt_'),
+        'taunt': category_of_mode(mode) == 'taunt',
         'misc': not (is_hands or is_spy_mask),
         'styles': not (is_spray or is_crit or is_skybox),
         # Команды и вариант зависят от загруженной модели, не от режима:
@@ -367,9 +392,12 @@ def icon_png(key: str) -> Optional[bytes]:
 
     Источников два, и порядок важен. Сначала рюкзак: это готовая иконка на
     прозрачном фоне, ровно та, что игрок видит в инвентаре. Но она есть только
-    у предметов инвентаря — у аптечек, патронов, снарядов, реквизита насмешек,
-    тел, рук и неба её нет и не будет, и карточки стояли пустыми. Для них
-    берём текстуру самой модели (у неба — грань), см. `model_icons`.
+    у предметов инвентаря — у аптечек, патронов, снарядов, реквизита насмешек
+    и неба её нет и не будет, и карточки стояли пустыми. Для них берём
+    текстуру самой модели (у неба — грань), см. `model_icons`.
+
+    Персонажи сюда не попадают: развёртка класса не говорит, чей это класс, и
+    каталог просит для них портрет (`mat/…`, см. `_character_items`).
     """
     from src.app.session import session
     from src.services import model_icons
@@ -382,6 +410,12 @@ def icon_png(key: str) -> Optional[bytes]:
     key = (key or '').replace('\\', '/').strip()
     if key.lower().startswith('skybox/'):
         return model_icons.sky_png(key[len('skybox/'):], paths['textures_vpk'])
+    # `mat/…` — прямая игровая картинка: портрет класса, значок постройки.
+    # У звука предмета может не быть вовсе, а карточка без картинки пустая.
+    if key.lower().startswith('mat/'):
+        from src.services.backpack_icons import material_png
+
+        return material_png(key[len('mat/'):], paths['textures_vpk'])
 
     icon = png_bytes(key, paths['textures_vpk'])
     if icon is not None:
@@ -400,6 +434,58 @@ def load_taunt(tf2_class: str = '', lang: str = '') -> Dict[str, object]:
 
     lang = _lang(lang)
     return session().load_taunt(tf2_class, lang=lang)
+
+
+def sounds(family: str = '', tf2_class: str = '', query: str = '',
+           section: str = '', lang: str = '') -> Dict[str, object]:
+    """Записи звукового скрипта под фильтрами страницы звуков."""
+    from src.app.session import session
+
+    return session().sounds(family, tf2_class, query, section,
+                            lang=_lang(lang))
+
+
+def sound_sections(lang: str = '') -> List[dict]:
+    """Разделы каталога звуков: оружие, реплики, игрок, мир."""
+    from src.app.session import session
+
+    return session().sound_sections(lang=_lang(lang))
+
+
+def sound_families(section: str = '', lang: str = '') -> List[dict]:
+    """Семьи событий этого раздела — для кнопок фильтра."""
+    from src.app.session import session
+
+    return session().sound_families(section, lang=_lang(lang))
+
+
+def set_sound(name: str = '', path: Optional[str] = None,
+              wave: str = '') -> Dict[str, object]:
+    """Кладёт свой файл на запись звука или на один её файл (`wave`)."""
+    from src.app.session import session
+
+    return session().set_sound(name, path, wave)
+
+
+def save_sound(name: str = '', wave: str = '') -> Dict[str, object]:
+    """Кладёт игровой звук записи (или один её файл) в папку экспорта."""
+    from src.app.session import session
+
+    return session().save_sound(name, wave)
+
+
+def build_sounds(filename: str = '') -> Dict[str, object]:
+    """Собирает VPK со всеми выбранными звуками."""
+    from src.app.session import session
+
+    return session().build_sounds(filename)
+
+
+def sound_wave(path: str) -> Optional[bytes]:
+    """Игровой звук как есть — отдаётся отдельной ручкой, не через /api/."""
+    from src.app.session import session
+
+    return session().sound_bytes(path)
 
 
 def stop_preview() -> Dict[str, object]:
@@ -836,6 +922,12 @@ def undo_parts(material: str = '') -> Dict[str, object]:
     return session().undo_parts(material)
 
 
+def redo_parts(material: str = '') -> Dict[str, object]:
+    """Возвращает вперёд отменённое изменение покраски частей."""
+    from src.app.session import session
+    return session().redo_parts(material)
+
+
 #: Что страница вправе менять. Остальное в конфиге (геометрия окна, последние
 #: флаги) относится к окну приложения и правится не отсюда.
 _SETTINGS_KEYS = (
@@ -845,6 +937,58 @@ _SETTINGS_KEYS = (
     # Раскладка окна: раньше жила кнопкой в шапке и не переживала перезапуск.
     'panels_pinned',
 )
+
+#: Мелочи раскладки, которые правят НЕ в окне настроек, а прямо на экране:
+#: край панели тянут мышью, громкость двигают ползунком. Читаются вместе с
+#: настройками, пишутся по одной (`set_ui_state`).
+#:
+#: Через конфиг, а не localStorage: страницу отдаёт локальный сервер на
+#: СЛУЧАЙНОМ порту (frontend/app.py), и origin у каждого запуска свой —
+#: браузерное хранилище не пережило бы перезапуск.
+#:
+#: Ключ → (минимум, максимум, умолчание).
+_UI_STATE = {
+    # 0 — «край не трогали». Ширину панели частиц задаёт тогда CSS, а она
+    # разная у прибитого режима (280) и у плавающего (300): подставить сюда
+    # одно число значило бы сломать один из двух.
+    'params_width': (0, 2000, 0),
+    # Доля левой половины работы в процентах; 0 — границу не трогали, поровну.
+    'split_percent': (0, 85, 0),
+    'sound_volume': (0, 100, 100),
+    # Ширина консоли; 0 — край не тянули, ширину задаёт CSS.
+    'console_width': (0, 2000, 0),
+    # Какие категории показывает консоль — битовой маской. Значения битов
+    # заданы в одном месте, frontend/mockup/log.js (BIT): Python их не
+    # толкует, ему это просто число, которое надо запомнить.
+    # Умолчание 7 — обмен + ошибки + предупреждения.
+    'console_filter': (0, 31, 7),
+}
+
+
+def _ui_value(key: str, raw: object) -> int:
+    """Число из конфига в границах ключа. Мусор и пустота — умолчание."""
+    low, high, default = _UI_STATE[key]
+    try:
+        return min(high, max(low, int(raw)))          # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default
+
+
+def set_ui_state(key: str = '', value: object = 0) -> Dict[str, object]:
+    """
+    Запоминает мелочь раскладки: ширину панели, громкость проигрывателя.
+
+    Отдельно от `set_settings`: то окно сохраняют кнопкой и целиком, а эти
+    значения меняются движением мыши. Гонять через него весь конфиг и обход
+    кэша моделей (`_cache_mb`) ради одного числа незачем.
+    """
+    from src.config.app_config import AppConfig
+
+    if key not in _UI_STATE:
+        logger.debug(f"api.set_ui_state: неизвестный ключ {key!r}")
+        return {'error': f'неизвестная настройка: {key}'}
+    AppConfig.set(key, _ui_value(key, value))
+    return {'saved': True}
 
 
 def settings(lang: str = '') -> Dict[str, object]:
@@ -884,6 +1028,10 @@ def settings(lang: str = '') -> Dict[str, object]:
     # чтение отдавало None, запись — False, и настройки «менялись» сами.
     if values.get('panels_pinned') is None:
         values['panels_pinned'] = False
+    # Мелочи раскладки правят на экране, а не здесь, но читает их страница
+    # тем же запросом: настройки внешнего вида она спрашивает один раз.
+    for key in _UI_STATE:
+        values[key] = _ui_value(key, cfg.get(key))
 
     return {
         'values': values,
@@ -902,16 +1050,207 @@ def settings(lang: str = '') -> Dict[str, object]:
              'label': t.get('bypass_vgui', 'vgui\\replay\\thumbnails\\')},
         ],
         'bypass_tip': t.get('bypass_tooltip', ''),
-        # Размер кэша декомпиляции — рядом с кнопкой очистки: «очистить»
-        # без числа не подсказывает, надо ли вообще это делать.
-        'cache_mb': _cache_mb(),
         'support_url': SUPPORT_URL,
     }
+
+
+def cache_size() -> Dict[str, object]:
+    """
+    Размер кэша декомпилированных моделей — отдельным вызовом.
+
+    Считается обходом всей папки кэша со `stat` на каждый файл: у меня 44 МБ
+    кэша давали 0.2 с, у человека с большой библиотекой это уже секунды. Пока
+    число входило в `settings()`, на него блокировалось открытие окна настроек
+    и первый запрос страницы при старте — хотя нужно оно ровно для подписи
+    рядом с кнопкой «очистить». Страница спрашивает его после отрисовки.
+    """
+    return {'cache_mb': _cache_mb()}
 
 
 #: Куда ведёт «Поддержать автора». Тот же адрес, что в окне приложения.
 SUPPORT_URL = ('https://steamcommunity.com/tradeoffer/new/'
                '?partner=394814324&token=GNGCagXk')
+
+
+# ═══════════════════════════════════════════════════════════════════════════ #
+# Журнал приложения
+# ═══════════════════════════════════════════════════════════════════════════ #
+
+
+def log_tail(since: int = 0, limit: int = 500) -> Dict[str, object]:
+    """
+    Записи журнала Python новее `since`.
+
+    Страница спрашивает это раз в секунду и ТОЛЬКО пока консоль открыта —
+    закрыта она почти всегда, так что в обычной работе стоит ноль. Через поток
+    событий воркеров лог пускать нельзя: очередь держит 500 штук и при
+    переполнении выбрасывает старые, а лог одной сборки — это сотни строк; он
+    вытеснил бы `progress` и `model_ready`, и превью бы залипло.
+
+    `dropped` в ответе — сколько записей вытеснено из кольца, пока их не
+    забирали. Молча отдать дырку нельзя: человек решит, что в этот момент
+    ничего не происходило.
+    """
+    from src.shared import log_bridge
+
+    return log_bridge.tail(int(since or 0), int(limit or 500))
+
+
+def clear_log() -> Dict[str, object]:
+    """Забывает накопленные записи. Файл журнала при этом не трогается."""
+    from src.shared import log_bridge
+
+    log_bridge.clear()
+    return {'cleared': True}
+
+
+def log_folder() -> Dict[str, object]:
+    """
+    Открывает папку с файлом журнала в проводнике.
+
+    Именно папку, а не сам .log: чем его откроет система — вопрос открытый, а
+    вот показать файл в проводнике предсказуемо. Полная история лежит там, в
+    кольце — только последние записи.
+    """
+    import os
+    import sys
+
+    from src.shared.paths import ensure_data_dir
+
+    folder = ensure_data_dir()
+    if sys.platform != 'win32':
+        return {'error': 'только Windows', 'path': str(folder)}
+    try:
+        os.startfile(str(folder))                     # noqa: S606
+    except OSError as exc:
+        logger.warning(f"не открыть папку журнала: {exc}")
+        return {'error': str(exc), 'path': str(folder)}
+    return {'opened': True, 'path': str(folder)}
+
+
+# ═══════════════════════════════════════════════════════════════════════════ #
+# Обновление приложения
+# ═══════════════════════════════════════════════════════════════════════════ #
+
+#: Ответ последней проверки. Спрашивать GitHub на каждое открытие настроек
+#: незачем: релизы выходят не чаще, чем человек перезапускает приложение.
+_update_cache: Dict[str, object] = {}
+
+
+def update_status(force: bool = False) -> Dict[str, object]:
+    """
+    Есть ли новая версия и можно ли поставить её отсюда.
+
+    Ходит в сеть (одна ссылка на GitHub API), поэтому страница зовёт это уже
+    после отрисовки, а не на старте. Ответ запоминается на сеанс; `force`
+    заставляет спросить заново — это кнопка «проверить» в настройках.
+    """
+    from src.services.update_checker import check_for_update
+
+    if force or not _update_cache:
+        _update_cache.clear()
+        _update_cache.update(check_for_update())
+    return dict(_update_cache)
+
+
+#: Ход обновления. Читается страницей опросом (`update_progress`), пишется
+#: фоновым потоком. Ключи: state (idle|downloading|launching|done|error),
+#: done, total, error, version.
+_update_run: Dict[str, object] = {'state': 'idle'}
+_update_lock = threading.Lock()
+
+#: Состояния, в которых второй запуск обновления не нужен.
+_UPDATE_BUSY = ('downloading', 'launching', 'done')
+
+
+def install_update() -> Dict[str, object]:
+    """
+    Запускает обновление и СРАЗУ возвращается.
+
+    Установщик носит приложение внутри себя (installer/*-bundle.iss), это
+    десятки мегабайт — качать их молча, пока страница ждёт ответа, нельзя.
+    Поэтому работа уходит в фоновый поток, а страница спрашивает ход дела
+    через `update_progress`.
+
+    После запуска установщика приложение обязано закрыться: Windows не даст
+    заменить его .exe и .dll, пока процесс жив.
+    """
+    with _update_lock:
+        if _update_run.get('state') in _UPDATE_BUSY:
+            return {'started': True}          # уже идёт, второй раз не надо
+
+        info = update_status()
+        if not info.get("can_install"):
+            return {'error': 'нечего устанавливать'}
+
+        _update_run.clear()
+        _update_run.update({
+            'state': 'downloading', 'done': 0,
+            'total': int(info.get('asset_size') or 0),
+            'version': info.get('version'),
+        })
+
+    threading.Thread(target=_run_update, args=(info,), daemon=True).start()
+    return {'started': True, 'version': info.get('version')}
+
+
+def update_progress() -> Dict[str, object]:
+    """Ход обновления для страницы. Опрос дешёвый — это чтение словаря."""
+    with _update_lock:
+        return dict(_update_run)
+
+
+def _run_update(info: Dict[str, object]) -> None:
+    """Скачивает, проверяет и запускает установщик. Работает в своём потоке."""
+    from src.services.update_checker import download_update, install_update as launch
+
+    def tick(done: int, total: int) -> None:
+        with _update_lock:
+            _update_run['done'] = done
+            # Content-Length надёжнее того, что записано в релизе.
+            if total:
+                _update_run['total'] = total
+
+    try:
+        setup = download_update(
+            str(info.get('asset_url') or ''),
+            expected_digest=str(info.get('asset_digest') or ''),
+            expected_size=int(info.get('asset_size') or 0),
+            progress=tick,
+        )
+        with _update_lock:
+            _update_run['state'] = 'launching'
+        launch(str(setup))
+    except Exception as exc:                                  # noqa: BLE001
+        logger.error(f"Обновление не установлено: {exc}", exc_info=True)
+        with _update_lock:
+            _update_run['state'] = 'error'
+            _update_run['error'] = str(exc)
+        return
+
+    with _update_lock:
+        _update_run['state'] = 'done'
+    _quit_soon()
+
+
+def _quit_soon(delay: float = 2.0) -> None:
+    """
+    Закрывает приложение через пару секунд.
+
+    Пауза — чтобы страница успела опросить `update_progress`, увидеть 'done' и
+    показать «закрываюсь». Опрос идёт раз в полсекунды, поэтому две.
+    Выходим через os._exit: обычный выход ждёт потоки воркеров, а установщик
+    ждать не будет, и любой задержавшийся поток означал бы занятый .exe.
+    """
+    import logging
+    import os
+    import threading
+
+    def bye() -> None:
+        logging.shutdown()
+        os._exit(0)
+
+    threading.Timer(delay, bye).start()
 
 
 def _cache_mb() -> float:
@@ -986,6 +1325,11 @@ def set_settings(values: Optional[Dict[str, object]] = None,
         else:
             cfg[key] = str(value or '').strip()
     AppConfig.save_config(cfg)
+    # «Режим отладки» теперь и правда включает DEBUG. Раньше галка управляла
+    # только сохранением временных папок сборки, а уровень был зашит в main.py
+    # как INFO — все logger.debug молчали при любом её положении.
+    from src.shared.logging_config import set_debug
+    set_debug(bool(cfg.get('debug_mode')))
     return settings(lang)
 
 

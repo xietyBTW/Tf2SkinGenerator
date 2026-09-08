@@ -26,11 +26,12 @@ from pathlib import Path
 from typing import Dict, Iterable, Iterator, Optional
 
 from src.shared.logging_config import get_logger
+from src.shared.paths import data_dir
 
 logger = get_logger(__name__)
 
 #: Рядом с export и mods: это данные пользователя, а не служебный кэш.
-WORK_DIR = Path('work')
+WORK_DIR = data_dir() / 'work'
 
 #: Версия формата. Файл от другой версии не читаем — правила «моё/производное»
 #: могут разойтись, и молча применённый чужой формат хуже потерянной работы.
@@ -384,8 +385,21 @@ def list_drafts() -> list:
 
 
 def has(key: str) -> bool:
-    """Есть ли сохранённая работа над предметом."""
+    """Лежит ли на диске файл работы. Про его содержимое — `holds_edits`."""
     return (work_dir() / key / 'edits.json').is_file()
+
+
+def holds_edits(key: str) -> bool:
+    """Есть ли в записанной работе то, что стоит предлагать вернуть.
+
+    Наличия файла мало: `edits.json` остаётся и от старых версий формата, и
+    от работы, в которой не осталось ничего, кроме настроек сборки. По нему
+    приложение всю жизнь предмета предлагало «вернуть правки», хотя в
+    текстуре человек ничего не менял. Правило то же, что у сеанса, — одно на
+    двоих, иначе они снова разъедутся.
+    """
+    from src.domain.preview.session import has_real_edits
+    return has_real_edits(load(key))
 
 
 def size_of(key: str) -> int:

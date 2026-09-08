@@ -145,12 +145,14 @@ class KeeperTests(unittest.TestCase):
         self.assertEqual(work_store.list_saved(), [])
 
     def test_asked_restore_ignores_the_switch_silent_one_obeys_it(self):
-        work_keeper.keep(_Preview({'part_tint': 0.5}), 'hat__demo')
+        work_keeper.keep(_Preview({'part_colors': {'m': {'0': '#ffffff'}}}),
+                         'hat__demo')
         empty = _Preview({})
         self.assertFalse(work_keeper.restore(empty, 'hat__demo'))
         self.assertIsNone(empty.applied)
         self.assertTrue(work_keeper.restore(empty, 'hat__demo', asked=True))
-        self.assertEqual(empty.applied.get('part_tint'), 0.5)
+        self.assertEqual(empty.applied.get('part_colors'),
+                         {'m': {'0': '#ffffff'}})
 
 
 class ForgetDraftsTests(unittest.TestCase):
@@ -168,7 +170,7 @@ class ForgetDraftsTests(unittest.TestCase):
         self.addCleanup(patcher.stop)
 
     def _work(self, key: str, kept: bool = False) -> None:
-        work_store.save(key, {'part_tint': 0.5})
+        work_store.save(key, {'part_colors': {'m': {'0': '#ffffff'}}})
         if kept:
             work_store.keep(key)
 
@@ -222,6 +224,44 @@ class ForgetDraftsTests(unittest.TestCase):
         self.assertTrue(res['reset'])
         self.assertFalse(app.preview.has_user_edits())
         self.assertFalse(work_store.has(key))
+
+
+class RealEditsTests(unittest.TestCase):
+    """Что именно делает предмет «правленым».
+
+    Признак один на сеанс и на диск: пока их было два, приложение предлагало
+    вернуть правки предмету, в котором человек ничего не менял.
+    """
+
+    def setUp(self):
+        self.tmp = TemporaryDirectory()
+        self.patch = mock.patch.object(work_store, 'WORK_DIR',
+                                       Path(self.tmp.name))
+        self.patch.start()
+        self.addCleanup(self.patch.stop)
+        self.addCleanup(self.tmp.cleanup)
+
+    def test_empty_wrappers_are_not_edits(self):
+        """Словари команд заводятся сами и пустыми доезжают до диска."""
+        from src.domain.preview.session import has_real_edits
+        self.assertFalse(has_real_edits({'textures': {'red': {}, 'blu': {}},
+                                         'part_colors': {'weapon': {}}}))
+
+    def test_build_settings_alone_are_not_edits(self):
+        """Размер и формат VTF текстуру не меняют — «вернуть» там нечего."""
+        from src.domain.preview.session import has_real_edits
+        self.assertFalse(has_real_edits(
+            {'texture_overrides': {'scattergun': {'size': [1024, 1024]}}}))
+
+    def test_a_painted_part_is_an_edit(self):
+        from src.domain.preview.session import has_real_edits
+        self.assertTrue(has_real_edits({'part_colors': {'w': {'0': '#fff'}}}))
+
+    def test_the_disk_answers_by_content_not_by_the_file(self):
+        work_store.save('hat__demo',
+                        {'texture_overrides': {'m': {'size': [512, 512]}}})
+        self.assertTrue(work_store.has('hat__demo'))       # файл есть
+        self.assertFalse(work_store.holds_edits('hat__demo'))  # работы нет
 
 
 class WorkNamesTests(unittest.TestCase):

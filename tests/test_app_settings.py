@@ -92,5 +92,58 @@ class SettingsRoundTripTests(unittest.TestCase):
             self.assertEqual(values['material_blacklist'], ['eyeball', 'teeth'])
 
 
+class UiStateTests(unittest.TestCase):
+    """Ширина панели и громкость: их правят на экране, а хранит тот же конфиг."""
+
+    def setUp(self):
+        AppConfig.invalidate_cache()
+
+    def tearDown(self):
+        AppConfig.invalidate_cache()
+
+    def _isolated(self, tmp: str) -> Path:
+        config_dir = Path(tmp) / 'config'
+        config_dir.mkdir(parents=True, exist_ok=True)
+        return config_dir / 'settings.json'
+
+    def test_round_trip_through_settings(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(AppConfig, 'CONFIG_FILE', self._isolated(tmp)):
+                api.set_ui_state('params_width', 512)
+                api.set_ui_state('sound_volume', 42)
+                values = api.settings('ru')['values']
+        self.assertEqual(values['params_width'], 512)
+        self.assertEqual(values['sound_volume'], 42)
+
+    def test_defaults_when_nothing_saved(self):
+        """0 — «край не трогали»: ширину задаёт CSS, а она разная у двух режимов."""
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(AppConfig, 'CONFIG_FILE', self._isolated(tmp)):
+                values = api.settings('ru')['values']
+        self.assertEqual(values['params_width'], 0)
+        self.assertEqual(values['split_percent'], 0)
+        self.assertEqual(values['sound_volume'], 100)
+
+    def test_values_are_clamped_and_junk_falls_back(self):
+        """Конфиг правят и руками: панель шириной в экран — не настройка."""
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(AppConfig, 'CONFIG_FILE', self._isolated(tmp)):
+                api.set_ui_state('sound_volume', 300)
+                self.assertEqual(api.settings('ru')['values']['sound_volume'], 100)
+                api.set_ui_state('sound_volume', -5)
+                self.assertEqual(api.settings('ru')['values']['sound_volume'], 0)
+                api.set_ui_state('params_width', 'абырвалг')
+                self.assertEqual(api.settings('ru')['values']['params_width'], 0)
+
+    def test_unknown_key_is_refused(self):
+        """Свой набор ключей: иначе страница писала бы в конфиг что угодно."""
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(AppConfig, 'CONFIG_FILE', self._isolated(tmp)):
+                self.assertIn('error', api.set_ui_state('window_geometry', 'взлом'))
+                # Отказ не пишет вообще ничего — файла может ещё не быть.
+                saved = AppConfig.load_config()
+        self.assertNotEqual(saved.get('window_geometry'), 'взлом')
+
+
 if __name__ == '__main__':
     unittest.main()

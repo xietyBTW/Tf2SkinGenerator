@@ -8,12 +8,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
 from src.shared.logging_config import setup_logging
 from src.shared.constants import DirectoryPaths
+from src.shared import paths
 
-# В frozen-режиме __file__ указывает внутрь _internal/ — лог пишем рядом с .exe
-if getattr(sys, 'frozen', False):
-    _log_dir = Path(sys.executable).parent
-else:
-    _log_dir = Path(os.path.dirname(os.path.abspath(__file__)))
+# Лог — к данным человека, а не в папку установки: обновление её заменяет, а
+# лог нужен как раз чтобы разобрать, что сломалось в прошлой версии.
+_log_dir = paths.ensure_data_dir()
 _log_file = _log_dir / "tf2sg.log"
 
 logger = setup_logging(
@@ -34,14 +33,14 @@ except Exception:  # диагностика не должна мешать за�
 
 def _cleanup_stale_temp() -> None:
     """
-    Удаляет старые папки build_* из tools/temp при старте приложения.
+    Удаляет старые папки build_* из папки временных файлов при старте.
 
     Эти папки остаются после прерванных или упавших сборок.
     Активная сборка создаёт папку только во время работы, поэтому
     при старте все build_* можно безопасно удалять.
     """
     import shutil
-    temp_dir = Path("tools/temp")
+    temp_dir = Path(DirectoryPaths.BASE_TEMP_DIR)
     if not temp_dir.exists():
         return
     removed = 0
@@ -60,6 +59,19 @@ def main():
     logger.info("Запуск TF2 Skin Generator")
 
     try:
+        # Мьютекс держим до конца процесса: по нему установщик понимает, что
+        # приложение запущено (AppMutex в installer/*.iss), и не пытается
+        # заменить занятые файлы. Он же не даёт запустить второй экземпляр —
+        # два процесса поверх одних config/ и work/ затирали бы друг друга.
+        from src.shared.single_instance import acquire_single_instance
+        if not acquire_single_instance():
+            logger.info("Приложение уже запущено — выходим")
+            return
+
+        # Данные прежних версий лежали рядом с .exe. Переносим один раз, до
+        # первого обращения к config/ и work/.
+        paths.migrate_legacy_data()
+
         DirectoryPaths.ensure_exists()
         _cleanup_stale_temp()
 

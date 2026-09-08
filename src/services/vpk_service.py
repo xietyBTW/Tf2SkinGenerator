@@ -32,6 +32,7 @@ from src.shared.logging_config import get_logger
 from src.shared.constants import DirectoryPaths, EXTRA_TEX_USE_GAME_ORIGINAL
 from src.shared.file_utils import ensure_directory_exists, copy_file_safe
 from src.shared.validators import validate_build_params
+from src.shared.paths import data_dir
 
 logger = get_logger(__name__)
 
@@ -322,7 +323,7 @@ class VPKService:
 
         # Чистим временные папки редактора VMT (мусор от достанных из игры VMT).
         VPKService._purge_dir_contents(DirectoryPaths.TEMP_VMT_EXTRACT_DIR, "temp_vmt_extract")
-        VPKService._purge_dir_contents(Path("tools/backupVMT"), "backupVMT")
+        VPKService._purge_dir_contents(data_dir() / "tools/backupVMT", "backupVMT")
 
         ctx.cleanup(on_error=False, keep_on_error=False, debug_mode=debug_mode)
 

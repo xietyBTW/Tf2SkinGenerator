@@ -17,12 +17,13 @@ from pathlib import Path
 from typing import Dict, Optional
 
 from src.shared.logging_config import get_logger
+from src.shared.paths import data_dir
 
 logger = get_logger(__name__)
 
 #: Готовые PNG между запусками. Декодирование VTF стоит ~12 мс на иконку —
 #: на второй запуск это заметная разница при трёхстах карточках на экране.
-_CACHE_DIR = Path("cache") / "icons"
+_CACHE_DIR = data_dir() / "cache" / "icons"
 
 _index: Optional[Dict[str, str]] = None
 
@@ -80,6 +81,21 @@ def vpk_path_for(key: str, textures_vpk: str) -> Optional[str]:
     return None
 
 
+def material_png(rel: str, textures_vpk: str) -> Optional[bytes]:
+    """PNG любой игровой картинки по пути внутри `materials/`, без расширения.
+
+    Нужна не рюкзаку, а каталогу звуков: у реплики нет предмета, зато есть
+    класс, а у класса есть портрет (`vgui/class_portraits/scout`). Индекс
+    рюкзака сюда не годится — он собран только по `materials/backpack/`.
+    """
+    rel = (rel or '').replace(chr(92), '/').strip().strip('/').lower()
+    if not rel or '..' in rel.split('/'):
+        return None
+    path = f"materials/{rel}.vtf"
+    cached = _CACHE_DIR / (rel.replace('/', '_') + '.png')
+    return _decode(path, cached, textures_vpk)
+
+
 def png_bytes(key: str, textures_vpk: str) -> Optional[bytes]:
     """PNG иконки предмета, либо None если её в игре нет."""
     path = vpk_path_for(key, textures_vpk)
@@ -87,6 +103,11 @@ def png_bytes(key: str, textures_vpk: str) -> Optional[bytes]:
         return None
 
     cached = _CACHE_DIR / (path[len("materials/backpack/"):].replace("/", "_")[:-4] + ".png")
+    return _decode(path, cached, textures_vpk)
+
+
+def _decode(path: str, cached: Path, textures_vpk: str) -> Optional[bytes]:
+    """VTF из игрового архива в PNG, с оглядкой на уже разобранное."""
     if cached.exists():
         return cached.read_bytes()
 

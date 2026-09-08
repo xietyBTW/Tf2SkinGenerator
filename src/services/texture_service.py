@@ -151,12 +151,10 @@ class TextureService:
     def process_image(input_path: str, output_path: str, size: Tuple[int, int]) -> None:
         if not os.path.exists(input_path):
             raise FileNotFoundError(f"Изображение не найдено: {input_path}")
-        img = Image.open(input_path)
-        has_alpha = img.mode in ('RGBA', 'LA') or 'transparency' in img.info
-        if has_alpha:
-            img = img.convert("RGBA").resize(size)
-        else:
-            img = img.convert("RGB").resize(size)
+        with Image.open(input_path) as src:
+            has_alpha = src.mode in ('RGBA', 'LA') or 'transparency' in src.info
+            mode = "RGBA" if has_alpha else "RGB"
+            img = src.convert(mode).resize(size)
         img.save(output_path)
 
     @staticmethod

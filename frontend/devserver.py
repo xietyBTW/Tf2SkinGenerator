@@ -27,6 +27,7 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT.parent))
 
 from src.app import api  # noqa: E402  — после правки sys.path
+from src.shared.paths import data_dir  # noqa: E402
 
 STATIC = ROOT / "mockup"
 
@@ -39,16 +40,60 @@ SEP = bytes([10, 10])
 
 #: Откуда разрешено отдавать файлы: временные папки воркеров и рабочие
 #: каталоги проекта. Всё остальное — 403.
+#:
+#: Корни берём у src/shared/paths, а не от расположения этого файла: в
+#: собранном приложении данные человека лежат в %LOCALAPPDATA%, а не рядом с
+#: кодом, и жёсткое ROOT.parent отдавало бы 403 на собственные же файлы.
 _FILE_ROOTS = [
     Path(tempfile.gettempdir()).resolve(),
-    (ROOT.parent / "tools").resolve(),
-    (ROOT.parent / "export").resolve(),
+    (data_dir() / "tools").resolve(),
+    (data_dir() / "export").resolve(),
     # Библиотека чужих модов и их обложки.
-    (ROOT.parent / "mods").resolve(),
+    (data_dir() / "mods").resolve(),
     # Сохранённые правки человека: work/<ключ предмета>/files. Без этого корня
     # восстановленная текстура отдаётся 403 и карточка в альбоме битая.
-    (ROOT.parent / "work").resolve(),
+    (data_dir() / "work").resolve(),
 ]
+
+
+#: Разрешать ли чужому источнику читать ответы (`Access-Control-Allow-Origin`).
+#: Включается ТОЛЬКО когда этот модуль запущен сам по себе как dev-сервер —
+#: тогда макет открывают и с file://, и с другого порта, и это удобство.
+#:
+#: В приложении сервер тот же самый (frontend/app.py поднимает этот Handler и
+#: грузит страницу по http://127.0.0.1:<порт>), но там `*` означал бы, что
+#: любая открытая в браузере страница может перебрать порты, вызвать `build`
+#: или `set_settings` и ПРОЧИТАТЬ ответ. Случайный порт — не защита.
+DEV_CORS = False
+
+
+def _same_origin(handler) -> bool:
+    """
+    Запрос пришёл от нашей же страницы?
+
+    Две независимые проверки, обе — стандартные заголовки браузера:
+
+      Origin           межисточниковый запрос обязан его прислать; свой шлёт
+                       ровно наш адрес. Отсутствует — значит это не браузерный
+                       кросс-запрос (навигация, <img> со своей же страницы,
+                       SSE, curl).
+      Sec-Fetch-Site   Chromium (а с ним WebView2 и Edge) шлёт его ВСЕГДА, в
+                       том числе на простые POST с text/plain и на загрузку
+                       картинок — то есть закрывает как раз те случаи, где
+                       Origin может не появиться.
+
+    Не-браузерный клиент на этой же машине сюда всё ещё дойдёт. Это осознанно:
+    процесс, запущенный от того же пользователя, и так читает config напрямую,
+    и токен в заголовке от него бы не спас.
+    """
+    site = handler.headers.get("Sec-Fetch-Site")
+    if site is not None and site not in ("same-origin", "none"):
+        return False
+    origin = handler.headers.get("Origin")
+    if origin is None:
+        return True
+    host = handler.headers.get("Host", "")
+    return origin in (f"http://{host}", f"https://{host}")
 
 
 def _drop_alpha(path: Path) -> bytes:
@@ -163,17 +208,32 @@ ALLOWED = {
     "clear_parts": api.clear_parts,
     "set_part_edge": api.set_part_edge,
     "undo_parts": api.undo_parts,
+    "redo_parts": api.redo_parts,
     "vmt_params": api.vmt_params,
     "mod_library": api.mod_library,
     "add_mod": api.add_mod,
     "mod_icon": api.mod_icon,
+    "sounds": api.sounds,
+    "sound_families": api.sound_families,
+    "sound_sections": api.sound_sections,
+    "set_sound": api.set_sound,
+    "save_sound": api.save_sound,
+    "build_sounds": api.build_sounds,
     "remove_mod": api.remove_mod,
     "load_vpk_mod": api.load_vpk_mod,
     "diagnose": api.diagnose,
     "settings": api.settings,
+    "cache_size": api.cache_size,
+    "update_status": api.update_status,
+    "install_update": api.install_update,
+    "update_progress": api.update_progress,
+    "log_tail": api.log_tail,
+    "clear_log": api.clear_log,
+    "log_folder": api.log_folder,
     "clear_model_cache": api.clear_model_cache,
     "vmt_snippets": api.vmt_snippets,
     "set_settings": api.set_settings,
+    "set_ui_state": api.set_ui_state,
     "load_custom_model": api.load_custom_model,
     "drop_custom_model": api.drop_custom_model,
     "qc_text": api.qc_text,
@@ -205,6 +265,13 @@ class Handler(SimpleHTTPRequestHandler):
         super().__init__(*args, directory=str(STATIC), **kwargs)
 
     def do_GET(self) -> None:  # noqa: N802 — имя задано базовым классом
+        # Свои файлы страницы не кэшируем (см. end_headers), игровые — да.
+        # Флаг живёт на запрос: обработчик один на всё соединение, и значение
+        # с прошлого запроса приезжало в следующий.
+        self._no_store = True
+        if not _same_origin(self):
+            self.send_error(403, "cross-origin request")
+            return
         if self.path == "/events":
             self._events()
             return
@@ -212,7 +279,12 @@ class Handler(SimpleHTTPRequestHandler):
             self._file()
             return
         if self.path.startswith("/icon?"):
+            self._no_store = False
             self._icon()
+            return
+        if self.path.startswith("/sound?"):
+            self._no_store = False
+            self._sound()
             return
         # Вьювер и его модули лежат в приложении и отдаются как есть: это тот
         # же viewer3d.html, что работает в окне, — второй копии быть не должно.
@@ -283,6 +355,47 @@ class Handler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def _sound(self) -> None:
+        """
+        Игровой звук прямо из VPK — странице его проигрывать.
+
+        Отдельная ручка по той же причине, что и у иконки: ответ не JSON, а
+        файл, и отдавать его через /api/ значило бы гонять сотни килобайт в
+        base64.
+        """
+        from urllib.parse import parse_qs, unquote, urlparse
+
+        wave = unquote(parse_qs(urlparse(self.path).query).get("wave", [""])[0])
+        try:
+            data = api.sound_wave(wave)
+        except Exception as exc:                      # noqa: BLE001
+            self.log_message("sound %s: %s", wave, exc)
+            data = None
+        if not data:
+            self.send_error(404)
+            return
+        kind = "audio/mpeg" if wave.lower().endswith(".mp3") else "audio/wav"
+        # Перемотка в <audio> требует байтовых диапазонов: без них Chrome
+        # считает поток неперематываемым, и ползунок возвращается на место.
+        rng = self.headers.get("Range", "")
+        partial = rng.startswith("bytes=")
+        head, _, tail = rng[len("bytes="):].partition("-") if partial else ("", "", "")
+        start = int(head) if head.isdigit() else 0
+        end = int(tail) if tail.isdigit() else len(data) - 1
+        start, end = min(start, len(data) - 1), min(end, len(data) - 1)
+        body = data[start:end + 1]
+
+        self.send_response(206 if partial else 200)
+        self.send_header("Content-Type", kind)
+        self.send_header("Accept-Ranges", "bytes")
+        if partial:
+            self.send_header("Content-Range",
+                             f"bytes {start}-{end}/{len(data)}")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "max-age=3600")
+        self.end_headers()
+        self.wfile.write(body)
+
     def _events(self) -> None:
         """
         Поток событий воркеров (Server-Sent Events).
@@ -320,6 +433,13 @@ class Handler(SimpleHTTPRequestHandler):
             app.unsubscribe(mine)
 
     def do_POST(self) -> None:  # noqa: N802 — имя задано базовым классом
+        # Чужая страница не должна вызывать ни `build`, ни `set_settings`, ни
+        # загрузку файла. Проверка — самая первая: у POST есть побочный эффект,
+        # и его нельзя выполнить «сначала, а отказать потом».
+        if not _same_origin(self):
+            self.send_error(403, "cross-origin request")
+            return
+
         # Загрузка файла идёт своим путём — проверять её ДО отсечки по /api/,
         # иначе запрос отвергается раньше, чем доходит до обработчика.
         if self.path.startswith("/upload"):
@@ -378,13 +498,20 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         # Макет открывают и с file://, и с другого порта — на dev-сервере это
-        # не риск, а удобство.
-        self.send_header("Access-Control-Allow-Origin", "*")
+        # не риск, а удобство. В приложении сервер тот же самый, и там `*`
+        # означал бы, что чужая страница ЧИТАЕТ наши ответы (см. DEV_CORS).
+        if DEV_CORS:
+            self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.wfile.write(body)
 
     def end_headers(self) -> None:
         # Иначе браузер закэширует правленый CSS и покажет вчерашний макет.
+        # Картинки и звуки — исключение: они из игры и не меняются, свой срок
+        # жизни ставят сами, и второй, противоречащий заголовок им ни к чему.
+        if not getattr(self, "_no_store", True):
+            super().end_headers()
+            return
         self.send_header("Cache-Control", "no-store")
         super().end_headers()
 
@@ -396,6 +523,20 @@ class Handler(SimpleHTTPRequestHandler):
 
 
 def main() -> None:
+    global DEV_CORS
+    # Логирование как в приложении. Без этого у логгера уровень унаследованный
+    # (WARNING), и консоль на странице оставалась пустой: INFO-записи гасились
+    # ДО того, как их видел кольцевой буфер. Плюс так dev-запуск и настоящий
+    # ведут себя одинаково — расхождение здесь ловится позже всего.
+    from src.shared.logging_config import setup_logging
+    from src.shared.paths import ensure_data_dir
+
+    setup_logging(log_file=ensure_data_dir() / "tf2sg.log")
+
+    # Запуск руками — это и есть разработка: разрешаем чужому источнику читать
+    # ответы. Приложение (frontend/app.py) поднимает Handler само и сюда не
+    # заходит, поэтому там остаётся закрыто.
+    DEV_CORS = True
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 5173
     server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     print(f"макет: http://127.0.0.1:{port}   (API: POST /api/<метод>)")

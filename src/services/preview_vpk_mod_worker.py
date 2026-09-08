@@ -86,6 +86,10 @@ class PreviewVpkModWorker(BaseWorker):
     cards_ready = Signal(object)      # [card_dict] — 2D-карточки всех текстур мода
     materials_ready = Signal(object)  # [material_name] — имена материалов модели (для наложения по мешам)
     skins_ready = Signal(object)      # skin_info — стили модели (skinfamilies) из QC
+    #: (ключ оружия, reference SMD мода) — что именно мод заменяет. По этому
+    #: приложение показывает мод в руках: скелет и анимации берутся у игрового
+    #: оружия, геометрия — из мода.
+    weapon_found = Signal(str, str)
     failed    = Signal(str)
     progress  = Signal(str)
 
@@ -278,6 +282,16 @@ class PreviewVpkModWorker(BaseWorker):
 
             first_tex = frame_paths[0] if frame_paths else ""
             self.ready.emit(obj_path, first_tex)
+
+            # Что мод заменяет и чем. Без reference SMD показать его в руках
+            # нечем: анимацию играет скелет ИГРОВОГО оружия, а меш берётся
+            # отсюда (см. ViewmodelPreviewWorker._weapon_smd).
+            if weapon_key:
+                from src.services import smd_service
+
+                ref = (smd_service.find_reference_smd(decomp_dir, weapon_key)
+                       if decomp_dir else '')
+                self.weapon_found.emit(weapon_key, ref or '')
 
             # Имена материалов модели → панель наложит текстуры мода по мешам.
             if self._model_materials:

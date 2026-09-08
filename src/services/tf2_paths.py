@@ -4,12 +4,14 @@
 
 import os
 from typing import Tuple, Optional
+from src.shared.paths import install_dir
 
 
 class TF2Paths:
     """Класс для разрешения путей TF2"""
     
-    CROWBAR_PATH = "tools/crowbar/CrowbarCommandLineDecomp.exe"
+    #: Бандл рядом с .exe — только чтение (см. src/shared/paths.py).
+    CROWBAR_PATH = str(install_dir() / "tools/crowbar/CrowbarCommandLineDecomp.exe")
     
     @staticmethod
     def resolve(tf2_root_dir: str) -> Tuple[str, str, str]:

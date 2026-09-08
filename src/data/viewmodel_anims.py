@@ -32,6 +32,7 @@ from typing import Dict, Optional, Tuple
 from src.data import items_game_kv
 from src.data.weapon_model_index import get_items_game_path
 from src.shared.logging_config import get_logger
+from src.shared.paths import data_dir
 
 logger = get_logger(__name__)
 
@@ -84,7 +85,7 @@ _ACT_PAIR_RE = _compile(r'"(ACT_[A-Z0-9_]+)"\s+"(ACT_[A-Z0-9_]+)"', IGNORECASE)
 #: Любой путь до .mdl внутри вложенного блока.
 _MODEL_PATH_RE = _compile(r'"([^"]+\.mdl)"', IGNORECASE)
 
-_CACHE_FILE = Path("cache") / "weapon_anim_slots.json"
+_CACHE_FILE = data_dir() / "cache" / "weapon_anim_slots.json"
 
 #: Версия формата кэша. Растёт, когда в записи добавляется поле: старый файл
 #: тогда не «почти подходит», а просто разбирается заново.
