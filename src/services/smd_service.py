@@ -20,6 +20,35 @@ NON_REFERENCE_SMD_KEYWORDS: Tuple[str, ...] = ("physics", "phys", "anim", "idle"
 _LOD_MARKER = "lod"
 
 
+def triangle_count(path: str) -> int:
+    """
+    Сколько треугольников в SMD.
+
+    Нужно там, где по имени файла не понять, есть ли в нём геометрия вообще:
+    у пиромана Crowbar оставил в нулевом уровне детализации четыре
+    треугольника, а всё тело положил в `*_lod6.smd`.
+
+    Считаем строки с ИМЕНЕМ МАТЕРИАЛА внутри секции `triangles`: их ровно
+    столько, сколько треугольников (за каждой идут три строки вершин, а те
+    начинаются с номера кости).
+    """
+    found = 0
+    inside = False
+    try:
+        with open(path, encoding='utf-8', errors='replace') as f:
+            for line in f:
+                text = line.strip()
+                if text == 'triangles':
+                    inside = True
+                elif text == 'end':
+                    inside = False
+                elif inside and text and not (text[0].isdigit() or text[0] == '-'):
+                    found += 1
+    except OSError:
+        return 0
+    return found
+
+
 def find_reference_smd(directory: str, prefer: str = "") -> Optional[str]:
     """
     Видимый меш модели среди декомпилированных SMD.

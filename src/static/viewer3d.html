@@ -1699,16 +1699,20 @@ document.addEventListener('dragleave', () => {
   }
 });
 
+// Подсвечиваем КУСОК под курсором, если части уже разобраны: обещать подсветкой
+// целый меш там, где картинка ляжет на одну часть, — врать про результат.
+function _hoverDrag(ndc) {
+  if (_dragDepth <= 0) return;
+  const overPart = _partsMap ? _partAt(ndc) : null;
+  if (overPart) { _clearDragHover(); _setPartHover(overPart); }
+  else if (!_partsMode) _setDragHover(_hitEditableMeshAt(ndc));
+}
+
 document.addEventListener('dragover', e => {
   e.preventDefault();
   e.dataTransfer.dropEffect = 'copy';
   if (_dragDepth <= 0) return;
-  // Подсвечиваем КУСОК под курсором, если части уже разобраны: обещать
-  // подсветкой целый меш там, где картинка ляжет на одну часть, — врать про
-  // результат.
-  const overPart = _partsMap ? _partAt(_ndcFromEvent(e)) : null;
-  if (overPart) { _clearDragHover(); _setPartHover(overPart); }
-  else if (!_partsMode) _setDragHover(_hitEditableMeshAt(_ndcFromEvent(e)));
+  _queueHover(e, _hoverDrag);
 });
 
 document.addEventListener('drop', e => {
@@ -1838,9 +1842,66 @@ window.setModelParts = function(map) {
 
 window.setPartsMode = function(on) {
   _partsMode = !!on;
-  document.getElementById('canvas-container').classList.toggle('inspecting', _partsMode);
-  if (!_partsMode) _clearPartHover();
+  // Класс `inspecting` (знак вопроса) здесь больше не ставится: он принадлежит
+  // инспектору материалов и обещал справку, тогда как щелчок красил. Чем
+  // работают, показывает курсор инструмента — см. setPartsTool.
+  if (!_partsMode) { _clearPartHover(); window.setPartsTool(''); }
 };
+
+// ── Инструмент частей: курсор и пипетка ─────────────────────────────────────
+//
+// Вьювер про инструменты ничего не решает — он получает готовое значение CSS
+// (рисунки значков живут на странице, второй их копии здесь быть не должно) и
+// одно имя, потому что от имени зависит ответ на щелчок.
+let _partsTool = '';
+
+window.setPartsTool = function(name, cursor) {
+  _partsTool = name || '';
+  document.getElementById('canvas-container').style.cursor = cursor || '';
+  // Подсветка куска закрашивает ровно то, с чего пипетка берёт цвет: под
+  // оранжевой плёнкой не видно, во что целятся, и взятый цвет оказывался
+  // неожиданным. Поэтому при пипетке её нет вовсе — ни в 3D, ни разметкой на
+  // кадре (её рисует страница по onPartHover, а его теперь не будет).
+  if (_partsTool === 'pick') _clearPartHover();
+};
+
+/**
+ * Цвет ТЕКСТУРЫ под курсором — «#rrggbb» или пустая строка.
+ *
+ * Из текстуры, а не с экрана: на экране цвет уже перемешан со светом и тенью,
+ * и взятая с него краска на модели выходит темнее выбранной. Заодно ответ
+ * совпадает с пипеткой по кадру на странице — она берёт из той же картинки.
+ */
+function _texelAt(ndc) {
+  const hit = _hitsAt(ndc)[0];
+  if (!hit || !hit.uv) return '';
+  const mat = hit.object.material;
+  const img = (mat && !Array.isArray(mat) && mat.map) ? mat.map.image : null;
+  const w = img && (img.naturalWidth || img.width);
+  const h = img && (img.naturalHeight || img.height);
+  if (!w || !h) return '';
+  // Развёртка выходит за 0..1 (wrapS/wrapT = Repeat) — берём ту же клетку,
+  // которую показывает игра.
+  const frac = (v) => v - Math.floor(v);
+  // flipY у текстур three.js включён по умолчанию: v = 0 — это НИЗ картинки.
+  const x = Math.min(w - 1, Math.floor(frac(hit.uv.x) * w));
+  const y = Math.min(h - 1, Math.floor((1 - frac(hit.uv.y)) * h));
+  try {
+    const cell = document.createElement('canvas');
+    cell.width = 1;
+    cell.height = 1;
+    const ctx = cell.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(img, x, y, 1, 1, 0, 0, 1, 1);
+    const px = ctx.getImageData(0, 0, 1, 1).data;
+    return '#' + [px[0], px[1], px[2]]
+      .map(v => v.toString(16).padStart(2, '0')).join('');
+  } catch (err) {
+    // Картинка с чужого адреса закрывает канвас на чтение: у нас все свои, но
+    // молча отдать чёрный цвет хуже, чем не отдать ничего.
+    console.warn('[3D viewer] пипетка: не прочитать текстуру:', err);
+    return '';
+  }
+}
 
 // Номера частей для меша. Имя материала — единственная связь с разбором из
 // Python; у одноматериальной модели связывать нечего, берём единственный набор.
@@ -1897,30 +1958,58 @@ function _partOverlay(mesh, list, part) {
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position',
     new THREE.BufferAttribute(new Float32Array(keep), 3));
+  // Подсветка лежит РОВНО на треугольниках части, то есть копланарна модели.
+  // Со сдвигом только по фактору (-2, units 0) она выигрывала глубину не
+  // везде: у шпиона от подсветки тела оставались пятна на кистях и полоски
+  // по бокам ног — остальное съедал z-fighting. Сдвиг по обоим слагаемым
+  // убирает это, а перекрытие остаётся честным: часть с обратной стороны
+  // модели сквозь неё не светит.
   const overlay = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({
-    color: 0xffb347, transparent: true, opacity: 0.45,
-    depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2,
+    color: 0xffb347, transparent: true, opacity: 0.55,
+    // С ОБЕИХ сторон: у одежды часть треугольников намотана «изнанкой»
+    // наружу, сама модель их показывает (её материал двусторонний), а
+    // односторонняя подсветка их отбрасывала — у шпиона от подсветки тела
+    // оставались кисти и полоски по ногам, а пиджак не подсвечивался вовсе.
+    side: THREE.DoubleSide,
+    depthWrite: false, polygonOffset: true,
+    polygonOffsetFactor: -4, polygonOffsetUnits: -8,
   }));
   overlay.renderOrder = 999;
+  // Луч сквозь подсветку проходит насквозь. Она лежит РОВНО на треугольниках
+  // части, и без этого попадала бы в пересечения наравне с самой моделью: её
+  // faceIndex — номер в её собственной геометрии, и часть по нему выходила бы
+  // чужая. Заодно это снимает половину работы луча в режиме частей.
+  overlay.raycast = () => {};
   mesh.add(overlay);            // геометрия в локальных координатах меша
   return overlay;
 }
 
 // Меш, для которого у нас есть разбор на части. Ищем обходом сцены: имя
 // материала — единственная связь с разбором, а мешей в кадре бывает несколько.
-function _meshWithParts() {
-  let found = null;
+//
+// Имя материала обязательно, когда их несколько: у шпиона голова и тело — это
+// РАЗНЫЕ материалы со своими развёртками, и «первый попавшийся меш с картой»
+// подсвечивал голову там, где страница просила часть тела.
+function _meshWithParts(material) {
+  let named = null;
+  let any = null;
   if (currentModel) {
     currentModel.traverse(obj => {
-      if (!found && obj.isMesh && _partListFor(obj)) found = obj;
+      if (!obj.isMesh || !_partListFor(obj)) return;
+      if (!any) any = obj;
+      const name = (obj.material || {}).name || '';
+      if (!named && material && name === material) named = obj;
     });
   }
-  return found;
+  // Без совпадения по имени — первый меш с картой: у одноматериальной модели
+  // карта лежит под служебным ключом, и материал ей не назвать.
+  return named || any;
 }
 
 // Подсветка части по номеру — для наведения на список частей на странице.
-window.highlightPart = function(part) {
-  const mesh = (part === null || part === undefined) ? null : _meshWithParts();
+window.highlightPart = function(part, material) {
+  const mesh = (part === null || part === undefined)
+    ? null : _meshWithParts(material);
   if (!mesh) { _clearPartHover(); return; }
   _setPartHover({ mesh, part,
                   material: (mesh.material || {}).name || '' });
@@ -1930,10 +2019,12 @@ function _setPartHover(found) {
   if (_partHover && found && _partHover.mesh === found.mesh
       && _partHover.part === found.part) return;
   _clearPartHover();
-  // О наведении сообщаем наружу: страница подсвечивает тот же кусок на
-  // развёртке и в списке частей.
+  // О наведении сообщаем наружу вместе с ИМЕНЕМ МАТЕРИАЛА: у модели их
+  // бывает несколько (у шпиона голова и тело), развёртка у каждого своя, и без
+  // имени страница рисовала разметку на первой попавшейся текстуре.
   if (typeof window.onPartHover === 'function') {
-    window.onPartHover(found ? found.part : null);
+    window.onPartHover(found ? found.part : null,
+                       found ? found.material : '');
   }
   if (!found) return;
   const list = found.list || _partListFor(found.mesh);
@@ -1950,8 +2041,35 @@ function _clearPartHover() {
   _partHover = null;
 }
 
+// Наведение считаем не чаще раза в кадр. mousemove и dragover приходят сотнями
+// в секунду, а каждый ответ — это луч через всю геометрию плюс
+// getBoundingClientRect, то есть принудительный пересчёт раскладки. Подсветке
+// кадра достаточно: чаще её всё равно не видно.
+let _hoverPos = null;   // положение курсора из последнего события
+let _hoverAct = null;   // что сделать с ним в начале кадра
+function _queueHover(e, act) {
+  _hoverPos = { clientX: e.clientX, clientY: e.clientY };
+  const queued = _hoverAct !== null;
+  _hoverAct = act;
+  if (queued) return;
+  requestAnimationFrame(() => {
+    const run = _hoverAct;
+    _hoverAct = null;
+    run(_ndcFromEvent(_hoverPos));
+  });
+}
+
+function _hoverParts(ndc) {
+  // Пока берут цвет, подсветки нет: она закрашивает ровно тот пиксель, на
+  // который целятся. Это и выбранная пипетка, и Alt при кисти — там подсветка
+  // успела бы мигнуть на время протяжки.
+  if (_partsMode && _partsTool !== 'pick' && !_pickDrag) {
+    _setPartHover(_partAt(ndc));
+  }
+}
+
 renderer.domElement.addEventListener('mousemove', e => {
-  if (_partsMode) _setPartHover(_partAt(_ndcFromEvent(e)));
+  if (_partsMode) _queueHover(e, _hoverParts);
 });
 
 // Клик по части. Вращение камеры — тоже зажатая кнопка, поэтому выбором
@@ -1973,6 +2091,81 @@ renderer.domElement.addEventListener('pointerup', e => {
   if (found && typeof window.onPartPicked === 'function') {
     window.onPartPicked(found.material, found.part);
   }
+});
+
+/**
+ * Пипетка: цвет видно, пока кнопку держат, и он берётся там, где отпустили.
+ *
+ * Так это работает в редакторах изображений, и иначе не получается вовсе:
+ * попасть в нужный пиксель модели с первого щелчка нельзя — её крутят и
+ * приближают, и один пиксель текстуры бывает меньше точки экрана.
+ *
+ * Слушаем на КОНТЕЙНЕРЕ и в фазе перехвата, а событие дальше не пускаем: под
+ * ним и OrbitControls (иначе протяжка пипеткой крутила бы камеру), и выбор
+ * части (иначе тот же щелчок ещё и красил бы). Гасить `controls.enabled` для
+ * этого нельзя: выключённый OrbitControls не убирает у себя отпущенный
+ * указатель, и следующая протяжка после пипетки считалась бы вторым пальцем.
+ *
+ * Alt при кисти делает то же самое «на минуту» — как в редакторах
+ * изображений. Смотрим на сам щелчок, а не на нажатие клавиши: Alt приходит в
+ * тот документ, у которого фокус, а курсор ходит между страницей и вьювером
+ * независимо от него.
+ */
+let _pickDrag = false;
+
+//: Берут ли этим щелчком цвет. Решает НАЧАЛО протяжки: Alt, отпущенный по
+//: дороге, её не обрывает — рука уже ведёт пипетку.
+function _sampling(e) {
+  return _partsMode
+    && (_partsTool === 'pick' || (e.altKey && _partsTool === 'brush'));
+}
+
+function _tellSample(hex, e) {
+  if (typeof window.onColorSample === 'function') {
+    window.onColorSample(hex, e ? e.clientX : 0, e ? e.clientY : 0);
+  }
+}
+
+(function bindPickDrag() {
+  const box = document.getElementById('canvas-container');
+
+  box.addEventListener('pointerdown', e => {
+    if (!_sampling(e)) return;
+    e.stopPropagation();
+    e.preventDefault();
+    _pickDrag = true;
+    box.setPointerCapture(e.pointerId);
+    _clearPartHover();     // подсветка от кисти закрыла бы то, с чего берут цвет
+    _tellSample(_texelAt(_ndcFromEvent(e)), e);
+  }, true);
+
+  box.addEventListener('pointermove', e => {
+    if (!_pickDrag) return;
+    e.stopPropagation();
+    _tellSample(_texelAt(_ndcFromEvent(e)), e);
+  }, true);
+
+  const finish = (e, take) => {
+    if (!_pickDrag) return;
+    e.stopPropagation();
+    _pickDrag = false;
+    if (box.hasPointerCapture(e.pointerId)) box.releasePointerCapture(e.pointerId);
+    const hex = take ? _texelAt(_ndcFromEvent(e)) : '';
+    _tellSample('', null);
+    if (hex && typeof window.onColorPicked === 'function') window.onColorPicked(hex);
+  };
+
+  box.addEventListener('pointerup', e => finish(e, true), true);
+  box.addEventListener('pointercancel', e => finish(e, false), true);
+})();
+
+// Клавиши отмены принадлежат СТРАНИЦЕ, а фокус после щелчка по модели
+// достаётся iframe — и Ctrl+Z, обещанный подсказкой режима частей, молча не
+// работал, пока не щёлкнешь мимо кадра. Своей обработки не заводим: история
+// покраски живёт на странице, здесь только передача нажатия.
+window.addEventListener('keydown', e => {
+  if (!(e.ctrlKey || e.metaKey)) return;
+  if (typeof window.onPartsKey === 'function') window.onPartsKey(e);
 });
 
 // ── Инспекция материала/текстуры (кнопка «?») ──────────────────────────────── //

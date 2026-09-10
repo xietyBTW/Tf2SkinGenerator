@@ -152,6 +152,17 @@ class ControlsTests(unittest.TestCase):
         self.assertTrue(api.controls_for('c_scattergun')['replace_model'])
         self.assertFalse(api.controls_for('scout_body')['replace_model'])
 
+    def test_parts_offered_wherever_there_is_geometry(self):
+        """Деление на части — про геометрию, а не про подмену модели.
+
+        Кнопка ходила за `replace_model` и вместе с ним пропадала у тел
+        классов, хотя куски у них есть и красить их по одному хочется даже
+        чаще, чем у оружия."""
+        for mode in ('c_scattergun', 'hat', 'scout_body', 'scout_hands'):
+            self.assertTrue(api.controls_for(mode)['split_parts'], mode)
+        for mode in ('spray', 'skybox', 'critHIT'):
+            self.assertFalse(api.controls_for(mode)['split_parts'], mode)
+
     def test_gamma_hidden_where_flags_are_restricted(self):
         """Гамма видна только в режимах без ограничений на набор флагов."""
         self.assertTrue(api.controls_for('c_scattergun')['gamma'])

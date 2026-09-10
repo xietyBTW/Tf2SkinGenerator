@@ -202,8 +202,10 @@ export const EN = {
   'Хранить временные файлы при ошибке': 'Keep temp files on failure',
   'Отладочный режим': 'Debug mode',
   'Скрытые материалы': 'Hidden materials',
-  'Эти материалы не показываются в альбоме и не пишутся в мод.':
-    'These materials are not shown in the album and are not written into the mod.',
+  'Совпадение по части имени: «head» скроет и «scout_head_red». Знак «=» в начале требует точного имени. Скрытые материалы не показываются в альбоме; в мод они пишутся с игровой текстурой.':
+    'Matched by part of the name: “head” also hides “scout_head_red”. A leading '
+    + '“=” demands the exact name. Hidden materials are kept out of the album; '
+    + 'they go into the mod with their in-game texture.',
   'по одному в строке или через запятую': 'one per line or comma-separated',
   'Очистить кэш моделей': 'Clear the model cache',
   'Удалить черновики…': 'Delete drafts…',
@@ -403,12 +405,40 @@ export const EN = {
 
   // ── Части модели ──────────────────────────────────────────────────────
   'Части': 'Parts',
+  'Картинка': 'Image',
   'Кисть': 'Brush',
+  'Пипетка': 'Eyedropper',
+  'Взять цвет с модели или с текстуры':
+    'Take a color from the model or from the texture',
+  'Зажми на модели или на текстуре — цвет виден под курсором, а берётся там, где отпустишь':
+    'Hold the button on the model or on the texture — the color shows under '
+    + 'the cursor and is taken where you release it',
+  'Взят цвет {}': 'Picked the color {}',
+  'Пипеткой щёлкай по модели или по текстуре слева, а не по списку':
+    'Use the eyedropper on the model or on the texture at the left, '
+    + 'not on the list',
+  'Возьми кисть справа — щелчок по части покрасит её':
+    'Take the brush on the right — a click on a part will paint it',
+  'Цвет выбран — возьми кисть, чтобы им красить':
+    'The color is chosen — take the brush to paint with it',
+  'Возьми значок справа: кисть красит, ножницы дробят кусок. Ctrl+Z отменяет, Ctrl+Y возвращает':
+    'Take an icon on the right: the brush paints, the scissors cut a piece '
+    + 'finer. Ctrl+Z undoes, Ctrl+Y redoes',
+  'Щёлкай по частям — покрасятся. Alt при щелчке берёт цвет с модели или с текстуры':
+    'Click the parts to paint them. Alt-click takes a color from the model or '
+    + 'from the texture',
   'Нарезка': 'Cutting',
   'Окантовка': 'Outline',
   'Градиент': 'Gradient',
   'Сила': 'Strength',
-  'Резать': 'Cut',
+  'Точный цвет': 'Exact color',
+  'Окантовка пойдёт по краям тех частей, которые покрасишь дальше':
+    'The outline will follow the parts you paint from now on',
+  'Цвет ложится ровно как в палитре; фактура остаётся за счёт теней':
+    'The color lands exactly as in the palette; the texture survives '
+    + 'through its own shadows',
+  'Цвет смешивается с оригиналом — так деталь выглядит естественнее':
+    'The color blends with the original — that way the part looks more natural',
   'Объединить': 'Merge',
   'Дробление': 'Detail',
   'Обводить': 'Outline',
@@ -431,14 +461,25 @@ export const EN = {
   'Цвет окантовки': 'Outline color',
   'Эта модель — один цельный кусок, делить нечего':
     'This model is a single solid piece, there is nothing to split',
-  'Щёлкай по кускам модели — покрасятся. Нарезать мельче или обвести края — вкладками слева. Ctrl+Z отменяет, Ctrl+Y возвращает':
-    'Click the pieces of the model to paint them. Cut finer or outline the edges '
-    + 'with the tabs on the left. Ctrl+Z undoes, Ctrl+Y redoes',
-  'Красить этим цветом': 'Paint with this color',
   'Щёлкай по частям модели — покрасятся в этот цвет':
     'Click the parts of the model to paint them this color',
-  'Перетащи картинку на часть модели или выбери цвет':
-    'Drag an image onto a part of the model, or pick a color',
+  'Положить картинку на часть': 'Place an image on the part',
+  'Красить части выбранным цветом': 'Paint parts with the chosen color',
+  'Щёлкай по частям модели или тащи на них картинку — она ляжет на кусок':
+    'Click the parts of the model or drag an image onto them — it will land '
+    + 'on that piece',
+  'Чем красить: цвет или переход': 'What to paint with: a color or a gradient',
+  'Цвет кисти': 'Brush color',
+  'У этой части своя картинка — цвет лёг под неё':
+    'This part has its own image — the color went underneath it',
+  'Начало перехода: за ним первый цвет чистый':
+    'Where the blend starts: before it the first color is pure',
+  'Середина: где цвета смешаны поровну':
+    'The midpoint: where the colors are mixed evenly',
+  'Конец перехода: за ним второй цвет чистый':
+    'Where the blend ends: past it the second color is pure',
+  'Свернуть палитру': 'Collapse the palette',
+  'Развернуть палитру': 'Expand the palette',
   'Часть': 'Part',
   'Часть ': 'Part ',
   ' развёртки': ' of the UV map',
@@ -468,8 +509,8 @@ export const EN = {
   'Отмечено': 'Marked',
   '. «Объединить» сведёт их в одну часть':
     '. “Merge” will bring them into one part',
-  '. То же — щелчок по ней на модели в режиме «Резать»':
-    '. Same as clicking it on the model in “Cut” mode',
+  '. То же — щелчок по ней на модели с ножницами':
+    '. Same as clicking it on the model with the scissors',
   'Наложение на часть…': 'Placing on the part…',
   'Эта часть делит развёртку с соседними — они покрасились вместе':
     'This part shares the UV map with its neighbours — they were painted together',
@@ -484,10 +525,9 @@ export const EN = {
     'Hover the model to outline the UV piece that will be cut. A click cuts it; clicking pieces already cut marks them so they can be merged into one part',
   'Объединяю…': 'Merging…',
   'Отрезки сведены в одну часть': 'The pieces are merged into one part',
-  'Обвожу края…': 'Outlining the edges…',
-  'Убираю окантовку…': 'Removing the outline…',
-  'Градиент: щёлкай по частям — переход из первого цвета. Направление задаёт ручка':
-    'Gradient: click the parts to fill them from the first color. The handle sets the direction',
+  'Градиент: щёлкай по частям — переход из первого цвета. Полоса задаёт края и середину перелива, ручка — направление':
+    'Gradient: click the parts to fill them from the first color. The bar sets '
+    + 'the edges and the midpoint of the blend, the handle sets the direction',
   'Перекладываю…': 'Re-placing…',
 
   // ── Посадка картинки на часть ─────────────────────────────────────────
@@ -496,11 +536,15 @@ export const EN = {
   'Целиком': 'Whole',
   'Заполнить': 'Fill',
   'Растянуть': 'Stretch',
-  'Размер': 'Size',
+  'Ширина': 'Width',
+  'Высота': 'Height',
   'Приблизить': 'Zoom',
   'Без игровой': 'No game texture',
-  'Тяни картинку мышью, поворачивай за маркер сверху (стрелки — на 15°), колесо — приблизить к курсору':
-    'Drag the image with the mouse, rotate it by the handle on top (arrows turn it by 15°), the wheel zooms to the cursor',
+  'Только контур': 'Outline only',
+  'Тяни картинку мышью, размер — за квадратики на рамке (угол тянет целиком, сторона — по своей оси), поворот — за маркер сверху (стрелки — на 15°), колесо — приблизить к курсору':
+    'Drag the image with the mouse; resize it by the squares on the frame (a '
+    + 'corner scales it whole, a side stretches along its own axis); rotate it '
+    + 'by the handle on top (arrows turn it by 15°); the wheel zooms to the cursor',
   'Отменить правку (Ctrl+Z)': 'Undo (Ctrl+Z)',
   'Вернуть правку (Ctrl+Y)': 'Redo (Ctrl+Y)',
 

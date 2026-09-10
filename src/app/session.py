@@ -36,7 +36,8 @@ logger = get_logger(__name__)
 _NO_CHOICE = object()
 
 
-def _paint_spec(color: Any) -> Dict[str, Any]:
+def _paint_spec(color: Any, brush: Optional[Dict[str, Any]] = None
+                ) -> Dict[str, Any]:
     """
     Цвет части в вид, понятный склейке.
 
@@ -46,18 +47,55 @@ def _paint_spec(color: Any) -> Dict[str, Any]:
     Направление раньше было флагом ``horizontal`` (два варианта), теперь это
     угол в градусах. Флаг из старых работ читаем и переводим здесь — так
     правило перевода одно на всё приложение, а склейка знает только угол.
+
+    `brush` — настройки кисти на СЕЙЧАС: сила, точный цвет, окантовка. Они
+    подставляются только там, где в самой записи ничего не сказано: у мазка
+    настройки те, что были в момент нанесения, и переключатель кисти не должен
+    задним числом менять уже покрашенное. Старые работы своих не помнят —
+    им достаются нынешние, как и было.
     """
+    at = dict(brush or {})
+
+    def kept(name: str, fallback: Any) -> Any:
+        got = color.get(name) if isinstance(color, dict) else None
+        return at.get(name, fallback) if got is None else got
+
     if not isinstance(color, dict):
-        return {'color': str(color)}
+        return {'color': str(color),
+                'strength': float(at.get('strength', 1.0)),
+                'exact': bool(at.get('exact', False)),
+                'edge': float(at.get('edge', 0.0)),
+                'edge_color': at.get('edge_color') or None}
     angle = color.get('angle')
     if angle is None:
         angle = 90.0 if color.get('horizontal') else 0.0
+    # Края и середина перехода. Их может не быть вовсе (работы до них и
+    # обычный градиент от края до края), поэтому умолчания те же, что у слоя.
+    start = _fraction(color.get('start'), 0.0)
+    end = _fraction(color.get('end'), 1.0)
     return {'color': str(color.get('color') or ''),
             'color2': (str(color.get('color2')) if color.get('color2') else None),
-            'angle': float(angle)}
+            'angle': float(angle),
+            # Настройки кисти в момент мазка: сила, точный цвет, окантовка.
+            'strength': float(kept('strength', 1.0)),
+            'exact': bool(kept('exact', False)),
+            'edge': float(kept('edge', 0.0)),
+            'edge_color': kept('edge_color', None) or None,
+            'start': start,
+            'end': end,
+            'mid': _fraction(color.get('mid'), 0.5)}
 
 
-def _image_spec(value: Any) -> Dict[str, Any]:
+def _fraction(value: Any, default: float) -> float:
+    """Доля 0..1 из того, что прислала страница. Мусор — умолчание."""
+    try:
+        return min(1.0, max(0.0, float(value)))
+    except (TypeError, ValueError):
+        return default
+
+
+def _image_spec(value: Any, brush: Optional[Dict[str, Any]] = None
+                ) -> Dict[str, Any]:
     """
     Картинка части в вид, понятный склейке.
 
@@ -68,9 +106,13 @@ def _image_spec(value: Any) -> Dict[str, Any]:
     Умолчание — 'contain': растяжение по прямоугольнику корёжило логотипы, а
     заметно это становилось только в игре.
     """
+    at = dict(brush or {})
     if not isinstance(value, dict):
         return {'path': str(value), 'fit': 'contain', 'angle': 0.0,
-                'scale': 1.0, 'offset': (0.0, 0.0)}
+                'scale': 1.0, 'scale_y': 1.0, 'offset': (0.0, 0.0),
+                'anchor': None,
+                'edge': float(at.get('edge', 0.0)),
+                'edge_color': at.get('edge_color') or None}
     offset = value.get('offset') or (0.0, 0.0)
     fit = str(value.get('fit') or 'contain')
     return {
@@ -80,8 +122,32 @@ def _image_spec(value: Any) -> Dict[str, Any]:
         # Ноль и отрицательный масштаб — это исчезнувшая картинка; такой
         # «результат» человек примет за поломку, а не за свою настройку.
         'scale': max(0.05, min(20.0, float(value.get('scale') or 1.0))),
+        # По высоте — свой множитель. Его может не быть (работы до растяжения
+        # и картинки, которые тянули только за угол): тогда он равен ширинному.
+        'scale_y': max(0.05, min(20.0, float(
+            value.get('scale_y') or value.get('scale') or 1.0))),
         'offset': (float(offset[0]), float(offset[1])),
+        # Габарит части, в который картинку вписали изначально. Появляется
+        # только при переносе на новые части (см. `_reshape`): после разреза
+        # наклейка должна остаться на том же месте развёртки, а не
+        # перерисоваться заново в каждой половине.
+        'anchor': _anchor(value.get('anchor')),
+        # Окантовка — настройка кисти в момент, когда картинку клали.
+        'edge': float(value.get('edge')
+                      if value.get('edge') is not None
+                      else at.get('edge', 0.0)),
+        'edge_color': (value.get('edge_color')
+                       or at.get('edge_color') or None),
     }
+
+
+def _anchor(value: Any) -> Optional[tuple]:
+    """Габарит (u0, v0, u1, v1) из работы. Мусор — как будто его нет."""
+    try:
+        u0, v0, u1, v1 = (float(x) for x in value)
+    except (TypeError, ValueError):
+        return None
+    return (u0, v0, u1, v1) if u1 > u0 and v1 > v0 else None
 
 
 #: Как называются склейки частей: `parts_<номер>.png`. Имя задаём мы сами
@@ -2812,7 +2878,11 @@ class AppSession:
 
         names = list(model.materials)
         if len(names) == 1:
-            obj_mat = names[0]
+            # У одноматериальной модели карточка ВСЕГДА служебная, как её ни
+            # назови: вьювер знает материал по имени из SMD и присылает его,
+            # а работа хранится под ключом главной текстуры. Разойдясь здесь,
+            # покраска ложилась в чужую карточку и на экране не появлялась.
+            return model, names[0], self.preview.textures.storage_main_key()
         else:
             wanted = (material or self.preview.textures.stable_main() or '').lower()
             obj_mat = next((n for n in names if n.lower() == wanted), '')
@@ -2836,7 +2906,7 @@ class AppSession:
         cuts = sorted(
             (int(g), tuple(sorted(tuple(sorted(int(i) for i in bundle))
                                   for bundle in v)))
-            for g, v in self.preview.part_cuts.items())
+            for g, v in (self.preview.part_cuts.get(obj_mat) or {}).items())
         stamp = 0.0
         try:
             stamp = os.path.getmtime(self._obj_path) if self._obj_path else 0.0
@@ -2894,6 +2964,7 @@ class AppSession:
             } for part in parts],
             'group_islands': model.group_islands.get(obj_mat) or {},
             'tint': self.preview.part_tint,
+            'exact': bool(self.preview.part_exact),
             'edge': self.preview.part_edge,
             'edge_color': self.preview.part_edge_color,
             'shape': shape,
@@ -2920,13 +2991,14 @@ class AppSession:
             self.preview.part_tint,
             self.preview.part_edge,
             self.preview.part_edge_color,
+            self.preview.part_exact,
         )
 
     def _restore_parts(self, snap: tuple) -> None:
         """Ставит снимок на место."""
         (self.preview.part_textures, self.preview.part_colors,
          self.preview.part_tint, self.preview.part_edge,
-         self.preview.part_edge_color) = snap
+         self.preview.part_edge_color, self.preview.part_exact) = snap
 
     def _remember_parts(self, card: str) -> None:
         """Снимок покраски ДО изменения — для отмены."""
@@ -2995,15 +3067,17 @@ class AppSession:
                 if not had:
                     return {'error': 'На этой части нет картинки'}
                 spec = _image_spec(had)
+                # Якорь переживает правку посадки: он говорит, В ЧЁМ картинка
+                # живёт (в габарите части, на которую её клали), а окно двигает
+                # её ВНУТРИ этого габарита. Потеряв якорь здесь, картинка
+                # прыгнула бы после разреза при первой же правке.
                 spec.update({k: v for k, v in _image_spec(
-                    {**options, 'path': spec['path']}).items() if k != 'path'})
+                    {**options, 'path': spec['path']}).items()
+                    if k not in ('path', 'anchor')})
                 chosen[int(part)] = {**spec, 'offset': list(spec['offset'])}
             elif path:
                 spec = _image_spec({**(options or {}), 'path': path})
                 chosen[int(part)] = {**spec, 'offset': list(spec['offset'])}
-                # У части либо картинка, либо цвет: два ответа на вопрос «чем
-                # красить» означали бы, что один из них молча проигрывает.
-                (self.preview.part_colors.get(card) or {}).pop(int(part), None)
             else:
                 chosen.pop(int(part), None)
             self._recompose(model, obj_mat, card)
@@ -3012,7 +3086,8 @@ class AppSession:
 
     def set_part_colors(self, material: str = '',
                         colors: Optional[Dict[str, Any]] = None,
-                        strength: Optional[float] = None) -> Dict[str, Any]:
+                        strength: Optional[float] = None,
+                        exact: Optional[bool] = None) -> Dict[str, Any]:
         """
         Красит части: {номер части: цвет}, значение None — снять.
 
@@ -3033,12 +3108,13 @@ class AppSession:
             self._remember_parts(card)
             if strength is not None:
                 self.preview.part_tint = min(1.0, max(0.05, float(strength)))
+            if exact is not None:
+                self.preview.part_exact = bool(exact)
             painted = self.preview.part_colors.setdefault(card, {})
             for part, color in (colors or {}).items():
                 if color:
                     painted[int(part)] = (dict(color) if isinstance(color, dict)
                                           else str(color))
-                    (self.preview.part_textures.get(card) or {}).pop(int(part), None)
                 else:
                     painted.pop(int(part), None)
             self._recompose(model, obj_mat, card)
@@ -3092,12 +3168,33 @@ class AppSession:
             return {'error': 'У этой части нет развёртки'}
 
         from src.services import texture_compose_service
+        # Подсветку рисуем в пропорциях САМОЙ текстуры: у тела шпиона она
+        # 1024×512, и квадратная маска ложилась на кадр растянутой — контуры
+        # уезжали с деталей. Размер входит и в имя файла: сменят текстуру на
+        # другую по форме — понадобится новая маска, а старая лежит в кэше и у
+        # браузера.
+        shape = self._texture_shape(card)
         stamp = hashlib.md5(
             self._shape_key(obj_mat).encode('utf-8')).hexdigest()[:10]
-        out = os.path.join(self._work_dir(), 'masks', f"{stamp}_{int(part)}.png")
+        tail = f"{shape[0]}x{shape[1]}" if shape else 'square'
+        out = os.path.join(self._work_dir(), 'masks',
+                           f"{stamp}_{int(part)}_{tail}.png")
         if not os.path.isfile(out):
-            texture_compose_service.outline_png(polys, out)
+            texture_compose_service.outline_png(polys, out, shape=shape)
         return {'part': int(part), 'mask': out}
+
+    def _texture_shape(self, card: str):
+        """Размер картинки, показанной на этом материале. None — не прочитать."""
+        t = self.preview.textures
+        path = t.uploaded_for_mat(card) or t.game_base(card)
+        if not path or not os.path.isfile(path):
+            return None
+        try:
+            from PIL import Image
+            with Image.open(path) as im:
+                return im.size
+        except (OSError, ValueError):
+            return None
 
     def part_shape(self, material: str = '', part: int = 0) -> Dict[str, Any]:
         """
@@ -3141,7 +3238,11 @@ class AppSession:
             # тогда не приближает, а только центрирует.
             'dense': [round(v, 6) for v in _compose.dense_bbox(polys)],
             'part': one.index,
-            'bbox': [round(v, 6) for v in one.uv_bbox],
+            # Габарит, в который вписана картинка. У наклейки, пережившей
+            # разрез, это габарит ПРЕЖНЕЙ части (её якорь): окно посадки обязано
+            # показывать ровно то, что соберёт склейка.
+            'bbox': [round(v, 6) for v in
+                     ((spec and spec.get('anchor')) or one.uv_bbox)],
             'polygons': [[[round(u, 6), round(v, 6)] for u, v in tri]
                          for tri in model.polygons(obj_mat, one.index)],
             'image': spec,
@@ -3165,7 +3266,7 @@ class AppSession:
         отдельной частью: «прирастить обратно» должно значить ровно это.
         """
         def one(model, obj_mat) -> Dict[int, List[List[int]]]:
-            out = self._cut_plan()
+            out = self._cut_plan(obj_mat)
             made = [list(b) for b in out.get(int(group), ())]
             was = [b for b in made if int(island) in b]
             if was:
@@ -3197,7 +3298,7 @@ class AppSession:
         wanted = {int(i) for i in (islands or ())}
 
         def join(model, obj_mat) -> Dict[int, List[List[int]]]:
-            out = self._cut_plan()
+            out = self._cut_plan(obj_mat)
             made = [list(b) for b in out.get(int(group), ())]
             touched = [b for b in made if wanted.intersection(b)]
             if len(touched) < 2:
@@ -3209,10 +3310,14 @@ class AppSession:
 
         return self._reshape(material, join)
 
-    def _cut_plan(self) -> Dict[int, List[List[int]]]:
-        """Копия разрезов, которую можно править, не задев состояние сеанса."""
+    def _cut_plan(self, obj_mat: str) -> Dict[int, List[List[int]]]:
+        """Копия разрезов ЭТОГО материала, которую можно править отдельно.
+
+        Материал обязателен: разрезы хранятся по нему, и без ключа сюда
+        приходил весь словарь — с именами материалов вместо номеров групп.
+        """
         return {int(g): [list(b) for b in v]
-                for g, v in self.preview.part_cuts.items()}
+                for g, v in (self.preview.part_cuts.get(obj_mat) or {}).items()}
 
     def _reshape(self, material: str, plan) -> Dict[str, Any]:
         """
@@ -3233,14 +3338,21 @@ class AppSession:
         if isinstance(found, dict):
             return found
         model, obj_mat, card = found
-        owner = {tri: part.index
-                 for part in model.parts_of(obj_mat) for tri in part.triangles}
+        was = model.parts_of(obj_mat)
+        owner = {tri: part.index for part in was for tri in part.triangles}
+        #: Габарит развёртки прежних частей: по нему наклейка остаётся на месте,
+        #: когда часть под ней разрезали надвое.
+        boxes = {part.index: tuple(part.uv_bbox) for part in was}
         wanted = plan(model, obj_mat)
 
         with self._lock:
             from src.services.mesh_parts_service import bundles_of
-            self.preview.part_cuts = {g: [list(b) for b in made]
-                                      for g, made in bundles_of(wanted).items()}
+            # Разрезы — СВОИ у каждого материала: номера групп считаются внутри
+            # материала, и общий словарь резал заодно соседний (у головы шпиона
+            # и у его тела есть своя «группа 1»).
+            self.preview.part_cuts[obj_mat] = {
+                g: [list(b) for b in made]
+                for g, made in bundles_of(wanted).items()}
             found = self._parts_model(material)
             if isinstance(found, dict):
                 return found
@@ -3256,9 +3368,20 @@ class AppSession:
                     if not votes:
                         continue
                     before = votes.most_common(1)[0][0]
+                    # Слои переносим ПО ОТДЕЛЬНОСТИ. Раньше здесь стоял
+                    # `elif` — наследие правила «у части либо картинка, либо
+                    # цвет». Правило сняли, а перенос остался: у части с
+                    # картинкой цвет при первом же разрезе исчезал.
                     if before in images:
-                        moved_images[part.index] = images[before]
-                    elif before in colors:
+                        spec = _image_spec(images[before])
+                        # Якорь ставим ОДИН раз — при первом разрезе. Дальше он
+                        # уже описывает исходное место картинки, и переписывать
+                        # его габаритом половинки значило бы всё-таки её сдвинуть.
+                        spec['anchor'] = spec['anchor'] or boxes.get(before)
+                        moved_images[part.index] = {
+                            **spec, 'offset': list(spec['offset']),
+                            'anchor': list(spec['anchor']) if spec['anchor'] else None}
+                    if before in colors:
                         moved_colors[part.index] = colors[before]
                 self.preview.part_textures[card] = moved_images
                 self.preview.part_colors[card] = moved_colors
@@ -3286,11 +3409,9 @@ class AppSession:
         model, obj_mat, card = found
 
         with self._lock:
-            self._remember_parts(card)
             self.preview.part_edge = max(0.0, min(0.1, float(width)))
             if color:
                 self.preview.part_edge_color = str(color)
-            self._recompose(model, obj_mat, card)
         self._autosave()
         return self.view_state()
 
@@ -3337,22 +3458,30 @@ class AppSession:
             base = t.game_base(card)
 
         Layer = texture_compose_service.Layer
-        layers = []
+        # Сперва ЦВЕТ, потом картинки: цвет — это тонировка игровой текстуры
+        # (детали под ней остаются), а картинка ложится на деталь сверху. У
+        # одной части может быть и то, и другое: покрасил корпус и наклеил на
+        # него свой знак — раньше второе действие молча стирало первое.
+        # Настройки кисти на сейчас — только для записей, которые своих не
+        # помнят (старые работы). У свежего мазка они уже внутри.
+        brush = {'strength': self.preview.part_tint,
+                 'exact': self.preview.part_exact,
+                 'edge': self.preview.part_edge,
+                 'edge_color': self.preview.part_edge_color}
+        layers = [Layer(polygons=model.polygons(obj_mat, part),
+                        **_paint_spec(color, brush))
+                  for part, color in sorted(colors.items())]
         for part, image in sorted(images.items()):
-            spec = _image_spec(image)
+            spec = _image_spec(image, brush)
             layers.append(Layer(polygons=model.polygons(obj_mat, part),
                                 image=spec['path'], fit=spec['fit'],
                                 image_angle=spec['angle'],
                                 image_scale=spec['scale'],
+                                image_scale_y=spec['scale_y'],
                                 image_offset=spec['offset'],
-                                edge=self.preview.part_edge,
-                                edge_color=self.preview.part_edge_color))
-        layers += [Layer(polygons=model.polygons(obj_mat, part),
-                         strength=self.preview.part_tint,
-                         edge=self.preview.part_edge,
-                         edge_color=self.preview.part_edge_color,
-                         **_paint_spec(color))
-                   for part, color in sorted(colors.items())]
+                                anchor=spec['anchor'],
+                                edge=spec['edge'],
+                                edge_color=spec['edge_color']))
         # Имя со счётчиком: путь — это ещё и адрес картинки во вьювере, и по
         # прежнему имени браузер показал бы предыдущую склейку из кэша.
         self._compose_seq = getattr(self, '_compose_seq', 0) + 1
@@ -3380,13 +3509,33 @@ class AppSession:
         работы во временной папке накопилось 1090 файлов на 248 МБ. К моменту
         следующей склейки предыдущая уже скопирована автосохранением в work/,
         так что работа человека от удаления не страдает.
+
+        Назначенные материалам НЕ ТРОГАЕМ, сколько бы им ни было лет. Очередь
+        была общей на всю модель, а склейка у каждого материала своя: покрасив
+        голову шпиона, а потом тело, человек тремя мазками выталкивал из
+        очереди ещё живую склейку головы. Файл исчезал, путь к нему оставался
+        назначенным — и материал молча возвращался к игровой текстуре. Со
+        стороны это выглядело как «цвета сами сбрасываются».
         """
-        while len(self._compose_files) > self._KEEP_COMPOSITES:
-            stale = self._compose_files.pop(0)
+        live = self._live_texture_paths()
+        recent = set(self._compose_files[-self._KEEP_COMPOSITES:])
+        keep: List[str] = []
+        for path in self._compose_files:
+            if path in live or path in recent:
+                keep.append(path)
+                continue
             try:
-                os.remove(stale)
+                os.remove(path)
             except OSError:
                 pass          # уже нет или занят — не повод падать на покраске
+        self._compose_files = keep
+
+    def _live_texture_paths(self) -> set:
+        """Пути, назначенные сейчас хоть какому-то материалу любой команды."""
+        live: set = set()
+        for slots in (self.preview.textures.textures or {}).values():
+            live.update(path for path in (slots or {}).values() if path)
+        return live
 
     def _work_dir(self) -> str:
         """Своя папка сеанса для склеек. Живёт до перезапуска, как и превью.

@@ -16,7 +16,7 @@
 
 const PICKER = { input: null, box: null, h: 0, s: 0, v: 0 };
 
-function hsvToHex(h, s, v) {
+export function hsvToHex(h, s, v) {
   const part = (n) => {
     const k = (n + h / 60) % 6;
     const x = v - v * s * Math.max(0, Math.min(k, 4 - k, 1));
@@ -73,7 +73,8 @@ function pickerBox() {
   box.innerHTML = '<div class="picker__sv"><i class="picker__dot"></i></div>'
     + '<div class="picker__hue"><i class="picker__bar"></i></div>'
     + '<div class="picker__foot"><span class="picker__now"></span>'
-    + '<input class="picker__hex" maxlength="7" spellcheck="false"></div>';
+    + '<input class="picker__hex" maxlength="7" spellcheck="false"></div>'
+    + '<div class="picker__extra"></div>';
   document.body.appendChild(box);
   PICKER.box = box;
 
@@ -127,17 +128,44 @@ function commitPicker() {
   if (PICKER.input) PICKER.input.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
-function openPicker(input) {
+/**
+ * Чужой блок в подвале поповера и место, откуда он взят.
+ *
+ * Нужен затем, что у цвета кисти есть продолжение — переход из первого цвета
+ * во второй: спрашивать его отдельным окном значило бы, что человек задаёт
+ * цвет в одном месте, а решает, цвет это или переход, в другом. Блок
+ * ПЕРЕЕЗЖАЕТ сюда и возвращается домой при закрытии: копия разошлась бы с
+ * оригиналом, а `getElementById` у отсоединённого узла ничего не находит.
+ */
+let extraHome = null;
+
+function setExtra(node) {
+  const slot = PICKER.box.querySelector('.picker__extra');
+  if (extraHome && slot.firstChild) extraHome.appendChild(slot.firstChild);
+  extraHome = null;
+  if (!node || node.parentNode === slot) return;
+  extraHome = node.parentNode;
+  slot.appendChild(node);
+}
+
+function openPicker(input, opts) {
   const box = pickerBox();
   PICKER.input = input;
   Object.assign(PICKER, hexToHsv(input.value));
   box.hidden = false;
+  setExtra((opts && opts.extra) || null);
   pushPicker();
 
-  const r = input.getBoundingClientRect();
+  // Поповер встаёт у ЯКОРЯ, а им не всегда служит само поле: цвет кисти
+  // задаётся квадратом в палитре, а поле при нём только хранит значение.
+  const r = ((opts && opts.anchor) || input).getBoundingClientRect();
   const w = box.offsetWidth;
   const h = box.offsetHeight;
-  box.style.left = Math.max(8, Math.min(window.innerWidth - w - 8, r.left)) + 'px';
+  // Слева от якоря, если справа не помещается: палитра стоит у правого края
+  // окна, и поповер иначе наезжал бы на неё саму.
+  box.style.left = (r.right + w + 8 > window.innerWidth && r.left - w - 6 >= 8
+    ? r.left - w - 6
+    : Math.max(8, Math.min(window.innerWidth - w - 8, r.left))) + 'px';
   // Под полем, а если там не помещается — над ним: палитра частей стоит у
   // самого низа экрана, и снизу места нет никогда.
   box.style.top = (r.bottom + h + 8 < window.innerHeight
@@ -145,8 +173,44 @@ function openPicker(input) {
 }
 
 function closePicker() {
-  if (PICKER.box) PICKER.box.hidden = true;
+  if (PICKER.box) {
+    setExtra(null);          // блок уезжает домой, иначе он пропал бы со страницы
+    PICKER.box.hidden = true;
+  }
   PICKER.input = null;
+}
+
+/**
+ * Открывает выбор цвета не по щелчку в само поле.
+ *
+ * `anchor` — у чего встать, `extra` — что показать под выбором.
+ */
+export function pickColor(input, opts) { openPicker(input, opts); }
+
+/** Переводит открытый поповер на другое поле: тот же выбор, другой цвет. */
+export function pickInto(input) {
+  if (!PICKER.box || PICKER.box.hidden) return;
+  PICKER.input = input;
+  Object.assign(PICKER, hexToHsv(input.value));
+  pushPicker();
+}
+
+/** Закрывает поповер снаружи: тем же путём, что и щелчок мимо. */
+export function closeColor() { closePicker(); }
+
+//: Взведена ли пипетка. Пока да, щелчок по кадру поповер не закрывает:
+//: пипеткой как раз и щёлкают мимо него — по модели и по текстуре, — а
+//: закрывшийся выбор цвета отнимал бы то, ради чего его открыли. Владелец
+//: состояния один — выбранный инструмент частей (см. showToolCursor).
+let dropping = false;
+
+/** Сообщает поповеру, что цвет сейчас берут пипеткой. */
+export function armDrop(on) { dropping = !!on; }
+
+/** Открыт ли поповер для этого поля. */
+export function picking(input) {
+  return Boolean(PICKER.box) && !PICKER.box.hidden
+    && (input === undefined || PICKER.input === input);
 }
 
 // Фаза перехвата: отменённый здесь click не даёт браузеру открыть системный
@@ -154,7 +218,14 @@ function closePicker() {
 document.addEventListener('click', (e) => {
   const input = e.target.closest && e.target.closest('input[type="color"]');
   if (input) { e.preventDefault(); openPicker(input); return; }
-  if (PICKER.input && !e.target.closest('.picker')) closePicker();
+  // Щелчок по тому, ЧЕМ открыли, закрывает поповер сам — иначе он закрылся
+  // бы здесь и тут же открылся заново, и повторный щелчок ничего не делал.
+  // Кадр при взведённой пипетке — не «щелчок мимо»: цвет берут именно там.
+  // Всё остальное закрывает поповер по-прежнему, иначе он оставался бы висеть
+  // после ухода в другую часть окна.
+  if (PICKER.input && !(dropping && e.target.closest('.album'))
+      && !e.target.closest('.picker')
+      && !e.target.closest('.picker-anchor')) closePicker();
 }, true);
 
 document.addEventListener('keydown', (e) => {

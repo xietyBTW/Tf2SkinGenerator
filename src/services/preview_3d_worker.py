@@ -11,6 +11,7 @@
 """
 
 import glob
+import re
 import os
 import tempfile
 from typing import Optional
@@ -24,7 +25,8 @@ from src.services import qc_skin_parser, vmt_tint
 from src.services.base_worker import BaseWorker
 from src.services.game_vpk_reader import GameVpkReader
 from src.services.material_resolver import MaterialResolver
-from src.services.smd_service import NON_REFERENCE_SMD_KEYWORDS
+from src.services.smd_service import (NON_REFERENCE_SMD_KEYWORDS,
+                                      triangle_count)
 from src.shared.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -612,6 +614,15 @@ class Preview3DWorker(BaseWorker):
                 return mask_smds[0]
 
         if self.mode in PLAYER_BODY_MODE_KEYS:
+            # Тело называет САМ QC. Имя файла — ненадёжный признак: у пиромана
+            # нет морфов лица (он в маске), файла *_morphs_low.smd не бывает, и
+            # поиск по имени класса выбирал `pyro_head_bodygroup.smd` — первый
+            # по алфавиту. В превью тогда висели голова, баллон, гранаты и рука
+            # без тела.
+            body = self._character_body_smd(directory)
+            if body:
+                return body
+
             class_short = os.path.splitext(os.path.basename(self.weapon_key))[0]
             # Например: "models/player/medic.mdl" → "medic"
             #            "models/player/demo.mdl"  → "demo"
@@ -661,6 +672,49 @@ class Preview3DWorker(BaseWorker):
         all_smds = [p for p in glob.glob(os.path.join(directory, "*.smd"))
                     if not skip(p)]
         return all_smds[0] if all_smds else None
+
+    def _character_body_smd(self, directory: str) -> Optional[str]:
+        """
+        Тело персонажа: тот меш, к которому пристёгнуты бодигруппы.
+
+        Называет его QC — первый `$body`/`$model`, — а не имя файла: у разных
+        классов Crowbar зовёт тело по-разному (`heavy_morphs_low.smd`,
+        `pyro_reference.smd`), и подбор по имени класса уже промахивался.
+
+        Дальше — оговорка, без которой у пиромана тела всё равно нет. Crowbar
+        разложил его меш по уровням детализации так, что нулевой уровень пуст
+        (`pyro_reference.smd` — 4 треугольника), а вся геометрия лежит в
+        `pyro_reference_lod6.smd` (482). Поэтому из семьи «сам файл плюс его
+        _lodN» берём самый ПОДРОБНЫЙ: там, где нулевой уровень настоящий (у
+        остальных восьми классов), он и побеждает — LOD по определению беднее.
+        """
+        model = self._model(directory)
+        qc_path = getattr(model, 'qc_path', None) if model is not None else None
+        if not qc_path or not os.path.isfile(qc_path):
+            return None
+        try:
+            with open(qc_path, encoding='utf-8', errors='replace') as f:
+                text = f.read()
+        except OSError:
+            return None
+        named = re.search(r'(?im)^\s*\$(?:body|model)\b.*?"([^"]+\.smd)"', text)
+        if not named:
+            return None
+        main = os.path.join(directory, os.path.basename(named.group(1)))
+        if not os.path.isfile(main):
+            return None
+
+        stem = os.path.splitext(os.path.basename(main))[0]
+        family = [main] + glob.glob(os.path.join(directory, f"{stem}_lod*.smd"))
+        best = max(family, key=triangle_count)
+        if os.path.abspath(best) != os.path.abspath(main):
+            logger.info(
+                f"[3D] Тело персонажа: у {os.path.basename(main)} нулевой уровень "
+                f"пуст, беру {os.path.basename(best)} "
+                f"({triangle_count(best)} треугольников)")
+        else:
+            logger.debug(f"[3D] Тело персонажа из QC: {os.path.basename(best)}")
+        return best
 
     def _find_bodygroup_smds(self, reference_smd_path: str) -> list:
         """

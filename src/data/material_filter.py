@@ -26,13 +26,24 @@ DEFAULT_NON_EDITABLE_PATTERNS = (
 )
 
 def _user_patterns() -> list:
-    """Пользовательские паттерны блэклиста из конфига (могут отсутствовать)."""
+    """
+    Пользовательские паттерны блэклиста из конфига (могут отсутствовать).
+
+    Каждая запись проходит тот же разбор, что и текст из настроек. Не для
+    красоты: окно настроек одно время склеивало список двумя символами «\\» и
+    «n» вместо переноса строки, и следующее сохранение писало в конфиг ОДИН
+    паттерн вида «_invun\\nzombie». Совпасть он не мог ни с чем, и весь список
+    молча переставал работать. Такие записи чиним на чтении, не дожидаясь,
+    пока человек откроет настройки и сохранит их заново.
+    """
     try:
         from src.config.app_config import AppConfig
         raw = AppConfig.load_config().get('material_blacklist', []) or []
     except Exception:
         return []
-    return [p.strip().lower() for p in raw if isinstance(p, str) and p.strip()]
+    return [pattern.lower()
+            for item in raw if isinstance(item, str)
+            for pattern in parse_blacklist(item)]
 
 
 def _matches(name_lower: str, pattern: str) -> bool:
@@ -79,10 +90,15 @@ def parse_blacklist(text: str) -> list:
     Строки или запятые — один разделитель: люди пишут и так, и так. Пустые
     отбрасываются, повторы (без учёта регистра) схлопываются — иначе один и тот
     же паттерн попадал бы в список дважды и путал при следующем открытии.
+
+    Пара символов «\\n» тоже считается переносом: так выглядит след старой
+    ошибки в окне настроек (список склеивался литералом), и разбирать её
+    правильнее здесь, чем оставлять человеку мусор в поле.
     """
     seen: set = set()
     out: list = []
-    for line in (text or '').replace(',', '\n').splitlines():
+    text = (text or '').replace('\\n', '\n').replace(',', '\n')
+    for line in text.splitlines():
         pattern = line.strip()
         if pattern and pattern.lower() not in seen:
             seen.add(pattern.lower())

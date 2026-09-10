@@ -538,6 +538,34 @@
 }
 .pick:hover .pick__box { border-color: var(--ink); }
 .pick.is-active .pick__box { border-color: var(--accent); }
+
+/* Обложка специального режима: свой значок вместо картинки из рюкзака (её у
+   спрея и эффектов смерти нет — см. catalog.js → SPECIAL_ART).
+
+   Размер долей от рамки, а не в пикселях: та же обложка бывает и во всю плитку
+   каталога, и меткой в 26 px у имени в прибитой панели. А вот линия долей быть
+   не может — `non-scaling-stroke` держит её волосяной в обоих размерах, иначе
+   на большой обложке она выходит в десяток пикселей. */
+.pick__art {
+  position: absolute;
+  left: 22%;
+  top: 22%;
+  width: 56%;
+  height: 56%;
+  /* Значок — содержимое карточки, а не её оправа: `--ink-soft` контрастнее
+     рамки в обеих темах, а `--ink-mute` терялся рядом с подписью. */
+  color: var(--ink-soft);
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.15;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.pick__art * { vector-effect: non-scaling-stroke; }
+/* Заливка только у капель баллончика — как у точек на кубике «Случайно». */
+.pick__art .pick__drop { fill: currentColor; stroke: none; }
+.pick:hover .pick__art { color: var(--ink); }
+.pick.is-active .pick__art { color: var(--accent); }
 .pick__name { font-size: 13px; }
 
 /* Имя и путь режем многоточием: у косметики пути вида
@@ -877,62 +905,240 @@
 .cp__scene .tag { padding: 3px 12px; }
 
 /* ── Части модели ───────────────────────────────────────────────────────
-   Это РЕЖИМ, а не ещё два ряда кнопок. Пока он включён, ряд действий над
-   моделью уходит — так же, как editbar убирает параметры сборки. Иначе
-   подсказка выдавливала «Заменить модель» на третью строку, и подвал
-   переставал быть выровненным по правому краю. */
-.half__foot.parts-on #model-acts { display: none; }
+   Палитра ПОВЕРХ кадра, а не ряд кнопок под ним. Инструментом работают по
+   самой модели, и место ему рядом с ней; в подвале он вдобавок исчезал
+   вместе с подвалом, стоило развернуть кадр на всё окно (F11).
 
-/* Каждая полоса занимает строку целиком: соседство их только путало. */
-.parts {
-  flex: 1 0 100%;
-  flex-wrap: wrap;
-  gap: 8px 10px;
-  min-width: 0;
+   Сам слой указатель не перехватывает — только панели: между ними и под ними
+   модель должна вращаться как обычно. Панели прибиты каждая к своему краю
+   абсолютно, а не выложены флексом: у флекса высота считается по содержимому,
+   и ограничить прокруткой в нём можно только распоркой. */
+.ptools {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+.ptools > * { pointer-events: auto; }
+
+/* Колонка значков — у правого края, по центру: рука с мышью и так там, а
+   середина высоты — то место, куда её не надо вести. */
+.ptools__bar {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  padding: 3px;
+  border: 1px solid var(--hairline-strong);
+  background: var(--surface);
+}
+.ptools__body { display: flex; flex-direction: column; }
+
+.ptools__btn {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink-soft);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: color var(--dur), background var(--dur);
+}
+/* Значки рисуются волосяной линией — тем же весом, что рамки и подчёркивания
+   всего интерфейса. Заливка есть только у точек на кубике. */
+.ptools__btn svg { width: 18px; height: 18px; fill: none; stroke: currentColor; }
+.ptools__btn .ptools__pip { fill: currentColor; stroke: none; }
+.ptools__btn:hover { color: var(--ink); background: var(--bg); }
+/* Выбранный инструмент — инверсия, как всё выбранное в этом интерфейсе. */
+.ptools__btn.is-active { background: var(--ink); color: var(--surface); }
+
+/* Свёрнутая палитра: остаётся одна кнопка разворота, стрелка смотрит в другую
+   сторону. Кадр при этом чист — модель разглядывают и издали тоже. */
+.ptools__fold {
+  width: auto;
+  height: 18px;
+  border-bottom: 1px solid var(--hairline);
+}
+.ptools__fold svg { width: 12px; height: 12px; }
+.ptools.is-folded .ptools__body,
+.ptools.is-folded .ptools__opts { display: none; }
+.ptools.is-folded .ptools__fold { border-bottom: 0; }
+.ptools.is-folded .ptools__fold svg { transform: scaleX(-1); }
+
+/* Черта отделяет инструменты от цвета и от действий над всей работой:
+   «Убрать всё» необратимо, и стоять вплотную к кисти ему не место. */
+.ptools__sep {
+  height: 1px;
+  margin: 4px 2px;
+  background: var(--hairline);
 }
 
-/* Ряд инструментов: слева что настраиваем, справа что сделать со всей
-   работой. Между ними — воздух, который и разводит их по смыслу. */
-.parts__tools {
-  flex-wrap: wrap;
-  gap: 8px 14px;
+/* Чем красят: два квадрата внахлёст, как в редакторах изображений. Второй
+   виден только при переходе — иначе он обещал бы цвет, которым ничего не
+   красится. */
+.ptools__color { position: relative; }
+.ptools__color:hover { background: none; }   /* тут говорит цвет, а не подложка */
+.ptools__fg,
+.ptools__bg {
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--hairline-strong);
 }
-.parts__tabs { display: flex; gap: 14px; flex: none; }
-.parts__tabs .underlined { padding-bottom: 2px; }
-
-/* Волосяная черта между «что настраиваем» и самими настройками: групп три,
-   и без неё вкладки читаются как первый параметр кисти. */
-.parts__sep {
-  flex: none;
-  width: 1px;
+.ptools__fg { left: 50%; top: 50%; transform: translate(-50%, -50%); }
+.ptools__bg { display: none; }
+/* С переходом их двое, внахлёст — и пара стоит по центру как целое. */
+.ptools__color.is-grad .ptools__fg {
+  width: 14px;
   height: 14px;
-  background: var(--hairline-strong);
+  left: 4px;
+  top: 4px;
+  transform: none;
 }
+.ptools__color.is-grad .ptools__bg {
+  display: block;
+  width: 14px;
+  height: 14px;
+  right: 4px;
+  bottom: 4px;
+}
+.ptools__color:hover .ptools__fg,
+.ptools__color:hover .ptools__bg { border-color: var(--ink); }
 
-/* Видна ровно одна группа: человек в момент времени либо режет, либо красит,
-   либо обводит. Показ всего разом давал четыре строки под моделью. */
+/* Настройки выбранного значка — слева от колонки и по центру, столбцом:
+   рядом с колонкой широкой панели нет места, да и сверху вниз читается
+   быстрее. Прокрутка на случай низкого окна. */
+.ptools__opts {
+  position: absolute;
+  right: 58px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 190px;
+  max-height: calc(100% - 24px);
+  padding: 12px;
+  border: 1px solid var(--hairline-strong);
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow: auto;
+}
+.ptools__title { flex: none; }
+
+/* Видна ровно одна группа: человек в момент времени либо красит, либо режет,
+   либо обводит. */
 .parts__group {
   display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px 12px;
-  /* Занимает столько, сколько нужно, и жмётся первой: действия остаются в
-     той же строке, пока она их вмещает, а не выталкиваются вниз. */
-  flex: 0 1 auto;
-  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
 }
+/* Подпись НАД ползунком: в столбце шириной с сам ползунок «Дробление» рядом
+   с ним не помещается. */
+.ptools .parts__strength { flex-direction: column; align-items: stretch; gap: 5px; }
+.ptools .parts__strength input { width: 100%; }
 
-/* Действия над всей работой прижаты вправо — как и во всех рядах приложения.
-   «Убрать всё» необратимо, и стоять вплотную к ползункам ему не место. */
-.parts__acts {
+/* Переход из первого цвета во второй. Дома (в палитре) он не виден: его
+   место — подвал поповера выбора цвета, куда он переезжает на время. */
+.parts__grad { display: none; }
+.picker__extra .parts__grad { display: flex; flex-direction: column; gap: 10px; }
+.picker__extra {
+  display: flex;
+  flex-direction: column;
+  margin-top: 10px;
+}
+.picker__extra:empty { display: none; }
+/* Черта над переходом: он про то же, что и выбор выше, но это уже решение
+   «цвет или переход», а не подбор оттенка. */
+.picker__extra .parts__grad {
+  padding-top: 10px;
+  border-top: 1px solid var(--hairline);
+}
+.parts__grad-aim { display: flex; align-items: center; gap: 10px; }
+/* Ряд решений о кисти: «Градиент» слева, пипетка у правого края — она не про
+   переход, а про то, откуда взять сам цвет. */
+.parts__grad-row { display: flex; align-items: center; gap: 8px; }
+.parts__grad-row .textbtn { flex: 1; text-align: left; }
+.parts__grad-row .ptools__btn { flex: none; width: 22px; height: 22px; }
+.parts__grad-row .ptools__btn svg { width: 15px; height: 15px; }
+
+/* Образец под пипеткой: цвет того пикселя, на котором стоит курсор, пока
+   кнопку держат. `fixed` и поверх кадра — цвет берут и с модели в iframe, где
+   своего окошка у страницы нет. */
+.pickspot {
+  position: fixed;
+  z-index: 60;
   display: flex;
   align-items: center;
-  gap: 14px;
-  margin-left: auto;
-  flex: none;
+  gap: 6px;
+  padding: 3px 5px;
+  border: 1px solid var(--hairline-strong);
+  background: var(--overlay);
+  pointer-events: none;
 }
-/* Частей бывает под три десятка — они уезжают вбок, а не разваливают подвал. */
-#partsbar { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 3px; }
+.pickspot[hidden] { display: none; }
+/* Квадрат образца — с той же двойной рамкой, что метки выбора цвета: он лежит
+   на произвольном цвете, и любой цвет интерфейса на нём где-нибудь пропадёт. */
+.pickspot i {
+  width: 16px;
+  height: 16px;
+  border: 1px solid #fff;
+  outline: 1px solid rgba(0, 0, 0, .55);
+}
+.pickspot b { font-family: var(--mono); font-size: 11px; font-weight: 400; }
+
+/* Полоса перехода: единственное место, где видно, ЧТО получится на детали.
+   Ползунки прямо на ней — края перелива и его середина. */
+.parts__ramp {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  height: 16px;
+  border: 1px solid var(--hairline-strong);
+  touch-action: none;
+}
+/* Метки — белая рамка с тёмной обводкой, как у меток выбора цвета: они лежат
+   на произвольном цвете, и любой цвет интерфейса на нём где-нибудь пропадёт. */
+.parts__stop {
+  position: absolute;
+  top: 50%;
+  width: 9px;
+  height: 9px;
+  margin: -5px 0 0 -5px;
+  padding: 0;
+  border: 1px solid #fff;
+  outline: 1px solid rgba(0, 0, 0, .55);
+  background: none;
+  cursor: ew-resize;
+}
+.parts__stop.is-active { background: #fff; }
+/* Середина — ромбом: она не про цвет, а про перевес, и путать её с краями
+   нельзя. */
+.parts__stop--mid { transform: rotate(45deg); width: 7px; height: 7px; margin: -4px 0 0 -4px; }
+
+/* Список частей — у противоположного края: он про модель, а не про
+   инструмент. Частей бывает под три десятка, поэтому столбец прокручивается,
+   а не растёт за край; снизу оставлено место подсказке. */
+.parts__list {
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  z-index: 2;
+  max-height: calc(100% - 80px);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--hairline-strong);
+  background: var(--surface);
+  overflow-y: auto;
+}
+.parts__head { flex: none; }
 
 /* Номер вместо «Часть 7 · 3%»: доля развёртки уехала в подсказку. Двухстрочные
    чипы были втрое шире любого другого тега в приложении. */
@@ -986,10 +1192,8 @@
   vertical-align: middle;
 }
 
-/* Образцы цвета — единственное цветное пятно в монохроме, поэтому они мелкие
-   и в такой же волосяной рамке, как всё остальное. Свой цвет — тот же
-   квадрат: нативный input рисует рамку и подложку от системы. */
-.parts__swatch,
+/* Поле цвета — мелкий квадрат в такой же волосяной рамке, как всё остальное:
+   нативный input иначе рисует рамку и подложку от системы. */
 .parts__color {
   flex: none;
   width: 18px;
@@ -1003,9 +1207,7 @@
 .parts__color::-webkit-color-swatch-wrapper { padding: 0; }
 .parts__color::-webkit-color-swatch { border: none; }
 .parts__color::-moz-color-swatch { border: none; }
-.parts__swatch:hover,
 .parts__color:hover { border-color: var(--ink); }
-.parts__swatch.is-active,
 .parts__color.is-active { outline: 1px solid var(--ink); outline-offset: 2px; }
 
 /* Подробность резки живёт в полосе ЧАСТЕЙ, а не в палитре: она меняет сам
@@ -1089,14 +1291,25 @@
 /* Включённый режим на текстовой кнопке: у палитры их несколько подряд. */
 .parts .textbtn.is-active { color: var(--accent); border-color: var(--accent); }
 
-/* Подсказка — своя строка с зарезервированной высотой: в ряду кнопок она
-   растягивала его и подвал прыгал на каждое действие. */
+/* Подсказка — понизу кадра, вне колонки инструментов: она длинная, а в панели
+   шириной с ползунок из неё вышел бы столбец из одного слова. Указатель сквозь
+   неё проходит: модель под ней должна вращаться. Пустую не показываем — рамка
+   без текста читается как поломка. */
 .parts__hint {
-  flex: 1 0 100%;
-  min-height: 15px;
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  z-index: 2;
+  max-width: 46ch;
+  padding: 5px 8px;
+  border: 1px solid var(--hairline);
+  background: var(--surface);
   font-size: 11px;
+  line-height: 1.45;
   color: var(--ink-soft);
+  pointer-events: none;
 }
+.parts__hint:empty { display: none; }
 
 /* Место части на текстуре: подсвечивается при наведении на кусок модели.
    Картинка-маска на весь кадр, а не прямоугольник: у детали, лежащей на
@@ -1109,6 +1322,10 @@
   top: 0;
   width: 100%;
   height: 100%;
+  /* Вписываем так же, как саму текстуру: квадратные они бывают не всегда (у
+     тела шпиона 1024×512), и растянутая на весь кадр подсветка съезжала с
+     деталей — сверху и снизу у такого кадра поля, а не текстура. */
+  object-fit: contain;
   pointer-events: none;
 }
 .parts .tag.is-hover { border-color: var(--accent); color: var(--accent); }

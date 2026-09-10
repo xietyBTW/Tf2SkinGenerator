@@ -46,7 +46,9 @@ function placeRect(image, box, spec, size) {
     h = image.height * k;
   }
   w *= spec.scale;
-  h *= spec.scale;
+  // По высоте — свой множитель: за угол рамки тянут целиком, за сторону —
+  // только по её оси. Старые работы второго не знают: там он равен первому.
+  h *= (spec.scale_y === undefined ? spec.scale : spec.scale_y);
   // Развёртка считает v снизу, холст — сверху: место части переворачивается.
   const cx = box[0] * size + bw / 2 + spec.offset[0] * bw;
   const cy = (1 - box[3]) * size + bh / 2 + spec.offset[1] * bh;
@@ -76,6 +78,31 @@ function placeView(state, size) {
   const focus = state.focus
     || [b[0] * size + w / 2, (1 - b[3]) * size + h / 2];
   return { k, dx: size / 2 - k * focus[0], dy: size / 2 - k * focus[1] };
+}
+
+/**
+ * Внешний контур развёртки: рёбра, у которых нет пары.
+ *
+ * Развёртка приезжает ТРЕУГОЛЬНИКАМИ, и обвести каждый — значит нарисовать
+ * сетку: у детали из полутора тысяч треугольников за ней не видно ни картинки,
+ * ни собственных краёв. Внутреннее ребро принадлежит двум треугольникам сразу,
+ * граничное — одному: пары взаимно уничтожаются, остаётся контур. Островов у
+ * куска бывает несколько — контуров тогда столько же, и это правда о нём.
+ */
+function outlineOf(polygons) {
+  const edges = new Map();
+  for (const tri of polygons) {
+    for (let i = 0; i < 3; i++) {
+      const from = tri[i];
+      const to = tri[(i + 1) % 3];
+      const a = from[0] + ',' + from[1];
+      const b = to[0] + ',' + to[1];
+      const key = a < b ? a + '|' + b : b + '|' + a;
+      if (edges.has(key)) edges.delete(key);
+      else edges.set(key, [from, to]);
+    }
+  }
+  return [...edges.values()];
 }
 
 function drawPlace(state) {
@@ -136,11 +163,20 @@ function drawPlace(state) {
   g.strokeStyle = '#cc5522';
   g.lineWidth = 1 / view.k;
   g.beginPath();
-  for (const tri of state.polygons) {
-    g.moveTo(tri[0][0] * size, (1 - tri[0][1]) * size);
-    g.lineTo(tri[1][0] * size, (1 - tri[1][1]) * size);
-    g.lineTo(tri[2][0] * size, (1 - tri[2][1]) * size);
-    g.closePath();
+  if (state.outline) {
+    // Считаем один раз: треугольники за время окна не меняются.
+    if (!state.edges) state.edges = outlineOf(state.polygons);
+    for (const [from, to] of state.edges) {
+      g.moveTo(from[0] * size, (1 - from[1]) * size);
+      g.lineTo(to[0] * size, (1 - to[1]) * size);
+    }
+  } else {
+    for (const tri of state.polygons) {
+      g.moveTo(tri[0][0] * size, (1 - tri[0][1]) * size);
+      g.lineTo(tri[1][0] * size, (1 - tri[1][1]) * size);
+      g.lineTo(tri[2][0] * size, (1 - tri[2][1]) * size);
+      g.closePath();
+    }
   }
   g.stroke();
 
@@ -154,6 +190,26 @@ function drawPlace(state) {
 //: сжимается на треть — отсюда числа крупнее, чем кажется нужным.
 const HANDLE_GAP = 38;
 const HANDLE_R = 10;
+//: Сторона квадратика на рамке и радиус попадания по нему. Попадание крупнее
+//: самого квадратика: целиться в семь пикселей мышью — работа, а не правка.
+const GRIP = 9;
+const GRIP_HIT = 14;
+
+//: Ручки рамки: углы и середины сторон. Знаки говорят, какой край тянут, и
+//: они же дают точку, которая при этом остаётся на месте (противоположная).
+const GRIPS = [[-1, -1], [1, -1], [1, 1], [-1, 1],
+               [0, -1], [1, 0], [0, 1], [-1, 0]];
+
+/** Ручка под курсором в системе картинки. null — курсор не на ручке. */
+function gripAt(rect, lx, ly, k) {
+  const reach = GRIP_HIT / k;
+  let best = null;
+  for (const [sx, sy] of GRIPS) {
+    const gap = Math.hypot(lx - sx * rect.w / 2, ly - sy * rect.h / 2);
+    if (gap <= reach && (!best || gap < best.gap)) best = { sx, sy, gap };
+  }
+  return best;
+}
 
 /** Рамка картинки и маркер поворота над ней — привычная ручка, а не циферблат. */
 function drawHandle(g, rect, angle, k) {
@@ -180,6 +236,20 @@ function drawHandle(g, rect, angle, k) {
   g.strokeStyle = '#fff';
   g.lineWidth = 2 / k;
   g.stroke();
+
+  // Ручки размера — там же, где их ищет рука: по углам и серединам сторон.
+  // Белая заливка с акцентной обводкой: они лежат на самой картинке, и
+  // сплошной акцент на оранжевой наклейке пропадал бы.
+  const side = GRIP / k;
+  g.lineWidth = 1.5 / k;
+  for (const [sx, sy] of GRIPS) {
+    g.beginPath();
+    g.rect(sx * rect.w / 2 - side / 2, sy * rect.h / 2 - side / 2, side, side);
+    g.fillStyle = '#fff';
+    g.fill();
+    g.strokeStyle = '#cc5522';
+    g.stroke();
+  }
   g.restore();
 }
 
@@ -198,6 +268,50 @@ function localPoint(state, rect, size, clientX, clientY, cv) {
 
 
 /**
+ * Тянет рамку за ручку.
+ *
+ * Противоположный край стоит на месте — так это работает в редакторах
+ * изображений: тянешь правый край, левый не шевелится. Значит меняется не
+ * только размер, но и центр, а центр здесь живёт в сдвиге (`offset`), в долях
+ * места части.
+ *
+ * Угол тянет обе оси разом, сохраняя пропорции: чаще всего наклейку просто
+ * увеличивают. Сторона тянет свою — ею картинку и вытягивают под деталь.
+ */
+function resizeBy(state, drag, event, cv) {
+  const size = cv.width;
+  const { sx, sy } = drag.grip;
+  // Считаем в системе рамки НА МОМЕНТ НАЖАТИЯ: она не должна ехать вслед за
+  // собственным изменением, иначе тяга разгоняется сама по себе.
+  const [lx, ly] = localPoint(state, drag.rect, size, event.clientX,
+                              event.clientY, cv);
+  let w = drag.w0;
+  let h = drag.h0;
+  if (sx) w = Math.max(4, Math.abs(lx + sx * drag.w0 / 2));
+  if (sy) h = Math.max(4, Math.abs(ly + sy * drag.h0 / 2));
+  if (sx && sy) {
+    const k = Math.hypot(w, h) / Math.hypot(drag.w0, drag.h0);
+    w = drag.w0 * k;
+    h = drag.h0 * k;
+  }
+
+  const clamp = (value) => Math.max(0.05, Math.min(20, value));
+  state.spec.scale = clamp(drag.scale0 * w / drag.w0);
+  state.spec.scale_y = clamp(drag.scaleY0 * h / drag.h0);
+
+  // Двигаем центр так, чтобы противоположный край остался там же, где был.
+  const shiftX = -sx * (w - drag.w0) / 2;
+  const shiftY = -sy * (h - drag.h0) / 2;
+  const rad = state.spec.angle * Math.PI / 180;
+  const worldX = shiftX * Math.cos(rad) - shiftY * Math.sin(rad);
+  const worldY = shiftX * Math.sin(rad) + shiftY * Math.cos(rad);
+  const bw = Math.max(1, (state.bbox[2] - state.bbox[0]) * size);
+  const bh = Math.max(1, (state.bbox[3] - state.bbox[1]) * size);
+  state.spec.offset = [drag.off0[0] - worldX / bw, drag.off0[1] - worldY / bh];
+  drawPlace(state);
+}
+
+/**
  * Спрашивает, как посадить картинку. Возвращает настройку или null (отмена).
  *
  * `shape` — ответ `api.partShape`: развёртка части и то, что на ней уже лежит.
@@ -207,20 +321,28 @@ export async function askPlacement(shape, imageUrl, spec) {
     polygons: shape.polygons || [],
     bbox: shape.bbox || [0, 0, 1, 1],
     spec: { fit: spec.fit, angle: spec.angle, scale: spec.scale,
+            scale_y: spec.scale_y === undefined ? spec.scale : spec.scale_y,
             offset: [spec.offset[0], spec.offset[1]] },
     base: shape.base ? await loadImage(api.fileUrl(shape.base, true)) : null,
     image: await loadImage(imageUrl),
   };
 
   const cv = document.getElementById('place-canvas');
-  const scale = document.getElementById('place-scale');
+  const wide = document.getElementById('place-w');
+  const tall = document.getElementById('place-h');
   const bare = document.getElementById('place-bare');
   const zoom = document.getElementById('place-zoom');
+  const outline = document.getElementById('place-outline');
   // Игровая текстура под наклейкой — контекст, но пёстрый: на ней не видно
   // границ собственной картинки. Прятать её нужно только на время правки,
   // поэтому это галка окна, а не настройка предмета.
   bare.checked = false;
   state.bare = false;
+  // Сетка треугольников показывает, ПО ЧЕМУ маскирует склейка, и на мелкой
+  // детали это единственный способ увидеть её изнанку. Поэтому контур —
+  // галка, а не умолчание; она окна, а не предмета.
+  outline.checked = false;
+  state.outline = false;
   // Приближение по умолчанию: класть картинку на кусок, глядя на всю текстуру,
   // — то же, что целиться в спичку с другого конца комнаты.
   zoom.checked = true;
@@ -246,11 +368,18 @@ export async function askPlacement(shape, imageUrl, spec) {
     }, wait);
   }
 
+  //: Числа в полях — то же самое, что показывает рамка. Тянут её мышью, а
+  //: поля обязаны идти следом: иначе они врут о том, что сейчас на холсте.
+  const syncNumbers = () => {
+    wide.value = Math.round(state.spec.scale * 100);
+    tall.value = Math.round(state.spec.scale_y * 100);
+  };
+
   const sync = () => {
     placeDlg.querySelectorAll('[data-fit]').forEach((b) => {
       b.classList.toggle('is-active', b.dataset.fit === state.spec.fit);
     });
-    scale.value = Math.round(state.spec.scale * 100);
+    syncNumbers();
     drawPlace(state);
   };
 
@@ -296,9 +425,17 @@ export async function askPlacement(shape, imageUrl, spec) {
       const [lx, ly, k] = localPoint(state, rect, cv.width, e.clientX, e.clientY, cv);
       const handleY = -rect.h / 2 - HANDLE_GAP / k;
       const near = Math.hypot(lx, ly - handleY) <= (HANDLE_R + 6) / k;
-      drag = near
-        ? { turn: true }
-        : { x: e.clientX, y: e.clientY, from: [...state.spec.offset] };
+      // Что делает нажатие, решает место: маркер над картинкой крутит,
+      // квадратик на рамке тянет размер, всё остальное двигает.
+      const grip = near ? null : gripAt(rect, lx, ly, k);
+      if (near) drag = { turn: true };
+      else if (grip) {
+        drag = { grip, rect, w0: rect.w, h0: rect.h,
+                 scale0: state.spec.scale, scaleY0: state.spec.scale_y,
+                 off0: [...state.spec.offset] };
+      } else {
+        drag = { x: e.clientX, y: e.clientY, from: [...state.spec.offset] };
+      }
     });
     on(cv, 'pointermove', (e) => {
       if (!drag) return;
@@ -320,6 +457,7 @@ export async function askPlacement(shape, imageUrl, spec) {
         drawPlace(state);
         return;
       }
+      if (drag.grip) { resizeBy(state, drag, e, cv); syncNumbers(); return; }
       const r = cv.getBoundingClientRect();
       // Приближение меняет экранный размер места части: без множителя картинка
       // при перетаскивании убегала бы от курсора во столько же раз.
@@ -369,11 +507,20 @@ export async function askPlacement(shape, imageUrl, spec) {
       drawPlace(state);
     });
 
-    on(scale, 'input', () => {
-      state.spec.scale = Number(scale.value) / 100;
+    // Поля — для точного числа; мышью то же самое делают ручки на рамке.
+    const byNumber = (field, axis) => on(field, 'input', () => {
+      const value = Number(field.value) / 100;
+      if (!(value > 0)) return;              // пустое поле — человек его чистит
+      state.spec[axis] = Math.max(0.05, Math.min(20, value));
       drawPlace(state);
     });
+    byNumber(wide, 'scale');
+    byNumber(tall, 'scale_y');
     on(bare, 'change', () => { state.bare = bare.checked; drawPlace(state); });
+    on(outline, 'change', () => {
+      state.outline = outline.checked;
+      drawPlace(state);
+    });
     on(zoom, 'change', () => {
       state.zoom = zoom.checked;
       state.zoomK = 1;             // выключили и включили — вид снова стартовый
@@ -382,7 +529,8 @@ export async function askPlacement(shape, imageUrl, spec) {
     });
 
     on(document.getElementById('place-reset'), 'click', () => {
-      state.spec = { fit: 'contain', angle: 0, scale: 1, offset: [0, 0] };
+      state.spec = { fit: 'contain', angle: 0, scale: 1, scale_y: 1,
+                     offset: [0, 0] };
       state.zoomK = 1;
       state.focus = null;
       sync();
@@ -404,7 +552,7 @@ export async function askPartPlacement(part, path) {
   const shape = await api.partShape(partsMaterial, part);
   if (shape.error) { hintParts(shape.error); return null; }
   const spec = shape.image
-    || { fit: 'contain', angle: 0, scale: 1, offset: [0, 0] };
+    || { fit: 'contain', angle: 0, scale: 1, scale_y: 1, offset: [0, 0] };
   const url = api.fileUrl(path || spec.path);
   return askPlacement(shape, url, spec);
 }

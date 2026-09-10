@@ -426,19 +426,39 @@ def _chunk_key(key):
 _CACHE: Dict[tuple, ModelParts] = {}
 
 
+def _cuts_per_material(cuts) -> Dict[str, Dict[int, List[Tuple[int, ...]]]]:
+    """Разрезы в вид «материал → канон разрезов».
+
+    Плоский словарь (ключи — номера групп) означает «одни и те же разрезы для
+    всех материалов»: так их писали, пока модель считалась одноматериальной.
+    """
+    if not cuts:
+        return {}
+    if all(isinstance(value, dict) for value in cuts.values()):
+        return {str(mat): bundles_of(made) for mat, made in cuts.items()}
+    return {'': bundles_of(cuts)}
+
+
 def load(obj_path: str,
          cuts: Optional[Dict[int, object]] = None) -> Optional[ModelParts]:
     """Части модели по её OBJ. None — файла нет или в нём нет геометрии.
 
-    ``cuts`` — {номер группы: список наборов островов}. Каждый набор — одна
-    отрезанная часть; несколько островов в наборе сливаются в неё же. Пусто —
-    куски геометрии целиком, как их видит человек.
+    ``cuts`` — {материал: {номер группы: список наборов островов}}. Каждый
+    набор — одна отрезанная часть; несколько островов в наборе сливаются в неё
+    же. Пусто — куски геометрии целиком, как их видит человек.
+
+    По МАТЕРИАЛАМ, потому что номера групп считаются внутри материала: у головы
+    шпиона и у его тела есть своя «группа 1», и общий словарь резал их обе
+    разом — человек отрезал воротник, а разбиение головы менялось следом, и её
+    покраска уезжала на чужие куски. Плоский словарь (без материалов) остаётся
+    понятным и означает «одинаково для всех» — так его писали раньше.
     """
     if not obj_path or not os.path.isfile(obj_path):
         return None
-    clean = bundles_of(cuts)
+    per_mat = _cuts_per_material(cuts)
     key = (os.path.abspath(obj_path), os.path.getmtime(obj_path),
-           tuple(sorted((g, tuple(v)) for g, v in clean.items())))
+           tuple(sorted((mat, tuple(sorted((g, tuple(v)) for g, v in clean.items())))
+                        for mat, clean in per_mat.items())))
     cached = _CACHE.get(key)
     if cached is not None:
         return cached
@@ -451,7 +471,9 @@ def load(obj_path: str,
     if not by_mat:
         return None
 
-    done = {mat: _split(tris, clean) for mat, tris in by_mat.items()}
+    shared = per_mat.get('')
+    done = {mat: _split(tris, per_mat.get(mat, shared))
+            for mat, tris in by_mat.items()}
     parts = ModelParts(
         materials={mat: got[0] for mat, got in done.items()},
         uv={mat: [uv for _, uv in tris] for mat, tris in by_mat.items()},

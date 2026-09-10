@@ -354,9 +354,10 @@ export function applyView(st) {
   // «Разделить на части» — только когда модель и правда в сцене. Признак
   // держит Python (`can_split`): у скайбокса и спрея модели нет вовсе, а до
   // прихода model_ready её ещё нет — и кнопка обещала бы действие, которого
-  // сделать нельзя.
+  // сделать нельзя. Режим при этом спрашиваем свой (`split_parts`), а не
+  // подмену модели: тело класса не подменить, а разделить — можно.
   document.querySelector('[data-cond="parts"]').hidden =
-    !(modeControls.replace_model && st.can_split);
+    !(modeControls.split_parts && st.can_split);
 
   // «Убрать свою модель» — только когда своя геометрия и правда стоит.
   // Без неё замена была билетом в один конец: вернуть игровую можно было
@@ -807,7 +808,12 @@ export function showMaterials(names, textures = {}, inStyle = false) {
 document.querySelector('.modes').addEventListener('click', async (e) => {
   const btn = e.target.closest('.underlined');
   if (!btn) return;
-  const wasFp = work.dataset.view === 'fp';
+  // Уходим ли со СЦЕНЫ. Вид от первого лица и насмешка — не ракурсы, а
+  // собранные сцены: их ставит отдельный воркер, и снять их обязан тот же, кто
+  // поставил. Раньше здесь спрашивалось только про вид от первого лица, и
+  // насмешку выключить было нельзя вовсе: «Вместе» возвращало свободную
+  // камеру, а персонаж продолжал играть насмешку вместо самого реквизита.
+  const wasScene = work.dataset.view === 'fp' || work.dataset.view === 'taunt';
   document.querySelectorAll('.modes .underlined').forEach((b) => b.classList.remove('is-active'));
   btn.classList.add('is-active');
   work.dataset.view = btn.dataset.view;
@@ -837,7 +843,10 @@ document.querySelector('.modes').addEventListener('click', async (e) => {
     // и без возврата обычной модели оружие оставалось в руках, только вертеть
     // его теперь можно было свободно. Кадр обычного превью уже есть, поэтому
     // Python пересобирать нечего — он лишь снимает сцену и подложку.
-    if (wasFp) {
+    // Выход у обеих сцен один: `leave_first_person` гасит и вьюмодель, и
+    // насмешку — обе держат подложку с текстурами персонажа, и снимаются они
+    // одинаково (см. session.leave_first_person).
+    if (wasScene) {
       applyView(await api.leaveFirstPerson());
       if (lastModel) await showModel(lastModel);
     }

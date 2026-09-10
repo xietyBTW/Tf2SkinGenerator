@@ -72,7 +72,7 @@ export async function openSettings() {
   document.getElementById('cfg-temp').checked = Boolean(v.keep_temp_files);
   document.getElementById('cfg-debug').checked = Boolean(v.debug_mode);
   document.getElementById('cfg-blacklist').value =
-    (v.material_blacklist || []).join('\\n');
+    (v.material_blacklist || []).join('\n');
   document.getElementById('cfg-note').textContent =
     pinnedFits() ? '' : 'для закреплённых панелей нужно окно шире 1100 px';
 

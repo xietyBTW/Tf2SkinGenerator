@@ -124,6 +124,11 @@ class PreviewSession:
     part_colors: Dict[str, Dict[int, str]] = field(default_factory=dict)
     #: Сила тонировки, общая на предмет: 1.0 — в цвет, 0.3 — лёгкий оттенок.
     part_tint: float = 1.0
+    #: Красить ровно выбранным цветом, а не смешивать его с оригиналом.
+    #: Настройка КИСТИ: у каждого мазка она своя, эта — для следующего.
+    #: Включена по умолчанию: человек выбирает цвет в палитре и вправе ждать
+    #: на модели именно его.
+    part_exact: bool = True
     #: Окантовка частей: ширина полосы по краю в долях стороны текстуры и её
     #: цвет. Общая на предмет, как и сила: обводят обычно всю работу разом, а
     #: не одну деталь. 0 — окантовки нет.
@@ -144,7 +149,10 @@ class PreviewSession:
     #: у них общие пиксели, и режутся они вместе. Свойство ПРЕДМЕТА, а не
     #: кисти: номера частей от разрезов зависят, и хранить их надо там же, где
     #: саму покраску.
-    part_cuts: Dict[int, List[int]] = field(default_factory=dict)
+    #: {материал: {группа: наборы островов}} — по материалу, потому что номера
+    #: групп считаются внутри него: у головы шпиона и у его тела есть своя
+    #: «группа 1», и общий словарь резал обе разом.
+    part_cuts: Dict[str, Dict[int, List[List[int]]]] = field(default_factory=dict)
 
     # ── Вариантные стили ──────────────────────────────────────────────────── #
     #: Материалы, ЯВНО добавленные пользователем в стиль через «+»: {skin: {mat}}.
@@ -509,7 +517,15 @@ class PreviewSession:
                               for mat, items in self.part_textures.items()},
             'part_colors': {mat: {str(part): color for part, color in items.items()}
                             for mat, items in self.part_colors.items()},
+            # Разрезы — часть работы, а не настройка показа: номера частей от
+            # них зависят, и без них вернувшаяся покраска легла бы на чужие
+            # куски. Сами по себе они правкой не считаются (см. EDIT_FIELDS):
+            # разрезал и передумал — работы тут нет.
+            'part_cuts': {mat: {str(group): [list(bundle) for bundle in made]
+                                for group, made in (cuts or {}).items()}
+                          for mat, cuts in self.part_cuts.items()},
             'part_tint': float(self.part_tint),
+            'part_exact': bool(self.part_exact),
             'custom_smd_path': self.custom_smd_path,
             'custom_keep_materials': bool(self.custom_keep_materials),
             'custom_qc_text': self.custom_qc_text,
@@ -549,7 +565,12 @@ class PreviewSession:
         self.part_colors = {
             mat: {int(part): color for part, color in (items or {}).items()}
             for mat, items in (edits.get('part_colors') or {}).items()}
+        self.part_cuts = {
+            mat: {int(group): [list(bundle) for bundle in (made or ())]
+                  for group, made in (cuts or {}).items()}
+            for mat, cuts in (edits.get('part_cuts') or {}).items()}
         self.part_tint = float(edits.get('part_tint') or 1.0)
+        self.part_exact = bool(edits.get('part_exact'))
         self.custom_smd_path = edits.get('custom_smd_path') or None
         self.custom_keep_materials = bool(edits.get('custom_keep_materials'))
         self.custom_qc_text = edits.get('custom_qc_text') or None

@@ -208,8 +208,9 @@ export const partShape = (material, part) =>
   call('part_shape', { material, part });
 export const partMask = (material, part) =>
   call('part_mask', { material, part });
-export const setPartColors  = (material, colors, strength = null) =>
-  call('set_part_colors', { material, colors, strength });
+export const setPartColors  = (material, colors, strength = null,
+                               exact = null) =>
+  call('set_part_colors', { material, colors, strength, exact });
 export const clearParts     = (material = '') => call('clear_parts', { material });
 export const setPartEdge    = (material, width, color) =>
   call('set_part_edge', { material, width, color });

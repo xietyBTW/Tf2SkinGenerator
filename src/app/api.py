@@ -339,6 +339,12 @@ def controls_for(mode: str) -> Dict[str, object]:
         # эффектов смерти её нет вовсе, у неба — грани вместо неё.
         'load_model': not (is_crit or is_skybox or is_spray),
         'replace_model': not (is_crit or is_skybox or is_spray or is_body),
+        # Деление на части — про ГЕОМЕТРИЮ, а не про подмену модели: делить
+        # можно всё, что приехало декомпиляцией, включая тела классов и руки
+        # (у них своя геометрия и своя развёртка). Раньше кнопка ходила за
+        # `replace_model` и вместе с ним пропадала у персонажей — хотя куски
+        # у них есть, и красить их по одному хочется даже чаще, чем у оружия.
+        'split_parts': model_like,
         # Вьюмодель есть только у оружия В РУКАХ. Снаряд, аптечка и реквизит
         # насмешки — мировые модели: `kind_of` зовёт их оружием (pipeline тот
         # же), но вида от первого лица у них нет, и вкладка вела в ошибку.
@@ -897,10 +903,14 @@ def set_part_texture(material: str = '', part: int = 0,
 
 def set_part_colors(material: str = '',
                     colors: Optional[Dict[str, str]] = None,
-                    strength: Optional[float] = None) -> Dict[str, object]:
-    """Красит части: {часть: '#rrggbb'}; значение None снимает цвет."""
+                    strength: Optional[float] = None,
+                    exact: Optional[bool] = None) -> Dict[str, object]:
+    """Красит части: {часть: '#rrggbb'}; значение None снимает цвет.
+
+    `exact` — красить ровно выбранным цветом, а не смешивать его с оригиналом.
+    """
     from src.app.session import session
-    return session().set_part_colors(material, colors, strength)
+    return session().set_part_colors(material, colors, strength, exact)
 
 
 def set_part_edge(material: str = '', width: float = 0.0,

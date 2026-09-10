@@ -98,5 +98,27 @@ class PatternsArgumentTests(unittest.TestCase):
         self.assertEqual(result, ["c_scattergun", "c_arrow"])
 
 
+class GluedPatternTests(unittest.TestCase):
+    """
+    Запись, склеенная литеральными «\» и «n».
+
+    Так выглядели конфиги после старой ошибки окна настроек: список
+    показывался одной строкой, и следующее сохранение писало его одним
+    паттерном. Совпасть он не мог ни с чем — блэклист просто переставал
+    работать, и понять это по интерфейсу было нельзя.
+    """
+
+    GLUED = "_invun" + chr(92) + "nzombie"
+
+    def test_glued_config_entry_still_matches(self):
+        with _with_user_patterns([self.GLUED]):
+            self.assertTrue(mf.is_user_blacklisted("sniper_red_invun"))
+            self.assertTrue(mf.is_user_blacklisted("heavy_zombie"))
+            self.assertFalse(mf.is_user_blacklisted("c_scattergun"))
+
+    def test_glued_text_splits_on_save(self):
+        self.assertEqual(mf.parse_blacklist(self.GLUED), ["_invun", "zombie"])
+
+
 if __name__ == "__main__":
     unittest.main()

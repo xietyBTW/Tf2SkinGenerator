@@ -165,6 +165,225 @@
              второй three.js ради неоткрытой вкладки незачем. -->
         <iframe class="viewport__frame" id="particles" title="Частицы" hidden></iframe>
         <span class="viewport__hint" id="stagehint">Выберите предмет</span>
+        <!-- ═══ Части модели ═══════════════════════════════════════════════
+             Инструменты стоят ПОВЕРХ кадра, у правого края и по центру, как
+             палитра в редакторе изображений. В подвале под кадром они были
+             двумя бедами сразу: инструмент оторван от того, по чему им
+             работают (щёлкают-то по самой модели), а в развёрнутом кадре
+             (F11) подвала нет вовсе — режим частей там пропадал целиком.
+
+             В колонке только значки: это РЕЖИМ, в нём сидят подолгу, и три
+             слова под кадром стоили строки экрана. Что настраивает выбранный
+             значок, показывает панель слева от колонки.
+
+             Колонка сворачивается: модель разглядывают в том числе и издали,
+             а палитра при этом занимает свою полосу кадра. -->
+        <div class="parts ptools" id="partspaint" hidden>
+          <div class="ptools__bar">
+            <!-- Сворачивание — первым: единственная кнопка, которая остаётся
+                 видна, когда всё остальное убрано. -->
+            <button class="ptools__btn ptools__fold" type="button" id="parts-fold"
+                    title="Свернуть палитру" aria-label="Свернуть палитру">
+              <svg viewBox="0 0 16 16" aria-hidden="true">
+                <path d="M6 3 11 8l-5 5"/>
+              </svg>
+            </button>
+
+            <!-- Сперва чем работают, потом чем красят, потом что сделать со
+                 всей работой. Между ними черты: «Убрать всё» необратимо, и
+                 стоять вплотную к кисти ему не место. -->
+            <div class="ptools__body">
+              <!-- Курсор — «положить картинку». Свой значок ей нужен затем,
+                   что раньше это было ОТСУТСТВИЕ выбранного цвета: щелчок по
+                   части то красил, то открывал выбор файла, и понять, что
+                   сейчас будет, было неоткуда. -->
+              <button class="ptools__btn" type="button" data-tool="image"
+                      title="Положить картинку на часть" aria-label="Картинка">
+                <svg viewBox="0 0 16 16" aria-hidden="true">
+                  <path d="M3 1.8 3 13.2 6.1 10.3 8.1 14 9.9 13.1 8 9.5 12.2 9.3Z"/>
+                </svg>
+              </button>
+              <button class="ptools__btn" type="button" data-tool="brush"
+                      title="Красить части выбранным цветом" aria-label="Кисть">
+                <svg viewBox="0 0 16 16" aria-hidden="true">
+                  <path d="M13.5 2.5 8 8"/><path d="M7 7 9 9 5.5 10.5Z"/>
+                </svg>
+              </button>
+              <!-- Ножницы — сам режим: пока они выбраны, щелчок по модели
+                   режет. Отдельной кнопки «Резать» при них не нужно; два
+                   выключателя у одного режима расходятся, и один из них молча
+                   проигрывает. -->
+              <button class="ptools__btn" type="button" data-tool="cut"
+                      title="Щёлкать по кускам модели, чтобы дробить их мельче"
+                      aria-label="Нарезка">
+                <svg viewBox="0 0 16 16" aria-hidden="true">
+                  <circle cx="4" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/>
+                  <path d="M4.9 10.6 11 2.5"/><path d="M11.1 10.6 5 2.5"/>
+                </svg>
+              </button>
+              <button class="ptools__btn" type="button" data-tool="edge"
+                      title="Обвести края покрашенных частей" aria-label="Окантовка">
+                <svg viewBox="0 0 16 16" aria-hidden="true">
+                  <path d="M2.5 2.5h11v11h-11z"/><path d="M5.5 5.5h5v5h-5z"/>
+                </svg>
+              </button>
+
+              <span class="ptools__sep"></span>
+
+              <!-- Чем красят — два квадрата внахлёст, как в редакторах
+                   изображений. Второй виден только при градиенте: без него он
+                   обещал бы цвет, которым ничего не красится. Щелчок открывает
+                   настройки кисти — там же и переключатель градиента. -->
+              <button class="ptools__btn ptools__color picker-anchor" type="button"
+                      id="parts-swatch"
+                      title="Чем красить: цвет или переход" aria-label="Цвет кисти">
+                <i class="ptools__bg" id="parts-swatch-bg"></i>
+                <i class="ptools__fg" id="parts-swatch-fg"></i>
+              </button>
+
+              <span class="ptools__sep"></span>
+
+              <button class="ptools__btn" type="button" id="parts-random"
+                      title="Случайно" aria-label="Случайно">
+                <svg viewBox="0 0 16 16" aria-hidden="true">
+                  <path d="M2.5 2.5h11v11h-11z"/>
+                  <circle class="ptools__pip" cx="5.5" cy="5.5" r=".9"/>
+                  <circle class="ptools__pip" cx="8" cy="8" r=".9"/>
+                  <circle class="ptools__pip" cx="10.5" cy="10.5" r=".9"/>
+                </svg>
+              </button>
+              <button class="ptools__btn" type="button" id="parts-clear"
+                      title="Убрать всё" aria-label="Убрать всё">
+                <svg viewBox="0 0 16 16" aria-hidden="true">
+                  <path d="M6.5 13.5 2.5 9.5 9 3l4 4z"/>
+                  <path d="M13.5 13.5H6.5"/><path d="M5.75 6.25 9.75 10.25"/>
+                </svg>
+              </button>
+              <button class="ptools__btn" type="button" id="parts-done"
+                      title="Готово" aria-label="Готово">
+                <svg viewBox="0 0 16 16" aria-hidden="true">
+                  <path d="M3 8.5 6.5 12 13 4"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          <!-- Настройки выбранного значка. Видна ровно одна группа: человек в
+               момент времени либо красит, либо режет, либо обводит. У картинки
+               настроек нет — панель тогда не показывается вовсе. -->
+          <div class="ptools__opts" id="parts-opts">
+            <span class="label ptools__title" id="parts-tool">Кисть</span>
+
+            <!-- ── Кисть ─────────────────────────────────────────────────── -->
+            <div class="parts__group" data-group="brush">
+              <!-- Сам цвет задаётся в квадрате колонки: щелчок по нему
+                   открывает выбор, и переход — там же. Поля здесь только хранят
+                   значение и служат целью тому выбору; готовых образцов нет —
+                   палитра из пяти квадратиков занимала место, а цвет всё равно
+                   подбирают свой. -->
+              <input class="parts__color" type="color" id="part-color" value="#7d6a58"
+                     title="Свой цвет" hidden>
+              <input class="parts__color" type="color" id="part-color2" value="#2a2a2a"
+                     title="Второй цвет градиента" hidden>
+              <label class="parts__strength">
+                Сила
+                <input type="range" id="part-tint" min="20" max="100" value="100">
+              </label>
+              <!-- Обычная тонировка считает цвет ОТ ЯРКОСТИ оригинала: на
+                   тёмном металле «#cc5522» выходит бурым, и в палитре одно, а
+                   на модели другое. С галкой цвет берётся как есть, а фактура
+                   возвращается относительной яркостью — тени и блики остаются,
+                   средний тон совпадает с выбранным. -->
+              <label class="check">
+                <input type="checkbox" id="part-exact" checked><span>Точный цвет</span>
+              </label>
+            </div>
+
+            <!-- ── Нарезка ───────────────────────────────────────────────── -->
+            <div class="parts__group" data-group="cut" hidden>
+              <!-- Развёртка режет вещи не так, как их видит человек: палец у неё
+                   нередко разложен на верх и низ. Кнопка появляется, только
+                   когда отмечено больше одного отрезка одного куска. -->
+              <button class="textbtn textbtn--sm" id="parts-join" hidden
+                      title="Свести отмеченные отрезки в одну часть">Объединить</button>
+              <label class="parts__strength">
+                Дробление
+                <input type="range" id="part-detail" min="0" max="100" value="0">
+              </label>
+            </div>
+
+            <!-- ── Окантовка ─────────────────────────────────────────────── -->
+            <div class="parts__group" data-group="edge" hidden>
+              <button class="textbtn textbtn--sm" id="parts-edge"
+                      title="Обвести края покрашенных частей">Обводить</button>
+              <input class="parts__color" type="color" id="part-edge-color"
+                     value="#141210" title="Цвет окантовки" hidden>
+              <label class="parts__strength" id="part-edge-box" hidden>
+                Толщина
+                <input type="range" id="part-edge-width" min="1" max="30" value="6">
+              </label>
+            </div>
+          </div>
+
+          <!-- Переход из первого цвета во второй. Дом у него здесь, а показан
+               он бывает ВНУТРИ поповера выбора цвета: решение «цвет или
+               переход» принимают там же, где подбирают сам цвет. -->
+          <div class="parts__grad" id="parts-grad-box">
+            <!-- Ряд решений о кисти: чем красить — переходом или одним цветом,
+                 и откуда взять сам цвет. Пипетка стоит здесь потому, что
+                 подобрать цвет по образцу на модели — то же решение, что
+                 подобрать его в квадрате, и уходить за ним из открытого выбора
+                 незачем. В колонке её нет намеренно: там инструменты, которые
+                 что-то ДЕЛАЮТ с моделью, а пипетка только называет цвет для
+                 кисти. Быстрый путь к ней — Alt при кисти. -->
+            <div class="parts__grad-row">
+              <button class="textbtn textbtn--sm" id="parts-grad"
+                      title="Красить переходом из первого цвета во второй">Градиент</button>
+              <button class="ptools__btn" type="button" id="parts-drop"
+                      data-tool="pick"
+                      title="Взять цвет с модели или с текстуры"
+                      aria-label="Пипетка">
+                <svg viewBox="0 0 16 16" aria-hidden="true">
+                  <path d="M2.5 13.5 3.4 10.8 10.2 4 12 5.8 5.2 12.6Z"/>
+                  <path d="M9.4 3.2 12.8 6.6"/>
+                </svg>
+              </button>
+            </div>
+            <div class="parts__grad-aim" id="parts-grad-aim" hidden>
+              <!-- Сам переход: полоса показывает, как он ляжет на деталь.
+                   Квадратики — края (за ними чистый цвет, и чем они ближе друг
+                   к другу, тем резче перелив), ромбик — середина, где цвета
+                   смешаны поровну. Щелчок по квадратику переводит на его цвет
+                   выбор наверху: два цвета и правятся здесь же. -->
+              <div class="parts__ramp" id="parts-ramp">
+                <button class="parts__stop is-active" data-stop="start"
+                        title="Начало перехода: за ним первый цвет чистый"></button>
+                <button class="parts__stop parts__stop--mid" data-stop="mid"
+                        title="Середина: где цвета смешаны поровну"></button>
+                <button class="parts__stop" data-stop="end"
+                        title="Конец перехода: за ним второй цвет чистый"></button>
+              </div>
+              <!-- Направление задаётся ручкой: двух вариантов («сверху вниз» /
+                   «слева направо») не хватает — наклонный переход на детали и
+                   есть то, что читается как объём. -->
+              <button class="parts__dial" id="parts-grad-dir"
+                      title="Направление перехода — потяни или стрелками">
+                <i class="parts__needle"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Список частей — у противоположного края: он про модель («из чего
+             она состоит»), а не про инструмент. Наведение на пункт подсвечивает
+             кусок в кадре между ними. -->
+        <div class="parts parts__list" id="partsbar" hidden>
+          <span class="label parts__head">Части</span>
+        </div>
+
+        <!-- Подсказка — понизу кадра, вне колонки: она длинная, и в панели
+             шириной с ползунок из неё получался бы столбец из одного слова. -->
+        <span class="parts__hint" id="parts-hint"></span>
       </div>
 
       <!-- ═══ Контрольные точки ═══════════════════════════════════════════
@@ -235,96 +454,6 @@
              из каталога вместе с предметом. -->
         <div class="styles" id="hatstyles" hidden>
           <span class="label label--inline">Стиль шапки</span>
-        </div>
-        <!-- Части модели: куски геометрии одного материала. Список приходит
-             от Python по загруженной модели. -->
-        <!-- Полоса частей. Разбита на три группы настроек, из которых видна
-             ОДНА: человек в момент времени либо режет, либо красит, либо
-             обводит, а показывать всё разом — четыре строки под моделью, где
-             «Толщина» отрывается переносом и уезжает к «Убрать всё».
-
-             Порядок сверху вниз тот же, что в работе: сперва из чего состоит
-             модель, потом чем это правят, потом что сделать со всем разом. -->
-        <div class="styles parts parts__list" id="partsbar" hidden>
-          <span class="label label--inline">Части</span>
-        </div>
-
-        <div class="styles parts parts__tools" id="partspaint" hidden>
-          <!-- Что настраиваем. Подчёркиванием, как отмечено всё выбранное в
-               этом интерфейсе (см. режимы показа над вьюпортом). -->
-          <div class="parts__tabs">
-            <button class="underlined is-active" data-tool="brush">Кисть</button>
-            <button class="underlined" data-tool="cut">Нарезка</button>
-            <button class="underlined" data-tool="edge">Окантовка</button>
-          </div>
-
-          <span class="parts__sep"></span>
-
-          <!-- ── Кисть ─────────────────────────────────────────────────── -->
-          <div class="parts__group" data-group="brush">
-            <input class="parts__color" type="color" id="part-color" value="#7d6a58"
-                   title="Свой цвет">
-            <button class="textbtn textbtn--sm" id="parts-grad"
-                    title="Красить переходом из первого цвета во второй">Градиент</button>
-            <input class="parts__color" type="color" id="part-color2" value="#2a2a2a"
-                   title="Второй цвет градиента" hidden>
-            <!-- Направление перехода задаётся ручкой: двух вариантов
-                 («сверху вниз» / «слева направо») не хватает — наклонный
-                 переход на детали и есть то, что читается как объём. -->
-            <button class="parts__dial" id="parts-grad-dir" hidden
-                    title="Направление перехода — потяни или стрелками">
-              <i class="parts__needle"></i>
-            </button>
-            <label class="parts__strength">
-              Сила
-              <input type="range" id="part-tint" min="20" max="100" value="100">
-            </label>
-          </div>
-
-          <!-- ── Нарезка ───────────────────────────────────────────────── -->
-          <div class="parts__group" data-group="cut" hidden>
-            <!-- Резать надо там, где смотрят: человек видит на модели руку и
-                 хочет пальцы. Это РЕЖИМ с видимой кнопкой, а не жест: щелчок
-                 по модели в обычном состоянии красит, и два ответа на один
-                 щелчок означали бы, что один из них молча проигрывает. -->
-            <button class="textbtn textbtn--sm" id="parts-cut"
-                    title="Щёлкать по кускам модели, чтобы дробить их мельче">Резать</button>
-            <!-- Развёртка режет вещи не так, как их видит человек: палец у неё
-                 нередко разложен на верх и низ. Кнопка появляется, только
-                 когда отмечено больше одного отрезка одного куска. -->
-            <button class="textbtn textbtn--sm" id="parts-join" hidden
-                    title="Свести отмеченные отрезки в одну часть">Объединить</button>
-            <label class="parts__strength">
-              Дробление
-              <input type="range" id="part-detail" min="0" max="100" value="0">
-            </label>
-          </div>
-
-          <!-- ── Окантовка ─────────────────────────────────────────────── -->
-          <div class="parts__group" data-group="edge" hidden>
-            <button class="textbtn textbtn--sm" id="parts-edge"
-                    title="Обвести края покрашенных частей">Обводить</button>
-            <input class="parts__color" type="color" id="part-edge-color"
-                   value="#141210" title="Цвет окантовки" hidden>
-            <label class="parts__strength" id="part-edge-box" hidden>
-              Толщина
-              <input type="range" id="part-edge-width" min="1" max="30" value="6">
-            </label>
-          </div>
-
-          <!-- Действия над всей работой — справа и отдельно: «Убрать всё»
-               рядом с ползунком толщины стояло как равное, а оно необратимо. -->
-          <!-- Отмена и возврат живут только на клавишах (Ctrl+Z / Ctrl+Y):
-               красят десятками щелчков, и кнопка, которой пользуются раз в
-               десять действий, стояла в ряду наравне с «Убрать всё». Про
-               клавиши сказано в подсказке под полосой. -->
-          <div class="parts__acts">
-            <button class="textbtn textbtn--sm" id="parts-random">Случайно</button>
-            <button class="textbtn textbtn--sm" id="parts-clear">Убрать всё</button>
-            <button class="textbtn textbtn--sm" id="parts-done">Готово</button>
-          </div>
-
-          <span class="parts__hint" id="parts-hint"></span>
         </div>
         <!-- Анимации вида от первого лица. Список приходит от воркера: у
              каждого оружия свой набор, и общего перечня не существует. -->
@@ -603,9 +732,18 @@
       <button class="tag" data-fit="contain">Целиком</button>
       <button class="tag" data-fit="cover">Заполнить</button>
       <button class="tag" data-fit="stretch">Растянуть</button>
+      <!-- Размер тянут ЗА РАМКУ, как в редакторах изображений: за угол —
+           целиком, за сторону — только по её оси. Поля рядом для тех, кому
+           нужно точное число, и как подпись к тому, что делает мышь. -->
       <label class="parts__detail">
-        Размер
-        <input type="range" id="place-scale" min="10" max="400" value="100">
+        Ширина
+        <input class="input input--num" id="place-w" type="number"
+               min="5" max="2000" step="5" value="100">
+      </label>
+      <label class="parts__detail">
+        Высота
+        <input class="input input--num" id="place-h" type="number"
+               min="5" max="2000" step="5" value="100">
       </label>
       <!-- Кусок занимает малую часть развёртки: класть на него картинку,
            глядя на всю текстуру, — то же, что целиться в спичку с другого
@@ -617,9 +755,16 @@
       <label class="check place__bare">
         <input type="checkbox" id="place-bare"><span>Без игровой</span>
       </label>
+      <!-- Развёртка нарисована ТРЕУГОЛЬНИКАМИ, и обвести каждый — значит
+           показать сетку: на детали из полутора тысяч треугольников за ней не
+           видно ни картинки, ни краёв самой детали. Галка оставляет только
+           внешний контур куска. -->
+      <label class="check place__bare">
+        <input type="checkbox" id="place-outline"><span>Только контур</span>
+      </label>
       <button class="textbtn textbtn--sm" id="place-reset">Сбросить</button>
     </div>
-    <p class="ask__text place__hint" id="place-hint">Тяни картинку мышью, поворачивай за маркер сверху (стрелки — на 15°), колесо — приблизить к курсору</p>
+    <p class="ask__text place__hint" id="place-hint">Тяни картинку мышью, размер — за квадратики на рамке (угол тянет целиком, сторона — по своей оси), поворот — за маркер сверху (стрелки — на 15°), колесо — приблизить к курсору</p>
     <div class="ask__acts">
       <button class="textbtn" type="button" id="place-cancel">Отмена</button>
       <button class="btn--primary" type="button" id="place-ok">Готово</button>
@@ -711,7 +856,7 @@
       <label class="field__label" for="cfg-blacklist">Скрытые материалы</label>
       <textarea class="input cfg__list" id="cfg-blacklist" rows="3"
                 placeholder="по одному в строке или через запятую"></textarea>
-      <span class="field__note">Эти материалы не показываются в альбоме и не пишутся в мод.</span>
+      <span class="field__note">Совпадение по части имени: «head» скроет и «scout_head_red». Знак «=» в начале требует точного имени. Скрытые материалы не показываются в альбоме; в мод они пишутся с игровой текстурой.</span>
     </div>
 
     <!-- Обслуживание: после обновления игры старые разобранные модели

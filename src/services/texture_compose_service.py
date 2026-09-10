@@ -64,8 +64,18 @@ class Layer:
     image_angle: float = 0.0
     #: Множитель поверх вписывания: 1.0 — как вписалось, 2.0 — вдвое крупнее.
     image_scale: float = 1.0
+    #: Множитель ПО ВЫСОТЕ. None — такой же, как по ширине: наклейку чаще
+    #: растят целиком, а разные множители нужны, когда деталь длинная и
+    #: картинку под неё вытягивают.
+    image_scale_y: Optional[float] = None
     #: Сдвиг центра в долях места части: (0.5, 0) — на пол-ширины вправо.
     image_offset: Tuple[float, float] = (0.0, 0.0)
+    #: Куда вписывать картинку, если не в габарит самой части: габарит развёртки
+    #: (u0, v0, u1, v1) той части, на которую её клали. Нужен после РЕЗКИ:
+    #: разрезанная деталь становится двумя частями, у каждой свой габарит, и
+    #: без якоря наклейка перерисовывалась заново в каждой половине — на модели
+    #: это выглядело как две уменьшенные копии вместо одной картинки.
+    anchor: Optional[Tuple[float, float, float, float]] = None
     #: Тонировка «#rrggbb». Яркость оригинала сохраняется — иначе от модели
     #: остаётся цветное пятно без единой детали.
     color: Optional[str] = None
@@ -77,8 +87,21 @@ class Layer:
     #: стрелке (90 — слева направо). Углом, а не флагом «поперёк»: наклонный
     #: переход на детали читается как объём, а двух вариантов на это не хватает.
     angle: float = 0.0
+    #: Где переход начинается и заканчивается вдоль своей оси, в долях места
+    #: части: 0 и 1 — от края до края. Сдвигая их, человек говорит, сколько
+    #: детали занимает чистый цвет, а сколько — сам перелив.
+    start: float = 0.0
+    end: float = 1.0
+    #: Где цвета смешаны поровну: 0.5 — ровно посередине перехода, меньше —
+    #: ближе к первому цвету (он перетягивает). Это и есть «сила» перелива:
+    #: краями задаётся его ширина, серединой — перевес.
+    mid: float = 0.5
     #: Сила тонировки: 1.0 — полностью в цвет, 0.3 — лёгкий оттенок.
     strength: float = 1.0
+    #: Красить ИМЕННО выбранным цветом, а не смешивать его с оригиналом
+    #: (см. `_tinted`). Свойство работы, а не отдельной части: вид у покраски
+    #: должен быть один на весь предмет.
+    exact: bool = False
     #: Окантовка: ширина полосы по краю части в долях стороны текстуры.
     #: 0 — без окантовки. В долях, а не в пикселях: одна и та же работа
     #: собирается и в 512, и в 2048, и полоса должна выглядеть одинаково.
@@ -89,7 +112,8 @@ class Layer:
 
 def place_image(patch: Image.Image, box: Tuple[int, int, int, int],
                 fit: str = 'contain', angle: float = 0.0, scale: float = 1.0,
-                offset: Tuple[float, float] = (0.0, 0.0)):
+                offset: Tuple[float, float] = (0.0, 0.0),
+                scale_y: Optional[float] = None):
     """
     Готовит картинку к вклейке: размер, поворот, положение.
 
@@ -111,8 +135,12 @@ def place_image(patch: Image.Image, box: Tuple[int, int, int, int],
         k = pick(width / source[0], height / source[1])
         target = (source[0] * k, source[1] * k)
 
-    k = max(0.01, float(scale))
-    target = (max(1, round(target[0] * k)), max(1, round(target[1] * k)))
+    # Ширина и высота тянутся по отдельности: за угол рамки — вместе, за
+    # сторону — только своя ось. Без второго множителя картинку было не
+    # вытянуть под длинную деталь.
+    kx = max(0.01, float(scale))
+    ky = max(0.01, float(scale if scale_y is None else scale_y))
+    target = (max(1, round(target[0] * kx)), max(1, round(target[1] * ky)))
     patch = patch.resize(target, Image.LANCZOS)
     if angle:
         # PIL крутит против часовой, а угол задаём по часовой — как у ручки
@@ -186,6 +214,19 @@ def _mask(polygons: Iterable[UvTri], size: Tuple[int, int],
 _SPOT_SIZE = 512
 
 
+def _spot_size(shape: Optional[Tuple[int, int]]) -> Tuple[int, int]:
+    """Размер подсветки в ПРОПОРЦИЯХ текстуры: длинная сторона — _SPOT_SIZE."""
+    try:
+        width, height = int(shape[0]), int(shape[1])
+    except (TypeError, ValueError, IndexError):
+        return (_SPOT_SIZE, _SPOT_SIZE)
+    if width < 1 or height < 1:
+        return (_SPOT_SIZE, _SPOT_SIZE)
+    longest = max(width, height)
+    return (max(1, round(_SPOT_SIZE * width / longest)),
+            max(1, round(_SPOT_SIZE * height / longest)))
+
+
 def dense_bbox(polygons: Sequence[UvTri], cut: float = 0.04):
     """
     Габарит ПЛОТНОЙ части детали: без редких дальних островков.
@@ -235,7 +276,8 @@ def dense_bbox(polygons: Sequence[UvTri], cut: float = 0.04):
 
 
 def outline_png(polygons: Sequence[UvTri], out_path: str,
-                rgb: Tuple[int, int, int] = (204, 85, 34)) -> str:
+                rgb: Tuple[int, int, int] = (204, 85, 34),
+                shape: Optional[Tuple[int, int]] = None) -> str:
     """
     Форма части на развёртке — картинкой: заливка плюс обводка по краю.
 
@@ -245,8 +287,12 @@ def outline_png(polygons: Sequence[UvTri], out_path: str,
 
     Обводку берём как разницу расширенной маски и исходной — рисовать рёбра
     треугольников нельзя, получилась бы сетка, а не контур детали.
+
+    `shape` — размер САМОЙ текстуры. Квадратными они бывают не всегда: у тела
+    шпиона 1024×512, и подсветка, нарисованная в квадрат, ложилась на кадр
+    растянутой по вертикали — разметка съезжала с деталей.
     """
-    size = (_SPOT_SIZE, _SPOT_SIZE)
+    size = _spot_size(shape)
     # Без запаса: здесь показывают форму части, а не красят её. Расширенный
     # контур врал бы о том, где деталь кончается.
     mask = _mask(polygons, size, bleed=0)
@@ -276,7 +322,8 @@ def _rgb(color: str) -> Optional[Tuple[int, int, int]]:
 def _paint_layer(size: Tuple[int, int], box: Tuple[int, int, int, int],
                  first: Tuple[int, int, int],
                  second: Optional[Tuple[int, int, int]],
-                 angle: float = 0.0) -> Image.Image:
+                 angle: float = 0.0, start: float = 0.0, end: float = 1.0,
+                 mid: float = 0.5) -> Image.Image:
     """
     Слой краски: сплошной цвет или градиент по месту части на развёртке.
 
@@ -303,7 +350,22 @@ def _paint_layer(size: Tuple[int, int], box: Tuple[int, int, int, int],
     # Нормируем по РАЗМАХУ проекции прямоугольника, а не по его стороне: иначе
     # на наклонной оси крайние цвета не доходят до углов части.
     span = abs(dx) + abs(dy) or 1.0
-    k = np.clip(projection / span + 0.5, 0.0, 1.0)[..., None]
+    k = np.clip(projection / span + 0.5, 0.0, 1.0)
+
+    # Края перехода: за ними лежит чистый цвет. Сдвинутые к середине, они
+    # делают перелив резче, сдвинутые к одному краю — отдают деталь одному
+    # цвету. Схлопнуться в точку не даём: это деление на ноль, а на экране —
+    # граница вместо перехода.
+    low, high = sorted((float(start), float(end)))
+    high = max(high, low + 1e-3)
+    k = np.clip((k - low) / (high - low), 0.0, 1.0)
+
+    # Середина: где цвета смешаны поровну. Степень, а не сдвиг, — так переход
+    # остаётся гладким на всей длине; ровно так же считает Photoshop.
+    middle = min(0.95, max(0.05, float(mid)))
+    if abs(middle - 0.5) > 1e-3:
+        k = k ** (math.log(0.5) / math.log(middle))
+    k = k[..., None]
 
     a = np.array(first, dtype=float)
     b = np.array(second, dtype=float)
@@ -325,7 +387,8 @@ def edge_band(mask: Image.Image, width: int) -> Image.Image:
 
 
 def _tinted(base: Image.Image, paint: Image.Image,
-            strength: float) -> Image.Image:
+            strength: float, mask: Optional[Image.Image] = None,
+            exact: bool = False) -> Image.Image:
     """
     Тонировка: цвет ложится как краска, детали остаются.
 
@@ -333,11 +396,48 @@ def _tinted(base: Image.Image, paint: Image.Image,
     («красный ствол» выходит угольным), а раскраска по яркости — мутной.
     Overlay держит и тени, и блики, поэтому дерево остаётся деревом, просто
     красным. Проверено на стоковой текстуре обреза.
+
+    `exact` — второй способ, для тех случаев, когда нужен ИМЕННО выбранный
+    цвет. Overlay считает от яркости оригинала: на тёмном металле #cc5522
+    выходит бурым, и человек видит в палитре одно, а на модели другое. Здесь
+    цвет берётся как есть, а фактура возвращается ОТНОСИТЕЛЬНОЙ яркостью:
+    пиксель темнее среднего по детали — цвет темнее во столько же раз, светлее
+    — светлее. Среднее совпадает с выбранным цветом, тени и блики на месте.
     """
-    lit = ImageChops.overlay(base.convert('RGB'), paint).convert('RGBA')
+    if exact:
+        lit = _repainted(base, paint, mask)
+    else:
+        lit = ImageChops.overlay(base.convert('RGB'), paint).convert('RGBA')
     lit.putalpha(base.getchannel('A'))
     amount = min(1.0, max(0.0, float(strength)))
     return Image.blend(base, lit, amount) if amount < 1.0 else lit
+
+
+def _repainted(base: Image.Image, paint: Image.Image,
+               mask: Optional[Image.Image]) -> Image.Image:
+    """
+    Цвет как в палитре, фактура — относительной яркостью оригинала.
+
+    Среднее берём ПО МАСКЕ ЧАСТИ, а не по всей текстуре: детали лежат на
+    развёртке вперемешку, и среднее по картинке целиком сделало бы светлую
+    деталь тёмной за компанию с соседями.
+    """
+    gray = np.asarray(base.convert('L'), dtype=np.float32)
+    if mask is not None:
+        weights = np.asarray(mask, dtype=np.float32)
+        total = float(weights.sum())
+        mean = float((gray * weights).sum() / total) if total > 0 else 0.0
+    else:
+        mean = float(gray.mean())
+    # Совсем чёрная деталь среднего не даёт: относительная яркость там
+    # бессмысленна, и красим ровно выбранным цветом.
+    if mean < 1.0:
+        return paint.convert('RGBA')
+
+    rel = (gray / mean)[..., None]
+    rgb = np.asarray(paint.convert('RGB'), dtype=np.float32) * rel
+    return Image.fromarray(np.clip(rgb, 0, 255).astype(np.uint8),
+                           'RGB').convert('RGBA')
 
 
 #: Больше кадров в VTF не влезает по-хорошему: анимация в Source живёт на весь
@@ -437,12 +537,19 @@ def _masks_for(layers: Sequence[Layer], size: Tuple[int, int]):
     кадров — при том что результат каждый раз один и тот же.
     """
     out = []
+    width, height = size
     for layer in layers:
         if not layer.polygons:
             out.append(None)
             continue
         mask = _mask(layer.polygons, size)
         box = mask.getbbox()
+        if box and layer.anchor:
+            # Якорь задан в координатах развёртки, а v там растёт снизу — как и
+            # в самой маске.
+            u0, v0, u1, v1 = layer.anchor
+            box = (int(u0 * width), int((1.0 - v1) * height),
+                   int(u1 * width), int((1.0 - v0) * height))
         out.append((mask, box) if box else None)   # None — часть вне холста
     return out
 
@@ -466,7 +573,8 @@ def _compose_frame(base: Image.Image, layers: Sequence[Layer],
             # Картинка ложится на место части: человек кладёт её «на ствол», а
             # не в угол развёртки. Как именно — решает настройка слоя.
             patch, at = place_image(patch, box, layer.fit, layer.image_angle,
-                                    layer.image_scale, layer.image_offset)
+                                    layer.image_scale, layer.image_offset,
+                                    layer.image_scale_y)
             canvas = Image.new('RGBA', size, (0, 0, 0, 0))
             canvas.paste(patch, at)
             # Прозрачность картинки уважаем: иначе PNG с альфой затирал бы
@@ -480,8 +588,8 @@ def _compose_frame(base: Image.Image, layers: Sequence[Layer],
             canvas = _tinted(
                 base,
                 _paint_layer(size, box, rgb, _rgb(layer.color2 or ''),
-                             layer.angle),
-                layer.strength)
+                             layer.angle, layer.start, layer.end, layer.mid),
+                layer.strength, mask, layer.exact)
         else:
             continue
 
