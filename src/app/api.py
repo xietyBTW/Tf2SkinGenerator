@@ -220,12 +220,22 @@ def items(category: str = 'weapon', tf2_class: Optional[str] = None,
                          'cls': '', 'type': 'special', 'mode': m}
                         for m in SPECIAL_MODES], query)
     if category == 'skybox':
-        from src.data.skyboxes import SKYBOX_MODE, STOCK_SKY_NAMES
+        from src.app.session import session
+        from src.data.skyboxes import SKYBOX_MODE
+        from src.services.skybox_service import SkyboxService
+
+        # Список спрашиваем у УСТАНОВЛЕННОЙ игры: `STOCK_SKY_NAMES` — фолбэк на
+        # случай ненастроенной папки, и с обновлениями Valve он стареет. Скан
+        # ищет `materials/skybox/<имя>up.vmt` и объединяется с фолбэком, так
+        # что список не может стать короче (см. enumerate_sky_names).
+        paths = session().tf2_paths()
+        names = SkyboxService.enumerate_sky_names(
+            '' if 'error' in paths else str(paths.get('root') or ''))
         # Обложка — боковая грань самого неба: иконки в рюкзаке у него нет и
         # быть не может, а узнают небо по горизонту.
         return _search([{'key': n, 'name': n, 'cls': '', 'type': 'skybox',
                          'mode': SKYBOX_MODE, 'sky': n, 'icon': f'skybox/{n}'}
-                        for n in STOCK_SKY_NAMES], query)
+                        for n in names], query)
 
     # Снаряды, пикапы и реквизит насмешек устроены одинаково: таблица
     # {ключ: {ru, en, mdl_path}} плюс префикс режима. Реестр общий с
@@ -274,7 +284,7 @@ def mode_for(category: str, subtype: Optional[str] = None) -> str:
 # Что показывать при этом режиме
 # ═══════════════════════════════════════════════════════════════════════════ #
 
-def controls_for(mode: str) -> Dict[str, object]:
+def controls_for(mode: str, key: str = '') -> Dict[str, object]:
     """
     Видимость и доступность контролов для режима сборки.
 
@@ -286,6 +296,10 @@ def controls_for(mode: str) -> Dict[str, object]:
     Часть ответов зависит не только от режима, но и от загруженной модели
     (есть ли BLU-вариант, австралий, служебные материалы). Такие ключи здесь
     не выдумываются — их проставит контроллер превью, когда модель приедет.
+
+    ``key`` — ключ выбранного предмета, если он есть: у косметики режим один
+    на всю категорию («hat»), и по нему предмет не назвать. Нужен только для
+    предлагаемого имени VPK.
     """
     from src.data.player_characters import PLAYER_BODY_MODE_KEYS, SPY_MASK_MODE_KEY
     from src.data.item_kinds import kind_of
@@ -293,10 +307,11 @@ def controls_for(mode: str) -> Dict[str, object]:
     from src.data.simple_models import category_of_mode
     from src.data.skyboxes import SKYBOX_MODE
     from src.domain.format_choices import (
-        allowed_flags_for_mode, allowed_formats_for_mode,
+        VTF_FLAGS, VTF_FORMATS, allowed_flags_for_mode, allowed_formats_for_mode,
     )
 
     from src.data.weapons import VTF_ONLY_SPECIAL_MODES
+    from src.shared.validators import suggest_vpk_name
 
     is_spray = mode == 'spray'
     # Эффекты смерти показываются ТОЙ ЖЕ сценой, что и крит (персонаж плюс
@@ -320,9 +335,23 @@ def controls_for(mode: str) -> Dict[str, object]:
         'mode': mode,
         # ── Панель сборки ───────────────────────────────────────────────── #
         'resolutions': ['256'] if is_spray else ['256', '512', '1024', '2048'],
-        'formats': allowed_formats_for_mode(mode),      # None → полный список
+        # Список ВСЕГДА конкретный. `allowed_formats_for_mode` возвращает None
+        # там, где ограничений нет, и это значило «покажи полный список» —
+        # окно приложения его знало (VTF_FORMATS), а страница держала свою
+        # копию из четырёх штук в разметке. Итого из 26 форматов было видно 4.
+        'formats': allowed_formats_for_mode(mode) or list(VTF_FORMATS),
         'format_locked': is_spray,
-        'flags': allowed_flags,                          # None → весь набор
+        # Имя VPK по предмету: в разметке стояло одно на всех
+        # («scattergun_mod.vpk»), и топор собирался под именем скаттергана.
+        # Считаем здесь, потому что имя обязано пройти validate_vpk_filename.
+        'vpk_name': suggest_vpk_name(mode, key),
+        # Галки флагов: ИМЯ (его ждёт сборка), подпись и разрешён ли флаг в
+        # этом режиме. Список конкретный по той же причине, что и форматы:
+        # копия в разметке разъезжается с доменной, и страница присылала в
+        # сборку подписи вместо имён — VTFCmd на них падал.
+        'flags': [{'key': key, 'label': label, 'adv': adv,
+                   'on': allowed_flags is None or key in allowed_flags}
+                  for key, label, adv in VTF_FLAGS],
         'flags_enabled': not (is_spray or is_crit),
         'gamma': allowed_flags is None,
         'normal_map': model_like and not is_crit,
@@ -371,6 +400,22 @@ def tf2_paths() -> Dict[str, object]:
     return session().tf2_paths()
 
 
+def find_tf2() -> Dict[str, object]:
+    """Ищет установленную TF2 сам: путь к игре — первое, без чего ничего.
+
+    Отдаёт `found` — список годных папок (обычно одну) в порядке от самого
+    вероятного. Пустой список означает «не нашлось», и тогда страница просит
+    указать папку руками: догадываться дальше нечем.
+
+    Проверка та же, по которой работает всё приложение (`TF2Paths.is_valid`),
+    так что предложенный путь заведомо рабочий.
+    """
+    from src.services.tf2_paths import TF2Paths
+    found = TF2Paths.autodetect()
+    logger.info(f"Автопоиск TF2: найдено {len(found)}")
+    return {'found': found}
+
+
 def load_preview(mode: str, lang: str = '',  # noqa: PLR0913 — зеркало сеанса
                  model_key: Optional[str] = None,
                  per_class: Optional[Dict[str, str]] = None,
@@ -415,7 +460,11 @@ def icon_png(key: str) -> Optional[bytes]:
 
     key = (key or '').replace('\\', '/').strip()
     if key.lower().startswith('skybox/'):
-        return model_icons.sky_png(key[len('skybox/'):], paths['textures_vpk'])
+        # Все VPK с небесами, а не одна tf2_textures: у небес из hl2/ обложка
+        # иначе не находилась и карточка оставалась пустой.
+        from src.services.tf2_paths import TF2Paths
+        return model_icons.sky_png(key[len('skybox/'):],
+                                   TF2Paths.skybox_vpks(paths['root']))
     # `mat/…` — прямая игровая картинка: портрет класса, значок постройки.
     # У звука предмета может не быть вовсе, а карточка без картинки пустая.
     if key.lower().startswith('mat/'):
@@ -946,6 +995,11 @@ _SETTINGS_KEYS = (
     'debug_mode', 'material_blacklist', 'save_edits',
     # Раскладка окна: раньше жила кнопкой в шапке и не переживала перезапуск.
     'panels_pinned',
+    # Особые флаги VTF: по умолчанию их нет на панели (см. VTF_FLAGS).
+    'advanced_vtf_flags',
+    # Гифка на части крутится и в 3D. Выключено: это секунды расчёта и сотни
+    # мегабайт на видеокарте после каждого мазка (см. AppSession._animate_parts).
+    'parts_animation',
 )
 
 #: Мелочи раскладки, которые правят НЕ в окне настроек, а прямо на экране:
@@ -1010,6 +1064,7 @@ def settings(lang: str = '') -> Dict[str, object]:
     """
     from src.config.app_config import AppConfig
     from src.shared.constants import SVPURE_BYPASS_DEFAULT
+    from src.services.tf2_paths import TF2Paths
 
     lang = _lang(lang)
     t = _t(lang)
@@ -1028,7 +1083,11 @@ def settings(lang: str = '') -> Dict[str, object]:
     if values.get('particles_group_tree') is None:
         values['particles_group_tree'] = True
     values['keep_temp_files'] = bool(values.get('keep_temp_files'))
+    # Особые флаги VTF по умолчанию спрятаны: скину они либо безразличны, либо
+    # (SSBump) вредны, а выглядят такой же безобидной галкой, как остальные.
+    values['advanced_vtf_flags'] = bool(values.get('advanced_vtf_flags'))
     values['debug_mode'] = bool(values.get('debug_mode'))
+    values['parts_animation'] = bool(values.get('parts_animation'))
     # Сохранение правок по умолчанию ВКЛЮЧЕНО: забытая работа — худший исход,
     # а человек не должен помнить про «сохранить».
     if values.get('save_edits') is None:
@@ -1045,6 +1104,11 @@ def settings(lang: str = '') -> Dict[str, object]:
 
     return {
         'values': values,
+        # Работает ли сохранённый путь к игре. Решает Python: проверка та же
+        # (`TF2Paths.is_valid`), по которой работает всё остальное, и второй
+        # её копии на странице быть не должно. Нужно, чтобы не показывать
+        # кнопку автопоиска там, где искать уже нечего.
+        'tf2_ok': TF2Paths.is_valid(values['tf2_game_folder']),
         'formats': ['VTF', 'PNG', 'TGA', 'JPG'],
         'languages': [{'value': 'ru', 'label': 'Русский'},
                       {'value': 'en', 'label': 'English'}],
@@ -1330,7 +1394,8 @@ def set_settings(values: Optional[Dict[str, object]] = None,
         elif key == 'export_folder':
             cfg[key] = str(value or '').strip() or 'export'
         elif key in ('particles_group_tree', 'keep_temp_files', 'debug_mode',
-                     'save_edits', 'panels_pinned'):
+                     'save_edits', 'panels_pinned', 'advanced_vtf_flags',
+                     'parts_animation'):
             cfg[key] = bool(value)
         else:
             cfg[key] = str(value or '').strip()
@@ -1340,6 +1405,8 @@ def set_settings(values: Optional[Dict[str, object]] = None,
     # как INFO — все logger.debug молчали при любом её положении.
     from src.shared.logging_config import set_debug
     set_debug(bool(cfg.get('debug_mode')))
+    from src.app.session import session
+    session().refresh_parts_animation()
     return settings(lang)
 
 
@@ -1666,10 +1733,11 @@ def particle_control_points(system: str) -> Dict[str, object]:
     return session().particle_control_points(system)
 
 
-def particle_models() -> List[dict]:
-    """Модели из кэша декомпиляции — на них сажают контрольную точку."""
-    from src.app.session import AppSession
-    return AppSession.particle_models()
+def particle_models(lang: str = '') -> List[dict]:
+    """Модели из кэша декомпиляции — на них сажают контрольную точку.
+    С группой (player/hat/weapon/arms/other) и подписью из каталогов игры."""
+    from src.app.session import session
+    return session().particle_models(_lang(lang))
 
 
 def particle_model_scene(qc: str) -> Dict[str, object]:

@@ -28,6 +28,47 @@ SKYBOX_ALLOWED_FLAGS = ("POINTSAMPLE",)
 SKYBOX_ALLOWED_FORMATS = ("DXT1", "BGR888")
 
 
+#: Флаги VTF, которые сборка ДОНОСИТ до готового файла: (имя, подпись).
+#:
+#: Имя уходит в VTFCmd (`-flag clamps`) и в VTFLib-путь
+#: (`TextureService._VTFLIB_FLAG_BITS`) — оно же должно приходить со страницы.
+#: Раньше страница присылала подпись галки («Clamp S»), и VTFCmd на неизвестном
+#: имени ПАДАЛ: отмеченный флаг ломал сборку целиком.
+#:
+#: Список выверен прогоном: каждое имя собрано в VTF и прочитано обратно из
+#: файла. Чего здесь нет намеренно:
+#:   • SRGB — этот VTFCmd такого флага не знает (сборка падает);
+#:   • NOMIP — мип-уровни гасит не флаг, а опция `nomipmaps` (её галка живёт
+#:     в колонке опций), и в VTFCmd-пути имя NOMIP пропускается нарочно.
+#:
+#: Третье поле — ОСОБЫЙ ли флаг. Обычных четыре, и только они что-то меняют у
+#: цветного скина: Point Sample (пиксель-арт без замыливания), No LOD
+#: (текстуру не режет настройка «Качество текстур» игрока), Clamp S/T (край не
+#: повторяется) и No minimum Mipmap (мелкие мип-уровни остаются). Остальные
+#: существуют в формате и корректно пишутся, но скину либо безразличны
+#: (фильтрацию решает клиент, Single Copy — про память), либо относятся к
+#: другому виду текстур (Clamp U — объёмные, Vertex Texture — вершинные,
+#: No Depth Buffer — render target), либо ВРЕДНЫ: SSBump объявляет текстуру
+#: самозатеняющимся бампмапом, и шейдер истолкует цветной скин иначе.
+#: Поэтому особые показываются только по галке в настройках.
+VTF_FLAGS = (
+    ("CLAMPS", "Clamp S", False),
+    ("CLAMPT", "Clamp T", False),
+    ("NOLOD", "No LOD", False),
+    ("NOMINMIP", "No minimum Mipmap", False),
+    ("POINTSAMPLE", "Point Sample", False),
+    ("CLAMPU", "Clamp U", True),
+    ("BORDER", "Border", True),
+    ("TRILINEAR", "Trilinear", True),
+    ("ANISOTROPIC", "Anisotropic", True),
+    ("SSBUMP", "SSBump", True),
+    ("VERTEXTEXTURE", "Vertex Texture", True),
+    ("NODEBUGOVERRIDE", "No Debug Override", True),
+    ("SINGLECOPY", "Single Copy", True),
+    ("NODEPTHBUFFER", "No Depth Buffer", True),
+)
+
+
 def allowed_flags_for_mode(mode):
     """Галки флагов/опций VTF, осмысленные для режима (имена флагов).
 

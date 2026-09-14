@@ -253,6 +253,8 @@ export const diagnose     = (path) => call('diagnose', { path });
 
 // Настройки приложения: конфиг общий с окном, поэтому правка видна обоим.
 export const settings     = () => call('settings');
+//: Автопоиск игры: реестр Steam и его библиотеки, а не обход диска.
+export const findTf2      = () => call('find_tf2');
 export const clearModelCache = () => call('clear_model_cache');
 //: Меню «Вставить» в редакторе VMT: набор не меняется за сеанс.
 export const vmtSnippets  = () => cached('vmt_snippets', {});

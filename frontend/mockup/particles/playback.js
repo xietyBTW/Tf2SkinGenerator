@@ -65,6 +65,15 @@ document.getElementById('ppause').addEventListener('click', (e) => {
   withParticles((w) => w.setPaused(pPaused));
 });
 
+//: Фон кадра: тёмный, как карта в тени, как карта на свету. Полупрозрачные
+//: слои (дымка воды) видны только на светлом — на чёрном это чёрный ящик.
+const BACKGROUNDS = [0x1a1a1a, 0x5c6a72, 0xb8c2c8];
+let pBg = 0;
+document.getElementById('pbg').addEventListener('click', () => {
+  pBg = (pBg + 1) % BACKGROUNDS.length;
+  withParticles((w) => w.setBackground(BACKGROUNDS[pBg]));
+});
+
 document.getElementById('ploop').addEventListener('click', (e) => {
   pLoop = !pLoop;
   e.target.classList.toggle('is-off', !pLoop);

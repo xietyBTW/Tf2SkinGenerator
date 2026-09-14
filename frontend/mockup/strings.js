@@ -149,6 +149,21 @@ export const EN = {
   'Не более 50 символов, без \\ / : * ? " < > |':
     'Up to 50 characters, no \\ / : * ? " < > |',
   'Флаги VTF': 'VTF flags',
+  'Особые флаги': 'Advanced flags',
+  'Найти автоматически': 'Detect automatically',
+  'Игра найдена: ': 'Game found: ',
+  'Найдено копий игры: ': 'Game copies found: ',
+  ', взял первую': ', using the first one',
+  'Игра не нашлась — укажите папку вручную':
+    'The game was not found - set the folder manually',
+  'Где установлена TF2?': 'Where is TF2 installed?',
+  'Нашёл игру здесь. Сохранить этот путь?':
+    'Found the game here. Save this path?',
+  'Найти игру сам не смог. Вставьте путь к папке игры.':
+    'Could not find the game. Paste the path to the game folder.',
+  'Особые флаги VTF': 'Advanced VTF flags',
+  'Флаги VTF, которые цветному скину либо безразличны (фильтрацию решает клиент), либо относятся к другому виду текстур, либо вредны: SSBump объявляет текстуру бампмапом':
+    'VTF flags that a color skin either does not care about (the client decides filtering), or that belong to a different kind of texture, or that do harm: SSBump declares the texture a bump map',
   'Опции': 'Options',
   'Гамма-коррекция': 'Gamma correction',
   'Изолировать плечи': 'Isolate shoulders',
@@ -168,10 +183,7 @@ export const EN = {
   'Выбрать файл…': 'Pick a file…',
   'Своя картинка именно для этого материала':
     'A custom image just for this material',
-  'И так для остальных — ещё': 'Same for the rest — {} more',
-  'материал': 'material',
-  'материала': 'materials',
-  'материалов': 'materials',
+  'И так для остальных материалов': 'Same for the rest of the materials',
   'Ответить': 'Answer',
   'Собрано: {}': 'Built: {}',
   'Сборка успешно завершена: {}': 'Build finished: {}',
@@ -402,6 +414,9 @@ export const EN = {
   'У этого неба граней в игре не нашлось':
     'No faces for this sky were found in the game',
   'Найдено граней: {} из 6': 'Faces found: {} of 6',
+  'Панорама 360°': '360° panorama',
+  'Загрузите панораму 360° или грани неба':
+    'Load a 360° panorama or the sky faces',
 
   // ── Части модели ──────────────────────────────────────────────────────
   'Части': 'Parts',
@@ -647,7 +662,19 @@ export const EN = {
   'Раскройте модуль в экспертном режиме — параметр добавляется в него':
     'Open the module in expert mode — the parameter is added to it',
   'Все известные параметры уже заданы': 'Every known parameter is already set',
+  'Поиск': 'Search',
+  'руки': 'hands',
+  'Игроки': 'Players',
+  'Косметика': 'Cosmetics',
+  'Руки': 'Hands',
+  'Только то, что уже открывали на вкладках оружия и шапок: разбор модели долгий и делается там.':
+    'Only what has been opened on the weapons and hats tabs: decompiling is slow and happens there.',
+  'Фон': 'Backdrop',
+  'Тёмный, серый или светлый фон кадра: полупрозрачные слои эффекта видны только на светлом':
+    'Dark, grey or light backdrop: translucent layers of an effect only show on a light one',
   'Какой параметр': 'Which parameter',
+  'Свои параметры у этого модуля уже все заданы. Остались общие для любого модуля: плавное включение и выключение по времени жизни системы.':
+    'This module already has all of its own parameters. What is left is common to every module: fading the operator in and out over the system lifetime.',
   'Значение подставится такое, как в эффектах игры.':
     'The value is taken from the game effects.',
   'Параметры скопированы — можно вставить в другую систему или отдать ИИ':
@@ -727,6 +754,11 @@ export const EN = {
   'VPK-файл не найден': 'VPK file not found',
   '«{}» в библиотеке нет': 'There is no “{}” in the library',
   'Сборка уже идёт': 'A build is already running',
+  'Крутить гифки на модели': 'Play GIFs on the model',
+  'Гифка, положенная на часть модели, крутится и в 3D. Каждый мазок пересчитывает кадры (секунды) и держит их на видеокарте (до сотен МБ)':
+    'A GIF placed on a model part also plays in 3D. Every stroke recomputes the frames (seconds) and keeps them on the GPU (up to hundreds of MB)',
+  'Анимация частей {}/{}': 'Part animation {}/{}',
+  'Не удалось собрать анимацию частей: {}': 'Could not assemble the part animation: {}',
   'Проверка уже идёт': 'A check is already running',
   'Извлечение уже идёт': 'An extraction is already running',
   'Объединение уже идёт': 'A merge is already running',

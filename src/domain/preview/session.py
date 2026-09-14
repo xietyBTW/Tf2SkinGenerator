@@ -18,6 +18,7 @@ PreviewSession владеет двумя моделями, которые уже
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -291,6 +292,35 @@ class PreviewSession:
         self.skin_chosen.setdefault(self.active_style, set()).add(material)
         return True
 
+    def adopt_style_textures(self, skin_textures: dict) -> None:
+        """
+        Готовые текстуры стилей: {индекс скина: {базовый материал: png}}.
+
+        Приезжают и от мода из VPK, и от игровой модели (там их достаёт
+        3D-воркер по строкам $texturegroup). Это ОРИГИНАЛЫ, а не правки: они
+        живут отдельно от ``skin_overrides``, иначе в сохранённую работу и в
+        сборку уехали бы временные PNG вместо выбора человека.
+        """
+        # Одноматериальная модель (гильотина) держит свою текстуру под
+        # СЛУЖЕБНЫМ ключом: настоящего имени материала превью не знает, и имя
+        # из QC ему не совпадает. Под именем из QC карточка стиля осталась бы
+        # пустой — материала с таким именем в состоянии просто нет.
+        single = self.textures.material_names == [SINGLE_TEX_KEY]
+        for raw_index, by_material in (skin_textures or {}).items():
+            index = int(raw_index)
+            if not index or not by_material:
+                continue           # базовый стиль показывает сами карточки
+            chosen = self.skin_chosen.setdefault(index, set())
+            slot = self.textures.style_game_tex.setdefault(index, {})
+            for base_material, png in by_material.items():
+                if not png or not os.path.exists(png):
+                    continue
+                # Карточки названы по базовому материалу — под ним стиль и
+                # переопределяется; имя меша подберёт resolve_mesh.
+                key = SINGLE_TEX_KEY if single else base_material
+                slot[key] = png
+                chosen.add(key)
+
     def drop_from_style(self, material: str) -> bool:
         """Убирает материал из стиля вместе с его текстурой — стиль вернёт базу."""
         style = self.active_style
@@ -301,6 +331,7 @@ class PreviewSession:
             return False
         chosen.discard(material)
         (self.textures.skin_overrides.get(style) or {}).pop(material, None)
+        (self.textures.style_game_tex.get(style) or {}).pop(material, None)
         return True
 
     def visible_textures(self) -> Dict[str, str]:
@@ -360,12 +391,11 @@ class PreviewSession:
         # переопределения наследует базовую текстуру, а не остаётся пустым.
         # Иначе выбор стиля раздевал модель догола (и вернуться было нечем).
         style = self.active_style
-        overrides = t.skin_overrides.get(style, {}) if style else {}
 
         for mat in list(t.material_names) + list(self.misc_materials):
             if mat in out:
                 continue
-            path = overrides.get(mat) if style else None
+            path = t.style_texture(style, mat) if style else None
             if not path:
                 path = t.resolve_base(mat) if style else t.resolve_card(mat)
             if path:

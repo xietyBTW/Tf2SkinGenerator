@@ -130,6 +130,121 @@ class ControlsTests(unittest.TestCase):
     def test_skybox_formats_have_no_alpha(self):
         self.assertEqual(api.controls_for('skybox')['formats'], ['DXT1', 'BGR888'])
 
+    def test_flag_checks_carry_names_not_captions(self):
+        """Галки флагов приезжают с ИМЕНЕМ флага, а не с подписью.
+
+        В сборку уходит имя (`-flag clamps`): на подпись («Clamp S») VTFCmd
+        падает, то есть отмеченный флаг ломал сборку целиком. Плюс каждое имя
+        обязано быть тем, которое сборка умеет применить.
+        """
+        from src.services.texture_service import TextureService
+
+        flags = api.controls_for('c_scattergun')['flags']
+        self.assertTrue(flags)
+        for row in flags:
+            self.assertIn(row['key'], TextureService._VTFLIB_FLAG_BITS, row)
+            self.assertTrue(row['label'], row)
+            self.assertTrue(row['on'], row)          # режим ничего не запрещает
+        # NOMIP гасится опцией `nomipmaps`, а не флагом: в VTFCmd-пути имя
+        # пропускается нарочно, и галка была бы пустышкой.
+        self.assertNotIn('NOMIP', [row['key'] for row in flags])
+
+    def test_settings_says_whether_the_game_path_works(self):
+        """`tf2_ok` — по нему окно настроек прячет кнопку автопоиска.
+
+        Проверку делает Python (`TF2Paths.is_valid`), а не страница: искать
+        нечего, когда путь уже рабочий, и второй копии этого правила в
+        разметке быть не должно.
+        """
+        from src.services.tf2_paths import TF2Paths
+
+        cfg = api.settings()
+        self.assertIsInstance(cfg['tf2_ok'], bool)
+        self.assertEqual(cfg['tf2_ok'],
+                         TF2Paths.is_valid(cfg['values']['tf2_game_folder']))
+
+    def test_find_tf2_returns_only_working_folders(self):
+        """Автопоиск отдаёт список папок, а не «похоже на игру».
+
+        Каждая проверена тем же `is_valid`, по которому работает приложение:
+        предложить путь, на котором сборка упадёт, хуже, чем не найти ничего.
+        """
+        from src.services.tf2_paths import TF2Paths
+
+        found = api.find_tf2()['found']
+        self.assertIsInstance(found, list)
+        for path in found:
+            self.assertTrue(TF2Paths.is_valid(path), path)
+
+    def test_vpk_name_follows_the_item(self):
+        """Имя мода предлагается по предмету, а не одно на всех.
+
+        В разметке стояло «scattergun_mod.vpk», и топор собирался под именем
+        скаттергана. Правило считает Python: имя обязано пройти
+        validate_vpk_filename, и второй копии этих лимитов быть не должно.
+        """
+        self.assertEqual(api.controls_for('c_axtinguisher')['vpk_name'],
+                         'axtinguisher_mod.vpk')
+        # У косметики режим один на весь раздел — предмет называет ключ.
+        self.assertEqual(
+            api.controls_for('hat', 'models/player/items/pyro/hood.mdl')['vpk_name'],
+            'hood_mod.vpk')
+        # До выбора предмета подсказки нет: иначе щелчок по фильтру каталога
+        # затирал бы уже набранное имя.
+        self.assertEqual(api.controls_for('hat')['vpk_name'], '')
+
+    def test_risky_flags_are_marked_advanced(self):
+        """Обычных флагов пять — только они что-то меняют у цветного скина.
+
+        Остальные скину либо безразличны (фильтрацию решает клиент, Single Copy
+        — про память), либо относятся к другому виду текстур, либо вредны:
+        SSBump объявляет текстуру самозатеняющимся бампмапом. Такая галка не
+        должна стоять в одном ряду с «Point Sample», поэтому она особая и
+        показывается только по настройке.
+        """
+        flags = api.controls_for('c_scattergun')['flags']
+        plain = [row['key'] for row in flags if not row['adv']]
+        self.assertEqual(plain, ['CLAMPS', 'CLAMPT', 'NOLOD',
+                                 'NOMINMIP', 'POINTSAMPLE'])
+        adv = {row['key'] for row in flags if row['adv']}
+        self.assertIn('SSBUMP', adv)
+        self.assertIn('VERTEXTEXTURE', adv)
+
+    def test_advanced_flags_are_off_until_asked_for(self):
+        """Настройка есть и по умолчанию не включена: особые флаги спрятаны.
+
+        Значение читается из конфига человека, поэтому проверяем сам ключ и его
+        тип — а не то, что стоит у разработчика в config.
+        """
+        values = api.settings()['values']
+        self.assertIn('advanced_vtf_flags', values)
+        self.assertIsInstance(values['advanced_vtf_flags'], bool)
+
+    def test_skybox_enables_only_the_flag_it_needs(self):
+        """У скайбокса осмысленный флаг один — Point Sample.
+
+        Раньше доступность считалась сравнением ПОДПИСИ с именем
+        («point sample».includes('pointsample') — ложь), и у неба гасились все
+        галки, включая нужную.
+        """
+        flags = api.controls_for('skybox')['flags']
+        self.assertEqual([row['key'] for row in flags if row['on']],
+                         ['POINTSAMPLE'])
+
+    def test_unrestricted_mode_gets_the_whole_format_list(self):
+        """Список форматов всегда конкретный, а не «None — сам знаешь».
+
+        `allowed_formats_for_mode` отвечает None там, где режим ничего не
+        запрещает, и это значило «покажи полный список». Окно приложения его
+        знало, а страница держала свою копию в разметке — из 26 форматов было
+        видно 4. Второй копии списка быть не должно.
+        """
+        from src.shared.constants import VTF_FORMATS
+
+        for mode in ('c_scattergun', 'hat', 'spray', 'scout_body'):
+            self.assertEqual(api.controls_for(mode)['formats'],
+                             list(VTF_FORMATS), mode)
+
     def test_normal_map_needs_a_model(self):
         """Spray и CritHIT — UnlitGeneric, бамп там бессмыслен."""
         for mode in ('c_scattergun', 'engineer_hands', 'scout_body'):
@@ -231,6 +346,26 @@ class CoverTests(unittest.TestCase):
     def test_sky_points_at_itself(self):
         for item in api.items('skybox'):
             self.assertEqual(item['icon'], f"skybox/{item['key']}")
+
+    def test_sky_list_comes_from_the_installed_game(self):
+        """Небеса спрашиваем у игры, а не у копии списка в данных.
+
+        `STOCK_SKY_NAMES` — фолбэк без настроенной папки; с обновлениями Valve
+        он стареет, и страница показывала бы список короче настоящего. Скан
+        (SkyboxService.enumerate_sky_names) объединяет фолбэк с содержимым
+        tf2_misc_dir.vpk, поэтому короче он стать не может.
+        """
+        from unittest.mock import patch
+
+        from src.data.skyboxes import STOCK_SKY_NAMES
+
+        fake = list(STOCK_SKY_NAMES) + ['sky_from_update_99']
+        with patch('src.services.skybox_service.SkyboxService'
+                   '.enumerate_sky_names', return_value=fake) as scan:
+            keys = [row['key'] for row in api.items('skybox')]
+        self.assertTrue(scan.called)
+        self.assertIn('sky_from_update_99', keys)
+        self.assertEqual(len(keys), len(fake))
 
     def test_character_parts_have_their_own_covers(self):
         """У каждой части свой ответ: тело — чьё, руки — руки, маски — маски.

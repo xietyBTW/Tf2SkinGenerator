@@ -156,6 +156,69 @@ class BuildSceneTests(unittest.TestCase):
         scene = self._build(weapon_carrier_smd=str(self.dir / "нет.smd"))
         self.assertEqual(self._part(scene, "weapon")["materials"], ["xms_lights"])
 
+    # ── Веса вершин ───────────────────────────────────────────────────────── #
+
+    def test_weights_across_several_merged_bones_survive(self):
+        """Вершина, поделённая между костями руки, должна остаться поделённой.
+
+        У Мутировавшего молока в руку садятся девять костей, и 8902 вершины из
+        15906 принадлежат им долями: банка, молоко и монстр внутри связаны
+        мягко. Пока анимация вела каждую вершину ОДНОЙ костью (первой в списке,
+        весом 1), меш рвало по швам, а молоко уезжало из стекла — при том, что
+        геометрия запекалась по ВСЕМ весам.
+        """
+        weapon = self._part(self._two_grip_scene("2 0 0.75 1 0.25"), "weapon")
+
+        self.assertEqual(weapon["skinWeight"][:4], [0.75, 0.25, 0.0, 0.0])
+        self.assertNotEqual(weapon["skinIndex"][0], weapon["skinIndex"][1])
+
+    def test_weights_of_bones_with_one_driver_add_up(self):
+        """Курок и корпус едут за одной костью руки — их доли складываются.
+
+        Иначе вторая запись затирала бы первую, и вершина уезжала бы с частью
+        своего веса. У обычного оружия это единственный случай: в руку садится
+        одна кость, и все доли сходятся на ней.
+        """
+        weapon = self._part(self._two_grip_scene("2 0 0.6 0 0.4"), "weapon")
+
+        self.assertEqual(weapon["skinWeight"][:4], [1.0, 0.0, 0.0, 0.0])
+
+    def _two_grip_scene(self, links):
+        """Сцена, где в руку садятся ДВЕ кости: `weapon_bone` и `weapon_bone_L`.
+
+        Так устроены медиганы (левая рука на своём корне) и Мутировавшее молоко
+        (банка, молоко и монстр на своих). Обе кости — корни собственной
+        иерархии, поэтому обе считаются хватом.
+
+        `links` — хвост строки вершины SMD: сколько костей и с какими долями.
+        Помощник `_smd` кладёт по одной кости на вершину, а проверяется здесь
+        именно доля, поэтому меш оружия пишется построчно.
+        """
+        bones = [("root", None), ("bip_hand_R", "root"),
+                 ("weapon_bone", "bip_hand_R"), ("weapon_bone_L", "root")]
+        place = {"bip_hand_R": ((0, 10, 0), (0, 0, 0)),
+                 "weapon_bone": ((0, 2, 0), (0, 0, 0)),
+                 "weapon_bone_L": ((3, 8, 0), (0, 0, 0))}
+        arms = self.dir / "c_two_arms.smd"
+        arms.write_text(_smd(bones, place, [_tri("test_hands", "bip_hand_R")]),
+                        encoding="utf-8")
+        anim = self.dir / "two.smd"
+        anim.write_text(_smd(bones, {**place, "root": ((0, 0, 0), (0, 0, HALF_PI))}),
+                        encoding="utf-8")
+
+        lines = ["version 1", "nodes",
+                 '0 "weapon_bone" -1', '1 "weapon_bone_L" -1',
+                 "end", "skeleton", "time 0",
+                 "0 0 0 0 0 0 0", "1 3 0 0 0 0 0",
+                 "end", "triangles", "c_jar"]
+        lines += [f"0 {x} 0 0 0 0 1 0.5 0.5 {links}" for x in (0, 1, 2)]
+        lines += ["end", ""]
+        weapon = self.dir / "c_two_reference.smd"
+        weapon.write_text("\n".join(lines), encoding="utf-8")
+
+        return viewmodel_animation.build_scene(
+            arms_ref_smd=str(arms), weapon_ref_smd=str(weapon), anim_smd=str(anim))
+
     # ── Бодигруппы и белый список ─────────────────────────────────────────── #
 
     def test_arms_bodygroups_are_added(self):

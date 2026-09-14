@@ -7,7 +7,7 @@
 
 import * as api from './api.js';
 import { ask } from './ask.js';
-import { chooseFile, plural } from './util.js';
+import { chooseFile } from './util.js';
 import { root, setStatus } from './layout.js';
 import { buildParticles } from './particles/index.js';
 import { texEdit } from './controls.js';
@@ -39,8 +39,13 @@ export function buildParams({ live = false } = {}) {
   // Колонку ищем по data-col, а имя галки берём из data-name: подписи
   // переводятся, а в сборку уходит имя — искать по надписи нельзя.
   const col = (key) => document.querySelector(`.build__col[data-col="${key}"]`);
+  // Скрытую галку не читаем: невидимый контрол не должен влиять на сборку.
+  // Так спрятанные особые флаги VTF (галка в настройках) и контролы, которых
+  // режим не показывает, не уезжают в мод — иначе отмеченный когда-то SSBump
+  // остался бы в текстуре, а человек его уже не видит.
+  const visible = (l) => l.offsetParent !== null;
   const checked = (key) => [...col(key).querySelectorAll('.check')]
-    .filter((l) => l.querySelector('input').checked)
+    .filter((l) => visible(l) && l.querySelector('input').checked)
     .map((l) => checkName(l));
 
   const res = [...document.querySelectorAll('input[name="res"]')]
@@ -49,11 +54,30 @@ export function buildParams({ live = false } = {}) {
     size: [256, 512, 1024, 2048][res < 0 ? 1 : res],
     format: document.getElementById('fmt').value,
     filename: document.getElementById('out').value,
-    flags: checked('flags'),
-    options: Object.fromEntries(checked('options').map((n) => [n, true])),
+    // Флаги лежат в двух колонках: обычные и особые (их показывает настройка,
+    // а скрытые здесь и не читаются — см. `visible`).
+    flags: [...checked('flags'), ...checked('flags-adv')],
+    options: (() => {
+      const on = Object.fromEntries(checked('options').map((n) => [n, true]));
+      // Не опции VTF: у обеих галок свои поля (ниже). Иначе их имена уезжали
+      // бы в набор опций мусором — и в настройки материала заодно.
+      delete on.isolate_shoulders;
+      delete on.hat_paints;
+      // Сила гамма-коррекции имеет смысл только с самой коррекцией.
+      if (on.gamma) on.gcorrection = document.getElementById('gammaval').value;
+      return on;
+    })(),
     // Краски шапки — не флаг VTF: они решают, как красится материал, поэтому
     // едут отдельным полем, а не в общем наборе опций.
     hat_paints: document.getElementById('hat-paints').checked,
+    // Изоляция плеч — тоже своё поле: сборка читает его именем
+    // `isolate_shoulders`, а не из набора опций VTF.
+    isolate_shoulders: (() => {
+      const box = document.getElementById('shoulders');
+      // Плечи есть только у рук: в других режимах галки нет на экране, и
+      // отмеченная когда-то она уезжала бы в каждую сборку.
+      return box.offsetParent !== null && box.checked;
+    })(),
     // Классы мультиклассовой шапки: пусто — значит все.
     hat_classes: hatClasses(),
     // Сборка подписывает шаги и пишет комментарии в VMT на языке настроек.
@@ -109,13 +133,14 @@ buildBtn.addEventListener('click', async () => {
  *
  * Три варианта — те же, что в окне приложения: оставить игровой оригинал (в мод
  * он не попадёт), скопировать главную текстуру или дать свою картинку.
- * «Ко всем» запоминает выбор до конца этой сборки.
+ * «Ко всем» запоминает выбор до конца этой сборки. Отмена окна — отмена
+ * сборки: молча подставлять «игровую» и собирать дальше значило бы решать за
+ * человека то, о чём его только что спросили.
  */
-export async function askForTexture(material, remaining = 0) {
+export async function askForTexture(material) {
   // «И так для остальных» — ГАЛКА к выбору, а не два лишних пункта: это то же
-  // действие, только шире. И появляется она, только когда остальные есть:
-  // раньше её предлагали даже на последнем материале, обещая распространить
-  // ответ на пустоту.
+  // действие, только шире. Без счётчика: сколько вопросов впереди, сборка не
+  // знает заранее (BLU-строка и общие столбцы спрашиваются по ходу).
   const answer = await ask({
     title: 'Чем красить «' + material + '»',
     text: 'Своей текстуры для этого материала нет.',
@@ -127,20 +152,19 @@ export async function askForTexture(material, remaining = 0) {
       { label: 'Выбрать файл…', value: 'file',
         hint: 'Своя картинка именно для этого материала' },
     ],
-    check: remaining > 0
-      ? 'И так для остальных — ещё ' + remaining + ' '
-        + plural(remaining, 'материал', 'материала', 'материалов')
-      : '',
+    check: 'И так для остальных материалов',
     ok: 'Ответить',
   });
 
-  // Окно закрыли — сборка ждать бесконечно не должна: отвечаем безопасным
-  // вариантом (игровой оригинал ничего не портит).
-  const picked = (answer && answer.value !== undefined) ? answer : { value: answer };
-  const choice = picked.value || 'game';
+  if (!answer || !answer.value) {
+    setStatus('Останавливаю сборку…', true);
+    await api.cancelBuild();
+    return;
+  }
+  const choice = answer.value;
   // «Для остальных» к выбору файла не применяем: своя картинка относится к
   // ЭТОМУ материалу, раздавать её всем никто не просил.
-  const forAll = Boolean(picked.checked) && choice !== 'file';
+  const forAll = Boolean(answer.checked) && choice !== 'file';
 
   if (choice === 'file') {
     const file = await chooseFile('image/*');

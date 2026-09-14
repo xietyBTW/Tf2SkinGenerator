@@ -143,7 +143,7 @@ def model_png(mdl_path: str, misc_vpk: str, textures_vpk: str) -> Optional[bytes
     return None
 
 
-def sky_png(name: str, textures_vpk: str) -> Optional[bytes]:
+def sky_png(name: str, textures_vpk) -> Optional[bytes]:
     """PNG боковой грани неба, либо None.
 
     Одна грань, а не панорама: карточке нужна узнаваемая картинка, а панораму
@@ -151,9 +151,14 @@ def sky_png(name: str, textures_vpk: str) -> Optional[bytes]:
     горизонту, а верх у половины стоковых это ровная заливка.
 
     Имена берём общим правилом (`stock_face_stems`): VMT грани для этого не
-    годятся — у стоковых небес они ссылаются на текстуру, которой в игре нет.
+    годятся — у стоковых небес TF2 они ссылаются на текстуру, которой в игре
+    нет.
+
+    `textures_vpk` — путь или список путей: небеса лежат и в tf/, и в hl2/
+    (см. TF2Paths.skybox_vpks), и обложка ищется во всех.
     """
     from src.data.skyboxes import stock_face_stems
+    from src.services.game_vpk_reader import GameVpkReader
     from src.services.vtf_preview_service import open_vpks, read_from_vpks
 
     name = (name or '').strip().lower()
@@ -164,7 +169,9 @@ def sky_png(name: str, textures_vpk: str) -> Optional[bytes]:
     if cache.exists():
         return cache.read_bytes()
 
-    paks = open_vpks([textures_vpk])
+    where = ([textures_vpk] if isinstance(textures_vpk, str)
+             else list(textures_vpk or ()))
+    paks = open_vpks(where)
     if not paks:
         return None
     for stem in stock_face_stems(name, 'ft'):
@@ -173,4 +180,13 @@ def sky_png(name: str, textures_vpk: str) -> Optional[bytes]:
         png = _render(read_from_vpks(paks, f"materials/skybox/{stem}.vtf"), cache)
         if png:
             return png
+    # Имя не сошлось — спрашиваем саму VMT. У небес TF2 она врёт (ссылается на
+    # `skybox/cloudft`, которой в игре нет), поэтому этот путь ВТОРОЙ, а не
+    # первый. Зато у небес из hl2/ он честный: `sky_day03_06b` рисуется
+    # текстурами соседа `sky_day03_06`, и без него карточка оставалась пустой.
+    vmt = read_from_vpks(paks, f"materials/skybox/{name}ft.vmt")
+    base = GameVpkReader.parse_basetexture(
+        vmt.decode('utf-8', errors='replace')) if vmt else ''
+    if base:
+        return _render(read_from_vpks(paks, f"materials/{base}.vtf"), cache)
     return None

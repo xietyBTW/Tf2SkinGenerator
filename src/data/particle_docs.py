@@ -583,6 +583,13 @@ MODULES: Dict[Tuple[str, str], Tuple[str, str]] = {
     ("operators", "movement max velocity"): (
         "Ограничивает скорость частиц сверху.",
         "Caps the particle speed."),
+    ("operators", "movement maintain position along path"): (
+        "Цепочка: каждый кадр расставляет частицы по кривой между двумя "
+        "контрол-пойнтами. Собственное движение гасится; сила сцепления и "
+        "предельное расстояние в TF2 ни на что не влияют.",
+        "Chain: every frame places the particles along the curve between two "
+        "control points. Their own motion is cancelled; cohesion strength and "
+        "maximum distance have no effect in TF2."),
     ("operators", "rotation basic"): (
         "Крутит спрайт с его собственной скоростью вращения.",
         "Spins the sprite at its own rotation speed."),

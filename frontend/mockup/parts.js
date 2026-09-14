@@ -402,6 +402,27 @@ function mixColors(one, two) {
   return '#' + half(1) + half(3) + half(5);
 }
 
+//: Был ли режим частей открыт, когда его отложили сценой. Вид от первого лица
+//: и насмешка собраны из ДРУГОЙ геометрии — руки класса, персонаж, — а карта
+//: треугольников у страницы от обычной модели: подсветка и покраска попадали
+//: бы не туда. Поэтому на сцене режим гасится, а по возвращении включается
+//: сам: человек его не закрывал, и заново искать кнопку ему незачем.
+let suspended = false;
+
+/** Откладывает режим частей на время сцены. Закрыт — откладывать нечего. */
+export function suspendParts() {
+  suspended = !document.getElementById('partsbar').hidden;
+  if (suspended) closeParts();
+}
+
+/** Возвращает отложенный режим. Зовётся ПОСЛЕ возврата обычной модели: разбор
+ *  спрашивается у Python по ней, и на сцене ответ был бы про чужую. */
+export async function resumeParts() {
+  if (!suspended) return;
+  suspended = false;
+  await loadParts();
+}
+
 /** Выходит из режима частей: покраска остаётся, уходит только полоса. */
 export function closeParts() {
   const bar = document.getElementById('partsbar');

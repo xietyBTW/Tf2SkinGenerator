@@ -212,6 +212,7 @@ MODULE_CATALOG = {
         "Movement Rotate Particle Around Axis", "Movement Max Velocity",
         "Movement Lock to Bone", "Movement Follow CP",
         "Movement Dampen Relative to Control Point",
+        "Movement Maintain Position Along Path",
         "Movement Match Particle Velocities",
         "Radius Scale", "Color Fade", "Alpha Fade In Random",
         "Alpha Fade Out Random", "Alpha Fade and Decay",
@@ -240,6 +241,19 @@ MODULE_CATALOG = {
 # Якорь по началу строки: иначе матчились закомментированные строки и ссылки
 # на $basetexture внутри proxies; хвостовой //-комментарий отсекается.
 # \r?$ обязателен: VMT Valve с CRLF-концами строк.
+#: Режимы Sprite-шейдера, которые складывают цвет с фоном: 3 glow, 5 add,
+#: 7 add frame blend, 8 alpha add, 9 world glow (RenderMode_t). У таких VMT
+#: «$additive» часто не написан, а текстура без альфы — без этого она
+#: рисовалась чёрным квадратом.
+_ADDITIVE_SPRITE_MODES = (3, 5, 7, 8, 9)
+
+
+def _is_additive(vmt) -> bool:
+    if vmt.flag("additive"):
+        return True
+    return int(vmt.number("spriterendermode", 0) or 0) in _ADDITIVE_SPRITE_MODES
+
+
 def _norm_mat(name: str, ext: str = ".vmt") -> str:
     """Материал → нормализованный rel-путь под materials/ (effects/crit.vmt).
 
@@ -724,8 +738,16 @@ class ParticleEditorService:
             return {
                 "dataUrl": None,
                 "sheet": None,
-                "additive": vmt.flag("additive"),
+                "additive": _is_additive(vmt),
+                "mod2x": vmt.flag("mod2x"),
                 "shader": shader,
+                # Refract без искажения и размытия (nothing2, effect_mask,
+                # skullmask — 8 материалов в стоке) в игре невидим: это маска,
+                # которая прячет частицы за собой. Рисовать за него мягкий
+                # белый круг значило показывать «белый шар».
+                "invisible": (shader.lower() == "refract"
+                              and not vmt.number("refractamount", 0)
+                              and not vmt.number("bluramount", 0)),
                 "width": 0,
                 "height": 0,
             }
@@ -743,7 +765,11 @@ class ParticleEditorService:
         return {
             "dataUrl": data_url,
             "sheet": parse_vtf_sheet(vtf_raw),
-            "additive": vmt.flag("additive"),
+            "additive": _is_additive(vmt),
+            # Модуляция (glow_modulate, beam_generic_3_modulate): цвет
+            # УМНОЖАЕТ фон ×2, серый — нейтрален. Через обычный бленд такой
+            # спрайт виден серым квадратом.
+            "mod2x": vmt.flag("mod2x"),
             "shader": shader,
             "width": width,
             "height": height,

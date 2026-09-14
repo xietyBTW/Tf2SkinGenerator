@@ -3,8 +3,119 @@
 """
 
 import os
-from typing import Tuple, Optional
+import re
+import string
+from pathlib import Path
+from typing import List, Optional, Tuple
 from src.shared.paths import install_dir
+
+#: Номер TF2 в Steam: по нему в библиотеке лежит appmanifest_440.acf.
+TF2_APP_ID = "440"
+
+#: Имя папки игры по умолчанию — то, что Steam пишет в `installdir`.
+TF2_DEFAULT_DIR = "Team Fortress 2"
+
+
+def _steam_from_registry() -> List[str]:
+    """Папки Steam из реестра — так же, как их находит сам Steam.
+
+    Ключей три, потому что записывают их разные вещи: HKCU ставит клиент при
+    каждом запуске, HKLM — установщик (32-битная ветка на 64-битной системе).
+    """
+    out: List[str] = []
+    try:
+        import winreg  # только Windows; на другой ОС приложение не работает
+    except ImportError:
+        return out
+    for hive, key, name in (
+        (winreg.HKEY_CURRENT_USER, r"Software\Valve\Steam", "SteamPath"),
+        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Valve\Steam",
+         "InstallPath"),
+        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Valve\Steam", "InstallPath"),
+    ):
+        try:
+            with winreg.OpenKey(hive, key) as handle:
+                value = str(winreg.QueryValueEx(handle, name)[0] or "")
+        except OSError:
+            continue
+        if value:
+            out.append(os.path.normpath(value))
+    return out
+
+
+def _steam_guesses() -> List[str]:
+    """Запасные места на случай, когда реестра нет (портативный Steam).
+
+    Дешёвая проверка: пара `exists` на каждый существующий диск, а не обход
+    файловой системы.
+    """
+    out: List[str] = []
+    for letter in string.ascii_uppercase:
+        drive = f"{letter}:\\"
+        if not os.path.exists(drive):
+            continue
+        for name in ("Steam", "SteamLibrary", os.path.join("Games", "Steam")):
+            out.append(os.path.join(drive, name))
+    out.append(os.path.join(os.environ.get("ProgramFiles(x86)", ""), "Steam"))
+    return [p for p in out if p and os.path.isdir(p)]
+
+
+def _steam_libraries() -> List[str]:
+    """Библиотеки Steam: папка клиента плюс всё из libraryfolders.vdf.
+
+    Игру ставят на любой диск, и путь к ней в реестре не лежит — только
+    список библиотек рядом с клиентом.
+    """
+    out: List[str] = []
+    seen: set = set()
+
+    def add(path: str) -> None:
+        # Реестр отдаёт путь как записал клиент ('d:\steam'), догадки — как
+        # собрали мы ('D:\Steam'). Для файловой системы это одно и то же, и
+        # читать один и тот же libraryfolders.vdf дважды незачем.
+        key = os.path.normcase(path)
+        if path and key not in seen:
+            seen.add(key)
+            out.append(path)
+
+    for steam in _steam_from_registry() + _steam_guesses():
+        add(steam)
+        vdf = os.path.join(steam, "steamapps", "libraryfolders.vdf")
+        try:
+            with open(vdf, encoding="utf-8", errors="replace") as handle:
+                text = handle.read()
+        except OSError:
+            continue
+        # Формат менялся: до 2021 путь стоял значением номера
+        # («"1"  "D:\Games"»), сейчас — ключом "path" внутри блока. Оба
+        # варианта встречаются на живых машинах, поэтому берём и тот, и этот.
+        # У старой формы значение обязано выглядеть путём: те же «"440"
+        # "12345"» из блока apps иначе приезжают библиотеками.
+        for pattern in (r'"path"\s*"([^"]+)"',
+                        r'"\d+"\s*"([A-Za-z]:[^"]*)"'):
+            for match in re.finditer(pattern, text):
+                add(os.path.normpath(match.group(1).replace("\\\\", "\\")))
+    return out
+
+
+def _tf2_dir_in(library: str) -> str:
+    """Куда в этой библиотеке Steam положил бы TF2.
+
+    Имя папки берём из appmanifest_440.acf: обычно это «Team Fortress 2», но
+    у переехавшей или перенесённой вручную установки оно другое, и жёстко
+    вписанное имя такую копию не находит.
+    """
+    apps = os.path.join(library, "steamapps")
+    name = TF2_DEFAULT_DIR
+    manifest = os.path.join(apps, f"appmanifest_{TF2_APP_ID}.acf")
+    try:
+        with open(manifest, encoding="utf-8", errors="replace") as handle:
+            match = re.search(r'"installdir"\s*"([^"]+)"', handle.read())
+        if match:
+            name = match.group(1)
+    except OSError:
+        pass
+    return os.path.join(apps, "common", name)
 
 
 class TF2Paths:
@@ -60,6 +171,69 @@ class TF2Paths:
             return True
         except (FileNotFoundError, OSError):
             return False
+
+    @staticmethod
+    def skybox_vpks(tf2_root_dir: str) -> List[str]:
+        """VPK, в которых лежат небеса: и tf/, и hl2/.
+
+        TF2 монтирует контент Half-Life 2, и его небеса — законная часть игры:
+        карты (в том числе сообществa) ставят в worldspawn `sky_day01_01`,
+        `sky_borealis01` и прочие, а в `tf2_*.vpk` их нет вовсе. Пока смотрели
+        только в tf/, из 47 небес установленной игры приложение видело 22.
+
+        Порядок важен: tf/ первым — если небо есть в обоих (переопределение
+        Valve), в игре главнее контент самой TF2.
+
+        Возвращает только существующие файлы; ни одного — пустой список, а
+        решение, что делать, остаётся за вызывающим.
+        """
+        pairs = (("tf", "tf2_misc_dir.vpk"), ("tf", "tf2_textures_dir.vpk"),
+                 ("hl2", "hl2_misc_dir.vpk"), ("hl2", "hl2_textures_dir.vpk"))
+        if not tf2_root_dir or not os.path.exists(tf2_root_dir):
+            return []
+        found = []
+        for folder, name in pairs:
+            path = os.path.join(tf2_root_dir, folder, name)
+            if os.path.exists(path):
+                found.append(path)
+        return found
+
+    @staticmethod
+    def autodetect() -> List[str]:
+        r"""Установленные копии TF2 — то, что можно предложить человеку.
+
+        Ищем НЕ обходом диска (это минуты и десятки тысяч папок), а тем же
+        путём, каким игру находит сам Steam:
+
+          1. реестр -> папка Steam;
+          2. ``steamapps/libraryfolders.vdf`` -> все библиотеки (игра часто
+             стоит не на диске со Steam);
+          3. ``appmanifest_440.acf`` -> имя папки игры (``installdir``): у
+             нестандартной установки она может называться иначе;
+          4. запасные места на случай, если реестра нет (портативный Steam):
+             ``<диск>:\Steam`` и ``<диск>:\SteamLibrary``.
+
+        Каждый кандидат проверяется `is_valid` — то есть по наличию
+        ``bin/studiomdl.exe`` и ``tf/tf2_misc_dir.vpk``, ровно того, без чего
+        приложение всё равно не работает. Поэтому «нашлось» здесь значит
+        «годится», а не «похоже на игру».
+
+        Порядок ответа — от самого вероятного; обычно в списке одна папка.
+        """
+        seen: set = set()
+        out: List[str] = []
+        for library in _steam_libraries():
+            root = _tf2_dir_in(library)
+            key = os.path.normcase(root)
+            if key in seen:
+                continue
+            seen.add(key)
+            if TF2Paths.is_valid(root):
+                # Реестр отдаёт путь так, как его записал Steam («d:\steam»).
+                # Человеку этот путь показывают и он же уходит в настройки —
+                # берём написание, как на диске.
+                out.append(str(Path(root).resolve()))
+        return out
 
     @staticmethod
     def resolve_textures_vpk(tf2_root_dir: str) -> Optional[str]:

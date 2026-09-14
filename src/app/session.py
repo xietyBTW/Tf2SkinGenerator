@@ -19,7 +19,7 @@ import os
 import queue
 import re
 import threading
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from src.app.preview_controller import (
     Preview3DController, SkinDetectController, SkyboxController,
@@ -150,6 +150,33 @@ def _anchor(value: Any) -> Optional[tuple]:
     return (u0, v0, u1, v1) if u1 > u0 and v1 > v0 else None
 
 
+def _qc_is_y_up(qc_path: str) -> bool:
+    """`$upaxis Y` в QC — модель (персонаж) лежит в SMD осью Y вверх."""
+    try:
+        with open(qc_path, encoding='utf-8', errors='replace') as f:
+            text = f.read()
+    except OSError:
+        return False
+    return re.search(r'(?im)^\s*\$upaxis\s+"?y', text) is not None
+
+
+def _obj_y_up_to_z_up(obj_text: str) -> str:
+    """Поворот OBJ из Y-up в Z-up: (x, y, z) → (x, −z, y), для вершин и нормалей."""
+    out = []
+    for line in obj_text.splitlines():
+        parts = line.split()
+        if len(parts) == 4 and parts[0] in ('v', 'vn'):
+            try:
+                x, y, z = (float(v) for v in parts[1:])
+            except ValueError:
+                out.append(line)
+                continue
+            out.append(f"{parts[0]} {x:.6f} {-z:.6f} {y:.6f}")
+        else:
+            out.append(line)
+    return '\n'.join(out) + '\n'
+
+
 #: Как называются склейки частей: `parts_<номер>.png`. Имя задаём мы сами
 #: (см. `AppSession._recompose`), поэтому оно и служит признаком «наше» для
 #: работы, вернувшейся с диска: множество путей переживает только один запуск.
@@ -276,6 +303,12 @@ class AppSession:
         self._composites: set = set()
         #: Порядок их появления: старые ФАЙЛЫ чистим, пути оставляем.
         self._compose_files: List[str] = []
+        #: {склейка превью: полная склейка со всеми кадрами} — на одну сборку.
+        self._baked: Dict[str, str] = {}
+        #: Анимация частей в 3D: номер последнего расчёта (старые обрываются
+        #: по нему) и что крутить, если настройку включат позже.
+        self._anim_seq = 0
+        self._anim_last: Any = None
         #: Модели показанной шапки: {класс: mdl}. Пусто у обычной шапки — у неё
         #: одна модель на всех. Нужны сборке: мультиклассовая шапка собирается
         #: сразу под все выбранные классы.
@@ -394,7 +427,10 @@ class AppSession:
         m.failed.connect(self._fail)
 
         # Скайбокс: шесть граней кубмапы.
-        self.skybox.ready.connect(lambda faces: self._put('skybox', faces=faces))
+        # Событие несёт РАЗРЕШЁННЫЕ грани (своя → нарезка → стоковая): и
+        # стоковая загрузка, и нарезка панорамы приходят одним сигналом, а
+        # что из них показать, решает домен.
+        self.skybox.ready.connect(lambda _faces: self._put_skybox())
         self.skybox.failed.connect(self._fail)
 
     def _on_model_ready(self, obj_path: str, texture: str) -> None:
@@ -1253,6 +1289,50 @@ class AppSession:
         return {'path': path, 'files': len(by_wave),
                 'sounds': self._picked_total(), 'skipped': skipped}
 
+    def _skybox_faces(self) -> Dict[str, str]:
+        """Что показывать по граням: своя → нарезка панорамы → стоковая."""
+        from src.data.skyboxes import SKY_FACES
+
+        out: Dict[str, str] = {}
+        for face in SKY_FACES:
+            got = self.preview.textures.resolve_skybox_face(face)
+            if got:
+                out[face] = got
+        return out
+
+    def _put_skybox(self) -> None:
+        """Сообщает странице состояние неба целиком.
+
+        Панорама едет отдельным полем: у неё своя карточка в ленте, и без неё
+        человеку некуда положить фото 360° (ключ `SKY_PANO_KEY`, гранью он не
+        является и в сборку идёт как `equirect`).
+        """
+        from src.data.skyboxes import SKY_PANO_KEY
+
+        self._put('skybox', faces=self._skybox_faces(),
+                  pano=self.preview.textures.skybox_pano() or '',
+                  pano_key=SKY_PANO_KEY)
+
+    def _after_skybox_texture(self, material: str, path) -> None:
+        """Реакция на подмену грани или панорамы в режиме неба.
+
+        Панораму надо НАРЕЗАТЬ: шесть граней из фото 360° делает воркер, и до
+        этого превью её не видит вовсе — раньше перенос фото не менял ничего.
+        Подмену одной грани достаточно показать: она уже в домене.
+        """
+        from src.data.skyboxes import SKY_FACES, SKY_PANO_KEY
+
+        if material == SKY_PANO_KEY:
+            if path:
+                self.skybox.split(str(path))    # ready → _put_skybox
+                return
+            self.skybox.stop_split()
+            with self._lock:
+                self.preview.textures.skybox_split_faces = {}
+        elif material not in SKY_FACES:
+            return
+        self._put_skybox()
+
     def load_skybox(self, sky_name: str) -> Dict[str, Any]:
         """Готовит грани стокового неба для показа кубмапой."""
         paths = self.tf2_paths()
@@ -1260,10 +1340,16 @@ class AppSession:
             return paths
 
         self._mode = 'skybox'
+        # Какое небо перекрывать — знает сборка: без имени мод собрался бы
+        # пустым (см. validate_skybox_request).
+        self._sky_name = sky_name
         with self._lock:
             self.preview.mode.enter(_skybox_mode())
             self._forget_model()
-        self.skybox.load(sky_name, [paths['misc_vpk'], paths['textures_vpk']])
+        # Небеса лежат и в hl2/ — оттуда же и грани, иначе половина списка
+        # показывалась бы пустой (см. TF2Paths.skybox_vpks).
+        from src.services.tf2_paths import TF2Paths
+        self.skybox.load(sky_name, TF2Paths.skybox_vpks(paths['root']))
         return {'started': True, 'sky': sky_name}
 
     def set_texture(self, material: str, path: Optional[str]) -> Dict[str, Any]:
@@ -1278,6 +1364,11 @@ class AppSession:
         with self._lock:
             self.preview.textures.set_texture(material, path)
         self._autosave()
+        # Небо — не материалы модели, а грани куба: страница показывает их
+        # своим событием, и после подмены его надо повторить.
+        from src.data.skyboxes import SKYBOX_MODE
+        if getattr(self, '_mode', '') == SKYBOX_MODE:
+            self._after_skybox_texture(material, path)
         return self.view_state()
 
     def build(self, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -1301,14 +1392,34 @@ class AppSession:
         if not mode:
             return {'error': 'Сначала выберите предмет'}
 
+        from src.data.skyboxes import SKYBOX_MODE
+
         t = self.preview.textures
         # Главная текстура — то, что лежит на главном материале модели.
         main = t.stable_main()
         image = t.uploaded_for_mat(main) if main else None
         extra = t.uploaded_slot_paths()
-
-        if not image and not extra:
+        # У неба главного материала нет вовсе: «своя текстура» — это панорама
+        # (её сборка режет сама) или подменённые грани. Слоты в сборку неба не
+        # идут: там свои поля, а грани уже лежат в overrides.
+        sky = t.skybox_build_data() if mode == SKYBOX_MODE else {}
+        if mode == SKYBOX_MODE:
+            image = sky.get('equirect') or None
+            extra = {}
+            if not image and not sky.get('face_overrides'):
+                return {'error': 'Загрузите панораму 360° или грани неба'}
+        elif not image and not extra:
             return {'error': 'Не загружено ни одной своей текстуры'}
+
+        # Гифка на части: превью держит один кадр, сборке нужны все. Полные
+        # склейки печёт воркер (это десятки секунд), а запрос уже смотрит на
+        # их будущие пути.
+        plan = self._bake_plan([image, *extra.values(),
+                                *t.blu_uploaded_paths().values()])
+        self._baked = {src: full for src, (_, _, full) in plan.items()}
+        baked = lambda p: self._baked.get(p, p)   # noqa: E731
+        image = baked(image)
+        extra = {mat: baked(p) for mat, p in extra.items()}
 
         size = int(params.get('size') or 512)
         request = BuildRequest(
@@ -1323,7 +1434,11 @@ class AppSession:
             export_folder=params.get('export_folder') or 'export',
             language=params.get('lang') or 'ru',
             panel_extra_textures=extra or None,
-            panel_blu_textures=t.blu_uploaded_paths() or None,
+            # «Прочее» со страницы: сборка спрашивает про эти материалы так
+            # же, как про доп. материалы геометрии.
+            misc_materials=list(self.preview.misc_materials) or None,
+            panel_blu_textures={mat: baked(p) for mat, p
+                                in t.blu_uploaded_paths().items()} or None,
             force_team=bool(t.force_team),
             isolate_shoulders=bool(params.get('isolate_shoulders')),
             # Карты материала (detail / самосвечение / phong): VTF по ним
@@ -1356,10 +1471,19 @@ class AppSession:
             # геометрии сборка собирает QC сама.
             custom_qc_text=(self.preview.custom_qc_text
                             if self.preview.custom_keep_materials else None),
+            # Небо: какие имена перекрывает мод и чем заменены отдельные грани.
+            # Панорама уехала в `image_path` — сборка режет её сама, в
+            # выбранном разрешении.
+            skybox_sky_names=([self._sky_name]
+                              if mode == SKYBOX_MODE
+                              and getattr(self, '_sky_name', '') else None),
+            skybox_face_overrides=(sky.get('face_overrides') or None),
         )
 
         from src.services.build_worker import BuildWorker
-        w = BuildWorker(request=request)
+        w = BuildWorker(request=request,
+                        prepare=(lambda report: self._bake(plan, report))
+                        if plan else None)
 
         # Сборка умеет СПРАШИВАТЬ у интерфейса недостающую текстуру и
         # блокируется до ответа (UiRequest, таймаут 300 секунд). Раньше здесь
@@ -1376,11 +1500,22 @@ class AppSession:
                                                            percent=pct, text=text))
         w.finished.connect(lambda ok, msg: self._put('build_done',
                                                      ok=bool(ok), message=msg))
+        w.finished.connect(lambda ok, msg: self._drop_baked())
         w.error.connect(lambda msg: self._put('build_done', ok=False, message=msg))
         self._build = w
         self._texture_choice = _NO_CHOICE   # «ко всем» — на одну сборку
         w.start()
         return {'started': True, 'filename': request.filename}
+
+    def _drop_baked(self) -> None:
+        """Полные склейки нужны только сборке: у текстуры 2048 шестьдесят
+        кадров весят сотни мегабайт, держать их до выхода незачем."""
+        for full in self._baked.values():
+            try:
+                os.remove(full)
+            except OSError:
+                pass
+        self._baked = {}
 
     def cancel_build(self) -> Dict[str, Any]:
         """Останавливает идущую сборку.
@@ -1428,9 +1563,20 @@ class AppSession:
         запомненный выбор «ко всем» отвечает следом, и только потом спрашиваем
         человека. Пока он думает, воркер стоит на UiRequest.
         """
-        uploaded = self.preview.textures.uploaded_for_mat(material)
+        # Правка стиля хранится под БАЗОВЫМ материалом, а сборка спрашивает
+        # материал строки $texturegroup по его имени (c_sd_cleaver_bloody) —
+        # без этой связки Bloody у гильотины собирался бы игровым.
+        uploaded = (self.preview.textures.uploaded_for_mat(material)
+                    or self.preview.textures.style_upload_for(material))
         if uploaded:
-            self._answer_texture_request(uploaded)
+            self._answer_texture_request(self._baked.get(uploaded, uploaded))
+            return
+        # Сборку отменяют: воркер дойдёт до проверки отмены только после
+        # ответа, а каждый новый вопрос до неё показывал бы окно заново.
+        build = self._build
+        if build is not None and build.isInterruptionRequested():
+            from src.shared.constants import EXTRA_TEX_USE_GAME_ORIGINAL
+            self._answer_texture_request(EXTRA_TEX_USE_GAME_ORIGINAL)
             return
         if self._texture_choice is not _NO_CHOICE:
             self._answer_texture_request(self._texture_choice)
@@ -1454,12 +1600,14 @@ class AppSession:
           • ``main`` — скопировать главную текстуру на этот материал;
           • ``file`` — своя картинка по пути ``path``.
         """
-        from src.shared.constants import EXTRA_TEX_USE_GAME_ORIGINAL
+        from src.shared.constants import (
+            EXTRA_TEX_USE_GAME_ORIGINAL, EXTRA_TEX_USE_MAIN,
+        )
 
         if choice == 'file' and path:
             value = path
         elif choice == 'main':
-            value = None                 # None у сборки означает «главную»
+            value = EXTRA_TEX_USE_MAIN
         else:
             value = EXTRA_TEX_USE_GAME_ORIGINAL
 
@@ -1990,22 +2138,95 @@ class AppSession:
             return {'used': []}
         return {'used': referenced_control_points(sys_json, systems)}
 
-    @staticmethod
-    def particle_models() -> List[dict]:
+    #: Порядок групп в списке моделей для точек: сперва то, на что вешают
+    #: анюжуалы — игроки и косметика, — потом остальное.
+    _MODEL_GROUPS = ('player', 'hat', 'weapon', 'arms', 'other')
+
+    def particle_models(self, lang: str = 'ru') -> List[dict]:
         """
         Модели из кэша декомпиляции — на них сажают контрольную точку.
 
         Своей распаковки VPK здесь нет намеренно: Crowbar долгий, а модели
         попадают в кэш при обычной работе на вкладках оружия и шапок.
+
+        Список был сырым: хэши папок, `__player_scout`, полные пути к MDL,
+        один разведчик дважды. Теперь запись — это модель игры: подпись из
+        каталога (класс, название шапки или оружия), группа по пути модели,
+        дубли по одному и тому же MDL схлопнуты.
         """
         from src.services.model_attachments import (
-            list_decompiled_models, reference_smd_for_qc,
+            list_decompiled_models_meta, reference_smd_for_qc,
         )
-        # Без reference-SMD меш не собрать: в кэше лежат и папки одних анимаций
-        # (__anims_*), предлагать их значит предлагать ошибку.
-        return [{'label': label, 'qc': qc}
-                for label, qc in list_decompiled_models()
-                if reference_smd_for_qc(qc)]
+
+        names = self._model_names(lang)
+        seen: Dict[str, dict] = {}
+        for m in list_decompiled_models_meta():
+            # Без reference-SMD меш не собрать: в кэше лежат и папки одних
+            # анимаций (__anims_*), предлагать их значит предлагать ошибку.
+            if not reference_smd_for_qc(m['qc']):
+                continue
+            mdl = (m['mdl'] or m['label']).lower()
+            group, label = self._model_group_and_name(mdl, m['label'], names, lang)
+            key = mdl
+            if key in seen:
+                continue
+            seen[key] = {'label': label, 'qc': m['qc'], 'group': group, 'mdl': mdl}
+        order = {g: i for i, g in enumerate(self._MODEL_GROUPS)}
+        return sorted(seen.values(),
+                      key=lambda x: (order.get(x['group'], 99), x['label'].lower()))
+
+    def _model_names(self, lang: str) -> Dict[str, str]:
+        """{путь модели (нижний регистр): название из каталогов игры}."""
+        from src.data.player_characters import PLAYER_CHARACTERS
+
+        names: Dict[str, str] = {}
+        for info in PLAYER_CHARACTERS.values():
+            names[info['mdl_path'].lower()] = info.get(lang) or info.get('en', '')
+        paths = self.tf2_paths()
+        if 'error' not in paths:
+            try:
+                from src.data.hats_parser import parse_hats
+                for h in parse_hats(paths['root'], lang):
+                    names.setdefault(h.mdl_path.replace('\\', '/').lower(), h.name)
+            except Exception as exc:                 # noqa: BLE001 — каталог не обязателен
+                logger.debug(f"каталог шапок для списка моделей не прочитан: {exc}")
+        try:
+            from src.app.api import items
+            for w in items(category='weapon', lang=lang):
+                names.setdefault('c:' + str(w.get('key', '')).lower(), w.get('name', ''))
+        except Exception as exc:                     # noqa: BLE001
+            logger.debug(f"каталог оружия для списка моделей не прочитан: {exc}")
+        return names
+
+    @staticmethod
+    def _model_group_and_name(mdl: str, label: str, names: Dict[str, str],
+                              lang: str) -> Tuple[str, str]:
+        """Группа и подпись модели по её пути в игре."""
+        base = os.path.splitext(os.path.basename(mdl))[0]
+        if mdl.startswith('models/player/') and mdl.count('/') == 2:
+            return 'player', names.get(mdl, base)
+        if '/items/taunts/' in mdl or base.startswith('taunt_') or '_prop' in base:
+            return 'other', base            # реквизит насмешек — не косметика
+        if '/items/' in mdl:
+            name = names.get(mdl)
+            # Стили шапки лежат отдельными моделями (`_style2`), а в каталоге
+            # только первый: имя берём у него, номер стиля дописываем.
+            style = re.search(r'_style(\d+)$', base)
+            if not name and style:
+                first = re.sub(r'_style\d+', '_style1', mdl)
+                name = names.get(first)
+                if name:
+                    word = 'style' if lang == 'en' else 'стиль'
+                    name = f"{name} ({word} {style.group(1)})"
+            return 'hat', name or base
+        if base.endswith('_arms'):
+            cls = base[2:-5] if base.startswith('c_') else base[:-5]
+            who = names.get(f'models/player/{cls}.mdl', cls)
+            hands = 'hands' if lang == 'en' else 'руки'
+            return 'arms', f"{who} ({hands})"
+        if mdl.startswith('models/weapons/') or base.startswith('c_'):
+            return 'weapon', names.get('c:' + base, base)
+        return 'other', base
 
     def particle_model_scene(self, qc: str) -> Dict[str, Any]:
         """
@@ -2056,11 +2277,20 @@ class AppSession:
         found = attachments_from_qc(qc)
         order = sorted(found, key=lambda a: (
             not a.name.lower().startswith('unusual'), a.name.lower()))
+        # Персонажи собраны с `$upaxis Y`: их SMD лежит осью Y вверх, а сцена
+        # частиц — Source, Z вверх. Без поворота разведчик лежал на полу и
+        # свечение «на игроке» садилось на лежачего. Поворот тот же, что
+        # делает studiomdl: (x, y, z) → (x, −z, y). Точки крепления — так же.
+        y_up = _qc_is_y_up(qc)
+        if y_up:
+            obj = _obj_y_up_to_z_up(obj)
         return {
             'obj': obj,
             'textures': textures,
             'attachments': [{'name': a.name, 'bone': a.bone,
-                             'pos': list(a.pos), 'angles': list(a.angles)}
+                             'pos': ([a.pos[0], -a.pos[2], a.pos[1]] if y_up
+                                     else list(a.pos)),
+                             'angles': list(a.angles)}
                             for a in order],
         }
 
@@ -3228,15 +3458,9 @@ class AppSession:
             frames, delays = texture_compose_service.export_frames(
                 spec['path'], os.path.join(self._work_dir(), 'frames'),
                 f"part{int(part)}")
-        from src.services import texture_compose_service as _compose
-        polys = model.polygons(obj_mat, one.index)
         return {
             'frames': frames,
             'delays': delays,
-            # Куда приближать окно: габарит без редких дальних островков.
-            # Обычный габарит у половины частей — почти вся текстура, и окно
-            # тогда не приближает, а только центрирует.
-            'dense': [round(v, 6) for v in _compose.dense_bbox(polys)],
             'part': one.index,
             # Габарит, в который вписана картинка. У наклейки, пережившей
             # разрез, это габарит ПРЕЖНЕЙ части (её якорь): окно посадки обязано
@@ -3246,8 +3470,10 @@ class AppSession:
             'polygons': [[[round(u, 6), round(v, 6)] for u, v in tri]
                          for tri in model.polygons(obj_mat, one.index)],
             'image': spec,
-            # Основа — то, поверх чего человек и увидит свою картинку.
-            'base': self.preview.textures.game_base(card) or '',
+            # Основа — то, поверх чего человек и увидит свою картинку: та же,
+            # что возьмёт склейка (своя текстура, если она есть, иначе игровая).
+            # По ней же окно берёт пропорции холста.
+            'base': self._compose_base(card) or '',
         }
 
     def toggle_part_island(self, material: str = '', group: int = 0,
@@ -3430,33 +3656,20 @@ class AppSession:
         self._autosave()
         return self.view_state()
 
-    def _recompose(self, model: Any, obj_mat: str, card: str) -> None:
-        """
-        Пересобирает текстуру материала из картинок его частей.
-
-        Склейка кладётся туда же, куда легла бы обычная своя текстура: дальше
-        по конвейеру — сборка, автосохранение, превью — про части не знает
-        никто, и знать не должен.
-        """
-        from src.services import texture_compose_service
-
+    def _compose_base(self, card: str) -> Optional[str]:
+        """Основа склейки: своя текстура, если она не наша же склейка, иначе игровая."""
         t = self.preview.textures
-        images = self.preview.part_textures.get(card) or {}
-        colors = self.preview.part_colors.get(card) or {}
-        if not (images or colors):
-            self.preview.part_textures.pop(card, None)
-            self.preview.part_colors.pop(card, None)
-            # Убрали последнее — материал возвращается к тому, что было под
-            # склейкой.
-            if t.uploaded_for_mat(card) in self._composites:
-                t.set_texture(card, None)
-            return
-
-        # Основа: своя текстура пользователя, если она не наша же склейка.
         base = t.uploaded_for_mat(card)
         if not base or base in self._composites:
             base = t.game_base(card)
+        return base
 
+    def _part_layers(self, model: Any, obj_mat: str, card: str) -> List[Any]:
+        """Слои склейки материала из того, что назначено его частям."""
+        from src.services import texture_compose_service
+
+        images = self.preview.part_textures.get(card) or {}
+        colors = self.preview.part_colors.get(card) or {}
         Layer = texture_compose_service.Layer
         # Сперва ЦВЕТ, потом картинки: цвет — это тонировка игровой текстуры
         # (детали под ней остаются), а картинка ложится на деталь сверху. У
@@ -3482,18 +3695,184 @@ class AppSession:
                                 anchor=spec['anchor'],
                                 edge=spec['edge'],
                                 edge_color=spec['edge_color']))
+        return layers
+
+    def _recompose(self, model: Any, obj_mat: str, card: str) -> None:
+        """
+        Пересобирает текстуру материала из картинок его частей.
+
+        Склейка кладётся туда же, куда легла бы обычная своя текстура: дальше
+        по конвейеру — сборка, автосохранение, превью — про части не знает
+        никто, и знать не должен.
+
+        ОДИН кадр, даже если на части гифка: 3D-превью APNG не крутит, а
+        собирать на каждый мазок шестьдесят кадров по 16 МБ значило ждать
+        покраски по десять секунд и скармливать браузеру файл на 90 МБ.
+        Все кадры печёт сборка — `_bake_plan`.
+        """
+        from src.services import texture_compose_service
+
+        t = self.preview.textures
+        images = self.preview.part_textures.get(card) or {}
+        colors = self.preview.part_colors.get(card) or {}
+        if not (images or colors):
+            self.preview.part_textures.pop(card, None)
+            self.preview.part_colors.pop(card, None)
+            # Убрали последнее — материал возвращается к тому, что было под
+            # склейкой.
+            if t.uploaded_for_mat(card) in self._composites:
+                t.set_texture(card, None)
+            return
+
+        base = self._compose_base(card)
+        layers = self._part_layers(model, obj_mat, card)
         # Имя со счётчиком: путь — это ещё и адрес картинки во вьювере, и по
         # прежнему имени браузер показал бы предыдущую склейку из кэша.
         self._compose_seq = getattr(self, '_compose_seq', 0) + 1
         out = os.path.join(self._work_dir(),
                            f"parts_{self._compose_seq}.png")
-        result = texture_compose_service.compose(base, layers, out)
+        result = texture_compose_service.compose(base, layers, out, frames=1)
         if not result:
             return
         self._composites.add(result)
         self._compose_files.append(result)
         self._drop_old_composites()
         t.set_texture(card, result)
+        self._animate_parts(card, obj_mat, result, base, layers)
+
+    # ── Анимация частей в 3D ─────────────────────────────────────────────── #
+
+    #: Длинная сторона кадра для вьювера. Он держит все кадры текстурами на
+    #: видеокарте: 60 кадров 1024² — это 240 МБ, на 2048² было бы гигабайт.
+    #: ponytail: один размер на всех; ужимать до 512 при 64 кадрах — если
+    #: слабые видеокарты пожалуются.
+    _ANIM_PREVIEW_SIZE = 1024
+
+    @staticmethod
+    def _parts_animation_on() -> bool:
+        from src.config.app_config import AppConfig
+        return bool(AppConfig.load_config().get('parts_animation'))
+
+    def _animate_parts(self, card: str, mesh: str, still: str, base: str,
+                       layers: List[Any]) -> None:
+        """
+        Крутит гифку с части в 3D — фоном, после того как мазок уже показан.
+
+        Склейка превью — один кадр (см. `_recompose`); кадры для вьювера
+        рисуются отдельным потоком в уменьшенном размере и приезжают событием
+        `parts_animated`. Новый мазок обрывает прежний расчёт: важен только
+        последний. Выключено настройкой по умолчанию — это секунды работы и
+        сотни мегабайт на видеокарте после каждого мазка.
+        """
+        from src.services import texture_compose_service
+
+        self._anim_seq += 1
+        self._anim_last = (card, mesh, still, base, layers)
+        if not self._parts_animation_on():
+            return
+        if not texture_compose_service.is_moving(layers):
+            return
+        seq = self._anim_seq
+        alive = lambda: self._anim_seq == seq   # noqa: E731
+
+        def run() -> None:
+            out_dir = os.path.join(self._work_dir(), 'anim', str(seq))
+            frames, fps = texture_compose_service.export_composite_frames(
+                base, layers, out_dir, self._ANIM_PREVIEW_SIZE, alive)
+            if not frames or not alive():
+                return
+            self._drop_old_animations(seq)
+            # Меш зовётся по материалу из OBJ, а не по ключу карточки: у
+            # одноматериальной модели они расходятся (см. `_parts_model`).
+            self._put('parts_animated', material=card, mesh=mesh,
+                      still=still, frames=frames, fps=fps)
+
+        threading.Thread(target=run, daemon=True,
+                         name=f'parts-anim-{seq}').start()
+
+    def _drop_old_animations(self, seq: int) -> None:
+        """Кадры прежних анимаций: держим одну предыдущую — браузер может
+        ещё грузить её, — остальные с диска долой (60 файлов на мазок)."""
+        import shutil
+
+        root = os.path.join(self._work_dir(), 'anim')
+        try:
+            names = os.listdir(root)
+        except OSError:
+            return
+        for name in names:
+            if name.isdigit() and int(name) < seq - 1:
+                shutil.rmtree(os.path.join(root, name), ignore_errors=True)
+
+    def refresh_parts_animation(self) -> None:
+        """Настройку переключили: включили — крутим то, что на модели сейчас,
+        выключили — обрываем расчёт, а кадры со сцены снимет сама страница."""
+        last = self._anim_last
+        self._anim_seq += 1
+        if not (last and self._parts_animation_on()):
+            return
+        # Склейка могла смениться без мазка: другой предмет, возврат работы.
+        # Кадры от прежней легли бы на чужую модель.
+        card, _, still = last[:3]
+        if self.preview.textures.uploaded_for_mat(card) != still:
+            return
+        self._anim_seq -= 1             # _animate_parts сам шагнёт
+        self._animate_parts(*last)
+
+    # ── Анимация частей для сборки ───────────────────────────────────────── #
+
+    def _card_of(self, path: str) -> Optional[str]:
+        """Карточка, на которой лежит этот файл (склейка ищется по пути)."""
+        t = self.preview.textures
+        slots = list(t.textures.values()) + list(t.skin_overrides.values())
+        for by_mat in slots:
+            for mat, p in (by_mat or {}).items():
+                if p == path:
+                    return mat
+        return None
+
+    def _bake_plan(self, paths: Iterable[Optional[str]]) -> Dict[str, Any]:
+        """
+        Какие склейки сборке надо испечь заново, со всеми кадрами.
+
+        Превью держит от гифки на части один кадр (`_recompose`), а в игру
+        должна уехать вся анимация — значит, перед сборкой склейку каждого
+        такого материала собираем ещё раз, уже целиком. Возвращает
+        {путь склейки превью: (основа, слои, путь полной склейки)}; материалы
+        без анимации сюда не попадают — их склейка и так полная.
+        """
+        from src.services import texture_compose_service
+
+        plan: Dict[str, Any] = {}
+        for path in paths:
+            if not path or path in plan or path not in self._composites:
+                continue
+            card = self._card_of(path)
+            if not card:
+                continue
+            found = self._parts_model(card)
+            if isinstance(found, dict):
+                logger.warning(f"анимация частей: {card} — {found['error']}")
+                continue
+            model, obj_mat, _ = found
+            layers = self._part_layers(model, obj_mat, card)
+            if not texture_compose_service.is_moving(layers):
+                continue
+            base = self._compose_base(card)
+            self._compose_seq = getattr(self, '_compose_seq', 0) + 1
+            full = os.path.join(self._work_dir(),
+                                f"parts_{self._compose_seq}_full.png")
+            plan[path] = (base, layers, full)
+        return plan
+
+    def _bake(self, plan: Dict[str, Any], report) -> None:
+        """Печёт полные склейки по плану. Зовётся из воркера сборки."""
+        from src.services import texture_compose_service
+
+        for n, (base, layers, full) in enumerate(plan.values(), 1):
+            report(-1, f"Анимация частей {n}/{len(plan)}")
+            if not texture_compose_service.compose(base, layers, full):
+                raise RuntimeError(f"Не удалось собрать анимацию частей: {full}")
 
     #: Сколько склеек держим на диске. Одной мало: путь — это ещё и адрес
     #: картинки во вьювере и в альбоме, и удалить только что показанную нельзя,

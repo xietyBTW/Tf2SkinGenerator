@@ -275,3 +275,18 @@ def test_frozen_animation_uses_system_sequence_number():
     s["attrs"]["sequence_number"] = {"t": "integer", "v": 0}    # один кадр
     assert "frozen_animation" not in [
         f.rule for f in check_systems({"fx": s}, materials=mats)]
+
+
+def test_parent_scaled_emitter_without_multiplier_is_silent_in_game():
+    """«Эмиссия по частицам родителя» умножает темп ещё и на «scale emission
+    to used control points», а его умолчание — ноль (симуляция Valve через
+    particles.lib: без атрибута эмиттер не создаёт ничего). Превью ручеёк
+    показывало, игра — нет."""
+    flag = {"use parent particles for emission scaling": {"t": "bool", "v": True}}
+    s = _system(emitters=[{"functionName": "emit_continuously", "attrs": dict(flag)}])
+    found = [f for f in check_systems({"fx": s}) if f.rule == "parent_scale_zero"]
+    assert found and found[0].fix_value == 1.0
+
+    ok = dict(flag, **{"scale emission to used control points": {"t": "float", "v": 1.0}})
+    s = _system(emitters=[{"functionName": "emit_continuously", "attrs": ok}])
+    assert "parent_scale_zero" not in [f.rule for f in check_systems({"fx": s})]

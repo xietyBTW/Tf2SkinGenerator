@@ -175,6 +175,7 @@ ALLOWED = {
     "mode_for": api.mode_for,
     "controls_for": api.controls_for,
     "tf2_paths": api.tf2_paths,
+    "find_tf2": api.find_tf2,
     "load_preview": api.load_preview,
     "stop_preview": api.stop_preview,
     "view_state": api.view_state,

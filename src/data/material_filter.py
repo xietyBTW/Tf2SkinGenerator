@@ -78,6 +78,18 @@ def is_user_blacklisted(name: str) -> bool:
     return any(_matches(n, p) for p in _user_patterns())
 
 
+def is_hidden_at_build(name: str) -> bool:
+    """True — сборка НЕ спрашивает текстуру, а пишет материал игровым оригиналом.
+
+    Это пользовательский ЧС плюс маски маскировки шпиона: они сидят в
+    $texturegroup тела шпиона, но правятся в своём режиме (девять карточек
+    масок), и спрашивать их ещё раз при сборке тела — значит спрашивать то,
+    для чего есть отдельная страница. Карточки превью этот фильтр не трогает
+    (там маски и есть предмет правки)."""
+    from src.data.player_characters import SPY_MASK_VTF_NAMES
+    return is_user_blacklisted(name) or (name or '').lower() in SPY_MASK_VTF_NAMES
+
+
 def filter_editable(names) -> list:
     """Оставляет только редактируемые (не служебные) материалы из списка имён."""
     return [n for n in names if is_editable_material(n)]

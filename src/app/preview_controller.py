@@ -66,6 +66,8 @@ class Preview3DController:
     # принадлежит, и карточек по ней не бывает.
     scene_extra = Signal(object, object)
     cards_ready = Signal(str)               # (texture) — геометрия НЕ трогается
+    # Игровые текстуры косметических стилей: {индекс скина: {базовый мат.: png}}
+    skin_textures = Signal(object)
     failed = Signal(str)                    # (текст ошибки)
 
     def __init__(self, session: PreviewSession):
@@ -143,6 +145,7 @@ class Preview3DController:
         w.australium_ready.connect(self._on_australium_ready)
         w.render_hints.connect(lambda hints: self.render_hints.emit(hints or {}))
         w.scene_extra.connect(self._on_scene_extra)
+        w.skin_textures.connect(self._on_skin_textures)
         w.failed.connect(self.failed.emit)
 
     # ═══════════════════════════════════════════════════════════════════════ #
@@ -251,6 +254,17 @@ class Preview3DController:
         self._session.scene_extra_textures = dict(tex_map)
         if own:
             self._session.scene_item_materials = list(own)
+
+    def _on_skin_textures(self, skin_textures: dict) -> None:
+        """Игровые текстуры стилей → переопределения стиля (как у мода из VPK).
+
+        Без этого вкладка стиля оставалась пустой, а его текстура показывалась
+        лишней карточкой в базовом альбоме.
+        """
+        if not skin_textures:
+            return
+        self._session.adopt_style_textures(skin_textures)
+        self.skin_textures.emit(skin_textures)
 
     def _on_multi_material(self, tex_map: dict) -> None:
         if not tex_map:
@@ -425,26 +439,10 @@ class VpkModController:
         лежит в файле. Раскладываем их переопределениями — так же, как это
         делает панель приложения (``_on_vpk_mod_skins_ready``).
         """
-        import os
-
         s = self._session
         s.textures.skin_info = info or None
 
-        skin_textures = (info or {}).get('skin_textures') or {}
-        for raw_index, by_material in skin_textures.items():
-            index = int(raw_index)
-            if not index or not by_material:
-                continue           # базовый стиль показывает сами карточки
-            chosen = s.skin_chosen.setdefault(index, set())
-            overrides = s.textures.skin_overrides.setdefault(index, {})
-            for base_material, png in by_material.items():
-                if not png or not os.path.exists(png):
-                    continue
-                # Карточки названы по базовому материалу — под ним стиль и
-                # переопределяется; имя меша подберёт resolve_mesh.
-                overrides[base_material] = png
-                chosen.add(base_material)
-
+        s.adopt_style_textures((info or {}).get('skin_textures') or {})
         self.skins.emit(info)
 
 
@@ -488,7 +486,9 @@ class SkinDetectController:
         s = self._session
         s.textures.skin_info = info
         s.textures.active_skin = 0
-        s.textures.skin_overrides = {}
+        # skin_overrides здесь НЕ чистим: оба вызова detect() идут сразу после
+        # reset_skins(), а игровые текстуры стилей приезжают параллельно от
+        # 3D-воркера — очистка съедала бы их в зависимости от того, кто успел.
         self.detected.emit(info)
 
 
@@ -705,7 +705,13 @@ class ViewmodelController:
 
 
 class SkyboxController:
-    """Грани неба для 3D-превью: шесть PNG, которые вьювер ставит кубмапой."""
+    """Грани неба для 3D-превью: шесть PNG, которые вьювер ставит кубмапой.
+
+    Два источника, оба кладут результат в домен и сообщают одним сигналом:
+    стоковые грани выбранного неба (`load`) и нарезка панорамы 360° на шесть
+    граней (`split`). Что из этого показать, решает домен —
+    `resolve_skybox_face`: своя грань → нарезка → стоковая.
+    """
 
     ready = Signal(object)          # {грань: png}
     failed = Signal(str)
@@ -713,11 +719,37 @@ class SkyboxController:
     def __init__(self, session: PreviewSession):
         self._session = session
         self._worker = None
+        self._split = None
 
     def stop(self) -> None:
         if self._worker is not None:
             self._worker.stop(3000)
             self._worker = None
+        self.stop_split()
+
+    def stop_split(self) -> None:
+        if self._split is not None:
+            self._split.stop(3000)
+            self._split = None
+
+    def split(self, equirect_path: str) -> None:
+        """Режет панораму на грани превью (numpy, 512px — см. воркер).
+
+        Нарезку делает воркер, а не сборка: сборка режет заново и в своём
+        разрешении, а превью нужно СЕЙЧАС и мелкое.
+        """
+        self.stop_split()
+        from src.services.skybox_preview_worker import SkyboxSplitWorker
+
+        w = SkyboxSplitWorker(equirect_path=equirect_path)
+        w.ready.connect(self._on_split)
+        w.failed.connect(self.failed.emit)
+        self._split = w
+        w.start()
+
+    def _on_split(self, faces: dict) -> None:
+        self._session.textures.skybox_split_faces = dict(faces or {})
+        self.ready.emit(faces or {})
 
     def load(self, sky_name: str, vpk_paths) -> None:
         self.stop()

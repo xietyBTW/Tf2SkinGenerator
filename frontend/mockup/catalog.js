@@ -34,7 +34,7 @@ import {
 import { diagDlg, diagSay } from './diagnostics.js';
 import { applyLook } from './settings.js';
 import { setMode } from './controls.js';
-import { startPreview, clearPreview } from './preview.js';
+import { startPreview, clearPreview, resetView } from './preview.js';
 
 export const els = {
   cat:   document.getElementById('cat'),
@@ -342,7 +342,7 @@ async function openWork(work) {
     return;
   }
 
-  await setMode(work.mode);
+  await setMode(work.mode, work.item_key || '');
   const res = await api.loadPreview(work.mode, null, work.item_key || null,
                                     work.per_class || null, null, true);
   if (res.error) say(res.error);
@@ -390,7 +390,9 @@ async function choose(button, item) {
   document.querySelector('.title__meta').textContent =
     [item.label ?? item.key, item.cls].filter(Boolean).join(' · ');
   closeCat();
-  await setMode(item.mode);
+  // Ключ предмета нужен имени VPK: у косметики режим «hat» на всём разделе,
+  // а модель у каждой шапки своя (см. suggest_vpk_name).
+  await setMode(item.mode, item.sky || item.key || '');
   await startPreview(item);
 }
 
@@ -519,11 +521,11 @@ export async function pickSection(name) {
   // не модель: там сцена с частицами. Меняем подпись, а не поведение.
   const modeModel = document.querySelector('.modes [data-view="model"]');
   modeModel.textContent = это_частицы ? 'Эффект' : 'Модель';
-  document.querySelector('.modes [data-view="fp"]').hidden = это_частицы;
+  // У эффекта правая половина — не модель, а сцена с частицами: сцен предмета
+  // (руки, насмешка) там нет вовсе.
+  document.querySelector('.half__bar--scenes').hidden = это_частицы;
   // Раздел открывается на «Вместе»: слева текстуры, справа эффект.
-  document.querySelectorAll('.modes .underlined').forEach(
-    (b) => b.classList.toggle('is-active', b.dataset.view === 'both'));
-  document.querySelector('.work').dataset.view = 'both';
+  resetView();
 
   els.cat.parentElement.parentElement.hidden = это_шапки;   // категорию прячем
   els.fType.hidden = true;

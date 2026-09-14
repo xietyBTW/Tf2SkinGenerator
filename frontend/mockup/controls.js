@@ -92,15 +92,68 @@ export function applyControls(c) {
   }
   fmt.disabled = Boolean(c.format_locked);
 
-  // Флаги VTF.
-  const flagCol = document.querySelector('.build__col[data-col="flags"]');
-  flagCol.querySelectorAll('input').forEach((b, i) => {
-    // Список флагов режима (null — все); Point Sample у скайбокса единственный
-    // осмысленный, остальное там выставляет SkyboxService.
-    const name = flagCol.querySelectorAll('.check span')[i].textContent.trim();
-    const allowed = c.flags === null || c.flags.some((f) => name.toLowerCase().includes(f.toLowerCase()));
-    b.disabled = !c.flags_enabled || !allowed;
-  });
+  // Имя VPK предлагает Python по предмету (scattergun_mod.vpk). Своё имя
+  // не трогаем: набранное руками важнее подсказки, поэтому смотрим на
+  // признак правки, а не на совпадение с прошлой подсказкой.
+  const out = document.getElementById('out');
+  if (c.vpk_name && !out.dataset.mine) out.value = c.vpk_name;
+
+  showFlagChecks(c);
+}
+
+// Как только имя набрали руками, подсказка перестаёт его перебивать. Пустое
+// поле — снова «ничьё»: так подсказка возвращается, если имя стёрли.
+document.getElementById('out').addEventListener('input', (e) => {
+  if (e.target.value.trim()) e.target.dataset.mine = '1';
+  else delete e.target.dataset.mine;
+});
+
+/**
+ * Галки флагов VTF — по ответу Python.
+ *
+ * В `data-name` уходит ИМЯ флага: его ждёт сборка (`-flag clamps`), а подпись
+ * переводится. Раньше галки стояли в разметке, и в сборку уезжала подпись —
+ * VTFCmd такого имени не знает и падал, то есть отмеченный флаг ломал сборку.
+ *
+ * Пересобираем только когда НАБОР другой: перестройка теряет отметки, а
+ * `applyControls` зовётся на каждую смену предмета. Доступность при этом
+ * обновляется всегда — она зависит от режима.
+ *
+ * Особые флаги (`adv`) уходят в СВОЮ колонку — последнюю в ряду. В общем
+ * столбце они читались продолжением обычных, а это другой разговор: скину они
+ * либо безразличны, либо вредны (см. format_choices.VTF_FLAGS). Колонку целиком
+ * показывает настройка, признак ставит CSS по корню (settings.js → applyLook).
+ */
+function showFlagChecks(c) {
+  if (!Array.isArray(c.flags)) return;
+  const col = (adv) => document.querySelector(
+    `.build__col[data-col="${adv ? 'flags-adv' : 'flags'}"]`);
+
+  for (const adv of [false, true]) {
+    const box = col(adv);
+    const mine = c.flags.filter((f) => Boolean(f.adv) === adv);
+    const shown = [...box.querySelectorAll('.check span')].map((s) => s.dataset.name);
+    if (String(shown) !== String(mine.map((f) => f.key))) {
+      const on = new Set([...box.querySelectorAll('.check')]
+        .filter((l) => l.querySelector('input').checked)
+        .map((l) => l.querySelector('span').dataset.name));
+      box.querySelectorAll('.check').forEach((l) => l.remove());
+      for (const flag of mine) {
+        const label = document.createElement('label');
+        label.className = 'check';
+        label.innerHTML = '<input type="checkbox"><span></span>';
+        label.querySelector('input').checked = on.has(flag.key);
+        const span = label.querySelector('span');
+        span.dataset.name = flag.key;
+        span.textContent = flag.label;
+        box.appendChild(label);
+      }
+    }
+    [...box.querySelectorAll('.check')].forEach((label, i) => {
+      label.querySelector('input').disabled =
+        !c.flags_enabled || !mine[i] || !mine[i].on;
+    });
+  }
 }
 
 // ── Режим правки настроек текстуры ──────────────────────────────────────
@@ -142,7 +195,8 @@ export function applySettings(st) {
   const flags = new Set(st.flags || []);
   const options = st.options || {};
   for (const col of document.querySelectorAll('.build__col[data-col]')) {
-    const isFlags = col.dataset.col === 'flags';
+    // Особые флаги — та же природа, только колонка своя.
+    const isFlags = col.dataset.col === 'flags' || col.dataset.col === 'flags-adv';
     if (!isFlags && col.dataset.col !== 'options') continue;
     col.querySelectorAll('.check').forEach((l) => {
       const name = checkName(l);
@@ -283,7 +337,9 @@ document.querySelector('.half--flat .acts').addEventListener('click', (e) => {
 });
 
 /** Спрашивает Python, что показывать при этом режиме, и применяет ответ. */
-export async function setMode(mode) {
+export async function setMode(mode, key = '') {
   sel.mode = mode;
-  applyControls(await api.call('controls_for', { mode }));
+  // Ключ предмета — только ради имени VPK: у косметики режим один на всю
+  // категорию, и по нему предмет не назвать.
+  applyControls(await api.call('controls_for', { mode, key }));
 }

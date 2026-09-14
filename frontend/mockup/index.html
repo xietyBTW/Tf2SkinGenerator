@@ -56,12 +56,14 @@
       </div>
     </div>
 
+    <!-- Только РАСКЛАДКА: что занимает стол. Что показано в кадре, выбирают
+         у самого кадра (см. .half__bar--scenes) — это другой вопрос, и пока
+         оба стояли одним рядом, «Вместе» с насмешкой было недостижимо, а
+         выход из сцены был побочным действием выбора раскладки. -->
     <div class="modes">
       <button class="underlined is-active" data-view="both">Вместе</button>
       <button class="underlined" data-view="flat">Текстура</button>
       <button class="underlined" data-view="model">Модель</button>
-      <button class="underlined" data-view="fp" data-cond="firstperson">От первого лица</button>
-      <button class="underlined" data-view="taunt" data-cond="taunt">Насмешка</button>
     </div>
 
     <div class="teams">
@@ -116,7 +118,7 @@
   </aside>
 
   <!-- ── Работа: текстуры и модель ──────────────────────────────────── -->
-  <div class="work" data-view="both">
+  <div class="work" data-view="both" data-scene="item">
 
     <section class="half half--flat">
       <div class="half__bar">
@@ -154,6 +156,24 @@
     </section>
 
     <section class="half half--model">
+
+      <!-- Что показывать в кадре. Ряд стоит там же, где у половины с текстурой
+           стоят вкладки материалов: слева выбирают, КАКУЮ текстуру смотреть,
+           справа — в чём смотреть модель. Вид от первого лица и насмешка — не
+           ракурсы, а собранные сцены, и «Модель» это выход из них: пока выход
+           был побочным действием смены раскладки, насмешку нельзя было
+           выключить вовсе.
+
+           Ряда нет, когда выбирать не из чего: у скайбокса, спрея и тела
+           класса сцены не бывает, и переключатель обещал бы выбор, которого
+           нет (правило в style.css, чтобы держаться за data-cond, а не за
+           второй список режимов). На «Текстуре» ряд уходит вместе с этой
+           половиной — и правильно: сцена это свойство кадра, а его там нет. -->
+      <div class="half__bar half__bar--scenes">
+        <button class="mattab is-active" data-scene="item">Модель</button>
+        <button class="mattab" data-scene="fp" data-cond="firstperson">От первого лица</button>
+        <button class="mattab" data-scene="taunt" data-cond="taunt">Насмешка</button>
+      </div>
 
       <div class="viewport">
         <!-- Тот же viewer3d.html, что работает в окне приложения: сервер
@@ -473,6 +493,7 @@
           <button class="textbtn textbtn--sm" id="ppause">Пауза</button>
           <button class="textbtn textbtn--sm" id="ploop">Повтор</button>
           <button class="textbtn textbtn--sm" id="pcpbtn">Точки</button>
+          <button class="textbtn textbtn--sm" id="pbg" title="Тёмный, серый или светлый фон кадра: полупрозрачные слои эффекта видны только на светлом">Фон</button>
           <!-- Ctrl+Z мышью не нажмёшь: у отмены должна быть и кнопка. -->
           <button class="textbtn textbtn--sm" id="pundo" disabled
                   title="Отменить правку (Ctrl+Z)">Отменить</button>
@@ -585,41 +606,59 @@
         <div class="field">
           <label class="field__label" for="fmt">Формат VTF</label>
           <div class="select">
+            <!-- Список форматов приходит от Python (controls_for → formats):
+                 он же решает, какие из них режим разрешает. Здесь только
+                 начальное значение — второй список в разметке разъехался бы с
+                 доменным, что и случилось: из 26 форматов страница знала 4. -->
             <select id="fmt">
-              <option>DXT5</option><option>DXT1</option>
-              <option>BGRA8888</option><option>RGBA8888</option>
+              <option>DXT5</option>
             </select>
           </div>
         </div>
         <div class="field">
           <label class="field__label" for="out">Имя VPK</label>
-          <input class="input" id="out" type="text" value="scattergun_mod.vpk">
+          <!-- Имя предлагает Python по выбранному предмету (controls_for →
+               vpk_name): здесь стояло одно на всех, и топор собирался под
+               именем скаттергана. Это значение видно только до первого
+               выбора; набранное руками подсказка не перебивает. -->
+          <input class="input" id="out" type="text" value="skin_mod.vpk">
           <span class="field__note">Не более 50 символов, без \ / : * ? " &lt; &gt; |</span>
         </div>
       </div>
 
+      <!-- Галки флагов строит код по ответу Python (controls_for → flags):
+           там же лежат и имена флагов, и подписи, и правило «какие флаги
+           осмысленны в этом режиме». Своей копии в разметке быть не должно —
+           именно она и разъехалась: в сборку уходила ПОДПИСЬ галки («Clamp
+           S»), а VTFCmd ждёт имя (`clamps`) и на чужом падал. -->
       <div class="build__col" data-col="flags">
         <span class="field__label">Флаги VTF</span>
-        <label class="check"><input type="checkbox"><span>Clamp S</span></label>
-        <label class="check"><input type="checkbox"><span>Clamp T</span></label>
-        <label class="check"><input type="checkbox"><span>No Mipmap</span></label>
-        <label class="check"><input type="checkbox"><span>No LOD</span></label>
-        <label class="check"><input type="checkbox"><span>No minimum Mipmap</span></label>
-        <label class="check"><input type="checkbox"><span>Point Sample</span></label>
       </div>
 
+      <!-- У опций в data-name лежит КЛЮЧ, который читает сборка
+           (texture_service.create_vtf: options['nomipmaps'] и прочие).
+           Подписи переводятся, ключи — нет. -->
       <div class="build__col" data-col="options">
         <span class="field__label">Опции</span>
-          <label class="check"><input type="checkbox"><span>No Thumbnail</span></label>
-        <label class="check"><input type="checkbox"><span>No Reflectivity</span></label>
-        <label class="check" data-cond="gamma"><input type="checkbox" id="gamma"><span data-name="Гамма-коррекция">Гамма-коррекция</span></label>
+        <label class="check"><input type="checkbox"><span data-name="nomipmaps">No Mipmap</span></label>
+        <label class="check"><input type="checkbox"><span data-name="nothumbnail">No Thumbnail</span></label>
+        <label class="check"><input type="checkbox"><span data-name="noreflectivity">No Reflectivity</span></label>
+        <label class="check" data-cond="gamma"><input type="checkbox" id="gamma"><span data-name="gamma">Гамма-коррекция</span></label>
         <input class="input input--tiny" id="gammaval" type="text" value="2.2" disabled data-cond="gamma">
-        <label class="check" data-cond="shoulders"><input type="checkbox"><span data-name="Изолировать плечи">Изолировать плечи</span></label>
+        <label class="check" data-cond="shoulders"><input type="checkbox" id="shoulders"><span data-name="isolate_shoulders">Изолировать плечи</span></label>
         <!-- Шапка красится командным цветом краской в VMT, а не текстурой:
              без красок она будет одного цвета у обеих команд. -->
         <label class="check" data-cond="hat_paints" title="С красками шапка красится командным цветом, как стоковая">
-          <input type="checkbox" id="hat-paints" checked><span data-name="Краски из игры">Краски из игры</span></label>
-        <label class="check" data-cond="normal"><input type="checkbox"><span>Normal Map</span></label>
+          <input type="checkbox" id="hat-paints" checked><span data-name="hat_paints">Краски из игры</span></label>
+        <label class="check" data-cond="normal"><input type="checkbox"><span data-name="normal">Normal Map</span></label>
+      </div>
+
+      <!-- Особые флаги — ОТДЕЛЬНАЯ колонка, последняя в ряду: в общем столбце
+           они читались продолжением обычных, а это другой разговор (см.
+           format_choices.VTF_FLAGS). Галки в неё складывает код, показывает
+           её настройка «Особые флаги VTF». -->
+      <div class="build__col" data-col="flags-adv">
+        <span class="field__label">Особые флаги</span>
       </div>
     </div>
   </aside>
@@ -677,6 +716,9 @@
     <p class="label ask__title"></p>
     <p class="ask__text" hidden></p>
     <input class="input ask__input" hidden>
+    <!-- Поиск по длинному списку: параметров у системы три десятка, текстур
+         игры — сотни, глазами такое не пролистать. -->
+    <input class="input ask__search" type="search" placeholder="Поиск" hidden>
     <div class="ask__list" hidden></div>
     <!-- Приписка к выбору: «и так для остальных». Отдельной галкой, а не
          вторым набором пунктов — это то же действие, только шире. -->
@@ -818,6 +860,12 @@
         <label class="field__label" for="cfg-tf2">Папка игры</label>
         <input class="input" id="cfg-tf2" type="text"
                placeholder="…/steamapps/common/Team Fortress 2">
+        <!-- Путь к игре — первое, без чего не работает ничего, а вводится он
+             руками: выбрать папку из браузера нельзя. Кнопка спрашивает
+             Python (find_tf2): реестр Steam и его библиотеки. -->
+        <span class="field__note">
+          <button class="textbtn" id="cfg-findtf2" type="button">Найти автоматически</button>
+        </span>
       </div>
       <div class="field">
         <label class="field__label" for="cfg-export">Папка экспорта</label>
@@ -848,6 +896,10 @@
       <label class="check" title="Каталог и параметры прибиты к краям, а не вызываются поверх. Нужно окно шире 1100 px">
         <input type="checkbox" id="cfg-panels"><span>Закрепить панели</span></label>
       <label class="check"><input type="checkbox" id="cfg-tree"><span>Группировать дерево частиц</span></label>
+      <label class="check" title="Флаги VTF, которые цветному скину либо безразличны (фильтрацию решает клиент), либо относятся к другому виду текстур, либо вредны: SSBump объявляет текстуру бампмапом">
+        <input type="checkbox" id="cfg-advflags"><span>Особые флаги VTF</span></label>
+      <label class="check" title="Гифка, положенная на часть модели, крутится и в 3D. Каждый мазок пересчитывает кадры (секунды) и держит их на видеокарте (до сотен МБ)">
+        <input type="checkbox" id="cfg-parts-anim"><span>Крутить гифки на модели</span></label>
       <label class="check"><input type="checkbox" id="cfg-temp"><span>Хранить временные файлы при ошибке</span></label>
       <label class="check"><input type="checkbox" id="cfg-debug"><span>Отладочный режим</span></label>
     </div>

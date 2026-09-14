@@ -252,9 +252,13 @@ def test_rotation_orient_to_2d_direction_world_plane():
       };
     """)
     PI = 3.14159265
-    assert abs(res["plusX"]) < 1e-3, res
-    assert abs(res["plusY"] - PI / 2) < 1e-3, res
-    assert abs(res["plusX_off90"] - PI / 2) < 1e-3, res
+    # Курс +X даёт 180°, +Y — 270° (симуляция Valve через ParticleOracle:
+    # atan2 от обратного вектора), смещение прибавляется как есть. Углы
+    # сравниваем по модулю 2π.
+    ang = lambda a, b: abs((a - b + PI) % (2 * PI) - PI)
+    assert ang(res["plusX"], PI) < 1e-3, res
+    assert ang(res["plusY"], 3 * PI / 2) < 1e-3, res
+    assert ang(res["plusX_off90"], 3 * PI / 2) < 1e-3, res
     # вертикальный полёт и нулевая сила не меняют исходное вращение (0)
     assert abs(res["pureZ"]) < 1e-6, res
     assert abs(res["zeroStrength"]) < 1e-6, res
@@ -659,9 +663,12 @@ def test_control_point_orientation_drives_local_axes():
           renderers:[{functionName:'render_animated_sprites', attrs:{}}],
           emitters:[{functionName:'emit_instantaneously',
                      attrs:{num_to_emit:{t:'integer', v:1}}}],
+          // Второй инициализатор позиции Source пропускает (первый
+          // выигрывает), поэтому сферу под тестом ставим ЕДИНСТВЕННОЙ
           initializers:[
-            {functionName:'Position Within Sphere Random',
-             attrs:{distance_max:{t:'float', v:0}}},
+            ...(initFn === 'Position Within Sphere Random' ? [] : [
+              {functionName:'Position Within Sphere Random',
+               attrs:{distance_max:{t:'float', v:0}}}]),
             {functionName:'Lifetime Random',
              attrs:{lifetime_min:{t:'float', v:9}, lifetime_max:{t:'float', v:9}}},
             {functionName: initFn, attrs: initAttrs}],
@@ -845,7 +852,7 @@ _BARE = """
       emitters: over.emitters || [{functionName:'emit_instantaneously',
                                    attrs:{num_to_emit:{t:'integer', v:200}}}],
       initializers: over.initializers || [],
-      operators: [], forces: [], constraints: [], children: []
+      operators: over.operators || [], forces: [], constraints: [], children: []
     };
     return new ParticleSystemInstance(def, {fx: def}, {},
       {controlPoints: over.cps || [[0,0,0]],
@@ -959,20 +966,23 @@ def test_initial_particles_spawn_without_emitter():
     assert res["later"] == 7, "залп разовый"
 
 
-def test_maximum_time_step_clamps_simulation():
-    """Шаг симуляции клампится по 'maximum time step' системы (в игре
-    дефолт 0.1): иначе при просадке FPS превью считает шагами, которых в
-    игре не бывает."""
+def test_maximum_time_step_substeps_simulation():
+    """Большой шаг режется на куски по 'maximum time step' (в игре дефолт
+    0.1), но не больше десяти — как у Valve: время не теряется, пока кусков
+    хватает, а при dt 0.25 и шаге 0.02 продвигается лишь на 0.2."""
     res = _run_js(_BARE + """
       const s = bare({attrs: { 'maximum time step': {t:'float', v:0.05} }});
-      s.movement(1.0);
+      s.movement(0.25);
+      const c = bare({attrs: { 'maximum time step': {t:'float', v:0.02} }});
+      c.movement(0.25);
       const d = bare({attrs: { 'maximum time step': {t:'float', v:0.0} }});
       d.movement(1.0);
-      return { slow: s.curTime, unlimited: d.curTime };
+      return { full: s.curTime, capped: c.curTime, unlimited: d.curTime };
     """)
-    assert abs(res["slow"] - 0.05) < 1e-9, res
-    # 0 в файле = «без ограничения», остаётся защитный потолок движка
-    assert abs(res["unlimited"] - 0.3) < 1e-9, res
+    assert abs(res["full"] - 0.25) < 1e-9, res
+    assert abs(res["capped"] - 0.2) < 1e-9, res
+    # 0 в файле = «без ограничения», остаётся защитный потолок движка 0.3
+    assert abs(res["unlimited"] - 1.0) < 1e-9, res
 
 
 def test_velocity_noise_local_space():
@@ -1123,3 +1133,148 @@ def test_renderer_envelope_gates_drawing():
     """)
     assert res["early"] == 0, res
     assert res["later"] > 0, res
+
+
+def test_first_position_initializer_wins():
+    """Source пропускает второй инициализатор того же атрибута
+    (InitMultipleOverride): сфера в нуле, а за ней бокс в (10,10,10) —
+    частица остаётся в нуле. Модификаторы (offset) правят поверх.
+    Снято с симуляции Valve через particles.lib (ParticleOracle)."""
+    res = _run_js("""
+      const sys = mkSystem([]);
+      sys.def.initializers.push(
+        {functionName:'Position Within Box Random',
+         attrs:{min:{t:'vec3', v:[10,10,10]}, max:{t:'vec3', v:[10,10,10]}}},
+        {functionName:'Position Modify Offset Random',
+         attrs:{'offset min':{t:'vec3', v:[1,0,0]}, 'offset max':{t:'vec3', v:[1,0,0]}}});
+      const fresh = mkSystem([]);
+      fresh.def.initializers.push(...sys.def.initializers.slice(2));
+      const again = new ParticleSystemInstance(fresh.def, {fx: fresh.def}, {}, {controlPoints: [[0,0,0]]});
+      again.movement(1/60);
+      return again.particles[0].pos;
+    """)
+    assert [round(v, 6) for v in res] == [1, 0, 0], res
+
+
+def test_twist_force_direction_matches_valve():
+    """Отрицательная сила с осью Z крутит частицу на +X в сторону +Y
+    (r × axis), не -Y. Направление снято с симуляции Valve."""
+    res = _run_js("""
+      const sys = mkSystem([{functionName:'Movement Basic', attrs:{}}]);
+      sys.def.initializers.push({functionName:'Position Modify Offset Random',
+         attrs:{'offset min':{t:'vec3', v:[50,0,0]}, 'offset max':{t:'vec3', v:[50,0,0]}}});
+      sys.def.forces.push({functionName:'twist around axis',
+         attrs:{'amount of force':{t:'float', v:-150}, 'twist axis':{t:'vec3', v:[0,0,1]}}});
+      const s2 = new ParticleSystemInstance(sys.def, {fx: sys.def}, {}, {controlPoints: [[0,0,0]]});
+      for (let i = 0; i < 30; i++) s2.movement(1/30);
+      return s2.particles[0].pos;
+    """)
+    assert res[1] > 10, res
+
+
+def test_parent_scaled_emission_multiplies_by_parent_count():
+    """emit_continuously с «use parent particles for emission scaling»:
+    темп = rate × число частиц родителя × «scale emission to used control
+    points», умолчание множителя — ноль (симуляция Valve)."""
+    res = _run_js("""
+      const child = (scale) => ({
+        name: 'kid',
+        attrs: {max_particles: {t:'integer', v:5000}, radius: {t:'float', v:1}, material: {t:'string', v:'m'}},
+        renderers: [{functionName:'render_animated_sprites', attrs:{}}],
+        emitters: [{functionName:'emit_continuously', attrs: Object.assign({
+          emission_rate: {t:'float', v:100},
+          'use parent particles for emission scaling': {t:'bool', v:true}},
+          scale === null ? {} : {'scale emission to used control points': {t:'float', v:scale}})}],
+        initializers: [{functionName:'Position From Parent Particles', attrs:{}},
+                       {functionName:'Lifetime Random', attrs:{lifetime_min:{t:'float', v:9}, lifetime_max:{t:'float', v:9}}}],
+        operators: [], forces: [], constraints: [], children: []});
+      const run = (scale) => {
+        const kid = child(scale);
+        const parent = mkSystem([]);
+        parent.def.children = [{delay: 0, childName: 'kid'}];
+        const sys = new ParticleSystemInstance(parent.def, {fx: parent.def, kid}, {}, {controlPoints: [[0,0,0]]});
+        for (let i = 0; i < 30; i++) sys.movement(1/30);
+        return sys.children[0].particles.length;
+      };
+      return {none: run(null), one: run(1.0), half: run(0.5)};
+    """)
+    # родитель — 4 частицы: 100/с × 4 × scale за секунду
+    assert res["none"] == 0, res
+    assert 380 <= res["one"] <= 400, res
+    assert 190 <= res["half"] <= 200, res
+
+
+def test_maintain_position_along_path_is_a_chain():
+    """Цепочка seamine: каждый кадр частицы сажаются на кривую между двумя
+    точками (снято с particles.lib оракулом). Счётчик доли НЕ сбрасывается
+    между кадрами, при loop после единицы идёт ноль."""
+    res = _run_js(_BARE + """
+      const s = bare({
+        cps: [[0,0,0],[0,0,100]],
+        emitters: [{functionName:'emit_instantaneously', attrs:{num_to_emit:{t:'integer',v:8}}}],
+        initializers: [
+          {functionName:'Position Within Sphere Random', attrs:{}},
+          lifetime(10)],
+        operators: [
+          {functionName:'Movement Maintain Position Along Path',
+           attrs:{ 'start control point number':{t:'integer',v:0},
+                   'end control point number':{t:'integer',v:1},
+                   'particles to map from start to end':{t:'float',v:5},
+                   'mid point position':{t:'float',v:0.5},
+                   'restart behavior (0 = bounce, 1 = loop )':{t:'bool',v:true} }}]});
+      s.movement(1/30);
+      const a = s.particles.map(p => Math.round(p.pos[2]));
+      s.movement(1/30);
+      const b = s.particles.map(p => Math.round(p.pos[2]));
+      return { a, b, prevZ: s.particles[1].prevPos[2], posZ: s.particles[1].pos[2] };
+    """)
+    assert res["a"] == [0, 25, 50, 75, 100, 0, 25, 50], res
+    assert res["b"] == [75, 100, 0, 25, 50, 75, 100, 0], res
+    assert res["prevZ"] == res["posZ"]          # скорость гасится
+
+
+def test_remap_to_alpha_clamps_the_output_range():
+    """«output maximum 100» на альфе у Valve означает 1, а не 100: зажат
+    диапазон выхода, не результат (0..25 у seamine даёт альфу 0..1 линейно)."""
+    res = _run_js(_BARE + """
+      const s = bare({
+        cps: [[0,0,0],[0,0,100]],
+        emitters: [{functionName:'emit_instantaneously', attrs:{num_to_emit:{t:'integer',v:5}}}],
+        initializers: [
+          {functionName:'Position Along Path Sequential',
+           attrs:{ 'start control point number':{t:'integer',v:0},
+                   'end control point number':{t:'integer',v:1},
+                   'particles to map from start to end':{t:'float',v:5} }},
+          lifetime(10)],
+        operators: [
+          {functionName:'Remap Distance to Control Point to Scalar',
+           attrs:{ 'control point':{t:'integer',v:0},
+                   'distance minimum':{t:'float',v:0}, 'distance maximum':{t:'float',v:100},
+                   'output minimum':{t:'float',v:-1}, 'output maximum':{t:'float',v:2},
+                   'output field':{t:'integer',v:7} }}]});
+      s.movement(1/30);
+      return { alpha: s.particles.map(p => Math.round(p.alpha * 100) / 100) };
+    """)
+    assert res["alpha"] == [0, 0.25, 0.5, 0.75, 1], res
+
+
+def test_slow_emitter_births_in_the_past():
+    """0.325/с у seamine: рождение — в момент пересечения счётчиком целого, а
+    не «начало кадра + 1/rate» (три секунды в будущем: отрицательный возраст
+    держал 0.1-секундную вспышку три секунды, а её дети плодились)."""
+    res = _run_js(_BARE + """
+      const s = bare({
+        emitters: [{functionName:'emit_continuously',
+                    attrs:{emission_rate:{t:'float',v:0.325}}}],
+        initializers: [{functionName:'Position Within Sphere Random', attrs:{}}, lifetime(0.1)],
+        operators: [{functionName:'Lifespan Decay', attrs:{}}]});
+      let born = null, seenAt = null, alive = 0;
+      for (let i = 0; i < 200; i++) {
+        s.movement(1/30);
+        if (s.particles.length && born === null) { born = s.particles[0].spawnTime; seenAt = s.curTime; }
+        if (s.particles.length) alive++;
+      }
+      return { born, seenAt, alive };
+    """)
+    assert res["born"] <= res["seenAt"] + 1e-6, res
+    assert res["alive"] <= 8, res          # две вспышки по 0.1 с — по 3-4 кадра, не 90

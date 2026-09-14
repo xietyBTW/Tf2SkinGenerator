@@ -1117,3 +1117,15 @@ def test_material_key_collapses_doubled_separators():
         "effects/workshop/utaunt/voidsmoke.vmt"
     assert _norm_mat(r"effects\\crit", ".vtf") == "effects/crit.vtf"
     assert _norm_mat("") == ""
+
+
+def test_sprite_render_mode_counts_as_additive():
+    """У Sprite-материалов «$spriterendermode 5» (kRenderTransAdd) — сложение с
+    фоном без слова $additive; текстура без альфы рисовалась чёрным квадратом."""
+    from src.services import vmt_parse
+    from src.services.particle_editor_service import _is_additive
+
+    add = vmt_parse.parse('"Sprite" { "$basetexture" "x" "$spriterendermode" 5 }')
+    solid = vmt_parse.parse('"Sprite" { "$basetexture" "x" "$spriterendermode" 4 }')
+    plain = vmt_parse.parse('"Spritecard" { "$basetexture" "x" "$additive" 1 }')
+    assert _is_additive(add) and _is_additive(plain) and not _is_additive(solid)

@@ -201,6 +201,13 @@ def reference_smd_for_qc(qc_path: str) -> Optional[str]:
 
 def _reference_smd(qc_path: Path) -> Optional[Path]:
     """Reference-SMD рядом с QC: не физика, не анимация, не поза."""
+    # Сперва — то, что QC зовёт телом (`$body`/`$model`): у игроков рядом
+    # лежат бодигруппы (dogtags, hat, shoes), и перебор по алфавиту отдавал
+    # жетоны разведчика вместо самого разведчика. Правило то же, что у 3D
+    # (preview_3d_worker._character_body_smd), включая пустой LOD0 пиромана.
+    body = body_smd_from_qc(qc_path)
+    if body is not None:
+        return body
     candidates = [p for p in qc_path.parent.glob("*.smd")
                   if not any(k in p.stem.lower()
                              for k in NON_REFERENCE_SMD_KEYWORDS)]
@@ -209,6 +216,25 @@ def _reference_smd(qc_path: Path) -> Optional[Path]:
     # Совпадение с именем QC надёжнее любого перебора
     same = [p for p in candidates if p.stem.lower() == qc_path.stem.lower()]
     return (same or candidates)[0]
+
+
+def body_smd_from_qc(qc_path: Path) -> Optional[Path]:
+    """Меш, который QC объявляет первым `$body`/`$model`, — самый подробный из
+    его семьи «файл плюс _lodN» (у пиромана нулевой уровень пуст)."""
+    from src.services.smd_service import triangle_count
+
+    try:
+        text = qc_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    named = re.search(r'(?im)^\s*\$(?:body|model)\b.*?"([^"]+\.smd)"', text)
+    if not named:
+        return None
+    main = qc_path.parent / os.path.basename(named.group(1))
+    if not main.is_file():
+        return None
+    family = [main] + list(qc_path.parent.glob(f"{main.stem}_lod*.smd"))
+    return max(family, key=lambda p: triangle_count(str(p)))
 
 
 def attachments_from_qc(qc_path: str) -> List[Attachment]:
@@ -257,13 +283,22 @@ def attachments_from_qc(qc_path: str) -> List[Attachment]:
 # ── Модели из кэша декомпиляции ──────────────────────────────────────────── #
 
 def list_decompiled_models() -> List[Tuple[str, str]]:
-    """Модели, уже разобранные Crowbar: [(подпись, путь к QC)], по алфавиту.
+    """Модели, уже разобранные Crowbar: [(подпись, путь к QC)], по алфавиту."""
+    out = [(m["label"], m["qc"]) for m in list_decompiled_models_meta()]
+    out.sort(key=lambda pair: pair[0].lower())
+    return out
+
+
+def list_decompiled_models_meta() -> List[Dict[str, str]]:
+    """Все записи кэша декомпиляции: {label, qc, mdl (путь модели в игре)}.
 
     Своей распаковки VPK здесь нет намеренно: Crowbar долгий, а модели
-    попадают в кэш при обычной работе на вкладках оружия и шапок.
+    попадают в кэш при обычной работе на вкладках оружия и шапок. Одна и та
+    же модель может лежать в кэше дважды (разведчик как `__player_scout` и
+    как `models/player/scout.mdl`) — различать их наверху по `mdl`.
     """
     cache = Path(os.path.expanduser("~")) / ".tf2skingen_cache" / "decompiled"
-    out: List[Tuple[str, str]] = []
+    out: List[Dict[str, str]] = []
     if not cache.is_dir():
         return out
     for entry in cache.iterdir():
@@ -272,16 +307,33 @@ def list_decompiled_models() -> List[Tuple[str, str]]:
         meta_file = entry / "_cache_meta.json"
         qc_name = None
         label = entry.name
+        mdl = ""
         if meta_file.is_file():
             try:
                 meta = json.loads(meta_file.read_text(encoding="utf-8"))
                 qc_name = meta.get("qc_filename")
                 label = meta.get("weapon_key") or label
+                mdl = meta.get("mdl_rel_path") or ""
             except Exception:
                 pass
         qc = entry / qc_name if qc_name else next(iter(entry.glob("*.qc")), None)
         if qc is None or not Path(qc).is_file():
             continue
-        out.append((label, str(qc)))
-    out.sort(key=lambda pair: pair[0].lower())
+        if not mdl:
+            # Старые записи кэша без меты: путь модели знает сам QC.
+            mdl = _modelname_from_qc(Path(qc))
+        out.append({"label": label, "qc": str(qc), "mdl": mdl.replace("\\", "/")})
     return out
+
+
+def _modelname_from_qc(qc_path: Path) -> str:
+    """`$modelname "player/scout.mdl"` → `models/player/scout.mdl`; пусто, если нет."""
+    try:
+        text = qc_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+    found = re.search(r'(?im)^\s*\$modelname\s+"([^"]+)"', text)
+    if not found:
+        return ""
+    name = found.group(1).replace("\\", "/").lstrip("/")
+    return name if name.lower().startswith("models/") else "models/" + name

@@ -129,10 +129,12 @@ click **Done** to go back to the global settings.
 
 Things the app might ask you during a build:
 
-- **A material has no texture yet**: pick *Upload mine*, *Use game original*, or *Use main
-  texture* (the default). Tick *apply to all remaining* if you want the same answer for every
-  material left. If you already loaded something for that slot via its card, you won't see this
-  prompt at all, the app just uses what you gave it.
+- **A material has no texture yet**: pick *Keep game original*, *Copy main texture*, or *Choose
+  a file*. Tick *same for the rest* if you want the same answer for every material left. Closing
+  the prompt cancels the build. You're asked only about what you see in the app (main cards and
+  *Other*); everything else, blacklisted materials and the spy's disguise masks (they have their
+  own page) included, is written silently with the game original. If you already loaded something for that
+  slot via its card, you won't see this prompt at all, the app just uses what you gave it.
 - **The weapon has an extra model part** (a shell, a scope lens…): you're asked whether to
   replace it too. Answering *No* keeps the original game part, which is what most people want.
 - **Keep-materials builds only:** if the texture count doesn't match what the app expected, it
@@ -150,6 +152,8 @@ Open with the gear icon, top-right. It's one scrollable dialog with a few labele
 rather than real tabs:
 
 - **Paths**: **TF2 Game Folder** (must contain `tf/` and `bin/`) and **Export Folder**.
+  The **Detect automatically** button below the field finds the game on its own - through
+  the Steam registry keys and its library list, including drives the game was moved to.
 - **Preferences**: **Language** (English / Русский), **Export Format** (the image format used
   when *extracting* a texture, separate from the VTF build format in Step 2), **Theme** (Dark /
   Blue), and **sv_pure bypass** (`console\` by default, or `vgui\replay\thumbnails\`).

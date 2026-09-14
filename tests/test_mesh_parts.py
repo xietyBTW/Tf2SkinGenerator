@@ -748,43 +748,59 @@ class ComposeTests(unittest.TestCase):
         with PilImage.open(res) as im:
             self.assertEqual(getattr(im, 'n_frames', 1), 1)
 
-    def test_dense_bbox_ignores_far_flung_scraps(self):
-        """Обычный габарит для приближения не годится: у половины частей острова
-        разбросаны по развёртке, и прямоугольник вокруг них — почти вся
-        текстура. У обреза это давало окну масштаб x0.87, то есть оно не
-        приближало, а отдаляло."""
-        # Основная масса в углу плюс один крошечный островок на другом краю.
-        body = [((0.10, 0.10), (0.30, 0.10), (0.30, 0.30)),
-                ((0.10, 0.10), (0.30, 0.30), (0.10, 0.30))]
-        speck = [((0.97, 0.97), (0.98, 0.97), (0.98, 0.98))]
+    def _gif(self, name, count, size=(16, 16)):
+        from PIL import Image as PilImage
 
-        plain = compose.dense_bbox(body + speck, cut=0.0)
-        dense = compose.dense_bbox(body + speck)
-        # Без отбрасывания габарит тянется до крошки, с отбрасыванием — нет.
-        self.assertGreater(plain[2], 0.9)
-        self.assertLess(dense[2], 0.9)
-        # И основная масса из кадра не выпадает.
-        self.assertLessEqual(dense[0], 0.11)
-        self.assertGreaterEqual(dense[3], 0.29)
+        gif = os.path.join(self.tmp, name)
+        shots = [PilImage.new('RGBA', size, (k * 4 % 256, 0, 255 - k * 4 % 256, 255))
+                 for k in range(count)]
+        shots[0].save(gif, save_all=True, append_images=shots[1:],
+                      duration=50, loop=0)
+        return gif
 
-    def test_dense_bbox_weighs_area_not_points(self):
-        """Площадь, а не число точек: иначе россыпь мелких треугольников
-        перевесила бы одну крупную деталь и кадр уехал бы к ним."""
-        big = [((0.10, 0.10), (0.60, 0.10), (0.60, 0.60))]
-        crumbs = [((0.90 + i * 0.001, 0.90), (0.901 + i * 0.001, 0.90),
-                   (0.901 + i * 0.001, 0.901)) for i in range(40)]
-        dense = compose.dense_bbox(big + crumbs)
-        self.assertLess(dense[2], 0.9)
+    def test_the_build_gets_every_frame(self):
+        """Гифка в 60 кадров обязана доехать до игры целиком. Раньше склейка
+        держала все кадры в памяти и потому резала их по бюджету — на текстуре
+        2048×2048 оставалось 20. Теперь кадры пишутся по одному."""
+        from PIL import Image as PilImage
 
-    def test_dense_bbox_survives_an_empty_part(self):
-        self.assertEqual(compose.dense_bbox([]), (0.0, 0.0, 1.0, 1.0))
+        square = ((0.0, 0.0), (1.0, 0.0), (1.0, 1.0))
+        square2 = ((0.0, 0.0), (1.0, 1.0), (0.0, 1.0))
+        res = compose.compose(self._banded('for_long.png'),
+                              [compose.Layer(polygons=[square, square2],
+                                             image=self._gif('long.gif', 60))],
+                              os.path.join(self.tmp, 'long.png'))
+        with PilImage.open(res) as im:
+            self.assertEqual(im.n_frames, 60)
+            self.assertEqual(im.info.get('duration'), 50)
+            im.seek(59)
+            last = im.convert('RGB').getpixel((32, 32))
+        self.assertEqual(last, (59 * 4, 0, 255 - 59 * 4))
 
-    def test_frame_count_is_capped_by_memory(self):
-        """Все кадры APNG живут в памяти одновременно: 64 кадра 2048x2048 — это
-        гигабайт, и приложение легло бы на ровном месте."""
-        self.assertLess(compose._frame_budget((2048, 2048), 64), 64)
-        self.assertEqual(compose._frame_budget((512, 512), 64), 64)
-        self.assertGreaterEqual(compose._frame_budget((4096, 4096), 64), 1)
+    def test_the_preview_takes_only_the_first_frame(self):
+        """Превью показывает один кадр (3D APNG не крутит), и на каждый мазок
+        собирать шестьдесят кадров по 16 МБ незачем: frames=1 даёт обычный PNG."""
+        from PIL import Image as PilImage
+
+        square = ((0.0, 0.0), (1.0, 0.0), (1.0, 1.0))
+        res = compose.compose(self._banded('for_still.png'),
+                              [compose.Layer(polygons=[square],
+                                             image=self._gif('short.gif', 5))],
+                              os.path.join(self.tmp, 'still.png'), frames=1)
+        with PilImage.open(res) as im:
+            self.assertEqual(getattr(im, 'n_frames', 1), 1)
+            self.assertEqual(im.convert('RGB').getpixel((40, 20)), (0, 0, 255))
+
+    def test_the_frame_cap_still_holds(self):
+        self.assertEqual(compose._MAX_FRAMES, 64)
+        square = ((0.0, 0.0), (1.0, 0.0), (1.0, 1.0))
+        res = compose.compose(self._banded('for_cap.png'),
+                              [compose.Layer(polygons=[square],
+                                             image=self._gif('cap.gif', 70))],
+                              os.path.join(self.tmp, 'cap.png'))
+        from PIL import Image as PilImage
+        with PilImage.open(res) as im:
+            self.assertEqual(im.n_frames, 64)
 
     def test_the_shape_fingerprint_tells_bundles_apart(self):
         """Отпечаток решает, слать ли карты треугольников. Спутает два разных
@@ -919,6 +935,76 @@ class SessionPartsTests(unittest.TestCase):
         shown = self.session.preview.textures.uploaded_for_mat(
             self.session.preview.textures.storage_main_key())
         self.assertTrue(os.path.isfile(shown), shown)
+
+    def test_a_gif_on_a_part_is_one_frame_in_preview_and_whole_in_the_build(self):
+        """Превью держит от гифки один кадр — иначе каждый мазок собирал
+        десятки кадров по 16 МБ и покраска приходила через десять секунд.
+        Все кадры печёт сборка, по плану `_bake_plan`, и печёт ЦЕЛИКОМ: раньше
+        потолок по памяти резал 60 кадров до 20."""
+        gif = os.path.join(self.tmp, 'anim.gif')
+        shots = [Image.new('RGBA', (8, 8), (k * 4, 0, 0, 255)) for k in range(60)]
+        shots[0].save(gif, save_all=True, append_images=shots[1:],
+                      duration=40, loop=0)
+        self.session.set_part_texture('weapon', 0, gif)
+        self.session.set_part_texture('weapon', 1, gif)
+        self.session.set_part_colors('weapon', {'1': '#00ff00'})
+
+        t = self.session.preview.textures
+        shown = t.uploaded_for_mat(t.storage_main_key())
+        with Image.open(shown) as im:
+            self.assertEqual(getattr(im, 'n_frames', 1), 1)
+
+        plan = self.session._bake_plan([shown, None, self.patch])
+        self.assertEqual(list(plan), [shown])
+        self.session._bake(plan, lambda pct, text: None)
+        full = plan[shown][2]
+        with Image.open(full) as im:
+            self.assertEqual(im.n_frames, 60)
+            self.assertEqual(im.info.get('duration'), 40)
+
+        # Без гифки печь нечего: склейка превью и так полная.
+        self.session.set_part_texture('weapon', 0, self.patch)
+        self.session.set_part_texture('weapon', 1, None)
+        still = t.uploaded_for_mat(t.storage_main_key())
+        self.assertEqual(self.session._bake_plan([still]), {})
+
+    def test_the_viewer_gets_the_gif_frames_only_when_asked(self):
+        """Гифка в 3D — настройка, по умолчанию выключенная: кадры считаются
+        фоном после каждого мазка и приезжают событием parts_animated, а без
+        настройки ничего не считается."""
+        import threading
+        from unittest import mock
+
+        gif = os.path.join(self.tmp, 'anim.gif')
+        shots = [Image.new('RGBA', (8, 8), (k * 8, 0, 0, 255)) for k in range(6)]
+        shots[0].save(gif, save_all=True, append_images=shots[1:],
+                      duration=50, loop=0)
+        got = self.session.subscribe()
+
+        # Настройка читается из конфига машины — тест на него не смотрит.
+        with mock.patch.object(type(self.session), '_parts_animation_on',
+                               staticmethod(lambda: False)):
+            self.session.set_part_texture('weapon', 0, gif)
+        self.assertEqual(sum(1 for t in threading.enumerate()
+                             if t.name.startswith('parts-anim')), 0)
+        self.assertTrue(got.empty())
+
+        with mock.patch.object(type(self.session), '_parts_animation_on',
+                               staticmethod(lambda: True)):
+            self.session.set_part_colors('weapon', {'1': '#00ff00'})
+            for t in threading.enumerate():
+                if t.name.startswith('parts-anim'):
+                    t.join(10)
+        ev = got.get_nowait()
+        self.assertEqual(ev['event'], 'parts_animated')
+        self.assertEqual(ev['mesh'], 'weapon')
+        self.assertEqual(len(ev['frames']), 6)
+        self.assertEqual(ev['fps'], 20)
+        still = self.session.preview.textures.uploaded_for_mat(
+            self.session.preview.textures.storage_main_key())
+        self.assertEqual(ev['still'], still)
+        with Image.open(ev['frames'][0]) as a, Image.open(ev['frames'][5]) as b:
+            self.assertNotEqual(a.tobytes(), b.tobytes(), 'кадры одинаковые')
 
     def test_cuts_travel_with_the_work(self):
         """Разрезы — часть работы: без них покраска вернулась бы на чужие куски.

@@ -157,11 +157,9 @@
    полоску незачем, граница половин и так видна. */
 .work.is-split { cursor: col-resize; }
 .work[data-view="flat"],
-.work[data-view="model"],
-.work[data-view="fp"]   { grid-template-columns: minmax(0, 1fr); }
+.work[data-view="model"] { grid-template-columns: minmax(0, 1fr); }
 .work[data-view="flat"]  .half--model { display: none; }
-.work[data-view="model"] .half--flat,
-.work[data-view="fp"]    .half--flat  { display: none; }
+.work[data-view="model"] .half--flat  { display: none; }
 
 .half {
   display: flex;
@@ -181,6 +179,14 @@
   min-height: 20px;
 }
 .half__bar--right { justify-content: flex-end; }
+/* Что показывать в кадре: сам предмет, руки или насмешка. Вкладками, как
+   материалы у половины с текстурой, — и в том же месте: вопрос там и тут
+   один и тот же, «что я смотрю». */
+.half__bar--scenes { justify-content: flex-start; gap: 16px; }
+/* Выбирать не из чего — ряда нет. Условие держится за те же data-cond, по
+   которым Python разрешает сцены: второй список режимов на странице разъехался
+   бы с `controls_for`. */
+.half__bar--scenes:not(:has([data-cond]:not([hidden]))) { display: none; }
 .half__foot--wrap { flex-wrap: wrap; row-gap: 10px; }
 
 /* Режимы показа стоят рядом с командами, а не внутри половины сцены: внутри
@@ -1080,7 +1086,6 @@
   background: var(--overlay);
   pointer-events: none;
 }
-.pickspot[hidden] { display: none; }
 /* Квадрат образца — с той же двойной рамкой, что метки выбора цвета: он лежит
    на произвольном цвете, и любой цвет интерфейса на нём где-нибудь пропадёт. */
 .pickspot i {
@@ -1378,6 +1383,8 @@
   cursor: pointer;
   transition: color var(--dur), background var(--dur);
 }
+.ask__group { margin: 10px 0 2px; padding-left: 2px; }
+.ask__group:first-child { margin-top: 4px; }
 .ask__item:hover { color: var(--ink); background: var(--bg); }
 .ask__item.is-active { color: var(--ink); border-bottom-color: var(--accent); }
 .ask__acts { display: flex; align-items: center; justify-content: flex-end; gap: 18px; }
@@ -1422,7 +1429,15 @@
 .build { min-width: 0; min-height: 0; overflow: auto; }
 
 .build__grid { display: grid; gap: 22px; }
+/* Особые флаги VTF живут своей колонкой и по умолчанию скрыты: скину они либо
+   безразличны, либо вредны (SSBump), а выглядят такой же безобидной галкой,
+   как остальные. Показывает их настройка — признак ставится на корень
+   (settings.js → applyLook). Прячем колонку, а не удаляем из разметки:
+   скрытая галка и так не уходит в сборку (build.js), а список остаётся тем,
+   что отдал Python. */
 .build__col { display: flex; flex-direction: column; gap: 9px; min-width: 0; }
+.build__col[data-col="flags-adv"] { display: none; }
+[data-advflags="1"] .build__col[data-col="flags-adv"] { display: flex; }
 .build__col .field { gap: 6px; }
 
 .field__note { font-size: 10px; color: var(--ink-mute); }
@@ -1459,6 +1474,10 @@
 }
 [data-panels="float"] .build[hidden] { display: none; }
 [data-panels="float"] .build__grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 34px; }
+/* С особыми флагами колонок пять: место справа как раз пустует. */
+[data-advflags="1"][data-panels="float"] .build__grid {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
 
 /* ── Нижняя полоса ───────────────────────────────────────────────────── */
 .dock {
@@ -1515,7 +1534,12 @@
    разложить две половины работы друг под друга. */
 @media (max-width: 1100px) {
   .work { grid-template-columns: minmax(0, 1fr); grid-auto-rows: minmax(180px, 1fr); }
-  [data-panels="float"] .build__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  [data-panels="float"] .build__grid,
+  /* Особые флаги тоже складываются: пять колонок в узком окне это пять
+     обрезанных подписей. */
+  [data-advflags="1"][data-panels="float"] .build__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 /* ── Баннер правки текстуры ──────────────────────────────────────────────
@@ -1960,7 +1984,6 @@
   height: auto;
   max-width: 100%;
   max-height: min(46vh, 420px);
-  aspect-ratio: 1;
   cursor: grab;
   touch-action: none;
 }
@@ -2084,15 +2107,16 @@
    Нативный настраивается ровно на цвет пунктов: ни рамки, ни отступа, ни
    перехода. Здесь тот же язык, что у остальных всплывающих слоёв (.menu__list,
    .picker): слой --overlay, волосяная рамка, никаких скруглений. */
+/* Координаты — оконные (`fixed`), а место считает dropdown.js. Абсолютный
+   список обрезала рамка прокручиваемого предка: у панели сборки и у диалогов
+   `overflow: auto`, и от списка форматов (26 пунктов) оставалась полоска в одну
+   строку. Узлом список при этом остаётся ВНУТРИ поля — приложенный к body, он
+   ушёл бы под модальный слой <dialog>. */
 .dropdown {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 100%;
+  position: fixed;
   z-index: 40;
   max-height: 240px;
   overflow: auto;
-  margin-top: 2px;
   border: 1px solid var(--hairline-strong);
   background: var(--overlay);
   /* Появление: короткий сдвиг вверх и проявление. Длительность общая с
@@ -2103,8 +2127,9 @@
 }
 .dropdown.is-open { opacity: 1; transform: none; }
 
-/* Снизу места нет — раскрываемся вверх (поля стоят и у нижнего края). */
-.dropdown--up { top: auto; bottom: 100%; margin: 0 0 2px; transform: translateY(4px); }
+/* Снизу места нет — раскрываемся вверх (поля стоят и у нижнего края).
+   Место считает dropdown.js; здесь остаётся только направление появления. */
+.dropdown--up { transform: translateY(4px); }
 
 .dropdown__item {
   display: block;

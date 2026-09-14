@@ -10,7 +10,7 @@ BuildWorker → build_with_progress (и дублировались в build_kwar
 """
 
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 
 @dataclass
@@ -48,6 +48,11 @@ class BuildRequest:
     #   vtf_path: Optional[str]   — готовый VTF стиля (приоритетнее image_path).
     hat_style_builds: Optional[list] = None
     panel_extra_textures: Optional[Dict[str, Any]] = None
+    # Материалы «Прочего» на странице: убер/зомби-варианты из $texturegroup, у
+    # которых нашлась игровая текстура. Что человек видел карточкой — про то
+    # сборка и спрашивает; сама она этот список не восстановит (какие из
+    # служебных материалов вообще имеют текстуру, знает только превью).
+    misc_materials: Optional[List[str]] = None
     material_maps: Optional[Dict[str, Any]] = None
     material_settings: Optional[Dict[str, Any]] = None
     skin_build_data: Optional[Dict[str, Any]] = None

@@ -17,7 +17,7 @@ import { relabel } from './catalog.js';
 import { setTheme, setConsoleWidth, setConsoleFilter } from './log.js';
 import { useDict, t } from './i18n.js';
 import { EN } from './strings.js';
-import { refreshView } from './preview.js';
+import { refreshView, stopPartsAnimation } from './preview.js';
 
 // ── Настройки ───────────────────────────────────────────────────────────
 // Конфиг общий с окном приложения, поэтому здесь только показ и запись: что
@@ -51,6 +51,11 @@ export function applyLook(values) {
   withViewer((w) => w.setLanguage && w.setLanguage(api.lang()));
   // Подписи самой страницы: разметка и всё, что построит код (см. i18n.js).
   useDict(api.lang() === 'en' ? EN : null);
+  // Особые флаги VTF: признак на корне, показом занимается CSS. Так галка
+  // действует сразу и не требует перерисовки колонки — а скрытая галка в
+  // сборку не уходит (см. build.js: невидимое не читается).
+  document.documentElement.dataset.advflags =
+    values.advanced_vtf_flags ? '1' : '';
 }
 
 export async function openSettings() {
@@ -58,6 +63,10 @@ export async function openSettings() {
   const v = cfg.values;
 
   document.getElementById('cfg-tf2').value = v.tf2_game_folder || '';
+  // Кнопка автопоиска нужна, только пока игра не найдена: с рабочим путём
+  // искать нечего. Годность решает Python (`tf2_ok`) той же проверкой, по
+  // которой работает всё приложение.
+  showFindTf2(!cfg.tf2_ok);
   document.getElementById('cfg-export').value = v.export_folder || '';
   fillSelect('cfg-format', cfg.formats, v.export_image_format);
   fillSelect('cfg-lang', cfg.languages, v.language);
@@ -69,7 +78,9 @@ export async function openSettings() {
   document.getElementById('cfg-bypass-tip').textContent = cfg.bypass_tip || '';
   document.getElementById('cfg-edits').checked = Boolean(v.save_edits);
   document.getElementById('cfg-tree').checked = Boolean(v.particles_group_tree);
+  document.getElementById('cfg-advflags').checked = Boolean(v.advanced_vtf_flags);
   document.getElementById('cfg-temp').checked = Boolean(v.keep_temp_files);
+  document.getElementById('cfg-parts-anim').checked = Boolean(v.parts_animation);
   document.getElementById('cfg-debug').checked = Boolean(v.debug_mode);
   document.getElementById('cfg-blacklist').value =
     (v.material_blacklist || []).join('\n');
@@ -301,7 +312,9 @@ document.getElementById('cfg-save').addEventListener('click', async () => {
     sv_pure_bypass: document.getElementById('cfg-bypass').value,
     save_edits: document.getElementById('cfg-edits').checked,
     particles_group_tree: document.getElementById('cfg-tree').checked,
+    advanced_vtf_flags: document.getElementById('cfg-advflags').checked,
     keep_temp_files: document.getElementById('cfg-temp').checked,
+    parts_animation: document.getElementById('cfg-parts-anim').checked,
     debug_mode: document.getElementById('cfg-debug').checked,
     material_blacklist: document.getElementById('cfg-blacklist').value,
     panels_pinned: document.getElementById('cfg-panels').checked,
@@ -309,6 +322,9 @@ document.getElementById('cfg-save').addEventListener('click', async () => {
   if (res.error) { say(res.error); return; }
   cfgDlg.close();
   say('Настройки сохранены');
+  // Гифки на модели: выключили — сцена перекрашивается неподвижной склейкой;
+  // включили — кадры приедут событием parts_animated.
+  if (!(res.values || {}).parts_animation) stopPartsAnimation();
   // Тема, раскладка и язык применяются сразу: ждать перезапуска ради галки —
   // не то, чего ждут от настроек.
   const before = api.lang();
@@ -322,6 +338,73 @@ document.getElementById('cfg-save').addEventListener('click', async () => {
     await relabel();
   }
 });
+
+//: Кнопка автопоиска: показываем её вместе с подписью-обёрткой, иначе от
+//: скрытой кнопки остаётся пустая строка под полем.
+function showFindTf2(show) {
+  document.getElementById('cfg-findtf2').closest('.field__note').hidden = !show;
+}
+
+/**
+ * Автопоиск игры: подставляет найденный путь в поле.
+ *
+ * Ищет Python (`find_tf2`) — реестром Steam и списком его библиотек, а не
+ * обходом диска. Найденное заведомо годное: проверка та же, по которой
+ * работает всё приложение.
+ */
+document.getElementById('cfg-findtf2').addEventListener('click', async (e) => {
+  const btn = e.target;
+  btn.disabled = true;
+  try {
+    const found = (await api.findTf2()).found || [];
+    if (!found.length) {
+      say(t('Игра не нашлась — укажите папку вручную'));
+      return;
+    }
+    document.getElementById('cfg-tf2').value = found[0];
+    // Копий больше одной — редкость (вторая библиотека Steam). Берём первую,
+    // но молчать об этом нельзя: путь могли ждать другой.
+    say(found.length > 1
+      ? t('Найдено копий игры: ') + found.length + t(', взял первую')
+      : t('Игра найдена: ') + found[0]);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+/**
+ * Первый запуск: предложить найденную игру или дать вставить путь руками.
+ *
+ * Без пути к игре не работает ничего, а узнать об этом человек мог только по
+ * ошибке на первой же загрузке модели. Спрашиваем ОДИН раз — когда путь не
+ * настроен; сохранённый путь окно вопроса не трогает.
+ */
+export async function offerTf2() {
+  const paths = await api.call('tf2_paths');
+  if (!paths.error) return;
+
+  const found = (await api.findTf2()).found || [];
+  const answer = await ask({
+    title: t('Где установлена TF2?'),
+    text: found.length
+      ? t('Нашёл игру здесь. Сохранить этот путь?')
+      : t('Найти игру сам не смог. Вставьте путь к папке игры.'),
+    value: found[0] || '',
+    ok: t('Сохранить'),
+  });
+  if (!answer || !String(answer).trim()) return;
+
+  const res = await api.setSettings({ tf2_game_folder: String(answer).trim() });
+  if (res.error) { say(res.error); return; }
+  showTf2Path();
+  // Обложки предметов приезжают из игры: список на экране нарисован без них.
+  api.forgetCached();
+  await relabel();
+}
+
+// Путь начали править руками: годность прежнего пути ничего уже не значит, и
+// кнопка снова может понадобиться — проверять каждую букву в Python незачем.
+document.getElementById('cfg-tf2').addEventListener('input', () => showFindTf2(true));
 
 document.getElementById('cfg-cancel').addEventListener('click', () => cfgDlg.close());
 document.getElementById('opencfg').addEventListener('click', openSettings);

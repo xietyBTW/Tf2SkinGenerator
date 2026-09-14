@@ -12,10 +12,13 @@
 
 from __future__ import annotations
 
+import io
 import math
 import os
+import struct
+import zlib
 from dataclasses import dataclass
-from typing import Iterable, List, Optional, Sequence, Tuple
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 from PIL import Image, ImageChops, ImageDraw
@@ -227,54 +230,6 @@ def _spot_size(shape: Optional[Tuple[int, int]]) -> Tuple[int, int]:
             max(1, round(_SPOT_SIZE * height / longest)))
 
 
-def dense_bbox(polygons: Sequence[UvTri], cut: float = 0.04):
-    """
-    Габарит ПЛОТНОЙ части детали: без редких дальних островков.
-
-    Обычный габарит для приближения не годится: у половины частей острова
-    разбросаны по всей развёртке, и прямоугольник вокруг них — почти вся
-    текстура. У обреза это давало окну масштаб x0.87, то есть оно не
-    приближало, а отдаляло.
-
-    Отбрасываем по `cut` доли ПЛОЩАДИ с каждого края по каждой оси: площадь, а
-    не число точек, — иначе один крупный остров перевесила бы россыпь мелких.
-    """
-    items = []
-    for tri in polygons:
-        (u1, v1), (u2, v2), (u3, v3) = tri
-        area = abs((u2 - u1) * (v3 - v1) - (u3 - u1) * (v2 - v1)) / 2
-        items.append((area, [p[0] for p in tri], [p[1] for p in tri]))
-    if not items:
-        return (0.0, 0.0, 1.0, 1.0)
-    total = sum(a for a, _, _ in items) or 1e-9
-
-    def edge(axis: int):
-        pts = []
-        for area, us, vs in items:
-            for value in (us if axis == 0 else vs):
-                pts.append((value, area / 3))
-        pts.sort()
-        low = pts[0][0]
-        high = pts[-1][0]
-        acc = 0.0
-        for value, weight in pts:
-            acc += weight
-            if acc >= total * cut:
-                low = value
-                break
-        acc = 0.0
-        for value, weight in reversed(pts):
-            acc += weight
-            if acc >= total * cut:
-                high = value
-                break
-        return (low, high) if high > low else (pts[0][0], pts[-1][0])
-
-    u0, u1 = edge(0)
-    v0, v1 = edge(1)
-    return (u0, v0, u1, v1)
-
-
 def outline_png(polygons: Sequence[UvTri], out_path: str,
                 rgb: Tuple[int, int, int] = (204, 85, 34),
                 shape: Optional[Tuple[int, int]] = None) -> str:
@@ -445,18 +400,6 @@ def _repainted(base: Image.Image, paint: Image.Image,
 #: 200 кадров раздула бы текстуру предмета в двести раз.
 _MAX_FRAMES = 64
 
-#: Сколько памяти готовы отдать под кадры склейки. Все кадры APNG живут в
-#: списке одновременно (Pillow иначе его не запишет), а кадр текстуры 2048×2048
-#: — это 16 МБ: шестьдесят четыре таких кадра положили бы приложение на ровном
-#: месте. Потолок по площади важнее потолка по числу.
-_FRAME_BUDGET = 320 * 1024 * 1024
-
-
-def _frame_budget(size: Tuple[int, int], wanted: int) -> int:
-    """Сколько кадров осилим при таком размере текстуры (минимум один)."""
-    per_frame = max(1, size[0] * size[1] * 4)
-    return max(1, min(wanted, _FRAME_BUDGET // per_frame))
-
 
 def _frames_of(path: str) -> int:
     """Сколько кадров в картинке; 1 — обычная."""
@@ -467,33 +410,31 @@ def _frames_of(path: str) -> int:
         return 1
 
 
-def _frame(path: str, index: int) -> Optional[Image.Image]:
-    """Кадр анимации (или сама картинка). Короткая анимация зацикливается."""
+def _read_frames(path: str):
+    """
+    Кадры анимации по порядку и по кругу: (картинка RGBA, задержка в мс).
+
+    Файл открывается ОДИН раз. Раньше каждый кадр открывал гифку заново и
+    мотал с начала, а GIF мотается только через все предыдущие кадры — на
+    шестидесяти кадрах это в тридцать раз дороже, чем прочитать их подряд.
+    Обычная картинка отдаётся бесконечно одна и та же.
+    """
     try:
-        # with: convert() возвращает независимую картинку, а исходник надо
-        # закрыть. Без этого дескриптор GIF висел до сборки мусора — по одному
-        # на каждый кадр, и Windows не давала удалить временную папку сборки.
         with Image.open(path) as img:
             count = max(1, int(getattr(img, 'n_frames', 1)))
-            if count > 1:
-                img.seek(index % count)
-            return img.convert('RGBA')
+            if count == 1:
+                still = img.convert('RGBA')
+                while True:
+                    yield still, 100
+            while True:
+                for index in range(count):
+                    img.seek(index)
+                    # Без метки — 100 мс, как принято у GIF.
+                    yield img.convert('RGBA'), int(img.info.get('duration') or 100)
     except (OSError, ValueError, EOFError) as exc:
         logger.warning(f"склейка частей: {path} не читается: {exc}")
-        return None
-
-
-def _durations(path: str, count: int) -> List[int]:
-    """Длительности кадров в мс. Без метки — 100 мс, как принято у GIF."""
-    out: List[int] = []
-    try:
-        with Image.open(path) as img:
-            for i in range(count):
-                img.seek(i % max(1, int(getattr(img, 'n_frames', 1))))
-                out.append(int(img.info.get('duration') or 100))
-    except (OSError, ValueError, EOFError):
-        out = [100] * count
-    return out or [100] * count
+        while True:
+            yield None, 100
 
 
 def frame_count(path: str) -> int:
@@ -517,14 +458,90 @@ def export_frames(path: str, out_dir: str, prefix: str,
         return [], []
     os.makedirs(out_dir, exist_ok=True)
     made: List[str] = []
-    for index in range(count):
-        frame = _frame(path, index)
-        if frame is None:
-            break
-        out = os.path.join(out_dir, f"{prefix}_{index:03d}.png")
-        frame.save(out)
-        made.append(out)
-    return made, _durations(path, len(made))
+    delays: List[int] = []
+    reader = _read_frames(path)
+    try:
+        for index in range(count):
+            frame, delay = next(reader)
+            if frame is None:
+                break
+            out = os.path.join(out_dir, f"{prefix}_{index:03d}.png")
+            frame.save(out)
+            made.append(out)
+            delays.append(delay)
+    finally:
+        reader.close()
+    return made, delays
+
+
+class _ApngWriter:
+    """
+    Пишет APNG кадр за кадром, не держа их в памяти.
+
+    Pillow умеет записать APNG только целиком: копирует ВСЕ кадры в список,
+    чтобы считать разницу между соседними. Кадр текстуры 2048×2048 — это
+    16 МБ, и шестьдесят кадров сборки положили бы приложение на ровном месте
+    (раньше от этого спасал потолок в 20 кадров — и гифка обрезалась).
+
+    Кадр кодируется тем же Pillow как одиночный PNG (фильтры и deflate — его
+    родной код на C), а отсюда берутся только сжатые данные: первый кадр идёт
+    в IDAT, остальные — в fdAT. Все кадры целые, одного размера, без разницы с
+    соседом: читателю (Pillow в сборке) так даже проще.
+    """
+
+    _SIG = b'\x89PNG\r\n\x1a\n'
+
+    def __init__(self, fp, size: Tuple[int, int], count: int, loop: int = 0):
+        self._fp = fp
+        self._size = size
+        self._seq = 0
+        self._written = 0
+        fp.write(self._SIG)
+        self._chunk(b'IHDR', struct.pack('>IIBBBBB', size[0], size[1],
+                                         8, 6, 0, 0, 0))      # RGBA, 8 бит
+        self._chunk(b'acTL', struct.pack('>II', count, loop))
+
+    def _chunk(self, kind: bytes, data: bytes) -> None:
+        self._fp.write(struct.pack('>I', len(data)) + kind + data
+                       + struct.pack('>I', zlib.crc32(kind + data) & 0xffffffff))
+
+    def _next_seq(self) -> bytes:
+        seq = self._seq
+        self._seq += 1
+        return struct.pack('>I', seq)
+
+    @staticmethod
+    def _idat(frame: Image.Image) -> bytes:
+        """Сжатые данные кадра — всё, что Pillow положил бы в IDAT."""
+        buf = io.BytesIO()
+        # Уровень 1: файл временный и его тут же читает сборка, а на 2048×2048
+        # умолчание Pillow вдвое медленнее ради нескольких мегабайт.
+        frame.save(buf, 'PNG', compress_level=1)
+        raw = buf.getvalue()
+        out = []
+        pos = len(_ApngWriter._SIG)
+        while pos + 8 <= len(raw):
+            length, kind = struct.unpack('>I4s', raw[pos:pos + 8])
+            if kind == b'IDAT':
+                out.append(raw[pos + 8:pos + 8 + length])
+            pos += 12 + length
+        return b''.join(out)
+
+    def add(self, frame: Image.Image, delay_ms: int) -> None:
+        if frame.size != self._size:
+            raise ValueError('кадр APNG не того размера')
+        self._chunk(b'fcTL', self._next_seq() + struct.pack(
+            '>IIIIHHBB', self._size[0], self._size[1], 0, 0,
+            max(1, int(delay_ms)), 1000, 0, 0))
+        data = self._idat(frame.convert('RGBA'))
+        if self._written == 0:
+            self._chunk(b'IDAT', data)
+        else:
+            self._chunk(b'fdAT', self._next_seq() + data)
+        self._written += 1
+
+    def close(self) -> None:
+        self._chunk(b'IEND', b'')
 
 
 def _masks_for(layers: Sequence[Layer], size: Tuple[int, int]):
@@ -555,8 +572,13 @@ def _masks_for(layers: Sequence[Layer], size: Tuple[int, int]):
 
 
 def _compose_frame(base: Image.Image, layers: Sequence[Layer],
-                   ready, frame: int) -> Tuple[Image.Image, int]:
-    """Один кадр склейки: база плюс все слои. Возвращает (картинка, сколько легло)."""
+                   ready, patches: Dict[str, Optional[Image.Image]]
+                   ) -> Tuple[Image.Image, int]:
+    """Один кадр склейки: база плюс все слои. Возвращает (картинка, сколько легло).
+
+    ``patches`` — картинка каждого слоя НА ЭТОТ КАДР, по пути файла: одна
+    гифка на двух частях декодируется один раз, а не дважды.
+    """
     size = base.size
     drawn = 0
     for layer, prepared in zip(layers, ready):
@@ -565,9 +587,7 @@ def _compose_frame(base: Image.Image, layers: Sequence[Layer],
         mask, box = prepared
 
         if layer.image:
-            if not os.path.isfile(layer.image):
-                continue
-            patch = _frame(layer.image, frame)
+            patch = patches.get(layer.image)
             if patch is None:
                 continue
             # Картинка ложится на место части: человек кладёт её «на ствол», а
@@ -610,9 +630,78 @@ def _compose_frame(base: Image.Image, layers: Sequence[Layer],
     return base, drawn
 
 
+def _plan(layers: Sequence[Layer], frames: Optional[int]):
+    """(пути картинок, сколько кадров, самая длинная анимация)."""
+    paths = sorted({l.image for l in layers
+                    if l.image and os.path.isfile(l.image)})
+    # Кадров столько, сколько у самой длинной анимации: короткие зациклятся.
+    count = min(frames or _MAX_FRAMES, _MAX_FRAMES,
+                max((_frames_of(p) for p in paths), default=1))
+    return paths, count, max(paths, key=_frames_of, default=None)
+
+
+def is_moving(layers: Sequence[Layer]) -> bool:
+    """Есть ли среди слоёв анимация — то есть будет ли склейка многокадровой."""
+    return _plan(layers, None)[1] > 1
+
+
+def iter_frames(base_path: str, layers: Sequence[Layer],
+                frames: Optional[int] = None,
+                size: Optional[int] = None,
+                alive=None):
+    """
+    Кадры склейки по одному: (картинка, задержка в мс).
+
+    Пусто — рисовать нечего (нет основы или ни один слой не лёг). Кадры не
+    копятся: кто читает, тот и решает, куда их деть — в APNG для сборки или в
+    файлы для вьювера.
+
+    Args:
+        frames: потолок кадров; 1 — только первый.
+        size:   ужать основу так, чтобы длинная сторона не превышала это.
+                Маски считаются в долях развёртки, и склейка при любом размере
+                та же — только мельче.
+        alive:  функция; вернула False — читатель передумал, обрываемся.
+    """
+    if not (base_path and os.path.isfile(base_path)):
+        logger.warning(f"склейка частей: нет базовой текстуры {base_path!r}")
+        return
+    try:
+        base = Image.open(base_path).convert('RGBA')
+    except OSError as exc:
+        logger.warning(f"склейка частей: {base_path} не читается: {exc}")
+        return
+    if size and max(base.size) > size:
+        k = size / max(base.size)
+        base = base.resize((max(1, round(base.size[0] * k)),
+                            max(1, round(base.size[1] * k))), Image.LANCZOS)
+
+    paths, count, longest = _plan(layers, frames)
+    ready = _masks_for(layers, base.size)
+    readers = {p: _read_frames(p) for p in paths}
+    try:
+        for index in range(count):
+            if alive is not None and not alive():
+                return
+            patches = {}
+            delay = 100
+            for path, reader in readers.items():
+                patches[path], took = next(reader)
+                if path == longest:
+                    delay = took
+            frame, hits = _compose_frame(base, layers, ready, patches)
+            if not hits:
+                return                    # первый кадр пуст — пусты и остальные
+            yield frame, delay
+    finally:
+        for reader in readers.values():
+            reader.close()
+
+
 def compose(base_path: str,
             layers: Sequence[Layer],
-            out_path: str) -> Optional[str]:
+            out_path: str,
+            frames: Optional[int] = None) -> Optional[str]:
     """
     Вклеивает в базовую текстуру всё, что назначено частям.
 
@@ -628,47 +717,63 @@ def compose(base_path: str,
         base_path: текстура, поверх которой рисуем (игровая или своя).
         layers:    слои по порядку; у каждого своя маска-часть.
         out_path:  куда записать склейку.
+        frames:    потолок кадров. 1 — только первый, обычный PNG: столько
+                   видит превью (3D крутить APNG не умеет), и ради него не
+                   стоит на каждый мазок собирать шестьдесят кадров по 16 МБ.
+                   None — все, сколько есть (до `_MAX_FRAMES`): так печёт
+                   сборка, кадр за кадром, память от их числа не зависит.
 
     Returns:
         Путь к склейке или None, если рисовать оказалось нечего.
     """
-    if not (base_path and os.path.isfile(base_path)):
-        logger.warning(f"склейка частей: нет базовой текстуры {base_path!r}")
-        return None
-
-    try:
-        base = Image.open(base_path).convert('RGBA')
-    except OSError as exc:
-        logger.warning(f"склейка частей: {base_path} не читается: {exc}")
-        return None
-
-    # Кадров столько, сколько у самой длинной анимации: короткие зациклятся.
-    moving = [l.image for l in layers
-              if l.image and os.path.isfile(l.image) and _frames_of(l.image) > 1]
-    count = min(_MAX_FRAMES, max((_frames_of(p) for p in moving), default=1))
-    allowed = _frame_budget(base.size, count)
-    if allowed < count:
-        logger.info("склейка частей: кадров %s → %s, текстура %sx%s не даёт больше",
-                    count, allowed, base.size[0], base.size[1])
-        count = allowed
-
-    ready = _masks_for(layers, base.size)
-    made = []
+    count = _plan(layers, frames)[1]
+    os.makedirs(os.path.dirname(out_path) or '.', exist_ok=True)
+    writer = None
     drawn = 0
-    for index in range(count):
-        frame, hits = _compose_frame(base, layers, ready, index)
-        drawn = max(drawn, hits)
-        made.append(frame)
+    with open(out_path, 'wb') as fp:
+        for frame, delay in iter_frames(base_path, layers, frames):
+            drawn += 1
+            if count == 1:
+                frame.save(fp, 'PNG')
+                break
+            if writer is None:
+                writer = _ApngWriter(fp, frame.size, count)
+            writer.add(frame, delay)
+        if writer is not None:
+            writer.close()
 
     if not drawn:
+        try:
+            os.remove(out_path)
+        except OSError:
+            pass
         return None
-
-    os.makedirs(os.path.dirname(out_path) or '.', exist_ok=True)
-    if len(made) > 1:
-        made[0].save(out_path, save_all=True, append_images=made[1:],
-                     duration=_durations(moving[0], count), loop=0)
-    else:
-        made[0].save(out_path)
-    logger.info("склейка частей: %s шт., кадров %s → %s",
-                drawn, len(made), os.path.basename(out_path))
+    logger.info("склейка частей: кадров %s → %s", drawn,
+                os.path.basename(out_path))
     return out_path
+
+
+def export_composite_frames(base_path: str, layers: Sequence[Layer],
+                            out_dir: str, size: Optional[int] = None,
+                            alive=None) -> Tuple[List[str], int]:
+    """
+    Кадры склейки файлами для вьювера: (файлы, кадров в секунду).
+
+    Вьювер APNG не крутит, а список PNG — умеет (`loadAnimatedTexture`).
+    Частота одна на всю анимацию — как и в VTF.
+    """
+    os.makedirs(out_dir, exist_ok=True)
+    made: List[str] = []
+    delays: List[int] = []
+    for frame, delay in iter_frames(base_path, layers, None, size, alive):
+        out = os.path.join(out_dir, f"frame_{len(made):03d}.png")
+        # Уровень 1: файл живёт до следующего мазка, а читает его один браузер.
+        frame.save(out, 'PNG', compress_level=1)
+        made.append(out)
+        delays.append(delay)
+    if alive is not None and not alive():
+        return [], 0
+    # Задержка короче 20 мс у гифок означает «как получится» — браузеры и
+    # сборка (TextureService._fps_from_durations) читают её как 100.
+    vals = [d if d >= 20 else 100 for d in delays] or [100]
+    return made, max(1, min(60, round(1000 * len(vals) / sum(vals))))

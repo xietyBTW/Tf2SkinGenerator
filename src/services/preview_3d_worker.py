@@ -49,6 +49,9 @@ class Preview3DWorker(BaseWorker):
     # BLU-вариант мульти-материальных текстур: {mat_name: png_path}
     # Эмитируется для персонажей когда у каждого меша есть своя BLU-текстура
     blu_multi_material = Signal(object)
+    # Игровые текстуры косметических стилей (bloody/clean):
+    # {индекс скина: {базовый материал: png_path}}
+    skin_textures = Signal(object)
     # Australium/Gold/Festive вариант оружия: (png_path, material_name)
     # Эмитируется когда в QC skinfamilies есть вариантная строка без 'blue'
     australium_ready = Signal(str, str)
@@ -433,6 +436,10 @@ class Preview3DWorker(BaseWorker):
         # Служебные материалы $texturegroup вне геометрии — для «Прочее».
         misc_extras = self._extract_texturegroup_misc_extras(mat_names)
 
+        # Игровые текстуры косметических стилей — не карточки базы, а
+        # переопределения самих стилей.
+        style_textures = self._extract_style_textures()
+
         if len(mat_names) > 1:
             # ── Мульти-материальное оружие (shell, scope и т.п.) ─────── #
             tex_map = self._extract_multi_textures(mat_names)
@@ -466,6 +473,9 @@ class Preview3DWorker(BaseWorker):
                     self.multi_material.emit(combined)
             elif len(frame_paths) > 1:
                 self.animated.emit(frame_paths, framerate)
+
+        if style_textures:
+            self.skin_textures.emit(style_textures)
 
         if self.isInterruptionRequested():
             return
@@ -1058,18 +1068,9 @@ class Preview3DWorker(BaseWorker):
                        if m.lower() not in known and is_editable_material(m)
                        and not is_user_blacklisted(m)]
 
-            # Доп. косметические стили (bloody/clean) — материалы строк-стилей,
-            # которых нет в геометрии. Показываем карточкой, чтобы стиль можно было
-            # перекрасить (сборка пакует их через blu_row). Только настоящие стили
-            # (selector_spec.styles), не команда/австралий.
-            _lay = model.layout
-            for _lbl, _idx in qc_skin_parser.selector_spec(_lay).styles:
-                if 0 <= _idx < len(_lay.all_rows):
-                    for _m in _lay.all_rows[_idx]:
-                        ml = _m.lower()
-                        if (ml not in known and is_editable_material(_m)
-                                and not is_user_blacklisted(_m) and _m not in missing):
-                            missing.append(_m)
+            # Материалы строк-стилей сюда НЕ попадают: строка стиля выровнена по
+            # колонкам со строкой 0, поэтому её материал — ЗАМЕНА базового, а не
+            # ещё один материал модели. Их отдаёт _extract_style_textures.
 
             if not missing:
                 return {}
@@ -1083,6 +1084,68 @@ class Preview3DWorker(BaseWorker):
             return result
         except Exception as exc:
             logger.debug(f"[3D] Не удалось собрать доп. материалы $texturegroup: {exc}")
+            return {}
+
+    def _extract_style_textures(self) -> dict:
+        """
+        Игровые текстуры косметических стилей: {индекс скина: {базовый материал: png}}.
+
+        Строка стиля выровнена по колонкам со строкой 0, поэтому её материал —
+        это замена базового, а не отдельный материал модели. Раньше такие имена
+        уходили в общий список карточек: у Летающей гильотины базовый альбом
+        показывал две текстуры (свою и Bloody), а вкладка стиля — ни одной.
+
+        Форма ответа та же, что у мода из VPK (``_build_skin_textures``), —
+        сеанс раскладывает их переопределениями стиля одним и тем же кодом.
+        """
+        if not self._decomp_dir:
+            return {}
+        try:
+            model = self._model(self._decomp_dir)
+            if model is None:
+                return {}
+            from src.data.material_filter import is_editable_material, is_user_blacklisted
+            rows = model.layout.all_rows or []
+            if not rows:
+                return {}
+            base_row = rows[0]
+            wanted: dict = {}     # {индекс скина: {базовый материал: материал стиля}}
+            names: list = []      # какие текстуры вообще доставать из игры
+            for _label, idx in qc_skin_parser.selector_spec(model.layout).styles:
+                if not 0 <= idx < len(rows):
+                    continue
+                pairs: dict = {}
+                for col, base_mat in enumerate(base_row):
+                    if col >= len(rows[idx]):
+                        break
+                    variant = rows[idx][col]
+                    # Одинаковый материал стиль наследует у базы — своей карточки
+                    # у него нет. Служебные и скрытые не редактируются вовсе.
+                    if (not variant or not base_mat
+                            or variant.strip().lower() == base_mat.strip().lower()
+                            or not is_editable_material(variant)
+                            or is_user_blacklisted(variant)):
+                        continue
+                    pairs[base_mat] = variant
+                    if variant not in names:
+                        names.append(variant)
+                if pairs:
+                    wanted[idx] = pairs
+            if not wanted:
+                return {}
+            resolved = self._extract_multi_textures(names)
+            out: dict = {}
+            for idx, pairs in wanted.items():
+                mp = {base: resolved[var] for base, var in pairs.items()
+                      if resolved.get(var)}
+                if mp:
+                    out[idx] = mp
+            if out:
+                logger.info(f"[3D] текстуры стилей из $texturegroup: "
+                            f"{ {i: sorted(m) for i, m in out.items()} }")
+            return out
+        except Exception as exc:
+            logger.debug(f"[3D] текстуры стилей не собраны: {exc}")
             return {}
 
     def _extract_texturegroup_misc_extras(self, mat_names: list) -> dict:

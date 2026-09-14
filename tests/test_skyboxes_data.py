@@ -91,14 +91,45 @@ class EnumerateSkyNamesTests(unittest.TestCase):
         self.assertEqual(names, sorted(STOCK_SKY_NAMES))
 
     def test_result_is_cached_per_root(self):
+        """Второй вызов не должен снова разбирать индексы VPK.
+
+        Сравниваем с числом открытий на ПЕРВОМ вызове, а не с единицей:
+        небеса лежат в нескольких VPK (tf/ и hl2/), и сколько их — дело
+        TF2Paths.skybox_vpks, а не этого теста.
+        """
         from unittest.mock import patch
         pak = ["materials/skybox/sky_extra_01up.vmt"]
         with patch("os.path.exists", return_value=True), \
              patch("src.services.skybox_service.open_vpk_cached",
                    return_value=pak) as opener:
             SkyboxService.enumerate_sky_names(r"C:\fake_tf2")
+            first = opener.call_count
             SkyboxService.enumerate_sky_names(r"C:\fake_tf2")
-        self.assertEqual(opener.call_count, 1)
+        self.assertGreaterEqual(first, 1)
+        self.assertEqual(opener.call_count, first)
+
+    def test_hl2_skies_are_scanned_too(self):
+        """Небеса Half-Life 2 — законная часть игры: TF2 монтирует её контент.
+
+        Карты ставят в worldspawn `sky_day01_01`, `sky_borealis01` и прочие, а
+        в tf2_*.vpk их нет вовсе. Пока скан читал одну tf2_misc_dir.vpk, из 47
+        небес установленной игры приложение показывало 22.
+        """
+        from unittest.mock import patch
+
+        paks = {
+            "tf/tf2_misc_dir.vpk": ["materials/skybox/sky_tf_onlyup.vmt"],
+            "hl2/hl2_misc_dir.vpk": ["materials/skybox/sky_day01_01up.vmt"],
+        }
+
+        with patch("src.services.tf2_paths.TF2Paths.skybox_vpks",
+                   return_value=list(paks)), \
+             patch("src.services.skybox_service.open_vpk_cached",
+                   side_effect=lambda path: paks.get(path)):
+            names = SkyboxService.enumerate_sky_names(r"C:\fake_tf2")
+
+        self.assertIn("sky_tf_only", names)
+        self.assertIn("sky_day01_01", names)
 
     def test_no_root_returns_fallback(self):
         self.assertEqual(

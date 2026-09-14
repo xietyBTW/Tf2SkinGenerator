@@ -42,6 +42,46 @@ def validate_vpk_filename(filename: str) -> Tuple[bool, Optional[str]]:
     return True, None
 
 
+SUGGEST_SUFFIX = '_mod.vpk'
+
+#: Режимы, которые предмет НЕ называют: это значение по умолчанию у раздела
+#: каталога (weapon -> normal, косметика -> hat, персонаж -> body, мод из
+#: файла -> custom). Их ставит `mode_for` ДО выбора предмета, и имя вида
+#: «normal_mod.vpk» подсказкой не является — пусть в поле останется прежнее.
+UNNAMED_MODES = frozenset({'', 'normal', 'hat', 'body', 'custom'})
+
+
+def suggest_vpk_name(mode: str, key: str = '') -> str:
+    """
+    Предлагаемое имя VPK для выбранного предмета: ``scattergun_mod.vpk``.
+
+    Считает Python, а не страница: имя обязано пройти
+    ``validate_vpk_filename`` — там и лимит длины, и список запрещённых
+    символов. Дублировать эти правила в разметке нельзя, иначе предложенное
+    имя не проходит собственную же проверку.
+
+    Ключ предмета бывает путём к модели (у косметики) — берём имя файла.
+    Префикс ``c_``/``v_``/``w_`` в имени модели говорит, ГДЕ она видна
+    (в руках, вьюмодель, мировая), к моду это отношения не имеет.
+
+    Пустая строка означает «подсказки нет»: режим раздела предмета не
+    называет (см. UNNAMED_MODES).
+    """
+    if not key and mode in UNNAMED_MODES:
+        return ''
+    base = str(key or mode).replace('\\', '/').rsplit('/', 1)[-1]
+    base = base.rsplit('.', 1)[0] if '.' in base else base
+    for prefix in ('c_', 'v_', 'w_'):
+        if base.startswith(prefix):
+            base = base[len(prefix):]
+            break
+    # Всё, что не годится в имя файла (пробелы, кириллица, кавычки), — в '_'.
+    base = ''.join(ch if (ch.isascii() and (ch.isalnum() or ch in '_-')) else '_'
+                   for ch in base).strip('_').lower()
+    room = ValidationLimits.MAX_FILENAME_LENGTH - len(SUGGEST_SUFFIX)
+    return (base[:room].rstrip('_') or 'skin') + SUGGEST_SUFFIX
+
+
 def sanitize_path(path: str, base_dir: str) -> str:
     """
     Преобразует относительный путь в абсолютный внутри base_dir.

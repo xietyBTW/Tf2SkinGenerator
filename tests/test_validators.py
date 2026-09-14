@@ -7,6 +7,7 @@ from src.shared.validators import (
     validate_vpk_filename,
     validate_build_params,
     sanitize_path,
+    suggest_vpk_name,
 )
 from src.data.weapons import SPECIAL_MODES
 
@@ -130,6 +131,45 @@ class ValidateBuildParamsTests(unittest.TestCase):
             custom_vtf_path="missing.vtf",
         )
         self.assertIsNotNone(err)
+
+
+class SuggestVpkNameTests(unittest.TestCase):
+    """Имя мода предлагается по предмету, а не одно на всех."""
+
+    def test_named_by_the_item(self):
+        # Ключ оружия несёт префикс модели: он говорит, где модель видна
+        # (в руках), и в имени мода лишний.
+        self.assertEqual(suggest_vpk_name('c_axtinguisher'),
+                         'axtinguisher_mod.vpk')
+        # У косметики режим один на весь раздел, зовётся предмет моделью.
+        self.assertEqual(
+            suggest_vpk_name('hat', 'models/player/items/pyro/hood.mdl'),
+            'hood_mod.vpk')
+        self.assertEqual(suggest_vpk_name('skybox', 'sky_harvest_01'),
+                         'sky_harvest_01_mod.vpk')
+
+    def test_no_guess_before_an_item_is_picked(self):
+        """Режим раздела предмета не называет — подсказки нет.
+
+        Иначе поле получало бы «normal_mod.vpk» при каждом щелчке по фильтру
+        каталога, затирая уже набранное имя.
+        """
+        for mode in ('', 'normal', 'hat', 'body', 'custom'):
+            self.assertEqual(suggest_vpk_name(mode), '', mode)
+
+    def test_suggestion_passes_its_own_check(self):
+        """Предложенное имя обязано проходить validate_vpk_filename.
+
+        Длина и запрещённые символы — правила этой же проверки: русское имя
+        файла мода и путь длиннее лимита не должны давать имя, которое
+        сборка тут же отвергнет.
+        """
+        for mode, key in (('normal', 'x' * 80),
+                          ('custom', 'Мой мод.vpk'),
+                          ('normal', 'c_a b?c*d.mdl')):
+            name = suggest_vpk_name(mode, key)
+            self.assertEqual(validate_vpk_filename(name), (True, None),
+                             f'{mode} {key} -> {name}')
 
 
 if __name__ == "__main__":

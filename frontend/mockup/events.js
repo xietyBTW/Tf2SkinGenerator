@@ -28,6 +28,7 @@ import {
   showSkybox,
   addFrame,
   setCardTitles,
+  showPartsAnimation,
 } from './preview.js';
 
 // ── События воркеров ─────────────────────────────────────────────────────
@@ -68,6 +69,11 @@ api.subscribe((ev) => {
       withViewer((w) => w.loadAnimatedTexture(
         ev.frames.map(api.fileUrl), ev.fps, ''));
       showMaterials(['текстура'], { 'текстура': ev.frames[0] });
+      break;
+
+    case 'parts_animated':
+      // Гифка на части: кадры склейки в уменьшенном размере, крутит вьювер.
+      showPartsAnimation(ev);
       break;
 
     case 'render_hints':
@@ -143,14 +149,17 @@ api.subscribe((ev) => {
     // Мод из VPK опознан: стало известно, какое оружие он заменяет. Значит
     // его можно посмотреть в руках — открываем вкладку вида от первого лица.
     case 'mod_weapon': {
-      const tab = document.querySelector('.modes [data-view="fp"]');
+      // Ряд сцен у кадра, а не ряд режимов: `data-scene` есть и у точек
+      // эффекта, поэтому ищем в своём ряду.
+      const tab = document.querySelector('.half__bar--scenes [data-scene="fp"]');
       if (tab) tab.hidden = !ev.ready;
       if (ev.ready) say(`Мод заменяет ${ev.key} — можно посмотреть в руках`);
       break;
     }
 
     case 'skybox':
-      showSkybox(ev.faces);
+      // Событие целиком: кроме граней в нём панорама — ей нужна своя карточка.
+      showSkybox(ev);
       break;
 
     case 'build_progress':
@@ -161,7 +170,7 @@ api.subscribe((ev) => {
     // Пока человек думает, воркер держит паузу (300 секунд), поэтому вопрос
     // задаём сразу и не копим.
     case 'need_texture':
-      askForTexture(ev.material, ev.remaining || 0);
+      askForTexture(ev.material);
       break;
 
     case 'build_done':

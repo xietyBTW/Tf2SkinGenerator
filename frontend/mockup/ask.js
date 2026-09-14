@@ -12,11 +12,15 @@
 
 const askEl = document.getElementById('ask');
 
+//: С какой длины списку нужен поиск.
+const SEARCH_FROM = 8;
+
 export function ask({ title, text = '', value = null, list = null, multi = false,
                chosen = [], ok = 'Готово', check = '' }) {
   const titleEl = askEl.querySelector('.ask__title');
   const textEl = askEl.querySelector('.ask__text');
   const input = askEl.querySelector('.ask__input');
+  const search = askEl.querySelector('.ask__search');
   const listEl = askEl.querySelector('.ask__list');
   const checkBox = askEl.querySelector('.ask__check');
   const checkInput = checkBox.querySelector('input');
@@ -30,6 +34,9 @@ export function ask({ title, text = '', value = null, list = null, multi = false
   input.value = value ?? '';
   listEl.hidden = !list;
   listEl.innerHTML = '';
+  // Поиск — только когда список не охватить взглядом.
+  search.hidden = !(list && list.length > SEARCH_FROM);
+  search.value = '';
   askEl.querySelector('.ask__ok').textContent = ok;
   // Галка-приписка к ответу: с ней окно отдаёт {value, checked}, без неё —
   // просто значение, как и раньше.
@@ -52,6 +59,8 @@ export function ask({ title, text = '', value = null, list = null, multi = false
       done = true;
       okBtn.removeEventListener('click', onOk);
       cancelBtn.removeEventListener('click', onCancel);
+      search.removeEventListener('input', onSearch);
+      search.removeEventListener('keydown', onSearchKey);
       askEl.removeEventListener('cancel', onCancel);
       askEl.removeEventListener('close', onCancel);
       if (askEl.open) askEl.close();
@@ -65,9 +74,48 @@ export function ask({ title, text = '', value = null, list = null, multi = false
       settle(wrap(value === null ? true : input.value.trim()));
     };
     const onCancel = () => settle(null);
+    // Фильтр по подстроке имени. Отмеченное при множественном выборе не
+    // теряется: прячутся кнопки, а не набор.
+    const onSearch = () => {
+      const q = search.value.trim().toLowerCase();
+      for (const b of listEl.querySelectorAll('.ask__item')) {
+        b.hidden = Boolean(q) && !b.textContent.toLowerCase().includes(q);
+      }
+      // Заголовок группы без видимых пунктов — лишний
+      for (const h of listEl.querySelectorAll('.ask__group')) {
+        let el = h.nextElementSibling, any = false;
+        while (el && !el.classList.contains('ask__group')) {
+          if (!el.hidden) { any = true; break; }
+          el = el.nextElementSibling;
+        }
+        h.hidden = !any;
+      }
+    };
+    // Enter в поиске — это не «отправить форму» (окно закрылось бы без
+    // ответа), а выбрать первое из найденного.
+    const onSearchKey = (e) => {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      const first = listEl.querySelector('.ask__item:not([hidden])');
+      if (first) first.dispatchEvent(new MouseEvent(multi ? 'click' : 'dblclick'));
+    };
+    // Один выбор из списка: пока ничего не выбрано, отвечать нечем — кнопка
+    // выключена, иначе «Ответить» без выбора выглядел бы как ответ.
+    okBtn.disabled = Boolean(list && !multi);
 
     if (list) {
+      let lastGroup = null;
       for (const item of list) {
+        // Заголовок группы — когда список длинный и разнородный (модели:
+        // игроки, косметика, оружие). Сам не выбирается; при поиске
+        // прячется вместе с пунктами.
+        if (item.group && item.group !== lastGroup) {
+          const h = document.createElement('p');
+          h.className = 'label ask__group';
+          h.textContent = item.group;
+          listEl.appendChild(h);
+          lastGroup = item.group;
+        }
         const b = document.createElement('button');
         b.type = 'button';
         b.className = 'ask__item';
@@ -88,6 +136,7 @@ export function ask({ title, text = '', value = null, list = null, multi = false
                 .forEach((x) => x.classList.remove('is-active'));
           b.classList.add('is-active');
           picked = value;
+          okBtn.disabled = false;
         });
         // Двойной клик — выбрать и закрыть: список длинный, тянуться к
         // кнопке ради каждого выбора незачем. При множественном выборе он
@@ -106,7 +155,10 @@ export function ask({ title, text = '', value = null, list = null, multi = false
     cancelBtn.addEventListener('click', onCancel);
     askEl.addEventListener('cancel', onCancel);      // Esc
     askEl.addEventListener('close', onCancel);
+    search.addEventListener('input', onSearch);
+    search.addEventListener('keydown', onSearchKey);
     askEl.showModal();
     if (value !== null) { input.focus(); input.select(); }
+    else if (!search.hidden) search.focus();
   });
 }

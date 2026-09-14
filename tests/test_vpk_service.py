@@ -59,6 +59,42 @@ class PlanMaterialsBypassTests(unittest.TestCase):
             self._run("vgui\\replay\\thumbnails"), "vgui\\replay\\thumbnails")
 
 
+class PlanMaterialsAskSplitTests(unittest.TestCase):
+    """Сборка спрашивает то, что человек видел карточкой; остальное — молча.
+
+    Тело шпиона: глаза в геометрии, но без текстуры (карточки нет) — молча;
+    убер-вариант не в геометрии, но страница показала его в «Прочем» —
+    спросят; `spy_red` из ЧС и маска (своя страница) — молча, оригиналом.
+    """
+
+    def test_spy_body_split(self):
+        row = ('{ "spy_head_red" "eyeball_l" "spy_red" "mask_spy" '
+               '"spy_red_invun" "spy_red_zombie" "mask_scout" }')
+        with tempfile.TemporaryDirectory() as tmp:
+            qc = Path(tmp) / "spy.qc"
+            qc.write_text(
+                '$modelname "player/spy.mdl"\n'
+                '$cdmaterials "models\\player\\spy"\n'
+                '$texturegroup "skinfamilies"\n{\n\t' + row + '\n\t' + row + '\n}\n',
+                encoding="utf-8")
+            ctx = BuildContext("id", "spy_body", "spy_head_red", Path(tmp) / "ctx")
+            ctx.create_directories()
+            weights = {"spy_head_red": 50, "eyeball_l": 5, "spy_red": 40,
+                       "mask_spy": 5, "mask_scout": 5}
+            with patch("src.data.material_filter._user_patterns", return_value=["=spy_red"]),                  patch("src.services.qc_skin_parser.mesh_material_weights",
+                       return_value=weights):
+                plan = VPKService._plan_materials(
+                    str(qc), "spy_body", "spy", ctx, "spy_head_red", None, None,
+                    {}, None, False, "none", None, False, None, None,
+                    misc_materials=["spy_red_invun", "SPY_RED_ZOMBIE", "spy_red",
+                                    "not_in_this_model"],
+                )
+        self.assertEqual(plan.extra_materials, ["spy_red_invun", "spy_red_zombie"])
+        self.assertEqual(
+            set(plan.blacklisted_extra),
+            {"eyeball_l", "spy_red", "mask_spy", "mask_scout"})
+
+
 class VPKServiceTests(unittest.TestCase):
     def test_resolve_weapon_key_weapon(self):
         # Обычное оружие: weapon_key = суффикс после первого '_'
@@ -1298,6 +1334,20 @@ class BuildVpkCharacterizationTests(unittest.TestCase):
             self.assertIn("c_scattergun.vtf", vtf_names)         # главный
             self.assertIn("c_scattergun_shell2.vtf", vtf_names)  # доп. из texturegroup
             self.assertIn("c_scattergun_detail.vtf", vtf_names)  # карта detail
+
+    def test_texturegroup_extra_copies_main_on_request(self):
+        # «Скопировать главную» — материал ОБЯЗАН оказаться в моде: раньше
+        # этот ответ шёл как None, и сборка молча пропускала материал.
+        from src.shared.constants import EXTRA_TEX_USE_MAIN
+        with tempfile.TemporaryDirectory() as tmp:
+            ok, msg, vtf_names = self._run_build(
+                Path(tmp),
+                panel_extra_textures={},
+                texturegroup_extras=["c_scattergun_shell2"],
+                extra_texture_callback=lambda *a: EXTRA_TEX_USE_MAIN,
+            )
+            self.assertTrue(ok, msg)
+            self.assertIn("c_scattergun_shell2.vtf", vtf_names)
 
     def test_blu_team_texture_only_for_real_team(self):
         # Командная (BLU) текстура создаётся ТОЛЬКО при настоящей команде

@@ -18,16 +18,22 @@ class BuildWorker(StandardWorker):
     request_extra_model = Signal(str, str)    # (smd_name, weapon_key) - запрос доп. модели (shell и т.д.)
     texture_mismatch_warning = Signal(str)    # (warning_message) — предупреждение о несовпадении текстур
 
-    def __init__(self, request: Optional[BuildRequest] = None, parent=None, **legacy_kwargs):
+    def __init__(self, request: Optional[BuildRequest] = None, parent=None,
+                 prepare=None, **legacy_kwargs):
         """
         request — все параметры сборки (см. BuildRequest). Для совместимости
         со старым стилем вызова по kwargs (BuildWorker(image_path=..., mode=...))
         request можно не передавать — тогда он соберётся из kwargs.
+
+        prepare — что сделать ДО сборки, уже в этом потоке: файлы, на которые
+        смотрит запрос, но которых ещё нет (полные склейки анимации частей).
+        Получает функцию прогресса (pct, text).
         """
         super().__init__(parent)
         if request is None:
             request = BuildRequest(**legacy_kwargs)
         self.request = request
+        self._prepare = prepare
         self.language = request.language
 
         # Синхронные запросы в UI-поток (диалоги выбора файла/подтверждения).
@@ -39,6 +45,8 @@ class BuildWorker(StandardWorker):
     def work(self) -> Tuple[bool, str]:
         r = self.request
         t = TRANSLATIONS.get(r.language, TRANSLATIONS['en'])
+        if self._prepare is not None:
+            self._prepare(self.sub_progress.emit)
         success, message, cancelled = VPKService.build_with_progress(
             r,
             model_file_callback=None,

@@ -283,6 +283,22 @@ def check_systems(systems: dict, root_name: str = "",
                 not _has(s.get("operators"), *_DEATH_OPERATORS):
             out.append(Finding("immortal", name, "particles_lint_immortal"))
 
+        # «Эмиссия по родительским частицам» без множителя: в игре темп =
+        # rate × число частиц родителя × «scale emission to used control
+        # points», а умолчание множителя — НОЛЬ. Проверено симуляцией Valve
+        # (particles.lib): без атрибута эмиттер молчит, с 1.0 — 2.5/с × 20
+        # родителей = 50/с. Превью раньше флаг не читало и показывало
+        # тонкий ручеёк, которого в игре нет.
+        for i, em in enumerate(emitters):
+            ea = em.get("attrs") or {}
+            if not ea.get("use parent particles for emission scaling", {}).get("v"):
+                continue
+            if float(ea.get("scale emission to used control points", {}).get("v", 0) or 0) <= 0:
+                out.append(Finding(
+                    "parent_scale_zero", name, "particles_lint_parent_scale_zero",
+                    fix=("emitters", i, "scale emission to used control points", "float"),
+                    fix_value=1.0))
+
         # Материал не удалось прочитать: в игре текстуры не будет.
         # Пустой словарь = резолв материалов не выполнялся (нет пути к TF2) —
         # тогда молчим, иначе получим предупреждение на каждую систему.

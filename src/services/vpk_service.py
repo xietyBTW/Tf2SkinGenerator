@@ -582,7 +582,7 @@ class VPKService:
         qc_path, mode, weapon_key, ctx, texture_filename, image_path, blu_image_path,
         panel_extra_textures, panel_blu_textures, isolate_shoulders, blu_mode,
         skin_build_data, replace_keep_materials, custom_qc_text, original_cdmaterials_path,
-        bypass_prefix: str = "console",
+        bypass_prefix: str = "console", misc_materials=None,
     ) -> "_MaterialPlan":
         """
         Анализирует $texturegroup и решает, какие материалы строить: BLU-строка,
@@ -640,22 +640,20 @@ class VPKService:
             panel_extra_textures, panel_blu_textures, isolate_shoulders,
         )
 
-        # Исключаем служебные материалы (глаза/зубы/sheen-оверлеи) —
-        # для них не нужно спрашивать текстуру при сборке. Тот же фильтр,
-        # что и для карточек 2D (единый источник). Делаем ПОСЛЕ hands-блока,
-        # т.к. он переназначает extra_materials/blu_row.
+        # Спрашиваем ровно то, что человек видит карточкой: основные материалы
+        # геометрии и «Прочее» со страницы (убер/зомби-варианты, у которых
+        # превью нашло текстуру — сами они в геометрии не встречаются, модель
+        # ссылается на них из других скинов). Молча, игровым оригиналом, пишем
+        # остальное: пользовательский ЧС, маски шпиона (у них своя страница) и
+        # служебное без карточки (глаза без $basetexture, оверлеи) — без
+        # записи под console\-cdmaterials оно фиолетовое. Делаем ПОСЛЕ
+        # hands-блока, т.к. он переназначает extra_materials/blu_row.
         from src.data.material_filter import (
             is_editable_material as _is_edit,
-            is_user_blacklisted as _is_hidden,
+            is_hidden_at_build as _is_hidden,
         )
-        # Служебные (глаза/зубы/убер/зомби/эффекты) И материалы из
-        # пользовательского ЧС: НЕ показываем карточками и НЕ редактируем,
-        # но ПИШЕМ в мод оригинальной игровой текстурой ниже — иначе из-за
-        # console\-cdmaterials они стали бы фиолетовыми.
-        # ВАЖНО: источник — ВЕСЬ $texturegroup (все строки/колонки), а НЕ
-        # extra_materials. Служебные варианты (invun/zombie) обычно не в
-        # геометрии и не в extra_materials, но модель ссылается на них в
-        # других скинах (убер/зомби) — без записи они фиолетовые.
+        # Источник — ВЕСЬ $texturegroup (все строки/колонки), а не
+        # extra_materials: служебные варианты обычно не в геометрии.
         _all_tg_mats: list = []
         _seen_tg: set = set()
         for _row in (tg_structure.get('all_rows') or []):
@@ -664,12 +662,20 @@ class VPKService:
                 if _ml and _ml not in _seen_tg:
                     _seen_tg.add(_ml)
                     _all_tg_mats.append(_m)
-        blacklisted_extra = [m for m in _all_tg_mats
-                              if (not _is_edit(m)) or _is_hidden(m)]
-        if blacklisted_extra:
-            logger.info(f"Служебные/ЧС материалы (без карточек, пишем оригиналом): {blacklisted_extra}")
         extra_materials = [m for m in extra_materials
                            if _is_edit(m) and not _is_hidden(m)]
+        _asked = {m.lower() for m in extra_materials} | {texture_filename.lower()}
+        _tg_names = {m.lower(): m for m in _all_tg_mats}
+        for _m in (misc_materials or []):
+            _ml = (_m or '').lower()
+            if _ml in _tg_names and _ml not in _asked and not _is_hidden(_m):
+                _asked.add(_ml)
+                extra_materials.append(_tg_names[_ml])
+        blacklisted_extra = [m for m in _all_tg_mats
+                              if m.lower() not in _asked
+                              and (_is_hidden(m) or not _is_edit(m))]
+        if blacklisted_extra:
+            logger.info(f"Служебные/ЧС материалы (без карточек, пишем оригиналом): {blacklisted_extra}")
         # blu_row НЕ фильтруем удалением — он индексируется по колонкам
         # вместе с red_row. Служебные blu-материалы пропускаются ВНУТРИ
         # цикла (по col_idx), чтобы не сместить выравнивание.
@@ -959,6 +965,7 @@ class VPKService:
         _bypass_prefix = _resolve_bypass_prefix(getattr(r, 'bypass_method', 'console'))
         blu_image_path = r.blu_image_path
         panel_extra_textures = r.panel_extra_textures or {}
+        misc_materials = r.misc_materials or []
         material_maps = r.material_maps or {}
         material_settings = r.material_settings or {}
         skin_build_data = r.skin_build_data
@@ -1057,7 +1064,7 @@ class VPKService:
                 blu_image_path, panel_extra_textures, panel_blu_textures,
                 isolate_shoulders, blu_mode, skin_build_data,
                 replace_keep_materials, custom_qc_text, original_cdmaterials_path,
-                bypass_prefix=_bypass_prefix,
+                bypass_prefix=_bypass_prefix, misc_materials=misc_materials,
             )
             tg_structure = _plan.tg_structure
             blu_row = _plan.blu_row

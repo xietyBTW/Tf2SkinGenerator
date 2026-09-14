@@ -16,7 +16,7 @@ import { say, sayBusy, stage, viewer, withViewer } from './stage.js';
 import { root, work } from './layout.js';
 import { bindAlbum, goTo, SINGLE_TEX } from './album.js';
 import { modeControls, restoreBadges } from './controls.js';
-import { closeParts, bindParts } from './parts.js';
+import { closeParts, bindParts, suspendParts, resumeParts } from './parts.js';
 import { updateDockSummary } from './build.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -159,6 +159,9 @@ export function resetView() {
   document.querySelectorAll('.modes .underlined').forEach(
     (b) => b.classList.toggle('is-active', b.dataset.view === 'both'));
   work.dataset.view = 'both';
+  // Сцену прошлого предмета Python погасил сам (select_item → viewmodel.stop и
+  // taunt.stop), поэтому здесь только отметка: звать выход неоткуда и незачем.
+  markScene('item');
   document.getElementById('fpbar').hidden = true;
   document.getElementById('tauntbar').hidden = true;
   // Камера возвращается к свободной орбите: риг остался от вида от первого лица.
@@ -252,6 +255,33 @@ function wornCard() {
   return Object.fromEntries(cardMesh.map((m) => [m, png]));
 }
 
+//: Последняя анимация частей от Python: {mesh, still, frames, fps}. Нужна
+//: после каждой раздачи текстур — вьювер при ней анимацию гасит.
+let partsAnim = null;
+
+/** Гифка на части крутится в 3D: кадры посчитал Python (parts_animated). */
+export function showPartsAnimation(ev) {
+  partsAnim = ev.frames && ev.frames.length > 1 ? ev : null;
+  if (!partsAnim) return;
+  withViewer((w) => w.loadAnimatedTexture(
+    partsAnim.frames.map(api.fileUrl), partsAnim.fps, partsAnim.mesh));
+}
+
+/** Настройку выключили: кадры забываем и перекрашиваем сцену неподвижной
+ *  склейкой — раздача текстур во вьювере гасит анимацию сама. */
+export function stopPartsAnimation() {
+  partsAnim = null;
+  refreshView();
+}
+
+function replayPartsAnimation(w, entries) {
+  if (!partsAnim) return;
+  // Склейку сменил новый мазок — его кадры приедут своим событием, а старые
+  // крутить поверх новой текстуры нельзя.
+  if (!entries.some(([, png]) => png === partsAnim.still)) { partsAnim = null; return; }
+  w.loadAnimatedTexture(partsAnim.frames.map(api.fileUrl), partsAnim.fps, partsAnim.mesh);
+}
+
 /** Одевает модель в карточку, на которой остановился альбом. */
 export function wearCard(name) {
   cardWorn = name || '';
@@ -301,6 +331,9 @@ export function applyView(st) {
       w.applyMaterialMap(Object.fromEntries(
         entries.map(([mat, png]) => [mat, api.fileUrl(png)])));
     }
+    // Раздача текстур останавливает анимацию во вьювере; если на сцене всё
+    // ещё та склейка, для которой считались кадры, — запускаем их заново.
+    replayPartsAnimation(w, entries);
   });
 
   // Активный стиль подсвечиваем по ответу Python, а не по последнему клику.
@@ -356,8 +389,10 @@ export function applyView(st) {
   // прихода model_ready её ещё нет — и кнопка обещала бы действие, которого
   // сделать нельзя. Режим при этом спрашиваем свой (`split_parts`), а не
   // подмену модели: тело класса не подменить, а разделить — можно.
+  // На сцене её нет вовсе: карта частей у страницы от обычной модели, и
+  // открытый на руках режим красил бы не то, что показано.
   document.querySelector('[data-cond="parts"]').hidden =
-    !(modeControls.split_parts && st.can_split);
+    !(modeControls.split_parts && st.can_split) || work.dataset.scene !== 'item';
 
   // «Убрать свою модель» — только когда своя геометрия и правда стоит.
   // Без неё замена была билетом в один конец: вернуть игровую можно было
@@ -508,7 +543,7 @@ export function showFpActions(actions) {
   const bar = document.getElementById('fpbar');
   bar.querySelectorAll('.tag').forEach((b) => b.remove());
   const list = actions || [];
-  bar.hidden = list.length < 2 || work.dataset.view !== 'fp';
+  bar.hidden = list.length < 2 || work.dataset.scene !== 'fp';
   if (bar.hidden) return;
 
   for (const action of list) {
@@ -542,7 +577,7 @@ export function showTauntClasses(classes) {
   const bar = document.getElementById('tauntbar');
   bar.querySelectorAll('.tag').forEach((b) => b.remove());
   const list = classes || [];
-  bar.hidden = list.length < 2 || work.dataset.view !== 'taunt';
+  bar.hidden = list.length < 2 || work.dataset.scene !== 'taunt';
   if (bar.hidden) return;
 
   if (!list.includes(tauntClass)) tauntClass = list[0];
@@ -674,8 +709,9 @@ export function applySpecialTexture(textures) {
 }
 
 /** Небо: шесть граней кубмапой вместо модели. */
-export function showSkybox(faces) {
-  const names = Object.keys(faces || {});
+export function showSkybox(ev) {
+  const faces = (ev && ev.faces) || {};
+  const names = Object.keys(faces);
   if (!names.length) {
     say('У этого неба граней в игре не нашлось');
     return;
@@ -683,7 +719,14 @@ export function showSkybox(faces) {
   withViewer((w) => w.loadSkybox(
     Object.fromEntries(names.map((f) => [f, api.fileUrl(faces[f])]))));
   say(names.length < 6 ? `Найдено граней: ${names.length} из 6` : '');
-  showMaterials(names, faces);
+
+  // Панорама — ПЕРВАЯ карточка ленты. Это единственное место, куда кладут
+  // фото 360°: грани принимают по одной картинке каждая, а панорама одна на
+  // все шесть — Python режет её сам и присылает результат гранями. Без этой
+  // карточки перенос фото 360° не делал ничего вовсе: класть его было некуда.
+  const pano = (ev && ev.pano_key) || '__pano__';
+  cardTitles[pano] = 'Панорама 360°';
+  showMaterials([pano, ...names], { ...faces, [pano]: (ev && ev.pano) || '' });
 
   // Небо приходит своим событием, минуя applyView, поэтому кнопки прошлого
   // предмета надо убрать здесь: у неба нет ни команд, ни варианта, ни стилей.
@@ -804,53 +847,85 @@ export function showMaterials(names, textures = {}, inStyle = false) {
   bindAlbum();
 }
 
-// ── Режим показа: текстура, модель или обе ──────────────────────────────
-document.querySelector('.modes').addEventListener('click', async (e) => {
+// ── Раскладка: текстура, модель или обе ─────────────────────────────────
+//
+// Только раскладка. Что показано в кадре, решает ряд у самого кадра (сцены):
+// это разные вопросы, и пока они стояли одним рядом, «Вместе» с насмешкой было
+// недостижимо, а выход из сцены случался ПОБОЧНО — от смены раскладки. Оттуда
+// и брался баг: ветку выхода написали для вида от первого лица, появилась
+// вторая сцена, и выключить её стало нечем.
+document.querySelector('.modes').addEventListener('click', (e) => {
   const btn = e.target.closest('.underlined');
   if (!btn) return;
-  // Уходим ли со СЦЕНЫ. Вид от первого лица и насмешка — не ракурсы, а
-  // собранные сцены: их ставит отдельный воркер, и снять их обязан тот же, кто
-  // поставил. Раньше здесь спрашивалось только про вид от первого лица, и
-  // насмешку выключить было нельзя вовсе: «Вместе» возвращало свободную
-  // камеру, а персонаж продолжал играть насмешку вместо самого реквизита.
-  const wasScene = work.dataset.view === 'fp' || work.dataset.view === 'taunt';
   document.querySelectorAll('.modes .underlined').forEach((b) => b.classList.remove('is-active'));
   btn.classList.add('is-active');
   work.dataset.view = btn.dataset.view;
+});
 
-  // Вид от первого лица — не другой ракурс, а другая сцена: её собирает
-  // отдельный воркер слиянием рук класса с оружием.
-  if (btn.dataset.view === 'taunt') {
-    // Насмешка — тоже не ракурс, а другая сцена: персонаж с реквизитом.
-    // Камера у неё свободная, поэтому рига нет.
+// ── Сцена: сам предмет, руки или насмешка ───────────────────────────────
+//
+// Вид от первого лица и насмешка — не ракурсы, а собранные сцены: их ставит
+// отдельный воркер, и снять их обязан тот же, кто поставил. «Сам по себе» —
+// это и есть выход, названный словом, а не побочное действие чего-то другого.
+async function showScene(name) {
+  if ((work.dataset.scene || 'item') === name) return;   // уже показано
+  markScene(name);
+  // Резка модели относится к обычной геометрии: на сцене её карта частей уже
+  // не про то, что в кадре. Откладываем, а не закрываем насовсем — по выходу
+  // режим вернётся сам (см. resumeParts).
+  if (name !== 'item') suspendParts();
+
+  if (name === 'taunt') {
     say('Сборка насмешки…');
-    withViewer((w) => w.setViewRig(null));
+    withViewer((w) => w.setViewRig(null));   // у насмешки камера свободная
     const res = await api.loadTaunt(tauntClass);
     if (res.error) say(res.error);
-  } else if (btn.dataset.view === 'fp') {
+    return;
+  }
+  if (name === 'fp') {
     say('Сборка вида от первого лица…');
     const res = await api.loadFirstPerson(fpAction);
     if (res.error) say(res.error);
-    // Риг придёт вместе со сценой: ответ на этот запрос может отстать от
-    // события, и полагаться на его порядок нельзя.
-  } else if (root.dataset.section !== 'particles') {
-    // Выход из вида: возвращаем свободную орбиту. У частиц вьювер моделей
-    // не участвует — дёргать его незачем.
-    withViewer((w) => w.setViewRig(null));
-    document.getElementById('fpbar').hidden = true;
-    document.getElementById('tauntbar').hidden = true;
-    // Свободная камера — это ещё не выход: сцену рук собирал отдельный воркер,
-    // и без возврата обычной модели оружие оставалось в руках, только вертеть
-    // его теперь можно было свободно. Кадр обычного превью уже есть, поэтому
-    // Python пересобирать нечего — он лишь снимает сцену и подложку.
-    // Выход у обеих сцен один: `leave_first_person` гасит и вьюмодель, и
-    // насмешку — обе держат подложку с текстурами персонажа, и снимаются они
-    // одинаково (см. session.leave_first_person).
-    if (wasScene) {
-      applyView(await api.leaveFirstPerson());
-      if (lastModel) await showModel(lastModel);
-    }
+    return;   // риг придёт вместе со сценой: порядок ответа и события не задан
   }
+
+  // Свободная камера — это ещё не выход: сцену собирал отдельный воркер, и без
+  // возврата обычной модели оружие оставалось в руках, только вертеть его
+  // теперь можно было свободно. Кадр обычного превью уже есть, поэтому Python
+  // пересобирать нечего — он лишь снимает сцену и подложку. Выход у обеих
+  // сцен один: `leave_first_person` гасит и вьюмодель, и насмешку — обе держат
+  // подложку с текстурами персонажа (см. session.leave_first_person).
+  withViewer((w) => w.setViewRig(null));
+  document.getElementById('fpbar').hidden = true;
+  document.getElementById('tauntbar').hidden = true;
+  if (root.dataset.section === 'particles') return;   // там вьювера моделей нет
+  applyView(await api.leaveFirstPerson());
+  if (lastModel) await showModel(lastModel);
+  // Строго после модели: `showModel` заново связывает части со вьювером
+  // (bindParts закрывает режим), и включённый до него он тут же и погас бы.
+  await resumeParts();
+}
+
+/**
+ * Отмечает выбранную сцену.
+ *
+ * Состояние живёт на `.work`: по нему открываются ряды выбора анимации и
+ * класса, и спрашивать его у кнопок значило бы держать одно и то же в
+ * разметке дважды.
+ *
+ * Кнопки ищем ТОЛЬКО в своём ряду: `data-scene` есть и у точек эффекта («в
+ * мире» / «на модели») — там это сцена самой точки, и общий поиск красил бы
+ * заодно их.
+ */
+function markScene(name) {
+  work.dataset.scene = name;
+  document.querySelectorAll('.half__bar--scenes [data-scene]').forEach(
+    (b) => b.classList.toggle('is-active', b.dataset.scene === name));
+}
+
+document.querySelector('.half__bar--scenes').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-scene]');
+  if (btn) showScene(btn.dataset.scene);
 });
 
 // Команды и вариант: решение принимает Python, страница применяет ответ.

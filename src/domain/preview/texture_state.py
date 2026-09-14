@@ -71,6 +71,10 @@ class PreviewTextureState:
         default_factory=lambda: {Team.RED: {}, Team.BLU: {}})
     #: {skin_idx: {mat_name: path}} — переопределения вариантных стилей (skin > 0).
     skin_overrides: Dict[int, Dict[str, str]] = field(default_factory=dict)
+    #: {skin_idx: {базовый материал: png}} — ОРИГИНАЛЫ текстур стиля из игры или
+    #: из мода. Не правки: в user_edits и в сборку не идут, показ их лишь
+    #: подставляет, пока человек не положил свою (см. resolve_card).
+    style_game_tex: Dict[int, Dict[str, str]] = field(default_factory=dict)
 
     # ── Активные селекторы ────────────────────────────────────────────────── #
     active_team: str = Team.RED
@@ -223,15 +227,49 @@ class PreviewTextureState:
         hands_blu_view — режим рук на BLU: нейтральный материал показываем
         пустым (= «общий, наследует RED»), пока ему не задана отдельная синяя.
         """
-        # Вариантный стиль (skin > 0): ТОЛЬКО его переопределение, без
-        # наследования базы/игры — пустая карточка предлагает выбрать.
+        # Вариантный стиль (skin > 0): своя правка, иначе ОРИГИНАЛ этого стиля
+        # (у гильотины Bloody — своя игровая текстура). Базу стиль не
+        # наследует: карточка без собственной текстуры остаётся пустой.
         if self.skin_info and self.active_skin != 0:
-            return _existing(self.skin_overrides.get(self.active_skin, {}).get(mat))
+            return self.style_texture(self.active_skin, mat)
 
         if hands_blu_view and not self.is_team_material(mat):
             return _existing(self.textures.get(Team.BLU, {}).get(mat))
 
         return self.resolve_base(mat)
+
+    def style_texture(self, style: int, mat: str) -> Optional[str]:
+        """Текстура материала в стиле: правка человека, иначе оригинал стиля."""
+        return (_existing(self.skin_overrides.get(style, {}).get(mat))
+                or _existing(self.style_game_tex.get(style, {}).get(mat)))
+
+    def style_upload_for(self, mat: str) -> Optional[str]:
+        """Правка стиля, загруженная под ИМЯ материала строки $texturegroup.
+
+        Сборка спрашивает материалы группы по их собственным именам
+        (``c_sd_cleaver_bloody``), а правки стиля хранятся под БАЗОВЫМ
+        материалом (``c_sd_cleaver``) — связывает их колонка строки стиля.
+        Оригиналы (``style_game_tex``) сюда не попадают: их сборка возьмёт из
+        игры сама, если человек так ответит.
+        """
+        rows = (self.skin_info or {}).get('rows') or []
+        if not rows or not self.skin_overrides:
+            return None
+        # Одноматериальная модель хранит правку под служебным ключом: имени
+        # своего материала превью не знает (см. adopt_style_textures).
+        single = self.material_names == [SINGLE_TEX_KEY]
+        low = (mat or '').lower()
+        for style, overrides in self.skin_overrides.items():
+            if not 0 <= style < len(rows):
+                continue
+            row = rows[style]
+            for col, base_mat in enumerate(rows[0]):
+                if col < len(row) and (row[col] or '').lower() == low:
+                    path = _existing(overrides.get(
+                        SINGLE_TEX_KEY if single else base_mat))
+                    if path:
+                        return path
+        return None
 
     def resolve_base(self, mat: str) -> Optional[str]:
         """Базовая (skin 0) текстура материала: пользовательская активной
@@ -442,6 +480,7 @@ class PreviewTextureState:
         self.skin_info = None
         self.active_skin = 0
         self.skin_overrides = {}
+        self.style_game_tex = {}
 
     def reset_team_data(self) -> None:
         """Сброс командных данных из VPK (кадры, карты, маппинг имён)."""

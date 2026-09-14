@@ -32,10 +32,16 @@ import { partsMaterial, hintParts, refreshParts } from './parts.js';
 
 const placeDlg = document.getElementById('placedlg');
 
-/** Куда и какого размера ляжет картинка — в пикселях холста развёртки. */
-function placeRect(image, box, spec, size) {
-  const bw = Math.max(1, (box[2] - box[0]) * size);
-  const bh = Math.max(1, (box[3] - box[1]) * size);
+/**
+ * Куда и какого размера ляжет картинка — в пикселях холста развёртки.
+ *
+ * Холст повторяет ПРОПОРЦИИ текстуры (W × H), а не квадрат: у тела шпиона
+ * она 1024×512, и на квадрате развёртка сжималась вдвое по ширине, а
+ * «целиком» вписывалось не так, как это потом делала склейка в пикселях.
+ */
+function placeRect(image, box, spec, W, H) {
+  const bw = Math.max(1, (box[2] - box[0]) * W);
+  const bh = Math.max(1, (box[3] - box[1]) * H);
   let w = bw;
   let h = bh;
   if (spec.fit !== 'stretch') {
@@ -50,8 +56,8 @@ function placeRect(image, box, spec, size) {
   // только по её оси. Старые работы второго не знают: там он равен первому.
   h *= (spec.scale_y === undefined ? spec.scale : spec.scale_y);
   // Развёртка считает v снизу, холст — сверху: место части переворачивается.
-  const cx = box[0] * size + bw / 2 + spec.offset[0] * bw;
-  const cy = (1 - box[3]) * size + bh / 2 + spec.offset[1] * bh;
+  const cx = box[0] * W + bw / 2 + spec.offset[0] * bw;
+  const cy = (1 - box[3]) * H + bh / 2 + spec.offset[1] * bh;
   return { x: cx, y: cy, w, h };
 }
 
@@ -62,22 +68,29 @@ function placeRect(image, box, spec, size) {
  * одно преобразование холста поверх. Иначе масштаб пришлось бы вносить в
  * каждую формулу, и посадка картинки разъехалась бы с тем, что считает Python.
  *
+ * Приближаем РОВНО к габариту части — тому самому, в который вписана картинка.
+ * Раньше здесь стоял «плотный» габарит: он отбрасывал по 4% площади с каждого
+ * края, чтобы не показывать дальние островки. Но картинка ложится в ПОЛНЫЙ
+ * габарит, и окно врало: у праздничного огнетопора в начальный вид не
+ * попадало от 36 до 49% треугольников части, а рамка картинки уходила за край
+ * холста — человек целился в кусок, которого не видит.
+ *
  * Автоматика не угадает, какой островок нужен человеку, поэтому она только
  * ставит СТАРТОВЫЙ вид, а дальше он приближает колесом.
  */
-function placeView(state, size) {
+function placeView(state, W, H) {
   if (!state.zoom) return { k: 1, dx: 0, dy: 0 };
-  const b = state.dense || state.bbox;
-  const w = Math.max(1, (b[2] - b[0]) * size);
-  const h = Math.max(1, (b[3] - b[1]) * size);
+  const b = state.bbox;
+  const w = Math.max(1, (b[2] - b[0]) * W);
+  const h = Math.max(1, (b[3] - b[1]) * H);
   // Запас по краям: деталь, прижатая к самой рамке, читается хуже, а картинку
   // нередко двигают чуть за край куска. Меньше единицы не опускаемся — окно
   // называется «приблизить», отдалять оно не должно.
-  const fit = Math.max(1, Math.min(size / w, size / h) * 0.86);
+  const fit = Math.max(1, Math.min(W / w, H / h) * 0.86);
   const k = fit * (state.zoomK || 1);
   const focus = state.focus
-    || [b[0] * size + w / 2, (1 - b[3]) * size + h / 2];
-  return { k, dx: size / 2 - k * focus[0], dy: size / 2 - k * focus[1] };
+    || [b[0] * W + w / 2, (1 - b[3]) * H + h / 2];
+  return { k, dx: W / 2 - k * focus[0], dy: H / 2 - k * focus[1] };
 }
 
 /**
@@ -108,19 +121,20 @@ function outlineOf(polygons) {
 function drawPlace(state) {
   const cv = document.getElementById('place-canvas');
   const g = cv.getContext('2d');
-  const size = cv.width;
+  const W = cv.width;
+  const H = cv.height;
   g.setTransform(1, 0, 0, 1, 0, 0);
-  g.clearRect(0, 0, size, size);
+  g.clearRect(0, 0, W, H);
 
-  const view = placeView(state, size);
+  const view = placeView(state, W, H);
   g.setTransform(view.k, 0, 0, view.k, view.dx, view.dy);
 
-  if (state.base && !state.bare) g.drawImage(state.base, 0, 0, size, size);
+  if (state.base && !state.bare) g.drawImage(state.base, 0, 0, W, H);
 
   const shown = (state.frames && state.frames.length)
     ? state.frames[state.frame % state.frames.length]
     : state.image;
-  const rect = shown ? placeRect(shown, state.bbox, state.spec, size) : null;
+  const rect = shown ? placeRect(shown, state.bbox, state.spec, W, H) : null;
 
   const drawPicture = () => {
     g.save();
@@ -130,12 +144,32 @@ function drawPlace(state) {
     g.restore();
   };
 
+  /**
+   * Обрезка по маске части — тому же набору треугольников, по которому
+   * маскирует склейка.
+   *
+   * Обход у всех треугольников разворачиваем В ОДНУ сторону. Холст заливает
+   * путь по правилу nonzero: пара треугольников, лежащих друг на друге с
+   * противоположным обходом, даёт число оборотов 0 — то есть ДЫРУ. А в TF2
+   * зеркальные половины модели делят одну развёртку сплошь: у праздничного
+   * огнетопора таких треугольников 253 из 1249, у другой его части ровно
+   * половина (88 из 176). Отсюда и было «свою текстуру видно только местами»:
+   * картинка пропадала там, где две половины кладутся на одно место.
+   *
+   * Склейка этим не болела и не болеет — она заливает каждый треугольник
+   * отдельно (PIL), поэтому в моде картинка лежала правильно, а врал показ.
+   */
   const clipToPart = () => {
     g.beginPath();
     for (const tri of state.polygons) {
-      g.moveTo(tri[0][0] * size, (1 - tri[0][1]) * size);
-      g.lineTo(tri[1][0] * size, (1 - tri[1][1]) * size);
-      g.lineTo(tri[2][0] * size, (1 - tri[2][1]) * size);
+      const [a, b, c] = tri;
+      // Знак площади считаем в координатах РАЗВЁРТКИ; холст переворачивает v,
+      // и знак вместе с ним, поэтому порядок выбираем по «< 0».
+      const area = (b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1]);
+      const [p, q, r] = area < 0 ? [a, b, c] : [a, c, b];
+      g.moveTo(p[0] * W, (1 - p[1]) * H);
+      g.lineTo(q[0] * W, (1 - q[1]) * H);
+      g.lineTo(r[0] * W, (1 - r[1]) * H);
       g.closePath();
     }
     g.clip();
@@ -167,14 +201,14 @@ function drawPlace(state) {
     // Считаем один раз: треугольники за время окна не меняются.
     if (!state.edges) state.edges = outlineOf(state.polygons);
     for (const [from, to] of state.edges) {
-      g.moveTo(from[0] * size, (1 - from[1]) * size);
-      g.lineTo(to[0] * size, (1 - to[1]) * size);
+      g.moveTo(from[0] * W, (1 - from[1]) * H);
+      g.lineTo(to[0] * W, (1 - to[1]) * H);
     }
   } else {
     for (const tri of state.polygons) {
-      g.moveTo(tri[0][0] * size, (1 - tri[0][1]) * size);
-      g.lineTo(tri[1][0] * size, (1 - tri[1][1]) * size);
-      g.lineTo(tri[2][0] * size, (1 - tri[2][1]) * size);
+      g.moveTo(tri[0][0] * W, (1 - tri[0][1]) * H);
+      g.lineTo(tri[1][0] * W, (1 - tri[1][1]) * H);
+      g.lineTo(tri[2][0] * W, (1 - tri[2][1]) * H);
       g.closePath();
     }
   }
@@ -186,8 +220,9 @@ function drawPlace(state) {
 
 //: Маркер поворота: отступ от края картинки и радиус — в пикселях ХОЛСТА
 //: (деление на масштаб вида гасит приближение, поэтому размер постоянный).
-//: Холст 512 показывается примерно в 330 CSS-пикселях, то есть всё это ещё и
-//: сжимается на треть — отсюда числа крупнее, чем кажется нужным.
+//: Холст (длинная сторона 512) показывается примерно в 330 CSS-пикселях, то
+//: есть всё это ещё и сжимается на треть — отсюда числа крупнее, чем кажется
+//: нужным.
 const HANDLE_GAP = 38;
 const HANDLE_R = 10;
 //: Сторона квадратика на рамке и радиус попадания по нему. Попадание крупнее
@@ -254,11 +289,11 @@ function drawHandle(g, rect, angle, k) {
 }
 
 /** Точка холста в системе КАРТИНКИ: центр в нуле, поворот снят. */
-function localPoint(state, rect, size, clientX, clientY, cv) {
-  const view = placeView(state, size);
+function localPoint(state, rect, clientX, clientY, cv) {
+  const view = placeView(state, cv.width, cv.height);
   const r = cv.getBoundingClientRect();
-  const tex = [((clientX - r.left) / r.width * size - view.dx) / view.k,
-               ((clientY - r.top) / r.height * size - view.dy) / view.k];
+  const tex = [((clientX - r.left) / r.width * cv.width - view.dx) / view.k,
+               ((clientY - r.top) / r.height * cv.height - view.dy) / view.k];
   const rad = -state.spec.angle * Math.PI / 180;
   const dx = tex[0] - rect.x;
   const dy = tex[1] - rect.y;
@@ -279,12 +314,10 @@ function localPoint(state, rect, size, clientX, clientY, cv) {
  * увеличивают. Сторона тянет свою — ею картинку и вытягивают под деталь.
  */
 function resizeBy(state, drag, event, cv) {
-  const size = cv.width;
   const { sx, sy } = drag.grip;
   // Считаем в системе рамки НА МОМЕНТ НАЖАТИЯ: она не должна ехать вслед за
   // собственным изменением, иначе тяга разгоняется сама по себе.
-  const [lx, ly] = localPoint(state, drag.rect, size, event.clientX,
-                              event.clientY, cv);
+  const [lx, ly] = localPoint(state, drag.rect, event.clientX, event.clientY, cv);
   let w = drag.w0;
   let h = drag.h0;
   if (sx) w = Math.max(4, Math.abs(lx + sx * drag.w0 / 2));
@@ -305,8 +338,8 @@ function resizeBy(state, drag, event, cv) {
   const rad = state.spec.angle * Math.PI / 180;
   const worldX = shiftX * Math.cos(rad) - shiftY * Math.sin(rad);
   const worldY = shiftX * Math.sin(rad) + shiftY * Math.cos(rad);
-  const bw = Math.max(1, (state.bbox[2] - state.bbox[0]) * size);
-  const bh = Math.max(1, (state.bbox[3] - state.bbox[1]) * size);
+  const bw = Math.max(1, (state.bbox[2] - state.bbox[0]) * cv.width);
+  const bh = Math.max(1, (state.bbox[3] - state.bbox[1]) * cv.height);
   state.spec.offset = [drag.off0[0] - worldX / bw, drag.off0[1] - worldY / bh];
   drawPlace(state);
 }
@@ -328,6 +361,13 @@ export async function askPlacement(shape, imageUrl, spec) {
   };
 
   const cv = document.getElementById('place-canvas');
+  // Холст — в пропорциях основы: склейка считает «целиком»/«заполнить» в
+  // ПИКСЕЛЯХ текстуры, и на квадратном холсте под текстуру 1024×512 картинка
+  // вписывалась иначе, чем потом ложилась в мод, а развёртка стояла сжатой.
+  // Длинная сторона — 512: размеры ручек считаются в пикселях холста.
+  const ratio = state.base ? state.base.naturalWidth / state.base.naturalHeight : 1;
+  cv.width = Math.round(ratio >= 1 ? 512 : 512 * ratio);
+  cv.height = Math.round(ratio >= 1 ? 512 / ratio : 512);
   const wide = document.getElementById('place-w');
   const tall = document.getElementById('place-h');
   const bare = document.getElementById('place-bare');
@@ -347,9 +387,6 @@ export async function askPlacement(shape, imageUrl, spec) {
   // — то же, что целиться в спичку с другого конца комнаты.
   zoom.checked = true;
   state.zoom = true;
-  // Плотный габарит считает Python и отдаёт вместе с развёрткой: там же он и
-  // покрыт тестом, а страница не перебирает полторы тысячи треугольников.
-  state.dense = shape.dense || null;
   state.zoomK = 1;
   state.focus = null;
 
@@ -413,7 +450,7 @@ export async function askPlacement(shape, imageUrl, spec) {
       const shown = (state.frames && state.frames.length)
         ? state.frames[state.frame % state.frames.length]
         : state.image;
-      return shown ? placeRect(shown, state.bbox, state.spec, cv.width) : null;
+      return shown ? placeRect(shown, state.bbox, state.spec, cv.width, cv.height) : null;
     };
 
     let drag = null;
@@ -422,7 +459,7 @@ export async function askPlacement(shape, imageUrl, spec) {
       const rect = rectNow();
       if (!rect) return;
       cv.setPointerCapture(e.pointerId);
-      const [lx, ly, k] = localPoint(state, rect, cv.width, e.clientX, e.clientY, cv);
+      const [lx, ly, k] = localPoint(state, rect, e.clientX, e.clientY, cv);
       const handleY = -rect.h / 2 - HANDLE_GAP / k;
       const near = Math.hypot(lx, ly - handleY) <= (HANDLE_R + 6) / k;
       // Что делает нажатие, решает место: маркер над картинкой крутит,
@@ -444,7 +481,7 @@ export async function askPlacement(shape, imageUrl, spec) {
       if (drag.turn) {
         // Угол — от центра картинки к курсору. Маркер стоит НАД картинкой,
         // поэтому ноль там же, где он: atan2(dx, -dy), а не наоборот.
-        const [lx, ly] = localPoint(state, rect, cv.width, e.clientX, e.clientY, cv);
+        const [lx, ly] = localPoint(state, rect, e.clientX, e.clientY, cv);
         const rad = state.spec.angle * Math.PI / 180;
         const dx = lx * Math.cos(rad) - ly * Math.sin(rad);
         const dy = lx * Math.sin(rad) + ly * Math.cos(rad);
@@ -461,7 +498,7 @@ export async function askPlacement(shape, imageUrl, spec) {
       const r = cv.getBoundingClientRect();
       // Приближение меняет экранный размер места части: без множителя картинка
       // при перетаскивании убегала бы от курсора во столько же раз.
-      const k = placeView(state, cv.width).k;
+      const k = placeView(state, cv.width, cv.height).k;
       const bw = Math.max(1e-3, (state.bbox[2] - state.bbox[0]) * r.width * k);
       const bh = Math.max(1e-3, (state.bbox[3] - state.bbox[1]) * r.height * k);
       state.spec.offset = [drag.from[0] + (e.clientX - drag.x) / bw,
@@ -475,18 +512,19 @@ export async function askPlacement(shape, imageUrl, spec) {
     on(cv, 'wheel', (e) => {
       e.preventDefault();
       if (!state.zoom) return;
-      const size = cv.width;
+      const W = cv.width;
+      const H = cv.height;
       const r = cv.getBoundingClientRect();
-      const at = [(e.clientX - r.left) / r.width * size,
-                  (e.clientY - r.top) / r.height * size];
-      const was = placeView(state, size);
+      const at = [(e.clientX - r.left) / r.width * W,
+                  (e.clientY - r.top) / r.height * H];
+      const was = placeView(state, W, H);
       // Точка текстуры под курсором — она и должна остаться под ним.
       const tex = [(at[0] - was.dx) / was.k, (at[1] - was.dy) / was.k];
       state.zoomK = Math.max(1, Math.min(12,
         (state.zoomK || 1) * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
-      const now = placeView({ ...state, focus: tex }, size);
-      state.focus = [tex[0] - (at[0] - size / 2) / now.k,
-                     tex[1] - (at[1] - size / 2) / now.k];
+      const now = placeView({ ...state, focus: tex }, W, H);
+      state.focus = [tex[0] - (at[0] - W / 2) / now.k,
+                     tex[1] - (at[1] - H / 2) / now.k];
       drawPlace(state);
     }, { passive: false });
 

@@ -8,6 +8,7 @@
 
 import * as api from '../api.js';
 import { ask } from '../ask.js';
+import { t } from '../i18n.js';
 import { say, withParticles } from '../stage.js';
 import { pSystem } from './state.js';
 
@@ -110,9 +111,17 @@ cpEl('cp-model').addEventListener('click', async () => {
       + 'или шапок, и она появится здесь');
     return;
   }
+  // Группы — от того, на что вешают анюжуалы (игроки, косметика), к
+  // остальному; подписи из каталогов игры, поиск — в самом окне.
+  const GROUPS = { player: 'Игроки', hat: 'Косметика', weapon: 'Оружие',
+                   arms: 'Руки', other: 'Прочее' };
   const qc = await ask({
     title: 'Модель из кэша декомпиляции',
-    list: models.map((m) => ({ label: m.label, value: m.qc })),
+    text: 'Только то, что уже открывали на вкладках оружия и шапок: '
+      + 'разбор модели долгий и делается там.',
+    list: models.map((m) => ({ label: m.label, value: m.qc,
+                               group: t(GROUPS[m.group] || GROUPS.other),
+                               hint: m.mdl })),
     ok: 'Показать',
   });
   if (!qc) return;

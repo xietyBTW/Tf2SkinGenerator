@@ -318,10 +318,12 @@ class VpkModStylesTests(unittest.TestCase):
             # Базовый стиль карточки показывают сами — его пропускаем.
             'skin_textures': {0: {'mat': __file__}, 1: {'mat': __file__}},
         })
-        self.assertEqual(session.textures.skin_overrides.get(1, {}).get('mat'),
-                         __file__)
+        # Оригиналы мода — не правки человека: в skin_overrides (они уходят в
+        # сохранённую работу и в сборку) им делать нечего.
+        self.assertEqual(session.textures.style_texture(1, 'mat'), __file__)
+        self.assertEqual(session.textures.skin_overrides, {})
         self.assertIn('mat', session.skin_chosen.get(1, set()))
-        self.assertNotIn(0, session.textures.skin_overrides)
+        self.assertNotIn(0, session.textures.style_game_tex)
 
     def test_missing_files_are_skipped(self):
         from src.app.preview_controller import VpkModController
@@ -331,7 +333,7 @@ class VpkModStylesTests(unittest.TestCase):
             'skins': [{'index': 1}],
             'skin_textures': {1: {'mat': 'C:/нет-такого.png'}},
         })
-        self.assertEqual(session.textures.skin_overrides.get(1, {}), {})
+        self.assertEqual(session.textures.style_game_tex.get(1, {}), {})
 
 
 class CardMeshTests(unittest.TestCase):

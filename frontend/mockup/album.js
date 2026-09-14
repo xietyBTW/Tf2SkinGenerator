@@ -106,7 +106,11 @@ export function bindAlbum() {
   // поправил шестую текстуру — смотришь на первую и ищешь, где был.
   const want = lastMat;
   frames = [...album.querySelectorAll('.frame')];
-  tabs = [...document.querySelectorAll('.mattab')];
+  // Только СВОИ вкладки: `.mattab` — это вид, а не принадлежность альбому, и
+  // тем же видом устроен выбор сцены у кадра модели. Пока поиск был по всей
+  // странице, альбом считал чужие вкладки своими: вешал на них листание и
+  // снимал у них отметку по номеру кадра — выбранная сцена гасла сама.
+  tabs = [...document.querySelectorAll('.mattabs .mattab')];
   tabs.forEach((tab, i) => tab.addEventListener('click', () => goTo(i)));
   frames.forEach((f, i) => {
     f.addEventListener('click', () => goTo(i));

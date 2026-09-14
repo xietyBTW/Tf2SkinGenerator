@@ -18,6 +18,12 @@
 
 const OPEN = 'is-open';
 
+//: Зазор между полем и списком и отступ от края окна — в точках.
+const GAP = 2;
+const EDGE = 8;
+//: Ниже этого списку не сжимаемся: два пункта видно всегда, дальше прокрутка.
+const MIN_ROOM = 80;
+
 //: Открытый сейчас список — он один на страницу.
 let current = null;
 
@@ -69,13 +75,30 @@ function open(select) {
   current = { box, select, wrap };
   select.setAttribute('aria-expanded', 'true');
 
-  // Вверх, если снизу не помещается: поля стоят и у нижнего края окна.
+  // Место считаем сами, в координатах ОКНА: список `fixed`, потому что
+  // абсолютный обрезала рамка прокручиваемого предка — у панели сборки и у
+  // диалогов `overflow: auto`, и от списка форматов (26 пунктов) оставалась
+  // полоска в одну строку.
+  //
+  // Вверх — если снизу не помещается: поля стоят и у нижнего края окна.
   // Чтение offsetHeight заодно ЗАСТАВЛЯЕТ браузер посчитать стили — без этого
   // класс лёг бы в том же кадре, что и вставка, и перехода не было бы вовсе.
   // Через requestAnimationFrame делать нельзя: у скрытого окна кадры не идут,
   // и список остался бы прозрачным, продолжая ловить щелчки.
-  const room = window.innerHeight - wrap.getBoundingClientRect().bottom;
-  box.classList.toggle('dropdown--up', room < box.offsetHeight + 12);
+  const at = wrap.getBoundingClientRect();
+  box.style.left = Math.round(at.left) + 'px';
+  box.style.width = Math.round(at.width) + 'px';
+  // Куда раскрыться — где места больше. И если не хватает НИ ТАМ, ни там,
+  // режем список по доступному: короткий с прокруткой лучше уехавшего за край
+  // экрана (окно 420 точек, список 240 — вверх он уходил на 86 точек за верх).
+  const below = window.innerHeight - at.bottom - GAP - EDGE;
+  const above = at.top - GAP - EDGE;
+  const up = below < box.offsetHeight && above > below;
+  const room = Math.max(MIN_ROOM, up ? above : below);
+  if (box.offsetHeight > room) box.style.maxHeight = room + 'px';
+  box.style.top = Math.round(up ? at.top - box.offsetHeight - GAP
+                                : at.bottom + GAP) + 'px';
+  box.classList.toggle('dropdown--up', up);
   box.classList.add(OPEN);
 
   box.addEventListener('click', (e) => {

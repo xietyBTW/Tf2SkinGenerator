@@ -57,9 +57,12 @@ the one exception (`vpk.exe`) and the rest of the dev setup.
 
 ## First-time setup
 
-1. Launch the app and open **Settings** (the gear icon, top-right).
-2. Set your **TF2 game folder**, the folder that contains `tf/` and `bin/`
-   (e.g. `…\steamapps\common\Team Fortress 2`).
+1. On first launch the app offers the game folder it found — just press
+   **Save**.
+2. If nothing was found: open **Settings** (the gear icon, top-right) and set
+   your **TF2 game folder**, the folder that contains `tf/` and `bin/`
+   (e.g. `…\steamapps\common\Team Fortress 2`). The **Detect automatically**
+   button lives there too.
 3. Pick your UI language and default export folder if you like.
 
 ## Quick start (30 seconds)

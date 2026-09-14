@@ -168,6 +168,10 @@ TRANSLATIONS = {
         'particles_lint_immortal': 'Частицы не умирают: нет оператора '
                                   'Lifespan Decay. Поток встанет, как только '
                                   'наберётся максимум частиц',
+        'particles_lint_parent_scale_zero': 'Эмиссия по частицам родителя, но '
+                                           'множитель «scale emission to used '
+                                           'control points» равен нулю — в игре '
+                                           'эмиттер не создаст ничего',
         'particles_lint_frozen_anim': 'Анимация текстуры ({frames} кадров) '
                                      'не успевает проиграться — в игре будет '
                                      'один кадр. Растянуть лист на время жизни '
@@ -779,6 +783,10 @@ TRANSLATIONS = {
         'particles_lint_immortal': 'Particles never die: no Lifespan Decay '
                                   'operator. The stream stops as soon as max '
                                   'particles is reached',
+        'particles_lint_parent_scale_zero': 'Emission scales with parent '
+                                           'particles, but "scale emission to '
+                                           'used control points" is zero — in '
+                                           'game the emitter creates nothing',
         'particles_lint_frozen_anim': 'The texture animation ({frames} frames) '
                                      'does not get to play — in game it shows a '
                                      'single frame. Stretch the sheet over the '

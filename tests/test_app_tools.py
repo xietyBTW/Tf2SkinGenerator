@@ -10,7 +10,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from src.app import api
 from src.app.session import AppSession
@@ -386,12 +386,25 @@ class MissingTextureAnswerTests(unittest.TestCase):
         return s
 
     def test_apply_all_main_is_remembered(self):
-        """«Взять главную» — это None, и его легко спутать с «ответа не было».
-        На этом сборка спрашивала про один и тот же материал по кругу."""
+        """«Взять главную» раньше уходило как None и сливалось с «ответа не
+        было»: сборка молча выкидывала материал из мода."""
+        from src.shared.constants import EXTRA_TEX_USE_MAIN
         s = self._session()
         s.answer_texture('main', apply_all=True)
         s._on_build_needs_texture('medic_gatsby_blue', 'medic_gatsby')
-        self.assertEqual(s.answers, [None, None])   # ответ и авто-ответ
+        self.assertEqual(s.answers, [EXTRA_TEX_USE_MAIN] * 2)   # ответ и авто-ответ
+
+    def test_cancelled_build_is_not_asked_again(self):
+        """После отмены воркер до проверки отмены доходит только через ответ —
+        каждый следующий материал показывал бы окно заново."""
+        from src.shared.constants import EXTRA_TEX_USE_GAME_ORIGINAL
+        s = self._session()
+        s._build = MagicMock(isInterruptionRequested=lambda: True)
+        events = []
+        s._put = lambda name, **payload: events.append(name)
+        s._on_build_needs_texture('medic_gatsby_blue', 'medic_gatsby')
+        self.assertEqual(events, [])
+        self.assertEqual(s.answers, [EXTRA_TEX_USE_GAME_ORIGINAL])
 
     def test_without_apply_all_the_question_reaches_the_page(self):
         s = self._session()

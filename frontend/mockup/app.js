@@ -39,7 +39,7 @@ import './particles/index.js';
 import './maps.js';
 import './vmt.js';
 import './custom-model.js';
-import './settings.js';
+import { offerTf2 } from './settings.js';
 import './diagnostics.js';
 import './build.js';
 import './tools.js';
@@ -89,7 +89,9 @@ group('.title__side', '.tag');
 group('#skinbar', '.tag');
 group('#fpbar', '.tag');
 
-boot().catch((err) => {
+// Первый запуск: без пути к игре не работает ничего, поэтому сразу после
+// каталога предлагаем найти её самим (см. settings.js → offerTf2).
+boot().then(offerTf2).catch((err) => {
   els.note.hidden = false;
   els.note.textContent = 'Нет связи с Python: ' + err.message;
   console.error(err);

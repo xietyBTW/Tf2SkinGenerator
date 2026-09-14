@@ -103,21 +103,27 @@ class SkyboxService:
         """
         Список имён стоковых небес: STOCK_SKY_NAMES ∪ скан установленной игры.
 
-        Скан: ключи tf2_misc_dir.vpk вида materials/skybox/<имя>up.vmt
-        (грань «up» есть у каждого неба, одного суффикса достаточно);
-        HDR-варианты (<имя>_hdr) — это то же небо, отбрасываем. Любая проблема
-        (нет папки/vpk/библиотеки) — молча возвращаем фолбэк: список небес не
-        критичен для работы. Вызов из UI-потока — принятый компромисс: первый
-        вызов платит парсинг индекса VPK, дальше результат кэшируется.
+        Скан: ключи VPK игры вида materials/skybox/<имя>up.vmt (грань «up»
+        есть у каждого неба, одного суффикса достаточно); HDR-варианты
+        (<имя>_hdr) — это то же небо, отбрасываем.
+
+        Смотрим и в hl2/: TF2 монтирует контент Half-Life 2, и его небеса
+        игрой используются (см. TF2Paths.skybox_vpks). Пока скан читал только
+        tf2_misc_dir.vpk, 25 небес из 47 не показывались вовсе.
+
+        Любая проблема (нет папки/vpk/библиотеки) — молча возвращаем фолбэк:
+        список небес не критичен для работы. Вызов из UI-потока — принятый
+        компромисс: первый вызов платит парсинг индексов VPK, дальше результат
+        кэшируется.
         """
         cached = _sky_names_cache.get(tf2_root_dir)
         if cached is not None:
             return cached
         names = set(STOCK_SKY_NAMES)
         try:
-            misc_vpk = os.path.join(tf2_root_dir, "tf", "tf2_misc_dir.vpk")
-            if tf2_root_dir and os.path.exists(misc_vpk):
-                pak = open_vpk_cached(misc_vpk)
+            from src.services.tf2_paths import TF2Paths
+            for vpk_path in TF2Paths.skybox_vpks(tf2_root_dir):
+                pak = open_vpk_cached(vpk_path)
                 if pak is not None:
                     names |= SkyboxService._scan_sky_names(pak)
         except Exception as e:
