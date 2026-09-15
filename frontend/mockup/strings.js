@@ -62,6 +62,52 @@ export const EN = {
   'Сделать командным': 'Make team-colored',
   'Разделить на части': 'Split into parts',
   'Убрать свою модель': 'Remove custom model',
+  // Подгонка импортированной модели (OBJ/GLB)
+  'Масштаб': 'Scale',
+  'Сдвиг': 'Offset',
+  'Вокруг X': 'Around X',
+  'Вокруг Y (вверх)': 'Around Y (up)',
+  'Вокруг Z (вдоль ствола)': 'Around Z (along the barrel)',
+  'Подгонка есть только у импортированной модели': 'Fitting is only for imported models',
+  'упрощено: {} → {} треугольников': 'simplified: {} → {} triangles',
+  'Среди выбранных файлов нет модели': 'None of the selected files is a model',
+  'Масштабировать': 'Scale & fit',
+  'Подгонка': 'Fitting',
+  'Двигать (G)': 'Move (G)',
+  'Вращать (R)': 'Rotate (R)',
+  'Масштаб (S)': 'Scale (S)',
+  'Двигать': 'Move',
+  'Вращать': 'Rotate',
+  'Сбросить подгонку': 'Reset fitting',
+  'Поворот, °': 'Rotation, °',
+  'Y (вверх)': 'Y (up)',
+  'Z (вдоль ствола)': 'Z (along the barrel)',
+  'Подогнать размер, поворот и положение по призраку оригинала':
+    'Fit size, rotation and position to the ghost of the original',
+  'SMD из Blender или OBJ/GLB с сайта; MTL и текстуры выберите вместе с моделью':
+    'SMD from Blender or OBJ/GLB from a website; pick the MTL and textures together with the model',
+  'текстур из файла: {}': 'textures from the file: {}',
+  'Упрощение недоступно: нет tools/meshoptimizer/meshoptimizer.dll':
+    'Simplification unavailable: tools/meshoptimizer/meshoptimizer.dll is missing',
+  'OBJ повреждён: грань ссылается на несуществующую вершину':
+    'OBJ is damaged: a face references a missing vertex',
+  'В файле нет ни одного треугольника': 'The file has no triangles',
+  'Формат {} не поддерживается: нужен OBJ, GLB или glTF':
+    'Format {} is not supported: use OBJ, GLB or glTF',
+  'Рядом с glTF нет файла {} — сохраните модель как GLB (один файл)':
+    'File {} is missing next to the glTF — save the model as GLB (single file)',
+  '{} треугольников — лимит игры {}. Упростите модель в редакторе':
+    '{} triangles — the game limit is {}. Simplify the model in an editor',
+  '{} вершин (после разрезания по швам и рёбрам) — лимит игры {}. Упростите модель в редакторе':
+    '{} vertices (after splitting by seams and hard edges) — the game limit is {}. Simplify the model in an editor',
+  '{} материалов — лимит игры {}. Объедините материалы в редакторе':
+    '{} materials — the game limit is {}. Merge materials in an editor',
+  'glTF повреждён или использует расширение, которое не поддерживается ({})':
+    'glTF is damaged or uses an unsupported extension ({})',
+  'OBJ повреждён: строка «{}» ({})': 'OBJ is damaged: line «{}» ({})',
+  'glTF не разобран: {}': 'glTF could not be parsed: {}',
+  'GLB без JSON-описания': 'GLB without a JSON chunk',
+  'glTF ссылается на буфер, которого нет в файле': 'glTF references a buffer that is not in the file',
   'Стиль': 'Style',
   'Стиль шапки': 'Cosmetic style',
   'Классы для сборки': 'Classes to build',
@@ -285,16 +331,15 @@ export const EN = {
   // ── Своя модель ───────────────────────────────────────────────────────
   'Своя модель убрана': 'Custom model removed',
   'Конвертация': 'Converting',
-  'Что это за модель': 'What kind of model is this',
+  'Как использовать модель?': 'How to use the model?',
   'Материалы модели:': 'Model materials:',
   'Материалов в модели не нашлось.': 'No materials found in the model.',
-  'Готовая — со своими материалами': 'Finished — with its own materials',
-  'Карточки возьмутся из самой модели, будет доступна правка QC':
-    'The cards come from the model itself, and QC editing becomes available',
-  'Только геометрия — текстуры игровые':
-    'Geometry only — the textures stay from the game',
-  'На экране ваша геометрия, карточки из игрового QC':
-    'Your geometry on screen, cards from the game QC',
+  'Со своими материалами и костями': 'With its own materials and bones',
+  'Каждый материал модели получит свой слот текстуры, кости с игровыми именами оживут в анимациях, QC можно править. Для моделей, сделанных под это оружие':
+    'Every material of the model gets its own texture slot, bones named like in the game animate, the QC is editable. For models made for this weapon',
+  'Только форма — материалы оружия': 'Shape only — weapon materials',
+  'Все материалы модели схлопнутся в материал оружия: одна текстура на всё, кости игровые. Для моделей с сайта и простых замен':
+    'All materials collapse into the weapon material: one texture for everything, game bones. For downloaded models and simple swaps',
   'Загрузить': 'Load',
   'Своя модель: материалы её собственные':
     'Custom model: its own materials',
@@ -635,7 +680,6 @@ export const EN = {
   'Эту точку эффект использует': 'The effect uses this point',
   'В кэше нет разобранных моделей — откройте модель на вкладке оружия или шапок, и она появится здесь':
     'The cache has no decompiled models — open a model on the weapons or cosmetics tab and it will show up here',
-  'Модель из кэша декомпиляции': 'A model from the decompile cache',
   'Показать': 'Show',
   'Сборка меша модели…': 'Building the model mesh…',
   '— не выбрана —': '— none —',
@@ -665,10 +709,20 @@ export const EN = {
   'Поиск': 'Search',
   'руки': 'hands',
   'Игроки': 'Players',
+  'корень': 'root',
+  'Классы': 'Classes',
+  'Из кэша': 'From cache',
+  'Ничего не найдено': 'Nothing found',
+  'Какой класс': 'Which class',
+  'У этой шапки своя модель на каждый класс.': 'This cosmetic has its own model per class.',
+  'Модель для точек': 'Model for control points',
+  'Разбор модели…': 'Decompiling the model…',
+  'Для «{}» модель не найти': 'No model can be found for “{}”',
+  'QC после разбора не найден': 'No QC after decompiling',
+  'У шапки нужен путь модели': 'A cosmetic needs its model path',
+  'У «{}» нет модели': '“{}” has no model',
   'Косметика': 'Cosmetics',
   'Руки': 'Hands',
-  'Только то, что уже открывали на вкладках оружия и шапок: разбор модели долгий и делается там.':
-    'Only what has been opened on the weapons and hats tabs: decompiling is slow and happens there.',
   'Фон': 'Backdrop',
   'Тёмный, серый или светлый фон кадра: полупрозрачные слои эффекта видны только на светлом':
     'Dark, grey or light backdrop: translucent layers of an effect only show on a light one',

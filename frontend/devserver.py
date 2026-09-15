@@ -156,6 +156,8 @@ ALLOWED = {
     "particle_control_points": api.particle_control_points,
     "particle_models": api.particle_models,
     "particle_model_scene": api.particle_model_scene,
+    "particle_model_load": api.particle_model_load,
+    "set_custom_fit": api.set_custom_fit,
     "particle_materials": api.particle_materials,
     "set_particle_texture": api.set_particle_texture,
     "reset_particle_texture": api.reset_particle_texture,

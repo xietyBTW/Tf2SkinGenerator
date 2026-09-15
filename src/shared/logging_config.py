@@ -38,7 +38,14 @@ def setup_logging(
     logger.handlers.clear()
     
     # Консольный handler
-    if console_output:
+    if console_output and sys.stdout is not None:
+        # Консоль Windows живёт в cp1251: стрелки и галочки из сообщений
+        # роняли handler трассировкой на каждую запись. Знак вместо символа
+        # дешевле, чем чистить все сообщения.
+        try:
+            sys.stdout.reconfigure(errors='replace')
+        except (AttributeError, ValueError):
+            pass
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setLevel(logging.DEBUG)
         console_handler.setFormatter(formatter)

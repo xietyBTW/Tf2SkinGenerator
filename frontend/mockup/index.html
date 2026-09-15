@@ -178,8 +178,9 @@
       <div class="viewport">
         <!-- Тот же viewer3d.html, что работает в окне приложения: сервер
              отдаёт его из src/static, второй копии нет. -->
+        <!-- pointer-lock: подгонка (G/R/S) захватывает курсор, как Blender. -->
         <iframe class="viewport__frame" id="viewer" title="Модель"
-                src="/viewer/viewer3d.html"></iframe>
+                allow="pointer-lock" src="/viewer/viewer3d.html"></iframe>
         <!-- Частицы рисует свой движок (particles3d.html) — тот же, что в
              приложении. Адрес ставится при первом входе в раздел: грузить
              второй three.js ради неоткрытой вкладки незачем. -->
@@ -401,6 +402,77 @@
           <span class="label parts__head">Части</span>
         </div>
 
+        <!-- ═══ Подгонка своей модели ═════════════════════════════════════
+             Та же палитра поверх кадра, что у частей: подгоняют по самой
+             модели (гизмо в кадре), и место инструменту рядом с ней. Призрак
+             оригинала виден только в этом режиме. Режимы частей и подгонки
+             взаимоисключающие: у обоих свой захват мыши в кадре. -->
+        <div class="parts ptools" id="fitpanel" hidden>
+          <div class="ptools__bar">
+            <div class="ptools__body">
+              <button class="ptools__btn" type="button" data-tool="translate"
+                      title="Двигать (G)" aria-label="Двигать">
+                <svg viewBox="0 0 16 16" aria-hidden="true">
+                  <path d="M8 2v12M2 8h12"/><path d="M6 4 8 2l2 2M6 12l2 2 2-2M4 6 2 8l2 2M12 6l2 2-2 2"/>
+                </svg>
+              </button>
+              <button class="ptools__btn" type="button" data-tool="rotate"
+                      title="Вращать (R)" aria-label="Вращать">
+                <svg viewBox="0 0 16 16" aria-hidden="true">
+                  <path d="M13 8a5 5 0 1 1-1.5-3.5"/><path d="M11.5 1.5v3h-3"/>
+                </svg>
+              </button>
+              <button class="ptools__btn is-active" type="button" data-tool="scale"
+                      title="Масштаб (S)" aria-label="Масштаб">
+                <svg viewBox="0 0 16 16" aria-hidden="true">
+                  <path d="M2.5 8.5v5h5"/><path d="M13.5 2.5 6 10"/><path d="M9.5 2.5h4v4"/>
+                </svg>
+              </button>
+
+              <span class="ptools__sep"></span>
+
+              <button class="ptools__btn" type="button" id="fit-reset"
+                      title="Сбросить подгонку" aria-label="Сбросить">
+                <svg viewBox="0 0 16 16" aria-hidden="true">
+                  <path d="M3 8a5 5 0 1 0 1.5-3.5"/><path d="M4.5 1.5v3h3"/>
+                </svg>
+              </button>
+              <button class="ptools__btn" type="button" id="fit-done"
+                      title="Готово" aria-label="Готово">
+                <svg viewBox="0 0 16 16" aria-hidden="true">
+                  <path d="M3 8.5 6.5 12 13 4"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          <!-- Те же числа, что крутит гизмо: в осях оружия (Y вверх, Z вдоль
+               ствола). Правятся и руками — точные 90° мышью не поймать. -->
+          <div class="ptools__opts">
+            <span class="label ptools__title">Подгонка</span>
+            <label class="parts__strength">
+              Масштаб
+              <input class="input input--num" id="fit-scale" type="number" step="0.1" min="0.001" value="1">
+            </label>
+            <div class="fit__group">
+              <span class="label">Поворот, °</span>
+              <div class="fit__row">
+                <input class="input input--num" id="fit-rx" type="number" step="15" value="0" title="Вокруг X">
+                <input class="input input--num" id="fit-ry" type="number" step="15" value="0" title="Вокруг Y (вверх)">
+                <input class="input input--num" id="fit-rz" type="number" step="15" value="0" title="Вокруг Z (вдоль ствола)">
+              </div>
+            </div>
+            <div class="fit__group">
+              <span class="label">Сдвиг</span>
+              <div class="fit__row">
+                <input class="input input--num" id="fit-x" type="number" step="1" value="0" title="X">
+                <input class="input input--num" id="fit-y" type="number" step="1" value="0" title="Y (вверх)">
+                <input class="input input--num" id="fit-z" type="number" step="1" value="0" title="Z (вдоль ствола)">
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- Подсказка — понизу кадра, вне колонки: она длинная, и в панели
              шириной с ползунок из неё получался бы столбец из одного слова. -->
         <span class="parts__hint" id="parts-hint"></span>
@@ -501,7 +573,12 @@
                   title="Вернуть правку (Ctrl+Y)">Вернуть</button>
         </div>
         <div class="acts" id="model-acts">
-          <button class="textbtn textbtn--sm" data-cond="replace">Заменить модель</button>
+          <button class="textbtn textbtn--sm" data-cond="replace"
+                  title="SMD из Blender или OBJ/GLB с сайта; MTL и текстуры выберите вместе с моделью">Заменить модель</button>
+          <!-- Подгонка своей модели под оружие: призрак оригинала в кадре и
+               гизмо, как в Blender. Появляется, когда своя модель уже стоит. -->
+          <button class="textbtn textbtn--sm" id="fitbtn" hidden
+                  title="Подогнать размер, поворот и положение по призраку оригинала">Масштабировать</button>
           <button class="textbtn textbtn--sm" data-cond="qc">Редактировать QC</button>
           <button class="textbtn textbtn--sm" id="maketeam" data-cond="team">Сделать командным</button>
           <button class="textbtn textbtn--sm" id="parts" data-cond="parts">Разделить на части</button>
@@ -759,6 +836,23 @@
 
      Тянуть, а не вводить числа: подобрать поворот логотипа на глаз можно, а
      назвать его в градусах — нет. -->
+<!-- Модель для точек частиц: тот же каталог, что слева, только в окне.
+     Кэш декомпиляции общий с вкладками оружия и шапок: открытое там
+     приходит сразу, остальное разбирает Crowbar. -->
+<dialog class="ask cpmodel" id="cpmodeldlg">
+  <form method="dialog" class="ask__body">
+    <p class="label ask__title">Модель для точек</p>
+    <div class="cpmodel__tabs" id="cpm-tabs"></div>
+    <div class="cpmodel__row" id="cpm-class"></div>
+    <input class="input" id="cpm-find" type="search" placeholder="Поиск">
+    <p class="ask__text" id="cpm-note" hidden></p>
+    <div class="catalog__grid cpmodel__grid" id="cpm-grid"></div>
+    <div class="ask__acts">
+      <button class="textbtn" type="button" id="cpm-cancel">Отмена</button>
+    </div>
+  </form>
+</dialog>
+
 <dialog class="ask place" id="placedlg">
   <div class="ask__body">
     <div class="dlg__head">

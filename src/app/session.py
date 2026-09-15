@@ -160,6 +160,24 @@ def _qc_is_y_up(qc_path: str) -> bool:
     return re.search(r'(?im)^\s*\$upaxis\s+"?y', text) is not None
 
 
+def _qc_is_player_item(qc_path: str) -> bool:
+    """Косметика/реквизит игрока по `$modelname` (…/player/items/…)."""
+    try:
+        with open(qc_path, encoding='utf-8', errors='replace') as f:
+            text = f.read()
+    except OSError:
+        return False
+    found = re.search(r'(?im)^\s*\$modelname\s+"([^"]+)"', text)
+    return bool(found and 'player/items/' in found.group(1).replace('\\', '/').lower())
+
+
+def _angles_y_up_to_z_up(angles) -> List[float]:
+    """Углы Source (pitch, yaw, roll) после поворота Y-up → Z-up."""
+    from src.services.model_attachments import angle_matrix, concat_transforms, matrix_angles
+    rot = [[1.0, 0.0, 0.0, 0.0], [0.0, 0.0, -1.0, 0.0], [0.0, 1.0, 0.0, 0.0]]
+    return list(matrix_angles(concat_transforms(rot, angle_matrix(*angles))))
+
+
 def _obj_y_up_to_z_up(obj_text: str) -> str:
     """Поворот OBJ из Y-up в Z-up: (x, y, z) → (x, −z, y), для вершин и нормалей."""
     out = []
@@ -172,6 +190,23 @@ def _obj_y_up_to_z_up(obj_text: str) -> str:
                 out.append(line)
                 continue
             out.append(f"{parts[0]} {x:.6f} {-z:.6f} {y:.6f}")
+        else:
+            out.append(line)
+    return '\n'.join(out) + '\n'
+
+
+def _obj_shift(obj_text: str, delta) -> str:
+    """Сдвиг вершин OBJ на −delta (нормали не трогаем)."""
+    out = []
+    for line in obj_text.splitlines():
+        parts = line.split()
+        if len(parts) == 4 and parts[0] == 'v':
+            try:
+                x, y, z = (float(v) for v in parts[1:])
+            except ValueError:
+                out.append(line)
+                continue
+            out.append(f"v {x - delta[0]:.6f} {y - delta[1]:.6f} {z - delta[2]:.6f}")
         else:
             out.append(line)
     return '\n'.join(out) + '\n'
@@ -795,10 +830,16 @@ class AppSession:
         # Чужой мод из VPK — тоже оружие, просто опознанное по путям внутри
         # файла. Показываем его тем же видом: скелет и анимации игровые, меш
         # из мода.
-        custom_smd = ''
+        custom_smd, keep = '', False
         if not key and self.preview.custom_vpk_mode:
             key = self.preview.custom_vpk_weapon or ''
-            custom_smd = self.preview.custom_vpk_smd or ''
+            custom_smd, keep = self.preview.custom_vpk_smd or '', True
+        elif self.preview.custom_smd_path:
+            # Своя модель (SMD либо импорт OBJ/GLB с запечённой подгонкой)
+            # едет в руку тем же слиянием, что и в мод: одна кость — жёсткий
+            # кусок на хвате, кости под игровыми именами — с анимацией частей.
+            custom_smd = self.preview.custom_smd_path
+            keep = bool(self.preview.custom_keep_materials)
         if not key:
             return {'error': 'Вид от первого лица есть только у оружия'}
 
@@ -820,8 +861,7 @@ class AppSession:
         # Панель приложения берёт тот же корень (`_tf2_root_for_fp`).
         self.viewmodel.load(key, mode, paths['misc_vpk'], paths['textures_vpk'],
                             paths['root'], action=action, lang=lang,
-                            custom_smd=custom_smd,
-                            keep_materials=bool(custom_smd))
+                            custom_smd=custom_smd, keep_materials=keep)
         return {'started': True, 'action': action, 'rig': _viewmodel_rig()}
 
     def leave_first_person(self) -> Dict[str, Any]:
@@ -2228,6 +2268,111 @@ class AppSession:
             return 'weapon', names.get('c:' + base, base)
         return 'other', base
 
+    def particle_model_load(self, mode: str, key: str = '',
+                            lang: str = 'ru') -> Dict[str, Any]:
+        """
+        Модель для точек по предмету каталога: класс, шапка, оружие.
+
+        Кэш декомпиляции — тот же, что у вкладок оружия и шапок
+        (`ensure_decompiled`): что уже открывали, придёт сразу, остальное
+        разберёт Crowbar. Это секунды-минуты, поэтому фоном: ответ — только
+        «начали», сцена приезжает событием `cp_model`, ход — `progress`.
+
+        Args:
+            mode: режим каталога (`scout_c_scattergun`, `scout_body`,
+                  `scout_hands`, `hat`).
+            key:  у шапки — путь MDL (у мультиклассовой — уже выбранного
+                  класса), у остальных не нужен.
+        """
+        from src.services import model_decompile_service
+        from src.services.model_decompile_service import DecompileError
+
+        paths = self.tf2_paths()
+        if 'error' in paths:
+            return paths
+        try:
+            weapon_key, candidates = self._cp_model_candidates(mode, key, paths['root'])
+        except ValueError as exc:
+            return {'error': str(exc)}
+        if not candidates:
+            return {'error': f'Для «{mode}» модель не найти'}
+
+        seq = self._cp_model_seq = getattr(self, '_cp_model_seq', 0) + 1
+        misc_vpk = paths['misc_vpk']
+        # Подписи стадий — те же, что у 3D-превью: одна и та же работа.
+        from src.services.preview_3d_worker import Preview3DWorker
+        t = Preview3DWorker._PROGRESS.get(lang, Preview3DWorker._PROGRESS['en'])
+
+        def run() -> None:
+            try:
+                found = model_decompile_service.ensure_decompiled(
+                    weapon_key, misc_vpk, candidates,
+                    cancelled=lambda: self._cp_model_seq != seq,
+                    on_progress=lambda stage: self._put(
+                        'progress', text=t.get(stage.value, stage.value)))
+            except DecompileError as exc:
+                self._put('cp_model', error=str(exc))
+                return
+            if self._cp_model_seq != seq:
+                return                       # выбрали другую — эта не нужна
+            if found is None:
+                self._put('cp_model', error=t['not_found'])
+                return
+            qc = self._qc_in(found.directory)
+            if not qc:
+                self._put('cp_model', error='QC после разбора не найден')
+                return
+            scene = self.particle_model_scene(qc)
+            if 'error' in scene:
+                self._put('cp_model', error=scene['error'])
+                return
+            self._put('cp_model', scene=scene, qc=qc)
+
+        threading.Thread(target=run, daemon=True, name=f'cp-model-{seq}').start()
+        return {'started': True}
+
+    @staticmethod
+    def _cp_model_candidates(mode: str, key: str, root: str):
+        """(ключ кэша, пути MDL в VPK) — тем же правилом, что у 3D-превью
+        (`Preview3DWorker._mdl_candidates`), чтобы кэш был общий."""
+        from src.data.player_characters import PLAYER_BODY_MODE_KEYS
+        from src.data.player_hands import HAND_MODE_KEYS
+        from src.domain.preview.model_key import model_key_for
+        from src.services.extract_model_service import ExtractModelService
+        from src.services.tf2_paths import build_hat_mdl_candidates
+
+        if mode == 'hat':
+            if not key:
+                raise ValueError('У шапки нужен путь модели')
+            return key, build_hat_mdl_candidates(key)
+        if mode in PLAYER_BODY_MODE_KEYS:
+            mdl = model_key_for(mode)
+            return mdl, [mdl]
+        if mode in HAND_MODE_KEYS:
+            arm = model_key_for(mode)
+            return arm, ExtractModelService._build_paths_to_try(mode, arm, root)
+        weapon_key = model_key_for(mode)
+        if not weapon_key:
+            raise ValueError(f'У «{mode}» нет модели')
+        return weapon_key, ExtractModelService._build_paths_to_try(mode, weapon_key, root)
+
+    @staticmethod
+    def _qc_in(directory: str) -> Optional[str]:
+        """QC разобранной модели: по мете кэша, иначе единственный *.qc."""
+        import glob
+        import json
+
+        meta = os.path.join(directory, '_cache_meta.json')
+        try:
+            with open(meta, encoding='utf-8') as f:
+                name = json.load(f).get('qc_filename')
+            if name and os.path.isfile(os.path.join(directory, name)):
+                return os.path.join(directory, name)
+        except (OSError, ValueError):
+            pass
+        found = sorted(glob.glob(os.path.join(directory, '*.qc')))
+        return found[0] if found else None
+
     def particle_model_scene(self, qc: str) -> Dict[str, Any]:
         """
         Меш модели и её точки крепления для сцены превью.
@@ -2241,7 +2386,7 @@ class AppSession:
         from pathlib import Path
 
         from src.services.model_attachments import (
-            attachments_from_qc, reference_smd_for_qc,
+            attachments_from_qc, reference_smd_for_qc, root_bone_from_qc,
         )
         from src.services.model_materials import resolve_model_textures
         from src.services.smd_to_obj_service import SmdToObjService
@@ -2281,17 +2426,43 @@ class AppSession:
         # частиц — Source, Z вверх. Без поворота разведчик лежал на полу и
         # свечение «на игроке» садилось на лежачего. Поворот тот же, что
         # делает studiomdl: (x, y, z) → (x, −z, y). Точки крепления — так же.
-        y_up = _qc_is_y_up(qc)
+        # Косметика собрана против того же скелета и тоже лежит Y вверх, хотя
+        # `$upaxis` Crowbar ей не пишет (bip_head у harmburg — (0, 75.7, −2.9)):
+        # верх шапки смотрел вбок.
+        y_up = _qc_is_y_up(qc) or _qc_is_player_item(qc)
         if y_up:
             obj = _obj_y_up_to_z_up(obj)
+
+        def point(a):
+            return {'name': a.name, 'bone': a.bone,
+                    'pos': ([a.pos[0], -a.pos[2], a.pos[1]] if y_up else list(a.pos)),
+                    'angles': _angles_y_up_to_z_up(a.angles) if y_up else list(a.angles)}
+
+        # Корневая кость — куда игра вешает анюжуал косметики
+        # (`attach_to_rootbone 1`): у шапки это bip_head на высоте головы, и
+        # точка 0 в нуле сцены стояла бы у ног.
+        root = root_bone_from_qc(qc)
+        points = [point(a) for a in order]
+        root_pt = point(root) if root else None
+
+        # Косметику ставим точкой подвеса в ноль сцены: новые шапки собраны на
+        # высоте головы (bip_head на ~75), старые — вокруг нуля, и без сдвига
+        # шапка висела под потолком, а камера смотрела в пустой пол. Игрока и
+        # оружие не трогаем: игрок стоит на сетке, оружие и так у нуля.
+        if _qc_is_player_item(qc):
+            anchor = next((p for p in points
+                           if p['name'].lower() in ('unusual', 'unusual_0')),
+                          root_pt)
+            if anchor:
+                delta = list(anchor['pos'])
+                obj = _obj_shift(obj, delta)
+                for p in points + ([root_pt] if root_pt else []):
+                    p['pos'] = [a - b for a, b in zip(p['pos'], delta)]
         return {
             'obj': obj,
             'textures': textures,
-            'attachments': [{'name': a.name, 'bone': a.bone,
-                             'pos': ([a.pos[0], -a.pos[2], a.pos[1]] if y_up
-                                     else list(a.pos)),
-                             'angles': list(a.angles)}
-                            for a in order],
+            'attachments': points,
+            'root': root_pt,
         }
 
     # ── Текстуры эффекта ───────────────────────────────────────────────── #
@@ -2698,49 +2869,50 @@ class AppSession:
         почти наверняка готовая модель.
         """
         import os
-        import tempfile
 
         from src.domain.preview.material_cards import editable_material_cards
-        from src.services import carrier_model
-        from src.services.smd_to_obj_service import SmdToObjService
+        from src.services import mesh_import_service
 
         pending = self._pending_model
-        if keep is not None and pending and pending['smd'] == (path or pending['smd']):
+        if keep is not None and pending and pending['src'] == (path or pending['src']):
             # Второй заход после ответа: SMD уже сконвертирован.
             smd, obj, materials = pending['smd'], pending['obj'], pending['materials']
+            source, fit = pending['source'], pending['fit']
         else:
             if not path or not os.path.isfile(path):
                 return {'error': 'Файл модели не найден'}
-            obj_dir = tempfile.mkdtemp(prefix='tf2_smd_preview_')
-            obj = os.path.join(obj_dir, 'model.obj')
-            # Пушка-НОСИТЕЛЬ остаётся в кадре: у праздничного оружия своей
-            # моделью заменяют гирлянду, а не пушку под ней. У обычного
-            # оружия носителя нет, и список пуст — на них это не влияет.
-            carrier = self._carrier_for_preview()
-            ok, materials = SmdToObjService.convert(
-                path, obj, extra_smd_paths=list(carrier.smds))
-            if not ok or not os.path.exists(obj):
+            # Источник помним у любой модели: подгонка (масштаб, поворот,
+            # сдвиг) пересобирает SMD из него. У OBJ/GLB SMD делаем сами.
+            source, fit = path, mesh_import_service.Fit()
+            try:
+                smd = self._bake_imported_mesh(path, fit)
+            except mesh_import_service.MeshImportError as exc:
+                return {'error': str(exc)}
+            obj, materials = self._custom_model_obj(smd, ghost=True)
+            if obj is None:
                 return {'error': 'SMD не сконвертировался'}
-            smd = path
-            # Материалы носителя предмету не принадлежат: карточек по ним нет
-            # и в сборку они не идут — иначе своя модель гирлянды тянула бы за
-            # собой ещё и текстуру базового обреза.
-            own = carrier_model.materials(carrier)
-            materials = [m for m in (materials or []) if m not in own]
 
         cards = [c.name for c in editable_material_cards(materials)]
         if keep is None:
-            self._pending_model = {'smd': smd, 'obj': obj, 'materials': materials}
+            self._pending_model = {'src': path, 'smd': smd, 'obj': obj,
+                                   'materials': materials, 'source': source,
+                                   'fit': fit}
             return {'ask_keep': True, 'materials': cards,
                     'recommend_keep': len(cards) > 1}
 
         self._pending_model = None
         with self._lock:
             p = self.preview
+            # Главный материал ИГРОВОЙ модели — до сброса: карточки «только
+            # геометрии» приедут теми же именами, но позже, а текстуру из
+            # файла класть надо сейчас.
+            game_main = p.textures.stable_main()
             p.custom_smd_path = smd
             p.custom_obj_path = obj
             p.custom_keep_materials = bool(keep)
             p.custom_qc_text = None
+            p.custom_source_path = source
+            p.custom_fit = fit.to_dict() if fit else None
             p.reset_skins()
             # Командные кадры и вариант остались от ИГРОВОЙ модели — на чужой
             # геометрии они показывали бы не то. Для «только геометрии» их
@@ -2753,6 +2925,9 @@ class AppSession:
 
         # Габариты считает та же дорожка, что и у игровой модели.
         self.controller.stop()
+        # Сцена в руках собрана под ПРОШЛУЮ геометрию: забыть её, иначе
+        # следующий запрос вида от первого лица получит одни дорожки.
+        self.viewmodel.stop()
         self._on_model_ready(obj, '')
         # Подложку носителя `stop()` не отменяет: она про геометрию в кадре, а
         # та никуда не делась. Без возврата пушка под своей гирляндой серая.
@@ -2771,17 +2946,168 @@ class AppSession:
                 p.weapon_key, mode, paths['misc_vpk'], paths['textures_vpk'],
                 lang=lang, geometry=False)
 
+        # Базовый цвет из MTL/glTF — сразу в слоты: «готовой» модели по её
+        # материалам, «только геометрии» — первый найденный на главный
+        # игровой материал (все её материалы схлопнутся в него).
+        placed = self._place_imported_textures(
+            source, cards if keep else [game_main] if game_main else [])
+
         self._autosave()
         logger.info(f"своя модель: {smd} keep={bool(keep)} материалов={len(cards)}")
         return {'started': True, 'keep': bool(keep), 'materials': cards,
-                'obj': obj}
+                'obj': obj, 'fit': p.custom_fit, 'textures': placed,
+                'simplified': (getattr(self, '_imported_simplified', None)
+                               if source else None)}
 
-    def drop_custom_model(self) -> Dict[str, Any]:
-        """Забывает свою модель — превью вернётся к игровой при перезагрузке."""
+    def _place_imported_textures(self, source: Optional[str], cards: List[str]) -> int:
+        """Кладёт текстуры импортированной модели на карточки; сколько легло.
+
+        `cards` — материалы «готовой» модели (свои имена) либо один главный
+        игровой материал «только геометрии»: в него схлопнутся все её
+        материалы, туда же идёт первая найденная картинка.
+        """
+        cached = getattr(self, '_imported_mesh', None)
+        if not source or not cached or cached[0] != source or not cards:
+            return 0
+        textures = cached[1].textures if cached[1] is not None else {}
+        if not textures:
+            return 0
+        by_card = [(m, textures[m]) for m in cards if m in textures]
+        pairs = by_card or [(cards[0], next(iter(textures.values())))]
         with self._lock:
-            self.preview.reset_custom_model()
-            self.preview.custom_qc_text = None
+            for material, path in pairs:
+                self.preview.textures.set_texture(material, path)
+        return len(pairs)
+
+    def _custom_model_obj(self, smd: str, ghost: bool):
+        """OBJ своей модели для превью: (путь, материалы модели) или (None, []).
+
+        `ghost` — добавить полупрозрачный оригинал оружия ориентиром для
+        подгонки: без него человек не знает, куда повернуть и насколько
+        увеличить. Его материалы идут с приставкой `ghost:` — вьювер по ней
+        рисует призрак, а карточек по ним нет.
+        """
+        import os
+        import tempfile
+
+        from src.services import carrier_model, decompile_cache
+        from src.services.smd_service import SMDService
+        from src.services.smd_to_obj_service import MeshPart, SmdToObjService
+
+        obj_dir = tempfile.mkdtemp(prefix='tf2_smd_preview_')
+        obj = os.path.join(obj_dir, 'model.obj')
+        # Пушка-НОСИТЕЛЬ остаётся в кадре: у праздничного оружия своей
+        # моделью заменяют гирлянду, а не пушку под ней. У обычного
+        # оружия носителя нет, и список пуст — на них это не влияет.
+        carrier = self._carrier_for_preview()
+        parts = [MeshPart(smd_path=smd, extra_smd_paths=tuple(carrier.smds))]
+        if ghost:
+            key = self.preview.weapon_key or ''
+            qc = decompile_cache.find_cached_qc_for_weapon(key) if key else None
+            ref = SMDService.find_reference_smd(os.path.dirname(qc), key) if qc else None
+            if ref:
+                parts.append(MeshPart(smd_path=ref, material_prefix='ghost:'))
+            else:
+                logger.info('призрак оригинала не показан: модель ещё не разобрана')
+        ok, materials = SmdToObjService.convert_parts(parts, obj)
+        if not ok or not os.path.exists(obj):
+            return None, []
+        # Материалы носителя и призрака предмету не принадлежат: карточек по
+        # ним нет и в сборку они не идут — иначе своя модель гирлянды тянула
+        # бы за собой ещё и текстуру базового обреза.
+        own = carrier_model.materials(carrier)
+        materials = [m for m in (materials or [])
+                     if m not in own and not m.startswith('ghost:')]
+        return obj, materials
+
+    def _bake_imported_mesh(self, source: str, fit) -> str:
+        """SMD с запечённой подгонкой: из OBJ/GLB — свой, из SMD — тот же с
+        пересчитанными вершинами; лимиты studiomdl — ошибкой."""
+        import os
+        import tempfile
+
+        from src.services import mesh_import_service
+
+        # Разобранный меш держим: подгонка правится ползунком, и разбирать
+        # 65k треугольников заново на каждый шаг — секунда впустую.
+        cached = getattr(self, '_imported_mesh', None)
+        if cached and cached[0] == source:
+            _, mesh, out_dir = cached
+        elif source.lower().endswith('.smd'):
+            # Свой SMD: кости и веса остаются, двигаются только вершины.
+            # Без подгонки файл идёт как есть — ничего не переписываем.
+            self._imported_simplified = None
+            if fit == mesh_import_service.Fit():
+                return source
+            out_dir = tempfile.mkdtemp(prefix='tf2_mesh_import_')
+            self._imported_mesh = (source, None, out_dir)
+            mesh = None
+        else:
+            mesh = mesh_import_service.load_mesh(source)
+            # Скульпт из интернета на сотни тысяч треугольников studiomdl не
+            # возьмёт — упрощаем сами, с сохранением UV; человеку об этом
+            # скажет ответ загрузки. Слишком много материалов так не лечится.
+            self._imported_simplified = None
+            if mesh_import_service.over_limits(mesh):
+                before = mesh.triangle_count
+                mesh = mesh_import_service.simplify(mesh)
+                self._imported_simplified = (before, mesh.triangle_count)
+            problem = mesh_import_service.check_limits(mesh)
+            if problem:
+                raise mesh_import_service.MeshImportError(problem)
+            if not mesh.has_uv:
+                logger.warning(f"у модели нет UV-развёртки: {source}")
+            # Одна папка на источник: SMD перезаписывается, а не плодится
+            # по 15 МБ на каждый шаг ползунка.
+            out_dir = tempfile.mkdtemp(prefix='tf2_mesh_import_')
+            self._imported_mesh = (source, mesh, out_dir)
+        stem = os.path.splitext(os.path.basename(source))[0]
+        out = os.path.join(out_dir, stem + '.smd')
+        if mesh is None:
+            return mesh_import_service.transform_smd(source, out, fit)
+        return mesh_import_service.write_smd(mesh, out, fit)
+
+    def set_custom_fit(self, fit: Optional[dict] = None) -> Dict[str, Any]:
+        """Подгонка импортированной модели: пересобирает SMD с запечённым
+        трансформом. Сцену превью не перегружает — вьювер крутит модель сам
+        тем же трансформом; SMD нужен сборке и виду от первого лица."""
+        from src.services import mesh_import_service
+
+        p = self.preview
+        if not p.custom_source_path:
+            return {'error': 'Подгонка есть только у импортированной модели'}
+        parsed = mesh_import_service.Fit.from_dict(fit)
+        try:
+            smd = self._bake_imported_mesh(p.custom_source_path, parsed)
+        except mesh_import_service.MeshImportError as exc:
+            return {'error': str(exc)}
+        with self._lock:
+            p.custom_smd_path = smd
+            p.custom_fit = parsed.to_dict()
+        self._autosave()
+        return {'fit': p.custom_fit}
+
+    def drop_custom_model(self, lang: str = 'ru') -> Dict[str, Any]:
+        """Забывает свою модель и возвращает в кадр игровую.
+
+        Раньше сброс был только в состоянии: в кадре и в альбоме оставались
+        своя геометрия и её карточки до перезагрузки предмета. Игровую модель
+        грузим той же дорожкой, что и выбор предмета — с её карточками и
+        стилями; правки текстур при этом остаются.
+        """
+        p = self.preview
+        key, mode = p.weapon_key, getattr(self, '_mode', '')
+        with self._lock:
+            p.begin_game_model()
+            p.custom_qc_text = None
         self._pending_model = None
+        self._imported_mesh = None
+        self.viewmodel.stop()        # сцена в руках была со своей моделью
+        paths = self.tf2_paths()
+        if key and mode and 'error' not in paths:
+            self.controller.load_game_model(
+                key, mode, paths['misc_vpk'], paths['textures_vpk'], lang=lang)
+            self.skins.detect(key, mode, paths['misc_vpk'], lang=lang)
         self._autosave()
         return {'dropped': True}
 
@@ -3106,7 +3432,8 @@ class AppSession:
         if not model:
             return {'error': 'Модель ещё не загружена'}
 
-        names = list(model.materials)
+        # Призрак оригинала (подгонка своей модели) — не часть предмета.
+        names = [n for n in model.materials if not n.startswith('ghost:')]
         if len(names) == 1:
             # У одноматериальной модели карточка ВСЕГДА служебная, как её ни
             # назови: вьювер знает материал по имени из SMD и присылает его,
@@ -4345,6 +4672,14 @@ class AppSession:
                                 and self.preview.custom_keep_materials),
             # Своя геометрия в кадре — можно предложить вернуть игровую.
             'has_custom': bool(self.preview.custom_smd_path),
+            # Подгонка есть только у импортированной модели (OBJ/GLB) и только
+            # пока она в кадре (custom_obj_path живёт один запуск): у SMD из
+            # Blender человек уже всё выставил сам, а вернувшаяся с диска
+            # работа показывает игровую модель — крутить её подгонкой нельзя.
+            'custom_fit': ((self.preview.custom_fit or {'scale': 1, 'rotate': [0, 0, 0],
+                                                        'offset': [0, 0, 0]})
+                           if self.preview.custom_source_path
+                           and self.preview.custom_obj_path else None),
             'framerate': self.preview.team_framerate,
             'skins': self.preview.textures.skin_info,
             'active_skin': self.preview.textures.active_skin,

@@ -186,6 +186,24 @@ class CustomModelTests(unittest.TestCase):
         self.assertIsNone(s.preview.custom_smd_path)
         self.assertIsNone(s.preview.custom_qc_text)
 
+    def test_dropping_the_model_brings_the_game_one_back(self):
+        """Сброс только в состоянии оставлял свою геометрию в кадре до
+        перезагрузки предмета — теперь игровая грузится тут же."""
+        from unittest.mock import patch
+        s = AppSession()
+        s._mode = 'scout_c_scattergun'
+        s.preview.weapon_key = 'c_scattergun'
+        s.preview.custom_smd_path = 'C:/models/my.smd'
+        s.preview.custom_source_path = 'C:/models/my.obj'
+        seen = {}
+        paths = {'misc_vpk': 'm', 'textures_vpk': 't', 'root': 'r', 'tf_dir': 'd'}
+        with patch.object(AppSession, 'tf2_paths', staticmethod(lambda: paths)),                 patch.object(s.controller, 'load_game_model',
+                             lambda key, mode, *a, **k: seen.update(key=key, mode=mode)),                 patch.object(s.skins, 'detect', lambda *a, **k: None),                 patch.object(s.viewmodel, 'stop', lambda: seen.update(fp='stopped')):
+            s.drop_custom_model()
+        self.assertEqual(seen, {'key': 'c_scattergun', 'mode': 'scout_c_scattergun',
+                                'fp': 'stopped'})
+        self.assertIsNone(s.preview.custom_source_path)
+
 
 class DiagnosticsReportTests(unittest.TestCase):
     """Отчёт диагностики отдаётся простыми значениями."""

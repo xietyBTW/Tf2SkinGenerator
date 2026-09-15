@@ -1015,6 +1015,31 @@ def test_referenced_control_points_ignores_range_fields():
     assert referenced_control_points(s) == [1]
 
 
+def test_referenced_control_points_skips_self_set_points():
+    """Анюжуал шапки (butterfly, лето 2026) сам расставляет точки 1-3 из
+    своих частиц, снаружи ему нужна только точка 0 — как и даёт игра."""
+    from src.services.particle_editor_service import referenced_control_points
+
+    kid = {"attrs": {}, "renderers": [], "emitters": [], "initializers": [],
+           "operators": [{"functionName": "Movement Lock to Control Point",
+                          "attrs": {"control_point_number": {"t": "integer", "v": 1}}},
+                         {"functionName": "Set control point positions",
+                          "attrs": {"first control point number": {"t": "integer", "v": 3}}}],
+           "forces": [{"functionName": "Pull towards control point",
+                       "attrs": {"control point number": {"t": "integer", "v": 2}}}],
+           "constraints": [], "children": []}
+    root = {"attrs": {}, "renderers": [], "emitters": [], "initializers": [],
+            "operators": [
+                {"functionName": "Movement Lock to Control Point",
+                 "attrs": {"control_point_number": {"t": "integer", "v": 0}}},
+                {"functionName": "Set child control points from particle positions",
+                 "attrs": {"first control point to set": {"t": "integer", "v": 1},
+                           "# of control points to set": {"t": "integer", "v": 2}}}],
+            "forces": [], "constraints": [],
+            "children": [{"delay": 0.0, "childName": "kid"}]}
+    assert referenced_control_points(root, {"fx": root, "kid": kid}) == [0]
+
+
 def test_attr_stats_tracks_value_spread():
     """Каталог копит разброс значения по эффектам игры: одного «примера»
     мало, чтобы понять, 0.1 — это норма или экзотика."""

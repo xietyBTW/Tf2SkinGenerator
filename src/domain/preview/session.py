@@ -44,7 +44,7 @@ from src.shared.constants import Team
 EDIT_FIELDS = (
     'textures', 'skin_overrides', 'australium_user_tex', 'force_team',
     'texture_maps', 'part_textures', 'part_colors',
-    'custom_smd_path', 'custom_qc_text',
+    'custom_smd_path', 'custom_qc_text', 'custom_source_path',
 )
 
 
@@ -87,6 +87,11 @@ class PreviewSession:
     custom_keep_materials: bool = False
     #: Отредактированный пользователем QC. None = авто-QC.
     custom_qc_text: Optional[str] = None
+    #: Импортированная модель (OBJ/GLB), из которой собран custom_smd_path:
+    #: по ней подгонку пересчитывают заново. None — SMD дал сам пользователь.
+    custom_source_path: Optional[str] = None
+    #: Подгонка импортированной модели: {scale, rotate, offset} в осях SMD.
+    custom_fit: Optional[dict] = None
     #: Точные имена материалов модели из SMD — для наложения текстур мода на
     #: правильные меши в режиме custom-VPK.
     custom_model_materials: List[str] = field(default_factory=list)
@@ -559,6 +564,8 @@ class PreviewSession:
             'custom_smd_path': self.custom_smd_path,
             'custom_keep_materials': bool(self.custom_keep_materials),
             'custom_qc_text': self.custom_qc_text,
+            'custom_source_path': self.custom_source_path,
+            'custom_fit': dict(self.custom_fit) if self.custom_fit else None,
         }
 
     def has_user_edits(self) -> bool:
@@ -604,6 +611,8 @@ class PreviewSession:
         self.custom_smd_path = edits.get('custom_smd_path') or None
         self.custom_keep_materials = bool(edits.get('custom_keep_materials'))
         self.custom_qc_text = edits.get('custom_qc_text') or None
+        self.custom_source_path = edits.get('custom_source_path') or None
+        self.custom_fit = dict(edits['custom_fit']) if edits.get('custom_fit') else None
 
     def forget_user_edits(self) -> None:
         """Сброс правок предмета — «начать с чистого» без смены предмета."""
@@ -640,6 +649,8 @@ class PreviewSession:
         self.custom_smd_path = None
         self.custom_obj_path = None
         self.custom_keep_materials = False
+        self.custom_source_path = None
+        self.custom_fit = None
 
     def reset_misc(self) -> None:
         """Забывает набор «Прочее» — его пересоберёт приход материалов модели.

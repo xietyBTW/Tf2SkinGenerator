@@ -458,6 +458,8 @@ export function closeParts() {
   marked.clear();
   const w = viewer();
   if (w) w.setPartsMode(false);
+  // Подгонка прячет свою кнопку, пока части открыты: сообщаем, что закрылись.
+  document.dispatchEvent(new Event('parts:changed'));
 }
 
 /** Полоса частей: крупные первыми, покрашенные помечены. */
@@ -465,6 +467,7 @@ export function showParts(res) {
   const bar = document.getElementById('partsbar');
   bar.querySelectorAll('.tag').forEach((b) => b.remove());
   bar.hidden = false;
+  document.dispatchEvent(new Event('parts:changed'));
 
   // Карту «треугольник → часть» вьювер получает по имени материала: у него
   // геометрия сгруппирована так же, как её отдал Python. Отдаём её ЗДЕСЬ, а не

@@ -14,4 +14,4 @@ export { fillTree, showParticleFrame, loadPcf, pickSystem } from './tree.js';
 export { showParams } from './params.js';
 export { showParticleMaterials } from './materials.js';
 export { systemMenu, buildParticles } from './actions.js';
-export { cpBox, cpFillIndexes } from './points.js';
+export { cpBox, cpFillIndexes, showCpModel } from './points.js';

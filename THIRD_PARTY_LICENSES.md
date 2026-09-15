@@ -37,6 +37,7 @@ No Valve game assets or proprietary Valve binaries are distributed with this pro
 | HLLib (`HLLib.dll`) | Read Half-Life/Source package files | Ryan Gregg | LGPL | https://nemstools.github.io/pages/Miscellaneous-HLLib.html |
 | DevIL (`DevIL.dll`) | Image loading library (used by VTFCmd) | DevIL / OpenIL project | LGPL | https://openil.sourceforge.net/ |
 | Crowbar (`CrowbarCommandLineDecomp.exe`) | Decompile Source engine models | ZeqMacaw | CC BY-SA 3.0 | https://github.com/ZeqMacaw/Crowbar |
+| meshoptimizer (`tools/meshoptimizer/meshoptimizer.dll`) | Mesh simplification with UV preservation for imported OBJ/GLB models (built from source by `scripts/build_meshoptimizer.ps1`, v1.2) | Arseny Kapoulkine | MIT | https://github.com/zeux/meshoptimizer |
 
 ### Notes on compliance
 

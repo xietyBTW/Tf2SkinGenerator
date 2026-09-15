@@ -138,6 +138,8 @@ export const particleControlPoints = (system) =>
 export const particleModels = () => call('particle_models');
 export const particleModelScene = (qc) =>
   call('particle_model_scene', { qc });
+export const particleModelLoad = (mode, key = '') =>
+  call('particle_model_load', { mode, key });
 export const particleMaterials = (system = '') =>
   call('particle_materials', { system });
 export const setParticleTexture = (material, path, max_size = 512) =>
@@ -273,6 +275,7 @@ export const logFolder    = () => call('log_folder', {});
 export const loadCustomModel = (path, keep = null) =>
   call('load_custom_model', { path, keep });
 export const dropCustomModel = () => call('drop_custom_model');
+export const setCustomFit = (fit) => call('set_custom_fit', { fit });
 export const qcText       = () => call('qc_text');
 export const saveQc       = (text) => call('save_qc', { text });
 

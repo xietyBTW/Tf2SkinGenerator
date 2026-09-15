@@ -1303,6 +1303,12 @@ const OPERATORS = {
         const eMax = attr(mod, 'end_fadeout_max', attr(mod, 'lifetime fade end', 1));
         const eExp = attr(mod, 'end_fadeout_exponent', 1);
         const range = attr(mod, 'distance fade range', 0);
+        // Окно спада целиком за концом жизни (все четыре >= 1) — это «без
+        // спада»: у Valve (particles.lib, probe_lock_overlife) такая привязка
+        // держит и частицу СТАРШЕ своей жизни. Без Lifespan Decay она живёт
+        // вечно — так якорь анюжуала шапки держится за голову; раньше через
+        // секунду доля жизни достигала 1 и якорь отпускало.
+        const noFade = sMin >= 1 && sMax >= 1 && eMin >= 1 && eMax >= 1;
         for (const p of sys.particles) {
             // Родилась в этом кадре: в Source берётся позиция CP на момент
             // рождения. Истории CP в превью нет — значит дельта нулевая
@@ -1313,7 +1319,7 @@ const OPERATORS = {
             // привязки — прямая от 1 в start до 0 в end по доле жизни; при
             // start > end она так же прямо растёт. Сплайн давал S-кривую и
             // разъезжался с игрой на 5-8% доли жизни у краёв окна.
-            const lock = remapValClamped(
+            const lock = noFade ? 1 : remapValClamped(
                 life,
                 randRangeExpOp(sys, p, 9, sMin, sMax, sExp),
                 randRangeExpOp(sys, p, 10, eMin, eMax, eExp), 1, 0);

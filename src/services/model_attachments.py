@@ -282,6 +282,32 @@ def attachments_from_qc(qc_path: str) -> List[Attachment]:
 
 # ── Модели из кэша декомпиляции ──────────────────────────────────────────── #
 
+def root_bone_from_qc(qc_path: str) -> Optional[Attachment]:
+    """Корневая кость модели в мировых координатах bind-позы — то, к чему
+    игра цепляет анюжуал косметики (`attach_to_rootbone 1` в items_game:
+    у шапок это bip_head). None — SMD или скелета нет."""
+    qc = Path(qc_path)
+    smd = _reference_smd(qc)
+    if smd is None:
+        return None
+    try:
+        text = smd.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return None
+    bones = parse_smd_bind_pose(text)
+    if not bones:
+        return None
+    # Корень для игры — не первая кость модели, а первая из тех, что есть и у
+    # игрока (bone_merge_cache.cpp: m_MergedBones[0]); у косметики это bip_*.
+    # parse_smd_bind_pose хранит порядок файла, Crowbar пишет его как в MDL.
+    name, world = next(((n, m) for n, m in bones.items()
+                        if n.lower().startswith("bip_")),
+                       next(iter(bones.items())))
+    return Attachment(name=name, bone=name,
+                      pos=(world[0][3], world[1][3], world[2][3]),
+                      angles=matrix_angles(world))
+
+
 def list_decompiled_models() -> List[Tuple[str, str]]:
     """Модели, уже разобранные Crowbar: [(подпись, путь к QC)], по алфавиту."""
     out = [(m["label"], m["qc"]) for m in list_decompiled_models_meta()]

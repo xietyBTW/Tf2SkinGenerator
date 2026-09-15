@@ -8,11 +8,12 @@
 
 import * as api from './api.js';
 import { say, sayBusy, withViewer } from './stage.js';
-import { setStatus } from './layout.js';
+import { setStatus, work } from './layout.js';
 import { ask } from './ask.js';
 import { showReport } from './diagnostics.js';
 import { showFailure } from './fail.js';
 import { askForTexture } from './build.js';
+import { showCpModel } from './particles/points.js';
 import {
   refreshView,
   showModel,
@@ -49,7 +50,10 @@ api.subscribe((ev) => {
       // Альбом наполняется ТОЛЬКО из applyView: два источника расходились —
       // кадр из события затирался пустым состоянием и обратно.
       rememberModel(ev);
-      showModel(ev);
+      // На сцене рук или насмешки обычной модели в кадре нет: своя модель,
+      // загруженная оттуда, показалась бы под ригом вида от первого лица.
+      // Кадр запомнен — им вернут обычный вид по выходу.
+      if ((work.dataset.scene || 'item') === 'item') showModel(ev);
       break;
 
     // Материалы, командные текстуры и вариант меняют то, ЧТО показывать.
@@ -69,6 +73,11 @@ api.subscribe((ev) => {
       withViewer((w) => w.loadAnimatedTexture(
         ev.frames.map(api.fileUrl), ev.fps, ''));
       showMaterials(['текстура'], { 'текстура': ev.frames[0] });
+      break;
+
+    case 'cp_model':
+      // Модель для точек частиц разобрана (или не удалась).
+      showCpModel(ev);
       break;
 
     case 'parts_animated':

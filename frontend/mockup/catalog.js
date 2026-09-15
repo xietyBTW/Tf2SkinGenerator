@@ -116,6 +116,22 @@ function specialArt(box, mode) {
 export function fillGrid(list) {
   els.grid.innerHTML = '';
   for (const item of list) {
+    const b = makePick(item, () => (item.type === 'particle'
+      ? pickSystem(b, item) : choose(b, item)));
+    // Правая кнопка на системе — её меню, как в дереве систем приложения.
+    if (item.type === 'particle') {
+      b.addEventListener('contextmenu', (e) => systemMenu(e, item.key));
+    }
+    els.grid.appendChild(b);
+  }
+  els.grid.hidden = list.length === 0;
+  showCount(list.length);
+}
+
+/** Карточка предмета: обложка, имя, подпись. Одна на каталог и на выбор
+ *  модели для точек частиц — второй копии обложек быть не должно. */
+export function makePick(item, onPick) {
+  {
     const b = document.createElement('button');
     b.className = 'pick';
     b.dataset.mode = item.mode;
@@ -164,16 +180,9 @@ export function fillGrid(list) {
       mark.textContent = styles + ' ' + plural(styles, 'стиль', 'стиля', 'стилей');
       b.querySelector('.pick__box').appendChild(mark);
     }
-    b.addEventListener('click', () => (item.type === 'particle'
-      ? pickSystem(b, item) : choose(b, item)));
-    // Правая кнопка на системе — её меню, как в дереве систем приложения.
-    if (item.type === 'particle') {
-      b.addEventListener('contextmenu', (e) => systemMenu(e, item.key));
-    }
-    els.grid.appendChild(b);
+    b.addEventListener('click', onPick);
+    return b;
   }
-  els.grid.hidden = list.length === 0;
-  showCount(list.length);
 }
 
 /** Класс предмета короткой подписью: длинный список — числом. */

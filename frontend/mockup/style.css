@@ -1048,6 +1048,12 @@
 .ptools .parts__strength { flex-direction: column; align-items: stretch; gap: 5px; }
 .ptools .parts__strength input { width: 100%; }
 
+/* Подгонка своей модели: числа столбцом в той же панели, что настройки
+   частей; три поля поворота или сдвига — в ряд, шире панель не станет. */
+.fit__group { display: flex; flex-direction: column; gap: 5px; }
+.fit__row { display: flex; gap: 4px; }
+.fit__row .input--num { width: 0; flex: 1; min-width: 0; }
+
 /* Переход из первого цвета во второй. Дома (в палитре) он не виден: его
    место — подвал поповера выбора цвета, куда он переезжает на время. */
 .parts__grad { display: none; }
@@ -1384,6 +1390,10 @@
   transition: color var(--dur), background var(--dur);
 }
 .ask__group { margin: 10px 0 2px; padding-left: 2px; }
+/* Модель для точек: окно шире обычного вопроса — в нём сетка обложек */
+.ask.cpmodel { width: min(820px, 94vw); }
+.cpmodel__tabs, .cpmodel__row { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.cpmodel__grid { max-height: 56vh; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 14px 12px; }
 .ask__group:first-child { margin-top: 4px; }
 .ask__item:hover { color: var(--ink); background: var(--bg); }
 .ask__item.is-active { color: var(--ink); border-bottom-color: var(--accent); }

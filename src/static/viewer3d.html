@@ -254,6 +254,7 @@
 import * as THREE        from 'three';
 import { OBJLoader }     from 'three/addons/loaders/OBJLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { makeMeshMaterial as _makeMeshMaterial } from './js/viewer_materials.js';
 import { firstPersonCamera as _firstPersonCamera } from './js/viewer_camera.js';
 import { firstEditableHit as _firstEditableHit } from './js/viewer_meshes.js';
@@ -495,8 +496,297 @@ function stopAnimation() {
 let _matHints = {};
 
 function makeMeshMaterial(opts) {
+  // Призрак оригинала (подгонка импортированной модели): всегда прозрачный
+  // серый, текстуры на него не ложатся — он ориентир, а не часть предмета.
+  if (opts && String(opts.name || '').startsWith('ghost:')) {
+    const m = new THREE.MeshLambertMaterial({
+      color: 0x8fb3ff, transparent: true, opacity: 0.28, depthWrite: false,
+      side: THREE.DoubleSide });
+    m.name = opts.name;
+    return m;
+  }
   return _makeMeshMaterial(THREE, opts, _matHints);
 }
+
+// ── Подгонка своей модели ───────────────────────────────────────────────────
+// Масштаб, поворот (вокруг X → Y → Z) и сдвиг в осях SMD оружия — те же
+// числа, что Python запекает в вершины. Меши модели (без призрака) живут в
+// группе `fit` внутри currentModel: нормировка кадра остаётся снаружи. В
+// режиме подгонки к группе прицеплен TransformControls — крутить, тянуть и
+// растягивать мышью, как в Blender (G/R/S переключают инструмент); призрак
+// оригинала показывается только в этом режиме.
+let _fitGroup = null;
+let _fitState = null;   // последняя подгонка — повторяется после перезагрузки OBJ
+let _fitMode = false;
+let _fitControls = null;
+// Оси SMD → оси сцены: (x, y, z) → (x, z, −y), как в SmdToObjService.
+const _FIT_C = new THREE.Matrix4().set(1, 0, 0, 0,  0, 0, 1, 0,  0, -1, 0, 0,  0, 0, 0, 1);
+const _FIT_CT = _FIT_C.clone().transpose();
+
+function _isGhost(obj) {
+  return obj.isMesh && obj.material && !Array.isArray(obj.material)
+    && String(obj.material.name).startsWith('ghost:');
+}
+
+/** Группа подгонки текущей модели (создаётся при первом обращении). */
+function _ensureFitGroup() {
+  if (!currentModel) return null;
+  if (_fitGroup && _fitGroup.parent === currentModel) return _fitGroup;
+  _fitGroup = new THREE.Group();
+  _fitGroup.name = 'fit';
+  currentModel.children.filter(c => !_isGhost(c))
+    .forEach(c => _fitGroup.add(c));   // add() переносит из currentModel
+  currentModel.add(_fitGroup);
+  if (_fitControls) _fitControls.attach(_fitGroup);
+  return _fitGroup;
+}
+
+window.setFitTransform = function(scale, rotate, offset) {
+  const identity = scale === 1 && rotate.every(v => !v) && offset.every(v => !v);
+  _fitState = identity ? null : [scale, rotate.slice(), offset.slice()];
+  const group = _ensureFitGroup();
+  if (!group) return;
+  const d = Math.PI / 180;
+  const R = new THREE.Matrix4().makeRotationZ(rotate[2] * d)
+    .multiply(new THREE.Matrix4().makeRotationY(rotate[1] * d))
+    .multiply(new THREE.Matrix4().makeRotationX(rotate[0] * d));
+  const M = _FIT_C.clone().multiply(R).multiply(_FIT_CT);
+  group.quaternion.setFromRotationMatrix(M);
+  group.scale.setScalar(scale);
+  group.position.set(offset[0], offset[2], -offset[1]);
+};
+
+/** Обратно: трансформ группы → числа подгонки в осях SMD. */
+function _fitFromGroup(group) {
+  // Масштаб только равномерный: сборке нужен один множитель.
+  const s = (group.scale.x + group.scale.y + group.scale.z) / 3;
+  group.scale.setScalar(s);
+  const M = _FIT_CT.clone().multiply(new THREE.Matrix4().makeRotationFromQuaternion(group.quaternion)).multiply(_FIT_C);
+  // Fit.matrix() у Python — Rz·Ry·Rx, у THREE это порядок 'ZYX'.
+  const e = new THREE.Euler().setFromRotationMatrix(M, 'ZYX');
+  const deg = (v) => Math.round(v * 180 / Math.PI * 10) / 10;
+  const p = group.position;
+  const r1 = (v) => Math.round(v * 10) / 10;
+  return { scale: Math.round(s * 1000) / 1000,
+           rotate: [deg(e.x), deg(e.y), deg(e.z)],
+           offset: [r1(p.x), r1(-p.z), r1(p.y)] };
+}
+
+window.setFitMode = function(on) {
+  _fitMode = Boolean(on);
+  if (currentModel) currentModel.traverse(c => { if (_isGhost(c)) c.visible = _fitMode; });
+  if (_fitMode) {
+    if (!_fitControls) {
+      _fitControls = new TransformControls(camera, renderer.domElement);
+      _fitControls.setSpace('local');
+      _fitControls.addEventListener('dragging-changed', e => { controls.enabled = !e.value; });
+      _fitControls.addEventListener('objectChange', () => {
+        if (!_fitGroup) return;
+        const fit = _fitFromGroup(_fitGroup);
+        _fitState = [fit.scale, fit.rotate, fit.offset];
+        if (typeof window.onFitChanged === 'function') window.onFitChanged(fit);
+      });
+      scene.add(_fitControls);
+    }
+    const group = _ensureFitGroup();
+    if (group) _fitControls.attach(group);
+    _fitControls.visible = true;
+    _fitControls.enabled = true;
+  } else if (_fitControls) {
+    _fitControls.detach();
+    _fitControls.visible = false;
+    _fitControls.enabled = false;
+  }
+};
+
+/** Инструмент гизмо: 'translate' | 'rotate' | 'scale'. */
+window.setFitTool = function(mode) {
+  if (_fitControls) _fitControls.setMode(mode);
+};
+
+// ── Модальные операции, как в Blender ──────────────────────────────────────
+// G/R/S начинают операцию: дальше модель следует за мышью без зажатой кнопки,
+// X/Y/Z ограничивают ось (повторно — снимают), левая кнопка подтверждает,
+// Esc или правая — отменяет. Масштаб и поворот считаются относительно точки
+// опоры — центра группы на экране, как у Blender вокруг курсора-пивота.
+// Клавиши — по коду, а не по букве: на русской раскладке те же кнопки.
+const FIT_KEYS = { KeyG: 'translate', KeyR: 'rotate', KeyS: 'scale' };
+const FIT_AXES = { KeyX: 'x', KeyY: 'y', KeyZ: 'z' };
+// Оси SMD в осях сцены: X → X, Y (вверх) → Y сцены? нет: (x, y, z) → (x, z, −y),
+// значит Y_smd = −Z сцены, Z_smd = Y сцены.
+const FIT_AXIS_DIR = { x: new THREE.Vector3(1, 0, 0), y: new THREE.Vector3(0, 0, -1),
+                       z: new THREE.Vector3(0, 1, 0) };
+let _fitOp = null;         // {tool, axis, start:{pos,quat,scale}, mouse0, pivot}
+const _mouse = { x: 0, y: 0 };
+
+function _screenOf(worldPos) {
+  const v = worldPos.clone().project(camera);
+  const r = renderer.domElement.getBoundingClientRect();
+  return { x: (v.x + 1) / 2 * r.width, y: (1 - v.y) / 2 * r.height };
+}
+
+function _fitOpEmit() {
+  const fit = _fitFromGroup(_fitGroup);
+  _fitState = [fit.scale, fit.rotate, fit.offset];
+  if (typeof window.onFitChanged === 'function') window.onFitChanged(fit);
+}
+
+window.startFitOp = function(tool) {
+  if (!_fitMode) return;
+  const group = _ensureFitGroup();
+  if (!group) return;
+  if (_fitOp) _fitOpCancel();
+  group.updateMatrixWorld(true);
+  const pivotWorld = new THREE.Vector3().setFromMatrixPosition(group.matrixWorld);
+  _fitOp = {
+    tool, axis: null,
+    start: { pos: group.position.clone(), quat: group.quaternion.clone(), scale: group.scale.x },
+    mouse0: { x: _mouse.x, y: _mouse.y },
+    pivot: _screenOf(pivotWorld), pivotWorld,
+  };
+  controls.enabled = false;
+  if (_fitControls) _fitControls.enabled = false;
+  window.setFitTool(tool);
+  if (typeof window.onFitTool === 'function') window.onFitTool(tool);
+  document.getElementById('canvas-container').style.cursor = 'crosshair';
+  // Захват курсора, как у Blender (continuous grab): без него курсор упирался
+  // в край кадра, и масштаб дальше не рос. Под захватом курсора не видно, а
+  // положение считаем сами из movementX/Y — оно может уходить далеко за кадр.
+  // Не дали захват (старый браузер, политика) — работаем как раньше.
+  try {
+    const p = renderer.domElement.requestPointerLock();
+    if (p && p.catch) p.catch(() => {});
+  } catch (_) { /* без захвата */ }
+};
+
+function _fitOpEnd() {
+  _fitOp = null;
+  controls.enabled = true;
+  if (_fitControls) _fitControls.enabled = true;
+  document.getElementById('canvas-container').style.cursor = '';
+  if (document.pointerLockElement === renderer.domElement) document.exitPointerLock();
+}
+// Esc под захватом браузер съедает сам и снимает захват — для нас это отмена,
+// как и в Blender.
+document.addEventListener('pointerlockchange', () => {
+  const locked = document.pointerLockElement === renderer.domElement;
+  if (_fitOp && !locked) _fitOpCancel();
+  // Захват пришёл, когда операцию уже подтвердили щелчком — отпускаем.
+  if (!_fitOp && locked) document.exitPointerLock();
+});
+
+/** Отмена операции; false — операции не было (Esc тогда достаётся странице). */
+function _fitOpCancel() {
+  if (!_fitOp || !_fitGroup) return false;
+  const { pos, quat, scale } = _fitOp.start;
+  _fitGroup.position.copy(pos);
+  _fitGroup.quaternion.copy(quat);
+  _fitGroup.scale.setScalar(scale);
+  _fitOpEmit();
+  _fitOpEnd();
+  return true;
+}
+window.cancelFitOp = _fitOpCancel;
+
+window.setFitAxis = function(axis) {
+  if (!_fitOp) return;
+  _fitOp.axis = _fitOp.axis === axis ? null : axis;
+  _fitOpApply();
+};
+
+/** Пересчитывает трансформ группы по положению мыши относительно старта. */
+function _fitOpApply() {
+  const op = _fitOp, group = _fitGroup;
+  if (!op || !group) return;
+  const { start, pivot, mouse0 } = op;
+  const dx = _mouse.x - mouse0.x, dy = _mouse.y - mouse0.y;
+  if (op.tool === 'scale') {
+    const d0 = Math.hypot(mouse0.x - pivot.x, mouse0.y - pivot.y) || 1;
+    const d1 = Math.hypot(_mouse.x - pivot.x, _mouse.y - pivot.y);
+    group.scale.setScalar(Math.max(0.001, start.scale * d1 / d0));
+  } else if (op.tool === 'rotate') {
+    const a0 = Math.atan2(mouse0.y - pivot.y, mouse0.x - pivot.x);
+    const a1 = Math.atan2(_mouse.y - pivot.y, _mouse.x - pivot.x);
+    let angle = a1 - a0;
+    // Ось: заданная клавишей (в мировых осях сцены) или взгляд камеры.
+    let axis;
+    if (op.axis) {
+      axis = FIT_AXIS_DIR[op.axis].clone();
+      // Знак — чтобы вращение шло за мышью, куда бы ось ни смотрела.
+      const toCam = camera.position.clone().sub(op.pivotWorld).normalize();
+      if (axis.dot(toCam) < 0) angle = -angle;
+    } else {
+      axis = camera.position.clone().sub(op.pivotWorld).normalize();
+    }
+    // Экранный угол по часовой (y вниз) — в мировом это против оси на камеру.
+    const q = new THREE.Quaternion().setFromAxisAngle(axis, -angle);
+    group.quaternion.copy(q.multiply(start.quat));
+  } else {
+    // Сдвиг в плоскости камеры на глубине опоры: пиксели → мировые единицы.
+    const r = renderer.domElement.getBoundingClientRect();
+    const dist = camera.position.distanceTo(op.pivotWorld);
+    const unitsPerPx = 2 * dist * Math.tan(camera.fov * Math.PI / 360) / r.height;
+    const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0);
+    const up = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1);
+    let delta = right.multiplyScalar(dx * unitsPerPx).add(up.multiplyScalar(-dy * unitsPerPx));
+    if (op.axis) {
+      const dir = FIT_AXIS_DIR[op.axis];
+      delta = dir.clone().multiplyScalar(delta.dot(dir));
+    }
+    // Мировой сдвиг → локальный в currentModel (та нормирована равномерно).
+    const local = delta.divideScalar(currentModel.scale.x || 1);
+    group.position.copy(start.pos).add(local);
+  }
+  _fitOpEmit();
+}
+
+// На окне, а не на холсте: без захвата курсор, вышедший за холст, иначе
+// переставал двигать модель — операция при этом ещё шла.
+window.addEventListener('mousemove', e => {
+  if (document.pointerLockElement === renderer.domElement) {
+    // Под захватом clientX/Y заморожены — ведём виртуальный курсор.
+    _mouse.x += e.movementX;
+    _mouse.y += e.movementY;
+  } else {
+    const r = renderer.domElement.getBoundingClientRect();
+    _mouse.x = e.clientX - r.left;
+    _mouse.y = e.clientY - r.top;
+  }
+  if (_fitOp) _fitOpApply();
+});
+renderer.domElement.addEventListener('mousedown', e => {
+  if (!_fitOp) return;
+  e.preventDefault();
+  e.stopPropagation();
+  if (e.button === 0) _fitOpEnd();      // подтвердить: трансформ уже отдан
+  else _fitOpCancel();
+}, true);
+renderer.domElement.addEventListener('contextmenu', e => {
+  if (_fitOp || _fitMode) e.preventDefault();
+});
+
+window.addEventListener('keydown', e => {
+  if (!_fitMode || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.code === 'Escape' && _fitOp) { e.preventDefault(); _fitOpCancel(); return; }
+  if (_fitOp && FIT_AXES[e.code]) { e.preventDefault(); window.setFitAxis(FIT_AXES[e.code]); return; }
+  const tool = FIT_KEYS[e.code];
+  if (!tool) return;
+  e.preventDefault();
+  window.startFitOp(tool);
+});
+
+/** Габариты модели и призрака в единицах сцены — для автопроверки подгонки. */
+window.fitDebug = function() {
+  if (!currentModel) return null;
+  currentModel.updateMatrixWorld(true);
+  const dump = (b) => b.isEmpty() ? null
+    : [b.min.toArray(), b.max.toArray()].map(a => a.map(v => +v.toFixed(3)));
+  const ghost = currentModel.children.filter(_isGhost);
+  const own = _fitGroup && _fitGroup.parent === currentModel ? [_fitGroup]
+    : currentModel.children.filter(c => !ghost.includes(c));
+  const union = (list) => list.reduce((b, o) => b.expandByObject(o), new THREE.Box3());
+  return { model: dump(union(own)), ghost: dump(union(ghost)), fit: _fitState, mode: _fitMode };
+};
 
 // Пересобирает материалы уже загруженной модели под новые подсказки:
 // подсказки обычно приходят раньше текстур, но порядок не гарантирован.
@@ -944,6 +1234,14 @@ window.loadModelFromContent = function(objContent, texDataUrl, cx, cy, cz, scale
         _pendingMaterialMap = null;
         window.applyMaterialMap(map);
       }
+
+      // Подгонка пережила перезагрузку OBJ (смена текстуры перегружает
+      // модель целиком): группа старой модели ушла вместе с ней. Призрак
+      // оригинала виден только в режиме подгонки.
+      _fitGroup = null;
+      object.traverse(c => { if (_isGhost(c)) c.visible = _fitMode; });
+      if (_fitState) window.setFitTransform(..._fitState);
+      if (_fitMode) window.setFitMode(true);
 
       if (_pendingTexUrl) {
         // Одиночная текстура, запрошенная во время загрузки OBJ. Применяем

@@ -569,6 +569,28 @@ def test_position_lock_fades_out_with_age():
     assert abs(res["fadedLast"] - res["fadedAt60"]) < 1e-9, res
 
 
+def test_position_lock_without_fade_outlives_lifetime():
+    """Окно спада целиком за концом жизни (все четыре >= 1) — «без спада»:
+    у Valve (probe_lock_overlife) такая привязка держит и частицу старше
+    своей жизни. Якорь анюжуала шапки (lifetime 1, без Lifespan Decay) живёт
+    вечно и должен ехать за головой, а не отваливаться через секунду."""
+    res = _run_js("""
+      const sys = mkSystem([
+        {functionName:'Movement Basic', attrs:{drag:{t:'float', v:0}}},
+        {functionName:'Movement Lock to Control Point',
+         attrs:{'control_point_number':{t:'integer', v:0}}}], 1);
+      // Без Lifespan Decay: как у unusual_butterfly_move_blue
+      sys.operators = sys.operators.filter(o => o.mod.functionName !== 'Lifespan Decay');
+      for (let i = 0; i < 30; i++) {      // 3 c — втрое дольше жизни
+        sys.controller.controlPoints[0] = [i * 10, 0, 0];
+        sys.movement(0.1);
+      }
+      return { x: sys.particles[0].pos[0], n: sys.particles.length };
+    """)
+    assert res["n"] == 4, res
+    assert abs(res["x"] - 290) < 2, res
+
+
 def test_operator_fade_envelope_gates_operator():
     """CheckIfOperatorShouldRun: при нулевой силе оператор не запускается
     вовсе. Movement Basic с «operator end fadeout» = 1 после первой секунды

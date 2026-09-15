@@ -50,6 +50,9 @@ class MeshPart:
     skinning: Optional[dict] = None
     #: Если задан — оставить только эти материалы.
     include_mats: Optional[set] = None
+    #: Приставка к именам материалов части: так вьювер отличает призрак
+    #: оригинала (`ghost:`) от самой модели, даже если имена совпали.
+    material_prefix: str = ''
 
 
 class SmdToObjService:
@@ -302,6 +305,9 @@ class SmdToObjService:
             triangles_by_mat = {
                 k: v for k, v in triangles_by_mat.items() if k in part.include_mats
             }
+        if part.material_prefix:
+            triangles_by_mat = {part.material_prefix + k: v
+                                for k, v in triangles_by_mat.items()}
         return triangles_by_mat
 
     @staticmethod

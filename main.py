@@ -54,6 +54,21 @@ def _cleanup_stale_temp() -> None:
     if removed:
         logger.info(f"Очищено {removed} старых temp папок при старте")
 
+    # Черновики воркеров в системном %TEMP% (сцены вида от первого лица,
+    # превью SMD, импорт мешей...). Функция была, но её никто не звал: за
+    # месяцы набегали тысячи папок на гигабайты. Приложение одно (мьютекс),
+    # так что всё старше старта — от прошлых запусков; в фоне, потому что
+    # папок бывает больше десяти тысяч.
+    import threading
+    from src.shared.file_utils import cleanup_stale_temp_artifacts
+
+    def sweep() -> None:
+        n = cleanup_stale_temp_artifacts(max_age_hours=0)
+        if n:
+            logger.info(f"Очищено {n} черновиков прошлых запусков из %TEMP%")
+
+    threading.Thread(target=sweep, daemon=True, name="temp-sweep").start()
+
 
 def main():
     logger.info("Запуск TF2 Skin Generator")

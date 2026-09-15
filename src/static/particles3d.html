@@ -1497,6 +1497,25 @@ window.particleDebugState = function(limit = 8) {
            particles: out };
 };
 
+/** Дерево систем: имя, число частиц, первая частица, точки 0..3 — чтобы
+    видеть, куда дети ставят свои контрольные точки. */
+window.particleDebugTree = function(depth = 4) {
+  if (!rootInstance) return null;
+  const node = (sys, d) => ({
+    name: sys.def && sys.def.name, count: sys.particles.length,
+    first: sys.particles[0] ? [...sys.particles[0].pos].map(v => +v.toFixed(1)) : null,
+    cps: [0, 1, 2, 3].map(i => [...sys.getControlPoint(i)].map(v => +v.toFixed(1))),
+    ops: sys.operators.map(o => (o.mod.functionName || o.mod.name || '?')),
+    children: d > 0 ? sys.children.map(c => node(c, d - 1)) : undefined,
+  });
+  return node(rootInstance, depth);
+};
+window.particleDebugSystem = (name) => {
+  const find = (sys) => (sys.def && sys.def.name) === name ? sys
+    : sys.children.map(find).find(Boolean);
+  return rootInstance && find(rootInstance);
+};
+
 /** Экранные углы спрайтов после render_screen_velocity_rotate — для
     автотеста камеро-зависимого поворота. */
 window.particleDebugSpriteRotations = function() {
@@ -1533,7 +1552,13 @@ const ropePool = [];
 
 function animate() {
   requestAnimationFrame(animate);
-  const dt = Math.min(clock.getDelta(), 0.3);
+  drawFrame(Math.min(clock.getDelta(), 0.3));
+}
+
+/** Кадр: шаг симуляции на dt и отрисовка. Отдельно от animate — пока
+    вкладка скрыта, requestAnimationFrame не идёт, а автопроверке кадр нужен
+    (particleDebugRender). */
+function drawFrame(dt) {
   controls.update();
 
   if (rootInstance && !paused) {
@@ -1613,6 +1638,7 @@ function animate() {
   renderer.render(scene, camera);
 }
 
+window.particleDebugRender = () => drawFrame(0);
 window.showPrompt();
 animate();
 

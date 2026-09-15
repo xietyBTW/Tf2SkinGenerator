@@ -18,6 +18,7 @@ import { bindAlbum, goTo, SINGLE_TEX } from './album.js';
 import { modeControls, restoreBadges } from './controls.js';
 import { closeParts, bindParts, suspendParts, resumeParts } from './parts.js';
 import { updateDockSummary } from './build.js';
+import { showFit, bindFitViewer, isFitOn } from './custom-model.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Данные из Python
@@ -229,6 +230,7 @@ export async function showModel(ev) {
     w.loadModelFromContent(obj, ev.texture ? api.fileUrl(ev.texture) : '',
                            b.cx, b.cy, b.cz, b.scale, 0);
     bindParts(w);
+    bindFitViewer(w);
     say('');                            // модель на экране — подпись убираем
 
     // Материалы могли приехать раньше, чем OBJ попал в сцену: тогда они легли
@@ -391,13 +393,18 @@ export function applyView(st) {
   // подмену модели: тело класса не подменить, а разделить — можно.
   // На сцене её нет вовсе: карта частей у страницы от обычной модели, и
   // открытый на руках режим красил бы не то, что показано.
+  // В режиме подгонки частей нет: у обоих свой захват мыши в кадре.
   document.querySelector('[data-cond="parts"]').hidden =
-    !(modeControls.split_parts && st.can_split) || work.dataset.scene !== 'item';
+    !(modeControls.split_parts && st.can_split) || work.dataset.scene !== 'item'
+    || isFitOn();
 
   // «Убрать свою модель» — только когда своя геометрия и правда стоит.
   // Без неё замена была билетом в один конец: вернуть игровую можно было
   // только выбрав предмет заново.
   document.getElementById('dropmodel').hidden = !st.has_custom;
+  // Подгонка — только у импортированной модели и только в кадре предмета:
+  // на руках и в насмешке призрака нет.
+  showFit(work.dataset.scene === 'item' ? st.custom_fit : null);
 
   // Альбом только что пересобран — вернуть пометки «свои настройки».
   restoreBadges();
@@ -537,6 +544,21 @@ export function applyFpClip(clip) {
     }
     api.loadFirstPerson(fpAction, true);
   });
+}
+
+/**
+ * Пересобирает сцену в руках, если она сейчас в кадре.
+ *
+ * Своя модель заменяет геометрию и на руках тоже — сцена под прошлую
+ * геометрию устарела. Полная сборка (`full`): Python сцену уже забыл, но
+ * страница просит явно, чтобы не зависеть от порядка.
+ */
+export async function reloadSceneIfFp() {
+  if (work.dataset.scene !== 'fp') return false;
+  sayBusy('Сборка вида от первого лица…');   // отложенно: подпись о модели успеет прочитаться
+  const res = await api.loadFirstPerson(fpAction, true);
+  if (res.error) say(res.error);
+  return true;
 }
 
 export function showFpActions(actions) {

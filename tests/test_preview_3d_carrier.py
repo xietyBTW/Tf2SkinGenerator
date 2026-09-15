@@ -222,6 +222,41 @@ class FirstPersonRootTests(unittest.TestCase):
         self.assertEqual(seen.get("tf2_root"), "D:/Game")
 
 
+class FirstPersonCustomModelTests(unittest.TestCase):
+    """Своя модель должна уезжать в руку тем же слиянием, что и в мод."""
+
+    def _load_with(self, **preview):
+        s = AppSession()
+        s._mode = "scout_c_scattergun"
+        for name, value in preview.items():
+            setattr(s.preview, name, value)
+        seen = {}
+
+        def _load(key, mode, misc, textures, tf2_root, **kw):
+            seen.update(kw)
+
+        with patch.object(AppSession, "tf2_paths", staticmethod(lambda: PATHS)),                 patch.object(s.viewmodel, "shows", lambda *a: False),                 patch.object(s.viewmodel, "load", _load),                 patch.object(s.controller, "stop", lambda: None):
+            s.load_first_person("IDLE")
+        return seen
+
+    def test_own_model_goes_to_the_hand(self):
+        """Страница теряла свою модель: в руке оставался сток."""
+        seen = self._load_with(custom_smd_path="D:/own.smd",
+                               custom_keep_materials=True)
+        self.assertEqual(seen.get("custom_smd"), "D:/own.smd")
+        self.assertTrue(seen.get("keep_materials"))
+
+    def test_geometry_only_collapses_materials(self):
+        seen = self._load_with(custom_smd_path="D:/own.smd",
+                               custom_keep_materials=False)
+        self.assertEqual(seen.get("custom_smd"), "D:/own.smd")
+        self.assertFalse(seen.get("keep_materials"))
+
+    def test_stock_model_without_custom(self):
+        seen = self._load_with()
+        self.assertEqual(seen.get("custom_smd"), "")
+
+
 class LeaveFirstPersonTests(_WithFiles):
     """Выход из вида от первого лица не должен уносить подложку модели."""
 
@@ -295,8 +330,9 @@ class CustomModelTests(_WithFiles):
         """Прогоняет замену модели: (что ушло в конвертер, что вышло наружу)."""
         seen = {}
 
-        def _convert(src, obj, extra_smd_paths=(), **kw):
-            seen["extra"] = list(extra_smd_paths)
+        def _convert(parts, obj, **kw):
+            # Своя модель — первая часть сцены; носитель едет её extra-SMD.
+            seen["extra"] = list(parts[0].extra_smd_paths)
             with open(obj, "w", encoding="utf-8") as f:
                 f.write("# obj\n")
             return True, list(produced)
@@ -306,7 +342,7 @@ class CustomModelTests(_WithFiles):
                 patch("src.services.carrier_model.find", return_value=carrier), \
                 patch("src.services.carrier_model.materials",
                       return_value=set(carrier_mats)), \
-                patch("src.services.smd_to_obj_service.SmdToObjService.convert",
+                patch("src.services.smd_to_obj_service.SmdToObjService.convert_parts",
                       _convert), \
                 patch.object(self.session.controller, "stop", lambda: None), \
                 patch.object(self.session, "_on_model_ready",

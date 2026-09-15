@@ -146,6 +146,7 @@ def _own_paths(edits: Dict[str, object], files_dir: Path) -> Dict[str, object]:
     out['australium_user_tex'] = _own_file(
         edits.get('australium_user_tex'), files_dir)
     out['custom_smd_path'] = _own_file(edits.get('custom_smd_path'), files_dir)
+    out['custom_source_path'] = _own_file(edits.get('custom_source_path'), files_dir)
 
     maps: Dict[str, dict] = {}
     for mat, by_id in (edits.get('texture_maps') or {}).items():
@@ -301,6 +302,8 @@ def load(key: str) -> Optional[Dict[str, object]]:
                                          if os.path.isfile(p)}
     if edits.get('custom_smd_path') and not os.path.isfile(edits['custom_smd_path']):
         edits['custom_smd_path'] = None
+    if edits.get('custom_source_path') and not os.path.isfile(edits['custom_source_path']):
+        edits['custom_source_path'] = None
     return edits
 
 

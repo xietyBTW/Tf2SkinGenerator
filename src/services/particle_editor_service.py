@@ -105,6 +105,11 @@ def referenced_control_points(sys_json: dict,
     какие именно, можно только вычитав их из модулей эффекта.
     """
     found: set = set()
+    # Точки, которые эффект расставляет САМ (Set child control points from
+    # particle positions, Set control point positions): снаружи они не нужны,
+    # и подсказка «нужны 0, 1, 2, 3» у анюжуала шапки заставляла искать, куда
+    # девать 1-3, хотя игра даёт ему только точку 0.
+    own: set = set()
     seen: set = set()
     pending = [sys_json]
     while pending:
@@ -114,6 +119,7 @@ def referenced_control_points(sys_json: dict,
         seen.add(id(s))
         for group in MODULE_GROUPS:
             for mod in s.get(group) or []:
+                own.update(_self_set_control_points(mod))
                 for name, tv in (mod.get("attrs") or {}).items():
                     low = name.lower()
                     if "control point" not in low and "control_point" not in low:
@@ -129,7 +135,27 @@ def referenced_control_points(sys_json: dict,
         if systems:
             for ch in s.get("children") or []:
                 pending.append(systems.get(ch.get("childName")))
-    return sorted(found)
+    return sorted(found - own)
+
+
+def _self_set_control_points(mod: dict) -> set:
+    """Номера точек, которые модуль выставляет сам (см. движок:
+    set child control points / set control point positions)."""
+    attrs = mod.get("attrs") or {}
+
+    def num(key: str, default: int) -> int:
+        v = (attrs.get(key) or {}).get("v", default)
+        return v if isinstance(v, int) and not isinstance(v, bool) else default
+
+    fn = (mod.get("functionName") or "").lower()
+    if fn == "set child control points from particle positions":
+        first = num("first control point to set", 0)
+        return set(range(first, first + num("# of control points to set", 1)))
+    if fn == "set control point positions":
+        return {n for n in (num(f"{o} control point number", -1)
+                            for o in ("first", "second", "third", "fourth"))
+                if n >= 0}
+    return set()
 
 
 def system_hierarchy(systems: dict, order: Optional[List[str]] = None) -> list:

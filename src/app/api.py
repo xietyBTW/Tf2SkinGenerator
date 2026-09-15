@@ -1473,10 +1473,16 @@ def load_custom_model(path: str = '', keep: Optional[bool] = None,
     return session().load_custom_model(path, keep, lang=lang)
 
 
-def drop_custom_model() -> Dict[str, object]:
-    """Забывает свою модель."""
+def set_custom_fit(fit: Optional[dict] = None) -> Dict[str, object]:
+    """Подгонка импортированной модели (масштаб, поворот, сдвиг) — в SMD."""
     from src.app.session import session
-    return session().drop_custom_model()
+    return session().set_custom_fit(fit)
+
+
+def drop_custom_model(lang: str = '') -> Dict[str, object]:
+    """Забывает свою модель и возвращает игровую."""
+    from src.app.session import session
+    return session().drop_custom_model(lang=_lang(lang))
 
 
 def qc_text() -> Dict[str, object]:
@@ -1738,6 +1744,12 @@ def particle_models(lang: str = '') -> List[dict]:
     С группой (player/hat/weapon/arms/other) и подписью из каталогов игры."""
     from src.app.session import session
     return session().particle_models(_lang(lang))
+
+
+def particle_model_load(mode: str, key: str = '', lang: str = '') -> Dict[str, object]:
+    """Модель для точек по предмету каталога; сцена придёт событием cp_model."""
+    from src.app.session import session
+    return session().particle_model_load(mode, key, _lang(lang))
 
 
 def particle_model_scene(qc: str) -> Dict[str, object]:

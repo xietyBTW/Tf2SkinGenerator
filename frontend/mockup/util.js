@@ -80,10 +80,16 @@ pickFile.hidden = true;
 document.body.append(pickFile);
 
 export function chooseFile(accept = 'image/*') {
+  return chooseFiles(accept, false).then((files) => files[0] || null);
+}
+
+/** Несколько файлов разом (модель вместе с её MTL и текстурами). */
+export function chooseFiles(accept = 'image/*', multiple = true) {
   return new Promise((resolve) => {
     pickFile.value = '';
     pickFile.accept = accept;
-    pickFile.onchange = () => resolve(pickFile.files[0] || null);
+    pickFile.multiple = multiple;
+    pickFile.onchange = () => resolve([...pickFile.files]);
     pickFile.click();
   });
 }

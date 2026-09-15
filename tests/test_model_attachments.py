@@ -9,7 +9,7 @@ import math
 
 from src.services.model_attachments import (
     angle_matrix, attachments_from_qc, concat_transforms, matrix_angles,
-    parse_qc_attachments, parse_smd_bind_pose,
+    parse_qc_attachments, parse_smd_bind_pose, root_bone_from_qc,
 )
 
 #: Кость arm висит на root со сдвигом по X и разворотом на 90 градусов по Z
@@ -105,6 +105,23 @@ def test_attachment_world_transform_follows_bone(tmp_path):
 
     # Кости нет в SMD: точку не выбрасываем, берём её локальный трансформ
     assert [round(v, 3) for v in by_name["orphan"].pos] == [1.0, 2.0, 3.0]
+
+
+def test_root_bone_is_first_player_bone(tmp_path):
+    """Игра вешает анюжуал на первую кость, которая есть и у игрока
+    (bone_merge_cache.cpp), а не на первую кость файла: у реквизита впереди
+    может стоять своя prop-кость."""
+    smd = _SMD.replace('"root"', '"prop_bone"').replace('"arm"', '"bip_head"')
+    (tmp_path / "test.smd").write_text(smd, encoding="utf-8")
+    qc = tmp_path / "test.qc"
+    qc.write_text(_QC, encoding="utf-8")
+    root = root_bone_from_qc(str(qc))
+    assert root.name == "bip_head"
+    assert [round(v, 3) for v in root.pos] == [10.0, 0.0, 0.0]
+
+    # Костей игрока нет — корень модели, как у GetBoneTransform(0)
+    (tmp_path / "test.smd").write_text(_SMD, encoding="utf-8")
+    assert root_bone_from_qc(str(qc)).name == "root"
 
 
 def test_attachments_ignore_physics_smd(tmp_path):

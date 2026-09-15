@@ -21,6 +21,8 @@ out/
 *.ps1
 # Без этого исключения сборщик релиза пропадает из репозитория. Уже пропадал
 !build-release.ps1
+# Сборка meshoptimizer.dll (tools/meshoptimizer) — часть проекта
+!scripts/build_meshoptimizer.ps1
 installer/
 
 # Данные человека, а не проекта: в собранном приложении они в %LOCALAPPDATA%
