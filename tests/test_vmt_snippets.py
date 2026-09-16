@@ -34,3 +34,16 @@ class VmtSnippetsTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_australium_snippet_matches_valve_gold_vmts():
+    """Набор — общий у c_*_gold.vmt Valve: золотая кубмапа, ровный phong,
+    лайтварп оружия, маска блеска в альфе. Мешающие ключи гасятся слиянием."""
+    from src.data.vmt_snippets import VMT_MERGE_REMOVES, VMT_SNIPPETS
+    label = "Австралий — золотой металл"
+    snippet = next(sn for lb, sn, _ in VMT_SNIPPETS["Эффекты"] if lb == label)
+    for key in ('"$envmap" "cubemaps/cubemap_gold001"', '"$envmaptint" "[2.5 2.5 1.15]"',
+                '"$phongexponent"', '"$basemapalphaphongmask" "1"',
+                '"$lightwarptexture" "models/lightwarps/weapon_lightwarp"'):
+        assert key in snippet
+    assert "$phongexponenttexture" in VMT_MERGE_REMOVES[label]

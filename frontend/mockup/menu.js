@@ -13,6 +13,13 @@
 const menuEl = document.createElement('div');
 menuEl.className = 'menu__list ctx';
 menuEl.hidden = true;
+// Popover — ради верхнего слоя: меню зовут и из модальных окон (редактор
+// VMT → «Вставить»), а модальный <dialog> лежит выше любого z-index. Показ
+// popover'ом после окна ставит меню над ним. `manual` — закрытием ведаем
+// сами (щелчок мимо, Esc), а не браузер. Одного слоя мало: всё вне
+// модального окна инертно, и по меню нельзя было бы щёлкнуть — поэтому на
+// время показа оно переезжает ВНУТРЬ открытого окна (см. contextMenu).
+menuEl.setAttribute('popover', 'manual');
 document.body.append(menuEl);
 
 /** Показывает меню в точке события; отдаёт значение пункта или null. */
@@ -21,6 +28,7 @@ export function contextMenu(e, items) {
   menuEl.innerHTML = '';
   return new Promise((resolve) => {
     const close = (value) => {
+      if (menuEl.matches(':popover-open')) menuEl.hidePopover();
       menuEl.hidden = true;
       document.removeEventListener('mousedown', onAway, true);
       document.removeEventListener('keydown', onKey, true);
@@ -45,7 +53,11 @@ export function contextMenu(e, items) {
       menuEl.append(b);
     }
 
+    // Из модального окна — внутрь него, иначе меню инертно; в верхнем слое
+    // координаты всё равно от окна браузера.
+    (document.querySelector('dialog:modal') || document.body).append(menuEl);
     menuEl.hidden = false;
+    if (menuEl.showPopover) menuEl.showPopover();
     // Меню не должно уезжать за край: у нижних строк дерева места вниз нет.
     const box = menuEl.getBoundingClientRect();
     const x = Math.min(e.clientX, innerWidth - box.width - 8);

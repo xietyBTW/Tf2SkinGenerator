@@ -35,7 +35,21 @@
   --mono: "SF Mono", "Cascadia Mono", "Consolas", monospace;
 
   --dur: 140ms;
+  /* Панели, диалоги, подписи: чуть медленнее hover, иначе появление не
+     читается как движение. */
+  --dur-panel: 220ms;
 }
+
+/* Анимации выключают либо системной настройкой, либо своей (настройки →
+   «Анимации интерфейса»; признак ставит settings.js). Обе гасят всё разом:
+   длительности в ноль, переходы стола — без движения. */
+@media (prefers-reduced-motion: reduce) {
+  :root { --dur: 0ms; --dur-panel: 0ms; }
+}
+[data-motion="off"] { --dur: 0ms; --dur-panel: 0ms; }
+[data-motion="off"]::view-transition-group(*),
+[data-motion="off"]::view-transition-old(*),
+[data-motion="off"]::view-transition-new(*) { animation: none; }
 
 /* Что рисует БРАУЗЕР, а не мы: список внутри <select>, полосы прокрутки,
    каретка, стрелки числовых полей. Без этой строки они остаются светлыми, и в
@@ -276,6 +290,12 @@ button, input, select, textarea { color: inherit; }
   border-color: var(--ink);
   color: var(--surface);
 }
+
+/* Нажатие — мгновенный отклик, без перехода: кнопка «проседает» под пальцем.
+   Текстовым — на точку вниз (масштаб сдвинул бы подчёркивание), обведённым —
+   чуть меньше. */
+.textbtn:active, .mattab:active { transform: translateY(1px); }
+.tag:active, .btn:active, .pick:active { transform: scale(.96); }
 
 /* ── Скроллбары под общий тон ────────────────────────────────────────── */
 * { scrollbar-width: thin; scrollbar-color: var(--hairline-strong) transparent; }

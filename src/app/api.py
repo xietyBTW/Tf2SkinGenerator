@@ -231,11 +231,18 @@ def items(category: str = 'weapon', tf2_class: Optional[str] = None,
         paths = session().tf2_paths()
         names = SkyboxService.enumerate_sky_names(
             '' if 'error' in paths else str(paths.get('root') or ''))
+        from src.data.skyboxes import SKY_ALL_MAPS_KEY
         # Обложка — боковая грань самого неба: иконки в рюкзаке у него нет и
         # быть не может, а узнают небо по горизонту.
-        return _search([{'key': n, 'name': n, 'cls': '', 'type': 'skybox',
-                         'mode': SKYBOX_MODE, 'sky': n, 'icon': f'skybox/{n}'}
-                        for n in names], query)
+        # Первым — «Все карты»: одно небо на всю игру, без обложки (своего
+        # неба у пункта нет; превью показывает SKY_PREVIEW_DEFAULT). Пункт был
+        # в окне приложения и потерялся при переезде на страницу.
+        return _search([{'key': SKY_ALL_MAPS_KEY, 'name': t['sky_all_maps'],
+                         'cls': '', 'type': 'skybox', 'mode': SKYBOX_MODE,
+                         'sky': SKY_ALL_MAPS_KEY, 'icon': ''}]
+                       + [{'key': n, 'name': n, 'cls': '', 'type': 'skybox',
+                           'mode': SKYBOX_MODE, 'sky': n, 'icon': f'skybox/{n}'}
+                          for n in names], query)
 
     # Снаряды, пикапы и реквизит насмешек устроены одинаково: таблица
     # {ключ: {ru, en, mdl_path}} плюс префикс режима. Реестр общий с
@@ -366,8 +373,11 @@ def controls_for(mode: str, key: str = '') -> Dict[str, object]:
         # ── Превью ──────────────────────────────────────────────────────── #
         # Модель подменять можно только там, где она есть: у спрея, крита и
         # эффектов смерти её нет вовсе, у неба — грани вместо неё.
-        'load_model': not (is_crit or is_skybox or is_spray),
-        'replace_model': not (is_crit or is_skybox or is_spray or is_body),
+        # Пустой режим — предмет ещё не выбран: страница спрашивает правила
+        # на старте, и без этого «Заменить модель» висела над пустым кадром.
+        'load_model': bool(mode) and not (is_crit or is_skybox or is_spray),
+        'replace_model': bool(mode) and not (is_crit or is_skybox or is_spray
+                                             or is_body),
         # Деление на части — про ГЕОМЕТРИЮ, а не про подмену модели: делить
         # можно всё, что приехало декомпиляцией, включая тела классов и руки
         # (у них своя геометрия и своя развёртка). Раньше кнопка ходила за
@@ -1000,6 +1010,8 @@ _SETTINGS_KEYS = (
     # Гифка на части крутится и в 3D. Выключено: это секунды расчёта и сотни
     # мегабайт на видеокарте после каждого мазка (см. AppSession._animate_parts).
     'parts_animation',
+    # Анимации интерфейса (панели, камера, разъезд половин). Включены.
+    'ui_animations',
 )
 
 #: Мелочи раскладки, которые правят НЕ в окне настроек, а прямо на экране:
@@ -1088,6 +1100,10 @@ def settings(lang: str = '') -> Dict[str, object]:
     values['advanced_vtf_flags'] = bool(values.get('advanced_vtf_flags'))
     values['debug_mode'] = bool(values.get('debug_mode'))
     values['parts_animation'] = bool(values.get('parts_animation'))
+    # Анимации по умолчанию ВКЛЮЧЕНЫ: None здесь ломал бы круг «прочитал →
+    # сохранил» так же, как у panels_pinned.
+    if values.get('ui_animations') is None:
+        values['ui_animations'] = True
     # Сохранение правок по умолчанию ВКЛЮЧЕНО: забытая работа — худший исход,
     # а человек не должен помнить про «сохранить».
     if values.get('save_edits') is None:
@@ -1357,7 +1373,9 @@ def vmt_snippets(lang: str = '') -> Dict[str, object]:
     весь документ, а не вставляется под курсор, и страница обязана спросить.
     Тексты живут в `src/data/vmt_snippets.py` — общие с окном приложения.
     """
-    from src.data.vmt_snippets import VMT_FULL_TEMPLATES, VMT_SNIPPETS
+    from src.data.vmt_snippets import (
+        VMT_FULL_TEMPLATES, VMT_MERGE_REMOVES, VMT_SNIPPETS,
+    )
 
     groups = []
     for category, items in VMT_SNIPPETS.items():
@@ -1365,7 +1383,11 @@ def vmt_snippets(lang: str = '') -> Dict[str, object]:
             'name': category,
             'items': [{'label': label, 'snippet': snippet or '',
                        'hint': hint or '',
-                       'template': bool(snippet is None)}
+                       'template': bool(snippet is None),
+                       # Слияние: значения перекрывают одноимённые ключи
+                       # документа, `remove` гасятся (см. VMT_MERGE_REMOVES).
+                       'merge': label in VMT_MERGE_REMOVES,
+                       'remove': list(VMT_MERGE_REMOVES.get(label, ()))}
                       for label, snippet, hint in items],
         })
     return {'groups': groups, 'templates': dict(VMT_FULL_TEMPLATES)}
@@ -1395,7 +1417,7 @@ def set_settings(values: Optional[Dict[str, object]] = None,
             cfg[key] = str(value or '').strip() or 'export'
         elif key in ('particles_group_tree', 'keep_temp_files', 'debug_mode',
                      'save_edits', 'panels_pinned', 'advanced_vtf_flags',
-                     'parts_animation'):
+                     'parts_animation', 'ui_animations'):
             cfg[key] = bool(value)
         else:
             cfg[key] = str(value or '').strip()

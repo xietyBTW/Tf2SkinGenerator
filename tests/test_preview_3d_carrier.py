@@ -414,3 +414,29 @@ class ClipOnlyTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SkyAllMapsTests(unittest.TestCase):
+    """«Все карты»: сборка перекрывает каждое стоковое небо, превью — одно."""
+
+    def test_all_maps_expands_to_every_sky(self):
+        from src.data.skyboxes import SKY_ALL_MAPS_KEY
+        s = AppSession()
+        s._sky_name = SKY_ALL_MAPS_KEY
+        with patch.object(AppSession, "tf2_paths", staticmethod(lambda: PATHS)),                 patch("src.services.skybox_service.SkyboxService.enumerate_sky_names",
+                      staticmethod(lambda root: ["sky_a", "sky_b"])):
+            self.assertEqual(s._sky_names_to_build(), ["sky_a", "sky_b"])
+
+    def test_single_sky_stays_single(self):
+        s = AppSession()
+        s._sky_name = "sky_day01_01"
+        self.assertEqual(s._sky_names_to_build(), ["sky_day01_01"])
+
+    def test_all_maps_previews_the_default_sky(self):
+        from src.data.skyboxes import SKY_ALL_MAPS_KEY, SKY_PREVIEW_DEFAULT
+        s = AppSession()
+        seen = {}
+        with patch.object(AppSession, "tf2_paths", staticmethod(lambda: PATHS)),                 patch.object(s.skybox, "load", lambda name, vpks: seen.update(name=name)):
+            s.load_skybox(SKY_ALL_MAPS_KEY)
+        self.assertEqual(seen["name"], SKY_PREVIEW_DEFAULT)
+        self.assertEqual(s._sky_name, SKY_ALL_MAPS_KEY)

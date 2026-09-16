@@ -15,6 +15,14 @@
   }
 
   #canvas-container { width: 100%; height: 100%; }
+  /* Новая модель проявляется: фон холста тот же, что у страницы, поэтому
+     прозрачность холста — это прозрачность модели. См. _revealCanvas. */
+  #canvas-container canvas { transition: opacity 220ms; }
+  #canvas-container canvas.is-hidden { opacity: 0; transition: none; }
+  @media (prefers-reduced-motion: reduce) {
+    #canvas-container canvas { transition: none; }
+  }
+  body.no-motion #canvas-container canvas { transition: none; }
   #canvas-container.inspecting { cursor: help; }
   #canvas-container.cutting  { cursor: crosshair; }
 
@@ -541,7 +549,13 @@ function _ensureFitGroup() {
   return _fitGroup;
 }
 
-window.setFitTransform = function(scale, rotate, offset) {
+// `animate` — доехать за FIT_TWEEN_MS, а не встать сразу: так возвращается
+// «Сбросить». Ввод чисел и первая постановка ставят сразу — там движение
+// либо не нужно, либо крутится по клавише.
+const FIT_TWEEN_MS = 220;
+let _fitTween = null;      // {group, from:{quat,scale,pos}, to:{...}, t0}
+
+window.setFitTransform = function(scale, rotate, offset, animate = false) {
   const identity = scale === 1 && rotate.every(v => !v) && offset.every(v => !v);
   _fitState = identity ? null : [scale, rotate.slice(), offset.slice()];
   const group = _ensureFitGroup();
@@ -551,10 +565,34 @@ window.setFitTransform = function(scale, rotate, offset) {
     .multiply(new THREE.Matrix4().makeRotationY(rotate[1] * d))
     .multiply(new THREE.Matrix4().makeRotationX(rotate[0] * d));
   const M = _FIT_C.clone().multiply(R).multiply(_FIT_CT);
-  group.quaternion.setFromRotationMatrix(M);
-  group.scale.setScalar(scale);
-  group.position.set(offset[0], offset[2], -offset[1]);
+  const to = { quat: new THREE.Quaternion().setFromRotationMatrix(M),
+               scale, pos: new THREE.Vector3(offset[0], offset[2], -offset[1]) };
+  if (!animate || _noMotion()) { _fitTween = null; _placeFit(group, to); return; }
+  _fitTween = {
+    group, to, t0: performance.now(),
+    from: { quat: group.quaternion.clone(), scale: group.scale.x, pos: group.position.clone() },
+  };
 };
+
+function _placeFit(group, f) {
+  group.quaternion.copy(f.quat);
+  group.scale.setScalar(f.scale);
+  group.position.copy(f.pos);
+}
+
+function _stepFitTween() {
+  if (!_fitTween) return;
+  const { group, from, to } = _fitTween;
+  if (group !== _fitGroup) { _fitTween = null; return; }   // модель сменилась
+  const k = Math.min(1, (performance.now() - _fitTween.t0) / FIT_TWEEN_MS);
+  const e = 1 - Math.pow(1 - k, 3);
+  _placeFit(group, {
+    quat: from.quat.clone().slerp(to.quat, e),
+    scale: from.scale + (to.scale - from.scale) * e,
+    pos: from.pos.clone().lerp(to.pos, e),
+  });
+  if (k >= 1) _fitTween = null;
+}
 
 /** Обратно: трансформ группы → числа подгонки в осях SMD. */
 function _fitFromGroup(group) {
@@ -636,6 +674,7 @@ window.startFitOp = function(tool) {
   const group = _ensureFitGroup();
   if (!group) return;
   if (_fitOp) _fitOpCancel();
+  _fitTween = null;                 // рукой — значит с того места, где модель сейчас
   group.updateMatrixWorld(true);
   const pivotWorld = new THREE.Vector3().setFromMatrixPosition(group.matrixWorld);
   _fitOp = {
@@ -845,17 +884,87 @@ function startAnimation(textures, framerate, meshFilter) {
   }, ms);
 }
 
+// ── Перелёт камеры ──────────────────────────────────────────────────────── //
+// Вход в вид от первого лица и выход из него переставляли камеру рывком:
+// орбита → глаз игрока и обратно, с другим FOV. Теперь она долетает за
+// CAM_FLY_MS, кадр за кадром в animate(). Первая постановка (камеры ещё
+// нигде не было) — сразу. Позиция, цель, FOV и «верх» интерполируются
+// линейно с плавным ходом; для перелётов такой длины этого достаточно.
+const CAM_FLY_MS = 300;
+let _camFly = null;        // {from:{pos,target,fov,up}, to:{...}, t0}
+let _camPlaced = false;
+//: Анимации выключены — настройкой страницы (setMotion) или системой.
+let _motionOff = false;
+const _noMotion = () => _motionOff
+  || window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+window.setMotion = function(on) {
+  _motionOff = !on;
+  document.body.classList.toggle('no-motion', _motionOff);
+};
+
+function _flyCamera(pos, target, fov, up) {
+  const to = { pos: new THREE.Vector3(...pos), target: new THREE.Vector3(...target),
+               fov, up: new THREE.Vector3(...up) };
+  if (!_camPlaced || _noMotion()) {
+    _camFly = null;
+    _placeCamera(to);
+    _camPlaced = true;
+    return;
+  }
+  _camFly = {
+    from: { pos: camera.position.clone(), target: controls.target.clone(),
+            fov: camera.fov, up: camera.up.clone() },
+    to, t0: performance.now(),
+  };
+}
+
+function _placeCamera(c) {
+  camera.up.copy(c.up);
+  camera.position.copy(c.pos);
+  if (camera.fov !== c.fov) { camera.fov = c.fov; camera.updateProjectionMatrix(); }
+  camera.lookAt(c.target);
+  controls.target.copy(c.target);
+  controls.update();
+}
+
+function _stepCameraFly() {
+  if (!_camFly) return;
+  const k = Math.min(1, (performance.now() - _camFly.t0) / CAM_FLY_MS);
+  const e = 1 - Math.pow(1 - k, 3);            // ease-out cubic
+  const { from, to } = _camFly;
+  _placeCamera({
+    pos: from.pos.clone().lerp(to.pos, e),
+    target: from.target.clone().lerp(to.target, e),
+    fov: from.fov + (to.fov - from.fov) * e,
+    up: from.up.clone().lerp(to.up, e).normalize(),
+  });
+  if (k >= 1) _camFly = null;
+}
+
+/** Проявляет холст заново: зовётся, когда в сцену встала новая модель.
+ *  Смена текстур или анимации сцену не трогает и сюда не заходит. */
+function _revealCanvas() {
+  const el = renderer.domElement;
+  el.classList.add('is-hidden');
+  void el.offsetWidth;              // зафиксировать «спрятан» до перехода
+  el.classList.remove('is-hidden');
+}
+
+/** Где камера сейчас — для автопроверки перелёта. */
+window.cameraDebug = () => ({
+  pos: camera.position.toArray().map(v => +v.toFixed(3)),
+  target: controls.target.toArray().map(v => +v.toFixed(3)),
+  fov: +camera.fov.toFixed(2), flying: !!_camFly,
+});
+
 // ── Geometry helpers ─────────────────────────────────────────────────────── //
 function applyTransform(object, cx, cy, cz, scale) {
   if (_viewRig) { _applyFirstPersonRig(object); return; }
   object.position.set(-cx * scale, -cy * scale, -cz * scale);
   object.scale.setScalar(scale);
-  const fovRad   = (camera.fov * Math.PI) / 180;
+  const fovRad   = (DEFAULT_FOV * Math.PI) / 180;
   const distance = 1.0 / Math.tan(fovRad / 2) * 1.8;
-  camera.position.set(0, 0.2, distance);
-  camera.lookAt(0, 0, 0);
-  controls.target.set(0, 0, 0);
-  controls.update();
+  _flyCamera([0, 0.2, distance], [0, 0, 0], DEFAULT_FOV, [0, 1, 0]);
 }
 
 // Вид от первого лица: сцена уже стоит там, где надо относительно глаза,
@@ -864,13 +973,7 @@ function _applyFirstPersonRig(object) {
   const rig = _firstPersonCamera(_viewRig);
   object.position.set(0, 0, 0);
   object.scale.setScalar(1);
-  camera.up.set(rig.up[0], rig.up[1], rig.up[2]);
-  camera.position.set(rig.position[0], rig.position[1], rig.position[2]);
-  camera.fov = rig.fov;
-  camera.updateProjectionMatrix();
-  camera.lookAt(rig.target[0], rig.target[1], rig.target[2]);
-  controls.target.set(rig.target[0], rig.target[1], rig.target[2]);
-  controls.update();
+  _flyCamera(rig.position, rig.target, rig.fov, rig.up);
 }
 
 // Как ставить камеру: null — орбита вокруг модели (обычное превью),
@@ -881,11 +984,7 @@ window.setViewRig = function(rig) {
   // Орбита в кадре от первого лица бессмысленна: там важно именно то, что
   // видит игрок, а не свободный осмотр.
   controls.enabled = !_viewRig;
-  if (!_viewRig) {
-    camera.up.set(0, 1, 0);
-    camera.fov = DEFAULT_FOV;
-    camera.updateProjectionMatrix();
-  }
+  // «Верх» и FOV орбиты вернёт перелёт камеры при показе обычной модели.
   // Переставляем камеру сразу только при входе в режим: выход из него всегда
   // сопровождается загрузкой другой модели, а её габариты здесь неизвестны.
   if (_viewRig && currentModel) _applyFirstPersonRig(currentModel);
@@ -1197,6 +1296,7 @@ window.loadModelFromContent = function(objContent, texDataUrl, cx, cy, cz, scale
       if (_sceneGeneration !== gen) return;   // запрос устарел — более новый уже в очереди
       scene.add(object);
       currentModel = object;
+      _revealCanvas();
 
       // Сначала показываем модель без текстуры (нейтральный цвет)
       applyTexture(object, null);
@@ -1307,6 +1407,7 @@ window.loadViewmodelAnimated = function(data, loadSeq) {
 
   scene.add(_skinned.group);
   currentModel = _skinned.group;
+  _revealCanvas();
   // Вид от первого лица ставит камеру ригом, и габариты ему не нужны. Сцену
   // же, которую смотрят со стороны (насмешка), надо вписать в кадр самим:
   // персонаж TF2 — это шесть десятков единиц, и камера по умолчанию
@@ -1889,6 +1990,7 @@ window.loadCritHitSceneWithModel = function(objContent, critTexDataUrl, cx, cy, 
 
       scene.add(object);
       currentModel = object;
+      _revealCanvas();
 
       // Позиционируем и масштабируем так же как обычную модель
       object.position.set(-cx * scale, -cy * scale, -cz * scale);
@@ -2611,6 +2713,8 @@ function animate() {
   const delta = _animClock.getDelta();
   if (_skinned && _skinned.mixer) _skinned.mixer.update(delta);
   _updateSkinnedHidden(_skinned);
+  _stepCameraFly();
+  _stepFitTween();
   controls.update();
   // Кнопка инспекции доступна только когда есть обычная модель (не CritHIT)
   const _inspectAvail = !!currentModel && !_isCritHitMode;

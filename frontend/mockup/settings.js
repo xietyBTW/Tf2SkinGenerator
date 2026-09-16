@@ -56,6 +56,11 @@ export function applyLook(values) {
   // сборку не уходит (см. build.js: невидимое не читается).
   document.documentElement.dataset.advflags =
     values.advanced_vtf_flags ? '1' : '';
+  // Анимации: признак на корне гасит CSS-переходы страницы, вьюверу — своим
+  // вызовом: перелёт камеры и проявление модели считает он сам.
+  const motion = values.ui_animations !== false;
+  document.documentElement.dataset.motion = motion ? '' : 'off';
+  withViewer((w) => w.setMotion && w.setMotion(motion));
 }
 
 export async function openSettings() {
@@ -79,6 +84,7 @@ export async function openSettings() {
   document.getElementById('cfg-edits').checked = Boolean(v.save_edits);
   document.getElementById('cfg-tree').checked = Boolean(v.particles_group_tree);
   document.getElementById('cfg-advflags').checked = Boolean(v.advanced_vtf_flags);
+  document.getElementById('cfg-motion').checked = v.ui_animations !== false;
   document.getElementById('cfg-temp').checked = Boolean(v.keep_temp_files);
   document.getElementById('cfg-parts-anim').checked = Boolean(v.parts_animation);
   document.getElementById('cfg-debug').checked = Boolean(v.debug_mode);
@@ -313,6 +319,7 @@ document.getElementById('cfg-save').addEventListener('click', async () => {
     save_edits: document.getElementById('cfg-edits').checked,
     particles_group_tree: document.getElementById('cfg-tree').checked,
     advanced_vtf_flags: document.getElementById('cfg-advflags').checked,
+    ui_animations: document.getElementById('cfg-motion').checked,
     keep_temp_files: document.getElementById('cfg-temp').checked,
     parts_animation: document.getElementById('cfg-parts-anim').checked,
     debug_mode: document.getElementById('cfg-debug').checked,

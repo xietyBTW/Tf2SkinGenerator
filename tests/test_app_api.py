@@ -220,6 +220,15 @@ class ControlsTests(unittest.TestCase):
         self.assertIn('advanced_vtf_flags', values)
         self.assertIsInstance(values['advanced_vtf_flags'], bool)
 
+    def test_animations_are_on_unless_switched_off(self):
+        """Ключ есть всегда и булев; отсутствие в конфиге значит «включены»."""
+        from unittest.mock import patch
+        values = api.settings()['values']
+        self.assertIsInstance(values['ui_animations'], bool)
+        with patch('src.config.app_config.AppConfig.load_config',
+                   return_value={}):
+            self.assertTrue(api.settings()['values']['ui_animations'])
+
     def test_skybox_enables_only_the_flag_it_needs(self):
         """У скайбокса осмысленный флаг один — Point Sample.
 
@@ -344,7 +353,12 @@ class CoverTests(unittest.TestCase):
                                     f"{category}/{item['key']}: {item['icon']!r}")
 
     def test_sky_points_at_itself(self):
-        for item in api.items('skybox'):
+        from src.data.skyboxes import SKY_ALL_MAPS_KEY
+        rows = api.items('skybox')
+        # Первым — «Все карты»: своего неба у пункта нет, и обложки тоже.
+        self.assertEqual(rows[0]['key'], SKY_ALL_MAPS_KEY)
+        self.assertEqual(rows[0]['icon'], '')
+        for item in rows[1:]:
             self.assertEqual(item['icon'], f"skybox/{item['key']}")
 
     def test_sky_list_comes_from_the_installed_game(self):
@@ -365,7 +379,7 @@ class CoverTests(unittest.TestCase):
             keys = [row['key'] for row in api.items('skybox')]
         self.assertTrue(scan.called)
         self.assertIn('sky_from_update_99', keys)
-        self.assertEqual(len(keys), len(fake))
+        self.assertEqual(len(keys), len(fake) + 1)      # плюс «Все карты»
 
     def test_character_parts_have_their_own_covers(self):
         """У каждой части свой ответ: тело — чьё, руки — руки, маски — маски.

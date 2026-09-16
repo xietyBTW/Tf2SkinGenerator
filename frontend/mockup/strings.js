@@ -459,9 +459,14 @@ export const EN = {
   'У этого неба граней в игре не нашлось':
     'No faces for this sky were found in the game',
   'Найдено граней: {} из 6': 'Faces found: {} of 6',
+  'Анимации интерфейса': 'Interface animations',
+  'Плавное появление панелей, перелёт камеры, разъезд половин стола. Без них всё переключается мгновенно':
+    'Panels fading in, the camera flying, the two halves sliding apart. Without them everything switches instantly',
   'Панорама 360°': '360° panorama',
   'Загрузите панораму 360° или грани неба':
     'Load a 360° panorama or the sky faces',
+  'Перетащите фото 360° (2:1) — оно разрежется на все шесть граней':
+    'Drop a 360° photo (2:1) — it will be split into all six faces',
 
   // ── Части модели ──────────────────────────────────────────────────────
   'Части': 'Parts',

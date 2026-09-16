@@ -83,6 +83,15 @@ narrow.addEventListener('change', applyPanels);
 addEventListener('resize', applyPanels);
 applyPanels();
 
+/** Проявляет стол заново — после смены раздела, когда его содержимое
+ *  подменилось целиком. Снять и поставить класс через reflow: иначе
+ *  анимация не перезапустится. */
+export function freshenStage() {
+  root.classList.remove('is-fresh');
+  void root.offsetWidth;
+  root.classList.add('is-fresh');
+}
+
 // ── Каталог: вошёл, выбрал, вышел ───────────────────────────────────────
 export const floating = () => root.dataset.panels === 'float';
 export const openCat = () => {

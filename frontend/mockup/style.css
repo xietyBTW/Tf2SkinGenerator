@@ -301,6 +301,29 @@
   object-fit: contain;
   display: block;
 }
+/* Подсказка в пустой карточке: что сюда класть. Сквозь неё проходит и
+   указатель, и перенос файла — карточка остаётся целью. */
+.frame__hint {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  text-align: center;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--ink-mute);
+  pointer-events: none;
+}
+
+/* Новая картинка в карточке проявляется. Класс ставит страница ТОЛЬКО когда
+   картинка сменилась: альбом пересобирается на каждое обновление состояния,
+   и проявление всех карточек подряд было бы мерцанием. */
+.frame__img img.is-new { animation: fade-in var(--dur-panel); }
+/* Без fill-mode НАМЕРЕННО: удержанная анимацией прозрачность — это stacking
+   context навсегда, и меню инструментов из заголовка уезжало под кадр. */
+@keyframes fade-in { from { opacity: 0; } }
 .frame:hover .frame__img { border-color: var(--ink); }
 .frame.is-current .frame__img { border-color: var(--accent); }
 /* Кадр под перетаскиванием: рамка акцентом, чтобы было видно, куда упадёт. */
@@ -819,7 +842,18 @@
 /* Контекстное меню — тот же список, что у «Инструментов», только у курсора. */
 /* right: auto обязателен: у .menu__list он прибит к правому краю родителя,
    и меню растягивалось от курсора до края экрана. */
-.ctx { position: fixed; right: auto; top: auto; z-index: 30; min-width: 220px; }
+/* Меню — popover (верхний слой, см. menu.js): у popover свои поля и
+   центровка от браузера, возвращаем наши. Где стоять, задаёт скрипт. */
+.ctx {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  padding: 0;
+  z-index: 30;
+  min-width: 220px;
+  color: inherit;
+}
+.ctx:popover-open { display: flex; }
 .ctx[hidden] { display: none; }
 .ctx__sep { height: 1px; background: var(--hairline-strong); }
 .ctx .menu__item:disabled { color: var(--ink-mute); cursor: default; }
@@ -970,8 +1004,33 @@
   border-bottom: 1px solid var(--hairline);
 }
 .ptools__fold svg { width: 12px; height: 12px; }
-.ptools.is-folded .ptools__body,
+/* Свёртка: столбик значков складывается по высоте (`interpolate-size` —
+   высота auto ↔ 0 анимируется), панель настроек уходит вправо и гаснет.
+   Панель настроек прячут ещё и атрибутом hidden — когда у инструмента
+   настроек нет; оба состояния уходят одинаково. */
+.ptools__body {
+  interpolate-size: allow-keywords;
+  height: auto;
+  overflow: hidden;
+  transition: height var(--dur-panel), opacity var(--dur-panel),
+              visibility var(--dur-panel) allow-discrete;
+}
+.ptools.is-folded .ptools__body { height: 0; opacity: 0; visibility: hidden; }
+.ptools__opts {
+  transition: opacity var(--dur-panel), transform var(--dur-panel),
+              display var(--dur-panel) allow-discrete;
+}
 .ptools.is-folded .ptools__opts { display: none; }
+.ptools.is-folded .ptools__opts, .ptools__opts[hidden] {
+  opacity: 0;
+  transform: translate(16px, -50%);
+}
+@starting-style {
+  .ptools:not(.is-folded) .ptools__opts:not([hidden]) {
+    opacity: 0;
+    transform: translate(16px, -50%);
+  }
+}
 .ptools.is-folded .ptools__fold { border-bottom: 0; }
 .ptools.is-folded .ptools__fold svg { transform: scaleX(-1); }
 
@@ -2232,6 +2291,114 @@
 @media (prefers-reduced-motion: reduce) {
   .loading__ring { animation: none; }
 }
+
+/* ── Появление и уход панелей ─────────────────────────────────────────────
+   Всё, что переключается атрибутом hidden, раньше возникало рывком: display
+   не анимируется. `transition-behavior: allow-discrete` держит display до
+   конца перехода (уход), `@starting-style` задаёт кадр, С КОТОРОГО начинать
+   (появление). Чисто CSS, JS про это не знает. Список — явный; откуда
+   выезжать, задаёт `--reveal-from` у элемента (по умолчанию — чуть сверху). */
+[data-panels="float"] .catalog,
+.viewport__hint,
+#fpbar, #tauntbar, #skinbar, #hatstyles, #hatclasses,
+#partsbar, #fitpanel, #partspaint,
+.build, .pbuild, .menu__list, .ctx, .console {
+  --reveal-from: translateY(-4px);
+  transition: opacity var(--dur-panel), transform var(--dur-panel),
+              display var(--dur-panel) allow-discrete;
+}
+[data-panels="float"] .catalog[hidden],
+.viewport__hint[hidden],
+#fpbar[hidden], #tauntbar[hidden], #skinbar[hidden], #hatstyles[hidden],
+#hatclasses[hidden], #partsbar[hidden], #fitpanel[hidden], #partspaint[hidden],
+.build[hidden], .pbuild[hidden], .menu__list[hidden], .ctx[hidden],
+.console[hidden] {
+  opacity: 0;
+  transform: var(--reveal-from);
+}
+@starting-style {
+  [data-panels="float"] .catalog:not([hidden]),
+  .viewport__hint:not([hidden]),
+  #fpbar:not([hidden]), #tauntbar:not([hidden]), #skinbar:not([hidden]),
+  #hatstyles:not([hidden]), #hatclasses:not([hidden]),
+  #partsbar:not([hidden]), #fitpanel:not([hidden]), #partspaint:not([hidden]),
+  .build:not([hidden]), .pbuild:not([hidden]), .menu__list:not([hidden]),
+  .ctx:not([hidden]), .console:not([hidden]) {
+    opacity: 0;
+    transform: var(--reveal-from);
+  }
+}
+/* Каталог на весь экран — без сдвига: он и так закрывает всё, хватит
+   проявления. Панель параметров снизу — выезжает снизу, консоль — справа. */
+[data-panels="float"] .catalog { --reveal-from: none; }
+.build, .pbuild { --reveal-from: translateY(10px); }
+.console { --reveal-from: translateX(16px); }
+/* Панели В КАДРЕ выезжают из-за его краёв, как половины стола: список частей
+   слева, палитры (части, подгонка) справа. Кадр обрезает (`overflow:
+   hidden`), так что за краем их не видно. Палитра — контейнер на весь кадр
+   со столбиком у правого края и панелью настроек в 280 px от него; сдвиг
+   контейнера на столько же уводит обе за край. */
+#partsbar { --reveal-from: translateX(calc(-100% - 12px)); }
+#fitpanel, #partspaint { --reveal-from: translateX(280px); }
+
+/* ── «Вместе / Текстура / Модель» ─────────────────────────────────────────
+   View Transitions: каждая половина — именованный участник. Та, что есть в
+   обоих кадрах, едет и растягивается сама (группа интерполирует рамку);
+   уходящая уезжает за СВОЙ край, приходящая выезжает из-за него: текстуры
+   слева, модель справа. `:only-child` — участник есть лишь в одном кадре,
+   то есть именно уходит или приходит, а не меняет размер. Снимки не
+   масштабируем (`object-fit: none`): при смене ширины вдвое картинку
+   иначе плющило бы. Хром вокруг стола не меняется — корень без анимации. */
+.half--flat  { view-transition-name: half-flat; }
+.half--model { view-transition-name: half-model; }
+/* Без кроссфейда корня — и без его сложения цветов (plus-lighter): два
+   непрозрачных снимка складывались в серую пелену на весь экран. */
+::view-transition-old(root), ::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+::view-transition-group(*) { animation-duration: var(--dur-panel); }
+::view-transition-old(*), ::view-transition-new(*) {
+  block-size: 100%;
+  object-fit: none;
+  animation-duration: var(--dur-panel);
+}
+::view-transition-old(half-flat):only-child  { animation-name: vt-out-left; }
+::view-transition-new(half-flat):only-child  { animation-name: vt-in-left; }
+::view-transition-old(half-model):only-child { animation-name: vt-out-right; }
+::view-transition-new(half-model):only-child { animation-name: vt-in-right; }
+@keyframes vt-out-left  { to   { transform: translateX(-100%); opacity: 0; } }
+@keyframes vt-in-left   { from { transform: translateX(-100%); opacity: 0; } }
+@keyframes vt-out-right { to   { transform: translateX(100%);  opacity: 0; } }
+@keyframes vt-in-right  { from { transform: translateX(100%);  opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) {
+    animation: none;
+  }
+}
+
+/* Смена раздела (оружие → шапки → частицы): содержимое стола подменяется
+   целиком и мгновенно — проявляем его заново, класс ставит catalog.js. */
+.is-fresh .title, .is-fresh .stage { animation: fade-in var(--dur-panel); }
+
+/* Диалоги: окно проявляется и чуть подъезжает, подложка проявляется.
+   `overlay` — чтобы на уходе окно не выпадало из верхнего слоя раньше,
+   чем догорит прозрачность. */
+.ask {
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity var(--dur-panel), transform var(--dur-panel),
+              display var(--dur-panel) allow-discrete,
+              overlay var(--dur-panel) allow-discrete;
+}
+.ask[open] { opacity: 1; transform: none; }
+@starting-style { .ask[open] { opacity: 0; transform: translateY(6px); } }
+.ask::backdrop {
+  transition: background var(--dur-panel), display var(--dur-panel) allow-discrete,
+              overlay var(--dur-panel) allow-discrete;
+}
+.ask:not([open])::backdrop { background: rgba(0, 0, 0, 0); }
+@starting-style { .ask[open]::backdrop { background: rgba(0, 0, 0, 0); } }
 
 /* ── Строка записи ───────────────────────────────────────────────────── */
 .snd {

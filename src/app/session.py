@@ -1329,6 +1329,25 @@ class AppSession:
         return {'path': path, 'files': len(by_wave),
                 'sounds': self._picked_total(), 'skipped': skipped}
 
+    def _sky_names_to_build(self) -> Optional[list]:
+        """Какие имена небес перекрывает мод: выбранное либо ВСЕ стоковые.
+
+        «Все карты» — каждая карта зовёт своё небо по имени в worldspawn, и
+        одно небо на всю игру означает VMT под каждым именем (VTF при этом
+        одни, см. build_skybox_vpk). Список — у установленной игры.
+        """
+        from src.data.skyboxes import SKY_ALL_MAPS_KEY
+        from src.services.skybox_service import SkyboxService
+
+        sky = getattr(self, '_sky_name', '')
+        if not sky:
+            return None
+        if sky != SKY_ALL_MAPS_KEY:
+            return [sky]
+        paths = self.tf2_paths()
+        return SkyboxService.enumerate_sky_names(
+            '' if 'error' in paths else str(paths.get('root') or ''))
+
     def _skybox_faces(self) -> Dict[str, str]:
         """Что показывать по граням: своя → нарезка панорамы → стоковая."""
         from src.data.skyboxes import SKY_FACES
@@ -1379,9 +1398,13 @@ class AppSession:
         if 'error' in paths:
             return paths
 
+        from src.data.skyboxes import SKY_ALL_MAPS_KEY, SKY_PREVIEW_DEFAULT
+
         self._mode = 'skybox'
         # Какое небо перекрывать — знает сборка: без имени мод собрался бы
-        # пустым (см. validate_skybox_request).
+        # пустым (см. validate_skybox_request). «Все карты» — ключ, а не
+        # небо: сборка развернёт его в полный список, а превью показывает
+        # одно стоковое небо — своего у пункта нет.
         self._sky_name = sky_name
         with self._lock:
             self.preview.mode.enter(_skybox_mode())
@@ -1389,7 +1412,8 @@ class AppSession:
         # Небеса лежат и в hl2/ — оттуда же и грани, иначе половина списка
         # показывалась бы пустой (см. TF2Paths.skybox_vpks).
         from src.services.tf2_paths import TF2Paths
-        self.skybox.load(sky_name, TF2Paths.skybox_vpks(paths['root']))
+        shown = SKY_PREVIEW_DEFAULT if sky_name == SKY_ALL_MAPS_KEY else sky_name
+        self.skybox.load(shown, TF2Paths.skybox_vpks(paths['root']))
         return {'started': True, 'sky': sky_name}
 
     def set_texture(self, material: str, path: Optional[str]) -> Dict[str, Any]:
@@ -1514,9 +1538,8 @@ class AppSession:
             # Небо: какие имена перекрывает мод и чем заменены отдельные грани.
             # Панорама уехала в `image_path` — сборка режет её сама, в
             # выбранном разрешении.
-            skybox_sky_names=([self._sky_name]
-                              if mode == SKYBOX_MODE
-                              and getattr(self, '_sky_name', '') else None),
+            skybox_sky_names=(self._sky_names_to_build()
+                              if mode == SKYBOX_MODE else None),
             skybox_face_overrides=(sky.get('face_overrides') or None),
         )
 

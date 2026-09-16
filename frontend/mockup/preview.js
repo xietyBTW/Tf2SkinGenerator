@@ -749,6 +749,14 @@ export function showSkybox(ev) {
   const pano = (ev && ev.pano_key) || '__pano__';
   cardTitles[pano] = 'Панорама 360°';
   showMaterials([pano, ...names], { ...faces, [pano]: (ev && ev.pano) || '' });
+  // Пустая карточка — шахматка без объяснений, и её принимали за отсутствие
+  // функции. Подпись говорит, что сюда класть; с картинкой она не нужна.
+  if (!(ev && ev.pano)) {
+    const hint = document.createElement('span');
+    hint.className = 'frame__hint';
+    hint.textContent = 'Перетащите фото 360° (2:1) — оно разрежется на все шесть граней';
+    document.querySelector(`.frame[data-mat="${pano}"] .frame__img`).appendChild(hint);
+  }
 
   // Небо приходит своим событием, минуя applyView, поэтому кнопки прошлого
   // предмета надо убрать здесь: у неба нет ни команд, ни варианта, ни стилей.
@@ -796,6 +804,20 @@ const GEAR = `<svg viewBox="0 0 14 14" width="14" height="14" fill="none"
                 <circle cx="9.5" cy="9.5" r="1.75" fill="var(--surface)"/>
               </svg>`;
 
+//: Какая картинка стояла на карточке при прошлой сборке альбома: проявляем
+//: только сменившиеся, иначе каждое обновление состояния мигало бы всем рядом.
+const shownSrc = new Map();
+
+/** <img> карточки; помечен `is-new`, если картинка не та, что была. */
+function frameImage(name, png) {
+  const img = document.createElement('img');
+  img.src = api.opaqueUrl(png);
+  img.alt = name;
+  if (shownSrc.get(name) !== img.src) img.classList.add('is-new');
+  shownSrc.set(name, img.src);
+  return img;
+}
+
 export function frameNode(name) {
   const fig = document.createElement('figure');
   fig.className = 'frame';
@@ -821,10 +843,7 @@ export function addFrame(name, png) {
 
   const fig = frameNode(name);
   fig.querySelector('.frame__name').textContent = name;
-  const img = document.createElement('img');
-  img.src = api.opaqueUrl(png);
-  img.alt = name;
-  fig.querySelector('.frame__img').appendChild(img);
+  fig.querySelector('.frame__img').appendChild(frameImage(name, png));
   stage.album.appendChild(fig);
 
   bindAlbum();
@@ -857,12 +876,7 @@ export function showMaterials(names, textures = {}, inStyle = false) {
     const png = textures[name];
     // Служебный ключ одноматериальной модели показывать как имя нельзя.
     fig.querySelector('.frame__name').textContent = cardTitle(name);
-    if (png) {
-      const img = document.createElement('img');
-      img.src = api.opaqueUrl(png);
-      img.alt = name;
-      fig.querySelector('.frame__img').appendChild(img);
-    }
+    if (png) fig.querySelector('.frame__img').appendChild(frameImage(name, png));
     fig.querySelector('.frame__off').hidden = !inStyle;
     stage.album.appendChild(fig);
   }
@@ -881,7 +895,15 @@ document.querySelector('.modes').addEventListener('click', (e) => {
   if (!btn) return;
   document.querySelectorAll('.modes .underlined').forEach((b) => b.classList.remove('is-active'));
   btn.classList.add('is-active');
-  work.dataset.view = btn.dataset.view;
+  if (work.dataset.view === btn.dataset.view) return;
+  // Половины разъезжаются по своим сторонам, оставшаяся растягивается —
+  // это View Transitions: браузер снимает кадр «до», применяет смену и
+  // сам ведёт каждую половину к кадру «после» (правила в style.css,
+  // `::view-transition-*`). Без поддержки — просто переключение.
+  const apply = () => { work.dataset.view = btn.dataset.view; };
+  const motion = document.documentElement.dataset.motion !== 'off';
+  if (motion && document.startViewTransition) document.startViewTransition(apply);
+  else apply();
 });
 
 // ── Сцена: сам предмет, руки или насмешка ───────────────────────────────

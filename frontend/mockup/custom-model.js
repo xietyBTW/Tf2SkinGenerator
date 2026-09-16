@@ -177,14 +177,16 @@ function fitSave(f) {
   }, 600);
 }
 
-function fitPush(save = true) {
+function fitPush(save = true, animate = false) {
   const f = fitRead();
-  withViewer((w) => w.setFitTransform && w.setFitTransform(f.scale, f.rotate, f.offset));
+  withViewer((w) => w.setFitTransform
+    && w.setFitTransform(f.scale, f.rotate, f.offset, animate));
   if (save) fitSave(f);
 }
 
 for (const id of FIT_FIELDS) fitEl(id).addEventListener('input', () => fitPush());
-fitEl('fit-reset').addEventListener('click', () => { fitWrite(null); fitPush(); });
+// Сброс — с движением: видно, откуда и куда вернулась модель.
+fitEl('fit-reset').addEventListener('click', () => { fitWrite(null); fitPush(true, true); });
 
 // Те же клавиши на странице: фокус после щелчка по кнопке остаётся у неё, а
 // не у кадра. Как в Blender: G/R/S начинают операцию — модель идёт за

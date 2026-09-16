@@ -66,6 +66,28 @@ VMT_SNIPPETS = {
             '"$color" "[1 .5 .5]"',
             "Умножение цвета текстуры на RGB (значения 0..1).",
         ),
+        (
+            "Австралий — золотой металл",
+            '"$envmap" "cubemaps/cubemap_gold001"\n'
+            '\t"$envmaptint" "[2.5 2.5 1.15]"\n'
+            '\t"$phong" "1"\n'
+            '\t"$phongexponent" "90"\n'
+            '\t"$phongboost" "10"\n'
+            '\t"$phongfresnelranges" "[.5 .5 3]"\n'
+            '\t"$basemapalphaphongmask" "1"\n'
+            '\t"$lightwarptexture" "models/lightwarps/weapon_lightwarp"\n'
+            '\t"$rimlight" "1"\n'
+            '\t"$rimlightexponent" "50"\n'
+            '\t"$rimlightboost" "0"\n'
+            '\t"$halflambert" "1"',
+            "Блеск австралия, как у c_*_gold.vmt Valve: золотая кубмапа "
+            "(cubemap_gold001 + тёплый $envmaptint), ровный phong вместо "
+            "маски-текстуры, лайтварп оружия. Цвет даёт ВАША текстура — "
+            "перекрасьте её в золото; её альфа = маска блеска "
+            "($basemapalphaphongmask). Значения $phongexponent/$phongboost/"
+            "rimlight у каждого оружия свои (обрез 90/10, миниган 165/3) — "
+            "подберите.",
+        ),
     ],
     "Прокси": [
         (
@@ -129,6 +151,18 @@ VMT_SNIPPETS = {
             None,
             "Сильно отражающий металл через $envmap. Заменяет весь VMT.",
         ),
+    ],
+}
+
+# Сниппеты-СЛИЯНИЯ: не вставляются под курсор, а правят документ — у ключа,
+# который уже есть, меняется значение (в VMT последний одноимённый ключ
+# перекрывает первые: KeyValues::FindKey(name, true) переиспользует узел, и
+# простая вставка в начало блока ничего бы не меняла), перечисленные ключи
+# гасятся комментарием. Австралию мешает $phongexponenttexture: пока
+# текстура-маска подключена, шейдер берёт её, а не $phongexponent.
+VMT_MERGE_REMOVES = {
+    "Австралий — золотой металл": [
+        "$phongexponenttexture", "$phongexponentfactor", "$phongalbedotint",
     ],
 }
 

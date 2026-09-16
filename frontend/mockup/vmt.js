@@ -130,6 +130,11 @@ async function insertMenu(e) {
       if (!go) return;
     }
     vmtText.value = body;
+  } else if (picked.merge) {
+    // Слияние (австралий): у ключей, что уже есть, меняется значение — в
+    // VMT последний одноимённый ключ перекрывает первые, и вставка в начало
+    // блока ничего не дала бы; мешающие ключи гасятся комментарием.
+    vmtText.value = mergeSnippet(vmtText.value, picked.snippet, picked.remove || []);
   } else {
     // Под курсор — но только если курсор ставил человек. Окно открывается с
     // кареткой в нуле, и вставка «под курсор» уехала бы ПЕРЕД шейдером:
@@ -145,6 +150,36 @@ async function insertMenu(e) {
   paintVmt();
   vmtText.focus();
   markVmtState();
+}
+
+//: Строка «"$ключ" значение» в начале строки (с любыми отступами, кавычки
+//: у ключа не обязательны). `$envmap` не ловит `$envmaptint`: после ключа
+//: обязателен пробел либо закрывающая кавычка.
+const keyLine = (key) => new RegExp(
+  '^([ \t]*)"?' + key.replace(/[$]/g, '[$]') + '"?[ \t]+[^\n]*$', 'im');
+
+/**
+ * Вливает сниппет в документ: одноимённые ключи заменяются на месте,
+ * остальные встают за открывающей скобкой, `remove` комментируются.
+ */
+function mergeSnippet(text, snippet, remove) {
+  let out = text;
+  for (const key of remove) {
+    out = out.replace(keyLine(key), (line, indent) => indent + '// ' + line.trim());
+  }
+  const fresh = [];
+  for (const raw of snippet.split('\n')) {
+    const line = raw.trim();
+    const m = line.match(/^"?(\$[a-z0-9_]+)"?/i);
+    if (!m) continue;
+    const re = keyLine(m[1]);
+    if (re.test(out)) out = out.replace(re, (_, indent) => indent + line);
+    else fresh.push(line);
+  }
+  if (!fresh.length) return out;
+  const at = afterBrace(out);
+  const block = '\n\t' + fresh.join('\n\t');
+  return out.slice(0, at) + block + out.slice(at);
 }
 
 /** Позиция сразу после открывающей скобки блока; её нет — конец файла. */

@@ -15,7 +15,7 @@ import * as api from './api.js';
 import { say } from './stage.js';
 import { build, floating } from './layout.js';
 import { SINGLE_TEX } from './album.js';
-import { sel } from './catalog.js';
+import { sel, applyToolsMenu } from './catalog.js';
 import { buildParams, checkName } from './build.js';
 import { openMaterialMaps } from './maps.js';
 import { openVmtEditor } from './vmt.js';
@@ -59,15 +59,21 @@ const RESET_ON_HIDE = new Set(['shoulders', 'normal', 'maps']);
 //: загрузки и обещала то, чего у модели нет.
 const MODEL_DRIVEN = new Set(['misc', 'team', 'aus', 'qc', 'styles', 'parts']);
 
-//: Последний ответ controls_for: applyView сверяется с ним, чтобы не показать
-//: в режиме то, что режим запретил.
+//: Эти — действия над ПРЕДМЕТОМ, а режим у категории ставится раньше, чем
+//: выбран предмет (панель сборки должна знать форматы и флаги заранее).
+//: Пока предмета нет, подменять, извлекать и смотреть в руках нечего.
+const ITEM_ONLY = new Set(['replace', 'load', 'firstperson', 'taunt', 'maps']);
+
+//: Последний ответ controls_for (плюс `has_item`): applyView и меню
+//: инструментов сверяются с ним, чтобы не показать то, что режим запретил.
 export let modeControls = {};
 
-export function applyControls(c) {
-  modeControls = c;
+export function applyControls(c, hasItem = true) {
+  modeControls = { ...c, has_item: hasItem };
   document.querySelectorAll('[data-cond]').forEach((el) => {
     const shown = Boolean(c[COND_KEY[el.dataset.cond]])
-      && !MODEL_DRIVEN.has(el.dataset.cond);
+      && !MODEL_DRIVEN.has(el.dataset.cond)
+      && (hasItem || !ITEM_ONLY.has(el.dataset.cond));
     el.hidden = !shown;
     if (!shown && RESET_ON_HIDE.has(el.dataset.cond)) {
       el.querySelectorAll('input[type="checkbox"]').forEach((i) => { i.checked = false; });
@@ -99,6 +105,7 @@ export function applyControls(c) {
   if (c.vpk_name && !out.dataset.mine) out.value = c.vpk_name;
 
   showFlagChecks(c);
+  applyToolsMenu();            // извлечение и UV-шаблон — только у модели
 }
 
 // Как только имя набрали руками, подсказка перестаёт его перебивать. Пустое
@@ -336,10 +343,12 @@ document.querySelector('.half--flat .acts').addEventListener('click', (e) => {
   else if (btn.id === 'vmt') openVmtEditor();
 });
 
-/** Спрашивает Python, что показывать при этом режиме, и применяет ответ. */
-export async function setMode(mode, key = '') {
+/** Спрашивает Python, что показывать при этом режиме, и применяет ответ.
+ *  `hasItem` — режим пришёл вместе с предметом, а не от выбора категории:
+ *  у категории есть форматы и флаги, но нет модели, которую можно подменить. */
+export async function setMode(mode, key = '', hasItem = true) {
   sel.mode = mode;
   // Ключ предмета — только ради имени VPK: у косметики режим один на всю
   // категорию, и по нему предмет не назвать.
-  applyControls(await api.call('controls_for', { mode, key }));
+  applyControls(await api.call('controls_for', { mode, key }), hasItem);
 }

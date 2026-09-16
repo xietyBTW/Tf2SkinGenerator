@@ -20,6 +20,7 @@ import {
   pnote,
   applyRightPanel,
   closeCat,
+  freshenStage,
   setStatus,
   showTf2Path,
 } from './layout.js';
@@ -33,8 +34,8 @@ import {
 } from './particles/index.js';
 import { diagDlg, diagSay } from './diagnostics.js';
 import { applyLook } from './settings.js';
-import { setMode } from './controls.js';
-import { startPreview, clearPreview, resetView } from './preview.js';
+import { setMode, modeControls } from './controls.js';
+import { startPreview, clearPreview, resetView, lastModel } from './preview.js';
 
 export const els = {
   cat:   document.getElementById('cat'),
@@ -495,6 +496,7 @@ export async function pickSection(name) {
   sel.section = ['hats', 'particles', 'sounds'].includes(name)
     ? name : 'weapons';
   root.dataset.section = sel.section;
+  if (было !== sel.section) freshenStage();
 
   // Звуки — раздел без предмета: ни модели, ни текстур, ни каталога. Стол он
   // занимает целиком, поэтому остальную настройку разделов не проходит.
@@ -577,7 +579,9 @@ export async function pickSection(name) {
     fillFilters(els.fClass, await api.classes(), null, pickClass);
     els.fClass.hidden = false;
     await fillHatFilters();
-    await setMode('hat');
+    // Категория, а не предмет: подменять и извлекать есть что, только если
+    // модель уже в кадре (каталог можно листать поверх показанного предмета).
+    await setMode('hat', '', Boolean(lastModel));
     await reload();
     return;
   }
@@ -611,7 +615,7 @@ export async function pickCategory(key) {
   if (wantType) fillFilters(els.fType, await api.weaponTypes(null), null, pickType);
   else els.fType.querySelectorAll('.underlined').forEach((b) => b.remove());
 
-  await setMode(await api.modeFor(key));
+  await setMode(await api.modeFor(key), '', Boolean(lastModel));   // см. выше
   await reload();
 }
 
@@ -677,12 +681,20 @@ export async function fillCategories() {
   for (const c of await api.categories()) els.cat.append(new Option(c.name, c.key));
 }
 
-/** Меню инструментов: у эффекта свои пункты, у предмета — свои.
+//: Пункт меню → ключ в ответе controls_for. Извлечение и UV-шаблон есть
+//: только у модели; сборка нескольких VPK от предмета не зависит.
+const TOOL_KEY = { model: 'extract_model', uv: 'extract_model',
+                   texture: 'extract_texture' };
+
+/** Меню инструментов: у эффекта свои пункты, у предмета — свои, и только
+ *  те, что режим разрешает (controls_for — то же правило, что у панели).
  *  Зовётся и на старте: раздел «Оружие» открывается без pickSection, и без
  *  этого в меню висели пункты PCF при выбранном оружии. */
-export function applyToolsMenu(particlesSection) {
+export function applyToolsMenu(particlesSection = sel.section === 'particles') {
   document.querySelectorAll('#tools .menu__item').forEach((i) => {
-    i.hidden = (i.dataset.for === 'particles') !== particlesSection;
+    const key = TOOL_KEY[i.dataset.tool];
+    i.hidden = (i.dataset.for === 'particles') !== particlesSection
+      || (Boolean(key) && !(modeControls[key] && modeControls.has_item));
   });
 }
 
@@ -690,7 +702,10 @@ export async function boot() {
   // Внешний вид — до всего остального: иначе первые кадры страница показывает
   // светлой и перекрашивается на глазах.
   applyLook((await api.settings()).values || {});
-  applyToolsMenu(false);
+  // Правила показа — с пустым режимом: предмет ещё не выбран, и контролы
+  // из разметки («Заменить модель», извлечение) не должны обещать действий
+  // над ним. Меню инструментов применяется там же.
+  await setMode('', '', false);
   showTf2Path();
   await fillCategories();
   els.cat.addEventListener('change', () => (sel.section === 'particles'
