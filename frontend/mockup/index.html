@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>TF2 Skin Generator</title>
 <link rel="stylesheet" href="base.css">
+<!-- Тема до первого кадра: после перезагрузки страницы (смена языка) тёмная
+     тема иначе мигает светлым, пока настройки едут из Python. -->
+<script>try{var t=sessionStorage.getItem('theme');if(t)document.documentElement.dataset.theme=t}catch(e){}</script>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -70,7 +73,13 @@
       <button class="tag is-active">RED</button>
       <button class="tag">BLU</button>
       <button class="tag" data-cond="aus">Australium</button>
+      <!-- Краска из игры: как шапка выглядит покрашенной. Только показ —
+           в мод краска не идёт, её накладывает игра по маске текстуры. -->
+      <button class="tag paint" id="paint" data-cond="hat_paints" title="Как выглядит с краской из игры">
+        <i class="paint__dot" hidden></i><span>Краска</span>
+      </button>
     </div>
+    <div class="paints" id="paints" popover="manual"></div>
   </div>
 </div>
 
@@ -99,6 +108,18 @@
 
     <div class="catalog__filters" id="f-type" hidden>
       <span class="label label--inline">Тип</span>
+    </div>
+
+    <!-- Куда надевается косметика: голова, лицо, тело… Список приходит из
+         Python вместе с предметами — только группы, что есть под запросом. -->
+    <div class="catalog__filters" id="f-region" hidden>
+      <span class="label label--inline">Куда</span>
+    </div>
+
+    <!-- Чем вызывается эффект: оружие, постройки, игрок, анюжуалы… Список
+         приходит из Python вместе с эффектами — только те виды, что есть. -->
+    <div class="catalog__filters" id="f-source" hidden>
+      <span class="label label--inline">Источник</span>
     </div>
 
     <!-- Фильтр категорий косметики: те же три, что в панели шапок приложения.
@@ -561,8 +582,11 @@
         <!-- Управление проигрыванием эффекта. Живёт там же, где действия
              над моделью: раздел меняет содержимое, а не раскладку. -->
         <div class="acts" id="pacts" hidden>
-          <button class="textbtn textbtn--sm" id="prestart">Заново</button>
-          <button class="textbtn textbtn--sm" id="ppause">Пауза</button>
+          <button class="textbtn textbtn--sm" id="prestart" title="Заново (R)">Заново</button>
+          <button class="textbtn textbtn--sm" id="ppause" title="Пауза (пробел)">Пауза</button>
+          <!-- Замедление: крит длится полсекунды, и без него в кадре не
+               разобрать, что и когда происходит. -->
+          <button class="textbtn textbtn--sm" id="pspeed" title="Скорость времени (S)">1×</button>
           <button class="textbtn textbtn--sm" id="ploop">Повтор</button>
           <button class="textbtn textbtn--sm" id="pcpbtn">Точки</button>
           <button class="textbtn textbtn--sm" id="pbg" title="Тёмный, серый или светлый фон кадра: полупрозрачные слои эффекта видны только на светлом">Фон</button>
@@ -597,31 +621,35 @@
        оружия их до восьми, и в карточку предмета они не помещаются. Модель и
        текстуры здесь не при чём, поэтому раздел занимает стол целиком. -->
   <section class="sounds" id="sounds" hidden>
-    <div class="sounds__bar">
+    <!-- Раздел — главная ось: у оружия и реплик разные события и разные
+         говорящие. Поэтому он стоит заголовком, а остальные фильтры живут в
+         колонке слева и меняются вместе с ним. -->
+    <div class="sounds__head">
+      <nav class="sounds__tabs" id="snd-section" aria-label="Раздел"></nav>
       <input class="input sounds__search" id="snd-q" type="search"
              placeholder="Название, предмет или файл">
-      <div class="catalog__filters" id="snd-section">
-        <span class="label label--inline">Раздел</span>
-      </div>
-      <div class="catalog__filters" id="snd-family">
-        <span class="label label--inline">Событие</span>
-      </div>
-      <div class="catalog__filters" id="snd-class">
-        <span class="label label--inline">Класс</span>
-      </div>
     </div>
 
-    <p class="catalog__count mono" id="snd-count"></p>
+    <div class="sounds__body">
+      <!-- Фасеты со счётчиками: кто, событие, вариант, формат. Строит код по
+           ответу Python — какие значения есть в разделе, знает только он. -->
+      <aside class="facets" id="snd-facets"></aside>
 
-    <!-- Кружок вместо списка, пока идёт чтение: разбор звуковых скриптов
-         занимает пару секунд, и пустой список за это время читается как
-         поломка. Тот же приём, что у вьювера моделей. -->
-    <div class="loading" id="snd-loading" hidden>
-      <span class="loading__ring"></span>
-      <span class="loading__text label"></span>
+      <div class="sounds__main">
+        <p class="catalog__count mono" id="snd-count"></p>
+
+        <!-- Кружок вместо списка, пока идёт чтение: разбор звуковых скриптов
+             занимает пару секунд, и пустой список за это время читается как
+             поломка. Тот же приём, что у вьювера моделей. -->
+        <div class="loading" id="snd-loading" hidden>
+          <span class="loading__ring"></span>
+          <span class="loading__text label"></span>
+        </div>
+
+        <!-- tabindex: список берёт клавиатуру — стрелки, пробел, Enter. -->
+        <div class="sounds__list" id="snd-list" tabindex="0"></div>
+      </div>
     </div>
-
-    <div class="sounds__list" id="snd-list"></div>
 
     <!-- Плеер. Движок — обычный <audio>, но без `controls`: браузерный пульт
          выпадает из вида приложения. Полоса и громкость — <input type=range>:
@@ -651,6 +679,7 @@
          и показывает её размер с форматом — к звукам это не относится. -->
     <div class="sounds__foot">
       <span class="label" id="snd-note">Своих звуков нет</span>
+      <button class="textbtn textbtn--sm" id="snd-clear" hidden>Убрать всё</button>
       <input class="input sounds__name" id="snd-name" type="text"
              placeholder="Имя VPK" value="sounds_mod">
       <button class="btn--primary" id="snd-build">Собрать VPK</button>

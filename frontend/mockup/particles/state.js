@@ -26,6 +26,17 @@ export function flattenNodes(nodes, out = []) {
 //: Система, чьи параметры сейчас показаны.
 export let pSystem = '';
 
+//: Чем файл отличается от игры: {система: added|changed|same}. Пусто —
+//: сравнивать не с чем (файл не из игры и одноимённого в ней нет).
+export const pcfDiff = new Map();
+
+/** Запоминает отличия от игры из ответа Python (если он их прислал). */
+export function setDiff(diff) {
+  if (!diff) return;
+  pcfDiff.clear();
+  for (const [name, status] of Object.entries(diff)) pcfDiff.set(name, status);
+}
+
 //: Обычный режим или экспертный. Выбор держится до смены раздела.
 export let pMode = 'simple';
 

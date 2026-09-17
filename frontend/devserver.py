@@ -172,6 +172,7 @@ ALLOWED = {
     "particle_param_reference": api.particle_param_reference,
     "set_particle_param": api.set_particle_param,
     "hats": api.hats,
+    "hat_item": api.hat_item,
     "hat_filters": api.hat_filters,
     "set_hat_filter": api.set_hat_filter,
     "mode_for": api.mode_for,
@@ -182,6 +183,8 @@ ALLOWED = {
     "stop_preview": api.stop_preview,
     "view_state": api.view_state,
     "set_team": api.set_team,
+    "paints": api.paints,
+    "set_paint": api.set_paint,
     "set_australium": api.set_australium,
     "toggle_misc": api.toggle_misc,
     "force_team": api.force_team,
@@ -217,9 +220,12 @@ ALLOWED = {
     "add_mod": api.add_mod,
     "mod_icon": api.mod_icon,
     "sounds": api.sounds,
-    "sound_families": api.sound_families,
-    "sound_sections": api.sound_sections,
+    "particle_effects": api.particle_effects,
+    "particle_diff": api.particle_diff,
+    "revert_particle_system": api.revert_particle_system,
+    "revert_particle_attr": api.revert_particle_attr,
     "set_sound": api.set_sound,
+    "clear_sounds": api.clear_sounds,
     "save_sound": api.save_sound,
     "build_sounds": api.build_sounds,
     "remove_mod": api.remove_mod,
@@ -543,6 +549,7 @@ def main() -> None:
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 5173
     server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     print(f"макет: http://127.0.0.1:{port}   (API: POST /api/<метод>)")
+    api.warm_up()
     try:
         server.serve_forever()
     except KeyboardInterrupt:

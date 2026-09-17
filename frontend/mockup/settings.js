@@ -13,7 +13,7 @@ import { say, withViewer } from './stage.js';
 import { showTf2Path, setPinned, pinnedFits } from './layout.js';
 import { setParamsWidth } from './particles/resize.js';
 import { setSplit } from './split.js';
-import { relabel } from './catalog.js';
+import { relabel, sel } from './catalog.js';
 import { setTheme, setConsoleWidth, setConsoleFilter } from './log.js';
 import { useDict, t } from './i18n.js';
 import { EN } from './strings.js';
@@ -328,23 +328,33 @@ document.getElementById('cfg-save').addEventListener('click', async () => {
   });
   if (res.error) { say(res.error); return; }
   cfgDlg.close();
+  // Язык пропитывает всё: разметку, то, что построил код, и то, что
+  // присылает Python уже словами (звуки, подписи эффектов, фасеты).
+  // Переводить это на месте — гоняться за каждым списком; честнее поднять
+  // страницу заново. Python остаётся жить, правки и кэши — с ним.
+  const before = api.lang();
+  api.setLang((res.values || {}).language);
+  if (api.lang() !== before) { restart(); return; }
   say('Настройки сохранены');
   // Гифки на модели: выключили — сцена перекрашивается неподвижной склейкой;
   // включили — кадры приедут событием parts_animated.
   if (!(res.values || {}).parts_animation) stopPartsAnimation();
-  // Тема, раскладка и язык применяются сразу: ждать перезапуска ради галки —
+  // Тема и раскладка применяются сразу: ждать перезапуска ради галки —
   // не то, чего ждут от настроек.
-  const before = api.lang();
   applyLook(res.values || {});
   // Путь к игре мог измениться — подпись внизу обязана это показать.
   showTf2Path();
-  // Имена предметов приезжают с языком: справочники в кэше — от прошлого,
-  // и список на экране тоже. Перерисовываем, сохраняя выбор.
-  if (api.lang() !== before) {
-    api.forgetCached();
-    await relabel();
-  }
 });
+
+/** Занавес и перезагрузка страницы: гаснет в цвет фона, поднимается на том
+ *  же разделе (см. boot в catalog.js). Без анимаций — сразу. */
+function restart() {
+  try { sessionStorage.setItem('section', sel.section); } catch {}
+  document.documentElement.classList.add('is-leaving');
+  const ms = parseFloat(getComputedStyle(document.documentElement)
+                        .getPropertyValue('--dur-panel')) || 0;
+  setTimeout(() => location.reload(), ms * 1.5);
+}
 
 //: Кнопка автопоиска: показываем её вместе с подписью-обёрткой, иначе от
 //: скрытой кнопки остаётся пустая строка под полем.

@@ -273,5 +273,7 @@ export function syncViewerTheme() {
  */
 export function setTheme(name) {
   root.dataset.theme = name === 'dark' ? 'dark' : 'light';
+  // Для первого кадра после перезагрузки страницы (см. index.html).
+  try { sessionStorage.setItem('theme', root.dataset.theme); } catch {}
   syncViewerTheme();
 }

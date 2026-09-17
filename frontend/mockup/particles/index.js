@@ -10,7 +10,7 @@ import './playback.js';
 import './resize.js';
 
 export { pcfNodes, pSystem, setSystem } from './state.js';
-export { fillTree, showParticleFrame, loadPcf, pickSystem } from './tree.js';
+export { fillTree, showEffects, showParticleFrame, loadPcf, pickSystem } from './tree.js';
 export { showParams } from './params.js';
 export { showParticleMaterials } from './materials.js';
 export { systemMenu, buildParticles } from './actions.js';

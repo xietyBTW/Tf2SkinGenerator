@@ -34,6 +34,7 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT.parent))
 
 from frontend.devserver import Handler  # noqa: E402  — после правки sys.path
+from src.app import api  # noqa: E402
 
 TITLE = "TF2 Skin Generator"
 
@@ -94,6 +95,8 @@ def _open_browser_app(url: str) -> bool:
 def main() -> None:
     port = _free_port()
     _serve(port)
+    # Индексы архивов игры греются, пока открывается окно.
+    api.warm_up()
     url = f"http://127.0.0.1:{port}"
     print(f"{TITLE}: {url}")
 

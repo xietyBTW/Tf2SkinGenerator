@@ -208,6 +208,9 @@ class Preview3DWorker(BaseWorker):
                 extra_smd_paths=bodygroup_smds,
                 source_zup=_source_zup,
                 pose_smd_path=_pose_smd,
+                # Косметика в MDL лежит как автору было удобно; игра ставит её
+                # bonemerge на голову игрока — и превью так же.
+                on_player=self.kind.worn_on_player,
             )
             if not ok:
                 self.failed.emit(self._p['conv_error'])

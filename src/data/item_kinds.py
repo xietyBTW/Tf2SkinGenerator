@@ -82,6 +82,12 @@ class ItemKind:
         return self.key != CHARACTER
 
     @property
+    def worn_on_player(self) -> bool:
+        """Модель собрана против скелета игрока и в игре сливается с ним
+        (bonemerge): превью ставит её в позу игрока (см. cosmetic_pose)."""
+        return self.key == HAT
+
+    @property
     def asks_game_paints(self) -> bool:
         """Перед сборкой спрашиваем, оставлять ли краски игры (см. VMT-прокси)."""
         return self.key == HAT

@@ -123,7 +123,7 @@ async function load(tab) {
     }));
   }
   if (tab === 'hat') {
-    return api.hats({ query: state.query, tf2_class: state.cls });
+    return (await api.hats({ query: state.query, tf2_class: state.cls })).items;
   }
   if (tab === 'weapon') {
     return api.items({ category: 'weapon', tf2_class: state.cls });

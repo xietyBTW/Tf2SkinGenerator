@@ -41,7 +41,7 @@ from src.services.base_worker import BaseWorker, Signal
 
 from src.shared.version import __version__, GITHUB_OWNER, GITHUB_REPO
 from src.shared.logging_config import get_logger
-from src.shared.paths import is_frozen
+from src.shared.paths import install_dir, is_frozen
 
 logger = get_logger(__name__)
 
@@ -59,6 +59,14 @@ ASSET_NAME = "Tf2SkinGenerator-Setup.exe"
 #: и понимает, что происходит. /NOCANCEL — чтобы не бросить обновление на
 #: середине замены файлов.
 _SETUP_FLAGS = ("/SILENT", "/NOCANCEL", "/RESTARTAPPLICATIONS")
+
+#: Портативная копия — та же сборка из zip, без установки. Признак — файл с
+#: этим именем рядом с .exe (кладёт build-release.ps1 в zip, установщик его
+#: не трогает). Обновляется она тем же Setup.exe в портативном режиме: он
+#: подменяет файлы в ЭТОЙ папке и не оставляет следов — ни ярлыков, ни
+#: записи в «Программах и компонентах», ни деинсталлятора (см. /PORTABLE в
+#: installer/Tf2SkinGenerator-bundle.iss).
+PORTABLE_MARKER = "PORTABLE"
 
 #: Сколько ждать перед запуском установщика. Приложение за это время успевает
 #: закрыться и отпустить мьютекс и свои файлы — иначе Setup упрётся в занятые
@@ -237,6 +245,28 @@ def download_update(
     return dest
 
 
+def portable_dir() -> Optional[Path]:
+    """Папка портативной копии, если приложение запущено из неё."""
+    if not is_frozen():
+        return None
+    root = install_dir()
+    return root if (root / PORTABLE_MARKER).is_file() else None
+
+
+def setup_arguments(portable: Optional[Path] = None) -> str:
+    """
+    Аргументы Setup.exe: обычное тихое обновление либо портативное — в ту же
+    папку. /MERGETASKS снимает задачи явно: UsePreviousTasks у Inno читает их
+    из реестра установленной копии, и ярлык на рабочем столе мог бы
+    перекинуться на портативную.
+    """
+    if portable is None:
+        return " ".join(_SETUP_FLAGS)
+    return " ".join(_SETUP_FLAGS + (
+        "/PORTABLE=1", f'/DIR="{portable}"', "/NOICONS",
+        "/MERGETASKS=!desktopicon,!removedata"))
+
+
 def install_update(setup_path: str) -> None:
     """
     Запускает установщик отдельным процессом и оставляет его работать.
@@ -259,14 +289,16 @@ def install_update(setup_path: str) -> None:
     # имени файла». Ошибки при этом не видно — Popen отработал, процесс
     # запустился, установщик не запустился НИКОГДА. Со строкой Windows отдаёт
     # командную строку в CreateProcess как есть.
+    portable = portable_dir()
     command = (f'cmd /c ping -n {_HANDOFF_DELAY_SEC + 1} 127.0.0.1 >nul & '
-               f'"{setup}" {" ".join(_SETUP_FLAGS)}')
+               f'"{setup}" {setup_arguments(portable)}')
     subprocess.Popen(
         command,
         creationflags=subprocess.DETACHED_PROCESS,
         close_fds=True,
     )
-    logger.info("Установщик запущен, приложение закрывается")
+    where = f" (портативно, в {portable})" if portable else ""
+    logger.info(f"Установщик запущен{where}, приложение закрывается")
 
 
 class UpdateChecker(BaseWorker):

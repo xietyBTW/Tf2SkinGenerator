@@ -59,10 +59,38 @@ document.getElementById('prestart').addEventListener('click',
 let pPaused = false;
 let pLoop = true;
 
-document.getElementById('ppause').addEventListener('click', (e) => {
+function togglePause() {
   pPaused = !pPaused;
-  e.target.textContent = pPaused ? 'Продолжить' : 'Пауза';
+  document.getElementById('ppause').textContent = pPaused ? 'Продолжить' : 'Пауза';
   withParticles((w) => w.setPaused(pPaused));
+}
+document.getElementById('ppause').addEventListener('click', togglePause);
+
+//: Скорость времени по кругу: 1× → ½ → ¼ → 1×. Быстрые эффекты (крит,
+//: вспышка) на глаз не разобрать без замедления.
+const SPEEDS = [1, 0.5, 0.25];
+let pSpeed = 0;
+function cycleSpeed() {
+  pSpeed = (pSpeed + 1) % SPEEDS.length;
+  const k = SPEEDS[pSpeed];
+  const btn = document.getElementById('pspeed');
+  btn.textContent = { 1: '1×', 0.5: '½×', 0.25: '¼×' }[k];
+  btn.classList.toggle('is-active', k !== 1);
+  withParticles((w) => w.setTimeScale && w.setTimeScale(k));
+}
+document.getElementById('pspeed').addEventListener('click', cycleSpeed);
+
+// Горячие клавиши кадра: пробел — пауза, R — заново, S — скорость. Только
+// когда фокус не в поле ввода: там пробел — это пробел.
+document.addEventListener('keydown', (e) => {
+  if (root.dataset.section !== 'particles' || e.ctrlKey || e.altKey) return;
+  const tag = (e.target.tagName || '').toLowerCase();
+  if (tag === 'input' || tag === 'textarea' || tag === 'select'
+      || e.target.isContentEditable) return;
+  // По коду клавиши, а не по символу: в русской раскладке R — это «к».
+  if (e.code === 'Space') { e.preventDefault(); togglePause(); }
+  else if (e.code === 'KeyR') withParticles((w) => w.restartEffect());
+  else if (e.code === 'KeyS') cycleSpeed();
 });
 
 //: Фон кадра: тёмный, как карта в тени, как карта на свету. Полупрозрачные

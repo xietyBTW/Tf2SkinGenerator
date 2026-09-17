@@ -16,9 +16,10 @@ import { say, sayBusy, stage, viewer, withViewer } from './stage.js';
 import { root, work } from './layout.js';
 import { bindAlbum, goTo, SINGLE_TEX } from './album.js';
 import { modeControls, restoreBadges } from './controls.js';
+import { syncPaint } from './paint.js';
 import { closeParts, bindParts, suspendParts, resumeParts } from './parts.js';
 import { updateDockSummary } from './build.js';
-import { showFit, bindFitViewer, isFitOn } from './custom-model.js';
+import { showFit, bindFitViewer, isFitOn, dropFitSave, flushFitSave } from './custom-model.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Данные из Python
@@ -98,7 +99,7 @@ export function hatClasses() {
  * без оправы), поэтому выбор перезагружает превью другой моделью и меняет то,
  * что уйдёт в сборку.
  */
-export function showHatStyles(item) {
+export function showHatStyles(item, active = 0) {
   const bar = document.getElementById('hatstyles');
   bar.querySelectorAll('.tag').forEach((b) => b.remove());
   const styles = (item && item.styles) || [];
@@ -107,7 +108,7 @@ export function showHatStyles(item) {
 
   styles.forEach((style, index) => {
     const b = document.createElement('button');
-    b.className = 'tag' + (index === 0 ? ' is-active' : '');
+    b.className = 'tag' + (index === active ? ' is-active' : '');
     b.dataset.style = index;
     b.textContent = style.name;
     b.addEventListener('click', async () => {
@@ -119,7 +120,8 @@ export function showHatStyles(item) {
       say('Загрузка стиля: ' + style.name + '…');
       // Индекс нужен сеансу: по нему он и запоминает правки стиля, и понимает,
       // что это стиль ТОЙ ЖЕ шапки, а не новый предмет.
-      const res = await api.loadPreview('hat', null, first, models, index);
+      const res = await api.loadPreview('hat', null, first, models, index,
+                                        false, item.key);
       if (res.error) say(res.error);
       else markEditedStyles(res.edited_styles);
     });
@@ -178,6 +180,7 @@ export function clearPreview() {
   document.getElementById('hatclasses').hidden = true;
   // Части считаны по ПРОШЛОЙ модели: у новой под тем же номером другой кусок.
   closeParts();
+  dropFitSave();          // и подгонка: её отложенная запись — про прошлую
   showMaterials([]);
   withViewer((w) => w.resetViewer());
 }
@@ -204,8 +207,38 @@ export async function startPreview(item) {
   showHatStyles(item);
   const res = await api.loadPreview(item.mode, null,
                                     item.type === 'hat' ? item.key : null,
-                                    models || null);
+                                    models || null, null, false,
+                                    item.type === 'hat' ? item.key : '');
   if (res.error) say(res.error);
+}
+
+/**
+ * Открывает сохранённую работу по шапке на том стиле, где её оставили.
+ *
+ * Без строки каталога у стилевой шапки нет ни списка стилей, ни моделей
+ * стиля: работа открывалась без переключателя, и правки соседних стилей
+ * было не достать. Шапки нет в каталоге (другая версия игры) — открываем
+ * как обычный предмет.
+ */
+export async function startHatWork(work) {
+  clearPreview();
+  say('Открываю работу…');
+  const item = await api.hatItem(work.item_key);
+  if (!item.key) {
+    const res = await api.loadPreview('hat', null, work.item_key || null,
+                                      work.per_class || null, null, true);
+    if (res.error) say(res.error);
+    return;
+  }
+  const index = work.style || 0;
+  const models = hatModels(item, index);
+  showHatClasses({ per_class: models });
+  showHatStyles(item, index);
+  const first = (models && Object.values(models)[0]) || item.key;
+  const res = await api.loadPreview('hat', null, first, models || null,
+                                    index, true, item.key);
+  if (res.error) say(res.error);
+  else markEditedStyles(res.edited_styles);
 }
 
 /**
@@ -353,6 +386,11 @@ export function applyView(st) {
   const teams = document.querySelector('.teams');
   teams.querySelectorAll('.tag').forEach((b) => {
     const key = b.textContent.trim().toUpperCase();
+    if (b.id === 'paint') {
+      // Краска — про шапки: режим решает Python (controls_for).
+      b.hidden = !modeControls.hat_paints;
+      return;
+    }
     if (key === 'RED' || key === 'BLU') {
       b.hidden = !st.has_teams;
       b.classList.toggle('is-active', st.team.toUpperCase() === key);
@@ -379,6 +417,7 @@ export function applyView(st) {
   // после включения его место занимают RED/BLU.
   const make = document.getElementById('maketeam');
   make.hidden = !(modeControls.teams && st.can_force_team);
+  syncPaint(st);
 
   // «Редактировать QC» — только при загруженной своей готовой модели: у
   // замены геометрии сборка собирает QC сама. Признак держит Python: смена
@@ -928,6 +967,7 @@ async function showScene(name) {
   }
   if (name === 'fp') {
     say('Сборка вида от первого лица…');
+    await flushFitSave();       // сцена собирается из SMD — с последней подгонкой
     const res = await api.loadFirstPerson(fpAction);
     if (res.error) say(res.error);
     return;   // риг придёт вместе со сценой: порядок ответа и события не задан
@@ -975,7 +1015,7 @@ document.querySelector('.half__bar--scenes').addEventListener('click', (e) => {
 // Команды и вариант: решение принимает Python, страница применяет ответ.
 document.querySelector('.teams').addEventListener('click', async (e) => {
   const btn = e.target.closest('.tag');
-  if (!btn) return;
+  if (!btn || btn.id === 'paint') return;      // у краски свой список (paint.js)
   const key = btn.textContent.trim().toUpperCase();
   applyView(key === 'RED' || key === 'BLU'
     ? await api.setTeam(key)

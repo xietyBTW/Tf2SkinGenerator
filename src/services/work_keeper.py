@@ -57,7 +57,7 @@ def key_for(mode: str, item: str = '', mod_path: str = '') -> str:
 
 
 def save(session: PreviewSession, key: str,
-         keep: Iterable[str] = (),
+         styles: Optional[Dict[int, dict]] = None,
          item: Optional[dict] = None) -> bool:
     """
     Пишет правки предмета.
@@ -65,14 +65,15 @@ def save(session: PreviewSession, key: str,
     Опустошённую работу удаляем, а не сохраняем пустой: иначе «сбросил всё»
     возвращалось бы при следующем открытии.
 
-    ``keep`` уходит в хранилище: там после записи убираются копии, на которые
-    правки больше не ссылаются, а живут не только они (см. `work_store.save`).
-    ``item`` — чем опознаётся предмет: по имени папки шапку не найти.
+    ``styles`` — снимки соседних стилей шапки: они часть той же работы
+    (см. `work_store.save`). Правленый соседний стиль держит работу живой и
+    без правок у показанного. ``item`` — чем опознаётся предмет: по имени
+    папки шапку не найти.
     """
     if not key or not is_enabled():
         return False
-    if session.has_user_edits():
-        return work_store.save(key, session.user_edits(), keep,
+    if session.has_user_edits() or styles:
+        return work_store.save(key, session.user_edits(), styles,
                                item) is not None
     if work_store.has(key):
         work_store.forget(key)
@@ -80,7 +81,7 @@ def save(session: PreviewSession, key: str,
 
 
 def keep(session: PreviewSession, key: str,
-         keep_files: Iterable[str] = (),
+         styles: Optional[Dict[int, dict]] = None,
          item: Optional[dict] = None) -> bool:
     """
     Сохраняет работу по просьбе человека — мимо выключателя автосохранения.
@@ -89,9 +90,9 @@ def keep(session: PreviewSession, key: str,
     только сохранённое отсюда. Поэтому и выключатель здесь не спрашивают: он
     про «пиши сам», а не про «не сохраняй, даже когда просят».
     """
-    if not key or not session.has_user_edits():
+    if not key or not (session.has_user_edits() or styles):
         return False
-    if work_store.save(key, session.user_edits(), keep_files, item) is None:
+    if work_store.save(key, session.user_edits(), styles, item) is None:
         return False
     logger.info(f"работа сохранена: {key}")
     return work_store.keep(key)
@@ -114,6 +115,13 @@ def restore(session: PreviewSession, key: str, asked: bool = False) -> bool:
     session.apply_user_edits(edits)
     logger.info(f"работа предмета возвращена: {key}")
     return True
+
+
+def styles(key: str, asked: bool = False) -> Dict[int, dict]:
+    """Снимки стилей шапки из работы — с тем же выключателем, что `restore`."""
+    if not key or not (asked or is_enabled()):
+        return {}
+    return work_store.styles_of(key)
 
 
 def forget(session: Optional[PreviewSession], key: str) -> None:

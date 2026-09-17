@@ -867,6 +867,123 @@ def test_snapshot_restore():
     assert not svc.restore({})
 
 
+def _make_shared_pcf_bytes() -> bytes:
+    """Две системы делят ОДИН элемент оператора — как в crit.pcf у Valve."""
+    root = Element("root", "DmElement")
+    fade = Element("Alpha Fade and Decay", "DmeParticleOperator")
+    fade["functionName"] = Attribute.string("functionName", "Alpha Fade and Decay")
+    fade["end_alpha"] = Attribute.float("end_alpha", 0.0)
+    defs = Attribute.array("particleSystemDefinitions", srctools_dmx.ValueType.ELEMENT)
+    for name in ("crit_text", "hit_text"):
+        sys_el = Element(name, "DmeParticleSystemDefinition")
+        sys_el["max_particles"] = Attribute.int("max_particles", 15)
+        sys_el["operators"] = Attribute.array("operators", srctools_dmx.ValueType.ELEMENT)
+        sys_el["operators"].append(fade)
+        defs.append(sys_el)
+    root["particleSystemDefinitions"] = defs
+    out = io.BytesIO()
+    root.export_binary(out, version=2, fmt_name="pcf", fmt_ver=1, unicode="format")
+    return out.getvalue()
+
+
+def test_shared_module_is_unshared_before_edit():
+    """У Valve один оператор стоит у десяти систем: правка у одной не должна
+    менять остальные."""
+    svc = ParticleEditorService()
+    svc.load_bytes(_make_shared_pcf_bytes())
+    assert svc.set_attr("crit_text", "operators", 0, "end_alpha", 77.0)
+    sysj = svc.systems_json()
+    assert sysj["crit_text"]["operators"][0]["attrs"]["end_alpha"]["v"] == 77.0
+    assert sysj["hit_text"]["operators"][0]["attrs"]["end_alpha"]["v"] == 0.0
+    # Второй раз копировать нечего — элемент уже свой.
+    d = svc._find_definition("crit_text")
+    mod = list(d["operators"].iter_elem())[0]
+    assert svc._module_owners(mod) == 1
+    assert svc._module_for_edit(d, "operators", 0) is mod
+
+
+def test_remove_attr_on_shared_module_keeps_the_neighbour():
+    svc = ParticleEditorService()
+    svc.load_bytes(_make_shared_pcf_bytes())
+    assert svc.remove_attr("crit_text", "operators", 0, "end_alpha")
+    sysj = svc.systems_json()
+    assert "end_alpha" not in sysj["crit_text"]["operators"][0]["attrs"]
+    assert "end_alpha" in sysj["hit_text"]["operators"][0]["attrs"]
+
+
+class _StockStub(ParticleEditorService):
+    """Сервис, у которого «игровая версия» — заданные байты, без VPK."""
+
+    def __init__(self, stock_bytes: bytes):
+        super().__init__()
+        self._stock_bytes = stock_bytes
+
+    def stock(self, tf2_root_dir):
+        cached = getattr(self, "_stock", None)
+        if cached is None:
+            svc = ParticleEditorService()
+            svc.load_bytes(self._stock_bytes, source="vpk:particles/x.pcf")
+            self._stock = ("particles/x.pcf", svc)
+        return self._stock[1]
+
+
+def test_stock_diff_and_reverts():
+    """Отличия от игры считаются по атрибутам, модулям и детям; откат
+    возвращает систему байт в байт по составу."""
+    from src.services.particle_editor_service import diff_systems
+
+    stock = _make_pcf_bytes()
+    svc = _StockStub(stock)
+    svc.load_bytes(stock, source="vpk:particles/x.pcf")
+    assert {k: v["status"] for k, v in svc.stock_diff("").items()} == {
+        "fx": "same", "fx_child": "same"}
+
+    svc.set_attr("fx", None, 0, "radius", 9.0)
+    svc.set_attr("fx", "initializers", 0, "color1", [1, 2, 3, 255])
+    svc.add_module("fx", "operators", "Movement Basic")
+    svc.remove_child("fx", 0)
+    d = svc.stock_diff("")["fx"]
+    assert d["status"] == "changed"
+    assert d["attrs"] == ["radius"]
+    assert d["modules"]["initializers"][0] == {"status": "changed", "attrs": ["color1"]}
+    assert d["modules"]["operators"][0]["status"] == "added"
+    assert d["children"] is True
+
+    # Один параметр — к значению игры; лишний (которого в игре нет) — долой.
+    assert svc.revert_attr("", "fx", None, 0, "radius")
+    assert svc.systems_json()["fx"]["attrs"]["radius"]["v"] == 5.0
+    svc.ensure_attr("fx", None, 0, "extra", "float", 1.0)
+    assert svc.revert_attr("", "fx", None, 0, "extra")
+    assert "extra" not in svc.systems_json()["fx"]["attrs"]
+
+    # Вся система разом.
+    assert svc.revert_system("", "fx")
+    assert svc.stock_diff("")["fx"]["status"] == "same"
+    assert svc.systems_json()["fx"]["children"] == [{"delay": 0.25, "childName": "fx_child"}]
+    assert svc.systems_json()["fx"]["operators"] == []
+
+    # Системы, которой в игре нет, — «added»; вернуть её не к чему.
+    svc.duplicate_system("fx", "fx_copy")
+    assert svc.stock_diff("")["fx_copy"]["status"] == "added"
+    assert not svc.revert_system("", "fx_copy")
+
+    # Чистая функция: удалённый модуль виден списком.
+    cur = {"a": {"attrs": {}, "operators": [], "children": []}}
+    ref = {"a": {"attrs": {}, "operators": [{"functionName": "Gone", "attrs": {}}],
+                 "children": []}}
+    assert diff_systems(cur, ref)["a"]["removed"] == {"operators": ["Gone"]}
+
+
+def test_stock_path_for_disk_file():
+    svc = ParticleEditorService()
+    svc.load_bytes(_make_pcf_bytes(), source=r"C:\mods\Crit.PCF")
+    assert svc.stock_path() == "particles/crit.pcf"
+    svc.load_bytes(_make_pcf_bytes(), source="vpk:particles/item_fx.pcf")
+    assert svc.stock_path() == "particles/item_fx.pcf"
+    svc.load_bytes(_make_pcf_bytes(), source="")
+    assert svc.stock_path() == ""
+
+
 def test_parse_vtf_sheet():
     # Sheet: version 1 (4 coords/кадр), 1 секвенция, 2 кадра
     sheet = struct.pack("<II", 1, 1)

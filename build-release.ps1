@@ -1,9 +1,13 @@
-﻿# Собирает ОДИН файл для релиза: installer\Output\Tf2SkinGenerator-Setup.exe
+﻿# Собирает релиз: installer\Output\Tf2SkinGenerator-Setup.exe и рядом
+# Tf2SkinGenerator-portable.zip.
 #
-# Внутри него лежит само приложение, поэтому в релиз на GitHub нужно приложить
-# ровно этот файл — ни zip, ни чего-то ещё. По нему же работает обновление из
-# приложения: оно ищет в релизе файл с таким именем (ASSET_NAME в
-# src\services\update_checker.py), качает, сверяет SHA-256 и запускает тихо.
+# Установщик обязателен: внутри него лежит само приложение, и по нему работает
+# обновление из приложения — оно ищет в релизе файл с таким именем (ASSET_NAME
+# в src\services\update_checker.py), качает, сверяет SHA-256 и запускает тихо.
+# Zip — та же сборка для тех, кто не хочет ставить: распаковал и запустил.
+# Обновляется он тем же установщиком в портативном режиме (см. /PORTABLE в
+# installer\Tf2SkinGenerator-bundle.iss), поэтому второго файла апдейтеру не
+# нужно; отличает портативную копию файл-маркер PORTABLE в корне zip.
 #
 # Запуск:
 #   .\build-release.ps1                 спросит версию (Enter — оставить как есть)
@@ -31,6 +35,7 @@ $IssFile      = Join-Path $Root "installer\$AppName-bundle.iss"
 $PayloadDir   = Join-Path $Root "build\release\$AppName"
 $WorkDir      = Join-Path $Root "build\release-work"
 $SetupPath    = Join-Path $Root "installer\Output\$AppName-Setup.exe"
+$ZipPath      = Join-Path $Root "installer\Output\$AppName-portable.zip"
 
 # Что из tools\ в релиз НЕ идёт.
 #
@@ -131,9 +136,9 @@ if ($Version -ne $current) {
 
 # ── Зависимости ─────────────────────────────────────────────────────────────
 if ($SkipDeps) {
-    Step "1/5" "Зависимости пропущены (-SkipDeps)"
+    Step "1/6" "Зависимости пропущены (-SkipDeps)"
 } else {
-    Step "1/5" "Зависимости"
+    Step "1/6" "Зависимости"
     Invoke-Native $VenvPython @("-m", "pip", "install", "--disable-pip-version-check",
         "-q", "-r", (Join-Path $Root "requirements.txt")) "не установились зависимости"
     Invoke-Native $VenvPython @("-m", "pip", "install", "--disable-pip-version-check",
@@ -146,7 +151,7 @@ if ($SkipDeps) {
 }
 
 # ── Сборка приложения ───────────────────────────────────────────────────────
-Step "2/5" "PyInstaller по $AppName.spec"
+Step "2/6" "PyInstaller по $AppName.spec"
 if (Test-Path (Join-Path $Root "build\release")) {
     Remove-Item -Recurse -Force (Join-Path $Root "build\release")
 }
@@ -164,7 +169,7 @@ if (-not (Test-Path $ExePath)) { Fail "после сборки нет $ExePath" 
 # tools\ НЕ идут через datas спеки: приложение читает их от папки .exe
 # (install_dir() в src\shared\paths.py), а копия внутри _internal нигде не
 # резолвится — это был бы мёртвый груз.
-Step "3/5" "tools\ в корень сборки"
+Step "3/6" "tools\ в корень сборки"
 $ToolsSource = Join-Path $Root "tools"
 if (Test-Path $ToolsSource) {
     $ToolsDest = Join-Path $PayloadDir "tools"
@@ -188,27 +193,50 @@ $payloadMb = [math]::Round((Get-ChildItem $PayloadDir -Recurse -File | Measure-O
 Write-Host "  размер приложения: $payloadMb МБ" -ForegroundColor Gray
 
 # ── Установщик ──────────────────────────────────────────────────────────────
-Step "4/5" "Inno Setup: упаковываю приложение внутрь установщика"
+Step "4/6" "Inno Setup: упаковываю приложение внутрь установщика"
 if (Test-Path $SetupPath) { Remove-Item -Force $SetupPath }
 Invoke-Native $Iscc @("/Q", "/DAppVersion=$Version", "/DPayloadDir=$PayloadDir",
     $IssFile) "ISCC не собрал установщик"
 if (-not (Test-Path $SetupPath)) { Fail "ISCC отработал, но нет $SetupPath" }
 
+# ── Портативный zip ─────────────────────────────────────────────────────────
+# СТРОГО после установщика: маркер PORTABLE кладётся в ту же папку сборки, и
+# попади он внутрь Setup.exe — установленная копия считала бы себя портативной.
+Step "5/6" "Портативный zip"
+Set-Content -Path (Join-Path $PayloadDir "PORTABLE") -Value "portable" -Encoding ASCII -NoNewline
+if (Test-Path $ZipPath) { Remove-Item -Force $ZipPath }
+# Имена записей пишем сами, с прямым слэшем: и Compress-Archive, и
+# ZipFile::CreateFromDirectory в .NET Framework кладут обратный, и часть
+# распаковщиков раскладывает такой архив плоско, файлами «Tf2SkinGenerator\…».
+Add-Type -AssemblyName System.IO.Compression
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$zip = [System.IO.Compression.ZipFile]::Open($ZipPath, 'Create')
+try {
+    Get-ChildItem -Path $PayloadDir -Recurse -File | ForEach-Object {
+        $rel = $_.FullName.Substring($PayloadDir.Length + 1).Replace('\', '/')
+        [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+            $zip, $_.FullName, "$AppName/$rel",
+            [System.IO.Compression.CompressionLevel]::Optimal) | Out-Null
+    }
+} finally { $zip.Dispose() }
+if (-not (Test-Path $ZipPath)) { Fail "zip не собрался: $ZipPath" }
+
 # ── Итог ────────────────────────────────────────────────────────────────────
-Step "5/5" "Готово"
+Step "6/6" "Готово"
 $setupMb = [math]::Round((Get-Item $SetupPath).Length / 1MB, 2)
+$zipMb   = [math]::Round((Get-Item $ZipPath).Length / 1MB, 2)
 $sha = (Get-FileHash -Algorithm SHA256 $SetupPath).Hash.ToLower()
 
 Write-Host ""
-Write-Host "Версия:  $Version" -ForegroundColor Cyan
-Write-Host "Файл:    $SetupPath" -ForegroundColor Cyan
-Write-Host "Размер:  $setupMb МБ (приложение внутри: $payloadMb МБ)" -ForegroundColor Cyan
-Write-Host "SHA-256: $sha" -ForegroundColor Gray
+Write-Host "Версия:     $Version" -ForegroundColor Cyan
+Write-Host "Установщик: $SetupPath" -ForegroundColor Cyan
+Write-Host "            $setupMb МБ (приложение внутри: $payloadMb МБ), SHA-256 $sha" -ForegroundColor Gray
+Write-Host "Портативно: $ZipPath ($zipMb МБ)" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "Что дальше:" -ForegroundColor Yellow
-Write-Host "  1. Проверьте установку: запустите этот файл у себя." -ForegroundColor Yellow
-Write-Host "  2. Создайте релиз на GitHub с тегом v$Version." -ForegroundColor Yellow
-Write-Host "  3. Приложите к нему ЭТОТ файл, имя менять нельзя:" -ForegroundColor Yellow
-Write-Host "     $AppName-Setup.exe" -ForegroundColor Yellow
-Write-Host "     По этому имени приложение находит обновление." -ForegroundColor Yellow
+Write-Host "  1. Проверьте установку: запустите Setup.exe у себя." -ForegroundColor Yellow
+Write-Host "  2. Создайте релиз на GitHub с тегом v$Version (не черновик, не пре-релиз)." -ForegroundColor Yellow
+Write-Host "  3. Приложите оба файла, имена менять нельзя:" -ForegroundColor Yellow
+Write-Host "     $AppName-Setup.exe      — по этому имени приложение находит обновление" -ForegroundColor Yellow
+Write-Host "     $AppName-portable.zip   — для тех, кто не хочет ставить" -ForegroundColor Yellow
 Write-Host "  4. GitHub сам посчитает SHA-256; сверьте с строкой выше, если хотите." -ForegroundColor Yellow

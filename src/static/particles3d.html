@@ -1550,9 +1550,14 @@ const spritePool = [];
 const _orientVec = new THREE.Vector3();   // переиспользуем для orient-to-2d
 const ropePool = [];
 
+//: Скорость времени: 1 — как в игре, 0.25 — замедленно. Крит длится
+//: полсекунды, и на глаз в нём ничего не разобрать без замедления.
+let timeScale = 1;
+window.setTimeScale = function(k) { timeScale = Math.max(0.05, Number(k) || 1); };
+
 function animate() {
   requestAnimationFrame(animate);
-  drawFrame(Math.min(clock.getDelta(), 0.3));
+  drawFrame(Math.min(clock.getDelta(), 0.3) * timeScale);
 }
 
 /** Кадр: шаг симуляции на dt и отрисовка. Отдельно от animate — пока

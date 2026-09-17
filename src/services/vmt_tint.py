@@ -19,6 +19,8 @@
 Модуль без Qt и без обращений к VPK: на вход текст VMT и PNG-файл.
 """
 
+import json
+import os
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
@@ -96,6 +98,9 @@ def apply_to_png(png_path: str, spec: Optional[TintSpec]) -> bool:
 
     Альфа после этого — сплошная непрозрачность: в исходной текстуре она
     была маской краски, и оставлять её значит показывать шапку дырявой.
+    Сама маска при этом не пропадает: исходник остаётся рядом (`raw_of`),
+    а краска — в соседнем JSON, чтобы превью могло перекрасить шапку любой
+    банкой из игры (`painted`).
 
     Returns:
         True, если файл изменён.
@@ -103,27 +108,80 @@ def apply_to_png(png_path: str, spec: Optional[TintSpec]) -> bool:
     if spec is None or not png_path:
         return False
     try:
-        from PIL import Image, ImageChops
+        from PIL import Image
     except ImportError:
         return False
     try:
         with Image.open(png_path) as img:
             src = img.convert("RGBA")
-        r, g, b, alpha = src.split()
-        base = Image.merge("RGB", (r, g, b))
-        if spec.is_neutral:
-            tinted = base
-        else:
-            multiplied = Image.merge("RGB", [
-                ImageChops.multiply(ch, Image.new("L", src.size, level))
-                for ch, level in zip((r, g, b), spec.color)])
-            flat = Image.new("RGB", src.size, spec.color)
-            tinted = (multiplied if spec.over_base <= 0 else
-                      Image.blend(multiplied, flat, spec.over_base))
-        out = Image.composite(tinted, base, alpha)
-        out.putalpha(Image.new("L", src.size, 255))
-        out.save(png_path)
+        src.save(raw_of(png_path))
+        with open(png_path + ".paint.json", "w", encoding="utf-8") as f:
+            json.dump({"color": list(spec.color), "over": spec.over_base}, f)
+        _tinted(src, spec).save(png_path)
         return True
     except Exception as exc:
         logger.warning(f"[tint] окраска {png_path} не удалась: {exc}")
         return False
+
+
+def _tinted(src, spec: TintSpec):
+    """Формула шейдера на картинке RGBA: альфа — маска, на выходе непрозрачно."""
+    from PIL import Image, ImageChops
+
+    r, g, b, alpha = src.split()
+    base = Image.merge("RGB", (r, g, b))
+    if spec.is_neutral:
+        tinted = base
+    else:
+        multiplied = Image.merge("RGB", [
+            ImageChops.multiply(ch, Image.new("L", src.size, level))
+            for ch, level in zip((r, g, b), spec.color)])
+        flat = Image.new("RGB", src.size, spec.color)
+        tinted = (multiplied if spec.over_base <= 0 else
+                  Image.blend(multiplied, flat, spec.over_base))
+    out = Image.composite(tinted, base, alpha)
+    out.putalpha(Image.new("L", src.size, 255))
+    return out
+
+
+def raw_of(png_path: str) -> str:
+    """Где лежит исходник с маской у окрашенной картинки."""
+    return png_path + ".raw.png"
+
+
+def paintable(png_path: Optional[str]) -> Optional[TintSpec]:
+    """Краска игры у картинки превью, если её красили через `apply_to_png`."""
+    if not png_path:
+        return None
+    try:
+        with open(png_path + ".paint.json", encoding="utf-8") as f:
+            data = json.load(f)
+        return TintSpec(tuple(int(c) for c in data["color"]), float(data.get("over", 0.0)))
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def painted(raw_png: str, spec: TintSpec, out_dir: str) -> Optional[str]:
+    """
+    Картинка, покрашенная краской `spec` по маске исходника, — для превью.
+
+    Имя файла несёт цвет и время исходника: другая краска или новая
+    текстура — новый файл, и браузер не покажет старый из кэша.
+    """
+    try:
+        from PIL import Image
+
+        stamp = int(os.stat(raw_png).st_mtime)
+        name = (f"{os.path.splitext(os.path.basename(raw_png))[0]}"
+                f"_{spec.color[0]:02x}{spec.color[1]:02x}{spec.color[2]:02x}"
+                f"_{int(spec.over_base * 100)}_{stamp}.png")
+        out = os.path.join(out_dir, name)
+        if os.path.isfile(out):
+            return out
+        with Image.open(raw_png) as img:
+            src = img.convert("RGBA")
+        _tinted(src, spec).save(out)
+        return out
+    except Exception as exc:
+        logger.warning(f"[tint] покраска {raw_png} не удалась: {exc}")
+        return None

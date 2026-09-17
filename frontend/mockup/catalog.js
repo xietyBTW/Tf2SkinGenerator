@@ -26,6 +26,7 @@ import {
 } from './layout.js';
 import {
   loadPcf,
+  showEffects,
   pickSystem,
   systemMenu,
   showParticleFrame,
@@ -35,12 +36,14 @@ import {
 import { diagDlg, diagSay } from './diagnostics.js';
 import { applyLook } from './settings.js';
 import { setMode, modeControls } from './controls.js';
-import { startPreview, clearPreview, resetView, lastModel } from './preview.js';
+import { startPreview, startHatWork, clearPreview, resetView, lastModel } from './preview.js';
 
 export const els = {
   cat:   document.getElementById('cat'),
   fClass:document.getElementById('f-class'),
   fHat:  document.getElementById('f-hat'),
+  fRegion: document.getElementById('f-region'),
+  fSource: document.getElementById('f-source'),
   fType: document.getElementById('f-type'),
   catLabel: document.getElementById('catlabel'),
   note:  document.getElementById('cat-note'),
@@ -48,20 +51,28 @@ export const els = {
 };
 
 export const sel = { section: 'weapons', category: 'weapon', cls: null,
-              type: null, mode: 'normal', query: '' };
+              type: null, region: null, mode: 'normal', query: '' };
 
 /** Рисует ряд фильтров; null-кнопка «Все» снимает ограничение. */
 export function fillFilters(row, list, chosen, onPick) {
   row.querySelectorAll('.underlined').forEach((b) => b.remove());
-  const add = (key, name) => {
+  const add = (key, name, count) => {
     const b = document.createElement('button');
     b.className = 'underlined' + (key === chosen ? ' is-active' : '');
     b.textContent = name;
+    // Число рядом — сколько под этой кнопкой: без него «Лицо» может
+    // оказаться пустым, и это узнают только щелчком.
+    if (count != null) {
+      const n = document.createElement('i');
+      n.className = 'underlined__n mono';
+      n.textContent = count;
+      b.append(n);
+    }
     b.addEventListener('click', () => onPick(key));
     row.appendChild(b);
   };
   add(null, 'Все');
-  list.forEach((x) => add(x.key, x.name));
+  list.forEach((x) => add(x.key, x.name, x.count));
   row.hidden = list.length === 0;
 }
 
@@ -353,6 +364,7 @@ async function openWork(work) {
   }
 
   await setMode(work.mode, work.item_key || '');
+  if (work.mode === 'hat') { await startHatWork(work); return; }
   const res = await api.loadPreview(work.mode, null, work.item_key || null,
                                     work.per_class || null, null, true);
   if (res.error) say(res.error);
@@ -422,14 +434,26 @@ export async function reload() {
     el.textContent = 'Читаю список…';
     el.hidden = false;
   }, 250);
-  const list = sel.section === 'hats'
-    ? await api.hats({ query: sel.query || '', tf2_class: sel.cls })
+  const hats = sel.section === 'hats'
+    ? await api.hats({ query: sel.query || '', tf2_class: sel.cls,
+                       region: sel.region })
+    : null;
+  const list = hats ? hats.items
     // Поиск работает во всех разделах, а не только у косметики: поле над
     // списком одно, и «не ищет» у оружия читалось как поломка.
     : await api.items({ category: sel.category, tf2_class: sel.cls,
                         weapon_type: sel.type, query: sel.query || '' });
   clearTimeout(wait);
   if (seq !== reloadSeq) return;               // выбор успел смениться
+  if (hats) {
+    // Группы под текущим запросом и классом; выбранная остаётся, даже если
+    // под ней пусто — иначе её не снять.
+    const regions = hats.regions.slice();
+    if (sel.region && !regions.some((r) => r.key === sel.region)) {
+      regions.push({ key: sel.region, name: sel.region, count: 0 });
+    }
+    fillFilters(els.fRegion, regions, sel.region, pickRegion);
+  }
 
   // Кастомный мод: предмет здесь — файл на диске. Список берётся не из
   // данных игры, а из библиотеки уже открытых модов.
@@ -446,7 +470,32 @@ export async function reload() {
     els.note.textContent = sel.section === 'hats'
       ? 'Ничего не найдено — попробуйте изменить фильтр или запрос.'
       : 'Для этой категории список ещё не подключён.';
+    if (hats && hats.suggest.length) els.note.append(...maybe(hats.suggest));
   }
+}
+
+/** «Возможно: …» — похожие имена кнопками; щелчок подставляет запрос. */
+function maybe(words) {
+  const out = [document.createTextNode(' — возможно: ')];
+  words.forEach((word, i) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'textbtn textbtn--sm';
+    b.textContent = word;
+    b.addEventListener('click', () => {
+      document.querySelector('.catalog__search').value = word;
+      sel.query = word;
+      reload();
+    });
+    if (i) out.push(', ');
+    out.push(b);
+  });
+  return out;
+}
+
+export async function pickRegion(key) {
+  sel.region = key;
+  await reload();
 }
 
 /**
@@ -540,6 +589,8 @@ export async function pickSection(name) {
 
   els.cat.parentElement.parentElement.hidden = это_шапки;   // категорию прячем
   els.fType.hidden = true;
+  els.fRegion.hidden = !это_шапки;
+  els.fSource.hidden = !это_частицы;
   els.fClass.hidden = это_частицы;
   els.fHat.hidden = !это_шапки;
   catalog.classList.toggle('no-icons', это_частицы);
@@ -557,17 +608,22 @@ export async function pickSection(name) {
   document.querySelector('.title__meta').textContent = '';
 
   if (это_частицы) {
-    els.catLabel.textContent = 'Файл частиц';
+    // Два режима одним списком: вся игра (каталог по именам, источники,
+    // поиск) или один файл (дерево систем). Смешивать их на экране нельзя:
+    // выпадашка файла над фильтром источников читалась как две навигации.
+    els.catLabel.textContent = 'Показать';
     els.cat.innerHTML = '';
+    els.cat.append(new Option('Все эффекты игры', ''));
     for (const f of await api.particleFiles()) {
       els.cat.append(new Option(f.name, f.key));
     }
-    els.note.hidden = false;
-    els.note.textContent = 'Выберите файл — в нём десятки эффектов.';
     els.grid.innerHTML = '';
     plist.innerHTML = '';
     pnote.hidden = false;
     setSystem('');
+    // Вход в раздел — каталог эффектов по именам из игры, а не пустой
+    // список с просьбой выбрать файл.
+    await showParticleHome();
     return;
   }
 
@@ -576,6 +632,7 @@ export async function pickSection(name) {
   if (это_шапки) {
     sel.category = 'hat';
     sel.cls = null;
+    sel.region = null;
     fillFilters(els.fClass, await api.classes(), null, pickClass);
     els.fClass.hidden = false;
     await fillHatFilters();
@@ -594,6 +651,13 @@ export async function pickSection(name) {
   }
   await fillCategories();
   await pickCategory('weapon');
+}
+
+/** Каталог частиц без запроса: дерево выбранного файла или эффекты игры. */
+async function showParticleHome() {
+  const { pcfNodes, pSystem, fillTree } = await import('./particles/index.js');
+  if (els.cat.value && pcfNodes.length) fillTree(pcfNodes, pSystem);
+  else await showEffects('');
 }
 
 export async function pickCategory(key) {
@@ -672,6 +736,14 @@ let searchTimer = null;
 document.querySelector('.catalog__search').addEventListener('input', (e) => {
   sel.query = e.target.value.trim();
   clearTimeout(searchTimer);
+  // У частиц поиск идёт по всей игре, а не по списку предметов: запрос
+  // предметов стирал дерево и говорил «список не подключён». Пустой запрос
+  // возвращает дерево открытого файла или каталог эффектов.
+  if (sel.section === 'particles') {
+    searchTimer = setTimeout(() => (sel.query ? showEffects(sel.query)
+                                              : showParticleHome()), 150);
+    return;
+  }
   searchTimer = setTimeout(reload, 250);
 });
 
@@ -708,9 +780,15 @@ export async function boot() {
   await setMode('', '', false);
   showTf2Path();
   await fillCategories();
-  els.cat.addEventListener('change', () => (sel.section === 'particles'
-    ? loadPcf(els.cat.value) : pickCategory(els.cat.value)));
+  els.cat.addEventListener('change', () => {
+    if (sel.section !== 'particles') return pickCategory(els.cat.value);
+    return els.cat.value ? loadPcf(els.cat.value) : showEffects(sel.query);
+  });
   await pickCategory('weapon');
+  // Страницу подняли заново после смены языка — возвращаемся в тот же раздел.
+  let back = '';
+  try { back = sessionStorage.getItem('section') || ''; sessionStorage.removeItem('section'); } catch {}
+  if (back) document.querySelector(`.chrome__nav [data-section="${back}"]`)?.click();
 }
 
 // Разделы в шапке: «Оружие», «Шапки» и «Частицы» — разные источники каталога.

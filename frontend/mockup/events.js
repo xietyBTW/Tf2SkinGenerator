@@ -224,6 +224,9 @@ api.subscribe((ev) => {
     // остаётся пользовательской — красим её глобально.
     case 'cards_ready':
       if (ev.texture) withViewer((w) => w.updateTextureFromDataUrl(api.fileUrl(ev.texture)));
+      // Здесь эта загрузка кончается: model_ready у неё нет, и «Загрузка
+      // текстуры…» иначе висела над кадром до конца сеанса.
+      say('');
       break;
 
     case 'diagnostics':

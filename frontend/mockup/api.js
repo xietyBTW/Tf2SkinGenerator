@@ -92,6 +92,12 @@ export const classes      = () => cached('classes', {});
 export const weaponTypes  = (tf2_class) => cached('weapon_types', { tf2_class });
 export const items        = (params) => call('items', params);
 export const hats         = (params) => call('hats', params);
+export const particleEffects = (query = '', source = '') =>
+  call('particle_effects', { query, source });
+export const revertParticleSystem = (system) =>
+  call('revert_particle_system', { system });
+export const revertParticleAttr = (system, group, index, attr) =>
+  call('revert_particle_attr', { system, group, index, attr });
 export const particleFiles = () => cached('particle_files', {});
 export const loadParticles = (source) => call('load_particles', { source });
 export const particleParams = (system) => call('particle_params', { system });
@@ -164,13 +170,18 @@ export const setHatFilter = (tag, hidden) => call('set_hat_filter', { tag, hidde
 export const modeFor      = (category, subtype = null) => call('mode_for', { category, subtype });
 // restore — открыть предмет с сохранённой работой. Из каталога он
 // открывается ИГРОВЫМ: свои работы лежат своим списком (`works`).
+// hat — ключ шапки из каталога: у стилей модели разные, а работа одна.
 export const loadPreview  = (mode, lang = null, model_key = null,
-                             per_class = null, style = null, restore = false) =>
-  call('load_preview', { mode, lang, model_key, per_class, style, restore });
+                             per_class = null, style = null, restore = false,
+                             hat = '') =>
+  call('load_preview', { mode, lang, model_key, per_class, style, restore, hat });
+export const hatItem      = (key) => call('hat_item', { key });
 export const works        = () => call('works', {});
 export const stopPreview  = () => call('stop_preview');
 export const viewState    = () => call('view_state');
 export const setTeam      = (team) => call('set_team', { team });
+export const paints       = () => call('paints', {});
+export const setPaint     = (key) => call('set_paint', { key });
 export const setAustralium = (active) => call('set_australium', { active });
 export const setSkin      = (index) => call('set_skin', { index });
 export const addToStyle   = (material) => call('add_to_style', { material });
@@ -236,15 +247,17 @@ export const addMod       = (path) => call('add_mod', { path });
 export const modIcon      = (name) => call('mod_icon', { name });
 
 // ── Звуки ─────────────────────────────────────────────────────────────── //
-export const sounds        = (family = '', tf2_class = '', query = '',
-                              section = '') =>
-  call('sounds', { family, tf2_class, query, section });
-export const soundSections = () => call('sound_sections', {});
-export const soundFamilies = (section = '') =>
-  call('sound_families', { section });
+/** Записи под фильтрами и сами фильтры со счётчиками — одним ответом. */
+export const sounds        = (filters = {}) => call('sounds', {
+  section: filters.section || '', who: filters.who || '',
+  group: filters.group || '', variant: filters.variant || '',
+  fmt: filters.fmt || '', own: Boolean(filters.own),
+  query: filters.query || '', offset: filters.offset || 0,
+});
 export const setSound      = (name, path = null, wave = '') =>
   call('set_sound', { name, path, wave });
 export const saveSound     = (name, wave = '') => call('save_sound', { name, wave });
+export const clearSounds   = () => call('clear_sounds');
 export const buildSounds   = (filename = '') => call('build_sounds', { filename });
 
 /** URL игрового звука прямо из VPK. Путь — от корня `sound/`. */

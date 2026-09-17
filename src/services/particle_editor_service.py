@@ -22,6 +22,7 @@ import os
 import re
 import struct
 import tempfile
+import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -370,6 +371,89 @@ def _module_to_json(el) -> dict:
     return {"functionName": fn, "name": el.name, "attrs": attrs}
 
 
+# ── Сравнение со стоком ─────────────────────────────────────────────────── #
+
+def _same_value(a: Any, b: Any) -> bool:
+    """Значения атрибутов равны. Числа — с допуском: float32 из файла и
+    число из поля отличаются в седьмом знаке."""
+    if isinstance(a, (list, tuple)) and isinstance(b, (list, tuple)):
+        return len(a) == len(b) and all(_same_value(x, y) for x, y in zip(a, b))
+    if isinstance(a, bool) or isinstance(b, bool):
+        return a == b
+    if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+        return abs(a - b) <= 1e-5 * max(1.0, abs(a), abs(b))
+    return a == b
+
+
+def _diff_attrs(cur: Dict[str, dict], ref: Dict[str, dict]) -> List[str]:
+    """Имена атрибутов, где текущее отличается от стокового (или его нет)."""
+    out = []
+    for name, tv in cur.items():
+        if name.lower() in ParticleEditorService._SERVICE_ATTRS:
+            continue
+        other = ref.get(name)
+        if other is None or not _same_value(tv.get("v"), other.get("v")):
+            out.append(name)
+    return out
+
+
+def diff_systems(current: Dict[str, dict],
+                 stock: Dict[str, dict]) -> Dict[str, dict]:
+    """Чем открытый файл отличается от игрового, по системам.
+
+    Модули сопоставляются по functionName и порядковому номеру среди
+    одноимённых: два Remap в одной группе — это два разных модуля.
+
+    Returns:
+        {имя: {"status": added|changed|same, "attrs": [имена],
+               "modules": {группа: {индекс: {"status": added|changed,
+                                             "attrs": [имена]}}},
+               "removed": {группа: [functionName, ...]},
+               "children": bool}}
+    """
+    out: Dict[str, dict] = {}
+    for name, cur in current.items():
+        ref = stock.get(name)
+        if ref is None:
+            out[name] = {"status": "added", "attrs": [], "modules": {},
+                         "removed": {}, "children": False}
+            continue
+        entry = {"attrs": _diff_attrs(cur.get("attrs") or {},
+                                      ref.get("attrs") or {}),
+                 "modules": {}, "removed": {}}
+        for group in MODULE_GROUPS:
+            ref_mods = ref.get(group) or []
+            used: set = set()
+            for idx, mod in enumerate(cur.get(group) or []):
+                fn = (mod.get("functionName") or "").lower()
+                match = next((j for j, m in enumerate(ref_mods)
+                              if j not in used
+                              and (m.get("functionName") or "").lower() == fn),
+                             None)
+                if match is None:
+                    entry["modules"].setdefault(group, {})[idx] = {
+                        "status": "added", "attrs": []}
+                    continue
+                used.add(match)
+                changed = _diff_attrs(mod.get("attrs") or {},
+                                      ref_mods[match].get("attrs") or {})
+                if changed:
+                    entry["modules"].setdefault(group, {})[idx] = {
+                        "status": "changed", "attrs": changed}
+            gone = [m.get("functionName") or m.get("name") or "?"
+                    for j, m in enumerate(ref_mods) if j not in used]
+            if gone:
+                entry["removed"][group] = gone
+        kids = [c.get("childName") for c in cur.get("children") or []]
+        ref_kids = [c.get("childName") for c in ref.get("children") or []]
+        entry["children"] = kids != ref_kids
+        entry["status"] = ("changed" if entry["attrs"] or entry["modules"]
+                           or entry["removed"] or entry["children"]
+                           else "same")
+        out[name] = entry
+    return out
+
+
 # ── Sheet-данные из VTF ──────────────────────────────────────────────────── #
 
 def parse_vtf_sheet(raw: bytes) -> Optional[dict]:
@@ -449,6 +533,14 @@ def parse_vtf_sheet(raw: bytes) -> Optional[dict]:
 
 
 # ── Сервис ───────────────────────────────────────────────────────────────── #
+
+def _mtime(path: Optional[str]) -> int:
+    """mtime файла в наносекундах; нет файла — ноль."""
+    try:
+        return os.stat(path).st_mtime_ns if path else 0
+    except OSError:
+        return 0
+
 
 class ParticleEditorService:
     """Загрузка, конвертация, правка и сохранение PCF."""
@@ -698,6 +790,179 @@ class ParticleEditorService:
             result[d.name] = sys_json
         return result
 
+    # ── Сток ─────────────────────────────────────────────────────────────── #
+
+    def stock_path(self) -> str:
+        """Путь игрового PCF, с которым сравнивать. Пусто — стока нет.
+
+        Файл из игры — он сам; файл с диска — игровой с тем же именем, если
+        такой есть (чужой crit.pcf сравниваем с crit.pcf Valve).
+        """
+        src = self.source_path or ""
+        if src.startswith("vpk:"):
+            return src[4:]
+        base = os.path.basename(src).lower()
+        return f"particles/{base}" if base.endswith(".pcf") else ""
+
+    def stock(self, tf2_root_dir: str) -> Optional["ParticleEditorService"]:
+        """Игровая версия открытого файла. None — её нет или не читается."""
+        path = self.stock_path()
+        if not path:
+            return None
+        cached = getattr(self, "_stock", None)
+        if cached is not None and cached[0] == path:
+            return cached[1]
+        svc: Optional[ParticleEditorService] = None
+        try:
+            svc = ParticleEditorService()
+            svc.load_from_game(tf2_root_dir, path)
+        except Exception as exc:                          # noqa: BLE001
+            logger.info(f"стока для {path} нет: {exc}")
+            svc = None
+        self._stock = (path, svc)
+        return svc
+
+    def stock_diff(self, tf2_root_dir: str) -> Dict[str, dict]:
+        """Отличия от игры по системам (см. diff_systems). Пусто — стока нет."""
+        stock = self.stock(tf2_root_dir)
+        if stock is None:
+            return {}
+        cached = getattr(self, "_stock_systems", None)
+        if cached is None:
+            cached = self._stock_systems = stock.systems_json()
+        return diff_systems(self.systems_json(), cached)
+
+    def revert_system(self, tf2_root_dir: str, system_name: str) -> bool:
+        """Возвращает систему в игровой вид: атрибуты, модули, дочерние.
+
+        Дочерние — ссылки на другие системы этого же файла; берём их по
+        имени, и если такой системы у нас больше нет, ссылку пропускаем.
+        """
+        stock = self.stock(tf2_root_dir)
+        d = self._find_definition(system_name)
+        ref = stock._find_definition(system_name) if stock else None
+        if d is None or ref is None:
+            return False
+        for key in list(d.keys()):
+            if key not in MODULE_GROUPS and key != "children":
+                del d[key]
+        for attr in ref.values():
+            if attr.name in MODULE_GROUPS or attr.name == "children":
+                continue
+            d[attr.name] = attr.copy()
+        # Пустой список srctools не типизирует (ловушка: `el[group] = []`
+        # падает) — массив заводим явно и наполняем.
+        # Модули у Valve общие между системами: берём наш же элемент с тем
+        # же uuid, если он ещё жив у соседей, — иначе файл раздувался бы
+        # копиями и переставал влезать в потолок казуала.
+        mine_by_uuid = {}
+        for other in self._all_definition_elements():
+            for group in MODULE_GROUPS:
+                if group in other:
+                    for m in other[group].iter_elem():
+                        mine_by_uuid.setdefault(m.uuid, m)
+        for group in MODULE_GROUPS:
+            if group in d:
+                del d[group]
+            if group in ref:
+                arr = Attribute.array(ref[group].name, ValueType.ELEMENT)
+                for m in ref[group].iter_elem():
+                    same = mine_by_uuid.get(m.uuid)
+                    if same is not None and not _diff_attrs(
+                            _element_attrs_to_json(same),
+                            _element_attrs_to_json(m)):
+                        arr.append(same)
+                    else:
+                        copy = self._copy_module(m)
+                        copy.uuid = m.uuid
+                        arr.append(copy)
+                d[ref[group].name] = arr
+        if "children" in d:
+            del d["children"]
+        if "children" in ref:
+            d[ref["children"].name] = self._copy_children(ref, mine_by_uuid, {})
+        return True
+
+    def _copy_children(self, ref, mine_by_uuid: dict, done: dict):
+        """Ссылки на дочерние из стока — на НАШИ системы с теми же именами.
+
+        Дочерняя, которой у нас больше нет (отцепили единственную ссылку —
+        и определение ушло из дерева), копируется из стока целиком, вместе
+        со своими модулями и детьми. `done` — уже скопированные, от циклов.
+        """
+        arr = Attribute.array(ref["children"].name, ValueType.ELEMENT)
+        for ch in ref["children"].iter_elem():
+            try:
+                child = ch["child"].val_elem
+            except Exception:
+                continue
+            mine = self._find_definition(child.name)
+            if mine is None:
+                mine = self._copy_definition(child, mine_by_uuid, done)
+            new = Element(ch.name, ch.type, ch.uuid)
+            for attr in ch.values():
+                new[attr.name] = (Attribute(attr.name, ValueType.ELEMENT, mine)
+                                  if attr.name.lower() == "child"
+                                  else attr.copy())
+            arr.append(new)
+        return arr
+
+    def _copy_definition(self, ref, mine_by_uuid: dict, done: dict):
+        """Отвязанная копия определения системы из стока (с модулями и детьми)."""
+        if ref.uuid in done:
+            return done[ref.uuid]
+        new = Element(ref.name, ref.type, ref.uuid)
+        done[ref.uuid] = new
+        for attr in ref.values():
+            if attr.name in MODULE_GROUPS or attr.name == "children":
+                continue
+            new[attr.name] = attr.copy()
+        for group in MODULE_GROUPS:
+            if group not in ref:
+                continue
+            arr = Attribute.array(ref[group].name, ValueType.ELEMENT)
+            for m in ref[group].iter_elem():
+                same = mine_by_uuid.get(m.uuid)
+                if same is None:
+                    same = self._copy_module(m)
+                    same.uuid = m.uuid
+                arr.append(same)
+            new[ref[group].name] = arr
+        if "children" in ref:
+            new[ref["children"].name] = self._copy_children(ref, mine_by_uuid, done)
+        return new
+
+    def revert_attr(self, tf2_root_dir: str, system_name: str,
+                    group: Optional[str], module_index: int,
+                    attr_name: str) -> bool:
+        """Значение атрибута как в игре; в игре его нет — убираем."""
+        stock = self.stock(tf2_root_dir)
+        if stock is None:
+            return False
+        stock_json = stock.systems_json().get(system_name)
+        if stock_json is None:
+            return False
+        cur = self.systems_json().get(system_name) or {}
+        if group is None:
+            ref_attrs = stock_json.get("attrs") or {}
+        else:
+            mods = cur.get(group) or []
+            if module_index >= len(mods):
+                return False
+            fn = (mods[module_index].get("functionName") or "").lower()
+            nth = sum(1 for m in mods[:module_index]
+                      if (m.get("functionName") or "").lower() == fn)
+            same = [m for m in stock_json.get(group) or []
+                    if (m.get("functionName") or "").lower() == fn]
+            if nth >= len(same):
+                return False
+            ref_attrs = same[nth].get("attrs") or {}
+        tv = ref_attrs.get(attr_name)
+        if tv is None:
+            return self.remove_attr(system_name, group, module_index, attr_name)
+        return self.ensure_attr(system_name, group, module_index, attr_name,
+                                tv["t"], tv["v"])
+
     # ── Материалы ────────────────────────────────────────────────────────── #
 
     def material_names(self) -> List[str]:
@@ -720,7 +985,8 @@ class ParticleEditorService:
         """
         # Перезаписанные текстуры — превью-инфо по нормализованному ключу
         out: Dict[str, dict] = {}
-        for mat in self.material_names():
+        names = self.material_names()
+        for mat in names:
             ck = _norm_mat(mat)
             if ck in self._custom_material_info:
                 out[mat] = self._custom_material_info[ck]
@@ -731,18 +997,39 @@ class ParticleEditorService:
         textures_vpk = TF2Paths.resolve_textures_vpk(tf2_root_dir)
         # hl2-VPK обязательны: часть particle-материалов (particle_glow_* и
         # др.) лежит в контенте HL2, который TF2 монтирует
-        paks = open_vpks(
-            [misc_vpk, textures_vpk] + TF2Paths.resolve_hl2_vpks(tf2_root_dir))
+        vpks = [misc_vpk, textures_vpk] + TF2Paths.resolve_hl2_vpks(tf2_root_dir)
+        paks = None
+        # Стоковые материалы одни на все PCF и не меняются между загрузками:
+        # `effects/…` повторяются из файла в файл, а VTF→PNG стоил три
+        # четверти времени открытия. Ключ с mtime архива: обновление игры
+        # подменяет VPK, и старая картинка его не переживёт.
+        stamp = tuple(_mtime(v) for v in vpks)
+        cache = ParticleEditorService._stock_material_cache
+        if cache.get('stamp') != stamp:
+            cache.clear()
+            cache['stamp'] = stamp
 
-        for mat in self.material_names():
+        for mat in names:
             if cancel_check is not None and cancel_check():
                 break
             if mat in out:
                 continue
+            ck = _norm_mat(mat)
+            if ck in cache:
+                if cache[ck] is not None:
+                    out[mat] = cache[ck]
+                continue
+            if paks is None:
+                paks = open_vpks(vpks)
             info = self._resolve_material(paks, mat)
+            cache[ck] = info
             if info is not None:
                 out[mat] = info
         return out
+
+    #: Разобранные стоковые материалы: {норм. путь: info | None} плюс
+    #: `stamp` — mtime архивов, для которых они разобраны.
+    _stock_material_cache: Dict[str, Any] = {}
 
     def _resolve_material(self, paks: list, mat: str) -> Optional[dict]:
         # Путь строим той же нормализацией, что и ключ материала: иначе
@@ -814,7 +1101,10 @@ class ParticleEditorService:
                 f.write(vtf_raw)
             rgba, w, h = VTFLib.read_vtf_as_rgba(tmp_path)
             buf = io.BytesIO()
-            Image.frombytes("RGBA", (w, h), rgba).save(buf, format="PNG")
+            # Сжатие послабее: уровень 3 против 6 — 2 мс вместо 29 на текстуру
+            # 256², а картинка тяжелее лишь на десятую часть.
+            Image.frombytes("RGBA", (w, h), rgba).save(buf, format="PNG",
+                                                       compress_level=3)
             b64 = base64.b64encode(buf.getvalue()).decode("ascii")
             return f"data:image/png;base64,{b64}", w, h
         except Exception as exc:
@@ -857,12 +1147,8 @@ class ParticleEditorService:
             return False
         el = d
         if group is not None:
-            if group not in d:
-                return False
-            try:
-                mods = list(d[group].iter_elem())
-                el = mods[module_index]
-            except (IndexError, Exception):
+            el = self._module_for_edit(d, group, module_index)
+            if el is None:
                 return False
         if attr_name not in el:
             return False
@@ -911,11 +1197,8 @@ class ParticleEditorService:
             return False
         el = d
         if group is not None:
-            if group not in d:
-                return False
-            try:
-                el = list(d[group].iter_elem())[module_index]
-            except (IndexError, Exception):
+            el = self._module_for_edit(d, group, module_index)
+            if el is None:
                 return False
         if attr_name in el:
             return False   # атрибут есть, но set_attr отверг значение
@@ -1105,10 +1388,11 @@ class ParticleEditorService:
                 target = None
                 if group in d:
                     k = 0
-                    for m in d[group].iter_elem():
+                    for i, m in enumerate(d[group].iter_elem()):
                         if self._module_fn(m) == fn.lower():
                             if k == n:
-                                target = m
+                                # Общий с другими системами — сперва свой.
+                                target = self._module_for_edit(d, group, i)
                                 break
                             k += 1
                 if target is None:
@@ -1489,6 +1773,46 @@ class ParticleEditorService:
     #: Кэш шаблонов модулей из стоковых PCF: {(group, fn_lower): Element}.
     _module_templates: Dict[tuple, "Element"] = {}
 
+    def _module_owners(self, mod) -> int:
+        """Сколько раз модуль встречается по группам всех систем.
+
+        Valve делит элементы модулей между системами: в crit.pcf один
+        «Alpha Fade and Decay» стоит у десяти определений сразу.
+        """
+        count = 0
+        for d in self._all_definition_elements():
+            for group in MODULE_GROUPS:
+                if group not in d:
+                    continue
+                try:
+                    count += sum(1 for m in d[group].iter_elem() if m is mod)
+                except Exception:
+                    continue
+        return count
+
+    def _module_for_edit(self, d, group: str, index: int):
+        """Модуль системы под правку — свой, а не общий с другими.
+
+        Общий элемент подменяется в ЭТОЙ системе отвязанной копией: иначе
+        правка end_alpha у crit_text молча меняла hit_text, miss_text и ещё
+        семь систем, делящих с ней тот же оператор. None — модуля нет.
+        """
+        if group not in d:
+            return None
+        try:
+            mods = list(d[group].iter_elem())
+            mod = mods[index]
+        except (IndexError, Exception):
+            return None
+        if self._module_owners(mod) <= 1:
+            return mod
+        mods[index] = self._copy_module(mod)
+        arr = Attribute.array(d[group].name, ValueType.ELEMENT)
+        for m in mods:
+            arr.append(m)
+        d[d[group].name] = arr
+        return mods[index]
+
     @staticmethod
     def _copy_module(el) -> "Element":
         """Отвязанная копия модуля: все атрибуты копируются по значению.
@@ -1644,7 +1968,14 @@ class ParticleEditorService:
     #: строчными 'spin strength' игра игнорирует, ей нужен 'Spin Strength'.
     _attr_canonical: Dict[tuple, Dict[str, str]] = {}
     #: Версия формата дискового кэша (растёт, когда меняется его состав).
-    _CATALOG_FORMAT = 5   # 5: + разброс значений параметра (lo/hi/n)
+    _CATALOG_FORMAT = 7   # 7: + корни {дочерняя: корневая система}
+    #: Все системы игры: {имя: путь PCF}. Собирается тем же проходом, что
+    #: каталог параметров: эффект ищут по имени, а не по файлу из 134.
+    _system_index: Dict[str, str] = {}
+    #: {дочерняя система: корневая}. Корней нет в словаре — они сами
+    #: корни. Список игры сворачивает детей под корень: у эффекта из
+    #: тридцати систем человеку нужна одна строка, а не тридцать.
+    _system_roots: Dict[str, str] = {}
 
     #: Служебные поля — их не показываем и не даём удалять.
     _SERVICE_ATTRS = ("functionname", "name", "id")
@@ -1686,6 +2017,8 @@ class ParticleEditorService:
                 group, _, fn = key_str.partition("|")
                 cls._attr_canonical[(group or None, fn)] = names
             cls._game_materials_cache = list(data.get("materials") or [])
+            cls._system_index = dict(data.get("systems") or {})
+            cls._system_roots = dict(data.get("roots") or {})
         except Exception as exc:
             logger.warning(f"Кэш каталога параметров не прочитан: {exc}")
             return False
@@ -1706,6 +2039,8 @@ class ParticleEditorService:
                 "canonical": {f"{g or ''}|{fn}": names
                               for (g, fn), names in cls._attr_canonical.items()},
                 "materials": cls._game_materials_cache or [],
+                "systems": cls._system_index,
+                "roots": cls._system_roots,
             }
             path.write_text(json.dumps(payload), encoding="utf-8")
         except Exception as exc:
@@ -1730,6 +2065,8 @@ class ParticleEditorService:
         catalog: Dict[tuple, Dict[str, dict]] = {}
         canon: Dict[tuple, Dict[str, Dict[str, int]]] = {}
         materials: set = set()
+        systems: Dict[str, str] = {}
+        roots: Dict[str, str] = {}
         for pcf in cls.list_game_pcfs(tf2_root_dir):
             try:
                 other = cls()
@@ -1740,8 +2077,28 @@ class ParticleEditorService:
             for m in other.material_names():
                 if cls._is_particle_material(m):
                     materials.add(m)
+            # Первый файл побеждает: `_dx80`-копии идут следом по алфавиту и
+            # несут те же имена.
+            sys_json = other.systems_json()
+            for name in sys_json:
+                systems.setdefault(name, pcf)
+            # Корень — верхний уровень дерева файла; потомку достаётся
+            # первый корень, под которым он встретился: одна система бывает
+            # ребёнком у нескольких эффектов.
+            tree = system_hierarchy(sys_json, order=other.system_names())
+            tops = {name for name, _ in tree}
+
+            def walk(kids, top):
+                for name, sub in kids:
+                    if name not in tops:
+                        roots.setdefault(name, top)
+                    walk(sub, top)
+            for name, sub in tree:
+                walk(sub, name)
         if catalog:
             cls._attr_catalog = catalog
+            cls._system_index = systems
+            cls._system_roots = roots
             # Побеждает самое частое написание (см. _canon)
             cls._attr_canonical = {
                 key: {low: max(variants.items(), key=lambda kv: kv[1])[0]
@@ -1749,6 +2106,34 @@ class ParticleEditorService:
                 for key, names in canon.items()}
             cls._game_materials_cache = sorted(materials, key=str.lower)
             cls._save_disk_catalog(tf2_root_dir)
+
+    #: Поток фонового скана каталога — один на процесс.
+    _catalog_thread: Optional[threading.Thread] = None
+
+    @classmethod
+    def system_roots(cls, tf2_root_dir: str) -> Dict[str, str]:
+        """{дочерняя система: корневая} — из того же каталога."""
+        cls.system_index(tf2_root_dir)
+        return cls._system_roots
+
+    @classmethod
+    def system_index(cls, tf2_root_dir: str) -> Dict[str, str]:
+        """{имя системы: файл PCF} по всей игре — то, что уже собрано.
+
+        Скана не ждёт: с нуля он идёт 13 секунд, и страница за это время
+        показывает то, что знает. Нет ничего — запускает сбор в фоне; с
+        диска (после первого раза) каталог поднимается мгновенно.
+        """
+        if cls._system_index or not tf2_root_dir:
+            return cls._system_index
+        if cls._load_disk_catalog(tf2_root_dir) and cls._system_index:
+            return cls._system_index
+        if cls._catalog_thread is None or not cls._catalog_thread.is_alive():
+            cls._catalog_thread = threading.Thread(
+                target=cls.build_attr_catalog, args=(tf2_root_dir,),
+                name='particle-catalog', daemon=True)
+            cls._catalog_thread.start()
+        return cls._system_index
 
     @staticmethod
     def _track_range(entry: dict, value: Any) -> None:
@@ -2123,11 +2508,8 @@ class ParticleEditorService:
             return False
         el = d
         if group is not None:
-            if group not in d:
-                return False
-            try:
-                el = list(d[group].iter_elem())[module_index]
-            except (IndexError, Exception):
+            el = self._module_for_edit(d, group, module_index)
+            if el is None:
                 return False
         if attr_name not in el:
             return False

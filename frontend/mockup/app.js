@@ -44,6 +44,7 @@ import './diagnostics.js';
 import './build.js';
 import './tools.js';
 import './events.js';
+import './paint.js';
 import { boot, els } from './catalog.js';
 import { syncViewerTheme } from './log.js';
 // Диалог «не получилось»: подписывается на свои кнопки при загрузке.

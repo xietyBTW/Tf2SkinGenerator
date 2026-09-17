@@ -34,6 +34,7 @@ logger = get_logger(__name__)
 
 #: Начало предмета в items_game: номер на двух табуляциях и скобка.
 _ITEM_HEAD = re.compile(r'\n\t\t"\d+"\s*\n\t\t\{')
+_BRACE = re.compile(r'[{}]')
 _ITEM_NAME = re.compile(r'"item_name"\s+"([^"]+)"')
 _IMAGE = re.compile(r'"image_inventory"\s+"([^"]+)"')
 
@@ -52,16 +53,14 @@ def _item_bodies(text: str) -> List[str]:
     out: List[str] = []
     for head in _ITEM_HEAD.finditer(text):
         start = head.end() - 1
-        depth, i = 0, start
-        while i < len(text):
-            if text[i] == '{':
-                depth += 1
-            elif text[i] == '}':
-                depth -= 1
-                if not depth:
-                    break
-            i += 1
-        out.append(text[start:i])
+        depth = 0
+        # Шагаем по скобкам, а не по символам: файл на десять мегабайт, и
+        # посимвольный обход стоил полторы секунды на каждый вызов.
+        for brace in _BRACE.finditer(text, start):
+            depth += 1 if brace.group() == '{' else -1
+            if not depth:
+                out.append(text[start:brace.start()])
+                break
     return out
 
 

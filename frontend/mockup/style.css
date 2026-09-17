@@ -783,6 +783,24 @@
 /* Раскрытый модуль отмечаем линией слева — видно, к чему относятся строки. */
 .expert__mod[open] { border-left: 1px solid var(--accent); padding-left: 9px; }
 .expert__warn { margin-left: auto; font-size: 10px; color: var(--accent); }
+/* Отличия от игры: точка у строки, метка у модуля, убранные — списком.
+   Точка, а не цвет текста: цветом уже говорит «не в превью». */
+.params__row.is-changed .params__name::before,
+.tree__name.is-changed::before,
+.tree__name.is-added::before {
+  content: "";
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin-right: 6px;
+  vertical-align: 2px;
+  background: var(--accent);
+}
+.tree__name.is-added::before { background: var(--ink-mute); }
+.expert__new { margin-left: 8px; font-size: 10px; letter-spacing: .1em;
+               text-transform: uppercase; color: var(--ink-mute); }
+.expert__new[hidden] { display: none; }
+.expert__gone { padding: 4px 0; color: var(--ink-mute); text-decoration: line-through; }
 .expert .params__row { padding: 4px 0 4px 14px; }
 
 /* Эффект правят, ГЛЯДЯ на него: шторка снизу закрывала ровно то, ради чего
@@ -854,6 +872,37 @@
   color: inherit;
 }
 .ctx:popover-open { display: flex; }
+
+/* ── Краска из игры ───────────────────────────────────────────────────── */
+.paint { display: inline-flex; align-items: center; gap: 7px; }
+/* Точка цвета банки; у командной — две половины. */
+.paint__dot, .swatch {
+  background: linear-gradient(135deg, var(--c) 50%, var(--c2, var(--c)) 50%);
+}
+.paint__dot { width: 9px; height: 9px; border-radius: 50%; }
+.paints {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  padding: 10px;
+  z-index: 30;
+  border: 1px solid var(--hairline-strong);
+  background: var(--overlay);
+  color: inherit;
+}
+.paints:popover-open { display: flex; flex-direction: column; gap: 8px; }
+.paints__none.is-active { color: var(--accent); }
+.paints__grid { display: grid; grid-template-columns: repeat(8, 22px); gap: 6px; }
+.swatch {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--hairline-strong);
+  cursor: pointer;
+  transition: transform var(--dur), border-color var(--dur);
+}
+.swatch:hover { transform: scale(1.15); border-color: var(--ink); }
+.swatch.is-active { outline: 2px solid var(--accent); outline-offset: 1px; }
 .ctx[hidden] { display: none; }
 .ctx__sep { height: 1px; background: var(--hairline-strong); }
 .ctx .menu__item:disabled { color: var(--ink-mute); cursor: default; }
@@ -908,6 +957,45 @@
   transition: color var(--dur), border-color var(--dur);
 }
 .tree__name:hover { color: var(--ink); }
+/* Имя эффекта из игры при имени системы: «Burning Flames» рядом с
+   `superrare_burning1`. */
+.tree__fx { margin-left: 10px; color: var(--ink-mute); font-size: 11px; }
+.tree__name.is-active .tree__fx { color: var(--ink-soft); }
+
+/* Каталог эффектов игры: имя, система, файл. */
+.fx__head { margin: 14px 0 4px; }
+/* Число при кнопке фильтра: «Лицо 212». */
+.underlined__n { margin-left: 5px; font-style: normal; font-size: 10px;
+                 color: var(--ink-mute); }
+.fx {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1.6fr) minmax(0, 1fr);
+  align-items: baseline;
+  gap: 12px;
+  width: 100%;
+  padding: 7px 0 7px 8px;
+  border: 0;
+  border-bottom: 1px solid var(--hairline);
+  background: none;
+  color: var(--ink-soft);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  box-shadow: inset 2px 0 0 transparent;
+  transition: color var(--dur), box-shadow var(--dur);
+}
+.fx:hover { color: var(--ink); }
+.fx.is-active { color: var(--ink); box-shadow: inset 2px 0 0 var(--accent); }
+/* В строке с разворачивалкой линию рисует сама строка. */
+.tree__row > .fx { border-bottom: 0; }
+.fx--kid { color: var(--ink-mute); }
+.fx__what { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.fx__name { flex: none; font-weight: 500; overflow: hidden; text-overflow: ellipsis;
+            white-space: nowrap; max-width: 100%; }
+/* Чем вызывается: «Огнемёт», «Турель» — приглушённо при имени. */
+.fx__who { color: var(--ink-mute); font-size: 11px; overflow: hidden;
+           text-overflow: ellipsis; white-space: nowrap; }
+.fx__sys, .fx__file { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tree__name.is-active {
   color: var(--ink);
   font-weight: 600;
@@ -2246,15 +2334,65 @@
   gap: 14px;
 }
 
-.sounds__bar {
+/* Шапка: разделы набраны как заголовок предмета — это и есть «что открыто»,
+   — а поиск справа, как у каталога. */
+.sounds__head {
+  flex: none;
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
+  align-items: flex-end;
+  justify-content: space-between;
   gap: var(--rhythm);
+  padding-top: 6px;
 }
 
-.sounds__search { flex: 1 1 260px; max-width: 420px; }
+.sounds__tabs { display: flex; align-items: flex-end; gap: 26px; }
+
+.sounds__tab {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 0 0 4px;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  background: none;
+  color: var(--ink-mute);
+  font-size: 22px;
+  font-weight: 300;
+  letter-spacing: -.01em;
+  cursor: pointer;
+  transition: color var(--dur), border-color var(--dur);
+}
+.sounds__tab:hover { color: var(--ink); }
+.sounds__tab.is-active { color: var(--ink); border-bottom-color: var(--accent); }
+/* Под поиском в разделе пусто: вкладка остаётся, но гаснет — исчезающая
+   вкладка читалась бы как поломка. */
+.sounds__tab.is-empty { opacity: .45; }
+/* Сколько записей в разделе: цифра при слове, а не отдельный столбец. */
+.sounds__tab b { font-family: var(--mono); font-size: 10.5px; font-weight: 400;
+                 color: var(--ink-mute); }
+
+.sounds__search { flex: 0 1 340px; }
 .sounds__name   { flex: 0 0 170px; }
+
+.sounds__body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 188px minmax(0, 1fr);
+  gap: var(--rhythm);
+  border-top: 1px solid var(--hairline);
+}
+
+.sounds__main {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+.sounds__main .catalog__count { flex: none; margin: 10px 0 6px; }
+/* Подсказка «есть в разделе …» живёт в той же строке счётчика. */
+.sounds__main .catalog__count .textbtn { margin: 0 2px; }
+.sounds__main .catalog__count .textbtn b { font-weight: 400; color: var(--ink-mute); }
 
 .sounds__list {
   flex: 1;
@@ -2262,6 +2400,58 @@
   overflow-y: auto;
   border-top: 1px solid var(--hairline);
 }
+
+/* Хвост списка: сколько ещё за кадром. Рисуем не всё разом — десять тысяч
+   строк стоили бы секунды на пустом месте, а до сотой всё равно не долистать. */
+.sounds__more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 16px 0 12px;
+}
+
+/* ── Колонка фильтров ────────────────────────────────────────────────────
+   Фасеты со счётчиками, один под другим: три ряда кнопок в строку занимали
+   полэкрана и всё равно не вмещали реплик. Здесь у каждого значения видно,
+   сколько за ним записей, — это и подсказка, и карта раздела. */
+.facets {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 10px 12px 0;
+  border-right: 1px solid var(--hairline);
+}
+
+.facet { display: flex; flex-direction: column; gap: 2px; }
+.facet > .label { margin-bottom: 6px; }
+
+.facet__opt {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 3px 0 3px 10px;
+  border: 0;
+  background: none;
+  color: var(--ink-soft);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  /* Отметка выбранного — полоска слева, та же, что у заменённых строк списка.
+     Всегда прозрачная, чтобы строки не прыгали при выборе. */
+  box-shadow: inset 2px 0 0 transparent;
+  transition: color var(--dur), box-shadow var(--dur);
+}
+.facet__opt:hover { color: var(--ink); }
+.facet__opt.is-active { color: var(--ink); box-shadow: inset 2px 0 0 var(--accent); }
+.facet__opt span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.facet__opt b { flex: none; font-family: var(--mono); font-size: 10.5px;
+                font-weight: 400; color: var(--ink-mute); }
+.facet__opt.is-active b { color: var(--ink-soft); }
 
 /* Кружок ожидания. Тот же приём, что у вьювера моделей (viewer3d.html):
    кольцо и подпись под ним по центру пустого места. */
@@ -2454,6 +2644,18 @@
 }
 .snd__file.is-many { cursor: pointer; color: var(--ink-soft); }
 .snd__file.is-many:hover { color: var(--accent); }
+/* Общий файл — число при имени: у `bat_miss.wav` девять хозяев, и замена у
+   одного — замена у всех. */
+.snd__shared { margin-left: 8px; color: var(--ink-mute); }
+.snd__shared[hidden] { display: none; }
+
+/* Курсор клавиатуры — рамка волосяной линией: фон занят наведением. */
+.sounds__list:focus { outline: none; }
+.snd.is-cursor { box-shadow: inset 2px 0 0 transparent, inset 0 0 0 1px var(--hairline-strong); }
+.snd.is-own.is-cursor { box-shadow: inset 2px 0 0 var(--accent), inset 0 0 0 1px var(--hairline-strong); }
+
+/* Файл тащат на строку — та же пунктирная рамка, что у кадра текстуры. */
+.snd.is-drop, .snd__file-row.is-drop { outline: 1px dashed var(--accent); outline-offset: -1px; }
 
 /* Раскрытые файлы записи: игра берёт из них случайный, и менять иногда надо
    один вариант, а не все разом. */
@@ -2471,18 +2673,33 @@
   box-shadow: inset 2px 0 0 transparent;
 }
 .snd__file-row.is-own { box-shadow: inset 2px 0 0 var(--accent); }
-.snd__file-name { flex: 1; min-width: 0; overflow: hidden;
-                  text-overflow: ellipsis; white-space: nowrap; }
+.snd__file-what { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.snd__file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Список «также у» не режем: у `bat_miss.wav` девять хозяев, и все нужны. */
+.snd__file-also { font-size: 10px; white-space: normal; }
+/* Как игра играет запись: канал, уровень, громкость — строкой над файлами. */
+.snd__props { padding: 6px 0 4px; letter-spacing: .06em; }
 .snd__file-row .snd__acts .textbtn { border-bottom-color: transparent; }
 .snd__file-row:hover .snd__acts .textbtn {
   border-bottom-color: var(--hairline-strong);
 }
 
-.snd__event {
+.snd__group {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 10px;
+  font-weight: 500;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+}
+
+/* Роботизированный дубль для MvM — метка при имени: имя записи его и так
+   выдаёт (`MVM_`), но в списке из сотен строк буквы в моно не читаются. */
+.snd__mvm {
+  margin-left: 8px;
+  font-size: 9px;
   font-weight: 500;
   letter-spacing: .16em;
   text-transform: uppercase;
@@ -2499,7 +2716,9 @@
 .snd.is-own { box-shadow: inset 2px 0 0 var(--accent); }
 
 /* Слово, а не только полоска: в списке из восьмисот строк цвет слева легко
-   не заметить. В разметке, а не в `content`, — иначе его не перевести. */
+   не заметить. В разметке, а не в `content`, — иначе его не перевести.
+   «Частично» — тем же словом-меткой, но приглушённо. */
+.snd__part { color: var(--ink-mute); }
 .snd__own {
   margin-left: 8px;
   font-size: 9px;

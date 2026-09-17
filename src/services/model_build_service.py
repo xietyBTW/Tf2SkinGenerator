@@ -103,8 +103,28 @@ class ModelBuildService:
                 f"STDOUT: {result.stdout}\n"
                 f"STDERR: {result.stderr}"
             )
-        
+
+        # Crowbar 0.68 теряет у флексовых мешей вторую strip-группу (Air Head —
+        # 112 треугольников из 1398, тело пиромана — четыре). Дописываем
+        # недостающее из VVD/VTX, которые лежат рядом с MDL; без них — как есть.
+        ModelBuildService._repair_lost_geometry(mdl_path, qc_path)
         return qc_path
+
+    @staticmethod
+    def _repair_lost_geometry(mdl_path: str, qc_path: str) -> None:
+        from src.services import mdl_mesh
+
+        base = os.path.splitext(mdl_path)[0]
+        vvd = base + ".vvd"
+        vtx = next((base + ext for ext in (".dx90.vtx", ".dx80.vtx", ".sw.vtx")
+                    if os.path.exists(base + ext)), None)
+        if not (os.path.exists(vvd) and vtx):
+            return
+        try:
+            with open(mdl_path, "rb") as f_mdl, open(vvd, "rb") as f_vvd, open(vtx, "rb") as f_vtx:
+                mdl_mesh.repair_smd(qc_path, f_mdl.read(), f_vvd.read(), f_vtx.read())
+        except Exception as exc:                          # noqa: BLE001
+            logger.warning(f"[decomp] проверка геометрии не удалась: {exc}")
     
     @staticmethod
     def extract_cdmaterials_path_from_qc(qc_path: str) -> Optional[str]:

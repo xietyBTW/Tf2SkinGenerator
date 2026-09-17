@@ -545,7 +545,9 @@ function _ensureFitGroup() {
   currentModel.children.filter(c => !_isGhost(c))
     .forEach(c => _fitGroup.add(c));   // add() переносит из currentModel
   currentModel.add(_fitGroup);
-  if (_fitControls) _fitControls.attach(_fitGroup);
+  // attach() у TransformControls сам включает visible: вне режима гизмо
+  // висело бы над моделью, у которой просто выставили числа подгонки.
+  if (_fitControls && _fitMode) _fitControls.attach(_fitGroup);
   return _fitGroup;
 }
 
@@ -627,12 +629,13 @@ window.setFitMode = function(on) {
       scene.add(_fitControls);
     }
     const group = _ensureFitGroup();
-    if (group) _fitControls.attach(group);
-    _fitControls.visible = true;
+    if (group) _fitControls.attach(group); else _fitControls.detach();
     _fitControls.enabled = true;
   } else if (_fitControls) {
+    // Enter или «Готово» посреди G/R/S: трансформ уже отдан — подтверждаем,
+    // иначе орбита осталась бы выключенной, а курсор — крестом.
+    if (_fitOp) _fitOpEnd();
     _fitControls.detach();
-    _fitControls.visible = false;
     _fitControls.enabled = false;
   }
 };
@@ -701,7 +704,7 @@ window.startFitOp = function(tool) {
 function _fitOpEnd() {
   _fitOp = null;
   controls.enabled = true;
-  if (_fitControls) _fitControls.enabled = true;
+  if (_fitControls) _fitControls.enabled = _fitMode;
   document.getElementById('canvas-container').style.cursor = '';
   if (document.pointerLockElement === renderer.domElement) document.exitPointerLock();
 }
@@ -713,6 +716,21 @@ document.addEventListener('pointerlockchange', () => {
   // Захват пришёл, когда операцию уже подтвердили щелчком — отпускаем.
   if (!_fitOp && locked) document.exitPointerLock();
 });
+
+/**
+ * Снимает модель со сцены. Единственное место: подгонка держит ссылки на её
+ * группу (гизмо, G/R/S, твин), и без сброса гизмо оставалось висеть в кадре
+ * над уже удалённой моделью — и на следующей, если операция шла в момент
+ * смены оружия.
+ */
+function _dropModel() {
+  if (_fitOp) _fitOpEnd();          // модели больше нет — отменять нечего
+  if (_fitControls) _fitControls.detach();
+  _fitGroup = null;
+  _fitTween = null;
+  if (currentModel) { scene.remove(currentModel); currentModel = null; }
+  if (_critSprite)  { scene.remove(_critSprite);  _critSprite  = null; }
+}
 
 /** Отмена операции; false — операции не было (Esc тогда достаётся странице). */
 function _fitOpCancel() {
@@ -1283,8 +1301,7 @@ window.loadModelFromContent = function(objContent, texDataUrl, cx, cy, cz, scale
   stopAnimation();
   _exitSkyboxView();
   _disposeSkinned();           // уходим с анимированной сцены — гасим микшер
-  if (currentModel) { scene.remove(currentModel); currentModel = null; }
-  if (_critSprite)  { scene.remove(_critSprite);  _critSprite  = null; }
+  _dropModel();
 
   const blob   = new Blob([objContent], { type: 'text/plain' });
   const objUrl = URL.createObjectURL(blob);
@@ -1335,13 +1352,16 @@ window.loadModelFromContent = function(objContent, texDataUrl, cx, cy, cz, scale
         window.applyMaterialMap(map);
       }
 
-      // Подгонка пережила перезагрузку OBJ (смена текстуры перегружает
-      // модель целиком): группа старой модели ушла вместе с ней. Призрак
-      // оригинала виден только в режиме подгонки.
-      _fitGroup = null;
+      // Подгонка пережила перезагрузку OBJ (возврат из вида от первого
+      // лица): группа старой модели ушла вместе с ней. Призрак оригинала
+      // виден только в режиме подгонки. Под ригом — сцена рук: подгонка в
+      // неё уже запечена Python, а крутить руки вместе с оружием гизмо не
+      // должно.
       object.traverse(c => { if (_isGhost(c)) c.visible = _fitMode; });
-      if (_fitState) window.setFitTransform(..._fitState);
-      if (_fitMode) window.setFitMode(true);
+      if (!_viewRig) {
+        if (_fitState) window.setFitTransform(..._fitState);
+        if (_fitMode) window.setFitMode(true);
+      }
 
       if (_pendingTexUrl) {
         // Одиночная текстура, запрошенная во время загрузки OBJ. Применяем
@@ -1392,8 +1412,7 @@ window.loadViewmodelAnimated = function(data, loadSeq) {
   stopAnimation();
   _exitSkyboxView();
   _disposeSkinned();
-  if (currentModel) { scene.remove(currentModel); currentModel = null; }
-  if (_critSprite)  { scene.remove(_critSprite);  _critSprite  = null; }
+  _dropModel();
 
   try {
     _skinned = _buildSkinnedScene(THREE, data || {}, name =>
@@ -1611,12 +1630,15 @@ window.resetViewer = function() {
   ++_sceneGeneration;
   _isCritHitMode    = false;
   _editableMeshNames = null;
+  // Новый предмет: подгонка прошлого к нему не относится. Иначе его модель,
+  // успев загрузиться раньше ответа страницы, вставала повёрнутой и в гизмо.
+  _fitState = null;
+  _fitMode = false;
   window.setViewRig(null);      // сброс режима — обратно к орбите
   stopAnimation();
   _exitSkyboxView();
   _disposeSkinned();
-  if (currentModel) { scene.remove(currentModel); currentModel = null; }
-  if (_critSprite)  { scene.remove(_critSprite);  _critSprite  = null; }
+  _dropModel();
   setStatus(_t.select_weapon);
 };
 
@@ -1774,8 +1796,7 @@ window.loadSkybox = function(faces) {
   _isSkyboxMode      = true;
   controls.enableZoom = false;   // колесо теперь крутит FOV (см. wheel-listener)
   stopAnimation();
-  if (currentModel) { scene.remove(currentModel); currentModel = null; }
-  if (_critSprite)  { scene.remove(_critSprite);  _critSprite  = null; }
+  _dropModel();
   setStatus(_t.loading, false, true);
 
   const imgs = new Array(SRC_FACE_MAP.length);
@@ -1917,8 +1938,7 @@ window.loadCritHitScene = function(critTexDataUrl, modelTexDataUrl) {
   _exitSkyboxView();
 
   // Очищаем предыдущую сцену
-  if (currentModel) { scene.remove(currentModel); currentModel = null; }
-  if (_critSprite)  { scene.remove(_critSprite);  _critSprite  = null; }
+  _dropModel();
 
   // Строим солдата
   const soldier  = _buildSoldierGroup();
@@ -1963,8 +1983,7 @@ window.loadCritHitSceneWithModel = function(objContent, critTexDataUrl, cx, cy, 
   stopAnimation();
   _exitSkyboxView();
 
-  if (currentModel) { scene.remove(currentModel); currentModel = null; }
-  if (_critSprite)  { scene.remove(_critSprite);  _critSprite  = null; }
+  _dropModel();
 
   const blob   = new Blob([objContent], { type: 'text/plain' });
   const objUrl = URL.createObjectURL(blob);

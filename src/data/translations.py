@@ -589,6 +589,12 @@ TRANSLATIONS = {
         'hat_filter_halloween_tip': 'Скрыть Halloween',
         'hat_filter_holiday': 'Сезонные',
         'hat_filter_holiday_tip': 'Скрыть сезонные (Christmas и др.)',
+        # Куда надевается (equip_region игры, сведённый к группам).
+        'hat_region_head': 'Голова',
+        'hat_region_face': 'Лицо',
+        'hat_region_body': 'Тело',
+        'hat_region_medal': 'Медали',
+        'hat_region_other': 'Прочее',
 
         # Hat Game Paints Dialog
         'hat_game_paints_title': 'Краски из игры',
@@ -1219,6 +1225,12 @@ TRANSLATIONS = {
         # of 9504). Short name goes on the button, full one into the tooltip.
         'hat_filter_medals': 'Medals',
         'hat_filter_medals_tip': 'Hide medals',
+        # Where it is worn (the game's equip_region, grouped).
+        'hat_region_head': 'Head',
+        'hat_region_face': 'Face',
+        'hat_region_body': 'Body',
+        'hat_region_medal': 'Medals',
+        'hat_region_other': 'Other',
         'hat_filter_halloween': 'Halloween',
         'hat_filter_halloween_tip': 'Hide Halloween',
         'hat_filter_holiday': 'Seasonal',

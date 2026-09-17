@@ -176,19 +176,37 @@ class WorkStoreTests(unittest.TestCase):
         work_store.save(self.key, {'textures': {'red': {'mat': second}}})
         self.assertEqual([f.name for f in files.iterdir()], ['parts_2.png'])
 
-    def test_sweep_spares_files_the_caller_still_needs(self):
-        """Снимки неактивных стилей шапки живут в памяти сеанса: хранилище о
-        них не знает, и без подсказки картинка соседнего стиля исчезла бы."""
-        keep_me = self._texture('style0.png')
-        files = Path(self._tmp.name) / 'work' / self.key / 'files'
-        work_store.save(self.key, {'textures': {'red': {'mat': keep_me}}})
-        owned = str(next(files.iterdir()))
-
+    def test_style_snapshots_live_in_the_work_with_their_own_copies(self):
+        """Снимок соседнего стиля шапки — часть той же работы: его картинка
+        копируется к себе, читается обратно и переживает уборку; исчезнувший
+        файл отбрасывается, как у самих правок."""
+        active = self._texture('style0.png')
         other = self._texture('style1.png')
-        work_store.save(self.key, {'textures': {'red': {'mat': other}}},
-                        keep=[owned])
+        files = Path(self._tmp.name) / 'work' / self.key / 'files'
+        styles = {1: {'models': {'': 'm.mdl'}, 'image_path': other,
+                      'edits': {'textures': {'red': {'mat': other}}}}}
+        work_store.save(self.key, {'textures': {'red': {'mat': active}}}, styles)
         self.assertEqual(sorted(f.name for f in files.iterdir()),
                          ['style0.png', 'style1.png'])
+
+        back = work_store.styles_of(self.key)
+        self.assertEqual(list(back), [1])
+        self.assertEqual(back[1]['models'], {'': 'm.mdl'})
+        self.assertTrue(back[1]['image_path'].startswith(str(files)))
+        self.assertTrue(Path(back[1]['edits']['textures']['red']['mat']).is_file())
+
+        # Стиль остался один — копия соседа уходит вместе со снимком.
+        work_store.save(self.key, {'textures': {'red': {'mat': active}}})
+        self.assertEqual([f.name for f in files.iterdir()], ['style0.png'])
+        self.assertEqual(work_store.styles_of(self.key), {})
+
+    def test_a_work_can_hold_only_style_snapshots(self):
+        """Правлен только соседний стиль, показанный — игровой: работа всё
+        равно есть, иначе снимок терялся бы вместе с ней."""
+        other = self._texture('style1.png')
+        styles = {1: {'models': {}, 'edits': {'textures': {'red': {'mat': other}}}}}
+        self.assertIsNotNone(work_store.save(self.key, {}, styles))
+        self.assertEqual(list(work_store.styles_of(self.key)), [1])
 
     def test_sweep_never_touches_a_failed_write(self):
         """Правки не легли на диск — значит на диске осталась прошлая работа,

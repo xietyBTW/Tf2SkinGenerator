@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import re
 import threading
 from typing import Dict, List, Optional
 
@@ -430,7 +431,8 @@ def load_preview(mode: str, lang: str = '',  # noqa: PLR0913 — зеркало 
                  model_key: Optional[str] = None,
                  per_class: Optional[Dict[str, str]] = None,
                  style: Optional[int] = None,
-                 restore: bool = False) -> Dict[str, object]:
+                 restore: bool = False,
+                 hat: str = '') -> Dict[str, object]:
     """Начинает загрузку 3D-превью. Модель приезжает событиями, не ответом.
 
     restore — открыть с сохранённой работой. Из каталога предмет открывается
@@ -441,7 +443,7 @@ def load_preview(mode: str, lang: str = '',  # noqa: PLR0913 — зеркало 
     lang = _lang(lang)
     return session().load_preview(mode, lang=lang, model_key=model_key,
                                   per_class=per_class, style=style,
-                                  restore=restore)
+                                  restore=restore, hat=hat or '')
 
 
 def icon_png(key: str) -> Optional[bytes]:
@@ -501,27 +503,15 @@ def load_taunt(tf2_class: str = '', lang: str = '') -> Dict[str, object]:
     return session().load_taunt(tf2_class, lang=lang)
 
 
-def sounds(family: str = '', tf2_class: str = '', query: str = '',
-           section: str = '', lang: str = '') -> Dict[str, object]:
-    """Записи звукового скрипта под фильтрами страницы звуков."""
+def sounds(section: str = '', who: str = '', group: str = '',
+           variant: str = '', fmt: str = '', own: bool = False,
+           query: str = '', offset: int = 0,
+           lang: str = '') -> Dict[str, object]:
+    """Записи звукового скрипта под фильтрами страницы и сами фильтры."""
     from src.app.session import session
 
-    return session().sounds(family, tf2_class, query, section,
-                            lang=_lang(lang))
-
-
-def sound_sections(lang: str = '') -> List[dict]:
-    """Разделы каталога звуков: оружие, реплики, игрок, мир."""
-    from src.app.session import session
-
-    return session().sound_sections(lang=_lang(lang))
-
-
-def sound_families(section: str = '', lang: str = '') -> List[dict]:
-    """Семьи событий этого раздела — для кнопок фильтра."""
-    from src.app.session import session
-
-    return session().sound_families(section, lang=_lang(lang))
+    return session().sounds(section, who, group, variant, fmt, own, query,
+                            offset, lang=_lang(lang))
 
 
 def set_sound(name: str = '', path: Optional[str] = None,
@@ -530,6 +520,13 @@ def set_sound(name: str = '', path: Optional[str] = None,
     from src.app.session import session
 
     return session().set_sound(name, path, wave)
+
+
+def clear_sounds() -> Dict[str, object]:
+    """Снимает все свои звуки разом."""
+    from src.app.session import session
+
+    return session().clear_sounds()
 
 
 def save_sound(name: str = '', wave: str = '') -> Dict[str, object]:
@@ -553,6 +550,13 @@ def sound_wave(path: str) -> Optional[bytes]:
     return session().sound_bytes(path)
 
 
+def warm_up() -> None:
+    """Прогрев игровых архивов в фоне — зовёт хост сразу после старта."""
+    from src.app.session import session
+
+    session().warm_up()
+
+
 def stop_preview() -> Dict[str, object]:
     from src.app.session import session
     return session().stop_preview()
@@ -572,6 +576,18 @@ def set_team(team: str) -> Dict[str, object]:
 def set_australium(active: bool) -> Dict[str, object]:
     from src.app.session import session
     return session().set_australium(active)
+
+
+def paints(lang: str = '') -> List[dict]:
+    """Банки краски игры для превью шапки: [{key, name, red, blu}]."""
+    from src.app.session import session
+    return session().paints(_lang(lang))
+
+
+def set_paint(key: str = '') -> Dict[str, object]:
+    """Красит превью выбранной банкой; пусто — без краски."""
+    from src.app.session import session
+    return session().set_paint(key)
 
 
 def toggle_misc(on: Optional[bool] = None) -> Dict[str, object]:
@@ -795,6 +811,7 @@ def _named(rows: List[dict], lang: str) -> List[dict]:
                     # открывается — из режима «hat» её путь не вывести.
                     'item_key': key,
                     'per_class': dict(item.get('per_class') or {}),
+                    'style': int(item.get('style') or 0),
                     'mod': item.get('mod') or '',
                     # Иконка косметики объявлена в items_game: по имени модели
                     # её не найти — у покласcовой шапки оно с суффиксом класса
@@ -1625,6 +1642,14 @@ def particle_files() -> List[dict]:
             for p in ParticleEditorService.list_game_pcfs(paths['root'])]
 
 
+def particle_effects(query: str = '', source: str = '',
+                     lang: str = '') -> Dict[str, object]:
+    """Эффекты игры по имени и по источнику — необычные, оружие, постройки…"""
+    from src.app.session import session
+
+    return session().particle_effects(query, source, lang=_lang(lang))
+
+
 def load_particles(source: str) -> Dict[str, object]:
     """Разбирает PCF: системы, материалы и дерево — всё, что рисует превью."""
     from src.app.session import session
@@ -1741,6 +1766,28 @@ def remove_particle_child(parent: str, index: int) -> Dict[str, object]:
 def add_particle_layer(parent: str) -> Dict[str, object]:
     from src.app.session import session
     return session().add_particle_layer(parent)
+
+
+def particle_diff(system: str) -> Dict[str, object]:
+    """Чем система отличается от игровой: атрибуты, модули, дочерние."""
+    from src.app.session import session
+
+    return session().particle_diff(system)
+
+
+def revert_particle_system(system: str) -> Dict[str, object]:
+    """Возвращает систему в игровой вид."""
+    from src.app.session import session
+
+    return session().revert_particle_system(system)
+
+
+def revert_particle_attr(system: str, group=None, index: int = 0,
+                         attr: str = '') -> Dict[str, object]:
+    """Возвращает один параметр к значению игры."""
+    from src.app.session import session
+
+    return session().revert_particle_attr(system, group, index, attr)
 
 
 def particle_history() -> Dict[str, object]:
@@ -1915,27 +1962,37 @@ def set_hat_filter(tag: str, hidden: bool) -> List[dict]:
 
 
 def hats(query: str = '', tf2_class: Optional[str] = None,
-         lang: str = '') -> List[dict]:
+         region: str = '', lang: str = '') -> Dict[str, object]:
     """
-    Косметика TF2 из items_game.txt.
+    Косметика TF2 из items_game.txt: {items, regions, suggest}.
 
     Скрытые категории берём из конфига (`hats_hidden_tags`) — так же, как
     панель шапок. Отдаём ВСЁ, что прошло фильтры: косметики 9504, и отрисовка
     полного списка стоит 56 мс — обрезать было незачем, а обрезанный список
     молча врал, что предмета в игре нет.
+
+    Поиск ранжирует: имя целиком, с начала, по началам слов, подстрока;
+    ищет и по английскому имени, когда интерфейс русский. `regions` — фасет
+    «куда надевается» с числами под текущим запросом и классом (без своего
+    фильтра, иначе из «Лица» нельзя было бы уйти). `suggest` — похожие имена,
+    когда ничего не нашлось.
     """
     from src.app.session import session
-    from src.data.hats_parser import parse_hats
+    from src.data.hats_parser import REGION_ORDER, parse_hats
 
     lang = _lang(lang)
     t = _t(lang)
     paths = session().tf2_paths()
     if 'error' in paths:
-        return []
+        return {'items': [], 'regions': [], 'suggest': []}
 
     hidden = set(hidden_hat_tags())
-    words = [w for w in str(query).lower().split() if w]
-    out: List[dict] = []
+    region = (region or '').strip().lower()
+    words = _hat_plain(str(query)).split()
+    english = _english_names(paths['root']) if words and lang != 'en' else {}
+    counts: Dict[str, int] = {}
+    found = []
+    names: List[str] = []
     for h in parse_hats(paths['root'], lang):
         if 'medals' in hidden and h.is_medal:
             continue
@@ -1943,32 +2000,132 @@ def hats(query: str = '', tf2_class: Optional[str] = None,
             continue
         if 'holiday' in hidden and h.is_holiday:
             continue
-        if not h.matches(words, tf2_class or None):
+        if not h.matches([], tf2_class or None):
             continue
-        out.append({
-            'key': h.mdl_path,
-            'name': h.name,
-            'cls': ', '.join(h.classes),
-            'type': 'hat',
-            'mode': 'hat',
-            'icon': h.icon,
-            # Имя файла модели — то же, что у оружия показано ключом
-            # (c_scattergun). Целиком путь в подпись не влезает: у косметики
-            # он вида models/workshop/player/items/demo/…
-            'label': _model_file_name(h.mdl_path),
-            # Мультиклассовая шапка: у каждого класса СВОЯ модель. Сборке нужны
-            # все выбранные, а превью — одна конкретная: путь с %s ей не годится.
-            'per_class': dict(h.per_class_models or {}),
-            'slot': h.slot,
-            # Модельные стили шапки: у каждого СВОЯ геометрия (у «Только
-            # камень» нет оправы). Отдаём их с моделями — выбор стиля меняет и
-            # показ, и то, что уйдёт в сборку. Числа мало: по нему стиль не
-            # загрузить.
-            'styles': [
-                {'name': (st.get('name')
-                          or t.get('hat_style_n', 'Style {n}').format(n=i + 1)),
-                 'per_class': dict(st.get('per_class_models') or {})}
-                for i, st in enumerate(h.styles or [])
-            ],
-        })
-    return out
+        names.append(h.name)
+        rank = _hat_rank(h, words, english.get(h.defindex, ''))
+        if rank is None:
+            continue
+        counts[h.region] = counts.get(h.region, 0) + 1
+        if region and h.region != region:
+            continue
+        found.append((rank, h.name.lower(), h))
+    found.sort(key=lambda f: (f[0], f[1]))
+    return {
+        'items': [_hat_row(h, t) for _, _, h in found],
+        'regions': [{'key': k, 'name': t.get(f'hat_region_{k}', k), 'count': n}
+                    for k in REGION_ORDER if (n := counts.get(k))],
+        'suggest': _hat_suggest(words, names, english) if words and not found else [],
+    }
+
+
+def _hat_plain(text: str) -> str:
+    """Строка для сравнения: регистр, ё и знаки не считаются, слова — через
+    пробел («Газиров-очки» → «газиров очки», чтобы «очки» было началом слова)."""
+    return ' '.join(re.sub(r'[^0-9a-zA-Zа-яёА-ЯЁ]+', ' ', text or '')
+                    .lower().replace('ё', 'е').split())
+
+
+def _hat_rank(h, words: List[str], english: str) -> Optional[int]:
+    """0 — имя целиком, 1 — с начала, 2 — по началам слов, 3 — подстрока
+    где угодно (в имени, внутреннем имени, классах); None — мимо."""
+    if not words:
+        return 0
+    q = ' '.join(words)
+    names = [n for n in (_hat_plain(h.name), _hat_plain(english)) if n]
+    if q in names:
+        return 0
+    if any(n.startswith(q) for n in names):
+        return 1
+    parts = [p for n in names for p in n.split()]
+    if all(any(p.startswith(w) for p in parts) for w in words):
+        return 2
+    blob = ' '.join([*names, _hat_plain(h.internal_name), h.classes_str.lower()])
+    if all(w in blob for w in words):
+        return 3
+    return None
+
+
+def _hat_suggest(words: List[str], names: List[str],
+                 english: Dict[str, str]) -> List[str]:
+    """Похожие имена: «Fedra» → «Fancy Fedora». По сжатому виду, показываем
+    как пишут."""
+    import difflib
+
+    vocab = {_hat_plain(n): n for n in [*names, *english.values()] if n}
+    q = ' '.join(words)
+    close = difflib.get_close_matches(q, list(vocab), n=3, cutoff=0.6)
+    if close:
+        return [vocab[c] for c in close]
+    # По одному слову против слов имён: «fedra» — «fedora» из «Fancy Fedora».
+    owner: Dict[str, str] = {}
+    for plain, name in vocab.items():
+        for w in plain.split():
+            owner.setdefault(w, name)
+    out: List[str] = []
+    for w in words:
+        for hit in difflib.get_close_matches(w, list(owner), n=2, cutoff=0.75):
+            if owner[hit] not in out:
+                out.append(owner[hit])
+    return out[:3]
+
+
+def _english_names(root: str) -> Dict[str, str]:
+    """{defindex: английское имя} — чтобы русский интерфейс находил «glasses»."""
+    from src.data.hats_parser import parse_hats
+    return {h.defindex: h.name for h in parse_hats(root, 'en')}
+
+
+def hat_item(key: str = '', lang: str = '') -> Dict[str, object]:
+    """
+    Предмет косметики по ключу — как строка `hats()`, но мимо фильтров.
+
+    Нужен сохранённой работе: у стилевой шапки без списка стилей нечем
+    переключить стиль. Ключом бывает и модель стиля или класса — так писались
+    старые работы.
+    """
+    from src.app.session import session
+    from src.data.hats_parser import parse_hats
+
+    lang = _lang(lang)
+    paths = session().tf2_paths()
+    want = str(key or '').replace(chr(92), '/').lower()
+    if 'error' in paths or not want:
+        return {}
+    for h in parse_hats(paths['root'], lang):
+        own = [h.mdl_path, *(h.per_class_models or {}).values()]
+        for st in h.styles or ():
+            own.extend((st.get('per_class_models') or {}).values())
+        if any(str(p).replace(chr(92), '/').lower() == want for p in own):
+            return _hat_row(h, _t(lang))
+    return {}
+
+
+def _hat_row(h, t) -> Dict[str, object]:
+    """Строка каталога косметики."""
+    return {
+        'key': h.mdl_path,
+        'name': h.name,
+        'cls': ', '.join(h.classes),
+        'type': 'hat',
+        'mode': 'hat',
+        'icon': h.icon,
+        # Имя файла модели — то же, что у оружия показано ключом
+        # (c_scattergun). Целиком путь в подпись не влезает: у косметики
+        # он вида models/workshop/player/items/demo/…
+        'label': _model_file_name(h.mdl_path),
+        # Мультиклассовая шапка: у каждого класса СВОЯ модель. Сборке нужны
+        # все выбранные, а превью — одна конкретная: путь с %s ей не годится.
+        'per_class': dict(h.per_class_models or {}),
+        'slot': h.slot,
+        # Модельные стили шапки: у каждого СВОЯ геометрия (у «Только
+        # камень» нет оправы). Отдаём их с моделями — выбор стиля меняет и
+        # показ, и то, что уйдёт в сборку. Числа мало: по нему стиль не
+        # загрузить.
+        'styles': [
+            {'name': (st.get('name')
+                      or t.get('hat_style_n', 'Style {n}').format(n=i + 1)),
+             'per_class': dict(st.get('per_class_models') or {})}
+            for i, st in enumerate(h.styles or [])
+        ],
+    }

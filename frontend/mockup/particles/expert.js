@@ -6,10 +6,12 @@
  */
 
 import { say, withParticles } from '../stage.js';
+import { t } from '../i18n.js';
 import * as api from '../api.js';
-import { pSystem } from './state.js';
+import { pSystem, pcfNodes, setDiff } from './state.js';
 import { attrField, supportedModules } from './fields.js';
 import { expertMenu } from './actions.js';
+import { fillTree, setTitle } from './tree.js';
 
 export const pfind = document.getElementById('pfind');
 
@@ -43,10 +45,39 @@ export function filterExpert(query) {
 
 pfind.addEventListener('input', () => filterExpert(pfind.value));
 
+//: Отличия показанной системы от игры (см. particle_diff в Python).
+let diff = {};
+
+/** Изменён ли атрибут модуля (или самой системы при group=null). */
+function attrChanged(group, index, attr) {
+  if (!diff.status) return false;
+  if (group === null || group === '') return (diff.attrs || []).includes(attr);
+  const mod = (diff.modules || {})[group]?.[index];
+  return Boolean(mod && (mod.status === 'added' || mod.attrs.includes(attr)));
+}
+
+/**
+ * Перекрашивает метки после правки — без перестройки дерева, иначе
+ * раскрытые модули сворачивались бы на каждый ввод.
+ */
+export function markExpert(systemDiff) {
+  diff = systemDiff || {};
+  document.querySelectorAll('#pexpert .params__row').forEach((row) => {
+    const { group, index, attr } = row.dataset;
+    row.classList.toggle('is-changed', attrChanged(group, Number(index), attr));
+  });
+  document.querySelectorAll('#pexpert .expert__mod').forEach((mod) => {
+    const entry = (diff.modules || {})[mod.dataset.group]?.[Number(mod.dataset.index)];
+    mod.classList.toggle('is-changed', Boolean(entry));
+    mod.querySelector('.expert__new').hidden = !(entry && entry.status === 'added');
+  });
+}
+
 /** Экспертное дерево: группы → модули → все атрибуты, как они лежат в PCF. */
 export async function showExpert(system) {
   const data = await api.particleSystem(system);
   if (pSystem !== system) return;
+  diff = data.diff || {};
 
   const supported = supportedModules();
   const box = document.getElementById('pexpert');
@@ -65,6 +96,14 @@ export async function showExpert(system) {
     }));
     block.append(head);
     box.append(block);
+    // Модули, которых в игре есть, а здесь нет: иначе удалённое выглядит
+    // так, будто его никогда не было.
+    for (const fn of (diff.removed || {})[g.group] || []) {
+      const gone = document.createElement('div');
+      gone.className = 'expert__gone mono';
+      gone.textContent = t('убран: ') + fn;
+      block.append(gone);
+    }
 
     if (g.group === 'children') {
       // Дети — ссылки, а не модули: у них нет параметров, только имя.
@@ -92,6 +131,7 @@ export async function showExpert(system) {
 
       const sum = document.createElement('summary');
       sum.innerHTML = '<span class="expert__name"></span>'
+                    + '<span class="expert__new" hidden>нет в игре</span>'
                     + '<span class="expert__warn"></span>';
       sum.querySelector('.expert__name').textContent = mod.title;
       sum.addEventListener('contextmenu', (e) => expertMenu(e, {
@@ -116,18 +156,28 @@ export async function showExpert(system) {
         row.innerHTML = '<span class="params__name"></span>';
         row.querySelector('.params__name').textContent = attr.name;
         row.title = attr.help || '';
+        // Адрес строки — для меток «отличается от игры».
+        row.dataset.group = g.group || '';
+        row.dataset.index = mod.index;
+        row.dataset.attr = attr.name;
         row.append(attrField(attr, async (value) => {
           const res = await api.setParticleAttr(system, g.group, mod.index,
                                                 attr.name, value);
           if (res.error) { say(res.error); return; }
           withParticles((w) => w.updateSystems(res.systems, pSystem));
+          setDiff(res.diff);
+          markExpert(res.system_diff);
+          fillTree(pcfNodes, pSystem);
+          setTitle(pSystem);
         }));
         row.addEventListener('contextmenu', (e) => expertMenu(e, {
           group: g.group, index: mod.index, attr: attr.name,
+          changed: attrChanged(g.group || null, mod.index, attr.name),
         }));
         d.append(row);
       }
       block.append(d);
     }
   }
+  markExpert(diff);
 }

@@ -9,8 +9,9 @@
 import * as api from '../api.js';
 import { curveFraction, curveValue } from '../curve.js';
 import { say, particles, withParticles } from '../stage.js';
-import { pSystem } from './state.js';
+import { pSystem, pcfNodes, setDiff } from './state.js';
 import { showParams } from './params.js';
+import { fillTree, setTitle } from './tree.js';
 
 /**
  * Дорожка ползунка. Границы у неё МЯГКИЕ (сколько нужно в 99% эффектов), а
@@ -94,6 +95,9 @@ export async function editParam(param, value) {
   const res = await api.setParticleParam(pSystem, param.key, value);
   if (res.error) { say(res.error); return; }
   withParticles((w) => w.updateSystems(res.systems, pSystem));
+  setDiff(res.diff);
+  fillTree(pcfNodes, pSystem);
+  setTitle(pSystem);
   // Значение могло создать модуль — перечитываем, чтобы бледные поля стали
   // обычными, а соседние крутилки показали то, что теперь в файле.
   await showParams(pSystem);

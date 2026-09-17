@@ -238,26 +238,33 @@ def item_of(key: str) -> Dict[str, object]:
 
 
 def save(key: str, edits: Dict[str, object],
-         keep: Iterable[str] = (),
+         styles: Optional[Dict[int, dict]] = None,
          item: Optional[Dict[str, object]] = None) -> Optional[Path]:
     """Сохраняет правки предмета. Пишем через временный файл: две вкладки
     могут сохранять одновременно, и половина файла хуже его отсутствия.
 
-    ``keep`` — файлы, которых в этих правках нет, но которые всё ещё нужны
-    (снимки неактивных стилей шапки живут только в памяти сеанса). Без этой
-    подсказки уборка забрала бы картинку соседнего стиля.
+    ``styles`` — снимки НЕактивных стилей шапки ({индекс: {models, edits,
+    image_path}}): у стиля своя модель и свои правки, а мод собирается из
+    всех сразу. Их файлы копируются к себе так же, как файлы самих правок —
+    иначе снимок жил только в памяти сеанса и пропадал с перезапуском.
 
     ``item`` — чем опознаётся предмет (см. `item_of`). None означает «не знаю»,
     и тогда записанное раньше остаётся: терять опознание из-за вызова, который
     про него не думал, работа не должна.
     """
-    if not key or not edits:
+    if not key or not (edits or styles):
         return None
 
     folder = _folder(key)
     files_dir = folder / 'files'
-    owned = _own_paths(edits, files_dir)
+    owned = _own_paths(edits or {}, files_dir)
     payload = {'format': FORMAT, 'edits': owned}
+    if styles:
+        payload['styles'] = {
+            str(index): {**snap,
+                         'edits': _own_paths(snap.get('edits') or {}, files_dir),
+                         'image_path': _own_file(snap.get('image_path'), files_dir)}
+            for index, snap in styles.items()}
     item = dict(item) if item else item_of(key)
     if item:
         payload['item'] = item
@@ -270,7 +277,7 @@ def save(key: str, edits: Dict[str, object],
     except OSError as exc:
         logger.warning(f"работа «{key}» не сохранена: {exc}")
         return None
-    _sweep(files_dir, owned, keep)
+    _sweep(files_dir, {'edits': owned, 'styles': payload.get('styles') or {}})
     return target
 
 
@@ -293,7 +300,11 @@ def load(key: str) -> Optional[Dict[str, object]]:
         logger.info(f"работа «{key}» от другой версии формата — пропущена")
         return None
 
-    edits = payload.get('edits') or {}
+    return _prune(payload.get('edits') or {})
+
+
+def _prune(edits: Dict[str, object]) -> Dict[str, object]:
+    """Правки без путей, файлов по которым уже нет."""
     for team, paths in list((edits.get('textures') or {}).items()):
         edits['textures'][team] = {m: p for m, p in paths.items()
                                    if os.path.isfile(p)}
@@ -305,6 +316,25 @@ def load(key: str) -> Optional[Dict[str, object]]:
     if edits.get('custom_source_path') and not os.path.isfile(edits['custom_source_path']):
         edits['custom_source_path'] = None
     return edits
+
+
+def styles_of(key: str) -> Dict[int, dict]:
+    """Снимки стилей шапки из работы: {индекс: {models, edits, image_path}}."""
+    path = work_dir() / key / 'edits.json'
+    if not path.is_file():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return {}
+    out: Dict[int, dict] = {}
+    for index, snap in (payload.get('styles') or {}).items():
+        snap = dict(snap or {})
+        snap['edits'] = _prune(snap.get('edits') or {})
+        if snap.get('image_path') and not os.path.isfile(snap['image_path']):
+            snap['image_path'] = None
+        out[int(index)] = snap
+    return out
 
 
 def forget(key: str) -> bool:
@@ -402,7 +432,8 @@ def holds_edits(key: str) -> bool:
     двоих, иначе они снова разъедутся.
     """
     from src.domain.preview.session import has_real_edits
-    return has_real_edits(load(key))
+    # Правлен только соседний стиль шапки — тоже есть что вернуть.
+    return has_real_edits(load(key)) or bool(styles_of(key))
 
 
 def size_of(key: str) -> int:

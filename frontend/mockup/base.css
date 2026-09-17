@@ -80,6 +80,15 @@
 [hidden] { display: none !important; }
 
 html, body { height: 100%; margin: 0; }
+/* Фон и у html: занавес гасит body, и просвечивать должен цвет темы. */
+html { background: var(--bg); }
+/* Уход на перезагрузку (смена языка): страница гаснет и чуть отступает. */
+.is-leaving body {
+  opacity: 0;
+  transform: scale(0.985);
+  transition: opacity calc(var(--dur-panel) * 1.5), transform calc(var(--dur-panel) * 1.5);
+  pointer-events: none;
+}
 
 body {
   display: flex;

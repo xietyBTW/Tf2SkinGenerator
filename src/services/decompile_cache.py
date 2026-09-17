@@ -15,6 +15,7 @@ import hashlib
 import json
 import os
 import shutil
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -24,12 +25,17 @@ logger = get_logger(__name__)
 
 _CACHE_DIR = Path(os.path.expanduser("~")) / ".tf2skingen_cache" / "decompiled"
 _META_FILENAME = "_cache_meta.json"
-_CACHE_VERSION = 3  # v3: использует vpk_mtime вместо mdl_hash
+_CACHE_VERSION = 4  # v3: vpk_mtime вместо mdl_hash; v4: SMD дописаны геометрией, которую терял Crowbar (mdl_mesh)
 
 # Мягкий потолок размера кэша. После сохранения новой записи кэш само-урезается
 # до этого размера, удаляя самые давно использованные записи (LRU по mtime папки;
 # mtime «трогается» на cache hit). Без лимита кэш рос бы бесконечно. <=0 — выкл.
 _CACHE_MAX_MB = 1024
+
+#: Превью и поиск стилей разбирают одну модель параллельно и оба несут её в
+#: кэш: rmtree одного стирал copytree другого, и в записи оставались метаданные
+#: без QC. Пишем по одному; второй застаёт готовую запись и не трогает её.
+_SAVE_LOCK = threading.Lock()
 
 
 def get_cache_dir() -> Path:
@@ -172,7 +178,17 @@ def save_to_cache(
     Returns:
         Путь к папке записи кэша, или None при ошибке.
     """
+    with _SAVE_LOCK:
+        return _save_to_cache(weapon_key, vpk_path, mdl_rel_path, decompile_dir)
+
+
+def _save_to_cache(weapon_key: str, vpk_path: str, mdl_rel_path: str,
+                   decompile_dir: str) -> Optional[str]:
     try:
+        ready = get_cached_decompile(weapon_key, vpk_path, mdl_rel_path)
+        if ready:
+            return ready                # сосед успел раньше — запись целая
+
         key = _cache_key(weapon_key, vpk_path, mdl_rel_path)
         entry_dir = get_cache_dir() / key
 

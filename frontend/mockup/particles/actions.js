@@ -10,8 +10,8 @@ import { ask } from '../ask.js';
 import { contextMenu } from '../menu.js';
 import { say, withParticles } from '../stage.js';
 import { setStatus } from '../layout.js';
-import { pcfNodes, pcfTree, pSystem, setTree, setSystem } from './state.js';
-import { fillTree } from './tree.js';
+import { pcfNodes, pcfTree, pSystem, setTree, setSystem, pcfDiff, setDiff } from './state.js';
+import { fillTree, setTitle } from './tree.js';
 import { syncHistory } from './playback.js';
 import { showParams } from './params.js';
 
@@ -22,6 +22,7 @@ import { showParams } from './params.js';
 
 export async function applyStructure(res, { reselect = null } = {}) {
   if (!res || res.error) { say(res?.error || 'не получилось'); return false; }
+  if (res.diff) setDiff(res.diff);
   if (res.tree) {
     setTree(res.tree);
     const keep = reselect || res.selected || pSystem;
@@ -29,7 +30,7 @@ export async function applyStructure(res, { reselect = null } = {}) {
     setSystem(pcfTree.some((n) => n.key === keep) ? keep
                 : (pcfTree[0] ? pcfTree[0].key : ''));
     fillTree(pcfNodes, pSystem);
-    document.querySelector('.title__name').textContent = pSystem;
+    setTitle(pSystem);
   }
   if (res.systems) {
     withParticles((w) => w.updateSystems(res.systems, pSystem));
@@ -281,6 +282,27 @@ export const PACTS = {
     if (!yes) return;
     await applyStructure(await api.removeParticleSystem(pSystem));
   },
+
+  /** Система как в игре: атрибуты, модули, дочерние. */
+  async revert() {
+    const yes = await ask({
+      title: 'Вернуть систему как в игре?',
+      text: 'Все правки этой системы — параметры, модули, дочерние — будут '
+          + 'заменены игровыми.',
+      ok: 'Вернуть',
+    });
+    if (!yes) return;
+    if (await applyStructure(await api.revertParticleSystem(pSystem))) {
+      say('Система возвращена к игровой');
+    }
+  },
+
+  /** Один параметр как в игре. */
+  async revertattr() {
+    if (!ctxNode || !ctxNode.attr) return;
+    await applyStructure(await api.revertParticleAttr(
+      pSystem, ctxNode.group || null, ctxNode.index, ctxNode.attr));
+  },
 };
 
 //: Копирование есть у всего, кроме детей: там ссылки, а не параметры. Первый
@@ -296,6 +318,9 @@ export function copyItems(label) {
 /** Меню системы — то же, что было на дереве систем в приложении. */
 export async function systemMenu(e, name) {
   setSystem(name);
+  // «Вернуть как в игре» — только когда есть что возвращать: у стоковой
+  // системы пункт погашен, у файла без игрового собрата его нет вовсе.
+  const status = pcfDiff.get(name);
   const chosen = await contextMenu(e, [
     { label: 'Добавить слой со своей текстурой…', value: 'layer' },
     null,
@@ -303,6 +328,8 @@ export async function systemMenu(e, name) {
     { label: 'Дублировать систему…', value: 'duplicate' },
     { label: 'Добавить дочернюю…', value: 'child' },
     { label: 'Удалить систему', value: 'remove' },
+    ...(pcfDiff.size ? [null, { label: 'Вернуть как в игре', value: 'revert',
+                                 disabled: status !== 'changed' }] : []),
     null,
     { label: 'Цвета текстуры (снять подкраску)', value: 'natural' },
     null,
@@ -327,7 +354,8 @@ export async function expertMenu(e, node) {
   } else if (attr) {
     items = [...copyItems(`Копировать параметр «${attr}»`), null,
              { label: 'Добавить параметр…', value: 'attr' },
-             { label: 'Удалить параметр (вернуть умолчание)', value: 'delattr' }];
+             { label: 'Удалить параметр (вернуть умолчание)', value: 'delattr' },
+             ...(node.changed ? [{ label: 'Вернуть значение игры', value: 'revertattr' }] : [])];
   } else {
     items = [...copyItems('Копировать этот модуль'), null,
              { label: 'Добавить параметр…', value: 'attr' },

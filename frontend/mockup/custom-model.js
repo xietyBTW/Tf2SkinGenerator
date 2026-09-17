@@ -15,6 +15,7 @@ import { closeParts } from './parts.js';
 
 /** Возвращает игровую модель вместо своей. */
 export async function dropModel() {
+  dropFitSave();            // подгонки больше не будет — и записывать нечего
   const res = await api.dropCustomModel();
   if (res.error) { say(res.error); return; }
   say('Своя модель убрана');
@@ -143,7 +144,9 @@ function setFitMode(on) {
     if (fitOn) w.setFitTool(currentTool());
   });
   if (fitOn) fitButtons();
-  else refreshView();       // «Разделить на части» возвращается по общему правилу
+  // «Разделить на части» возвращается по общему правилу. Строго после записи:
+  // иначе состояние вернуло бы числа до последнего движения гизмо.
+  else flushFitSave().then(refreshView);
 }
 
 fitBtn.addEventListener('click', () => setFitMode(!fitOn));
@@ -169,12 +172,38 @@ fitPanel.addEventListener('click', (e) => {
   withViewer((w) => w.setFitTool && w.setFitTool(b.dataset.tool));
 });
 
+let fitPending = null;    // числа, которые ждут записи в SMD
+
 function fitSave(f) {
   clearTimeout(fitTimer);
-  fitTimer = setTimeout(async () => {
-    const res = await api.setCustomFit(f);
-    if (res.error) say(res.error);
-  }, 600);
+  fitPending = f;
+  fitTimer = setTimeout(flushFitSave, 600);
+}
+
+/**
+ * Записать ожидающую подгонку сейчас. Зовут перед всем, что читает SMD или
+ * состояние: выход из режима перечитывает числа у Python, а сцена в руках
+ * собирается из SMD — оба видели бы правку до последнего движения.
+ */
+export async function flushFitSave() {
+  clearTimeout(fitTimer);
+  fitTimer = null;
+  const f = fitPending;
+  fitPending = null;
+  if (!f) return;
+  const res = await api.setCustomFit(f);
+  if (res.error) say(res.error);
+}
+
+/**
+ * Предмет сменился: отложенная запись подгонки принадлежала прошлому и на
+ * новом либо падала ошибкой, либо запекла бы чужие числа в его модель.
+ * Последние полсекунды правки теряются — они же и не были ещё записаны.
+ */
+export function dropFitSave() {
+  clearTimeout(fitTimer);
+  fitTimer = null;
+  fitPending = null;
 }
 
 function fitPush(save = true, animate = false) {

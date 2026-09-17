@@ -10,13 +10,40 @@ import * as api from '../api.js';
 import { t } from '../i18n.js';
 import { stage, say, sayBusy, withParticles } from '../stage.js';
 import { closeCat } from '../layout.js';
-import { els } from '../catalog.js';
-import { pcfNodes, pcfTree, pcfCollapsed, pSystem, setTree } from './state.js';
+import { els, fillFilters } from '../catalog.js';
+import { plural } from '../util.js';
+import { pcfNodes, pcfTree, pcfCollapsed, pSystem, setTree, pcfDiff, setDiff } from './state.js';
 import { systemMenu } from './actions.js';
 import { showParams } from './params.js';
 import { syncHistory } from './playback.js';
 import { showParticleMaterials } from './materials.js';
 import { cpBox, cpFillIndexes } from './points.js';
+
+//: Имена эффектов из игры по имени системы: «Burning Flames» под
+//: `superrare_burning1`. Наполняется каталогом эффектов.
+const fxNames = new Map();
+//: Какой файл открыт — чтобы по щелчку в списке эффектов не перечитывать его.
+let loadedFile = '';
+let loadedShort = '';
+
+/**
+ * Заголовок: имя из игры, если оно есть, иначе имя системы; в подписи —
+ * система, файл и размер. «Язычки пламени» человек узнаёт сразу,
+ * `superrare_burning1` — нет.
+ */
+export function setTitle(system) {
+  const known = fxNames.get(system);
+  const status = pcfDiff.get(system);
+  document.querySelector('.title__name').textContent = known || system;
+  document.querySelector('.title__meta').textContent =
+    (known ? system + ' · ' : '') + loadedShort + ' · ' + pcfTree.length
+    + t(' систем, корней ') + pcfNodes.length
+    + (status === 'changed' ? t(' · изменена относительно игры')
+       : status === 'added' ? t(' · нет в игре') : '');
+}
+//: Загруженный файл могли открыть с диска, тогда путь чужой; для поиска
+//: важен только игровой.
+export const currentFile = () => loadedFile;
 
 /**
  * Рисует дерево систем.
@@ -27,9 +54,13 @@ import { cpBox, cpFillIndexes } from './points.js';
  */
 export function fillTree(nodes, selected) {
   els.grid.innerHTML = '';
+  // Источники — про список игры; у дерева файла им делать нечего.
+  els.fSource.hidden = true;
+  let shown = 0;
 
   const walk = (list, depth) => {
     for (const node of list) {
+      shown += 1;
       const row = document.createElement('div');
       row.className = 'tree__row';
       row.style.setProperty('--depth', depth);
@@ -55,6 +86,21 @@ export function fillTree(nodes, selected) {
       name.className = 'tree__name' + (node.key === selected ? ' is-active' : '');
       name.type = 'button';
       name.textContent = node.name;
+      // Имя из игры — рядом: `superrare_burning1` человеку ничего не
+      // говорит, «Burning Flames» — всё.
+      const known = fxNames.get(node.key);
+      if (known) {
+        const tag = document.createElement('span');
+        tag.className = 'tree__fx';
+        tag.textContent = known;
+        name.append(tag);
+      }
+      // Точка у изменённой системы: в чужом файле сразу видно, что трогали.
+      const status = pcfDiff.get(node.key);
+      if (status && status !== 'same') {
+        name.classList.add('is-' + status);
+        name.title = (status === 'added' ? 'Нет в игре' : 'Изменена относительно игры');
+      }
       name.title = node.kids.length
         ? `${node.name} · дочерних: ${node.kids.length}` : node.name;
       name.addEventListener('click', () => pickSystem(name, node));
@@ -70,6 +116,147 @@ export function fillTree(nodes, selected) {
   };
 
   walk(nodes, 0);
+  // Счётчик — общий с предметами, но считает системы, а не предметы.
+  const count = document.getElementById('cat-count');
+  count.hidden = !shown;
+  count.textContent = shown + ' ' + plural(shown, 'система', 'системы', 'систем');
+}
+
+//: Номер последнего запроса эффектов: ответы приходят не по порядку.
+let fxTurn = 0;
+//: Выбранный источник: оружие, постройки, игрок… Пусто — все.
+let source = '';
+//: Последний запрос — чтобы смена источника перерисовала тот же список.
+let lastQuery = '';
+//: Корни списка эффектов, развёрнутые рукой; держатся между перерисовками.
+const fxOpen = new Set();
+
+/**
+ * Каталог эффектов игры: по имени, а не по файлу.
+ *
+ * Без запроса — необычные эффекты с именами из игры по категориям: это то,
+ * за чем сюда приходят. С запросом — поиск по ним и по всем системам всех
+ * 134 файлов: знать, что «Burning Flames» лежит в `item_fx.pcf` как
+ * `superrare_burning1`, никто не обязан.
+ */
+export async function showEffects(query = '') {
+  const mine = ++fxTurn;
+  lastQuery = query;
+  const res = await api.particleEffects(query, source);
+  if (mine !== fxTurn) return;
+  for (const it of res.items) {
+    for (const k of [it, ...it.kids]) if (k.name) fxNames.set(k.system, k.name);
+  }
+
+  // Виды источников — только те, что есть под этим запросом; выбор
+  // держится, пока его не сняли.
+  fillFilters(els.fSource, res.facets || [], source || null, (key) => {
+    source = key || '';
+    showEffects(lastQuery);
+  });
+  els.fSource.hidden = !(res.facets || []).length;
+
+  els.grid.innerHTML = '';
+  let group = '';
+  for (const it of res.items) {
+    // Без запроса список идёт группами: каталог — по категориям, источник
+    // — по предмету («Огнемёт», «Турель»); подписываем границы.
+    const key = query ? '' : (source ? (it.labels[0] || '') : it.category_name);
+    if (!query && key !== group) {
+      group = key;
+      const head = document.createElement('p');
+      head.className = 'label fx__head';
+      head.textContent = group || 'Без предмета';
+      els.grid.append(head);
+    }
+    // Корень первым, дочерние системы под ним свёрнуты: у эффекта из
+    // тридцати систем человеку нужна одна строка. При поиске раскрыты те,
+    // где совпали именно дети — иначе непонятно, почему корень в списке.
+    const row = effectRow(it, 0, query);
+    // У ребёнка не повторяем то, что уже сказано у корня: «Язычки пламени»
+    // под «Язычками пламени» — шум.
+    const said = new Set([it.name, ...it.labels]);
+    const kids = it.kids.map((k) => effectRow(k, 1, query, said));
+    if (kids.length) {
+      const twist = row.firstChild;
+      twist.disabled = false;
+      const show = (on) => {
+        twist.textContent = on ? '−' : '+';
+        twist.title = on ? 'Свернуть' : 'Развернуть';
+        for (const k of kids) k.hidden = !on;
+      };
+      show(it.open || fxOpen.has(it.system));
+      twist.addEventListener('click', () => {
+        const on = kids[0].hidden;
+        show(on);
+        if (on) fxOpen.add(it.system); else fxOpen.delete(it.system);
+      });
+    }
+    els.grid.append(row, ...kids);
+  }
+
+  const count = document.getElementById('cat-count');
+  count.hidden = !res.items.length;
+  count.textContent = res.total > res.items.length
+    ? `${res.items.length} из ${res.total}`
+    : res.items.length + ' ' + plural(res.items.length, 'эффект', 'эффекта', 'эффектов');
+  els.note.hidden = res.items.length > 0;
+  els.note.textContent = res.ready
+    ? 'Ничего не найдено.'
+    : 'Индекс эффектов ещё строится — пока ищем только по именам из игры.';
+}
+
+/** Строка списка эффектов: имя, чем вызывается, система, файл. */
+function effectRow(it, depth, query, said = new Set()) {
+  const row = document.createElement('div');
+  row.className = 'tree__row';
+  row.style.setProperty('--depth', depth);
+  const twist = document.createElement('button');
+  twist.className = 'tree__twist';
+  twist.type = 'button';
+  twist.disabled = true;
+
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'fx' + (depth ? ' fx--kid' : '')
+                + (it.system === pSystem ? ' is-active' : '');
+  btn.innerHTML = '<span class="fx__what"><b class="fx__name"></b>'
+                + '<span class="fx__who"></span></span>'
+                + '<span class="fx__sys mono"></span>'
+                + '<span class="fx__file mono"></span>';
+  btn.querySelector('.fx__name').textContent = it.name || it.system;
+  // Чем вызывается — словами: «Огнемёт», «Турель». В группе по предмету
+  // первый уже в заголовке, остальные (общие эффекты) — при строке.
+  const who = it.labels.filter((l, i) => !(source && !query && i === 0) && !said.has(l));
+  btn.querySelector('.fx__who').textContent = who.join(', ');
+  btn.querySelector('.fx__sys').textContent = it.name ? it.system : '';
+  btn.querySelector('.fx__file').textContent =
+    (it.file || '').replace(/^particles\//, '');
+  btn.addEventListener('click', () => openEffect(it));
+  btn.addEventListener('contextmenu', (e) => {
+    if (it.file === loadedFile) systemMenu(e, it.system);
+  });
+  row.append(twist, btn);
+  return row;
+}
+
+/** Открывает эффект из списка: файл, если он другой, затем систему. */
+async function openEffect(it) {
+  if (!it.file) {
+    say('Индекс эффектов ещё строится — попробуйте через несколько секунд');
+    return;
+  }
+  if (it.file !== loadedFile) {
+    await loadPcf(it.file);
+    // Файл не открылся — дерева нет, выбирать не из чего.
+    if (loadedFile !== it.file) return;
+  }
+  const node = pcfTree.find((n) => n.key === it.system);
+  if (!node) { say('В файле нет такой системы'); return; }
+  fillTree(pcfNodes, it.system);
+  const button = [...els.grid.querySelectorAll('.tree__name')]
+    .find((b) => b.firstChild && b.firstChild.textContent === node.name);
+  await pickSystem(button || document.createElement('button'), node);
 }
 
 /** Переводит кадр на движок частиц (или обратно на вьювер моделей). */
@@ -90,6 +277,10 @@ export async function loadPcf(source, label = '') {
   if (data.error) { say(data.error); return; }
 
   setTree(data.tree || []);
+  setDiff(data.diff || {});
+  loadedFile = source;
+  // Выпадашка показывает открытый файл и когда его выбрали из списка игры.
+  if ([...els.cat.options].some((o) => o.value === source)) els.cat.value = source;
   // Новый файл — свои узлы; старое состояние свёрнутости к ним не относится.
   pcfCollapsed.clear();
   // Дочерние сворачиваем сразу: сверху видно корни эффектов, а не всё подряд.
@@ -99,10 +290,8 @@ export async function loadPcf(source, label = '') {
     w.setLanguage && w.setLanguage(api.lang());
     w.loadParticleData(data);
   });
-  document.querySelector('.title__name').textContent =
-    short.replace(/\.pcf$/, '');
-  document.querySelector('.title__meta').textContent =
-    short + ' · ' + pcfTree.length + t(' систем, корней ') + pcfNodes.length;
+  loadedShort = short;
+  setTitle(data.rootName || short.replace(/\.pcf$/, ''));
 
   fillTree(pcfNodes, data.rootName);
   els.note.hidden = pcfTree.length > 0;
@@ -118,7 +307,7 @@ export async function pickSystem(button, item) {
   els.grid.querySelectorAll('.tree__name, .pick')
           .forEach((b) => b.classList.remove('is-active'));
   button.classList.add('is-active');
-  document.querySelector('.title__name').textContent = item.name;
+  setTitle(item.key);
   closeCat();
   // Пока собирается, кадр остаётся прежним: у эффекта распаковываются
   // текстуры, и без единого слова это читается как «ничего не произошло».

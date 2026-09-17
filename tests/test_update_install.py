@@ -104,6 +104,58 @@ class DownloadTests(unittest.TestCase):
         self.assertIn("ping", args, "пауза перед запуском обязана остаться")
 
 
+class PortableTests(unittest.TestCase):
+    """
+    Портативная копия обновляется тем же Setup.exe, но в свою папку и без
+    следов: иначе установщик поставил бы программу в Program Files, а
+    портативная осталась бы старой.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name) / "папка с пробелом"
+        self.root.mkdir()
+
+    def _frozen_in(self, root):
+        self.enterContext(patch.object(uc, "is_frozen", return_value=True))
+        self.enterContext(patch.object(uc, "install_dir", return_value=root))
+
+    def test_marker_makes_copy_portable(self):
+        self._frozen_in(self.root)
+        self.assertIsNone(uc.portable_dir())
+        (self.root / uc.PORTABLE_MARKER).write_text("portable")
+        self.assertEqual(uc.portable_dir(), self.root)
+
+    def test_sources_are_never_portable(self):
+        (self.root / uc.PORTABLE_MARKER).write_text("portable")
+        with patch.object(uc, "is_frozen", return_value=False):
+            self.assertIsNone(uc.portable_dir())
+
+    def test_portable_arguments_target_own_folder(self):
+        args = uc.setup_arguments(self.root)
+        self.assertIn("/PORTABLE=1", args)
+        self.assertIn(f'/DIR="{self.root}"', args, "путь с пробелом — в кавычках")
+        self.assertIn("/NOICONS", args)
+        self.assertIn("/MERGETASKS=!desktopicon,!removedata", args)
+        for flag in uc._SETUP_FLAGS:
+            self.assertIn(flag, args, "тихий режим и перезапуск — как у обычной")
+
+    def test_installed_copy_gets_plain_arguments(self):
+        args = uc.setup_arguments(None)
+        self.assertNotIn("/PORTABLE", args)
+        self.assertNotIn("/DIR", args)
+
+    def test_install_uses_portable_mode_when_marked(self):
+        self._frozen_in(self.root)
+        (self.root / uc.PORTABLE_MARKER).write_text("portable")
+        setup = self.root / uc.ASSET_NAME
+        setup.write_bytes(b"MZ")
+        with patch("subprocess.Popen") as popen:
+            uc.install_update(str(setup))
+        self.assertIn(f'/PORTABLE=1 /DIR="{self.root}"', popen.call_args.args[0])
+
+
 class CheckForUpdateTests(unittest.TestCase):
     def _release(self, **over):
         data = {

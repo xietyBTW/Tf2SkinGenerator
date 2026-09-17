@@ -67,6 +67,7 @@ class SmdToObjService:
         source_zup: bool = True,
         keep_source_axes: bool = False,
         pose_smd_path: Optional[str] = None,
+        on_player: bool = False,
     ) -> Tuple[bool, List[str]]:
         """
         Конвертирует SMD → OBJ + MTL с поддержкой нескольких материалов.
@@ -93,6 +94,9 @@ class SmdToObjService:
                           — не то, что видит игрок: у Мутировавшего молока хлеб
                           в bind-позе торчит из банки. Не задан или поза
                           совпадает с bind — меш остаётся как есть.
+            on_player:    Косметика: перенести в позу игрока, как делает
+                          bonemerge (см. cosmetic_pose). В MDL шапка лежит как
+                          автору было удобно, и без переноса стоит боком.
 
         Returns:
             (success, material_names) где material_names — список уникальных
@@ -102,7 +106,7 @@ class SmdToObjService:
             [MeshPart(
                 smd_path=smd_path,
                 extra_smd_paths=tuple(extra_smd_paths or ()),
-                skinning=SmdToObjService._pose_matrices(smd_path, pose_smd_path),
+                skinning=SmdToObjService._skinning(smd_path, pose_smd_path, on_player),
                 include_mats=include_mats,
             )],
             obj_path,
@@ -309,6 +313,20 @@ class SmdToObjService:
             triangles_by_mat = {part.material_prefix + k: v
                                 for k, v in triangles_by_mat.items()}
         return triangles_by_mat
+
+    @staticmethod
+    def _skinning(ref_smd: str, pose_smd: Optional[str],
+                  on_player: bool) -> Optional[dict]:
+        """Поза анимации, а поверх неё — перенос косметики на игрока."""
+        mats = SmdToObjService._pose_matrices(ref_smd, pose_smd)
+        if not on_player:
+            return mats
+        try:
+            from src.services import cosmetic_pose
+            return cosmetic_pose.on_player(ref_smd, mats)
+        except Exception as exc:
+            logger.debug(f"SMD→OBJ: на игрока не поставлена: {exc}")
+            return mats
 
     @staticmethod
     def _pose_matrices(ref_smd: str, pose_smd: Optional[str]) -> Optional[dict]:

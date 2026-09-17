@@ -53,11 +53,39 @@ update checker and by the build script when it stamps the installer.
 
 ## Release builds
 
-The Windows release is produced with **PyInstaller** (`--onedir --windowed`), with `tools/`
-copied into the output root so the frozen app can still find everything by relative path. The
-maintainer's own build script (`build.ps1`) and the Inno Setup installer script live outside the
-repo (they're gitignored), so this section is a reference for how the release is made rather
-than a step you can run straight from a clone.
+A release is two files from one build: `Tf2SkinGenerator-Setup.exe` (an Inno Setup installer with
+the app inside) and `Tf2SkinGenerator-portable.zip` (the same folder: unzip and run). Both are
+produced by `build-release.ps1` (in the repo); the installer script
+`installer/Tf2SkinGenerator-bundle.iss` is gitignored. You need `.venv` and
+[Inno Setup 6](https://jrsoftware.org/isdl.php).
+
+```bat
+release.bat -Version 1.0.4
+```
+
+The script bumps the version in `src/shared/version.py`, builds the app with PyInstaller from the
+spec (`--onedir --windowed`), copies `tools/` into the build root, packs everything into the
+installer and then into the zip — both land in `installer\Output\`. `-SkipDeps` skips
+reinstalling packages.
+
+Then by hand:
+
+1. Run the resulting `Setup.exe` locally and make sure the app installs and opens.
+2. Commit the version bump.
+3. Create a GitHub release tagged `v1.0.4` — a regular one, **not a draft and not a
+   pre-release**: the update check skips those.
+4. Attach both files with their exact names. The installer is required; the zip is for people
+   who don't want to install.
+
+In-app updates rely on these rules: the app asks GitHub for the latest release, compares the tag
+with its own version, finds the installer by name (`ASSET_NAME` in
+`src/services/update_checker.py`), verifies the SHA-256 that GitHub computes itself, and runs it
+silently. The release text is shown in the app as the version notes.
+
+A portable copy updates with the same installer: the `PORTABLE` marker file in its folder (the
+script puts it into the zip) switches the updater to `Setup.exe /PORTABLE=1 /DIR="<that folder>"`,
+which replaces the files in place and leaves nothing behind — no shortcuts, no uninstaller, no
+entry in Programs and Features. The folder must be writable without administrator rights.
 
 ## Notes
 

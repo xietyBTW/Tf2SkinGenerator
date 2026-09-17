@@ -19,7 +19,7 @@ import { sel, applyToolsMenu } from './catalog.js';
 import { buildParams, checkName } from './build.js';
 import { openMaterialMaps } from './maps.js';
 import { openVmtEditor } from './vmt.js';
-import { applyView } from './preview.js';
+import { applyView, markEditedStyles } from './preview.js';
 
 // ── Что показывать: решает Python ───────────────────────────────────────
 // Таблицы правил здесь нет намеренно. api.controls_for(mode) отдаёт готовый
@@ -301,6 +301,7 @@ async function restoreWork() {
   if (res.error) { say(res.error); return; }
   // applyView сам пересобирает альбом и через restoreBadges обновляет кнопки.
   applyView(res);
+  markEditedStyles(res.edited_styles);
   say('Отложенные правки вернулись');
 }
 

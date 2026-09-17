@@ -29,8 +29,9 @@ logger = logging.getLogger(__name__)
 
 # v8: добавлено поле icon (image_inventory) — иконка предмета из рюкзака.
 # v9: %s раскрывается токеном КЛАССА ИЗ ПУТЕЙ («demo», а не «demoman»).
+# v10: regions — equip_region с учётом prefab (фасет «куда надевается»).
 # Смена версии форсирует одноразовый перепарс старого кэша.
-_CACHE_VERSION = "v9"
+_CACHE_VERSION = "v10"
 _CACHE_DIR = data_dir() / "cache"
 
 #: Как называется файл локализации у языка приложения. Один словарь на модуль:
@@ -97,6 +98,21 @@ class HatItem:
     # "backpack/player/items/soldier/soldier_officer". Пусто = не объявлена,
     # тогда иконку ищут по имени модели (см. services/backpack_icons).
     icon: str = ""
+    # Области экипировки ("equip_region"/"equip_regions", с учётом prefab):
+    # hat, beard, glasses, shirt… — в игре их 67. Пусто = не объявлены (у
+    # медалей и старых предметов их нет и в prefab).
+    regions: List[str] = field(default_factory=list)
+
+    @property
+    def region(self) -> str:
+        """Куда надевается — одной из пяти групп (см. REGION_GROUPS)."""
+        if self.is_medal:
+            return 'medal'
+        groups = {region_group(r) for r in self.regions}
+        for key in REGION_ORDER:
+            if key in groups:
+                return key
+        return 'other'
 
     @property
     def is_medal(self) -> bool:
@@ -161,6 +177,44 @@ class HatItem:
         if q in name_lower:
             return 2
         return 3
+
+
+# ── Куда надевается ───────────────────────────────────────────────────────── #
+
+#: Порядок групп в фасете; он же — приоритет, когда у предмета областей
+#: несколько (шлем с очками — голова).
+REGION_ORDER = ('head', 'face', 'body', 'medal', 'other')
+
+_HEAD = {'hat', 'whole_head', 'head_skin', 'ears', 'sniper_headband'}
+_FACE = {'face', 'glasses', 'lenses', 'beard', 'demo_eyepatch', 'soldier_cigar',
+         'medic_pipe'}
+_OTHER = {'disconnected_floating_item'}
+
+
+def region_group(region: str) -> str:
+    """Группа области: 67 значений игры сводим к голове, лицу, телу и прочему."""
+    r = region.lower()
+    if r in _HEAD or r.endswith('_head_replacement') or r.endswith('_hair'):
+        return 'head'
+    if r in _FACE:
+        return 'face'
+    if r == 'medal':
+        return 'medal'
+    if r in _OTHER:
+        return 'other'
+    return 'body'
+
+
+def _extract_regions(block: str, game: items_game_kv.ItemsGame) -> List[str]:
+    """Области предмета: своё значение и блок, с наследованием через prefab."""
+    out = set()
+    one = game.inherited(block, "equip_region")
+    if one:
+        out.add(one.lower())
+    many = game.inherited_block(block, "equip_regions")
+    if many:
+        out.update(k.lower() for k in re.findall(r'"([^"]+)"\s*"1"', many))
+    return sorted(out)
 
 
 # ── Низкоуровневые хелперы парсера KV ─────────────────────────────────────── #
@@ -309,6 +363,10 @@ def _parse_items_game(filepath: str,
         return []
 
     logger.info(f"Секция 'items' найдена на позиции {items_brace}")
+
+    # Prefab нужны только областям: остальное шапки читают из своего блока.
+    game = items_game_kv.ItemsGame(items=[], prefabs=dict(items_game_kv.iter_blocks(
+        content, items_game_kv.find_section(content, "prefabs"))))
 
     results: List[HatItem] = []
     pos = items_brace + 1  # сразу после {
@@ -479,6 +537,7 @@ def _parse_items_game(filepath: str,
             item_name_token=item_name_token,
             holiday=holiday,
             icon=icon,
+            regions=_extract_regions(block, game),
         ))
 
         if progress_cb and items_parsed % 500 == 0:
@@ -507,6 +566,11 @@ def _parse_items_game(filepath: str,
 _LOC_LINE = re.compile(r'^\s*"((?:[^"\\]|\\.)+)"\s+"((?:[^"\\]|\\.)*)"', re.M)
 
 
+#: Управляющие символы. Регуляркой, а не посимвольным обходом: значений
+#: сорок тысяч на файл, и обход стоил треть секунды на каждый язык.
+_CONTROL_CHARS = re.compile(r'[\x00-\x1f]')
+
+
 def _clean_display(value: str) -> str:
     """Название предмета для показа: без экранирования и управляющих символов.
 
@@ -515,13 +579,21 @@ def _clean_display(value: str) -> str:
     именем.
     """
     text = value.replace('\\"', '"').replace('\\\\', '\\')
-    text = ''.join(ch for ch in text if ord(ch) >= 32 or ch == ' ')
-    return text.strip()
+    return _CONTROL_CHARS.sub('', text).strip()
+
+
+#: Разобранные файлы локализации: {(путь, mtime): токены}. Файл на три
+#: мегабайта разбирается треть секунды, а просят его и каталог шапок, и
+#: насмешки, и звуки — каждый на своём языке и каждый заново. Ключ с mtime:
+#: обновление игры подменяет файл, и старый разбор не переживёт его.
+_LOC_CACHE: Dict[tuple, Dict[str, str]] = {}
 
 
 def parse_localization(tf2_root: str, lang: str = "english") -> Dict[str, str]:
     """
     Парсит tf_english.txt (или tf_{lang}.txt) и возвращает {token: display_name}.
+
+    Словарь общий на всех, кто его попросил, — не менять на месте.
     """
     lang_file = Path(tf2_root) / "tf" / "resource" / f"tf_{lang}.txt"
     if not lang_file.exists():
@@ -529,6 +601,11 @@ def parse_localization(tf2_root: str, lang: str = "english") -> Dict[str, str]:
     if not lang_file.exists():
         logger.warning(f"Файл локализации не найден: {lang_file}")
         return {}
+
+    key = (str(lang_file), lang_file.stat().st_mtime_ns)
+    cached = _LOC_CACHE.get(key)
+    if cached is not None:
+        return cached
 
     logger.info(f"Парсинг локализации: {lang_file}")
     try:
@@ -546,6 +623,7 @@ def parse_localization(tf2_root: str, lang: str = "english") -> Dict[str, str]:
         tokens[key.lower()] = val
 
     logger.info(f"Загружено {len(tokens) // 2} токенов локализации")
+    _LOC_CACHE[key] = tokens
     return tokens
 
 
@@ -634,9 +712,18 @@ def parse_hats(
     """
     Возвращает список всех косметических предметов TF2 с MDL-путями.
     """
+    # Список в памяти: кэш на диске читался и проверялся на каждый вызов —
+    # 120 мс на букву запроса. Ключ — mtime файла кэша: перепарс его меняет.
+    memo_key = (tf2_root, language)
+    cache = _cache_file(language)
+    stamp = cache.stat().st_mtime if cache.exists() else 0
     if not force_reparse:
+        held = _MEMO.get(memo_key)
+        if held and held[0] == stamp:
+            return held[1]
         cached = _load_cache(tf2_root, language)
         if cached is not None:
+            _MEMO[memo_key] = (stamp, cached)
             return cached
 
     if progress_cb:
@@ -665,4 +752,9 @@ def parse_hats(
     if progress_cb:
         progress_cb(100, f"Done — {len(items)} cosmetics found")
 
+    _MEMO[memo_key] = (cache.stat().st_mtime if cache.exists() else 0, items)
     return items
+
+
+#: {(корень игры, язык): (mtime кэша, список)} — см. parse_hats.
+_MEMO: Dict[tuple, tuple] = {}
