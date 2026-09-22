@@ -36,6 +36,7 @@ import {
 import { diagDlg, diagSay } from './diagnostics.js';
 import { applyLook } from './settings.js';
 import { setMode, modeControls } from './controls.js';
+import { pcfNodes } from './particles/state.js';
 import { startPreview, startHatWork, clearPreview, resetView, lastModel } from './preview.js';
 
 export const els = {
@@ -260,8 +261,7 @@ export async function showModLibrary() {
       // «убрать» здесь не трогает то, что человек когда-то выбрал на диске.
       const yes = await ask({
         title: 'Убрать мод из библиотеки',
-        text: mod.name + '\nУдалится копия в библиотеке. '
-            + 'Исходный файл, который вы открывали, останется на месте.',
+        text: `${mod.name}\nУдалится копия в библиотеке. Исходный файл, который вы открывали, останется на месте.`,
         ok: 'Убрать',
       });
       if (!yes) return;
@@ -339,7 +339,9 @@ function whenSaved(stamp) {
   const days = Math.floor((Date.now() / 1000 - (stamp || 0)) / 86400);
   if (days <= 0) return 'сегодня';
   if (days === 1) return 'вчера';
-  return days + ' ' + plural(days, 'день', 'дня', 'дней') + ' назад';
+  // Целой фразой: словарь узнаёт «{} дня назад», а слово по отдельности
+  // оставляло бы «3 days назад».
+  return plural(days, `${days} день назад`, `${days} дня назад`, `${days} дней назад`);
 }
 
 /**
@@ -378,7 +380,7 @@ async function openWork(work) {
  * источником.
  */
 export async function openMod(mod) {
-  say('Разбор ' + mod.name + '…');
+  say(`Разбор ${mod.name}…`);
   const res = await api.loadVpkMod(mod.path);
   if (res.error) { say(res.error); return; }
   showModAsItem(mod.name);
@@ -389,7 +391,7 @@ async function pickVpkMod() {
   const file = await chooseFile('.vpk');
   if (!file) return;
 
-  say('Разбор ' + file.name + '…');
+  say(`Разбор ${file.name}…`);
   // Сохраняем ДО открытия: временную копию, в которую браузер положил файл,
   // рано или поздно чистят, и вернуться к моду было бы не по чему.
   const saved = await api.addMod(await api.upload(file));
@@ -646,7 +648,7 @@ export async function pickSection(name) {
   if (name !== 'weapons') {
     els.grid.innerHTML = '';
     els.note.hidden = false;
-    els.note.textContent = 'Раздел «' + name + '» ещё не подключён.';
+    els.note.textContent = `Раздел «${name}» ещё не подключён.`;
     return;
   }
   await fillCategories();
@@ -766,7 +768,9 @@ export function applyToolsMenu(particlesSection = sel.section === 'particles') {
   document.querySelectorAll('#tools .menu__item').forEach((i) => {
     const key = TOOL_KEY[i.dataset.tool];
     i.hidden = (i.dataset.for === 'particles') !== particlesSection
-      || (Boolean(key) && !(modeControls[key] && modeControls.has_item));
+      || (Boolean(key) && !(modeControls[key] && modeControls.has_item))
+      // Сохранять можно только открытый файл: до него пункт вёл в ошибку.
+      || (i.dataset.need === 'pcf' && !pcfNodes.length);
   });
 }
 

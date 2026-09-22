@@ -426,3 +426,33 @@ def test_team_material_outside_geometry_still_gets_blu():
         tex_map, name_map = seen["blu"]
         assert name_map.get("ball_red") == "ball_blue"
         assert tex_map.get("ball_red"), "у гранаты своя BLU-картинка"
+
+
+QC_HANDS_FIRST = """
+$modelname "v_watch.mdl"
+$cdmaterials "models\workshop\player\items\demo\hat\\"
+
+$texturegroup "skinfamilies"
+{
+\t{ "spy_hands_red"  "c_pocket_watch" "spy_hands_blue" }
+\t{ "spy_hands_blue" "c_pocket_watch" "spy_hands_blue" }
+}
+"""
+
+
+def test_single_texture_prefers_the_material_that_is_on_screen():
+    """Звон смерти показывается вьюмоделью с руками, из которой оставлены одни
+    часы, а первая колонка строки — `spy_hands_red`: карточка часов показывала
+    руки шпиона. Текстура ищется прежде всего для материала в кадре."""
+    with TemporaryDirectory() as tmp:
+        files = _files(
+            spy_hands_red=("models/spy/hands", (200, 30, 30, 255)),
+            c_pocket_watch=("models/watch/watch", (220, 180, 40, 255)),
+        )
+        w, decomp = _worker(files, QC_HANDS_FIRST, tmp)
+        w._decomp_dir = decomp
+
+        hands = w._extract_red_texture_via_qc(w._reader.paks)
+        watch = w._extract_red_texture_via_qc(w._reader.paks, ["c_pocket_watch"])
+        assert hands == _png_bytes((200, 30, 30, 255))
+        assert watch == _png_bytes((220, 180, 40, 255))

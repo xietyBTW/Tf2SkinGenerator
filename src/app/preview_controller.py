@@ -101,9 +101,13 @@ class Preview3DController:
         textures_vpk: str,
         lang: str = 'en',
         geometry: bool = True,
+        bodygroups: Optional[dict] = None,
     ) -> None:
         """
         Начинает загрузку обычной игровой модели.
+
+        ``bodygroups`` — {имя группы: номер варианта}: переключатель состояния
+        модели в превью (разбитая бутылка); пусто — как в игре по умолчанию.
 
         Предыдущая загрузка останавливается: держать две одновременно нельзя —
         их сигналы перемешались бы в одной сессии.
@@ -128,6 +132,7 @@ class Preview3DController:
             misc_vpk_path=misc_vpk,
             textures_vpk_path=textures_vpk,
             lang=lang,
+            bodygroups=bodygroups,
         )
         self._bind(w, mode, geometry)
         self._worker = w

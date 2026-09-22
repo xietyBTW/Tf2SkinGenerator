@@ -99,6 +99,31 @@ class BodygroupParseTests(unittest.TestCase):
             self._names(ModelBuildService.extract_default_body_smds(qc)),
             ["main.smd"])
 
+    def test_groups_carry_their_names_and_a_choice_picks_a_variant(self):
+        """Переключатель состояния в превью: {имя группы: номер варианта}."""
+        qc = self._qc(
+            '$bodygroup "body"\n{\n\tstudio "c_caber_reference.smd"\n}\n'
+            '$bodygroup "broken"\n{\n\tstudio "caber_top_bodygroup.smd"\n'
+            '\tstudio "caber_exploded_bodygroup.smd"\n}\n',
+            ["c_caber_reference.smd", "caber_top_bodygroup.smd",
+             "caber_exploded_bodygroup.smd"])
+        groups = ModelBuildService.extract_bodygroups(qc)
+        self.assertEqual([name for name, _ in groups], ["body", "broken"])
+        self.assertEqual(
+            self._names(ModelBuildService.chosen_body_smds(groups)),
+            ["c_caber_reference.smd", "caber_top_bodygroup.smd"])
+        self.assertEqual(
+            self._names(ModelBuildService.chosen_body_smds(groups, {"broken": 1})),
+            ["c_caber_reference.smd", "caber_exploded_bodygroup.smd"])
+        # Номер за пределами группы — как blank: вариант не рисуется.
+        self.assertEqual(
+            self._names(ModelBuildService.chosen_body_smds(groups, {"broken": 7})),
+            ["c_caber_reference.smd"])
+
+    def test_unnamed_group_gets_a_number(self):
+        qc = self._qc('$body studio "main.smd"\n', ["main.smd"])
+        self.assertEqual(ModelBuildService.extract_bodygroups(qc)[0][0], "group0")
+
     def test_missing_file_is_not_returned(self):
         qc = self._qc('$bodygroup "body"\n{\n\tstudio "нет.smd"\n}\n')
         self.assertEqual(ModelBuildService.extract_default_body_smds(qc), [])

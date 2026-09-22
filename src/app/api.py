@@ -394,6 +394,10 @@ def controls_for(mode: str, key: str = '') -> Dict[str, object]:
         # реквизита — у оружия своего тонта нет, а у шапки нет и реквизита.
         'taunt': category_of_mode(mode) == 'taunt',
         'misc': not (is_hands or is_spy_mask),
+        # Редактор VMT — там, где материал модели: у спрея, крита, неба и
+        # мода из VPK своего VMT нет (то же правило, что в `_vmt_target`).
+        # Без признака кнопка висела под пустым альбомом до выбора предмета.
+        'vmt_editor': model_like and mode != 'custom',
         'styles': not (is_spray or is_crit or is_skybox),
         # Команды и вариант зависят от загруженной модели, не от режима:
         # маски шпиона прячут их безусловно, остальное решает контроллер.
@@ -573,6 +577,12 @@ def set_team(team: str) -> Dict[str, object]:
     return session().set_team(team)
 
 
+def set_bodygroup(name: str = '', variant: int = 0, lang: str = '') -> Dict[str, object]:
+    """Показывает вариант бодигруппы модели (разбитая бутылка) — только показ."""
+    from src.app.session import session
+    return session().set_bodygroup(name, int(variant), lang=_lang(lang))
+
+
 def set_australium(active: bool) -> Dict[str, object]:
     from src.app.session import session
     return session().set_australium(active)
@@ -627,10 +637,12 @@ def part_mask(material: str = '', part: int = 0) -> Dict[str, object]:
     return session().part_mask(material, part)
 
 
-def part_shape(material: str = '', part: int = 0) -> Dict[str, object]:
-    """Развёртка одной части — для окна посадки картинки."""
+def part_shape(material: str = '', part: int = 0,
+               layer: Optional[int] = None) -> Dict[str, object]:
+    """Развёртка одной части — для окна посадки картинки.
+    `layer` — какую из её картинок правят; None — кладут новую."""
     from src.app.session import session
-    return session().part_shape(material, part)
+    return session().part_shape(material, part, layer)
 
 
 def merge_part_islands(material: str = '', group: int = 0,
@@ -910,16 +922,16 @@ def keep_work() -> Dict[str, object]:
     return session().keep_work()
 
 
-def restore_work() -> Dict[str, object]:
+def restore_work(lang: str = '') -> Dict[str, object]:
     """Возвращает отложенную работу над открытым сейчас предметом."""
     from src.app.session import session
-    return session().restore_work()
+    return session().restore_work(lang=_lang(lang))
 
 
-def forget_work() -> Dict[str, object]:
+def forget_work(lang: str = '') -> Dict[str, object]:
     """Сбрасывает правки предмета — и в сеансе, и на диске."""
     from src.app.session import session
-    return session().forget_work()
+    return session().forget_work(lang=_lang(lang))
 
 
 def add_to_style(material: str = '') -> Dict[str, object]:
@@ -967,14 +979,24 @@ def parts(material: str = '', known_shape: str = '') -> Dict[str, object]:
 
 def set_part_texture(material: str = '', part: int = 0,
                      path: Optional[str] = None,
-                     options: Optional[Dict[str, object]] = None) -> Dict[str, object]:
-    """Кладёт картинку на одну часть модели (path=None — убирает).
+                     options: Optional[Dict[str, object]] = None,
+                     layer: Optional[int] = None) -> Dict[str, object]:
+    """Картинки одной части — слоями: новая ложится поверх, `layer` называет
+    слой для правки посадки, замены или снятия (без него снимаются все).
 
     options — посадка: вписать/заполнить/растянуть, поворот, масштаб, сдвиг.
     Без пути, но с настройкой, — правка уже положенной картинки.
     """
     from src.app.session import session
-    return session().set_part_texture(material, part, path, options)
+    return session().set_part_texture(material, part, path, options, layer)
+
+
+def move_part_texture(material: str = '', part: int = 0,
+                      layer: int = 0, to: int = 0) -> Dict[str, object]:
+    """Переставляет картинку части в стопке: слой `layer` на место `to`
+    (индексы снизу вверх). Выше в стопке — поверх."""
+    from src.app.session import session
+    return session().move_part_texture(material, part, layer, to)
 
 
 def set_part_colors(material: str = '',
@@ -1002,16 +1024,11 @@ def clear_parts(material: str = '') -> Dict[str, object]:
     return session().clear_parts(material)
 
 
-def undo_parts(material: str = '') -> Dict[str, object]:
-    """Откатывает последнее изменение покраски частей."""
+def undo_edits(delta: int = -1, lang: str = '') -> Dict[str, object]:
+    """Шаг по истории правок предмета: -1 — отменить, 1 — вернуть.
+    В ответе — состояние показа плюс `undo`/`redo`: есть ли куда ещё."""
     from src.app.session import session
-    return session().undo_parts(material)
-
-
-def redo_parts(material: str = '') -> Dict[str, object]:
-    """Возвращает вперёд отменённое изменение покраски частей."""
-    from src.app.session import session
-    return session().redo_parts(material)
+    return session().undo_edits(delta, lang=_lang(lang))
 
 
 #: Что страница вправе менять. Остальное в конфиге (геометрия окна, последние
@@ -1611,6 +1628,12 @@ def merge_vpk(files: Optional[List[str]] = None, name: str = '',
 
     lang = _lang(lang)
     return session().merge_vpk(files, name, confirmed=confirmed, lang=lang)
+
+
+def answer_model(path: str = '') -> Dict[str, object]:
+    """Ответ на `need_model`: свой SMD для сменной части либо пусто — игровая."""
+    from src.app.session import session
+    return session().answer_model(path)
 
 
 def answer_texture(choice: str = 'game', path: str = '',

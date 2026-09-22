@@ -12,6 +12,7 @@
 import * as api from './api.js';
 import { toGameWav } from './audio.js';
 import { chooseFile } from './util.js';
+import { t } from './i18n.js';
 
 const els = {
   box: document.getElementById('sounds'),
@@ -320,7 +321,7 @@ function clock(sec) {
 function showPlaying() {
   const on = !player.paused && !player.ended;
   els.play.classList.toggle('is-playing', on);
-  els.play.setAttribute('aria-label', on ? 'Пауза' : 'Играть');
+  els.play.setAttribute('aria-label', t(on ? 'Пауза' : 'Играть'));
   els.list.querySelectorAll('.snd.is-playing')
           .forEach((b) => b.classList.remove('is-playing'));
   if (!on || !playingKey) return;

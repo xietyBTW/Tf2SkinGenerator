@@ -94,7 +94,7 @@ group('#fpbar', '.tag');
 // каталога предлагаем найти её самим (см. settings.js → offerTf2).
 boot().then(offerTf2).catch((err) => {
   els.note.hidden = false;
-  els.note.textContent = 'Нет связи с Python: ' + err.message;
+  els.note.textContent = `Нет связи с Python: ${err.message}`;
   console.error(err);
 });
 

@@ -14,7 +14,7 @@ Qt здесь нет: keeper работает с ``PreviewSession``, то ест
 from __future__ import annotations
 
 import os
-from typing import Iterable, Optional
+from typing import Dict, Optional
 
 from src.domain.preview.session import PreviewSession
 from src.services import work_store

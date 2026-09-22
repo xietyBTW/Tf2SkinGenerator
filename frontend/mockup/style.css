@@ -2117,30 +2117,61 @@
 .picker__hex:focus { outline: none; border-bottom-color: var(--accent); }
 
 /* ── Посадка картинки на часть ───────────────────────────────────────────
-   Канва — единственная «масса» в окне: всё остальное подписи и волосяные
-   линии, как и везде. Развёртка рисуется под картинкой, а не рамкой вокруг:
-   склейка маскирует по треугольникам, и рамка обещала бы лишнее. */
-/* Ширину задаёт САМ диалог (у `.ask` она 440px), а не его тело: у окна
-   посадки в ряду настроек три кнопки, ручка и ползунок, и в 440 они не
-   помещались — ряд вылезал за край вместе с «Готово». */
-.place { width: min(600px, 94vw); }
-.place .ask__body { max-height: 92vh; overflow: auto; }
-/* Канва квадратная (развёртка — квадрат), поэтому ограничиваем её ПО ВЫСОТЕ:
-   иначе окно с рядами настроек и кнопками не помещается в экран, и «Готово»
-   уезжает под край. */
-.place__box {
+   Окно-редактор из трёх панелей: слои · холст · свойства. Панели отделены
+   волосяными линиями и стоят от края до края окна, как столбцы таблицы, —
+   ничего не плавает в пустоте. Холст — единственная «масса»: всё остальное
+   подписи, поля-подчёркивания и линии, как и везде в приложении. */
+.place { width: min(1060px, 96vw); }
+.place__frame { display: flex; flex-direction: column; max-height: 92vh; }
+.place__head {
   display: flex;
-  justify-content: center;
-  margin: 4px 0 12px;
-  border: 1px solid var(--hairline-strong);
-  background: var(--viewport);
+  align-items: baseline;
+  gap: 14px;
+  padding: 18px 22px 16px;
+  border-bottom: 1px solid var(--hairline);
 }
+.place__panes {
+  display: grid;
+  grid-template-columns: 208px minmax(0, 1fr) 216px;
+  min-height: 0;
+}
+.place__panes > * { min-width: 0; min-height: 0; }
+.place__layers, .place__props {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px 20px;
+  overflow: auto;
+}
+.place__layers { border-right: 1px solid var(--hairline); }
+.place__props  { border-left: 1px solid var(--hairline); }
+.place__foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 18px;
+  padding: 14px 22px;
+  border-top: 1px solid var(--hairline);
+}
+
+/* Холст в своей панели: по центру, с воздухом; рамка на самом холсте, чтобы
+   не оставалось пустых полей внутри коробки. Фон у панели тот же, что у окна:
+   тёмная подложка читалась чёрной рамкой вокруг холста. */
+.place__stage {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px 20px;
+}
+.place__box { display: flex; justify-content: center; align-items: flex-start; flex: 1 1 auto; min-height: 0; }
 .place__canvas {
   display: block;
   width: auto;
   height: auto;
   max-width: 100%;
-  max-height: min(46vh, 420px);
+  max-height: min(58vh, 540px);
+  border: 1px solid var(--hairline-strong);
+  background: var(--viewport);
   cursor: grab;
   touch-action: none;
 }
@@ -2149,21 +2180,160 @@
    лишней линией поверх картинки, поэтому только по клавиатуре. */
 .place__canvas:focus { outline: none; }
 .place__canvas:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
-.place__row {
+.place__view { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 18px; }
+.place__toggle { flex: none; font-size: 11px; white-space: nowrap; }
+.place__keys {
+  margin-left: auto;
+  font-size: 10.5px;
+  line-height: 1.4;
+  color: var(--ink-mute);
+  text-align: right;
+}
+
+/* ── Слои ─────────────────────────────────────────────────────────────── */
+.place__panehead { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.place__count { font-size: 10px; }
+.place__order { margin: -6px 0 0; font-size: 11px; line-height: 1.45; color: var(--ink-mute); }
+/* Строки — стопкой, как лежат картинки: верхняя поверх. Отступ и
+   отрицательное поле — чтобы тень поднятой строки не резалась прокруткой. */
+.place__list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow: auto;
+  max-height: min(44vh, 400px);
+  padding: 3px;
+  margin: -3px;
+}
+.place__layer {
+  position: relative;
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 8px 14px;
+  gap: 10px;
+  padding: 7px 9px 7px 7px;
+  border: 1px solid var(--hairline);
+  background: var(--surface);
+  color: var(--ink-soft);
+  font: inherit;
+  text-align: left;
+  min-width: 0;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  transition: border-color var(--dur), color var(--dur), box-shadow var(--dur);
+}
+.place__layer:hover { border-color: var(--hairline-strong); color: var(--ink); }
+.place__layer.is-active {
+  border-color: var(--accent);
+  color: var(--ink);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+/* Захват — точки слева: подсказка, что строку можно тащить. */
+.place__grip {
+  flex: none;
+  width: 6px;
+  height: 18px;
+  background: radial-gradient(circle, var(--hairline-strong) 1px, transparent 1.3px) 0 0 / 6px 6px;
+}
+.place__layer:hover .place__grip,
+.place__layer.is-dragging .place__grip {
+  background-image: radial-gradient(circle, var(--ink-mute) 1px, transparent 1.3px);
+}
+/* Клетка под миниатюрой: у наклеек прозрачный фон, и без неё белого знака
+   на белом не видно. */
+.place__thumb {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--hairline);
+  background: repeating-conic-gradient(var(--viewport) 0 25%, var(--surface) 0 50%)
+              0 0 / 10px 10px;
+}
+.place__thumb img { display: block; max-width: 100%; max-height: 100%; object-fit: contain; }
+.place__meta { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.place__name {
+  font-size: 11px;
+  color: inherit;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   min-width: 0;
 }
-.place__row .tag { flex: none; }
-.place__row .tag.is-active {
+.place__pos { font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-mute); }
+/* Перетаскивание: поднятая строка едет за курсором без задержки, соседи
+   уступают место плавно; отпущенная доезжает до своей щели. */
+.place__list.is-sorting .place__layer:not(.is-dragging) { transition: transform var(--dur); }
+.place__layer.is-dragging {
+  z-index: 2;
+  border-color: var(--ink);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, .28);
+  cursor: grabbing;
+  transition: none;
+}
+.place__layer.is-settling { transition: transform var(--dur); }
+.place__add {
+  align-self: stretch;
+  padding: 9px;
+  border: 1px dashed var(--hairline-strong);
+  background: none;
+  color: var(--ink-soft);
+  font: inherit;
+  font-size: 10px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: border-color var(--dur), color var(--dur);
+}
+.place__add:hover { border-color: var(--accent); color: var(--accent); }
+.place__layeracts { display: flex; gap: 16px; flex-wrap: wrap; }
+
+/* ── Свойства ─────────────────────────────────────────────────────────── */
+.place__prop { display: flex; flex-direction: column; gap: 9px; }
+.place__prop + .place__prop { padding-top: 14px; border-top: 1px solid var(--hairline); }
+/* Сегментный переключатель: три кнопки одной полосой, общие рамки. */
+.seg { display: flex; }
+.seg button {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 6px 4px;
+  margin-left: -1px;
+  border: 1px solid var(--hairline-strong);
+  background: none;
+  color: var(--ink-soft);
+  font: inherit;
+  font-size: 9.5px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color var(--dur), background var(--dur), border-color var(--dur);
+}
+.seg button:first-child { margin-left: 0; }
+.seg button:hover { color: var(--ink); border-color: var(--ink); position: relative; }
+.seg button.is-active {
+  position: relative;
   background: var(--ink);
   border-color: var(--ink);
   color: var(--surface);
 }
-.place__hint { margin: 10px 0 0; color: var(--ink-mute); }
-.place__bare { flex: none; font-size: 11px; }
+.place__fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.place__field { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.place__field span {
+  font-size: 9.5px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+}
+.place__field .input {
+  width: 100%;
+  padding: 4px 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  text-align: left;
+}
+.place__reset { align-self: flex-start; margin-top: auto; }
 
 /* Счётчик найденного под фильтрами каталога. */
 .catalog__count {
@@ -2490,7 +2660,7 @@
    выезжать, задаёт `--reveal-from` у элемента (по умолчанию — чуть сверху). */
 [data-panels="float"] .catalog,
 .viewport__hint,
-#fpbar, #tauntbar, #skinbar, #hatstyles, #hatclasses,
+#fpbar, #tauntbar, #skinbar, #bodybar, #hatstyles, #hatclasses,
 #partsbar, #fitpanel, #partspaint,
 .build, .pbuild, .menu__list, .ctx, .console {
   --reveal-from: translateY(-4px);
@@ -2499,7 +2669,7 @@
 }
 [data-panels="float"] .catalog[hidden],
 .viewport__hint[hidden],
-#fpbar[hidden], #tauntbar[hidden], #skinbar[hidden], #hatstyles[hidden],
+#fpbar[hidden], #tauntbar[hidden], #skinbar[hidden], #bodybar[hidden], #hatstyles[hidden],
 #hatclasses[hidden], #partsbar[hidden], #fitpanel[hidden], #partspaint[hidden],
 .build[hidden], .pbuild[hidden], .menu__list[hidden], .ctx[hidden],
 .console[hidden] {
@@ -2510,7 +2680,7 @@
   [data-panels="float"] .catalog:not([hidden]),
   .viewport__hint:not([hidden]),
   #fpbar:not([hidden]), #tauntbar:not([hidden]), #skinbar:not([hidden]),
-  #hatstyles:not([hidden]), #hatclasses:not([hidden]),
+  #bodybar:not([hidden]), #hatstyles:not([hidden]), #hatclasses:not([hidden]),
   #partsbar:not([hidden]), #fitpanel:not([hidden]), #partspaint:not([hidden]),
   .build:not([hidden]), .pbuild:not([hidden]), .menu__list:not([hidden]),
   .ctx:not([hidden]), .console:not([hidden]) {

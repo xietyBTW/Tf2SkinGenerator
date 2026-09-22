@@ -184,6 +184,7 @@ export const paints       = () => call('paints', {});
 export const setPaint     = (key) => call('set_paint', { key });
 export const setAustralium = (active) => call('set_australium', { active });
 export const setSkin      = (index) => call('set_skin', { index });
+export const setBodygroup = (name, variant) => call('set_bodygroup', { name, variant });
 export const addToStyle   = (material) => call('add_to_style', { material });
 export const dropFromStyle = (material) => call('drop_from_style', { material });
 export const toggleMisc   = (on = null) => call('toggle_misc', { on });
@@ -215,10 +216,15 @@ export const textureBadges = () => call('texture_badges');
 // от резки, тогда как сам запрос идёт после каждого мазка кистью.
 export const parts          = (material = '', known_shape = '') =>
   call('parts', { material, known_shape });
-export const setPartTexture = (material, part, path = null, options = null) =>
-  call('set_part_texture', { material, part, path, options });
-export const partShape = (material, part) =>
-  call('part_shape', { material, part });
+// Картинки части — слоями: `layer` называет, какую правят, заменяют или
+// снимают; без него новая ложится поверх, а снятие убирает все.
+export const setPartTexture = (material, part, path = null, options = null,
+                               layer = null) =>
+  call('set_part_texture', { material, part, path, options, layer });
+export const movePartTexture = (material, part, layer, to) =>
+  call('move_part_texture', { material, part, layer, to });
+export const partShape = (material, part, layer = null) =>
+  call('part_shape', { material, part, layer });
 export const partMask = (material, part) =>
   call('part_mask', { material, part });
 export const setPartColors  = (material, colors, strength = null,
@@ -227,8 +233,8 @@ export const setPartColors  = (material, colors, strength = null,
 export const clearParts     = (material = '') => call('clear_parts', { material });
 export const setPartEdge    = (material, width, color) =>
   call('set_part_edge', { material, width, color });
-export const undoParts      = (material = '') => call('undo_parts', { material });
-export const redoParts      = (material = '') => call('redo_parts', { material });
+// История правок предмета — одна на текстуры, части и свою модель.
+export const undoEdits      = (delta = -1) => call('undo_edits', { delta });
 
 // Работа над предметом. Автосохранение пишет черновик молча (если это не
 // выключено), а в библиотеку работа попадает только по `keepWork`.
@@ -320,6 +326,7 @@ export const build        = (params) => call('build', { params });
 export const cancelBuild  = () => call('cancel_build');
 export const vtfEstimate  = (size, format, flags) =>
   call('vtf_estimate', { size, format, flags });
+export const answerModel   = (path = '') => call('answer_model', { path });
 export const answerTexture = (choice, path = '', apply_all = false) =>
   call('answer_texture', { choice, path, apply_all });
 export const exportUv     = (size = 1024) => call('export_uv', { size });

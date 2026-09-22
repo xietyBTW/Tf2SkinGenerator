@@ -341,6 +341,7 @@ const I18N = {
     no_internet   : 'Нет подключения к интернету (Three.js CDN недоступен)',
     hint          : 'ЛКМ — вращение · Колесо — масштаб · ПКМ — панорама',
     drop_texture  : 'Отпустите, чтобы применить текстуру',
+    inspect       : 'Инспектор материалов — наведи на модель',
   },
   en: {
     select_weapon : 'Select a weapon for 3D Preview',
@@ -350,6 +351,7 @@ const I18N = {
     no_internet   : 'No internet connection (Three.js CDN unavailable)',
     hint          : 'LMB — rotate · Wheel — zoom · RMB — pan',
     drop_texture  : 'Release to apply texture',
+    inspect       : 'Material inspector — hover over the model',
   },
 };
 
@@ -361,6 +363,7 @@ window.setLanguage = function(lang) {
   _t    = I18N[_lang];
   document.getElementById('hint').textContent     = _t.hint;
   document.getElementById('drop-text').textContent = _t.drop_texture;
+  document.getElementById('inspect-btn').title = _t.inspect;
   // Обновляем текст статуса только если показан начальный экран (не loading/error)
   if (!status.classList.contains('loading') && !status.classList.contains('error')) {
     if (!currentModel) {
@@ -2640,7 +2643,7 @@ const _inspectTip    = document.getElementById('inspect-tip');
 const _inspectTipImg = document.getElementById('inspect-tip-img');
 const _inspectTipMat = document.getElementById('inspect-tip-mat');
 let   _inspectMode   = false;
-_inspectBtn.title = 'Инспектор материалов — наведи на модель';
+_inspectBtn.title = _t.inspect;
 
 function _setInspectMode(on) {
   _inspectMode = on;

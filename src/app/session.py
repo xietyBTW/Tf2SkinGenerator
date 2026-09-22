@@ -94,6 +94,20 @@ def _fraction(value: Any, default: float) -> float:
         return default
 
 
+def _image_specs(value: Any) -> List[Any]:
+    """
+    Картинки части списком — снизу вверх, в порядке наложения.
+
+    Одна запись хранится строкой или словарём (так писали работы до слоёв),
+    несколько — списком. Читаем любую форму, пишем всегда список.
+    """
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [v for v in value if v]
+    return [value]
+
+
 def _image_spec(value: Any, brush: Optional[Dict[str, Any]] = None
                 ) -> Dict[str, Any]:
     """
@@ -220,6 +234,56 @@ def _obj_shift(obj_text: str, delta) -> str:
 #: именем от другого материала: на диске склейка зовётся `parts_1_25.png`, и
 #: без этого хвоста в шаблоне «Убрать всё» её не узнавало.
 _COMPOSITE_NAME = re.compile(r'^parts_\d+(?:_\d+)*\.png$', re.IGNORECASE)
+
+
+#: Подписи вариантов бодигрупп по слову в имени SMD.
+_VARIANT_WORDS = (
+    ('exploded', 'после взрыва'),
+    ('broken', 'разбитая'),
+    ('blank', 'без части'),
+)
+
+
+def _variant_label(smd_path: Optional[str], weapon_key: str) -> str:
+    """Подпись варианта бодигруппы: знакомое слово из имени SMD, иначе то,
+    что остаётся от имени без ключа оружия; нулевой обычно — «основной»."""
+    if not smd_path:
+        return 'без части'
+    name = os.path.splitext(os.path.basename(smd_path))[0].lower()
+    for word, label in _VARIANT_WORDS:
+        if word in name:
+            return label
+    stem = os.path.splitext(os.path.basename(weapon_key or ''))[0].lower()
+    for junk in (stem, 'c_', '_reference', 'reference', '_bodygroup', 'bodygroup'):
+        if junk:
+            name = name.replace(junk, '')
+    name = name.strip('_ ')
+    return name or 'основной'
+
+
+def _part_kind(smd_name: str) -> str:
+    """Что за сменная часть — по имени SMD. Пусто, если по имени не понять."""
+    name = (smd_name or '').lower()
+    if 'exploded' in name:
+        return 'exploded'
+    if 'broken' in name:
+        return 'broken'
+    return ''
+
+
+def _existing_path(path: Optional[str]) -> Optional[str]:
+    """Путь, если файл на месте, иначе None."""
+    return path if path and os.path.isfile(path) else None
+
+
+def _in_work_dir(path: str) -> bool:
+    """Лежит ли путь в папке сохранённых работ (Windows регистр не различает)."""
+    from src.services.work_store import WORK_DIR
+    try:
+        root = os.path.normcase(str(WORK_DIR.resolve())) + os.sep
+        return os.path.normcase(os.path.abspath(path)).startswith(root)
+    except (OSError, ValueError):
+        return False
 
 
 def _is_composite_name(path: str) -> bool:
@@ -365,13 +429,14 @@ class AppSession:
         self._vpk_mod_path: Optional[str] = None
         #: OBJ показанной модели — источник частей (см. mesh_parts_service).
         self._obj_path: str = ''
-        #: Прошлые состояния покраски частей: (материал, картинки, цвета).
-        #: Красят на ощупь — «попробовал, не понравилось» должно откатываться,
-        #: иначе человек боится трогать.
-        self._parts_history: List[Any] = []
-        #: Отменённое — чтобы вернуть его вперёд. Любая новая правка список
-        #: обнуляет: вернуться «в будущее», которого уже не будет, нельзя.
-        self._parts_future: List[Any] = []
+        #: История правок предмета: снимки `user_edits()` и позиция в них.
+        #: Одна на всё — текстуры, части, свою модель, карты: красят и
+        #: подставляют на ощупь, и «попробовал, не понравилось» должно
+        #: откатываться, иначе человек боится трогать.
+        self._edit_history: List[Dict[str, Any]] = []
+        self._edit_pos = -1
+        #: {путь в папке работы: своя копия} — см. `_shield_work_files`.
+        self._undo_copies: Dict[str, str] = {}
         #: Склейки, которые сделали мы сами. Отличать их от своей текстуры
         #: пользователя обязательно: иначе следующая склейка легла бы поверх
         #: предыдущей и «убрать картинку с части» ничего не вернуло бы.
@@ -388,6 +453,10 @@ class AppSession:
         #: по нему) и что крутить, если настройку включат позже.
         self._anim_seq = 0
         self._anim_last: Any = None
+        #: Переключатель состояния модели в превью: {имя бодигруппы: вариант}.
+        #: Пусто — как в игре по умолчанию (целая бутылка). Только показ: в
+        #: мод уходят все варианты, игра переключает их сама.
+        self._bodygroups: Dict[str, int] = {}
         #: Модели показанной шапки: {класс: mdl}. Пусто у обычной шапки — у неё
         #: одна модель на всех. Нужны сборке: мультиклассовая шапка собирается
         #: сразу под все выбранные классы.
@@ -426,6 +495,7 @@ class AppSession:
         self._subscribers: "list[queue.Queue[dict]]" = []
         self._lock = threading.Lock()
         self._bind()
+        self._edits_reset()
 
     # ═══════════════════════════════════════════════════════════════════════ #
     # События
@@ -686,6 +756,7 @@ class AppSession:
             self._obj_path = ''
         self.vpk_mod.stop()
         self._vpk_mod_path = None
+        self._bodygroups = {}          # состояние — свойство показанной модели
         # Собранные сцены принадлежали ПРОШЛОМУ предмету: и вид от первого
         # лица, и насмешка. Не погасив их, мы получили бы кадр чужого
         # предмета поверх нового — воркер досчитает и пришлёт свою сцену.
@@ -708,13 +779,18 @@ class AppSession:
         # Показанный стиль снимком не держим: его правда — живые правки, а
         # снимок остаётся от прошлого ухода и вернул бы старое поверх нового.
         self._hat_styles.pop(self._hat_style, None)
+        self._edits_reset()
 
         logger.info(f"load_preview: mode={mode!r} key={weapon_key!r}")
-        self.controller.load_game_model(
-            weapon_key, mode, paths['misc_vpk'], paths['textures_vpk'], lang=lang)
-        # Стили ищем параллельно: QC после декомпиляции окажется в кэше, так что
-        # ждать своей очереди воркеру почти не придётся.
-        self.skins.detect(weapon_key, mode, paths['misc_vpk'], lang=lang)
+        # Работа с подменённой моделью открывается на НЕЙ: игровая геометрия
+        # показала бы чужую текстуру не на том, для чего её рисовали.
+        if not self._restore_custom_model(lang):
+            self.controller.load_game_model(
+                weapon_key, mode, paths['misc_vpk'], paths['textures_vpk'], lang=lang,
+                bodygroups=self._bodygroups)
+            # Стили ищем параллельно: QC после декомпиляции окажется в кэше,
+            # так что ждать своей очереди воркеру почти не придётся.
+            self.skins.detect(weapon_key, mode, paths['misc_vpk'], lang=lang)
         self._mode = mode
         return {'started': True, 'mode': mode, 'weapon_key': weapon_key,
                 # Какие стили уже правлены: страница ставит на них метку, иначе
@@ -807,6 +883,7 @@ class AppSession:
         self._vpk_mod_path = None
         if restore:
             self._restore_work()
+        self._edits_reset()
 
         logger.info(f"режим без модели: {mode}")
         # У крита и эффектов смерти сцена ЕСТЬ — персонаж: у крита текстура
@@ -1695,6 +1772,7 @@ class AppSession:
         with self._lock:
             self.preview.mode.enter(_skybox_mode())
             self._forget_model()
+        self._edits_reset()
         # Небеса лежат и в hl2/ — оттуда же и грани, иначе половина списка
         # показывалась бы пустой (см. TF2Paths.skybox_vpks).
         from src.services.tf2_paths import TF2Paths
@@ -1840,6 +1918,11 @@ class AppSession:
         # «взять ГЛАВНУЮ текстуру» — то есть скин молча растекался на служебные
         # материалы. Теперь вопрос доходит до человека, как в окне приложения.
         w.request_extra_texture.connect(self._on_build_needs_texture)
+        # Сменные части модели (бутылка целая/разбитая, набалдашник кабера до и
+        # после взрыва) при подмене модели спрашиваются так же. Раньше сигнал
+        # никто не слушал: сборка молча ждала ответа пять минут на каждую
+        # часть и шла дальше с игровой геометрией.
+        w.request_extra_model.connect(self._on_build_needs_model)
         w.texture_mismatch_warning.connect(
             lambda msg: w._texture_mismatch_req.answer(True))
 
@@ -1932,6 +2015,33 @@ class AppSession:
             return
         self._put('need_texture', material=material, weapon_key=weapon_key,
                   remaining=int(remaining))
+
+    # ── Сменная часть модели: вопрос страницы, ответ человека ─────────────── #
+
+    def _on_build_needs_model(self, smd_name: str, weapon_key: str) -> None:
+        """
+        Сборке нужна геометрия сменной части (`$bodygroup`): своя модель
+        подменила основную, а у оружия есть ещё состояния — разбитая бутылка,
+        взорванный кабер. Игра переключает их сама, и мод должен дать каждое.
+        """
+        build = self._build
+        if build is not None and build.isInterruptionRequested():
+            self._answer_model_request(None)
+            return
+        self._put('need_model', part=smd_name, weapon_key=weapon_key,
+                  kind=_part_kind(smd_name))
+
+    def _answer_model_request(self, path: Optional[str]) -> None:
+        build = self._build
+        if build is not None and hasattr(build, 'set_extra_model_result'):
+            build.set_extra_model_result(path)
+
+    def answer_model(self, path: str = '') -> Dict[str, Any]:
+        """Ответ страницы на ``need_model``: свой SMD либо пусто — игровая."""
+        if path and not os.path.isfile(path):
+            return {'error': 'Файл модели не найден'}
+        self._answer_model_request(path or None)
+        return {'ok': True}
 
     def _answer_texture_request(self, value) -> None:
         """Отдаёт ответ ждущему воркеру сборки."""
@@ -3344,6 +3454,7 @@ class AppSession:
         # Мод опознаётся файлом в библиотеке — по нему и находится работа.
         self.preview.forget_user_edits()
         self._restore_work()
+        self._edits_reset()
         self.vpk_mod.load(path, paths['misc_vpk'], paths['textures_vpk'], lang=lang)
         logger.info(f"мод из VPK: {path}")
         return {'started': True, 'path': path}
@@ -3486,7 +3597,36 @@ class AppSession:
             # вернёт воркер карточек.
             p.reset_team_frames()
             p.reset_misc()
-            if keep:
+
+        self._show_custom_model(obj, cards, lang)
+
+        # Базовый цвет из MTL/glTF — сразу в слоты: «готовой» модели по её
+        # материалам, «только геометрии» — первый найденный на главный
+        # игровой материал (все её материалы схлопнутся в него).
+        placed = self._place_imported_textures(
+            source, cards if keep else [game_main] if game_main else [])
+
+        self._autosave()
+        logger.info(f"своя модель: {smd} keep={bool(keep)} материалов={len(cards)}")
+        return {'started': True, 'keep': bool(keep), 'materials': cards,
+                'obj': obj, 'fit': p.custom_fit, 'textures': placed,
+                'simplified': (getattr(self, '_imported_simplified', None)
+                               if source else None)}
+
+    def _show_custom_model(self, obj: str, cards: List[str], lang: str) -> None:
+        """
+        Ставит свою геометрию в кадр.
+
+        `obj` — её OBJ для вьювера, `cards` — материалы из SMD. У «готовой»
+        модели они и есть карточки; у «только геометрии» карточки игровые, их
+        привозит воркер без геометрии. Состояние (`custom_smd_path`, `keep`)
+        к этому моменту уже выставлено — либо загрузкой, либо вернувшейся
+        работой.
+        """
+        p = self.preview
+        with self._lock:
+            p.custom_obj_path = obj
+            if p.custom_keep_materials:
                 p.textures.material_names = cards
                 p.textures.main_material = cards[0] if cards else None
 
@@ -3503,28 +3643,46 @@ class AppSession:
 
         paths = self.tf2_paths()
         mode = getattr(self, '_mode', '')
-        if keep:
-            # Стили оригинала пригодятся и своей модели: по ним переопределяют
-            # текстуры вариантов.
-            if 'error' not in paths and mode and p.weapon_key:
-                self.skins.detect(p.weapon_key, mode, paths['misc_vpk'], lang=lang)
-        elif 'error' not in paths and mode and p.weapon_key:
+        if 'error' in paths or not mode or not p.weapon_key:
+            return
+        # Стили оригинала пригодятся и своей модели: по ним переопределяют
+        # текстуры вариантов. Сброшены выше — ищем заново.
+        self.skins.detect(p.weapon_key, mode, paths['misc_vpk'], lang=lang)
+        if not p.custom_keep_materials:
             self.controller.load_game_model(
                 p.weapon_key, mode, paths['misc_vpk'], paths['textures_vpk'],
                 lang=lang, geometry=False)
 
-        # Базовый цвет из MTL/glTF — сразу в слоты: «готовой» модели по её
-        # материалам, «только геометрии» — первый найденный на главный
-        # игровой материал (все её материалы схлопнутся в него).
-        placed = self._place_imported_textures(
-            source, cards if keep else [game_main] if game_main else [])
+    def _restore_custom_model(self, lang: str = 'ru') -> bool:
+        """
+        Своя модель из вернувшейся работы — в кадр. False — ставить нечего.
 
-        self._autosave()
-        logger.info(f"своя модель: {smd} keep={bool(keep)} материалов={len(cards)}")
-        return {'started': True, 'keep': bool(keep), 'materials': cards,
-                'obj': obj, 'fit': p.custom_fit, 'textures': placed,
-                'simplified': (getattr(self, '_imported_simplified', None)
-                               if source else None)}
+        Работа помнит SMD, а кадр после возврата показывал ИГРОВУЮ модель:
+        текстура, нарисованная под свою геометрию, ложилась на чужую, и на
+        экране было не то, что уйдёт в сборку. OBJ для вьювера живёт один
+        запуск, поэтому собираем его заново из того же SMD.
+        """
+        from src.domain.preview.material_cards import editable_material_cards
+
+        p = self.preview
+        smd = p.custom_smd_path
+        if not smd or not os.path.isfile(smd) or self._vpk_mod_path:
+            return False
+        # Призрак оригинала нужен подгонке, а она есть только у импорта.
+        obj, materials = self._custom_model_obj(smd, ghost=bool(p.custom_source_path))
+        if obj is None:
+            logger.warning(f"своя модель из работы не показана: {smd}")
+            return False
+        cards = [c.name for c in editable_material_cards(materials)]
+        with self._lock:
+            # Кадры команд и «Прочее» — от игровой геометрии; правки человека
+            # (текстуры, «сделать командным») уже на месте, их не трогаем.
+            force = p.textures.force_team
+            p.reset_team_frames()
+            p.reset_misc()
+            p.textures.force_team = force
+        self._show_custom_model(obj, cards, lang)
+        return True
 
     def _place_imported_textures(self, source: Optional[str], cards: List[str]) -> int:
         """Кладёт текстуры импортированной модели на карточки; сколько легло.
@@ -3728,10 +3886,167 @@ class AppSession:
         return work_keeper.is_enabled()
 
     def _autosave(self) -> None:
-        """Пишет правки предмета. Зовётся после КАЖДОГО изменения."""
+        """Пишет правки предмета. Зовётся после КАЖДОГО изменения — потому
+        здесь же и шаг истории отмены: второй список точек «после правки»
+        разошёлся бы с первым."""
         from src.services import work_keeper
+        self._edits_commit()
         work_keeper.save(self.preview, self._work_key(),
                          self._style_snapshots(), self._item_id())
+
+    # ═══════════════════════════════════════════════════════════════════════ #
+    # История правок предмета: Ctrl+Z / Ctrl+Y
+    # ═══════════════════════════════════════════════════════════════════════ #
+
+    #: Глубже тридцати шагов не помнит никто.
+    EDIT_HISTORY_LIMIT = 30
+
+    def _edits_reset(self) -> None:
+        """Точка отсчёта: предмет открыт (с работой или без). Раньше неё
+        откатываться нельзя — там правки другого предмета."""
+        self._edit_history = [self._edit_snapshot()]
+        self._edit_pos = 0
+
+    def _edit_snapshot(self) -> Dict[str, Any]:
+        """Снимок правок — то же, что уходит на диск, своей копией."""
+        import copy
+        return self._shield_work_files(copy.deepcopy(self.preview.user_edits()))
+
+    def _shield_work_files(self, node: Any) -> Any:
+        """
+        Пути в папку работы заменяет своими копиями.
+
+        Вернувшаяся с диска работа ссылается в `work/<ключ>/files`, а
+        автосохранение при каждой записи убирает оттуда всё, на что правки
+        больше не ссылаются (и всю папку, когда правок не осталось). Снимку
+        истории эти файлы ещё нужны: сняли текстуру — Ctrl+Z обязан её
+        вернуть. Копия делается один раз на файл и живёт с сеансом.
+        """
+        if isinstance(node, dict):
+            return {k: self._shield_work_files(v) for k, v in node.items()}
+        if isinstance(node, list):
+            return [self._shield_work_files(v) for v in node]
+        if not isinstance(node, str) or not _in_work_dir(node):
+            return node
+        import shutil
+        try:
+            stat = os.stat(node)
+        except OSError:
+            return node
+        # Ключ — вместе с размером и временем: под тем же именем в папке
+        # работы позже может лежать другой файл, и старая копия соврала бы.
+        key = f"{node}|{stat.st_size}|{stat.st_mtime_ns}"
+        owned = self._undo_copies.get(key)
+        if owned is None:
+            owned = os.path.join(self._work_dir(),
+                                 f"undo_{len(self._undo_copies)}_{os.path.basename(node)}")
+            try:
+                shutil.copy2(node, owned)
+            except OSError as exc:
+                logger.warning(f"копия для отмены не сделана: {exc}")
+                return node
+            self._undo_copies[key] = owned
+        return owned
+
+    def _edits_commit(self) -> None:
+        """Шаг истории после правки. Снимок, равный текущему, не дублируем:
+        часть правок пишет состояние дважды (положил текстуру и тут же
+        пересобрал склейку), и Ctrl+Z на них был бы холостым."""
+        snap = self._edit_snapshot()
+        if self._edit_history and snap == self._edit_history[self._edit_pos]:
+            return
+        del self._edit_history[self._edit_pos + 1:]
+        self._edit_history.append(snap)
+        if len(self._edit_history) > self.EDIT_HISTORY_LIMIT:
+            self._edit_history.pop(0)
+        self._edit_pos = len(self._edit_history) - 1
+
+    def edit_history(self) -> Dict[str, Any]:
+        """Есть ли куда откатываться и что возвращать."""
+        return {'undo': self._edit_pos > 0,
+                'redo': 0 <= self._edit_pos < len(self._edit_history) - 1}
+
+    def undo_edits(self, delta: int = -1, lang: str = 'ru') -> Dict[str, Any]:
+        """
+        Шаг по истории правок предмета: назад (delta < 0) или вперёд.
+
+        Снимок ставится целиком поверх чистого состояния — так же, как
+        возвращается работа с диска. Отдельно доделывается то, что снимок
+        описывает, а в кадре само не появится: геометрия (своя ↔ игровая,
+        другая подгонка), склейки частей (их файлы живут недолго — пересобрать
+        дешевле, чем хранить) и грани неба.
+        """
+        from src.data.skyboxes import SKYBOX_MODE, SKY_PANO_KEY
+        from src.services import mesh_import_service
+
+        pos = self._edit_pos + int(delta)
+        if pos < 0 or pos >= len(self._edit_history):
+            return {'error': 'Отменять нечего' if delta < 0 else 'Возвращать нечего'}
+        snap = self._edit_history[pos]
+        p = self.preview
+        mode = getattr(self, '_mode', '')
+
+        with self._lock:
+            was_smd, obj, was_fit = p.custom_smd_path, p.custom_obj_path, p.custom_fit
+            was_pano = p.textures.skybox_pano()
+            painted = set(p.part_textures) | set(p.part_colors)
+            p.forget_user_edits()
+            # Своя модель уходит — кадр возвращается к игровой: с её кадрами
+            # команд, стилями и служебными материалами, как при выборе предмета.
+            to_game = bool(was_smd) and not snap.get('custom_smd_path')
+            if to_game:
+                p.begin_game_model()
+            p.apply_user_edits(snap)
+            painted |= set(p.part_textures) | set(p.part_colors)
+            # OBJ своей модели живёт один запуск — не терять, пока SMD тот же.
+            if p.custom_smd_path == was_smd:
+                p.custom_obj_path = obj
+            self._edit_pos = pos
+
+        paths = self.tf2_paths()
+        if to_game:
+            self.viewmodel.stop()
+            if p.weapon_key and mode and 'error' not in paths:
+                self.controller.load_game_model(
+                    p.weapon_key, mode, paths['misc_vpk'], paths['textures_vpk'], lang=lang)
+                self.skins.detect(p.weapon_key, mode, paths['misc_vpk'], lang=lang)
+        elif p.custom_smd_path != was_smd:
+            self._restore_custom_model(lang)
+        elif p.custom_source_path and p.custom_fit != was_fit:
+            # SMD импортированной модели один на все подгонки: на диске лежит
+            # последняя, а снимок вернул прежние числа — запечь их заново.
+            try:
+                smd = self._bake_imported_mesh(
+                    p.custom_source_path, mesh_import_service.Fit.from_dict(p.custom_fit))
+                with self._lock:
+                    p.custom_smd_path = smd
+            except mesh_import_service.MeshImportError as exc:
+                logger.warning(f"подгонка после отмены не запеклась: {exc}")
+
+        # Склейки частей: старые файлы уже могли уйти с диска (см.
+        # `_drop_old_composites`), а без части — вернуть материалу основу.
+        for slot in sorted(painted):
+            card, style, team = self._parse_slot(slot)
+            found = self._parts_model(card)
+            if isinstance(found, dict):
+                continue
+            model, obj_mat, card = found
+            with self._lock:
+                self._recompose(model, obj_mat, card, style, team)
+
+        if mode == SKYBOX_MODE:
+            pano = p.textures.skybox_pano()
+            if pano != was_pano:
+                self._after_skybox_texture(SKY_PANO_KEY, pano)   # режет заново
+            else:
+                self._put_skybox()
+
+        # Склейки пересобраны под новыми именами — снимок должен знать их,
+        # иначе следующая же правка легла бы в историю дважды.
+        with self._lock:
+            self._edit_history[pos] = self._edit_snapshot()
+        self._autosave()
+        return {**self.view_state(), **self.edit_history()}
 
     def _item_id(self) -> Dict[str, Any]:
         """
@@ -3823,14 +4138,19 @@ class AppSession:
                 if path and _is_composite_name(path):
                     self._composites.add(path)
 
-    def forget_work(self) -> Dict[str, Any]:
+    def forget_work(self, lang: str = 'ru') -> Dict[str, Any]:
         """Сбрасывает правки предмета — и в сеансе, и на диске."""
         from src.services import work_keeper
         with self._lock:
+            had_custom = bool(self.preview.custom_smd_path)
             work_keeper.forget(self.preview, self._work_key())
             # Стили шапки — тот же предмет: оставить их правки значило бы
             # собрать в мод то, что человек только что попросил забыть.
             self._hat_styles = {}
+        # Своя модель — тоже правка: состояние её забыло, а в кадре она
+        # оставалась до перезагрузки предмета.
+        if had_custom:
+            self.drop_custom_model(lang)
         return self.view_state()
 
     def keep_work(self) -> Dict[str, Any]:
@@ -3843,11 +4163,13 @@ class AppSession:
             return {'error': 'Сохранять нечего: правок нет'}
         return self.work_state()
 
-    def restore_work(self) -> Dict[str, Any]:
+    def restore_work(self, lang: str = 'ru') -> Dict[str, Any]:
         """Возвращает отложенную работу над открытым предметом."""
         # Замок берёт сам `_restore_work` — он же зовётся при открытии предмета.
         if not self._restore_work(asked=True):
             return {'error': 'Сохранённых правок у этого предмета нет'}
+        # В работе была своя модель — в кадре должна стоять она, а не игровая.
+        self._restore_custom_model(lang)
         # Вместе с правками вернулись и снимки соседних стилей — пометить.
         return {**self.view_state(), 'edited_styles': sorted(self._hat_styles)}
 
@@ -4016,7 +4338,18 @@ class AppSession:
                                         self.preview.part_cuts)
         if not model:
             return {'error': 'Модель ещё не загружена'}
+        # Номера частей считаются по геометрии в кадре: у разбитой бутылки они
+        # другие, и мазки легли бы не на те куски основной.
+        if self._bodygroups:
+            return {'error': 'Части красят основное состояние модели — верните переключатель'}
 
+        t = self.preview.textures
+        # Австралий — та же геометрия, что у главного материала, со своей
+        # текстурой: его карточку назвали прямо, либо он включён в кадре —
+        # тогда части красят то, что человек видит.
+        gold = t.is_variant_material(material)
+        if gold:
+            material = ''
         # Призрак оригинала (подгонка своей модели) — не часть предмета.
         names = [n for n in model.materials if not n.startswith('ghost:')]
         if len(names) == 1:
@@ -4024,15 +4357,80 @@ class AppSession:
             # назови: вьювер знает материал по имени из SMD и присылает его,
             # а работа хранится под ключом главной текстуры. Разойдясь здесь,
             # покраска ложилась в чужую карточку и на экране не появлялась.
-            return model, names[0], self.preview.textures.storage_main_key()
+            obj_mat, card = names[0], t.storage_main_key()
         else:
-            wanted = (material or self.preview.textures.stable_main() or '').lower()
+            wanted = (material or t.stable_main() or '').lower()
             obj_mat = next((n for n in names if n.lower() == wanted), '')
             if not obj_mat:
                 return {'error': 'У этого материала нет геометрии'}
+            card = material or t.storage_main_key()
 
-        card = material or self.preview.textures.storage_main_key()
+        if t.australium_mat_name and (gold or (
+                t.australium_active and card == t.storage_main_key())):
+            card = t.australium_mat_name
         return model, obj_mat, card
+
+    def _slot(self, card: str, style: Optional[int] = None,
+              team: Optional[str] = None) -> str:
+        """
+        Ключ хранения покраски частей: карточка плюс стиль или команда.
+
+        Склейка ложится в слот стиля (`skin_overrides`) или команды — а сами
+        мазки лежали под одной карточкой на всех. Покрасил Bloody у гильотины,
+        вернулся на базовый — чипы говорят «покрашено», а текстура нет; следующий
+        мазок на базовом пересобирал её с чужими мазками. Теперь у стиля и у
+        синей команды (когда материал командный) своя стопка мазков; старые
+        работы без суффикса читаются как базовые.
+        """
+        from src.shared.constants import Team
+
+        t = self.preview.textures
+        if style is None:
+            style = self.preview.active_style
+        if team is None:
+            team = t.active_team
+        if style:
+            return f"{card}@style{int(style)}"
+        if team != Team.RED and t.is_team_material(card):
+            return f"{card}@blu"
+        return card
+
+    @staticmethod
+    def _parse_slot(key: str) -> Tuple[str, int, str]:
+        """(карточка, стиль, команда) из ключа хранения покраски."""
+        from src.shared.constants import Team
+
+        card, sep, tail = key.partition('@')
+        if not sep:
+            return key, 0, Team.RED
+        if tail.startswith('style'):
+            return card, int(tail[5:] or 0), Team.RED
+        if tail == 'blu':
+            return card, 0, Team.BLU
+        return key, 0, Team.RED
+
+    def _slot_texture(self, card: str, style: int, team: str) -> Optional[str]:
+        """Что лежит на карточке в этом стиле/команде — без разрешения."""
+        t = self.preview.textures
+        if style:
+            return _existing_path(t.skin_overrides.get(style, {}).get(card))
+        return _existing_path(t.textures.get(team, {}).get(card))
+
+    def _put_slot_texture(self, card: str, path: Optional[str],
+                          style: int, team: str) -> None:
+        """Кладёт склейку в слот стиля/команды. Активный слот — обычной
+        маршрутизацией (нейтральная текстура уходит в обе команды), чужой —
+        напрямую: его правила показа сейчас не действуют."""
+        t = self.preview.textures
+        if style == self.preview.active_style and team == t.active_team:
+            t.set_texture(card, path)
+            return
+        slot = (t.skin_overrides.setdefault(style, {}) if style
+                else t.textures.setdefault(team, {}))
+        if path:
+            slot[card] = path
+        else:
+            slot.pop(card, None)
 
     def _shape_key(self, obj_mat: str) -> str:
         """
@@ -4069,9 +4467,14 @@ class AppSession:
             return found
         model, obj_mat, card = found
 
-        chosen = self.preview.part_textures.get(card, {})
-        colors = self.preview.part_colors.get(card, {})
+        slot = self._slot(card)
+        chosen = self.preview.part_textures.get(slot, {})
+        colors = self.preview.part_colors.get(slot, {})
         parts = model.parts_of(obj_mat)
+        # Странице отдаём ключ ГЕОМЕТРИИ, а не карточку варианта: по нему она
+        # держит карты треугольников для вьювера, и у австралия они те же.
+        shown = card if not self.preview.textures.is_variant_material(card) \
+            else (material or self.preview.textures.storage_main_key())
         tri_part = [0] * len(model.uv.get(obj_mat) or [])
         for part in parts:
             for tri in part.triangles:
@@ -4080,7 +4483,7 @@ class AppSession:
 
         shape = self._shape_key(obj_mat)
         out: Dict[str, Any] = {
-            'material': card,
+            'material': shown,
             'parts': [{
                 'id': part.index,
                 'area': round(part.uv_area, 4),
@@ -4088,7 +4491,11 @@ class AppSession:
                 # Куски, делящие развёртку, в игре красятся вместе — молчать
                 # об этом нельзя.
                 'shared': list(part.shared),
-                'image': chosen.get(part.index),
+                # Картинок на части может быть несколько — слоями, снизу
+                # вверх; странице нужны их число и файлы.
+                'images': [{**s, 'offset': list(s['offset'])}
+                           for s in map(_image_spec,
+                                        _image_specs(chosen.get(part.index)))],
                 'color': colors.get(part.index),
                 # Дробление настраивается на КУСОК, а не на часть: номер части
                 # меняется вместе с разбиением, номер куска — нет.
@@ -4119,79 +4526,33 @@ class AppSession:
             out['tri_island'] = list(model.tri_island.get(obj_mat) or [])
         return out
 
-    def _parts_snapshot(self) -> tuple:
-        """Всё, что делает покраску такой, какая она есть.
-
-        Сила тонировки и окантовка входят наравне с картинками и цветами:
-        они тоже правки человека, и без них отмена ползунка была ХОЛОСТОЙ —
-        снимок совпадал с текущим состоянием, кнопка не меняла ничего, а
-        добравшись до начала, оставляла силу и окантовку от последнего шага.
-        """
-        return (
-            {mat: dict(items) for mat, items in self.preview.part_textures.items()},
-            {mat: dict(items) for mat, items in self.preview.part_colors.items()},
-            self.preview.part_tint,
-            self.preview.part_edge,
-            self.preview.part_edge_color,
-            self.preview.part_exact,
-        )
-
-    def _restore_parts(self, snap: tuple) -> None:
-        """Ставит снимок на место."""
-        (self.preview.part_textures, self.preview.part_colors,
-         self.preview.part_tint, self.preview.part_edge,
-         self.preview.part_edge_color, self.preview.part_exact) = snap
-
-    def _remember_parts(self, card: str) -> None:
-        """Снимок покраски ДО изменения — для отмены."""
-        self._parts_history.append(self._parts_snapshot())
-        del self._parts_history[:-20]      # глубже двадцати шагов не помнит никто
-        # Новая правка отменяет «вперёд»: та ветка больше никогда не наступит.
-        self._parts_future.clear()
-
     def undo_parts(self, material: str = '') -> Dict[str, Any]:
-        """Откатывает последнее изменение покраски частей."""
-        return self._step_parts(material, self._parts_history,
-                                self._parts_future, 'Отменять нечего')
+        """Откатывает последнее изменение покраски частей.
+
+        Своей истории у частей нет: мазок — такая же правка предмета, как
+        положенная текстура, и откатываются они одной лентой (`undo_edits`).
+        Две ленты разъезжались бы: отменил мазок в одной, а другая помнит его
+        как последний шаг."""
+        return self.undo_edits(-1)
 
     def redo_parts(self, material: str = '') -> Dict[str, Any]:
         """Возвращает вперёд то, что отменили."""
-        return self._step_parts(material, self._parts_future,
-                                self._parts_history, 'Возвращать нечего')
-
-    def _step_parts(self, material: str, take: List[Any], keep: List[Any],
-                    empty: str) -> Dict[str, Any]:
-        """Шаг по истории: снимок оттуда, текущее состояние — туда.
-
-        Отмена и возврат — одно и то же движение в разные стороны, поэтому и
-        код один: разъехавшись, они дали бы состояние, из которого не выйти
-        ни назад, ни вперёд.
-        """
-        found = self._parts_model(material)
-        if isinstance(found, dict):
-            return found
-        model, obj_mat, card = found
-
-        with self._lock:
-            if not take:
-                return {'error': empty}
-            keep.append(self._parts_snapshot())
-            self._restore_parts(take.pop())
-            self._recompose(model, obj_mat, card)
-        self._autosave()
-        return self.view_state()
+        return self.undo_edits(1)
 
     def set_part_texture(self, material: str = '', part: int = 0,
                          path: Optional[str] = None,
-                         options: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                         options: Optional[Dict[str, Any]] = None,
+                         layer: Optional[int] = None) -> Dict[str, Any]:
         """
-        Кладёт картинку на одну часть (path=None — убирает с неё).
+        Картинки одной части — слоями, снизу вверх.
 
-        ``options`` — как её посадить: вписать/заполнить/растянуть, поворот,
-        масштаб, сдвиг. Пусто — вписать целиком с сохранением пропорций.
-
-        Без пути, но с настройкой, — правка УЖЕ положенной картинки: так окно
-        посадки двигает её, не заставляя выбирать файл заново.
+        ``path`` — новая картинка: без ``layer`` ложится ПОВЕРХ уже лежащих,
+        с ним — заменяет названный слой (место и посадка остаются его).
+        ``options`` — как посадить: вписать/заполнить/растянуть, поворот,
+        масштаб, сдвиг. Без пути, но с настройкой, — правка уже положенной
+        картинки (``layer``, по умолчанию верхней): так окно посадки двигает
+        её, не заставляя выбирать файл заново. Без того и другого — убрать:
+        названный слой либо все картинки части разом.
         """
         found = self._parts_model(material)
         if isinstance(found, dict):
@@ -4202,13 +4563,23 @@ class AppSession:
             return {'error': 'Файл не найден'}
 
         with self._lock:
-            self._remember_parts(card)
-            chosen = self.preview.part_textures.setdefault(card, {})
-            if not path and options is not None:
-                had = chosen.get(int(part))
-                if not had:
+            chosen = self.preview.part_textures.setdefault(self._slot(card), {})
+            stack = _image_specs(chosen.get(int(part)))
+            at = None if layer is None else int(layer)
+            if at is not None and not -len(stack) <= at < len(stack):
+                return {'error': 'Такой картинки на части нет'}
+            if path:
+                spec = _image_spec({**(options or {}), 'path': path})
+                entry = {**spec, 'offset': list(spec['offset'])}
+                if at is None:
+                    stack.append(entry)
+                else:
+                    stack[at] = entry
+            elif options is not None:
+                if not stack:
                     return {'error': 'На этой части нет картинки'}
-                spec = _image_spec(had)
+                idx = -1 if at is None else at
+                spec = _image_spec(stack[idx])
                 # Якорь переживает правку посадки: он говорит, В ЧЁМ картинка
                 # живёт (в габарите части, на которую её клали), а окно двигает
                 # её ВНУТРИ этого габарита. Потеряв якорь здесь, картинка
@@ -4216,13 +4587,46 @@ class AppSession:
                 spec.update({k: v for k, v in _image_spec(
                     {**options, 'path': spec['path']}).items()
                     if k not in ('path', 'anchor')})
-                chosen[int(part)] = {**spec, 'offset': list(spec['offset'])}
-            elif path:
-                spec = _image_spec({**(options or {}), 'path': path})
-                chosen[int(part)] = {**spec, 'offset': list(spec['offset'])}
+                stack[idx] = {**spec, 'offset': list(spec['offset'])}
+            elif at is None:
+                stack = []
+            else:
+                del stack[at]
+            if stack:
+                chosen[int(part)] = stack
             else:
                 chosen.pop(int(part), None)
             self._recompose(model, obj_mat, card)
+        self._autosave()
+        return self.view_state()
+
+    def move_part_texture(self, material: str = '', part: int = 0,
+                          layer: int = 0, to: int = 0) -> Dict[str, Any]:
+        """
+        Переставляет картинку части в стопке: слой ``layer`` встаёт на место
+        ``to`` (оба — индексы снизу вверх, отрицательные — с конца).
+
+        Порядок и есть наложение: что выше в стопке, то поверх. Окно посадки
+        показывает стопку списком и даёт таскать строки — сюда приходит итог.
+        """
+        found = self._parts_model(material)
+        if isinstance(found, dict):
+            return found
+        model, obj_mat, card = found
+
+        with self._lock:
+            chosen = self.preview.part_textures.setdefault(self._slot(card), {})
+            stack = _image_specs(chosen.get(int(part)))
+            n = len(stack)
+            src, dst = int(layer), int(to)
+            if not (-n <= src < n and -n <= dst < n):
+                return {'error': 'Такой картинки на части нет'}
+            src %= n
+            dst %= n
+            if src != dst:
+                stack.insert(dst, stack.pop(src))
+                chosen[int(part)] = stack
+                self._recompose(model, obj_mat, card)
         self._autosave()
         return self.view_state()
 
@@ -4247,12 +4651,11 @@ class AppSession:
         model, obj_mat, card = found
 
         with self._lock:
-            self._remember_parts(card)
             if strength is not None:
                 self.preview.part_tint = min(1.0, max(0.05, float(strength)))
             if exact is not None:
                 self.preview.part_exact = bool(exact)
-            painted = self.preview.part_colors.setdefault(card, {})
+            painted = self.preview.part_colors.setdefault(self._slot(card), {})
             for part, color in (colors or {}).items():
                 if color:
                     painted[int(part)] = (dict(color) if isinstance(color, dict)
@@ -4338,12 +4741,18 @@ class AppSession:
         except (OSError, ValueError):
             return None
 
-    def part_shape(self, material: str = '', part: int = 0) -> Dict[str, Any]:
+    def part_shape(self, material: str = '', part: int = 0,
+                   layer: Optional[int] = None) -> Dict[str, Any]:
         """
         Развёртка одной части: по ней окно посадки рисует, куда ляжет картинка.
 
         Треугольники, а не прямоугольник: склейка маскирует по ним, и рамка
         врала бы — положенное в угол исчезало бы при сборке.
+
+        ``layer`` — какую из картинок части правят (отрицательный — с конца);
+        None — кладут новую, и ответ без её посадки. Основа для окна — всё,
+        что уже лежит на материале, КРОМЕ правимого слоя: остальные картинки
+        и цвета видны, а сама она рисуется окном живьём.
 
         Отдельным запросом, а не в общем списке частей: у крупного куска это
         тысячи треугольников, и возить их со всем списком незачем.
@@ -4358,8 +4767,12 @@ class AppSession:
         if one is None:
             return {'error': 'Такой части нет'}
 
-        image = (self.preview.part_textures.get(card) or {}).get(int(part))
-        spec = _image_spec(image) if image else None
+        stack = _image_specs((self.preview.part_textures.get(self._slot(card)) or {})
+                             .get(int(part)))
+        idx: Optional[int] = None
+        if layer is not None and stack:
+            idx = int(layer) % len(stack) if -len(stack) <= int(layer) < len(stack) else None
+        spec = _image_spec(stack[idx]) if idx is not None else None
         frames: List[str] = []
         delays: List[int] = []
         if spec:
@@ -4382,11 +4795,42 @@ class AppSession:
             'polygons': [[[round(u, 6), round(v, 6)] for u, v in tri]
                          for tri in model.polygons(obj_mat, one.index)],
             'image': spec,
+            'layer': idx,
+            # Все картинки части — окну нужен их список: в нём выбирают, какую
+            # править, и в него добавляют новую.
+            'images': [{**s, 'offset': list(s['offset'])}
+                       for s in map(_image_spec, stack)],
             # Основа — то, поверх чего человек и увидит свою картинку: та же,
-            # что возьмёт склейка (своя текстура, если она есть, иначе игровая).
-            # По ней же окно берёт пропорции холста.
-            'base': self._compose_base(card) or '',
+            # что возьмёт склейка, плюс всё уже положенное, кроме правимого
+            # слоя. По ней же окно берёт пропорции холста.
+            'base': self._context_base(
+                model, obj_mat, card,
+                skip=(int(part), idx) if idx is not None else None),
         }
+
+    def _context_base(self, model: Any, obj_mat: str, card: str,
+                      skip: Optional[tuple] = None) -> str:
+        """
+        Основа для окна посадки: материал со всем, что на нём лежит.
+
+        Склейка по тем же слоям, что и превью, только без правимого
+        (``skip`` — (часть, слой)): иначе под живой картинкой лежала бы её же
+        запечённая копия, а соседние картинки и цвет не были бы видны вовсе.
+        """
+        from src.services import texture_compose_service
+
+        base = self._compose_base(card) or ''
+        layers = self._part_layers(model, obj_mat, card, skip=skip)
+        if not base or not layers:
+            return base
+        self._compose_seq = getattr(self, '_compose_seq', 0) + 1
+        out = os.path.join(self._work_dir(), f"context_{self._compose_seq}.png")
+        result = texture_compose_service.compose(base, layers, out, frames=1)
+        if not result:
+            return base
+        # В общую очередь: уберётся со старыми склейками, а не копится.
+        self._compose_files.append(result)
+        return result
 
     def toggle_part_island(self, material: str = '', group: int = 0,
                            island: int = 0) -> Dict[str, Any]:
@@ -4467,11 +4911,9 @@ class AppSession:
         наследует цвет той старой, из которой вышла; при укрупнении наоборот —
         берётся цвет, занимавший бо́льшую часть.
 
-        Историю отмены чистим: её шаги записаны в НОМЕРАХ прежнего разбиения, и
-        откат после смены дробления красил бы наугад.
+        Отмена этого шага возвращает и прежние разрезы: номера частей в
+        снимке записаны вместе с ними (см. `user_edits` → part_cuts).
         """
-        from collections import Counter
-
         found = self._parts_model(material)
         if isinstance(found, dict):
             return found
@@ -4496,38 +4938,55 @@ class AppSession:
                 return found
             model, obj_mat, card = found
 
-            images = self.preview.part_textures.get(card) or {}
-            colors = self.preview.part_colors.get(card) or {}
-            if images or colors:
-                moved_images: Dict[int, Any] = {}
-                moved_colors: Dict[int, Any] = {}
-                for part in model.parts_of(obj_mat):
-                    votes = Counter(owner[t] for t in part.triangles if t in owner)
-                    if not votes:
-                        continue
-                    before = votes.most_common(1)[0][0]
-                    # Слои переносим ПО ОТДЕЛЬНОСТИ. Раньше здесь стоял
-                    # `elif` — наследие правила «у части либо картинка, либо
-                    # цвет». Правило сняли, а перенос остался: у части с
-                    # картинкой цвет при первом же разрезе исчезал.
-                    if before in images:
-                        spec = _image_spec(images[before])
-                        # Якорь ставим ОДИН раз — при первом разрезе. Дальше он
-                        # уже описывает исходное место картинки, и переписывать
-                        # его габаритом половинки значило бы всё-таки её сдвинуть.
-                        spec['anchor'] = spec['anchor'] or boxes.get(before)
-                        moved_images[part.index] = {
-                            **spec, 'offset': list(spec['offset']),
-                            'anchor': list(spec['anchor']) if spec['anchor'] else None}
-                    if before in colors:
-                        moved_colors[part.index] = colors[before]
-                self.preview.part_textures[card] = moved_images
-                self.preview.part_colors[card] = moved_colors
-                self._recompose(model, obj_mat, card)
-            self._parts_history.clear()
-            self._parts_future.clear()
+            # Номера частей общие на геометрию, а мазки лежат по слотам
+            # (стиль, команда): переносим их все, иначе покраска соседнего
+            # стиля осталась бы в номерах прежнего разбиения.
+            slots = [k for k in set(self.preview.part_textures) | set(self.preview.part_colors)
+                     if self._parse_slot(k)[0] == card]
+            for slot in slots:
+                self._move_parts(model, obj_mat, slot, owner, boxes)
+            for slot in slots:
+                _, style, team = self._parse_slot(slot)
+                self._recompose(model, obj_mat, card, style, team)
         self._autosave()
         return self.view_state()
+
+    def _move_parts(self, model: Any, obj_mat: str, slot: str,
+                    owner: Dict[int, int], boxes: Dict[int, tuple]) -> None:
+        """Переносит мазки одного слота на новые части — по треугольникам."""
+        from collections import Counter
+
+        images = self.preview.part_textures.get(slot) or {}
+        colors = self.preview.part_colors.get(slot) or {}
+        if images or colors:
+            moved_images: Dict[int, Any] = {}
+            moved_colors: Dict[int, Any] = {}
+            for part in model.parts_of(obj_mat):
+                votes = Counter(owner[t] for t in part.triangles if t in owner)
+                if not votes:
+                    continue
+                before = votes.most_common(1)[0][0]
+                # Слои переносим ПО ОТДЕЛЬНОСТИ. Раньше здесь стоял
+                # `elif` — наследие правила «у части либо картинка, либо
+                # цвет». Правило сняли, а перенос остался: у части с
+                # картинкой цвет при первом же разрезе исчезал.
+                if before in images:
+                    moved = []
+                    for image in _image_specs(images[before]):
+                        spec = _image_spec(image)
+                        # Якорь ставим ОДИН раз — при первом разрезе. Дальше
+                        # он уже описывает исходное место картинки, и
+                        # переписывать его габаритом половинки значило бы
+                        # всё-таки её сдвинуть.
+                        spec['anchor'] = spec['anchor'] or boxes.get(before)
+                        moved.append({
+                            **spec, 'offset': list(spec['offset']),
+                            'anchor': list(spec['anchor']) if spec['anchor'] else None})
+                    moved_images[part.index] = moved
+                if before in colors:
+                    moved_colors[part.index] = colors[before]
+            self.preview.part_textures[slot] = moved_images
+            self.preview.part_colors[slot] = moved_colors
 
     def set_part_edge(self, material: str = '', width: float = 0.0,
                       color: str = '') -> Dict[str, Any]:
@@ -4561,27 +5020,65 @@ class AppSession:
         model, obj_mat, card = found
 
         with self._lock:
-            self._remember_parts(card)
-            self.preview.part_textures.pop(card, None)
-            self.preview.part_colors.pop(card, None)
+            slot = self._slot(card)
+            self.preview.part_textures.pop(slot, None)
+            self.preview.part_colors.pop(slot, None)
             self._recompose(model, obj_mat, card)
         self._autosave()
         return self.view_state()
 
-    def _compose_base(self, card: str) -> Optional[str]:
-        """Основа склейки: своя текстура, если она не наша же склейка, иначе игровая."""
+    def _compose_base(self, card: str, style: Optional[int] = None,
+                      team: Optional[str] = None) -> Optional[str]:
+        """
+        Основа склейки: своя текстура слота, если она не наша же склейка,
+        иначе игровая — у стиля его собственная (Bloody у гильотины), у
+        команды её кадр.
+        """
         t = self.preview.textures
-        base = t.uploaded_for_mat(card)
-        if not base or base in self._composites:
-            base = t.game_base(card)
-        return base
+        if style is None:
+            style = self.preview.active_style
+        if team is None:
+            team = t.active_team
+        own = self._slot_texture(card, style, team)
+        if own and own not in self._composites:
+            return own
+        if style:
+            game = _existing_path(t.style_game_tex.get(style, {}).get(card))
+            if game:
+                return game
+        with self._as_team(team):
+            return t.game_base(card)
 
-    def _part_layers(self, model: Any, obj_mat: str, card: str) -> List[Any]:
-        """Слои склейки материала из того, что назначено его частям."""
+    def _as_team(self, team: str):
+        """Временно смотрит на состояние глазами другой команды: `game_base`
+        и разрешение текстур читают активную команду."""
+        import contextlib
+
+        t = self.preview.textures
+
+        @contextlib.contextmanager
+        def swap():
+            was = t.active_team
+            t.active_team = team
+            try:
+                yield
+            finally:
+                t.active_team = was
+        return swap()
+
+    def _part_layers(self, model: Any, obj_mat: str, card: str,
+                     skip: Optional[tuple] = None,
+                     slot: Optional[str] = None) -> List[Any]:
+        """Слои склейки материала из того, что назначено его частям.
+
+        ``skip`` — (часть, номер картинки), которую не класть: окно посадки
+        рисует её само поверх остального. ``slot`` — чей набор мазков; без
+        него — активного стиля и команды."""
         from src.services import texture_compose_service
 
-        images = self.preview.part_textures.get(card) or {}
-        colors = self.preview.part_colors.get(card) or {}
+        slot = slot or self._slot(card)
+        images = self.preview.part_textures.get(slot) or {}
+        colors = self.preview.part_colors.get(slot) or {}
         Layer = texture_compose_service.Layer
         # Сперва ЦВЕТ, потом картинки: цвет — это тонировка игровой текстуры
         # (детали под ней остаются), а картинка ложится на деталь сверху. У
@@ -4596,20 +5093,24 @@ class AppSession:
         layers = [Layer(polygons=model.polygons(obj_mat, part),
                         **_paint_spec(color, brush))
                   for part, color in sorted(colors.items())]
-        for part, image in sorted(images.items()):
-            spec = _image_spec(image, brush)
-            layers.append(Layer(polygons=model.polygons(obj_mat, part),
-                                image=spec['path'], fit=spec['fit'],
-                                image_angle=spec['angle'],
-                                image_scale=spec['scale'],
-                                image_scale_y=spec['scale_y'],
-                                image_offset=spec['offset'],
-                                anchor=spec['anchor'],
-                                edge=spec['edge'],
-                                edge_color=spec['edge_color']))
+        for part, entry in sorted(images.items()):
+            for n, image in enumerate(_image_specs(entry)):
+                if skip == (part, n):
+                    continue
+                spec = _image_spec(image, brush)
+                layers.append(Layer(polygons=model.polygons(obj_mat, part),
+                                    image=spec['path'], fit=spec['fit'],
+                                    image_angle=spec['angle'],
+                                    image_scale=spec['scale'],
+                                    image_scale_y=spec['scale_y'],
+                                    image_offset=spec['offset'],
+                                    anchor=spec['anchor'],
+                                    edge=spec['edge'],
+                                    edge_color=spec['edge_color']))
         return layers
 
-    def _recompose(self, model: Any, obj_mat: str, card: str) -> None:
+    def _recompose(self, model: Any, obj_mat: str, card: str,
+                   style: Optional[int] = None, team: Optional[str] = None) -> None:
         """
         Пересобирает текстуру материала из картинок его частей.
 
@@ -4625,19 +5126,24 @@ class AppSession:
         from src.services import texture_compose_service
 
         t = self.preview.textures
-        images = self.preview.part_textures.get(card) or {}
-        colors = self.preview.part_colors.get(card) or {}
+        if style is None:
+            style = self.preview.active_style
+        if team is None:
+            team = t.active_team
+        slot = self._slot(card, style, team)
+        images = self.preview.part_textures.get(slot) or {}
+        colors = self.preview.part_colors.get(slot) or {}
         if not (images or colors):
-            self.preview.part_textures.pop(card, None)
-            self.preview.part_colors.pop(card, None)
+            self.preview.part_textures.pop(slot, None)
+            self.preview.part_colors.pop(slot, None)
             # Убрали последнее — материал возвращается к тому, что было под
             # склейкой.
-            if t.uploaded_for_mat(card) in self._composites:
-                t.set_texture(card, None)
+            if self._slot_texture(card, style, team) in self._composites:
+                self._put_slot_texture(card, None, style, team)
             return
 
-        base = self._compose_base(card)
-        layers = self._part_layers(model, obj_mat, card)
+        base = self._compose_base(card, style, team)
+        layers = self._part_layers(model, obj_mat, card, slot=slot)
         # Имя со счётчиком: путь — это ещё и адрес картинки во вьювере, и по
         # прежнему имени браузер показал бы предыдущую склейку из кэша.
         self._compose_seq = getattr(self, '_compose_seq', 0) + 1
@@ -4649,7 +5155,7 @@ class AppSession:
         self._composites.add(result)
         self._compose_files.append(result)
         self._drop_old_composites()
-        t.set_texture(card, result)
+        self._put_slot_texture(card, result, style, team)
         self._animate_parts(card, obj_mat, result, base, layers)
 
     # ── Анимация частей в 3D ─────────────────────────────────────────────── #
@@ -4733,14 +5239,20 @@ class AppSession:
 
     # ── Анимация частей для сборки ───────────────────────────────────────── #
 
-    def _card_of(self, path: str) -> Optional[str]:
-        """Карточка, на которой лежит этот файл (склейка ищется по пути)."""
+    def _card_of(self, path: str) -> Optional[Tuple[str, int, str]]:
+        """(карточка, стиль, команда), где лежит этот файл — склейка ищется
+        по пути, а мазки к ней — по своему слоту."""
+        from src.shared.constants import Team
+
         t = self.preview.textures
-        slots = list(t.textures.values()) + list(t.skin_overrides.values())
-        for by_mat in slots:
+        for team, by_mat in t.textures.items():
             for mat, p in (by_mat or {}).items():
                 if p == path:
-                    return mat
+                    return mat, 0, (team if t.is_team_material(mat) else Team.RED)
+        for style, by_mat in t.skin_overrides.items():
+            for mat, p in (by_mat or {}).items():
+                if p == path:
+                    return mat, int(style), Team.RED
         return None
 
     def _bake_plan(self, paths: Iterable[Optional[str]]) -> Dict[str, Any]:
@@ -4759,18 +5271,20 @@ class AppSession:
         for path in paths:
             if not path or path in plan or path not in self._composites:
                 continue
-            card = self._card_of(path)
-            if not card:
+            where = self._card_of(path)
+            if not where:
                 continue
+            card, style, team = where
             found = self._parts_model(card)
             if isinstance(found, dict):
                 logger.warning(f"анимация частей: {card} — {found['error']}")
                 continue
             model, obj_mat, _ = found
-            layers = self._part_layers(model, obj_mat, card)
+            layers = self._part_layers(model, obj_mat, card,
+                                       slot=self._slot(card, style, team))
             if not texture_compose_service.is_moving(layers):
                 continue
-            base = self._compose_base(card)
+            base = self._compose_base(card, style, team)
             self._compose_seq = getattr(self, '_compose_seq', 0) + 1
             full = os.path.join(self._work_dir(),
                                 f"parts_{self._compose_seq}_full.png")
@@ -5259,9 +5773,9 @@ class AppSession:
             # Своя геометрия в кадре — можно предложить вернуть игровую.
             'has_custom': bool(self.preview.custom_smd_path),
             # Подгонка есть только у импортированной модели (OBJ/GLB) и только
-            # пока она в кадре (custom_obj_path живёт один запуск): у SMD из
-            # Blender человек уже всё выставил сам, а вернувшаяся с диска
-            # работа показывает игровую модель — крутить её подгонкой нельзя.
+            # пока она в кадре (custom_obj_path): у SMD из Blender человек уже
+            # всё выставил сам. Вернувшаяся с диска работа собирает OBJ заново
+            # (`_restore_custom_model`), и подгонка у неё есть.
             'custom_fit': ((self.preview.custom_fit or {'scale': 1, 'rotate': [0, 0, 0],
                                                         'offset': [0, 0, 0]})
                            if self.preview.custom_source_path
@@ -5273,6 +5787,8 @@ class AppSession:
             # знать, что ещё можно в него добавить.
             'style': self.preview.active_style,
             'style_candidates': self.preview.style_candidates(),
+            # Состояния модели (бодигруппы): переключатель под кадром.
+            'bodygroups': self.bodygroups(),
             # Есть ли что делить на части. Кнопка иначе висела бы доступной у
             # скайбокса, спрея и просто до того, как модель приехала, — и
             # обещала бы действие, которого нет.
@@ -5357,6 +5873,61 @@ class AppSession:
         wanted = Team.BLU if str(team).upper() == Team.BLU.upper() else Team.RED
         with self._lock:
             self.preview.textures.active_team = wanted
+        return self.view_state()
+
+    def bodygroups(self) -> List[Dict[str, Any]]:
+        """
+        Переключаемые состояния показанной модели: [{name, variants, chosen}].
+
+        `$bodygroup` с двумя и более вариантами — переключатель, который игра
+        дёргает сама (бутылка после крита разбивается, у кабера отлетает
+        набалдашник). Превью показывает один вариант, и посмотреть остальные
+        иначе нельзя. Только у оружия и шапок: у тел классов групп десятки, и
+        основной меш там выбирается своими правилами.
+        """
+        from src.data.item_kinds import kind_of
+        from src.services import decompile_cache
+        from src.services.model_build_service import ModelBuildService
+
+        key = self.preview.weapon_key
+        mode = getattr(self, '_mode', '')
+        kind = kind_of(mode)
+        if (not key or not (kind.is_weapon or kind.is_hat)
+                or self.preview.custom_smd_path or self.preview.custom_vpk_mode):
+            return []
+        qc = decompile_cache.find_cached_qc_for_weapon(key)
+        if not qc:
+            return []
+        out = []
+        for name, variants in ModelBuildService.extract_bodygroups(qc):
+            if len(variants) < 2:
+                continue
+            out.append({
+                'name': name,
+                'chosen': int(self._bodygroups.get(name, 0)),
+                'variants': [_variant_label(v, key) for v in variants],
+            })
+        return out
+
+    def set_bodygroup(self, name: str = '', variant: int = 0,
+                      lang: str = 'ru') -> Dict[str, Any]:
+        """Показывает вариант бодигруппы: модель собирается заново тем же
+        воркером (декомпиляция в кэше — это секунда), правки остаются."""
+        paths = self.tf2_paths()
+        if 'error' in paths:
+            return paths
+        known = {g['name']: len(g['variants']) for g in self.bodygroups()}
+        if name not in known or not 0 <= int(variant) < known[name]:
+            return {'error': 'Такого состояния у модели нет'}
+        if int(variant):
+            self._bodygroups[name] = int(variant)
+        else:
+            self._bodygroups.pop(name, None)
+        key, mode = self.preview.weapon_key, getattr(self, '_mode', '')
+        self.viewmodel.stop()             # сцена в руках собрана под прежний вид
+        self.controller.load_game_model(
+            key, mode, paths['misc_vpk'], paths['textures_vpk'], lang=lang,
+            bodygroups=self._bodygroups)
         return self.view_state()
 
     def set_australium(self, active: bool) -> Dict[str, Any]:

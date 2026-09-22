@@ -316,5 +316,74 @@ class RestoreIsAskedForTests(unittest.TestCase):
             self.assertIs(got['restore'].default, False, name)
 
 
+class CustomModelComesBackTests(unittest.TestCase):
+    """Работа помнит свою модель — вернуться она должна В КАДР, а не только в
+    сборку: текстура под чужую геометрию ложилась на игровую, и на экране
+    было не то, что уйдёт в мод."""
+
+    def setUp(self):
+        from src.app.session import AppSession
+
+        self._dir = TemporaryDirectory()
+        root = Path(self._dir.name)
+        self.smd = root / 'own.smd'
+        self.smd.write_text('version 1', encoding='utf-8')
+        self.obj = str(root / 'own.obj')
+        self.session = AppSession()
+        self.session._mode = 'scout_c_scattergun'
+        self.session.preview.weapon_key = 'c_scattergun'
+        self.events = self.session.subscribe()
+        # Конвертация SMD и воркеры — не предмет проверки.
+        patches = [
+            mock.patch.object(self.session, '_custom_model_obj',
+                              return_value=(self.obj, ['own_mat'])),
+            mock.patch.object(self.session, '_on_model_ready'),
+            mock.patch.object(self.session.controller, 'load_game_model'),
+            mock.patch.object(self.session.skins, 'detect'),
+            mock.patch.object(type(self.session), 'tf2_paths',
+                              staticmethod(lambda: {'root': 'r', 'misc_vpk': 'm',
+                                                    'textures_vpk': 't'})),
+        ]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+
+    def tearDown(self):
+        self._dir.cleanup()
+
+    def _work(self, keep: bool):
+        return {'custom_smd_path': str(self.smd), 'custom_keep_materials': keep,
+                'textures': {'red': {'own_mat' if keep else 'c_scattergun': __file__}}}
+
+    def test_restore_puts_the_own_geometry_back_with_its_cards(self):
+        with mock.patch.object(work_keeper, 'restore',
+                               side_effect=lambda s, key, asked: (
+                                   s.apply_user_edits(self._work(True)) or True)):
+            res = self.session.restore_work()
+        self.assertNotIn('error', res)
+        p = self.session.preview
+        self.assertEqual(p.custom_obj_path, self.obj)
+        self.assertEqual(p.textures.material_names, ['own_mat'])
+        self.session._on_model_ready.assert_called_once_with(self.obj, '')
+        self.session.controller.load_game_model.assert_not_called()
+
+    def test_geometry_only_model_asks_the_game_for_its_cards(self):
+        with mock.patch.object(work_keeper, 'restore',
+                               side_effect=lambda s, key, asked: (
+                                   s.apply_user_edits(self._work(False)) or True)):
+            self.session.restore_work()
+        self.session._on_model_ready.assert_called_once_with(self.obj, '')
+        kw = self.session.controller.load_game_model.call_args.kwargs
+        self.assertFalse(kw.get('geometry', True))
+
+    def test_forget_takes_the_own_model_out_of_the_frame(self):
+        self.session.preview.apply_user_edits(self._work(True))
+        with mock.patch.object(work_keeper, 'forget'):
+            self.session.forget_work()
+        self.assertIsNone(self.session.preview.custom_smd_path)
+        # Игровая модель грузится заново — своя не остаётся в кадре.
+        self.session.controller.load_game_model.assert_called_once()
+
+
 if __name__ == '__main__':
     unittest.main()

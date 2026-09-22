@@ -221,6 +221,17 @@ class FindPoseSmdTests(unittest.TestCase):
             (self.dir / name).write_text("version 1\n", encoding="utf-8")
         qc = self._qc('$sequence "idle" "idle.smd"\n$sequence "fire" "fire.smd"\n')
         self.assertEqual(Path(smd_pose.find_pose_smd(qc)).name, "idle.smd")
+        qc = self._qc('$sequence "fire" "fire.smd"\n$sequence "reload" "fire.smd"\n')
+        self.assertEqual(Path(smd_pose.find_pose_smd(qc)).name, "fire.smd")
+
+    def test_idle_beats_draw(self):
+        """Вьюмодель Звона смерти: первой идёт draw с закрытой крышкой, а
+        циферблат виден только в idle."""
+        for name in ("draw.smd", "idle.smd"):
+            (self.dir / name).write_text("version 1\n", encoding="utf-8")
+        qc = self._qc('$sequence "draw" {\n\t"draw.smd"\n\tsnap\n}\n'
+                      '$sequence "idle" {\n\t"idle.smd"\n\tloop\n}\n')
+        self.assertEqual(Path(smd_pose.find_pose_smd(qc)).name, "idle.smd")
 
     def test_missing_file_is_not_returned(self):
         qc = self._qc('$sequence "idle" "нет-такого.smd"\n')

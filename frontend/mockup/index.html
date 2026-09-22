@@ -53,7 +53,7 @@
         <!-- Работа с самим файлом эффекта. Справочник нужен, чтобы собрать
              набор параметров снаружи и вставить его кнопкой «Вставить». -->
         <button class="menu__item" data-for="particles" data-tool="open">Открыть PCF с диска…</button>
-        <button class="menu__item" data-for="particles" data-tool="save">Сохранить PCF…</button>
+        <button class="menu__item" data-for="particles" data-tool="save" data-need="pcf">Сохранить PCF…</button>
         <button class="menu__item" data-for="particles" data-tool="ref">Справочник параметров (JSON)…</button>
         <button class="menu__item" data-for="particles" data-tool="ref-ai">Справочник для ИИ (с заданием)…</button>
       </div>
@@ -70,8 +70,8 @@
     </div>
 
     <div class="teams">
-      <button class="tag is-active">RED</button>
-      <button class="tag">BLU</button>
+      <button class="tag is-active" hidden>RED</button>
+      <button class="tag" hidden>BLU</button>
       <button class="tag" data-cond="aus">Australium</button>
       <!-- Краска из игры: как шапка выглядит покрашенной. Только показ —
            в мод краска не идёт, её накладывает игра по маске текстуры. -->
@@ -170,7 +170,7 @@
           <button class="textbtn textbtn--sm" id="forget" hidden
                   title="Удалить сохранённые правки этого предмета">Забыть правки</button>
           <button class="textbtn textbtn--sm" data-cond="maps">Карты материала</button>
-          <button class="textbtn textbtn--sm" id="vmt">VMT</button>
+          <button class="textbtn textbtn--sm" id="vmt" data-cond="vmt">VMT</button>
           <button class="textbtn textbtn--sm" id="misc" data-cond="misc">Прочее</button>
         </div>
       </div>
@@ -557,6 +557,11 @@
         <div class="styles" id="skinbar" data-cond="styles" hidden>
           <span class="label label--inline">Стиль</span>
         </div>
+        <!-- Состояния модели ($bodygroup): целая и разбитая бутылка, кабер до
+             и после взрыва. Игра переключает их сама; здесь — только
+             посмотреть. Ряды строит applyView по ответу Python. -->
+        <div class="styles" id="bodybar" hidden
+             title="Состояние модели: игра переключает его сама, здесь можно посмотреть каждое"></div>
         <!-- Классы мультиклассовой шапки: у каждого своя модель, и собирать
              все девять ради одного незачем. -->
         <div class="styles" id="hatclasses" hidden
@@ -594,7 +599,7 @@
           <button class="textbtn textbtn--sm" id="pundo" disabled
                   title="Отменить правку (Ctrl+Z)">Отменить</button>
           <button class="textbtn textbtn--sm" id="predo" disabled
-                  title="Вернуть правку (Ctrl+Y)">Вернуть</button>
+                  title="Вернуть правку (Ctrl+Y)">Повторить</button>
         </div>
         <div class="acts" id="model-acts">
           <button class="textbtn textbtn--sm" data-cond="replace"
@@ -883,57 +888,123 @@
 </dialog>
 
 <dialog class="ask place" id="placedlg">
-  <div class="ask__body">
-    <div class="dlg__head">
-      <p class="label ask__title">Как положить картинку</p>
+  <!-- Окно устроено как редактор: слева слои, в середине холст, справа
+       свойства выбранного слоя. Панели разделены волосяными линиями, как и
+       всё остальное в приложении; ни одна не «плавает» по пустому месту. -->
+  <div class="place__frame">
+    <header class="place__head">
+      <p class="label ask__title">Посадка картинки</p>
       <span class="mono dlg__mat" id="place-part"></span>
+    </header>
+
+    <div class="place__panes">
+      <!-- Слои — стопкой, как лежат: верхняя строка поверх. Отсюда же
+           добавляют, заменяют и убирают; второй дороги к слоям нет. -->
+      <aside class="place__layers" id="place-layers" hidden>
+        <div class="place__panehead">
+          <p class="label">Слои</p>
+          <span class="mono place__count" id="place-count"></span>
+        </div>
+        <p class="place__order">Верхний лежит поверх остальных. Тяни строку, чтобы переставить</p>
+        <div class="place__list" id="place-list"></div>
+        <button class="place__add" type="button" id="place-add"
+                title="Ещё одна картинка поверх">+ Добавить</button>
+        <div class="place__layeracts">
+          <button class="textbtn textbtn--sm" type="button" id="place-replace"
+                  title="Другой файл на место этой картинки, посадка останется">Заменить…</button>
+          <button class="textbtn textbtn--sm" type="button" id="place-drop"
+                  title="Снять эту картинку с части">Убрать</button>
+        </div>
+      </aside>
+
+      <!-- Холст показывает НАСТОЯЩУЮ развёртку части (треугольники, по
+           которым маскирует склейка), а не рамку. Под ним — что показывать:
+           это переключатели окна, а не настройки предмета. -->
+      <section class="place__stage">
+        <div class="place__box">
+          <canvas class="place__canvas" id="place-canvas" width="512" height="512"
+                  tabindex="0"></canvas>
+        </div>
+        <!-- Галки, а не кнопки: это независимые «да/нет», и ряд кнопок, где
+             одна залита, а две обведены, читался как выбор одного из трёх. -->
+        <div class="place__view">
+          <span class="label label--inline">Показ</span>
+          <label class="check place__toggle"
+                 title="Приблизить холст к куску: класть картинку, глядя на всю текстуру, — целиться в спичку с другого конца комнаты">
+            <input type="checkbox" id="place-zoom" checked><span>Приблизить</span>
+          </label>
+          <label class="check place__toggle"
+                 title="Спрятать игровую текстуру: на пёстрой не видно границ своей картинки">
+            <input type="checkbox" id="place-bare"><span>Без игровой</span>
+          </label>
+          <label class="check place__toggle"
+                 title="Только внешний контур куска вместо сетки треугольников">
+            <input type="checkbox" id="place-outline"><span>Контур</span>
+          </label>
+          <span class="place__keys">Тяни мышью · размер — за квадратики · поворот — за маркер или стрелками · колесо — ближе</span>
+        </div>
+      </section>
+
+      <!-- Свойства посадки — числами, как в любом редакторе: то же, что
+           делает мышь на холсте, только точно. -->
+      <aside class="place__props">
+        <div class="place__prop">
+          <p class="label">Вписать</p>
+          <div class="seg">
+            <button type="button" data-fit="contain" title="Целиком в место части, с сохранением пропорций">Целиком</button>
+            <button type="button" data-fit="cover" title="Заполнить место части, края уйдут под маску">Заполнить</button>
+            <button type="button" data-fit="stretch" title="Растянуть по месту части, пропорции не сохраняются">Растянуть</button>
+          </div>
+        </div>
+        <div class="place__prop">
+          <p class="label">Размер, %</p>
+          <div class="place__fields">
+            <label class="place__field">
+              <span>Ширина</span>
+              <input class="input input--num" id="place-w" type="number"
+                     min="5" max="2000" step="5" value="100">
+            </label>
+            <label class="place__field">
+              <span>Высота</span>
+              <input class="input input--num" id="place-h" type="number"
+                     min="5" max="2000" step="5" value="100">
+            </label>
+          </div>
+        </div>
+        <div class="place__prop">
+          <p class="label">Поворот, °</p>
+          <div class="place__fields">
+            <label class="place__field">
+              <span>Угол</span>
+              <input class="input input--num" id="place-a" type="number"
+                     min="-360" max="720" step="15" value="0">
+            </label>
+          </div>
+        </div>
+        <div class="place__prop">
+          <p class="label">Сдвиг, % места</p>
+          <div class="place__fields">
+            <label class="place__field">
+              <span>Вправо</span>
+              <input class="input input--num" id="place-x" type="number"
+                     min="-500" max="500" step="5" value="0">
+            </label>
+            <label class="place__field">
+              <span>Вниз</span>
+              <input class="input input--num" id="place-y" type="number"
+                     min="-500" max="500" step="5" value="0">
+            </label>
+          </div>
+        </div>
+        <button class="textbtn textbtn--sm place__reset" type="button" id="place-reset"
+                title="Вернуть посадку к исходной: целиком, без поворота и сдвига">Сбросить посадку</button>
+      </aside>
     </div>
-    <div class="place__box">
-      <canvas class="place__canvas" id="place-canvas" width="512" height="512"
-              tabindex="0"></canvas>
-    </div>
-    <div class="place__row">
-      <span class="label label--inline">Вписать</span>
-      <button class="tag" data-fit="contain">Целиком</button>
-      <button class="tag" data-fit="cover">Заполнить</button>
-      <button class="tag" data-fit="stretch">Растянуть</button>
-      <!-- Размер тянут ЗА РАМКУ, как в редакторах изображений: за угол —
-           целиком, за сторону — только по её оси. Поля рядом для тех, кому
-           нужно точное число, и как подпись к тому, что делает мышь. -->
-      <label class="parts__detail">
-        Ширина
-        <input class="input input--num" id="place-w" type="number"
-               min="5" max="2000" step="5" value="100">
-      </label>
-      <label class="parts__detail">
-        Высота
-        <input class="input input--num" id="place-h" type="number"
-               min="5" max="2000" step="5" value="100">
-      </label>
-      <!-- Кусок занимает малую часть развёртки: класть на него картинку,
-           глядя на всю текстуру, — то же, что целиться в спичку с другого
-           конца комнаты. По умолчанию включено, выключается для контекста:
-           иногда надо видеть, где деталь лежит относительно соседних. -->
-      <label class="check place__bare">
-        <input type="checkbox" id="place-zoom" checked><span>Приблизить</span>
-      </label>
-      <label class="check place__bare">
-        <input type="checkbox" id="place-bare"><span>Без игровой</span>
-      </label>
-      <!-- Развёртка нарисована ТРЕУГОЛЬНИКАМИ, и обвести каждый — значит
-           показать сетку: на детали из полутора тысяч треугольников за ней не
-           видно ни картинки, ни краёв самой детали. Галка оставляет только
-           внешний контур куска. -->
-      <label class="check place__bare">
-        <input type="checkbox" id="place-outline"><span>Только контур</span>
-      </label>
-      <button class="textbtn textbtn--sm" id="place-reset">Сбросить</button>
-    </div>
-    <p class="ask__text place__hint" id="place-hint">Тяни картинку мышью, размер — за квадратики на рамке (угол тянет целиком, сторона — по своей оси), поворот — за маркер сверху (стрелки — на 15°), колесо — приблизить к курсору</p>
-    <div class="ask__acts">
+
+    <footer class="place__foot">
       <button class="textbtn" type="button" id="place-cancel">Отмена</button>
       <button class="btn--primary" type="button" id="place-ok">Готово</button>
-    </div>
+    </footer>
   </div>
 </dialog>
 

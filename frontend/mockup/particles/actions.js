@@ -160,9 +160,15 @@ export const PACTS = {
       pSystem, scope.group ?? null, scope.index ?? null, scope.attr ?? null);
     if (res.error) { say(res.error); return; }
     const text = JSON.stringify({ tf2sgParticleParams: res.payload });
+    // Подпись называет, ЧТО скопировано: параметр, модуль, группа или вся
+    // система — одно «параметры скопированы» на всё читалось как ошибка.
+    const what = scope.attr ? `Скопирован параметр «${scope.attr}»`
+      : scope.index !== null && scope.index !== undefined ? 'Скопирован модуль'
+      : scope.group ? `Скопирована группа «${scope.group}»`
+      : 'Скопирована вся система эффекта';
     try {
       await navigator.clipboard.writeText(text);
-      say('Параметры скопированы — можно вставить в другую систему или отдать ИИ');
+      say(what);
     } catch {
       // Доступ к буферу может быть закрыт настройками браузера — тогда
       // показываем набор, чтобы его можно было выделить и скопировать самому.
@@ -183,7 +189,7 @@ export const PACTS = {
     let payload = null;
     try {
       payload = JSON.parse(text).tf2sgParticleParams;
-    } catch (e) { say('В буфере не JSON: ' + e.message); return; }
+    } catch (e) { say(`В буфере не JSON: ${e.message}`); return; }
     if (!payload) { say('В JSON нет раздела tf2sgParticleParams'); return; }
 
     // Полный набор можно влить поверх или заменить систему целиком.
@@ -202,7 +208,7 @@ export const PACTS = {
     }
     const res = await api.pasteParticleParams(pSystem, payload, mode);
     if (await applyStructure(res) && res.report?.length) {
-      say('Вставлено, но часть пропущена: ' + res.report[0]);
+      say(`Вставлено, но часть пропущена: ${res.report[0]}`);
     }
   },
 

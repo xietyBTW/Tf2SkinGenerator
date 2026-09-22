@@ -271,6 +271,13 @@ class ControlsTests(unittest.TestCase):
         self.assertFalse(api.controls_for('spray')['extract_model'])
         self.assertFalse(api.controls_for('skybox')['extract_texture'])
 
+    def test_vmt_editor_only_where_the_model_has_a_material(self):
+        """Кнопка VMT висела под пустым альбомом до выбора предмета."""
+        for mode in ('c_scattergun', 'hat', 'scout_body', 'scout_hands'):
+            self.assertTrue(api.controls_for(mode)['vmt_editor'], mode)
+        for mode in ('', 'spray', 'skybox', 'critHIT', 'custom'):
+            self.assertFalse(api.controls_for(mode)['vmt_editor'], mode)
+
     def test_replace_model_not_offered_for_player_body(self):
         """Сложный скелет и bodygroups — подмена почти всегда даёт битый результат."""
         self.assertTrue(api.controls_for('c_scattergun')['replace_model'])

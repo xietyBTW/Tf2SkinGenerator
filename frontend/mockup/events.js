@@ -12,7 +12,7 @@ import { setStatus, work } from './layout.js';
 import { ask } from './ask.js';
 import { showReport } from './diagnostics.js';
 import { showFailure } from './fail.js';
-import { askForTexture } from './build.js';
+import { askForTexture, askForModel } from './build.js';
 import { showCpModel } from './particles/points.js';
 import {
   refreshView,
@@ -182,6 +182,12 @@ api.subscribe((ev) => {
       askForTexture(ev.material);
       break;
 
+    // Своя модель подменила основную, а у оружия есть сменная часть
+    // (разбитая бутылка, взорванный кабер) — сборка ждёт, чем её собрать.
+    case 'need_model':
+      askForModel(ev.part, ev.kind);
+      break;
+
     case 'build_done':
       setStatus(ev.message || (ev.ok ? 'Готово' : 'Ошибка сборки'), false);
       break;
@@ -193,10 +199,10 @@ api.subscribe((ev) => {
       // У многоматериальной модели разметок несколько: у каждого материала
       // своя текстура и своя развёртка в тех же координатах.
       const uvFiles = (ev.paths && ev.paths.length) ? ev.paths : [ev.path];
-      say(uvFiles.length > 1 ? 'UV-шаблоны: ' + uvFiles.length + ' шт.'
-                             : 'UV-шаблон: ' + uvFiles[0]);
+      say(uvFiles.length > 1 ? `UV-шаблоны: ${uvFiles.length} шт.`
+                             : `UV-шаблон: ${uvFiles[0]}`);
       uvFiles.forEach((file, index) => addFrame(
-        uvFiles.length > 1 ? 'UV-шаблон ' + (index + 1) : 'UV-шаблон', file));
+        uvFiles.length > 1 ? `UV-шаблон ${index + 1}` : 'UV-шаблон', file));
       break;
 
     // Файлы декомпиляции готовы: пока выбор не сделан, за ними числится

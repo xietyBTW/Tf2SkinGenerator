@@ -962,8 +962,9 @@ class SessionPartsTests(unittest.TestCase):
             self.assertEqual(im.n_frames, 60)
             self.assertEqual(im.info.get('duration'), 40)
 
-        # Без гифки печь нечего: склейка превью и так полная.
-        self.session.set_part_texture('weapon', 0, self.patch)
+        # Без гифки печь нечего: склейка превью и так полная. Гифку на части 0
+        # ЗАМЕНЯЕМ (слой 0): новая картинка без слоя легла бы поверх неё.
+        self.session.set_part_texture('weapon', 0, self.patch, layer=0)
         self.session.set_part_texture('weapon', 1, None)
         still = t.uploaded_for_mat(t.storage_main_key())
         self.assertEqual(self.session._bake_plan([still]), {})
@@ -1284,24 +1285,207 @@ class SessionPartsTests(unittest.TestCase):
         Якорь — габарит части, на которую наклейку клали; после разреза он
         единственный говорит, где она была. Потеряв его при первой же правке
         посадки, картинка прыгнула бы в габарит половинки."""
-        from src.app.session import _image_spec
+        from src.app.session import _image_spec, _image_specs
 
+        images = lambda part: [_image_spec(v) for v in _image_specs(
+            self.session.preview.part_textures['weapon'][part])]
         self.session.set_part_texture('weapon', 0, self.patch)
         self.session.set_part_detail('weapon', 1.0)          # разрезали
         part = sorted(self.session.preview.part_textures['weapon'])[0]
-        anchor = _image_spec(
-            self.session.preview.part_textures['weapon'][part])['anchor']
+        anchor = images(part)[0]['anchor']
         self.assertIsNotNone(anchor, 'разрез не поставил якорь')
 
         self.session.set_part_texture('weapon', part, None, {'scale': 1.5})
-        spec = _image_spec(self.session.preview.part_textures['weapon'][part])
+        spec = images(part)[0]
         self.assertEqual(spec['anchor'], anchor)
         self.assertAlmostEqual(spec['scale'], 1.5)
 
         # А новая картинка начинает с чистого листа: она про ЭТУ часть.
         self.session.set_part_texture('weapon', part, self.patch)
-        fresh = _image_spec(self.session.preview.part_textures['weapon'][part])
+        fresh = images(part)[-1]
         self.assertIsNone(fresh['anchor'])
+
+    def test_images_stack_on_a_part(self):
+        """Картинок на части может быть несколько — слоями, снизу вверх:
+        новая ложится поверх, а не стирает предыдущую."""
+        from src.app.session import _image_specs
+
+        green = os.path.join(self.tmp, 'green.png')
+        Image.new('RGBA', (8, 8), (0, 255, 0, 255)).save(green)
+        self.session.set_part_texture('weapon', 0, self.patch, {'scale': 0.5})
+        self.session.set_part_texture('weapon', 0, green, {'scale': 0.2})
+        stack = _image_specs(self.session.preview.part_textures['weapon'][0])
+        self.assertEqual([s['path'] for s in stack], [self.patch, green])
+        # Верхняя — зелёная и мельче: снизу видна и красная.
+        colors = {c for _, c in
+                  Image.open(self._painted()).convert('RGB').getcolors(65536)}
+        self.assertIn((255, 0, 0), colors)
+        self.assertIn((0, 255, 0), colors)
+
+    def test_a_named_layer_is_edited_replaced_and_removed(self):
+        from src.app.session import _image_spec, _image_specs
+
+        green = os.path.join(self.tmp, 'green.png')
+        Image.new('RGBA', (8, 8), (0, 255, 0, 255)).save(green)
+        self.session.set_part_texture('weapon', 0, self.patch)
+        self.session.set_part_texture('weapon', 0, green)
+        stack = lambda: _image_specs(self.session.preview.part_textures['weapon'][0])
+
+        # Посадка — у названного слоя, верхний не трогаем.
+        self.session.set_part_texture('weapon', 0, None, {'scale': 2.0}, layer=0)
+        self.assertAlmostEqual(_image_spec(stack()[0])['scale'], 2.0)
+        self.assertAlmostEqual(_image_spec(stack()[1])['scale'], 1.0)
+        # Без слоя правится верхняя.
+        self.session.set_part_texture('weapon', 0, None, {'scale': 3.0})
+        self.assertAlmostEqual(_image_spec(stack()[1])['scale'], 3.0)
+        # Замена картинки слоя — на его месте.
+        self.session.set_part_texture('weapon', 0, green, layer=0)
+        self.assertEqual([_image_spec(s)['path'] for s in stack()], [green, green])
+        self.assertIn('error', self.session.set_part_texture(
+            'weapon', 0, None, {'scale': 1.0}, layer=5))
+        # Снять один слой — остаётся другой; снять без слоя — все.
+        self.session.set_part_texture('weapon', 0, None, layer=0)
+        self.assertEqual(len(stack()), 1)
+        self.session.set_part_texture('weapon', 0, None)
+        self.assertNotIn(0, self.session.preview.part_textures.get('weapon', {}))
+
+    def test_a_layer_moved_up_the_stack_shows_on_top(self):
+        """Порядок стопки и есть наложение: переставил выше — легла поверх."""
+        from src.app.session import _image_specs
+
+        green = os.path.join(self.tmp, 'green.png')
+        Image.new('RGBA', (8, 8), (0, 255, 0, 255)).save(green)
+        self.session.set_part_texture('weapon', 0, self.patch)
+        self.session.set_part_texture('weapon', 0, green)
+        pixels = lambda: {c for _, c in
+                          Image.open(self._painted()).convert('RGB').getcolors(65536)}
+        self.assertIn((0, 255, 0), pixels())
+        self.assertNotIn((255, 0, 0), pixels())
+
+        self.session.move_part_texture('weapon', 0, 0, -1)     # красную наверх
+        stack = _image_specs(self.session.preview.part_textures['weapon'][0])
+        self.assertEqual([s['path'] for s in stack], [green, self.patch])
+        self.assertIn((255, 0, 0), pixels())
+        self.assertNotIn((0, 255, 0), pixels())
+        self.assertIn('error', self.session.move_part_texture('weapon', 0, 0, 7))
+
+    def test_a_cut_moves_every_layer(self):
+        from src.app.session import _image_specs
+
+        self.session.set_part_texture('weapon', 0, self.patch)
+        self.session.set_part_texture('weapon', 0, self.patch)
+        self.session.set_part_detail('weapon', 1.0)
+        part = sorted(self.session.preview.part_textures['weapon'])[0]
+        self.assertEqual(len(_image_specs(
+            self.session.preview.part_textures['weapon'][part])), 2)
+
+    def test_placement_window_sees_the_other_layers_but_not_the_edited_one(self):
+        """Основа для окна посадки — материал со всем, что на нём лежит, кроме
+        правимого слоя: иначе под живой картинкой лежала бы её же копия."""
+        Image.new('RGBA', (64, 64), (0, 0, 0, 255)).save(self.base)
+        green = os.path.join(self.tmp, 'green.png')
+        Image.new('RGBA', (8, 8), (0, 255, 0, 255)).save(green)
+        self.session.set_part_texture('weapon', 0, self.patch, {'scale': 0.5})
+        self.session.set_part_texture('weapon', 1, green)
+        shape = self.session.part_shape('weapon', 0, layer=0)
+        self.assertEqual(shape['layer'], 0)
+        self.assertEqual(shape['image']['path'], self.patch)
+        colors = {c for _, c in
+                  Image.open(shape['base']).convert('RGB').getcolors(65536)}
+        self.assertIn((0, 255, 0), colors, 'соседний слой не виден')
+        self.assertNotIn((255, 0, 0), colors, 'правимый слой запечён в основу')
+        # Новая картинка: посадки нет, основа — со всеми слоями.
+        fresh = self.session.part_shape('weapon', 0)
+        self.assertIsNone(fresh['image'])
+        colors = {c for _, c in
+                  Image.open(fresh['base']).convert('RGB').getcolors(65536)}
+        self.assertIn((255, 0, 0), colors)
+
+    def test_parts_paint_the_variant_card_while_australium_is_shown(self):
+        """Части красят то, что в кадре: с включённым австралием — его карточку,
+        поверх его gold-кадра; главная остаётся нетронутой."""
+        gold = os.path.join(self.tmp, 'gold.png')
+        Image.new('RGBA', (64, 64), (200, 170, 40, 255)).save(gold)
+        t = self.session.preview.textures
+        t.australium_frame = gold
+        t.australium_mat_name = 'weapon_gold'
+
+        t.australium_active = True
+        self.session.set_part_colors('', {'0': '#ff0000'})
+        self.assertIn('weapon_gold', self.session.preview.part_colors)
+        self.assertNotIn('weapon', self.session.preview.part_colors)
+        painted = t.uploaded_for_mat('weapon_gold')
+        self.assertTrue(painted and os.path.isfile(painted))
+        self.assertIsNone(self._painted())
+        # Странице — ключ геометрии, а не карточка варианта.
+        self.assertEqual(self.session.parts('')['material'], 'weapon')
+        # Основа склейки — gold-кадр, не игровая текстура главной.
+        colors = {c for _, c in Image.open(painted).convert('RGB').getcolors(65536)}
+        self.assertNotIn((0, 0, 0), colors)
+
+        t.australium_active = False
+        self.session.set_part_colors('', {'1': '#00ff00'})
+        self.assertIn('weapon', self.session.preview.part_colors)
+        self.assertEqual(self.session.preview.part_colors['weapon_gold'], {0: '#ff0000'})
+        # По имени карточка варианта достижима и без переключателя.
+        self.assertEqual(self.session.parts('weapon_gold')['parts'][0]['color'], '#ff0000')
+
+    def test_a_style_keeps_its_own_strokes_over_its_own_game_texture(self):
+        """Мазки стиля — свои: покрасил Bloody, вернулся на базовый — там
+        чисто. И склейка стиля ложится на ЕГО игровую текстуру, а не на базу."""
+        bloody = os.path.join(self.tmp, 'bloody.png')
+        Image.new('RGBA', (64, 64), (120, 0, 0, 255)).save(bloody)
+        t = self.session.preview.textures
+        t.skin_info = {'num_skins': 2}
+        t.style_game_tex = {1: {'weapon': bloody}}
+        self.session.preview.skin_chosen = {1: {'weapon'}}
+
+        t.active_skin = 1
+        self.session.set_part_colors('weapon', {'0': '#00ff00'})
+        styled = t.skin_overrides.get(1, {}).get('weapon')
+        self.assertTrue(styled and os.path.isfile(styled), 'склейка не в стиле')
+        colors = {c for _, c in Image.open(styled).convert('RGB').getcolors(65536)}
+        self.assertIn((120, 0, 0), colors, 'основа стиля — не его текстура')
+        self.assertNotIn((0, 0, 0), colors)
+
+        t.active_skin = 0
+        self.assertIsNone(self._painted())
+        self.assertFalse([p for p in self.session.parts('weapon')['parts'] if p['color']])
+        self.session.set_part_colors('weapon', {'1': '#0000ff'})
+        self.assertEqual(self.session.preview.part_colors['weapon'], {1: '#0000ff'})
+        self.assertEqual(self.session.preview.part_colors['weapon@style1'], {0: '#00ff00'})
+        # Склейка стиля от базового мазка не пострадала.
+        self.assertEqual(t.skin_overrides[1]['weapon'], styled)
+
+    def test_blu_strokes_do_not_leak_into_red(self):
+        from src.shared.constants import Team
+
+        blue = os.path.join(self.tmp, 'blue.png')
+        Image.new('RGBA', (64, 64), (0, 0, 120, 255)).save(blue)
+        t = self.session.preview.textures
+        t.blu_frames = [blue]                       # командный материал
+        t.active_team = Team.BLU
+        self.session.set_part_colors('weapon', {'0': '#ff0000'})
+        painted = t.textures[Team.BLU].get('weapon')
+        self.assertTrue(painted and os.path.isfile(painted))
+        self.assertNotIn('weapon', t.textures[Team.RED])
+        colors = {c for _, c in Image.open(painted).convert('RGB').getcolors(65536)}
+        self.assertIn((0, 0, 120), colors, 'основа синей склейки — не синий кадр')
+
+        t.active_team = Team.RED
+        self.assertFalse([p for p in self.session.parts('weapon')['parts'] if p['color']])
+
+    def test_a_cut_moves_the_strokes_of_every_style(self):
+        t = self.session.preview.textures
+        t.skin_info = {'num_skins': 2}
+        self.session.preview.skin_chosen = {1: {'weapon'}}
+        t.active_skin = 1
+        self.session.set_part_colors('weapon', {'0': '#00ff00'})
+        t.active_skin = 0
+        self.session.set_part_colors('weapon', {'0': '#ff0000'})
+        self.session.set_part_detail('weapon', 1.0)
+        self.assertTrue(self.session.preview.part_colors.get('weapon'))
+        self.assertTrue(self.session.preview.part_colors.get('weapon@style1'))
 
     def test_the_image_lies_on_top_of_the_colour(self):
         """Порядок слоёв: сперва тонировка, потом наклейка. Наоборот картинка

@@ -7,7 +7,7 @@ import os
 import re
 import shutil
 import subprocess
-from typing import List, Optional
+from typing import Dict, List, Optional, Tuple
 from src.services import qc_skin_parser
 from src.services.smd_service import NON_REFERENCE_SMD_KEYWORDS
 from src.shared.constants import ToolTimeouts
@@ -496,8 +496,13 @@ class ModelBuildService:
 
     @staticmethod
     def extract_bodygroup_groups(qc_path: str) -> List[List[Optional[str]]]:
+        """Варианты каждой бодигруппы QC — без имён (см. extract_bodygroups)."""
+        return [variants for _, variants in ModelBuildService.extract_bodygroups(qc_path)]
+
+    @staticmethod
+    def extract_bodygroups(qc_path: str) -> List[Tuple[str, List[Optional[str]]]]:
         """
-        Варианты каждой бодигруппы QC в порядке объявления.
+        Бодигруппы QC с именами: [(имя, варианты)] в порядке объявления.
 
         `$bodygroup "shell" { studio "shell.smd" blank }` — это ПЕРЕКЛЮЧАТЕЛЬ:
         игра показывает ровно один вариант, по умолчанию нулевой. Для превью
@@ -520,14 +525,19 @@ class ModelBuildService:
             return []
 
         qc_dir = os.path.dirname(qc_path)
-        groups: List[List[Optional[str]]] = []
+        groups: List[Tuple[str, List[Optional[str]]]] = []
         for m in re.finditer(r'\$(?:bodygroup|body)\b', content, re.IGNORECASE):
             line_end = content.find('\n', m.end())
             head = content[m.end():line_end if line_end != -1 else len(content)]
+            # Имя группы — первая строка в кавычках после ключевого слова
+            # (`$bodygroup "broken"`); без него группа зовётся по номеру.
+            named = re.match(r'\s*"([^"]*)"', head)
+            name = (named.group(1).strip() if named and not named.group(1).lower().endswith('.smd')
+                    else '') or f'group{len(groups)}'
             # Однострочная форма: $body studio "x.smd" — блока нет
             inline = re.search(r'studio\s+"([^"]+\.smd)"', head, re.IGNORECASE)
             if inline:
-                groups.append([os.path.join(qc_dir, inline.group(1))])
+                groups.append((name, [os.path.join(qc_dir, inline.group(1))]))
                 continue
             # Блочная форма: '{' обычно на СЛЕДУЮЩЕЙ строке (так пишет Crowbar).
             # Между заголовком и скобкой не должно быть другой директивы.
@@ -551,8 +561,34 @@ class ModelBuildService:
                 ref = item.group(1)
                 variants.append(os.path.join(qc_dir, ref) if ref else None)
             if variants:
-                groups.append(variants)
+                groups.append((name, variants))
         return groups
+
+    @staticmethod
+    def chosen_body_smds(groups: List[Tuple[str, List[Optional[str]]]],
+                         choice: Optional[Dict[str, int]] = None) -> List[str]:
+        """
+        SMD выбранных вариантов бодигрупп: по умолчанию нулевой из каждой
+        группы (его показывает игра, пока группу не переключили), либо тот,
+        что назвал ``choice`` {имя группы: номер}. `blank` — группа не
+        рисуется. Служебные SMD (physics/anim) отбрасываются.
+        """
+        choice = choice or {}
+        out: List[str] = []
+        seen = set()
+        for name, variants in groups:
+            index = choice.get(name, 0)
+            picked = variants[index] if 0 <= index < len(variants) else None
+            if not picked:
+                continue                      # blank — вариант ничего не рисует
+            low = os.path.basename(picked).lower()
+            if any(skip in low for skip in NON_REFERENCE_SMD_KEYWORDS):
+                continue
+            if low in seen or not os.path.exists(picked):
+                continue
+            seen.add(low)
+            out.append(picked)
+        return out
 
     @staticmethod
     def extract_all_mesh_smds(qc_path: str) -> List[str]:
@@ -599,28 +635,14 @@ class ModelBuildService:
         return out
 
     @staticmethod
-    def extract_default_body_smds(qc_path: str) -> List[str]:
+    def extract_default_body_smds(qc_path: str,
+                                  choice: Optional[Dict[str, int]] = None) -> List[str]:
         """
-        SMD, которые игра показывает при бодигруппах по умолчанию.
-
-        Из каждой группы берётся НУЛЕВОЙ вариант (именно его показывает игра,
-        пока бодигруппу не переключили); `blank` означает, что группа по
-        умолчанию не рисуется. Служебные SMD (physics/anim) отбрасываются.
+        SMD, которые игра показывает при бодигруппах по умолчанию — либо при
+        выбранных ``choice`` {имя группы: номер варианта} (см. chosen_body_smds).
         """
-        out: List[str] = []
-        seen = set()
-        for variants in ModelBuildService.extract_bodygroup_groups(qc_path):
-            first = variants[0] if variants else None
-            if not first:
-                continue                      # blank первым — группа не рисуется
-            low = os.path.basename(first).lower()
-            if any(skip in low for skip in NON_REFERENCE_SMD_KEYWORDS):
-                continue
-            if low in seen or not os.path.exists(first):
-                continue
-            seen.add(low)
-            out.append(first)
-        return out
+        return ModelBuildService.chosen_body_smds(
+            ModelBuildService.extract_bodygroups(qc_path), choice)
 
     @staticmethod
     def extract_extra_body_smds(qc_path: str, weapon_key: str) -> List[str]:

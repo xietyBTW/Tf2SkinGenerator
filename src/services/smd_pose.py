@@ -370,10 +370,12 @@ _RE_SMD = re.compile(r'"([^"]+\.smd)"', re.IGNORECASE)
 
 def find_pose_smd(qc_path: str) -> Optional[str]:
     """
-    SMD первой последовательности QC — та поза, в которой модель видна в игре.
+    SMD последовательности `idle` из QC — та поза, в которой модель видна в
+    игре большую часть времени; без неё — первая по порядку.
 
-    Берём именно первую: у косметики и оружия это `idle`, и другой игрок её
-    почти всегда и видит. None, если последовательностей нет или файл потерян.
+    У косметики и оружия `idle` и стоит первой. У вьюмоделей (часы шпиона)
+    первой идёт `draw`: Звон смерти в её нулевом кадре закрыт, и циферблат
+    спрятан под крышкой. None, если последовательностей нет или файл потерян.
     """
     if not qc_path or not os.path.isfile(qc_path):
         return None
@@ -383,9 +385,14 @@ def find_pose_smd(qc_path: str) -> Optional[str]:
     except OSError:
         return None
     qc_dir = os.path.dirname(qc_path)
+    found: list = []
     for block in _RE_SEQUENCE.finditer(content):
-        for ref in _RE_SMD.finditer(block.group(1)):
+        body = block.group(1)
+        for ref in _RE_SMD.finditer(body):
             candidate = os.path.join(qc_dir, ref.group(1).replace("\\", os.sep))
             if os.path.isfile(candidate):
-                return candidate
-    return None
+                found.append((body.lstrip().strip('"').lower().startswith("idle"), candidate))
+                break
+    if not found:
+        return None
+    return next((path for is_idle, path in found if is_idle), found[0][1])

@@ -216,10 +216,20 @@ class PreviewTextureState:
 
     def variant_display_texture(self) -> Optional[str]:
         """Текстура активного варианта (Australium) или None, если не активен.
-        Своя загруженная приоритетнее игрового gold-кадра."""
+
+        У варианта своя карточка (`australium_mat_name`): что на ней лежит —
+        своя правка либо игровой gold-кадр, — то и показывает кадр.
+        `australium_user_tex` остался от работ, записанных до карточки."""
         if not self.australium_active:
             return None
-        return _existing(self.australium_user_tex) or self.australium_frame
+        own = self.resolve_base(self.australium_mat_name) if self.australium_mat_name else None
+        return own or _existing(self.australium_user_tex) or self.australium_frame
+
+    def is_variant_material(self, mat: Optional[str]) -> bool:
+        """Материал варианта (Australium) — карточка с той же геометрией, что у
+        главного, но со своей текстурой."""
+        return bool(mat and self.australium_mat_name
+                    and mat.lower() == self.australium_mat_name.lower())
 
     def resolve_card(self, mat: str, hands_blu_view: bool = False) -> Optional[str]:
         """Текстура для карточки при текущей команде/стиле.
@@ -322,6 +332,11 @@ class PreviewTextureState:
             frames = self.blu_frames if active == Team.BLU else self.red_frames
             if frames and os.path.exists(frames[0]):
                 return frames[0]
+
+        # Вариант (Australium): его игровой кадр приезжает отдельным сигналом,
+        # в карты материалов он не попадает.
+        if self.is_variant_material(mat):
+            return _existing(self.australium_frame)
 
         return None
 

@@ -104,10 +104,14 @@ class Preview3DWorker(BaseWorker):
         textures_vpk_path: str,
         lang: str = 'en',
         parent=None,
+        bodygroups: Optional[dict] = None,
     ):
         super().__init__(parent)
         self.weapon_key        = weapon_key
         self.mode              = mode
+        #: Выбранные варианты бодигрупп {имя группы: номер}: переключатель
+        #: состояния в превью (разбитая бутылка). Пусто — как в игре по умолчанию.
+        self.bodygroups: dict  = dict(bodygroups or {})
         #: Вид предмета: вместо разбросанных проверок «mode == 'hat'» и
         #: «mode in HAND_MODE_KEYS» (см. src/data/item_kinds.py)
         self.kind              = kind_of(mode)
@@ -157,6 +161,9 @@ class Preview3DWorker(BaseWorker):
 
             # Ищем bodygroup SMDs в той же папке (например c_righthand_bodygroup.smd)
             bodygroup_smds = self._find_bodygroup_smds(smd_path)
+            # Основной SMD сам может быть вариантом группы (c_bottle.smd — целая
+            # бутылка): выбрали другой вариант — основным становится он.
+            smd_path = self._swap_reference_for_choice(smd_path, bodygroup_smds)
             if bodygroup_smds:
                 logger.info(
                     f"[3D] Найдены bodygroup SMD: "
@@ -281,6 +288,9 @@ class Preview3DWorker(BaseWorker):
         except Exception as exc:
             logger.debug(f"[3D] свойства материалов не собраны: {exc}")
             hints = {}
+        if self._decomp_dir:
+            from src.services import control_panel
+            hints.update(control_panel.screen_hints(self._decomp_dir))
         # Отправляем ВСЕГДА, даже пустое: иначе на новой модели останутся
         # свойства предыдущей, а материалы у разных пушек нередко тёзки
         # (36 моделей стока делят главную текстуру с соседней).
@@ -459,7 +469,7 @@ class Preview3DWorker(BaseWorker):
             framerate = 0.0
         else:
             # ── Одиночная текстура (возможно анимированная) ──────────── #
-            frame_paths, framerate = self._extract_texture_frames()
+            frame_paths, framerate = self._extract_texture_frames(mat_names)
             first_tex = frame_paths[0] if frame_paths else ""
             self.ready.emit(obj_path, first_tex)
             # Главная текстура + доп. (фиксированные и из $texturegroup) → карточки 2D
@@ -748,20 +758,31 @@ class Preview3DWorker(BaseWorker):
         directory = os.path.dirname(reference_smd_path)
         found = set(glob.glob(os.path.join(directory, "*_bodygroup.smd")))
 
-        # Части модели из QC. Берём вариант ПО УМОЛЧАНИЮ каждой бодигруппы:
-        # переключаемая группа (broken у бутылки, bites у сэндвича, reload у
-        # гранатомёта, класс у id_badge) показывает в игре ровно один вариант,
-        # и складывать их все в одну модель значит показать бутылку целой и
-        # разбитой разом. Материалы скрытых вариантов не теряются — они
-        # приходят карточками из $texturegroup (_extract_texturegroup_extras).
+        # Части модели из QC. Берём вариант ПО УМОЛЧАНИЮ каждой бодигруппы
+        # (либо выбранный переключателем): переключаемая группа (broken у
+        # бутылки, bites у сэндвича, reload у гранатомёта, класс у id_badge)
+        # показывает в игре ровно один вариант, и складывать их все в одну
+        # модель значит показать бутылку целой и разбитой разом. Файлы
+        # НЕвыбранных вариантов убираем и из найденного по маске: у кабера оба
+        # набалдашника зовутся *_bodygroup.smd. Материалы скрытых вариантов
+        # не теряются — они приходят карточками из $texturegroup.
         try:
             model = self._model(directory)
             if model is not None:
                 from src.services.model_build_service import ModelBuildService
-                for smd in ModelBuildService.extract_default_body_smds(model.qc_path):
-                    found.add(smd)
+                groups = ModelBuildService.extract_bodygroups(model.qc_path)
+                every = {os.path.normcase(os.path.abspath(v))
+                         for _, variants in groups for v in variants if v}
+                found = {p for p in found
+                         if os.path.normcase(os.path.abspath(p)) not in every}
+                found.update(ModelBuildService.chosen_body_smds(groups, self.bodygroups))
         except Exception as exc:
             logger.debug(f"[3D] Не удалось собрать part-SMD из QC: {exc}")
+
+        # Экран модели (циферблат Звона смерти) — vgui-панель, которой в меше
+        # нет: превращаем её в геометрию, привязанную к своей кости.
+        from src.services import control_panel
+        found.update(control_panel.screen_smds(directory, reference_smd_path))
 
         # Не включаем сам reference (он уже основной)
         found.discard(os.path.abspath(reference_smd_path))
@@ -771,6 +792,37 @@ class Preview3DWorker(BaseWorker):
         # попала бы в превью тела. Но у маски своя секция (режим spy_masks /
         # SPY_MASK_MODE_KEY), поэтому из тела её исключаем.
         return sorted(self._strip_spy_disguise_mask(found, self.mode))
+
+    def _swap_reference_for_choice(self, smd_path: str, bodygroup_smds: list) -> str:
+        """
+        Основной SMD, если переключатель выбрал другой вариант его группы.
+
+        У бутылки reference — это `c_bottle.smd`, нулевой вариант группы
+        `broken`; выбрали разбитую — рисовать надо `c_bottle_broken.smd`, а
+        целую не рисовать вовсе. Вариант забирается из списка частей: он
+        становится основным, а не дополнительным мешем.
+        """
+        if not self.bodygroups:
+            return smd_path
+        try:
+            from src.services.model_build_service import ModelBuildService
+            model = self._model(os.path.dirname(smd_path))
+            if model is None:
+                return smd_path
+            same = lambda a, b: os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
+            for name, variants in ModelBuildService.extract_bodygroups(model.qc_path):
+                if not any(v and same(v, smd_path) for v in variants):
+                    continue
+                index = self.bodygroups.get(name, 0)
+                picked = variants[index] if 0 <= index < len(variants) else None
+                if not picked or same(picked, smd_path) or not os.path.exists(picked):
+                    return smd_path
+                bodygroup_smds[:] = [p for p in bodygroup_smds if not same(p, picked)]
+                logger.info(f"[3D] Бодигруппа {name!r}: основной меш → {os.path.basename(picked)}")
+                return picked
+        except Exception as exc:
+            logger.debug(f"[3D] Переключатель бодигрупп не применён: {exc}")
+        return smd_path
 
     @staticmethod
     def _strip_spy_disguise_mask(smd_paths, mode: str) -> list:
@@ -1006,14 +1058,18 @@ class Preview3DWorker(BaseWorker):
             paks = self._reader.paks
 
             for ex in extras:
-                # 1) Прямой VTF по указанному пути.
+                # 1) Прямой VTF по указанному пути; затем — где картинка
+                #    лежит в игре (мод кладёт её в свою папку обхода sv_pure).
                 data = None
-                for pak in paks:
-                    try:
-                        data = pak[ex["vpk"]].read()
+                for path in (ex["vpk"], ex.get("game")):
+                    for pak in paks:
+                        try:
+                            data = pak[path].read() if path else None
+                            break
+                        except KeyError:
+                            continue
+                    if data:
                         break
-                    except KeyError:
-                        continue
                 # 2) Через VMT → $basetexture (часто VTF лежит не там, куда смотрит HUD).
                 if not data and ex.get("vmt"):
                     for pak in paks:
@@ -1813,12 +1869,15 @@ class Preview3DWorker(BaseWorker):
             logger.warning(f"[3D] _extract_spy_mask_texture: {exc}", exc_info=True)
             return [], 0.0
 
-    def _extract_texture_frames(self) -> tuple:
+    def _extract_texture_frames(self, mat_names: Optional[list] = None) -> tuple:
         """
         Извлекает VTF текстуру из VPK.
 
         Если VTF содержит несколько кадров (анимированная текстура) —
         сохраняет каждый кадр отдельным PNG и читает framerate из VMT.
+
+        ``mat_names`` — материалы геометрии В КАДРЕ: текстуру ищем прежде
+        всего для них (см. _extract_red_texture_via_qc).
 
         Returns:
             (frame_paths: list[str], framerate: float)
@@ -1860,7 +1919,7 @@ class Preview3DWorker(BaseWorker):
             # моделью. $cdmaterials из QC указывает на материалы именно той
             # модели, поэтому спрашиваем его первым.
             if self._decomp_dir:
-                vtf_data = self._extract_red_texture_via_qc(paks_tex)
+                vtf_data = self._extract_red_texture_via_qc(paks_tex, mat_names)
                 if vtf_data:
                     logger.debug("3D Preview текстура: по $cdmaterials из QC")
 
@@ -1904,13 +1963,16 @@ class Preview3DWorker(BaseWorker):
             logger.warning(f"Не удалось извлечь текстуру для 3D Preview: {exc}")
             return [], 0.0
 
-    def _extract_red_texture_via_qc(self, paks: list) -> Optional[bytes]:
+    def _extract_red_texture_via_qc(self, paks: list,
+                                    mat_names: Optional[list] = None) -> Optional[bytes]:
         """
-        Fallback: ищет RED (skin 0) текстуру через QC $cdmaterials.
+        Ищет RED (skin 0) текстуру через QC $cdmaterials.
 
-        Используется когда стандартные пути _extract_texture_frames не нашли VTF.
-        Аналогично тому, как _extract_blu_via_qc ищет BLU, только читает
-        skin_families[0] (или weapon_key если texturegroup отсутствует).
+        Читает skin_families[0] (или weapon_key, если texturegroup нет).
+        ``mat_names`` — материалы геометрии в кадре: их имена ищем ПЕРВЫМИ.
+        У Звона смерти показывается вьюмодель с руками, из которой оставлены
+        одни часы, а первая колонка строки — `spy_hands_red`: без этого
+        карточка часов показывала руки шпиона.
 
         Returns:
             VTF-байты или None.
@@ -1932,6 +1994,10 @@ class Preview3DWorker(BaseWorker):
             red_tex_names = [t for t in rows[0] if t]
         else:
             red_tex_names = [self.weapon_key]
+        shown = {m.lower() for m in (mat_names or [])}
+        if shown:
+            red_tex_names = ([t for t in red_tex_names if t.lower() in shown]
+                             + [t for t in red_tex_names if t.lower() not in shown])
 
         logger.debug(
             f"[3D] RED via QC: cdmaterials={cdmaterials}, "

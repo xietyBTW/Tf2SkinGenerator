@@ -12,12 +12,13 @@
 
 import * as api from './api.js';
 import { ask } from './ask.js';
+import { t } from './i18n.js';
 import { say, sayBusy, stage, viewer, withViewer } from './stage.js';
 import { root, work } from './layout.js';
 import { bindAlbum, goTo, SINGLE_TEX } from './album.js';
 import { modeControls, restoreBadges } from './controls.js';
 import { syncPaint } from './paint.js';
-import { closeParts, bindParts, suspendParts, resumeParts } from './parts.js';
+import { closeParts, bindParts, suspendParts, resumeParts, refreshParts } from './parts.js';
 import { updateDockSummary } from './build.js';
 import { showFit, bindFitViewer, isFitOn, dropFitSave, flushFitSave } from './custom-model.js';
 
@@ -117,7 +118,7 @@ export function showHatStyles(item, active = 0) {
       const models = hatModels(item, index) || {};
       showHatClasses({ per_class: models });
       const first = Object.values(models)[0] || item.key;
-      say('Загрузка стиля: ' + style.name + '…');
+      say(`Загрузка стиля: ${style.name}…`);
       // Индекс нужен сеансу: по нему он и запоминает правки стиля, и понимает,
       // что это стиль ТОЙ ЖЕ шапки, а не новый предмет.
       const res = await api.loadPreview('hat', null, first, models, index,
@@ -182,6 +183,10 @@ export function clearPreview() {
   closeParts();
   dropFitSave();          // и подгонка: её отложенная запись — про прошлую
   showMaterials([]);
+  // Кнопки работы — про предмет, которого больше нет: «Вернуть правки» над
+  // пустым альбомом обещало правки неизвестно чего. Их вернёт restoreBadges
+  // вместе со следующей моделью.
+  for (const id of ['keep', 'restore', 'forget']) document.getElementById(id).hidden = true;
   withViewer((w) => w.resetViewer());
 }
 
@@ -270,7 +275,7 @@ export async function showModel(ev) {
     // бы в пустоту и модель осталась серой. Повторяем после загрузки.
     refreshView();
   } catch (err) {
-    say('Не удалось показать модель: ' + err.message);
+    say(`Не удалось показать модель: ${err.message}`);
   }
 }
 
@@ -397,8 +402,10 @@ export function applyView(st) {
       // Командный вариант есть, но в стоке он не отличается от RED: без
       // подсказки кажется, что переключатель сломан.
       if (key === 'BLU') {
+        // Кнопка уже в документе: атрибут переводим сами (наблюдатель
+        // видит только добавленные узлы).
         b.title = st.blu_matches_red
-          ? 'В игре синий вариант этой модели не отличается от красного'
+          ? t('В игре синий вариант этой модели не отличается от красного')
           : '';
       }
     } else {
@@ -437,6 +444,8 @@ export function applyView(st) {
     !(modeControls.split_parts && st.can_split) || work.dataset.scene !== 'item'
     || isFitOn();
 
+  showBodygroups(st.bodygroups || []);
+
   // «Убрать свою модель» — только когда своя геометрия и правда стоит.
   // Без неё замена была билетом в один конец: вернуть игровую можно было
   // только выбрав предмет заново.
@@ -474,7 +483,7 @@ export function bindDrop(frame) {
       applyView(await api.setTexture(mat, await api.upload(file)));
       say('');
     } catch (err) {
-      say('Не удалось загрузить: ' + err.message);
+      say(`Не удалось загрузить: ${err.message}`);
     }
   };
 
@@ -496,6 +505,40 @@ export function bindDrop(frame) {
     input.addEventListener('change', () => accept(input.files[0]));
     input.click();
   });
+}
+
+/**
+ * Переключатель состояний модели: ряд на каждую бодигруппу с вариантами.
+ *
+ * Только показ — в мод уходят все состояния, игра переключает их сама. Ряд
+ * прячется, когда переключать нечего (у большинства оружия один вариант).
+ * Части закрываются: их номера считаны по геометрии в кадре.
+ */
+function showBodygroups(groups) {
+  const bar = document.getElementById('bodybar');
+  bar.innerHTML = '';
+  bar.hidden = !groups.length || work.dataset.scene !== 'item';
+  if (bar.hidden) return;
+  for (const g of groups) {
+    const label = document.createElement('span');
+    label.className = 'label label--inline';
+    label.textContent = groups.length > 1 ? `Состояние · ${g.name}` : 'Состояние модели';
+    bar.appendChild(label);
+    g.variants.forEach((name, i) => {
+      const b = document.createElement('button');
+      b.className = 'tag' + (i === g.chosen ? ' is-active' : '');
+      b.textContent = name;
+      b.addEventListener('click', async () => {
+        if (i === g.chosen) return;
+        closeParts();
+        say('Собираю состояние…');
+        const res = await api.setBodygroup(g.name, i);
+        if (res.error) { say(res.error); return; }
+        applyView(res);
+      });
+      bar.appendChild(b);
+    });
+  }
 }
 
 export function showSkins(info) {
@@ -521,7 +564,11 @@ export function showSkins(info) {
     b.className = 'tag';
     b.dataset.skin = index;
     b.textContent = label;
-    b.addEventListener('click', async () => applyView(await api.setSkin(index)));
+    b.addEventListener('click', async () => {
+      applyView(await api.setSkin(index));
+      // Мазки у стиля свои: полоса частей должна показать его покраску.
+      if (!document.getElementById('partsbar').hidden) await refreshParts();
+    });
     row.appendChild(b);
   }
 }
@@ -617,7 +664,7 @@ export function showFpActions(actions) {
         (x) => x.classList.toggle('is-active', x === b));
       // Из кэша сцена приезжает дорожками за треть секунды — при такой
       // скорости подпись только мигнёт, поэтому она отложенная.
-      sayBusy('Сборка сцены: ' + action + '…');
+      sayBusy(`Сборка сцены: ${action}…`);
       const res = await api.loadFirstPerson(action);
       if (res.error) say(res.error);
     });
@@ -650,7 +697,7 @@ export function showTauntClasses(classes) {
       tauntClass = name;
       bar.querySelectorAll('.tag').forEach(
         (x) => x.classList.toggle('is-active', x === b));
-      sayBusy('Сборка сцены: ' + name + '…');
+      sayBusy(`Сборка сцены: ${name}…`);
       const res = await api.loadTaunt(name);
       if (res.error) say(res.error);
     });
@@ -816,7 +863,7 @@ export async function showFirstPerson(objPath, rig) {
     w.loadModelFromContent(obj, '', 0, 0, 0, 1, 0);
     say('');
   } catch (err) {
-    say('Не удалось показать сцену: ' + err.message);
+    say(`Не удалось показать сцену: ${err.message}`);
   }
 }
 
@@ -896,6 +943,9 @@ export let cardTitles = {};
 /** Как подписать карточку: служебный ключ и имена мода — особые случаи. */
 export function cardTitle(name) {
   if (name === SINGLE_TEX) return 'текстура';
+  // Карточка варианта встаёт на место главной, пока он включён: подпись
+  // называет вариант, а не материал — имя материала есть в подсказке.
+  if (/_(gold|australium)$/i.test(name)) return 'Australium';
   return cardTitles[name] || name;
 }
 
@@ -914,7 +964,10 @@ export function showMaterials(names, textures = {}, inStyle = false) {
     const fig = frameNode(name);
     const png = textures[name];
     // Служебный ключ одноматериальной модели показывать как имя нельзя.
-    fig.querySelector('.frame__name').textContent = cardTitle(name);
+    const label = fig.querySelector('.frame__name');
+    label.textContent = cardTitle(name);
+    // Подпись бывает не именем материала (вариант): имя — в подсказке.
+    if (name !== SINGLE_TEX && label.textContent !== name) label.title = name;
     if (png) fig.querySelector('.frame__img').appendChild(frameImage(name, png));
     fig.querySelector('.frame__off').hidden = !inStyle;
     stage.album.appendChild(fig);
@@ -1020,6 +1073,9 @@ document.querySelector('.teams').addEventListener('click', async (e) => {
   applyView(key === 'RED' || key === 'BLU'
     ? await api.setTeam(key)
     : await api.setAustralium(!btn.classList.contains('is-active')));
+  // Части красят то, что в кадре: с австралием — его карточку. Полоса
+  // должна показать её покраску, а не главной.
+  if (!document.getElementById('partsbar').hidden) await refreshParts();
 });
 
 // «Прочее» и «Сделать командным»: состояние меняет Python, страница

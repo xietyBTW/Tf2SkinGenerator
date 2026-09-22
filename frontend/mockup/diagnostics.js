@@ -66,7 +66,7 @@ export function showReport(ev) {
     if (f.fix) {
       const fix = document.createElement('p');
       fix.className = 'finding__fix';
-      fix.textContent = 'Что делать: ' + f.fix;
+      fix.textContent = `Что делать: ${f.fix}`;
       row.append(fix);
     }
     list.append(row);

@@ -32,6 +32,7 @@ const COND_KEY = {
   hat_paints: 'hat_paints',
   normal: 'normal_map',
   maps: 'material_maps',
+  vmt: 'vmt_editor',
   shoulders: 'shoulders',
   load: 'load_model',
   replace: 'replace_model',
@@ -62,7 +63,7 @@ const MODEL_DRIVEN = new Set(['misc', 'team', 'aus', 'qc', 'styles', 'parts']);
 //: Эти — действия над ПРЕДМЕТОМ, а режим у категории ставится раньше, чем
 //: выбран предмет (панель сборки должна знать форматы и флаги заранее).
 //: Пока предмета нет, подменять, извлекать и смотреть в руках нечего.
-const ITEM_ONLY = new Set(['replace', 'load', 'firstperson', 'taunt', 'maps']);
+const ITEM_ONLY = new Set(['replace', 'load', 'firstperson', 'taunt', 'maps', 'vmt']);
 
 //: Последний ответ controls_for (плюс `has_item`): applyView и меню
 //: инструментов сверяются с ним, чтобы не показать то, что режим запретил.

@@ -11,11 +11,12 @@
  */
 
 import * as api from './api.js';
-import { plural } from './util.js';
+import { plural, chooseFile } from './util.js';
 import { t } from './i18n.js';
-import { stage, withViewer, viewer } from './stage.js';
+import { stage, withViewer, viewer, say } from './stage.js';
+import { root } from './layout.js';
 import { applyView } from './preview.js';
-import { askPartPlacement, repositionPart } from './place.js';
+import { editPartLayers } from './place.js';
 import { pickColor, pickInto, picking, closeColor, hsvToHex, armDrop }
   from './picker.js';
 import { colorAt } from './sample.js';
@@ -242,7 +243,7 @@ function pickPart(part) {
   // Сказать об этом надо в тот момент, когда это произошло, — иначе человек
   // решит, что покраска не сработала.
   const known = (partsList || []).find((x) => x.id === part);
-  if (known && known.image) {
+  if (known && (known.images || []).length) {
     hintParts('У этой части своя картинка — цвет лёг под неё');
   }
 }
@@ -485,8 +486,9 @@ export function showParts(res) {
   rememberMaps(res);
 
   res.parts.forEach((part) => {
+    const images = part.images || [];
     const b = document.createElement('button');
-    b.className = 'tag' + (part.image || part.color ? ' is-painted' : '')
+    b.className = 'tag' + (images.length || part.color ? ' is-painted' : '')
       + (part.shared.length ? ' tag--shared' : '');
     b.dataset.part = part.id;
     // На кнопке — только номер: частей бывает под три десятка, и «Часть 7 · 3%»
@@ -544,22 +546,23 @@ export function showParts(res) {
       b.classList.toggle('is-marked', marked.has(part.id));
       b.appendChild(chunkStep(part, '\u2212', 'Прирастить обратно'));
     }
-    // У части с картинкой — вход в окно посадки. Щелчок по самому чипу
-    // спрашивает файл заново, а поправить нужно чаще, чем заменить.
-    if (part.image) {
+    // У части с картинками — вход в их редактор: посадка, замена, ещё одна.
+    // Туда же ведёт щелчок по чипу с картинкой-курсором; кнопка — для тех,
+    // у кого в руке кисть.
+    if (images.length) {
       const fix = document.createElement('button');
       fix.className = 'parts__cut';
       fix.type = 'button';
-      fix.textContent = '…';
-      fix.title = 'Как положена картинка: размер, поворот, место';
+      fix.textContent = images.length > 1 ? images.length + '…' : '…';
+      fix.title = 'Картинки части: посадка, замена, ещё одна';
       fix.addEventListener('click', (e) => {
         e.stopPropagation();
-        repositionPart(part.id);
+        editPartLayers(part.id);
       });
       b.appendChild(fix);
     }
     if (part.id === hoverPart) b.classList.add('is-hover');
-    if (part.image || part.color) {
+    if (images.length || part.color) {
       const x = document.createElement('button');
       x.className = 'parts__x';
       x.type = 'button';
@@ -568,7 +571,7 @@ export function showParts(res) {
       // Снимаем ОБА слоя: у части может быть и цвет, и картинка поверх него, а
       // крестик обещает вернуть игровую текстуру — то есть убрать всё своё.
       x.addEventListener('click', async () => {
-        if (part.image) await paintPart(part.id, null);
+        if (images.length) await paintPart(part.id, null);
         if (part.color) await colorParts({ [part.id]: null });
       });
       b.appendChild(x);
@@ -609,9 +612,12 @@ async function cutIsland(partId, island) {
   const uniq = new Set(cut.flatMap((x) => x.islands)).size;
   // Про возврат говорим, только когда есть что возвращать: у мелкого острова
   // попасть по нему курсором трудно, поэтому там же называем «−» на чипе.
-  hintParts('Отрезано ' + uniq + ' ' + plural(uniq, 'остров', 'острова', 'островов')
-            + ' из ' + total
-            + (uniq ? '. Вернуть — щелчок по нему же или «−» на его чипе' : ''));
+  // Фразой целиком — так её узнаёт словарь; хвост переводим сами, склейку
+  // он уже не узнает.
+  hintParts(plural(uniq, `Отрезано ${uniq} остров из ${total}`,
+                   `Отрезано ${uniq} острова из ${total}`,
+                   `Отрезано ${uniq} островов из ${total}`)
+            + (uniq ? t('. Вернуть — щелчок по нему же или «−» на его чипе') : ''));
 }
 
 /**
@@ -641,7 +647,7 @@ function syncMarks() {
   const chosen = (partsList || []).filter((x) => marked.has(x.id));
   document.getElementById('parts-join').hidden = chosen.length < 2;
   if (chosen.length >= 2) {
-    hintParts('Отмечено ' + chosen.length + '. «Объединить» сведёт их в одну часть');
+    hintParts(`Отмечено ${chosen.length}. «Объединить» сведёт их в одну часть`);
   }
 }
 
@@ -651,7 +657,7 @@ function chunkStep(part, glyph, title) {
   btn.className = 'parts__cut';
   btn.type = 'button';
   btn.textContent = glyph;
-  btn.title = title + '. То же — щелчок по ней на модели с ножницами';
+  btn.title = t(title) + t('. То же — щелчок по ней на модели с ножницами');
   btn.addEventListener('click', (e) => {
     e.stopPropagation();          // щелчок по чипу красит — здесь этого не надо
     uncutPart(part);
@@ -727,41 +733,39 @@ export async function refreshParts() {
 }
 
 /** Кладёт (или снимает) картинку на часть и обновляет полосу. */
-export async function paintPart(part, file = undefined) {
-  const apply = async (file) => {
-    hintParts('Наложение на часть…');
-    try {
-      let path = null;
-      let options;
-      if (file) {
-        path = await api.upload(file);
-        // Спрашиваем ДО наложения: иначе человек сперва видит перекошенную
-        // картинку, а потом её правит — и первый кадр всегда испорчен.
-        options = await askPartPlacement(part, path);
-        if (options === null) { hintParts(''); return; }
-      }
-      const res = await api.setPartTexture(partsMaterial, part, path, options);
-      if (res.error) { hintParts(res.error); return; }
-      applyView(res);
-      const fresh = await refreshParts();
-      // Куски, делящие развёртку, красятся вместе. Сказать об этом надо в тот
-      // момент, когда это произошло, а не только подсказкой на кнопке.
-      const painted = (fresh.parts || []).find((p) => p.id === part);
-      hintParts(file && painted && painted.shared.length
-        ? 'Эта часть делит развёртку с соседними — они покрасились вместе'
-        : '');
-    } catch (err) {
-      hintParts('Не удалось: ' + err.message);
-    }
-  };
-
-  if (file !== undefined) { apply(file); return; }   // null — снять картинку
-
-  const input = document.createElement('input');
-  input.type = 'file';
-  input.accept = 'image/*,.vtf';
-  input.addEventListener('change', () => input.files[0] && apply(input.files[0]));
-  input.click();
+/**
+ * Картинка на часть.
+ *
+ * `file` не задан — щелчок по части: у части с картинками открывает их
+ * редактор (посадка, замена, ещё одна), у пустой спрашивает файл. `null` —
+ * снять: слой `layer` либо все. Файл (в том числе брошенный на модель)
+ * ложится сразу, поверх лежащих или на место слоя `layer`, и тут же
+ * открывается редактор — поправить посадку, глядя на неё на месте.
+ */
+export async function paintPart(part, file = undefined, layer = null) {
+  if (file === undefined) {
+    const known = (partsList || []).find((x) => x.id === part);
+    if (known && (known.images || []).length) { await editPartLayers(part); return; }
+    file = await chooseFile('image/*,.vtf');
+    if (!file) return;
+  }
+  hintParts(file ? 'Наложение на часть…' : 'Убираю…');
+  try {
+    const path = file ? await api.upload(file) : null;
+    const res = await api.setPartTexture(partsMaterial, part, path, null, layer);
+    if (res.error) { hintParts(res.error); return; }
+    applyView(res);
+    const fresh = await refreshParts();
+    // Куски, делящие развёртку, красятся вместе. Сказать об этом надо в тот
+    // момент, когда это произошло, а не только подсказкой на кнопке.
+    const painted = (fresh.parts || []).find((p) => p.id === part);
+    hintParts(file && painted && painted.shared.length
+      ? 'Эта часть делит развёртку с соседними — они покрасились вместе'
+      : '');
+    if (file) await editPartLayers(part, layer === null ? -1 : layer);
+  } catch (err) {
+    hintParts(`Не удалось: ${err.message}`);
+  }
 }
 
 document.getElementById('parts').addEventListener('click', togglePartsMode);
@@ -860,25 +864,34 @@ document.getElementById('parts-random').addEventListener('click', async () => {
 // Отмена — то, что позволяет пробовать: без неё каждый щелчок по модели
 // приходится обдумывать заранее.
 export async function undoParts() {
-  return stepParts(api.undoParts, 'Отменено');
+  return stepHistory(-1);
 }
 
 /** Возвращает вперёд то, что отменили. */
 export async function redoParts() {
-  return stepParts(api.redoParts, 'Возвращено');
+  return stepHistory(1);
 }
 
-/** Шаг по истории покраски — в любую сторону: движение одно и то же. */
-async function stepParts(step, said) {
-  const res = await step(partsMaterial);
-  if (res.error) { hintParts(res.error); return; }
+/**
+ * Шаг по истории правок предмета — в любую сторону: движение одно и то же.
+ *
+ * История одна на всё (текстуры, части, своя модель): Python держит её
+ * снимками `user_edits`. Полоса частей, если открыта, перечитывается: шаг
+ * возвращает и силу тонировки с окантовкой, а они живут на ползунках — без
+ * этого контролы показывали бы значения, от которых на модели уже ничего не
+ * осталось.
+ */
+async function stepHistory(delta) {
+  const open = !document.getElementById('partsbar').hidden;
+  const tell = open ? hintParts : say;
+  const res = await api.undoEdits(delta);
+  if (res.error) { tell(res.error); return; }
   applyView(res);
-  // Не только полоса частей: шаг возвращает и силу тонировки с окантовкой, а
-  // они живут на ползунках. Без этого контролы показывали бы значения, от
-  // которых на модели уже ничего не осталось.
-  const fresh = await refreshParts();
-  if (fresh && !fresh.error) showPalette(fresh);
-  hintParts(said);
+  if (open) {
+    const fresh = await refreshParts();
+    if (fresh && !fresh.error) showPalette(fresh);
+  }
+  tell(delta < 0 ? 'Отменено' : 'Возвращено');
 }
 
 /**
@@ -1318,7 +1331,7 @@ function setGradientAngle(deg) {
   // CSS крутит по часовой, а угол растёт против неё, отсюда минус.
   const needle = document.querySelector('#parts-grad-dir .parts__needle');
   needle.style.transform = 'rotate(' + (-angle) + 'deg)';
-  hintParts('Направление перехода: ' + Math.round(angle) + '°');
+  hintParts(`Направление перехода: ${Math.round(angle)}°`);
 }
 
 (function bindGradientDial() {
@@ -1355,12 +1368,14 @@ function setGradientAngle(deg) {
 /**
  * Отмена и возврат — только с клавиатуры.
  *
- * Кнопки в полосе у них нет намеренно: красят десятками щелчков подряд, а
- * откатывают редко, и ряд действий из-за неё стоял вчетвером. Раскладка та
- * же, что везде: Ctrl+Z назад, Ctrl+Y (и Ctrl+Shift+Z, как в редакторах)
- * вперёд.
+ * Кнопки у них нет намеренно: красят десятками щелчков подряд, а откатывают
+ * редко, и ряд действий из-за неё стоял вчетвером. Раскладка та же, что
+ * везде: Ctrl+Z назад, Ctrl+Y (и Ctrl+Shift+Z, как в редакторах) вперёд.
+ * Работает по всему редактору предмета, не только в частях: положенная
+ * текстура и подменённая модель откатываются той же лентой.
  *
  * Пока курсор в поле ввода, клавиши принадлежат ему: там своя отмена текста.
+ * У раздела эффектов история своя (particles/playback.js).
  *
  * Разбор вынесен в функцию, потому что то же нажатие приходит ИЗ ВЬЮВЕРА:
  * щелчок по модели отдаёт фокус iframe, и обещанный подсказкой Ctrl+Z молча
@@ -1368,16 +1383,17 @@ function setGradientAngle(deg) {
  * Второй копии раскладки при этом нет: вьювер передаёт само событие.
  */
 function historyKey(e) {
-  const editing = /^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName || '');
+  const editing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || '');
   if (!(e.ctrlKey || e.metaKey) || editing
-      || document.getElementById('partsbar').hidden) return;
-  const key = e.key.toLowerCase();
-  const back = key === 'z' && !e.shiftKey;
-  const forward = key === 'y' || (key === 'z' && e.shiftKey);
+      || document.querySelector('dialog[open]')
+      // У эффектов история своя, у звуков предмета нет вовсе.
+      || root.dataset.section === 'particles' || root.dataset.section === 'sounds') return;
+  // По коду клавиши, а не по символу: в русской раскладке Z — это «я».
+  const back = e.code === 'KeyZ' && !e.shiftKey;
+  const forward = e.code === 'KeyY' || (e.code === 'KeyZ' && e.shiftKey);
   if (!back && !forward) return;
   e.preventDefault();
-  if (back) undoParts();
-  else redoParts();
+  stepHistory(back ? -1 : 1);
 }
 
 document.addEventListener('keydown', historyKey);

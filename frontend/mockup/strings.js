@@ -8,8 +8,9 @@
  * незнакомая строка просто остаётся русской, и это видно на экране.
  *
  * `{}` — подстановка. Такие ключи узнают собранную строку целиком («Собрано:
- * mod.vpk»), а не её кусок. Ключи, кончающиеся на «:» или «…», работают ещё и
- * началом строки: к ним обычно дописывают значение.
+ * mod.vpk»), а не её кусок. Поэтому строка с подстановкой в коде собирается
+ * ОДНИМ шаблоном (`Разбор ${name}…`), а не склейкой кусков: кусок «Разбор»
+ * словарь нашёл бы, а склеенную строку на экране — уже нет.
  *
  * Сообщения Python (ошибки сеанса и воркеров) тоже здесь: они приходят
  * готовым текстом и попадают в те же подписи, что и всё остальное.
@@ -152,8 +153,7 @@ export const EN = {
     'Nothing found — try another filter or query.',
   'Для этой категории список ещё не подключён.':
     'The list for this category is not wired up yet.',
-  'Раздел «': 'Section “',
-  '» ещё не подключён.': '” is not wired up yet.',
+  'Раздел «{}» ещё не подключён.': 'Section “{}” is not wired up yet.',
   'Эффект': 'Effect',
   'Файл не выбран': 'No file selected',
   'Выберите систему частиц.': 'Select a particle system.',
@@ -166,18 +166,16 @@ export const EN = {
   'Убрать из библиотеки (исходный файл останется)':
     'Remove from the library (the source file stays)',
   'Убрать мод из библиотеки': 'Remove the mod from the library',
-  'Удалится копия в библиотеке. Исходный файл, который вы открывали, останется на месте.':
-    'The library copy will be deleted. The source file you opened stays where it is.',
+  '{}\nУдалится копия в библиотеке. Исходный файл, который вы открывали, останется на месте.': '{}\nThe library copy will be deleted. The original file you opened stays where it is.',
   'Убрать': 'Remove',
   'сегодня': 'today',
   'вчера': 'yesterday',
-  'день': 'day',
-  'дня': 'days',
-  'дней': 'days',
-  'назад': 'ago',
+  '{} день назад': '{} day ago',
+  '{} дня назад': '{} days ago',
+  '{} дней назад': '{} days ago',
   'сохранённая работа': 'saved work',
   'Открываю работу…': 'Opening the work…',
-  'Разбор': 'Reading',
+  'Разбор {}…': 'Reading {}…',
   'мод из VPK': 'VPK mod',
   'Работа сохранена — она в разделе «Кастомный мод»':
     'Work saved — it is in the “Custom mod” section',
@@ -218,7 +216,7 @@ export const EN = {
   'Останавливаю сборку…': 'Stopping the build…',
   'Сборка…': 'Building…',
   'Ошибка сборки': 'Build failed',
-  'Чем красить «': 'What to put on “',
+  'Чем красить «{}»': 'What to put on “{}”',
   'Своей текстуры для этого материала нет.':
     'There is no custom texture for this material.',
   'Оставить игровую': 'Keep the game one',
@@ -230,6 +228,17 @@ export const EN = {
   'Выбрать файл…': 'Pick a file…',
   'Своя картинка именно для этого материала':
     'A custom image just for this material',
+  'Своя модель для части «{}»': 'Custom model for the “{}” part',
+  'разбитое состояние': 'the broken state',
+  'состояние после взрыва': 'the state after the explosion',
+  'Это {}: игра переключает на него сама. Основную часть заменила ваша модель; чем собрать эту?':
+    'This is {}: the game switches to it by itself. Your model replaced the main part; what should this one be built from?',
+  'Основную часть заменила ваша модель; чем собрать эту?':
+    'Your model replaced the main part; what should this one be built from?',
+  'Часть останется такой, как в игре': 'The part stays as it is in the game',
+  'Выбрать файл SMD…': 'Choose an SMD file…',
+  'Своя геометрия этой части; кости и материалы возьмутся из игровой':
+    'Your own geometry for this part; bones and materials come from the game one',
   'И так для остальных материалов': 'Same for the rest of the materials',
   'Ответить': 'Answer',
   'Собрано: {}': 'Built: {}',
@@ -245,7 +254,7 @@ export const EN = {
   ' · Crowbar готов': ' · Crowbar ready',
   ' · Crowbar НЕ НАЙДЕН': ' · Crowbar NOT FOUND',
   'Параметры': 'Parameters',
-  'Нет связи с Python:': 'No connection to Python:',
+  'Нет связи с Python: {}': 'No connection to Python: {}',
   'неизвестная ошибка': 'unknown error',
 
   // ── Настройки ─────────────────────────────────────────────────────────
@@ -279,10 +288,8 @@ export const EN = {
     'The draft is written silently and offered by the “Restore edits” button. A work reaches the “Custom mod” section only through “Save work”',
   'Каталог и параметры прибиты к краям, а не вызываются поверх. Нужно окно шире 1100 px':
     'The catalog and parameters are pinned to the edges instead of opening on top. Needs a window wider than 1100 px',
-  'Сейчас в кэше': 'The cache now holds',
-  '. Кэш ускоряет повторную сборку того же оружия — после очистки первая сборка каждого будет медленнее.':
-    '. The cache speeds up rebuilding the same weapon — after clearing, the first build of each will be slower.',
-  'Кэш очищен, записей удалено:': 'Cache cleared, entries removed:',
+  'Сейчас в кэше {}. Кэш ускоряет повторную сборку того же оружия — после очистки первая сборка каждого будет медленнее.': 'The cache now holds {}. It speeds up rebuilding the same weapon — after clearing, the first build of each will be slower.',
+  'Кэш очищен, записей удалено: {}': 'Cache cleared, entries removed: {}',
   'МБ': 'MB',
   'КБ': 'KB',
   'пусто': 'empty',
@@ -294,7 +301,7 @@ export const EN = {
   'Удалить черновики': 'Delete drafts',
   'Это молчаливые записи автосохранения — работы, сохранённые кнопкой, здесь не показаны и не пострадают. Снимите отметку с того, что нужно оставить.':
     'These are the silent autosave records — works saved with the button are not listed here and will not be touched. Uncheck whatever you want to keep.',
-  'Черновиков удалено:': 'Drafts deleted:',
+  'Черновиков удалено: {}': 'Drafts deleted: {}',
 
   // ── Диагностика ───────────────────────────────────────────────────────
   'Диагностика мода': 'Mod diagnostics',
@@ -306,7 +313,7 @@ export const EN = {
   'Проверка не удалась': 'The check failed',
   'Проблем не найдено': 'No problems found',
   'Ошибок: {} · предупреждений: {}': 'Errors: {} · warnings: {}',
-  'Что делать:': 'What to do:',
+  'Что делать: {}': 'What to do: {}',
 
   // ── Редактор VMT и QC ─────────────────────────────────────────────────
   'Материал': 'Material',
@@ -331,7 +338,7 @@ export const EN = {
 
   // ── Своя модель ───────────────────────────────────────────────────────
   'Своя модель убрана': 'Custom model removed',
-  'Конвертация': 'Converting',
+  'Конвертация {}…': 'Converting {}…',
   'Как использовать модель?': 'How to use the model?',
   'Материалы модели:': 'Model materials:',
   'Материалов в модели не нашлось.': 'No materials found in the model.',
@@ -369,10 +376,10 @@ export const EN = {
   'Карты материала сняты': 'Material maps cleared',
 
   // ── Превью ────────────────────────────────────────────────────────────
-  'Загрузка стиля:': 'Loading the style:',
+  'Загрузка стиля: {}…': 'Loading the style: {}…',
   'Загрузка модели…': 'Loading the model…',
   'Загрузка текстуры…': 'Loading the texture…',
-  'Сборка сцены:': 'Building the scene:',
+  'Сборка сцены: {}…': 'Building the scene: {}…',
   // ── Звуки ──────────────────────────────────────────────────────────── //
   'Звуки': 'Sounds',
   'Событие': 'Event',
@@ -455,6 +462,18 @@ export const EN = {
   'Не удалось сохранить: {}': 'Could not save: {}',
   'Свой файл': 'Own file',
   'Этот файл браузер проиграть не может': 'The browser cannot play this file',
+  'Состояние модели': 'Model state',
+  'Состояние · {}': 'State · {}',
+  'Состояние модели: игра переключает его сама, здесь можно посмотреть каждое':
+    'Model state: the game switches it by itself; here you can look at each one',
+  'Собираю состояние…': 'Building the state…',
+  'Такого состояния у модели нет': 'The model has no such state',
+  'Части красят основное состояние модели — верните переключатель':
+    'Parts paint the main state of the model — switch it back',
+  'после взрыва': 'after the explosion',
+  'разбитая': 'broken',
+  'без части': 'without the part',
+  'основной': 'main',
   'Базовый': 'Default',
   'Перекодирую звук…': 'Converting the sound…',
   'Не разобрать этот звук: {}': 'Cannot decode this sound: {}',
@@ -477,9 +496,9 @@ export const EN = {
   'Собираем сцену…': 'Building the scene…',
   'Сборка вида от первого лица…': 'Building the first-person view…',
   'Извлечение граней неба…': 'Extracting the sky faces…',
-  'Не удалось показать модель:': 'Could not show the model:',
-  'Не удалось показать сцену:': 'Could not show the scene:',
-  'Не удалось загрузить:': 'Could not load:',
+  'Не удалось показать модель: {}': 'Could not show the model: {}',
+  'Не удалось показать сцену: {}': 'Could not show the scene: {}',
+  'Не удалось загрузить: {}': 'Could not load: {}',
   'В игре синий вариант этой модели не отличается от красного':
     'In the game the BLU variant of this model is the same as RED',
   'Материалы стиля: остальные наследуют базовую текстуру.':
@@ -554,7 +573,7 @@ export const EN = {
   'Второй цвет градиента': 'Second gradient color',
   'Направление перехода — потяни или стрелками':
     'Gradient direction — drag it or use the arrows',
-  'Направление перехода:': 'Gradient direction:',
+  'Направление перехода: {}°': 'Gradient direction: {}°',
   'Щёлкать по кускам модели, чтобы дробить их мельче':
     'Click parts of the model to cut them finer',
   'Свести отмеченные отрезки в одну часть':
@@ -585,38 +604,43 @@ export const EN = {
   'Часть': 'Part',
   'Часть ': 'Part ',
   ' развёртки': ' of the UV map',
-  'часть': 'part',
+  'часть {} · развёртка {} тр.': 'part {} · UV {} tri',
   'развёртки': 'of the UV map',
-  '· развёртка': '· UV map',
-  'тр.': 'tri',
   'Делит развёртку с другими: в игре они покрасятся вместе, разными их сделать нельзя':
     'Shares the UV map with others: in the game they are painted together and cannot be made different',
   'Прирастить обратно': 'Grow it back',
-  'Как положена картинка: размер, поворот, место':
-    'How the image is placed: size, rotation, position',
+  'Картинки части: посадка, замена, ещё одна':
+    'Images on the part: placement, replace, one more',
+  'Такой картинки на части нет': 'There is no such image on the part',
+  'Заменить…': 'Replace…',
+  '+ Добавить': '+ Add',
+  'Другой файл на место этой картинки, посадка останется':
+    'Another file in place of this image; the placement stays',
+  'Снять эту картинку с части': 'Take this image off the part',
+  'Ещё одна картинка поверх': 'One more image on top',
+  'Убираю…': 'Removing…',
+  'Переставляю…': 'Reordering…',
+  'поверх': 'on top',
+  'внизу': 'bottom',
   'Вернуть этой части игровую текстуру':
     'Bring back the game texture for this part',
   'У этого куска один остров развёртки — резать нечего':
     'This piece has a single UV island — there is nothing to cut',
   'Режу…': 'Cutting…',
-  'Отрезано': 'Cut off',
-  'остров': 'island',
-  'острова': 'islands',
-  'островов': 'islands',
-  'из': 'of',
+  'Отрезано {} остров из {}': 'Cut off {} island of {}',
+  'Отрезано {} острова из {}': 'Cut off {} islands of {}',
+  'Отрезано {} островов из {}': 'Cut off {} islands of {}',
   '. Вернуть — щелчок по нему же или «−» на его чипе':
     '. To bring it back click it again, or press “−” on its chip',
   'Отмечать можно только отрезанное: сперва отрежь на модели':
     'Only cut pieces can be marked: cut it on the model first',
-  'Отмечено': 'Marked',
-  '. «Объединить» сведёт их в одну часть':
-    '. “Merge” will bring them into one part',
+  'Отмечено {}. «Объединить» сведёт их в одну часть': 'Marked {}. “Merge” will bring them into one part',
   '. То же — щелчок по ней на модели с ножницами':
     '. Same as clicking it on the model with the scissors',
   'Наложение на часть…': 'Placing on the part…',
   'Эта часть делит развёртку с соседними — они покрасились вместе':
     'This part shares the UV map with its neighbours — they were painted together',
-  'Не удалось:': 'Failed:',
+  'Не удалось: {}': 'Failed: {}',
   'Перерезаю модель…': 'Re-cutting the model…',
   'Частей:': 'Parts:',
   'Случайная раскраска — щёлкай по частям, чтобы поправить':
@@ -633,7 +657,6 @@ export const EN = {
   'Перекладываю…': 'Re-placing…',
 
   // ── Посадка картинки на часть ─────────────────────────────────────────
-  'Как положить картинку': 'How to place the image',
   'Вписать': 'Fit',
   'Целиком': 'Whole',
   'Заполнить': 'Fill',
@@ -642,17 +665,40 @@ export const EN = {
   'Высота': 'Height',
   'Приблизить': 'Zoom',
   'Без игровой': 'No game texture',
-  'Только контур': 'Outline only',
-  'Тяни картинку мышью, размер — за квадратики на рамке (угол тянет целиком, сторона — по своей оси), поворот — за маркер сверху (стрелки — на 15°), колесо — приблизить к курсору':
-    'Drag the image with the mouse; resize it by the squares on the frame (a '
-    + 'corner scales it whole, a side stretches along its own axis); rotate it '
-    + 'by the handle on top (arrows turn it by 15°); the wheel zooms to the cursor',
+  'Размер, %': 'Size, %',
+  'Посадка картинки': 'Image placement',
+  'Слои': 'Layers',
+  'Верхний лежит поверх остальных. Тяни строку, чтобы переставить':
+    'The top one lies over the rest. Drag a row to reorder',
+  'Показ': 'View',
+  'Контур': 'Outline',
+  'Приблизить холст к куску: класть картинку, глядя на всю текстуру, — целиться в спичку с другого конца комнаты':
+    'Zoom the canvas to the piece: placing an image while looking at the whole texture is like aiming at a match from across the room',
+  'Спрятать игровую текстуру: на пёстрой не видно границ своей картинки':
+    'Hide the game texture: on a busy one the edges of your image are hard to see',
+  'Только внешний контур куска вместо сетки треугольников':
+    'Only the outer outline of the piece instead of the triangle mesh',
+  'Тяни мышью · размер — за квадратики · поворот — за маркер или стрелками · колесо — ближе':
+    'Drag with the mouse · size — by the squares · rotate — by the handle or arrow keys · wheel — closer',
+  'Целиком в место части, с сохранением пропорций':
+    'Whole into the part area, proportions kept',
+  'Заполнить место части, края уйдут под маску':
+    'Fill the part area, the edges go under the mask',
+  'Растянуть по месту части, пропорции не сохраняются':
+    'Stretch over the part area, proportions are not kept',
+  'Угол': 'Angle',
+  'Сдвиг, % места': 'Offset, % of the area',
+  'Вправо': 'Right',
+  'Вниз': 'Down',
+  'Сбросить посадку': 'Reset placement',
+  'Вернуть посадку к исходной: целиком, без поворота и сдвига':
+    'Back to the initial placement: whole, no rotation, no offset',
   'Отменить правку (Ctrl+Z)': 'Undo (Ctrl+Z)',
   'Вернуть правку (Ctrl+Y)': 'Redo (Ctrl+Y)',
 
   // ── Инструменты ───────────────────────────────────────────────────────
-  'Загрузка': 'Loading',
-  'Не удалось открыть:': 'Could not open:',
+  'Загрузка {}…': 'Loading {}…',
+  'Не удалось открыть: {}': 'Could not open: {}',
   'Куда сохранить PCF': 'Where to save the PCF',
   'Сохранено: {} ({} Б)': 'Saved: {} ({} B)',
   'Сбор справочника…': 'Collecting the reference…',
@@ -660,9 +706,9 @@ export const EN = {
   'Построение UV-шаблона…': 'Building the UV template…',
   'UV-шаблон не построен': 'The UV template was not built',
   'UV-шаблон': 'UV template',
-  'UV-шаблон:': 'UV template:',
-  'UV-шаблоны:': 'UV templates:',
-  'шт.': 'pcs.',
+  'UV-шаблон {}': 'UV template {}',
+  'UV-шаблон: {}': 'UV template: {}',
+  'UV-шаблоны: {} шт.': 'UV templates: {}',
   'Извлечение модели…': 'Extracting the model…',
   'Модель не извлечена': 'The model was not extracted',
   'Что сохранить в папку экспорта': 'What to save into the export folder',
@@ -676,7 +722,7 @@ export const EN = {
   'Далее': 'Next',
   'Имя выходного файла': 'Output file name',
   'Моды трогают одно оружие': 'The mods touch the same weapon',
-  'Один перекроет другой. Продолжить?': 'One will override the other. Continue?',
+  '{}\nОдин перекроет другой. Продолжить?': '{}\nOne will override the other. Continue?',
   'Объединение…': 'Merging…',
   'Не получилось': 'It did not work out',
 
@@ -709,6 +755,7 @@ export const EN = {
   'Пауза': 'Pause',
   'Продолжить': 'Resume',
   'Повтор': 'Loop',
+  'Повторить': 'Redo',
   'Точки': 'Points',
   'Вернуть': 'Restore',
   'Свернуть': 'Collapse',
@@ -755,7 +802,7 @@ export const EN = {
   'систем': 'systems',
   'система': 'system',
   'не в превью': 'not in the preview',
-  'эффекту нужны:': 'the effect needs:',
+  'эффекту нужны: {}': 'the effect needs: {}',
   'Эту точку эффект использует': 'The effect uses this point',
   'В кэше нет разобранных моделей — откройте модель на вкладке оружия или шапок, и она появится здесь':
     'The cache has no decompiled models — open a model on the weapons or cosmetics tab and it will show up here',
@@ -810,14 +857,16 @@ export const EN = {
     'This module already has all of its own parameters. What is left is common to every module: fading the operator in and out over the system lifetime.',
   'Значение подставится такое, как в эффектах игры.':
     'The value is taken from the game effects.',
-  'Параметры скопированы — можно вставить в другую систему или отдать ИИ':
-    'Parameters copied — paste them into another system or hand them to an AI',
+  'Скопирован параметр «{}»': 'Copied the “{}” parameter',
+  'Скопирован модуль': 'Copied the module',
+  'Скопирована группа «{}»': 'Copied the “{}” group',
+  'Скопирована вся система эффекта': 'Copied the whole effect system',
   'Скопируйте набор параметров': 'Copy the parameter set',
   'Буфер обмена недоступен — выделите и скопируйте.':
     'The clipboard is not available — select and copy by hand.',
   'Вставьте набор параметров': 'Paste the parameter set',
   'JSON с ключом tf2sgParticleParams': 'JSON with a tf2sgParticleParams key',
-  'В буфере не JSON:': 'The clipboard does not hold JSON:',
+  'В буфере не JSON: {}': 'The clipboard does not hold JSON: {}',
   'В JSON нет раздела tf2sgParticleParams':
     'The JSON has no tf2sgParticleParams section',
   'Как вставить': 'How to paste',
@@ -828,7 +877,7 @@ export const EN = {
   'Полная замена — снести модули системы':
     'Full replacement — wipe the system modules',
   'Вставить': 'Paste',
-  'Вставлено, но часть пропущена:': 'Pasted, but some of it was skipped:',
+  'Вставлено, но часть пропущена: {}': 'Pasted, but some of it was skipped: {}',
   'Имя копии': 'Name of the copy',
   'Новое имя системы': 'New system name',
   'Дочерние системы': 'Child systems',

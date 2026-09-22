@@ -140,11 +140,6 @@ class PreviewSession:
     #: не одну деталь. 0 — окантовки нет.
     part_edge: float = 0.0
     part_edge_color: str = '#141210'
-    #: Окантовка частей: ширина полосы по краю в долях стороны текстуры и её
-    #: цвет. Общая на предмет, как и сила: обводят обычно всю работу разом, а
-    #: не одну деталь. 0 — окантовки нет.
-    part_edge: float = 0.0
-    part_edge_color: str = '#141210'
     #: {номер группы: список НАБОРОВ отрезанных островов развёртки}. Поимённо,
     #: а не счётчиком: счётчик резал острова в своём порядке, от крупного, и до
     #: мизинца можно было добраться только разрезав перед ним всё остальное.
@@ -270,7 +265,17 @@ class PreviewSession:
         if self.active_style:
             chosen = self.skin_chosen.get(self.active_style) or set()
             return [m for m in self.textures.material_names if m in chosen]
-        return list(self.textures.material_names)
+        cards = list(self.textures.material_names)
+        # Австралий — своя карточка со своей текстурой, но показывается она
+        # НА МЕСТЕ главной, пока вариант включён: как у RED/BLU, карточка
+        # одна, а что на ней — решает переключатель. Две карточки рядом
+        # читались как два материала модели. У мода из VPK карточки — по его
+        # VTF, вариантов там нет.
+        gold = self.textures.australium_mat_name
+        if gold and cards and self.textures.australium_active and not self.custom_vpk_mode:
+            main = self.textures.stable_main() or cards[0]
+            cards = [gold if c == main else c for c in cards]
+        return cards
 
     @property
     def active_style(self) -> int:
@@ -353,7 +358,9 @@ class PreviewSession:
             path = t.resolve_card(mat)
             if path:
                 out[mat] = path
-        return self._with_variant(out)
+        # Вариант альбом не накладывает: у него своя карточка, а главная
+        # показывает главное. Что на модели — решает сцена (scene_textures).
+        return out
 
     def _with_variant(self, textures: Dict[str, str]) -> Dict[str, str]:
         """
@@ -561,6 +568,10 @@ class PreviewSession:
                           for mat, cuts in self.part_cuts.items()},
             'part_tint': float(self.part_tint),
             'part_exact': bool(self.part_exact),
+            # Окантовка — настройка кисти на предмет, как сила: без неё
+            # отмена ползунка была холостой, а вернувшаяся работа её теряла.
+            'part_edge': float(self.part_edge),
+            'part_edge_color': str(self.part_edge_color),
             'custom_smd_path': self.custom_smd_path,
             'custom_keep_materials': bool(self.custom_keep_materials),
             'custom_qc_text': self.custom_qc_text,
@@ -608,6 +619,9 @@ class PreviewSession:
             for mat, cuts in (edits.get('part_cuts') or {}).items()}
         self.part_tint = float(edits.get('part_tint') or 1.0)
         self.part_exact = bool(edits.get('part_exact'))
+        self.part_edge = float(edits.get('part_edge') or 0.0)
+        self.part_edge_color = str(edits.get('part_edge_color')
+                                   or PreviewSession.part_edge_color)
         self.custom_smd_path = edits.get('custom_smd_path') or None
         self.custom_keep_materials = bool(edits.get('custom_keep_materials'))
         self.custom_qc_text = edits.get('custom_qc_text') or None
@@ -627,6 +641,7 @@ class PreviewSession:
         self.part_colors = {}
         self.part_cuts = {}
         self.part_edge = 0.0
+        self.part_edge_color = PreviewSession.part_edge_color
         self.reset_custom_model()
         self.custom_qc_text = None
 

@@ -10,12 +10,12 @@ import * as api from '../api.js';
 import { t } from '../i18n.js';
 import { stage, say, sayBusy, withParticles } from '../stage.js';
 import { closeCat } from '../layout.js';
-import { els, fillFilters } from '../catalog.js';
+import { els, fillFilters, applyToolsMenu } from '../catalog.js';
 import { plural } from '../util.js';
 import { pcfNodes, pcfTree, pcfCollapsed, pSystem, setTree, pcfDiff, setDiff } from './state.js';
 import { systemMenu } from './actions.js';
 import { showParams } from './params.js';
-import { syncHistory } from './playback.js';
+import { syncHistory, editorKey } from './playback.js';
 import { showParticleMaterials } from './materials.js';
 import { cpBox, cpFillIndexes } from './points.js';
 
@@ -182,7 +182,9 @@ export async function showEffects(query = '') {
       twist.disabled = false;
       const show = (on) => {
         twist.textContent = on ? '−' : '+';
-        twist.title = on ? 'Свернуть' : 'Развернуть';
+        // Подпись на уже показанной кнопке: наблюдатель перевода её не
+        // увидит, он смотрит только за добавленными узлами.
+        twist.title = t(on ? 'Свернуть' : 'Развернуть');
         for (const k of kids) k.hidden = !on;
       };
       show(it.open || fxOpen.has(it.system));
@@ -263,7 +265,12 @@ async function openEffect(it) {
 export function showParticleFrame(on) {
   // Адрес ставим при первом входе: второй three.js на неоткрытой вкладке
   // грузить незачем.
-  if (on && !stage.pframe.src) stage.pframe.src = '/viewer/particles3d.html';
+  if (on && !stage.pframe.src) {
+    stage.pframe.src = '/viewer/particles3d.html';
+    // Язык — сразу: подсказка «выберите систему» стоит в кадре до первого
+    // файла, а до него движок говорил по-английски при любой настройке.
+    withParticles((w) => w.setLanguage && w.setLanguage(api.lang()));
+  }
   stage.pframe.hidden = !on;
   stage.frame.hidden = on;
 }
@@ -271,7 +278,7 @@ export function showParticleFrame(on) {
 /** Загружает PCF и показывает первый эффект. */
 export async function loadPcf(source, label = '') {
   const short = label || source.replace(/^particles\//, '');
-  say('Разбор ' + short + '…');
+  say(`Разбор ${short}…`);
   els.grid.innerHTML = '';
   const data = await api.loadParticles(source);
   if (data.error) { say(data.error); return; }
@@ -279,6 +286,7 @@ export async function loadPcf(source, label = '') {
   setTree(data.tree || []);
   setDiff(data.diff || {});
   loadedFile = source;
+  applyToolsMenu();            // «Сохранить PCF» — теперь есть что
   // Выпадашка показывает открытый файл и когда его выбрали из списка игры.
   if ([...els.cat.options].some((o) => o.value === source)) els.cat.value = source;
   // Новый файл — свои узлы; старое состояние свёрнутости к ним не относится.
@@ -288,6 +296,9 @@ export async function loadPcf(source, label = '') {
 
   withParticles((w) => {
     w.setLanguage && w.setLanguage(api.lang());
+    // Клавиши принадлежат странице, а фокус после щелчка по кадру — движку:
+    // он передаёт нажатие сюда (см. playback.js → editorKey).
+    w.onEditorKey = editorKey;
     w.loadParticleData(data);
   });
   loadedShort = short;

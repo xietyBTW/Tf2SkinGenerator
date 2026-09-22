@@ -10,7 +10,7 @@ import * as api from '../api.js';
 import { say, withParticles } from '../stage.js';
 import { root } from '../layout.js';
 import { pSystem } from './state.js';
-import { applyStructure } from './actions.js';
+import { applyStructure, PACTS } from './actions.js';
 import { showParticleMaterials } from './materials.js';
 
 // ── Отмена правок ────────────────────────────────────────────────────────
@@ -39,18 +39,35 @@ export async function syncHistory() {
 document.getElementById('pundo').addEventListener('click', () => historyGo(-1));
 document.getElementById('predo').addEventListener('click', () => historyGo(1));
 
-document.addEventListener('keydown', (e) => {
-  if (root.dataset.section !== 'particles' || !e.ctrlKey) return;
-  // В поле ввода Ctrl+Z — это отмена ТЕКСТА, её перехватывать нельзя.
+/**
+ * Сочетания клавиш раздела: отмена, возврат, копирование и вставка системы.
+ *
+ * Разбор вынесен в функцию, потому что то же нажатие приходит ИЗ КАДРА:
+ * щелчок по эффекту отдаёт фокус iframe, и Ctrl+Z молча не работал, пока не
+ * щёлкнешь мимо. Движок передаёт само событие (см. onEditorKey).
+ */
+export function editorKey(e) {
+  if (root.dataset.section !== 'particles' || !(e.ctrlKey || e.metaKey)) return;
+  // В поле ввода Ctrl+Z — это отмена ТЕКСТА, её перехватывать нельзя; то же
+  // с копированием выделенного.
   const tag = (e.target.tagName || '').toLowerCase();
   if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
-  const key = e.key.toLowerCase();
-  if (key === 'z' && !e.shiftKey) { e.preventDefault(); historyGo(-1); }
-  else if (key === 'y' || (key === 'z' && e.shiftKey)) {
+  // По коду клавиши, а не по символу: в русской раскладке Z — это «я».
+  if (e.code === 'KeyZ' && !e.shiftKey) { e.preventDefault(); historyGo(-1); }
+  else if (e.code === 'KeyY' || (e.code === 'KeyZ' && e.shiftKey)) {
     e.preventDefault();
     historyGo(1);
+  } else if (e.code === 'KeyC' && pSystem) {
+    // Выделенный текст копируют как текст — это не про эффект.
+    if (String(window.getSelection && window.getSelection()).trim()) return;
+    e.preventDefault();
+    PACTS.copy();
+  } else if (e.code === 'KeyV' && pSystem) {
+    e.preventDefault();
+    PACTS.paste();
   }
-});
+}
+document.addEventListener('keydown', editorKey);
 
 document.getElementById('prestart').addEventListener('click',
   () => withParticles((w) => w.restartEffect()));

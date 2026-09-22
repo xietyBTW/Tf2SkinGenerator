@@ -637,6 +637,8 @@ WEAPON_EXTRA_TEXTURES: dict[str, list[dict]] = {
         {
             "name": "pocket_watch_fg",
             "vpk":  "materials/vgui/replay/thumbnails/deadringer/pocket_watch_fg.vtf",
+            # Оригинал в игре — здесь; мод кладёт свою в папку обхода sv_pure.
+            "game": "materials/vgui/pocket_watch_fg.vtf",
             # VMT кладём В ТУ ЖЕ папку, что и VTF (так требует игра, без дублей vgui)
             "vmt":  "materials/vgui/replay/thumbnails/deadringer/pocket_watch_fg.vmt",
             "ru": "Центральная вставка", "en": "Center insert",
@@ -644,6 +646,7 @@ WEAPON_EXTRA_TEXTURES: dict[str, list[dict]] = {
         {
             "name": "pocket_watch_bg",
             "vpk":  "materials/vgui/replay/thumbnails/deadringer/pocket_watch_bg.vtf",
+            "game": "materials/vgui/pocket_watch_bg.vtf",
             "vmt":  "materials/vgui/replay/thumbnails/deadringer/pocket_watch_bg.vmt",
             "ru": "Фон циферблата", "en": "Watch background",
         },

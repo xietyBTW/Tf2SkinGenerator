@@ -76,7 +76,11 @@ def _folder(key: str) -> Path:
 
 
 def _own_part_image(spec, files_dir: Path):
-    """Копия картинки части рядом с работой; настройка посадки сохраняется."""
+    """Копия картинки части рядом с работой; настройка посадки сохраняется.
+    Картинок на части бывает несколько — списком, в порядке наложения."""
+    if isinstance(spec, list):
+        owned = [o for s in spec if (o := _own_part_image(s, files_dir))]
+        return owned or None
     if isinstance(spec, dict):
         owned = _own_file(spec.get('path'), files_dir)
         return {**spec, 'path': owned} if owned else None

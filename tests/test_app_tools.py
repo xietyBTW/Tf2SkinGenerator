@@ -440,6 +440,51 @@ class MissingTextureAnswerTests(unittest.TestCase):
         self.assertEqual(s.answers, [__file__])
 
 
+class MissingPartModelAnswerTests(unittest.TestCase):
+    """Сменная часть модели (`$bodygroup`): вопрос доходит до страницы, ответ —
+    до воркера. Раньше сигнал никто не слушал, и сборка ждала пять минут на
+    каждую часть."""
+
+    def _session(self) -> AppSession:
+        s = AppSession()
+        s._mode = 'demoman_c_bottle'
+        s.preview.weapon_key = 'c_bottle'
+        s._build = MagicMock(isInterruptionRequested=lambda: False)
+        return s
+
+    def test_the_question_reaches_the_page_with_the_kind_of_part(self):
+        s = self._session()
+        events = []
+        s._put = lambda name, **payload: events.append((name, payload))
+        s._on_build_needs_model('c_bottle_broken', 'c_bottle')
+        self.assertEqual(events[0][0], 'need_model')
+        self.assertEqual(events[0][1]['part'], 'c_bottle_broken')
+        self.assertEqual(events[0][1]['kind'], 'broken')
+
+    def test_the_answer_reaches_the_worker(self):
+        s = self._session()
+        s.answer_model(__file__)
+        s._build.set_extra_model_result.assert_called_once_with(__file__)
+        s.answer_model('')
+        s._build.set_extra_model_result.assert_called_with(None)
+        self.assertIn('error', s.answer_model('C:/nowhere/part.smd'))
+
+    def test_a_cancelled_build_keeps_the_game_part_without_asking(self):
+        s = self._session()
+        s._build = MagicMock(isInterruptionRequested=lambda: True)
+        events = []
+        s._put = lambda name, **payload: events.append(name)
+        s._on_build_needs_model('caber_exploded_bodygroup', 'c_caber')
+        self.assertEqual(events, [])
+        s._build.set_extra_model_result.assert_called_once_with(None)
+
+    def test_the_build_listens_for_part_requests(self):
+        """Проводка сигнала — то, чего не хватало."""
+        import inspect
+        src = inspect.getsource(AppSession.build)
+        self.assertIn('request_extra_model.connect', src)
+
+
 class HatClassSelectionTests(unittest.TestCase):
     """Какие модели мультиклассовой шапки уходят в сборку."""
 

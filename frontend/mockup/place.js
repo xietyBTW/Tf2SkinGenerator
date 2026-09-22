@@ -16,6 +16,7 @@
 import * as api from './api.js';
 import { loadImage } from './util.js';
 import { applyView } from './preview.js';
+import { chooseFile } from './util.js';
 import { partsMaterial, hintParts, refreshParts } from './parts.js';
 
 // ── Посадка картинки на часть ───────────────────────────────────────────
@@ -345,11 +346,20 @@ function resizeBy(state, drag, event, cv) {
 }
 
 /**
- * Спрашивает, как посадить картинку. Возвращает настройку или null (отмена).
+ * Окно посадки одной картинки части.
  *
- * `shape` — ответ `api.partShape`: развёртка части и то, что на ней уже лежит.
+ * `shape` — ответ `api.partShape`: развёртка части, основа (всё, что на
+ * материале уже лежит, кроме этой картинки) и список картинок части.
+ * Список стоит слева; щелчок по другой картинке, «+ Добавить», «Заменить…»
+ * и «Убрать» — тоже ответы окна, только оно при них не закрывается: цикл
+ * в `editPartLayers` сохраняет посадку, делает дело и открывает окно на
+ * нужном слое заново.
+ *
+ * Отвечает {act, spec, changed[, layer, file]}: act — ok, cancel, layer,
+ * add, replace или drop; spec — посадка на момент ответа; changed — правили
+ * ли её.
  */
-export async function askPlacement(shape, imageUrl, spec) {
+export async function askPlacement(shape, imageUrl, spec, layers = null) {
   const state = {
     polygons: shape.polygons || [],
     bbox: shape.bbox || [0, 0, 1, 1],
@@ -370,25 +380,26 @@ export async function askPlacement(shape, imageUrl, spec) {
   cv.height = Math.round(ratio >= 1 ? 512 / ratio : 512);
   const wide = document.getElementById('place-w');
   const tall = document.getElementById('place-h');
+  const angle = document.getElementById('place-a');
+  const shiftX = document.getElementById('place-x');
+  const shiftY = document.getElementById('place-y');
   const bare = document.getElementById('place-bare');
   const zoom = document.getElementById('place-zoom');
   const outline = document.getElementById('place-outline');
-  // Игровая текстура под наклейкой — контекст, но пёстрый: на ней не видно
-  // границ собственной картинки. Прятать её нужно только на время правки,
-  // поэтому это галка окна, а не настройка предмета.
-  bare.checked = false;
+  // Галки показа под холстом — настройки ОКНА, а не предмета, и каждое
+  // открытие начинает с одного и того же:
+  //  • игровая текстура под наклейкой видна — контекст, хоть и пёстрый;
+  //  • контур выключен — сетка треугольников нужна только на мелкой детали;
+  //  • приближение включено: класть картинку на кусок, глядя на всю
+  //    текстуру, — то же, что целиться в спичку с другого конца комнаты.
   state.bare = false;
-  // Сетка треугольников показывает, ПО ЧЕМУ маскирует склейка, и на мелкой
-  // детали это единственный способ увидеть её изнанку. Поэтому контур —
-  // галка, а не умолчание; она окна, а не предмета.
-  outline.checked = false;
   state.outline = false;
-  // Приближение по умолчанию: класть картинку на кусок, глядя на всю текстуру,
-  // — то же, что целиться в спичку с другого конца комнаты.
-  zoom.checked = true;
   state.zoom = true;
   state.zoomK = 1;
   state.focus = null;
+  bare.checked = false;
+  outline.checked = false;
+  zoom.checked = true;
 
   // Кадры анимации приходят от Python отдельными картинками: браузер их из
   // гифки не достаёт — отсоединённый <img> её не крутит, а drawImage берёт
@@ -410,6 +421,9 @@ export async function askPlacement(shape, imageUrl, spec) {
   const syncNumbers = () => {
     wide.value = Math.round(state.spec.scale * 100);
     tall.value = Math.round(state.spec.scale_y * 100);
+    angle.value = Math.round(state.spec.angle);
+    shiftX.value = Math.round(state.spec.offset[0] * 100);
+    shiftY.value = Math.round(state.spec.offset[1] * 100);
   };
 
   const sync = () => {
@@ -421,8 +435,9 @@ export async function askPlacement(shape, imageUrl, spec) {
   };
 
   document.getElementById('place-part').textContent =
-    'часть ' + (shape.part + 1) + ' · развёртка ' + state.polygons.length + ' тр.';
+    `часть ${shape.part + 1} · развёртка ${state.polygons.length} тр.`;
   sync();
+  const initial = JSON.stringify(state.spec);
 
   return new Promise((resolve) => {
     let done = false;
@@ -432,14 +447,19 @@ export async function askPlacement(shape, imageUrl, spec) {
       off.push(() => el.removeEventListener(type, fn, opts));
     };
 
-    const settle = (value) => {
+    // `close` — закрыть ли окно: смена слоя и действия над списком оставляют
+    // его открытым, чтобы оно не мигало между шагами.
+    const settle = (value, close = true) => {
       if (done) return;
       done = true;
       if (state.animate) clearInterval(state.animate);
       off.forEach((f) => f());
-      placeDlg.close();
-      resolve(value);
+      if (close) placeDlg.close();
+      resolve({ ...value, spec: state.spec,
+                changed: JSON.stringify(state.spec) !== initial });
     };
+
+    showLayers(layers, on, settle);
 
     // Тянем картинку мышью: сдвиг считаем в долях места части — в тех же
     // единицах, в которых его понимает склейка.
@@ -492,6 +512,7 @@ export async function askPlacement(shape, imageUrl, spec) {
         if (Math.abs(angle - step) < 3) angle = step % 360;
         state.spec.angle = angle;
         drawPlace(state);
+        syncNumbers();
         return;
       }
       if (drag.grip) { resizeBy(state, drag, e, cv); syncNumbers(); return; }
@@ -504,6 +525,7 @@ export async function askPlacement(shape, imageUrl, spec) {
       state.spec.offset = [drag.from[0] + (e.clientX - drag.x) / bw,
                            drag.from[1] + (e.clientY - drag.y) / bh];
       drawPlace(state);
+      syncNumbers();
     });
     on(cv, 'pointerup', (e) => { cv.releasePointerCapture(e.pointerId); drag = null; });
     // Колесо приближает ВИД, а не картинку: размер картинки правится своим
@@ -543,6 +565,7 @@ export async function askPlacement(shape, imageUrl, spec) {
       e.preventDefault();
       state.spec.angle = ((state.spec.angle + step) % 360 + 360) % 360;
       drawPlace(state);
+      syncNumbers();
     });
 
     // Поля — для точного числа; мышью то же самое делают ручки на рамке.
@@ -554,6 +577,23 @@ export async function askPlacement(shape, imageUrl, spec) {
     });
     byNumber(wide, 'scale');
     byNumber(tall, 'scale_y');
+    // Поворот и сдвиг числом: то же, что маркер и перетаскивание, только точно.
+    on(angle, 'input', () => {
+      const value = Number(angle.value);
+      if (!Number.isFinite(value) || angle.value === '') return;
+      state.spec.angle = ((value % 360) + 360) % 360;
+      drawPlace(state);
+    });
+    const byShift = (field, axis) => on(field, 'input', () => {
+      const value = Number(field.value);
+      if (!Number.isFinite(value) || field.value === '') return;
+      const offset = [...state.spec.offset];
+      offset[axis] = Math.max(-5, Math.min(5, value / 100));
+      state.spec.offset = offset;
+      drawPlace(state);
+    });
+    byShift(shiftX, 0);
+    byShift(shiftY, 1);
     on(bare, 'change', () => { state.bare = bare.checked; drawPlace(state); });
     on(outline, 'change', () => {
       state.outline = outline.checked;
@@ -573,36 +613,188 @@ export async function askPlacement(shape, imageUrl, spec) {
       state.focus = null;
       sync();
     });
-    on(document.getElementById('place-ok'), 'click', () => settle(state.spec));
-    on(document.getElementById('place-cancel'), 'click', () => settle(null));
-    on(placeDlg, 'cancel', () => settle(null));
+    on(document.getElementById('place-ok'), 'click', () => settle({ act: 'ok' }));
+    on(document.getElementById('place-cancel'), 'click', () => settle({ act: 'cancel' }));
+    on(placeDlg, 'cancel', (e) => { e.preventDefault(); settle({ act: 'cancel' }); });
 
-    placeDlg.showModal();
+    if (!placeDlg.open) placeDlg.showModal();
   });
 }
 
 /**
- * Открывает окно посадки для части: развёртку и основу спрашиваем у Python.
+ * Колонка картинок части.
  *
- * `path` — новая картинка; без него правится уже положенная.
+ * Строки лежат так же, как картинки: верхняя — поверх. Щелчок выбирает
+ * слой, а перетаскивание переставляет — порядок в списке и есть порядок
+ * наложения. Тащим сами, без drag-and-drop браузера: тому нужен призрак и
+ * долгое нажатие на тачпаде, а здесь строка едет за курсором сразу, соседи
+ * уступают место плавно, и отпущенная доезжает до своей щели.
  */
-export async function askPartPlacement(part, path) {
-  const shape = await api.partShape(partsMaterial, part);
-  if (shape.error) { hintParts(shape.error); return null; }
-  const spec = shape.image
-    || { fit: 'contain', angle: 0, scale: 1, scale_y: 1, offset: [0, 0] };
-  const url = api.fileUrl(path || spec.path);
-  return askPlacement(shape, url, spec);
+function showLayers(layers, on, settle) {
+  const panel = document.getElementById('place-layers');
+  panel.hidden = !layers;
+  if (!layers) return;
+  const list = document.getElementById('place-list');
+  list.innerHTML = '';
+  const count = layers.images.length;
+  document.getElementById('place-count').textContent = String(count);
+  //: Порядок показа → номер слоя в стопке (стопка считается снизу вверх).
+  const shown = layers.images.map((_, i) => i).reverse();
+  const rows = shown.map((li, di) => {
+    const img = layers.images[li];
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'place__layer' + (li === layers.selected ? ' is-active' : '');
+    row.innerHTML = '<span class="place__grip" aria-hidden="true"></span>'
+      + '<span class="place__thumb"><img alt=""></span>'
+      + '<span class="place__meta"><span class="place__name mono"></span>'
+      + '<span class="place__pos"></span></span>';
+    row.querySelector('img').src = api.fileUrl(img.path);
+    const name = row.querySelector('.place__name');
+    name.textContent = String(img.path).split(/[\\/]/).pop();
+    name.title = name.textContent;
+    row.querySelector('.place__pos').textContent =
+      count === 1 ? '' : di === 0 ? 'поверх' : di === count - 1 ? 'внизу' : '';
+    return row;
+  });
+  list.append(...rows);
+
+  //: Длительность из темы: при выключенной анимации — ноль, и ждать нечего.
+  const dur = parseFloat(getComputedStyle(document.documentElement)
+    .getPropertyValue('--dur')) || 0;
+  //: Шаг между строками — расстояние между их верхами, вместе с зазором.
+  const pitch = () => (rows.length > 1
+    ? rows[1].offsetTop - rows[0].offsetTop : rows[0].offsetHeight);
+
+  let drag = null;
+  rows.forEach((row, di) => {
+    on(row, 'click', () => {
+      // После перетаскивания браузер шлёт и щелчок — он не выбор.
+      if (row.dataset.dragged) { delete row.dataset.dragged; return; }
+      if (shown[di] !== layers.selected) settle({ act: 'layer', layer: shown[di] }, false);
+    });
+    on(row, 'pointerdown', (e) => {
+      if (e.button !== 0 || rows.length < 2) return;
+      drag = { di, y0: e.clientY, moved: false, target: di };
+      row.setPointerCapture(e.pointerId);
+    });
+    on(row, 'pointermove', (e) => {
+      if (!drag || drag.di !== di) return;
+      const dy = e.clientY - drag.y0;
+      // Порог: щелчок с дрожью руки — всё ещё щелчок.
+      if (!drag.moved) {
+        if (Math.abs(dy) < 4) return;
+        drag.moved = true;
+        row.dataset.dragged = '1';
+        row.classList.add('is-dragging');
+        list.classList.add('is-sorting');
+      }
+      const h = pitch();
+      row.style.transform = `translateY(${dy}px) scale(1.02)`;
+      const target = Math.max(0, Math.min(rows.length - 1, Math.round(di + dy / h)));
+      if (target === drag.target) return;
+      drag.target = target;
+      // Соседи между старым и новым местом сдвигаются на одну строку.
+      rows.forEach((other, oi) => {
+        if (other === row) return;
+        let shift = 0;
+        if (di < target && oi > di && oi <= target) shift = -h;
+        else if (di > target && oi >= target && oi < di) shift = h;
+        other.style.transform = shift ? `translateY(${shift}px)` : '';
+      });
+    });
+    const finish = (e) => {
+      if (!drag || drag.di !== di) return;
+      const { target, moved } = drag;
+      drag = null;
+      if (row.hasPointerCapture(e.pointerId)) row.releasePointerCapture(e.pointerId);
+      if (!moved) return;
+      // Довести строку до щели плавно — и только потом отдать ответ: список
+      // перестроится уже на том же месте, и глазу не за что зацепиться.
+      row.classList.remove('is-dragging');
+      list.classList.remove('is-sorting');
+      row.classList.add('is-settling');
+      row.style.transform = `translateY(${(target - di) * pitch()}px)`;
+      setTimeout(() => {
+        if (target !== di) {
+          settle({ act: 'move', layer: shown[di], to: shown[target] }, false);
+          return;
+        }
+        rows.forEach((r) => { r.style.transform = ''; r.classList.remove('is-settling'); });
+      }, dur);
+    };
+    on(row, 'pointerup', finish);
+    on(row, 'pointercancel', finish);
+  });
+
+  // Файл спрашиваем ЗДЕСЬ, до ответа окна: отказ от выбора файла ничего не
+  // меняет, и окно остаётся жить как было.
+  const withFile = (act) => async () => {
+    const file = await chooseFile('image/*,.vtf');
+    if (file) settle({ act, file }, false);
+  };
+  on(document.getElementById('place-add'), 'click', withFile('add'));
+  on(document.getElementById('place-replace'), 'click', withFile('replace'));
+  on(document.getElementById('place-drop'), 'click', () => settle({ act: 'drop' }, false));
 }
 
-/** Правка посадки уже лежащей картинки — по щелчку на её метке в списке. */
-export async function repositionPart(part) {
-  const options = await askPartPlacement(part, null);
-  if (options === null) return;
-  hintParts('Перекладываю…');
-  const res = await api.setPartTexture(partsMaterial, part, null, options);
-  if (res.error) { hintParts(res.error); return; }
+/**
+ * Редактор картинок части: окно посадки со списком слоёв слева.
+ *
+ * Открывается на слое `layer` (отрицательный — с конца). Каждое действие в
+ * списке — свой шаг: посадка правимого слоя сохраняется при любом уходе с
+ * него, добавление кладёт картинку поверх и открывает её, замена ставит
+ * файл на место слоя с его посадкой, «Убрать» снимает слой, перетаскивание
+ * переставляет в стопке (выше в списке — поверх на модели). Всё это —
+ * обычные правки предмета, Ctrl+Z их откатывает по одной. «Отмена» бросает
+ * только несохранённую посадку текущего слоя.
+ */
+export async function editPartLayers(part, layer = -1) {
+  let current = layer;
+  for (;;) {
+    const shape = await api.partShape(partsMaterial, part, current);
+    if (shape.error) { hintParts(shape.error); break; }
+    const images = shape.images || [];
+    if (!images.length || !shape.image) break;       // снять больше нечего
+    current = shape.layer;
+
+    const res = await askPlacement(shape, api.fileUrl(shape.image.path), shape.image,
+                                   { images, selected: current });
+    if (res.act === 'cancel') return;
+    if (res.changed && res.act !== 'drop'
+        && !await persist(part, null, res.spec, current)) return;
+    if (res.act === 'ok') return;
+
+    if (res.act === 'layer') {
+      current = res.layer;
+    } else if (res.act === 'drop') {
+      if (!await persist(part, null, null, current)) return;
+      current = Math.min(current, images.length - 2);
+    } else if (res.act === 'add') {
+      if (!await persist(part, await api.upload(res.file), null, null)) return;
+      current = -1;                                   // новая — верхняя
+    } else if (res.act === 'replace') {
+      if (!await persist(part, await api.upload(res.file), res.spec, current)) return;
+    } else if (res.act === 'move') {
+      hintParts('Переставляю…');
+      const moved = await api.movePartTexture(partsMaterial, part, res.layer, res.to);
+      if (moved.error) { hintParts(moved.error); return; }
+      applyView(moved);
+      await refreshParts();
+      hintParts('');
+      current = res.to;
+    }
+  }
+  if (placeDlg.open) placeDlg.close();
+}
+
+/** Одно действие над картинками части — и модель с полосой частей следом. */
+async function persist(part, path, options, layer) {
+  hintParts(path ? 'Наложение на часть…' : 'Перекладываю…');
+  const res = await api.setPartTexture(partsMaterial, part, path, options, layer);
+  if (res.error) { hintParts(res.error); return false; }
   applyView(res);
   await refreshParts();
   hintParts('');
+  return true;
 }

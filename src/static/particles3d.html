@@ -127,7 +127,14 @@ const I18N = {
   },
 };
 let lang = 'en';
-window.setLanguage = (l) => { lang = I18N[l] ? l : 'en'; };
+window.setLanguage = (l) => {
+  lang = I18N[l] ? l : 'en';
+  // Подсказка «выберите систему» уже в кадре: язык приходит после старта, и
+  // без перерисовки она осталась бы на прежнем.
+  if (statusEl && statusEl.className === '' && statusTxt.textContent) {
+    statusTxt.textContent = I18N[lang].prompt;
+  }
+};
 
 // ── Статус ───────────────────────────────────────────────────────────────── //
 
@@ -1297,6 +1304,15 @@ function disposeBatches() {
 //: Что движок умеет симулировать. Через мост Qt это уходит панели окна
 //: (reportSupport); веб-странице тот же список нужен прямо из окна кадра.
 window.implementedModules = implementedModules;
+
+// Сочетания клавиш редактора (Ctrl+Z, Ctrl+C…) принадлежат СТРАНИЦЕ, а
+// фокус после щелчка по кадру достаётся этому iframe — и они молча не
+// работали, пока не щёлкнешь мимо. Своей обработки здесь нет: только
+// передача нажатия наверх (так же делает viewer3d → onPartsKey).
+window.addEventListener('keydown', e => {
+  if (!(e.ctrlKey || e.metaKey)) return;
+  if (typeof window.onEditorKey === 'function') window.onEditorKey(e);
+});
 
 window.loadParticleData = function(dataJson) {
   try {

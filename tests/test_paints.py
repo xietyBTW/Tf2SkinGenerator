@@ -1,6 +1,5 @@
 """Краски игры для превью: банки из items_game и покраска по маске."""
 
-import json
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory

@@ -71,7 +71,7 @@ export async function cpFillIndexes() {
   const res = pSystem ? await api.particleControlPoints(pSystem) : { used: [] };
   const used = res.used || [];
   cpEl('cp-used').textContent = used.length
-    ? 'эффекту нужны: ' + used.join(', ') : '';
+    ? `эффекту нужны: ${used.join(', ')}` : '';
 
   box.innerHTML = '';
   // Показываем нужные точки плюс небольшой запас: всего их 64, и рисовать

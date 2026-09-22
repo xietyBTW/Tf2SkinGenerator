@@ -249,14 +249,13 @@ document.getElementById('cfg-cache').addEventListener('click', async () => {
   const size = document.getElementById('cfg-cache-size').textContent;
   const go = await ask({
     title: 'Очистить кэш моделей',
-    text: 'Сейчас в кэше ' + size + '. Кэш ускоряет повторную сборку того же '
-        + 'оружия — после очистки первая сборка каждого будет медленнее.',
+    text: `Сейчас в кэше ${size}. Кэш ускоряет повторную сборку того же оружия — после очистки первая сборка каждого будет медленнее.`,
     ok: 'Очистить',
   });
   if (!go) return;
   const res = await api.clearModelCache();
   document.getElementById('cfg-cache-size').textContent = 'пусто';
-  say('Кэш очищен, записей удалено: ' + (res.removed ?? 0));
+  say(`Кэш очищен, записей удалено: ${res.removed ?? 0}`);
 });
 
 /**
@@ -302,7 +301,7 @@ document.getElementById('cfg-drafts').addEventListener('click', async () => {
   if (!picked || !picked.length) return;
   const res = await api.forgetDrafts(picked);
   if (res.error) { say(res.error); return; }
-  say('Черновиков удалено: ' + (res.removed ?? 0));
+  say(`Черновиков удалено: ${res.removed ?? 0}`);
   // Ушёл черновик открытого предмета — вместе с ним ушли и правки на экране.
   if (res.reset) refreshView();
   showDrafts();

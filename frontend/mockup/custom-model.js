@@ -9,6 +9,7 @@
 import * as api from './api.js';
 import { ask } from './ask.js';
 import { chooseFiles } from './util.js';
+import { t } from './i18n.js';
 import { say, viewer, withViewer } from './stage.js';
 import { refreshView, reloadSceneIfFp } from './preview.js';
 import { closeParts } from './parts.js';
@@ -39,7 +40,7 @@ export async function replaceModel() {
   const file = files.find((f) => /\.(smd|obj|glb|gltf)$/i.test(f.name));
   if (!file) { if (files.length) say('Среди выбранных файлов нет модели'); return; }
 
-  say('Конвертация ' + file.name + '…');
+  say(`Конвертация ${file.name}…`);
   for (const extra of files) if (extra !== file) await api.upload(extra);
   const path = await api.upload(file);
   const first = await api.loadCustomModel(path);
@@ -76,7 +77,8 @@ export async function replaceModel() {
     notes.push(`упрощено: ${res.simplified[0]} → ${res.simplified[1]} треугольников`);
   }
   if (res.textures) notes.push(`текстур из файла: ${res.textures}`);
-  say(notes.join('; '));
+  // Каждую заметку переводим отдельно: склеенную строку словарь не узнаёт.
+  say(notes.map(t).join('; '));
   refreshView();
   await reloadSceneIfFp();
 }

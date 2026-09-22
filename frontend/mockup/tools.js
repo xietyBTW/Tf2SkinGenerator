@@ -23,11 +23,11 @@ document.getElementById('tools').addEventListener('click', async (e) => {
     // путь, а страница пути к выбранному файлу не знает и знать не должна.
     const file = await chooseFile('.pcf');
     if (!file) return;
-    say('Загрузка ' + file.name + '…');
+    say(`Загрузка ${file.name}…`);
     try {
       await loadPcf(await api.upload(file), file.name);
     } catch (err) {
-      say('Не удалось открыть: ' + err.message);
+      say(`Не удалось открыть: ${err.message}`);
     }
     return;
   }
@@ -108,7 +108,7 @@ export async function mergeMods() {
       .map(([weapon, mods]) => `${weapon}: ${mods.join(', ')}`).join('\n');
     const go = await ask({
       title: 'Моды трогают одно оружие',
-      text: lines + '\nОдин перекроет другой. Продолжить?',
+      text: `${lines}\nОдин перекроет другой. Продолжить?`,
       ok: 'Объединить',
     });
     if (!go) return;

@@ -19,7 +19,7 @@ import os
 import re
 import struct
 from dataclasses import dataclass, field
-from typing import Dict, Iterator, List, Optional, Tuple
+from typing import Dict, Iterator, List, Tuple
 
 from src.shared.logging_config import get_logger
 
@@ -60,7 +60,6 @@ def _cstr(data: bytes, offset: int) -> str:
 
 def _vvd_vertices(vvd: bytes) -> List[tuple]:
     """Вершины LOD0 с учётом таблицы фикс-апов."""
-    num_lods = struct.unpack_from('<i', vvd, 12)[0]
     num_fixups, fixup_start, vert_start = struct.unpack_from('<iii', vvd, 48)
     count = struct.unpack_from('<i', vvd, 16)[0]        # numLODVertexes[0]
     raw = [_VERT.unpack_from(vvd, vert_start + i * _VERT.size)

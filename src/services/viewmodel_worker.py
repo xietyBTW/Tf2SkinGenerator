@@ -251,14 +251,15 @@ class ViewmodelPreviewWorker(BaseWorker):
             return
 
         self.progress.emit(self._p['converting'])
+        extra = _default_body_parts(view_dir, ref)
         scene = viewmodel_animation.build_scene(
             arms_ref_smd=ref,
             anim_smd=sequence.smd_path,
             clip_name=sequence.name,
             fps=sequence.fps,
             loop=sequence.loop,
-            arms_extra_smds=_default_body_parts(view_dir, ref),
-            editable_mats=self._own_view_editable(ref, tf2_class),
+            arms_extra_smds=extra,
+            editable_mats=self._own_view_editable([ref, *extra], tf2_class),
         )
         if scene is None:
             self.failed.emit(self._p['scene_error'])
@@ -266,10 +267,10 @@ class ViewmodelPreviewWorker(BaseWorker):
         self.progress.emit(self._p['texture'])
         self._emit_scene(reader, scene, view_dir, view_dir)
 
-    def _own_view_editable(self, ref: str, tf2_class: str) -> list:
+    def _own_view_editable(self, smds: list, tf2_class: str) -> list:
         """Материалы модели вида за вычетом рук класса — это и есть предмет."""
         from src.services.smd_to_obj_service import SmdToObjService
-        found = SmdToObjService.scan_material_names([ref])
+        found = SmdToObjService.scan_material_names(smds)
         hands = mds.ensure_decompiled(
             f"__arms_{tf2_class}", self.misc_vpk_path,
             [viewmodel_anims.arms_mdl(tf2_class)],
@@ -494,6 +495,13 @@ class ViewmodelPreviewWorker(BaseWorker):
         weapon_cd = _cdmaterials(weapon_dir) + (
             _cdmaterials(carrier_dir) if carrier_dir else [])
         arms_cd = _cdmaterials(arms_dir)
+        # Экран модели (циферблат Звона смерти): его картинки — vgui-материалы
+        # из materials/vgui, а не из $cdmaterials модели. У модели вида
+        # (v_watch_*) экран лежит в той же части, что и руки.
+        from src.services import control_panel
+        screen = control_panel.screen_hints(weapon_dir)
+        if screen:
+            weapon_cd, arms_cd = weapon_cd + ['vgui'], arms_cd + ['vgui']
         weapon_names, arms_names = _scene_materials(scene)
 
         textures: dict = {}
@@ -506,6 +514,7 @@ class ViewmodelPreviewWorker(BaseWorker):
                              in resolver.texture_map(names, cdmaterials).items()
                              if png})
             hints.update(resolver.render_map(names, cdmaterials))
+        hints.update(screen)
         textures.update(self._blue_arms(resolver, arms_names, arms_cd, arms_dir))
 
         # Свойства материалов — ДО модели: вьювер применит их по мере прихода
@@ -612,7 +621,10 @@ def _default_body_parts(decomp_dir: str, main_smd: str) -> list:
         logger.debug(f"[fp] бодигруппы не собрались ({decomp_dir}): {exc}")
         return []
     main = os.path.normcase(os.path.abspath(main_smd or ""))
-    return [p for p in parts if os.path.normcase(os.path.abspath(p)) != main]
+    parts = [p for p in parts if os.path.normcase(os.path.abspath(p)) != main]
+    # Экран модели (циферблат Звона смерти): vgui-панель как геометрия.
+    from src.services import control_panel
+    return parts + control_panel.screen_smds(decomp_dir, main_smd)
 
 
 def _cdmaterials(decomp_dir: str) -> list:
