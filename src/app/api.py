@@ -588,6 +588,24 @@ def set_australium(active: bool) -> Dict[str, object]:
     return session().set_australium(active)
 
 
+def set_festive(kind: str = '', lang: str = '') -> Dict[str, object]:
+    """Гирлянда поверх оружия: 'xmas', 'festivizer' или '' — только показ."""
+    from src.app.session import session
+    return session().set_festive(kind, lang=_lang(lang))
+
+
+def set_decor_fit(fit: Optional[Dict[str, object]] = None) -> Dict[str, object]:
+    """Подгонка показанной гирлянды под свою модель: масштаб, поворот, сдвиг."""
+    from src.app.session import session
+    return session().set_decor_fit(fit)
+
+
+def set_decor_bends(bends: Optional[List[dict]] = None) -> Dict[str, object]:
+    """Изгибы показанной гирлянды: [{c, r, d}] в осях SMD, по порядку."""
+    from src.app.session import session
+    return session().set_decor_bends(bends)
+
+
 def paints(lang: str = '') -> List[dict]:
     """Банки краски игры для превью шапки: [{key, name, red, blu}]."""
     from src.app.session import session
@@ -621,20 +639,20 @@ def set_skin(index: int) -> Dict[str, object]:
 def set_part_detail(material: str = '', detail: float = 0.0) -> Dict[str, object]:
     """Раздробить все куски одинаково (0 — геометрия, 1 — швы развёртки)."""
     from src.app.session import session
-    return session().set_part_detail(material, detail)
+    return session().parts.set_part_detail(material, detail)
 
 
 def toggle_part_island(material: str = '', group: int = 0,
                        island: int = 0) -> Dict[str, object]:
     """Отрезать названный остров развёртки или прирастить его обратно."""
     from src.app.session import session
-    return session().toggle_part_island(material, group, island)
+    return session().parts.toggle_part_island(material, group, island)
 
 
 def part_mask(material: str = '', part: int = 0) -> Dict[str, object]:
     """Картинка-подсветка части: её форма на развёртке."""
     from src.app.session import session
-    return session().part_mask(material, part)
+    return session().parts.part_mask(material, part)
 
 
 def part_shape(material: str = '', part: int = 0,
@@ -642,14 +660,20 @@ def part_shape(material: str = '', part: int = 0,
     """Развёртка одной части — для окна посадки картинки.
     `layer` — какую из её картинок правят; None — кладут новую."""
     from src.app.session import session
-    return session().part_shape(material, part, layer)
+    return session().parts.part_shape(material, part, layer)
 
 
-def merge_part_islands(material: str = '', group: int = 0,
-                       islands: Optional[List[int]] = None) -> Dict[str, object]:
-    """Свести отрезки в один: их острова становятся одной частью."""
+def add_part_region(material: str = '',
+                    triangles: Optional[List[int]] = None) -> Dict[str, object]:
+    """Выделенное ножницами — в отдельную часть (номера треугольников меша)."""
     from src.app.session import session
-    return session().merge_part_islands(material, group, islands)
+    return session().parts.add_part_region(material, triangles)
+
+
+def remove_part_region(material: str = '', region: int = 0) -> Dict[str, object]:
+    """Вернуть область, выделенную ножницами, туда, откуда её вырезали."""
+    from src.app.session import session
+    return session().parts.remove_part_region(material, region)
 
 
 def leave_first_person() -> Dict[str, object]:
@@ -974,7 +998,7 @@ def parts(material: str = '', known_shape: str = '') -> Dict[str, object]:
     только от резки.
     """
     from src.app.session import session
-    return session().parts(material, known_shape)
+    return session().parts.describe(material, known_shape)
 
 
 def set_part_texture(material: str = '', part: int = 0,
@@ -988,7 +1012,7 @@ def set_part_texture(material: str = '', part: int = 0,
     Без пути, но с настройкой, — правка уже положенной картинки.
     """
     from src.app.session import session
-    return session().set_part_texture(material, part, path, options, layer)
+    return session().parts.set_part_texture(material, part, path, options, layer)
 
 
 def move_part_texture(material: str = '', part: int = 0,
@@ -996,7 +1020,7 @@ def move_part_texture(material: str = '', part: int = 0,
     """Переставляет картинку части в стопке: слой `layer` на место `to`
     (индексы снизу вверх). Выше в стопке — поверх."""
     from src.app.session import session
-    return session().move_part_texture(material, part, layer, to)
+    return session().parts.move_part_texture(material, part, layer, to)
 
 
 def set_part_colors(material: str = '',
@@ -1008,20 +1032,20 @@ def set_part_colors(material: str = '',
     `exact` — красить ровно выбранным цветом, а не смешивать его с оригиналом.
     """
     from src.app.session import session
-    return session().set_part_colors(material, colors, strength, exact)
+    return session().parts.set_part_colors(material, colors, strength, exact)
 
 
 def set_part_edge(material: str = '', width: float = 0.0,
                   color: str = '') -> Dict[str, object]:
     """Окантовка частей: ширина полосы по краю (в долях стороны) и её цвет."""
     from src.app.session import session
-    return session().set_part_edge(material, width, color)
+    return session().parts.set_part_edge(material, width, color)
 
 
 def clear_parts(material: str = '') -> Dict[str, object]:
     """Снимает с частей все картинки и цвета."""
     from src.app.session import session
-    return session().clear_parts(material)
+    return session().parts.clear_parts(material)
 
 
 def undo_edits(delta: int = -1, lang: str = '') -> Dict[str, object]:
@@ -1462,7 +1486,7 @@ def set_settings(values: Optional[Dict[str, object]] = None,
     from src.shared.logging_config import set_debug
     set_debug(bool(cfg.get('debug_mode')))
     from src.app.session import session
-    session().refresh_parts_animation()
+    session().parts.refresh_parts_animation()
     return settings(lang)
 
 
@@ -1670,13 +1694,13 @@ def particle_effects(query: str = '', source: str = '',
     """Эффекты игры по имени и по источнику — необычные, оружие, постройки…"""
     from src.app.session import session
 
-    return session().particle_effects(query, source, lang=_lang(lang))
+    return session().particles.particle_effects(query, source, lang=_lang(lang))
 
 
 def load_particles(source: str) -> Dict[str, object]:
     """Разбирает PCF: системы, материалы и дерево — всё, что рисует превью."""
     from src.app.session import session
-    return session().load_particles(source)
+    return session().particles.load_particles(source)
 
 
 def particle_params(system: str, lang: str = '') -> List[dict]:
@@ -1684,7 +1708,7 @@ def particle_params(system: str, lang: str = '') -> List[dict]:
     from src.app.session import session
 
     lang = _lang(lang)
-    return session().particle_params(system, lang)
+    return session().particles.particle_params(system, lang)
 
 
 def particle_system(system: str, lang: str = '') -> Dict[str, object]:
@@ -1692,32 +1716,32 @@ def particle_system(system: str, lang: str = '') -> Dict[str, object]:
     from src.app.session import session
 
     lang = _lang(lang)
-    return session().particle_system(system, lang)
+    return session().particles.particle_system(system, lang)
 
 
 def set_particle_attr(system: str, group, index: int, attr: str,
                       value) -> Dict[str, object]:
     """Правка одного атрибута системы или её модуля."""
     from src.app.session import session
-    return session().set_particle_attr(system, group, index, attr, value)
+    return session().particles.set_particle_attr(system, group, index, attr, value)
 
 
 def particle_module_catalog(group: str) -> List[str]:
     """Модули, которые можно добавить в группу."""
     from src.app.session import session
-    return session().particle_module_catalog(group)
+    return session().particles.particle_module_catalog(group)
 
 
 def add_particle_module(system: str, group: str,
                         function_name: str) -> Dict[str, object]:
     from src.app.session import session
-    return session().add_particle_module(system, group, function_name)
+    return session().particles.add_particle_module(system, group, function_name)
 
 
 def remove_particle_module(system: str, group: str,
                            index: int) -> Dict[str, object]:
     from src.app.session import session
-    return session().remove_particle_module(system, group, index)
+    return session().particles.remove_particle_module(system, group, index)
 
 
 def particle_missing_attrs(system: str, group=None, index: int = 0,
@@ -1726,83 +1750,83 @@ def particle_missing_attrs(system: str, group=None, index: int = 0,
     from src.app.session import session
 
     lang = _lang(lang)
-    return session().particle_missing_attrs(system, group, index, lang)
+    return session().particles.particle_missing_attrs(system, group, index, lang)
 
 
 def add_particle_attr(system: str, group, index: int, attr: str,
                       attr_type: str, value) -> Dict[str, object]:
     from src.app.session import session
-    return session().add_particle_attr(system, group, index, attr,
+    return session().particles.add_particle_attr(system, group, index, attr,
                                        attr_type, value)
 
 
 def remove_particle_attr(system: str, group, index: int,
                          attr: str) -> Dict[str, object]:
     from src.app.session import session
-    return session().remove_particle_attr(system, group, index, attr)
+    return session().particles.remove_particle_attr(system, group, index, attr)
 
 
 def copy_particle_params(system: str, group=None, index=None,
                          attr=None) -> Dict[str, object]:
     """Набор параметров для буфера: один параметр, модуль, группа или всё."""
     from src.app.session import session
-    return session().copy_particle_params(system, group, index, attr)
+    return session().particles.copy_particle_params(system, group, index, attr)
 
 
 def paste_particle_params(system: str, payload: dict,
                           mode: str = 'overwrite') -> Dict[str, object]:
     from src.app.session import session
-    return session().paste_particle_params(system, payload, mode)
+    return session().particles.paste_particle_params(system, payload, mode)
 
 
 def duplicate_particle_system(system: str, new_name: str) -> Dict[str, object]:
     from src.app.session import session
-    return session().duplicate_particle_system(system, new_name)
+    return session().particles.duplicate_particle_system(system, new_name)
 
 
 def rename_particle_system(system: str, new_name: str) -> Dict[str, object]:
     from src.app.session import session
-    return session().rename_particle_system(system, new_name)
+    return session().particles.rename_particle_system(system, new_name)
 
 
 def remove_particle_system(system: str) -> Dict[str, object]:
     from src.app.session import session
-    return session().remove_particle_system(system)
+    return session().particles.remove_particle_system(system)
 
 
 def particle_children(system: str) -> List[dict]:
     from src.app.session import session
-    return session().particle_children(system)
+    return session().particles.particle_children(system)
 
 
 def add_particle_child(parent: str, child: str,
                        delay: float = 0.0) -> Dict[str, object]:
     from src.app.session import session
-    return session().add_particle_child(parent, child, delay)
+    return session().particles.add_particle_child(parent, child, delay)
 
 
 def remove_particle_child(parent: str, index: int) -> Dict[str, object]:
     from src.app.session import session
-    return session().remove_particle_child(parent, index)
+    return session().particles.remove_particle_child(parent, index)
 
 
 def add_particle_layer(parent: str) -> Dict[str, object]:
     from src.app.session import session
-    return session().add_particle_layer(parent)
+    return session().particles.add_particle_layer(parent)
 
 
 def particle_diff(system: str) -> Dict[str, object]:
     """Чем система отличается от игровой: атрибуты, модули, дочерние."""
     from src.app.session import session
 
-    return session().particle_diff(system)
+    return session().particles.particle_diff(system)
 
 
 def revert_particle_system(system: str) -> Dict[str, object]:
     """Возвращает систему в игровой вид."""
     from src.app.session import session
 
-    return session().revert_particle_system(system)
+    return session().particles.revert_particle_system(system)
 
 
 def revert_particle_attr(system: str, group=None, index: int = 0,
@@ -1810,84 +1834,84 @@ def revert_particle_attr(system: str, group=None, index: int = 0,
     """Возвращает один параметр к значению игры."""
     from src.app.session import session
 
-    return session().revert_particle_attr(system, group, index, attr)
+    return session().particles.revert_particle_attr(system, group, index, attr)
 
 
 def particle_history() -> Dict[str, object]:
     """Есть ли куда откатываться и возвращаться."""
     from src.app.session import session
-    return session().particle_history()
+    return session().particles.particle_history()
 
 
 def undo_particles(delta: int = -1) -> Dict[str, object]:
     """Откат (-1) или возврат (+1) правки эффекта."""
     from src.app.session import session
-    return session().undo_particles(delta)
+    return session().particles.undo_particles(delta)
 
 
 def particle_control_points(system: str) -> Dict[str, object]:
     """Какие контрольные точки нужны этому эффекту."""
     from src.app.session import session
-    return session().particle_control_points(system)
+    return session().particles.particle_control_points(system)
 
 
 def particle_models(lang: str = '') -> List[dict]:
     """Модели из кэша декомпиляции — на них сажают контрольную точку.
     С группой (player/hat/weapon/arms/other) и подписью из каталогов игры."""
     from src.app.session import session
-    return session().particle_models(_lang(lang))
+    return session().particles.particle_models(_lang(lang))
 
 
 def particle_model_load(mode: str, key: str = '', lang: str = '') -> Dict[str, object]:
     """Модель для точек по предмету каталога; сцена придёт событием cp_model."""
     from src.app.session import session
-    return session().particle_model_load(mode, key, _lang(lang))
+    return session().particles.particle_model_load(mode, key, _lang(lang))
 
 
 def particle_model_scene(qc: str) -> Dict[str, object]:
     """Меш модели и её точки крепления."""
     from src.app.session import session
-    return session().particle_model_scene(qc)
+    return session().particles.particle_model_scene(qc)
 
 
 def particle_materials(system: str = '') -> List[dict]:
     """Материалы выбранного эффекта с картинками — карточки 2D."""
     from src.app.session import session
-    return session().particle_materials(system)
+    return session().particles.particle_materials(system)
 
 
 def set_particle_texture(material: str, path: str,
                          max_size: int = 512) -> Dict[str, object]:
     from src.app.session import session
-    return session().set_particle_texture(material, path, max_size)
+    return session().particles.set_particle_texture(material, path, max_size)
 
 
 def reset_particle_texture(material: str) -> Dict[str, object]:
     from src.app.session import session
-    return session().reset_particle_texture(material)
+    return session().particles.reset_particle_texture(material)
 
 
 def game_particle_materials() -> List[str]:
     """Материалы всех эффектов игры — работают в казуале без нового файла."""
     from src.app.session import session
-    return session().game_particle_materials()
+    return session().particles.game_particle_materials()
 
 
 def set_particle_material_to_game(material: str,
                                   game_material: str) -> Dict[str, object]:
     from src.app.session import session
-    return session().set_particle_material_to_game(material, game_material)
+    return session().particles.set_particle_material_to_game(material, game_material)
 
 
 def rename_particle_material(material: str,
                              new_material: str) -> Dict[str, object]:
     from src.app.session import session
-    return session().rename_particle_material(material, new_material)
+    return session().particles.rename_particle_material(material, new_material)
 
 
 def use_particle_texture_colors(system: str) -> Dict[str, object]:
     from src.app.session import session
-    return session().use_particle_texture_colors(system)
+    return session().particles.use_particle_texture_colors(system)
 
 
 def particle_lint(system: str = '', lang: str = '') -> Dict[str, object]:
@@ -1895,17 +1919,17 @@ def particle_lint(system: str = '', lang: str = '') -> Dict[str, object]:
     from src.app.session import session
 
     lang = _lang(lang)
-    return session().particle_lint(system, lang)
+    return session().particles.particle_lint(system, lang)
 
 
 def fix_particle_lint(system: str = '') -> Dict[str, object]:
     from src.app.session import session
-    return session().fix_particle_lint(system)
+    return session().particles.fix_particle_lint(system)
 
 
 def save_particles(path: str) -> Dict[str, object]:
     from src.app.session import session
-    return session().save_particles(path)
+    return session().particles.save_particles(path)
 
 
 def export_particles_vpk(name: str = 'particles_mod.vpk',
@@ -1913,19 +1937,19 @@ def export_particles_vpk(name: str = 'particles_mod.vpk',
     from src.app.session import session
 
     lang = _lang(lang)
-    return session().export_particles_vpk(name, lang)
+    return session().particles.export_particles_vpk(name, lang)
 
 
 def particle_param_reference(path: str = '',
                              for_ai: bool = False) -> Dict[str, object]:
     from src.app.session import session
-    return session().particle_param_reference(path, for_ai)
+    return session().particles.particle_param_reference(path, for_ai)
 
 
 def set_particle_param(system: str, key: str, value) -> Dict[str, object]:
     """Меняет параметр эффекта; в ответе — обновлённые системы для превью."""
     from src.app.session import session
-    return session().set_particle_param(system, key, value)
+    return session().particles.set_particle_param(system, key, value)
 
 
 # ═══════════════════════════════════════════════════════════════════════════ #

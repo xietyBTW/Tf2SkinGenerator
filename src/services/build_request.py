@@ -47,6 +47,11 @@ class BuildRequest:
     #   image_path: Optional[str] — текстура стиля (главная/RED);
     #   vtf_path: Optional[str]   — готовый VTF стиля (приоритетнее image_path).
     hat_style_builds: Optional[list] = None
+    # Гирлянды поверх оружия (праздничная версия, фестивайзер) с правками —
+    # каждая своей моделью и со своими материалами в тот же мод (см.
+    # decor_build). Элемент: {'kind', 'mdl', 'fit', 'textures': {материал:
+    # {'red': png, 'blu': png}}}.
+    decor_builds: Optional[list] = None
     panel_extra_textures: Optional[Dict[str, Any]] = None
     # Материалы «Прочего» на странице: убер/зомби-варианты из $texturegroup, у
     # которых нашлась игровая текстура. Что человек видел карточкой — про то

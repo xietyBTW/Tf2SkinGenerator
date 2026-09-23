@@ -45,6 +45,14 @@ w_stickybomb 21 кусок на 5 островов, суммарная площ�
 части помечаются `shared` — врать об этом нельзя, иначе человек рисует и не
 понимает, почему покрасилось ещё в трёх местах.
 
+Острова развёртки тоже не всегда совпадают с деталями: у обреза приклад
+вместе с корпусом — ОДИН остров, и резать по островам там нечего. Поэтому
+поверх всего этого есть ОБЛАСТИ (`regions`): произвольные наборы треугольников,
+которые человек выделил ножницами. Маска склейки строится по UV-треугольникам
+части, поэтому часть может быть любым их набором — ограничение одно: зеркальные
+треугольники с теми же пикселями красятся вместе (их добирает редактор частей).
+Область позже в списке забирает треугольники у более ранних.
+
 Разбор идёт по OBJ, а не по SMD: именно OBJ уехал во вьювер, и номера
 треугольников в нём те же, по которым вьювер вернёт попадание мыши. Считать
 то же самое из SMD — значит завести второй порядок треугольников и однажды
@@ -96,6 +104,9 @@ class Part:
     #: строится подпись «04·2»: сквозная нумерация от каждого разреза съезжала,
     #: и человек терял из виду ту часть, с которой работал.
     sub: int = 0
+    #: Номер ОБЛАСТИ (выделенной ножницами), из которой часть; -1 — не область.
+    #: По нему область возвращают обратно.
+    region: int = -1
 
     @property
     def paintable(self) -> bool:
@@ -331,8 +342,46 @@ def _regroup(keys: Sequence[tuple], cuts: Dict[int, List[Tuple[int, ...]]],
     return out, belongs, islands_of
 
 
+def _apply_regions(groups: Dict[object, List[int]], keys: Sequence[tuple],
+                   regions: Sequence[Sequence[int]], count: int):
+    """
+    Отдаёт треугольники областей их областям: ключ области — ('r', номер).
+
+    Возвращает (новые группы, корень куска каждого ключа). Кусок области —
+    кусок её первого треугольника: по нему она встаёт в списке рядом с тем,
+    из чего вырезана. Номера за пределами модели пропускаются: работа могла
+    пережить смену модели, и падать из-за этого нельзя.
+    """
+    region_of: Dict[int, int] = {}
+    for number, tris in enumerate(regions or ()):
+        for tri in tris:
+            if 0 <= int(tri) < count:
+                region_of[int(tri)] = number
+    root_of = {key: _chunk_key(key) for key in groups}
+    if not region_of:
+        return groups, root_of
+
+    out: Dict[object, List[int]] = {}
+    for key, indexes in groups.items():
+        for index in indexes:
+            number = region_of.get(index)
+            mine = ('r', number) if number is not None else key
+            out.setdefault(mine, []).append(index)
+    for key, indexes in out.items():
+        if key not in root_of:
+            root_of[key] = keys[min(indexes)][0]
+    for indexes in out.values():
+        indexes.sort()
+    return out, root_of
+
+
+def _is_region(key) -> bool:
+    return isinstance(key, tuple) and len(key) == 2 and key[0] == 'r'
+
+
 def _split(triangles: Sequence[Tuple[tuple, UvTri]],
-           cuts: Optional[Dict[int, set]] = None):
+           cuts: Optional[Dict[int, set]] = None,
+           regions: Optional[Sequence[Sequence[int]]] = None):
     """Части одного материала плюс карта «треугольник → остров».
 
     Возвращает (части, номер острова каждого треугольника, островов в группе).
@@ -354,6 +403,10 @@ def _split(triangles: Sequence[Tuple[tuple, UvTri]],
     numbers = _island_numbers(keys, triangles, group_of)
     groups, belongs, islands_of = _regroup(keys, bundles_of(cuts), order,
                                            group_of, numbers)
+    groups, root_of = _apply_regions(groups, keys, regions, len(triangles))
+    for key, root in root_of.items():
+        belongs.setdefault(key, order[root])
+        islands_of.setdefault(key, ())
 
     tri_island = [numbers[island] for _, island in keys]
     per_group: Dict[int, set] = {}
@@ -368,8 +421,23 @@ def _split(triangles: Sequence[Tuple[tuple, UvTri]],
         for index in indexes:
             for uv in triangles[index][1]:
                 owners.setdefault(uv, set()).add(key)
+    # Одно исключение: область и остаток ТОГО ЖЕ куска. Область вырезана из
+    # острова, и по линии разреза у них общие вершины — но не пиксели; общими
+    # их делает только общий ТРЕУГОЛЬНИК развёртки (зеркальная половина).
+    # Части РАЗНЫХ кусков с общими вершинами UV делят пиксели, как и раньше.
+    tri_owners: Dict[tuple, set] = {}
+    for key, indexes in groups.items():
+        for index in indexes:
+            tri_owners.setdefault(tuple(sorted(triangles[index][1])), set()).add(key)
     shared: Dict[object, set] = {}
     for holders in owners.values():
+        if len(holders) > 1:
+            for key in holders:
+                shared.setdefault(key, set()).update(
+                    k for k in holders - {key}
+                    if not ((_is_region(key) or _is_region(k))
+                            and root_of[key] == root_of[k]))
+    for holders in tri_owners.values():
         if len(holders) > 1:
             for key in holders:
                 shared.setdefault(key, set()).update(holders - {key})
@@ -410,8 +478,9 @@ def _split(triangles: Sequence[Tuple[tuple, UvTri]],
                                             for k in shared.get(key, ()))),
                         chunk=chunk,
                         sub=seen[chunk] if pieces[chunk] > 1 else 0,
-                        group=group_of[_chunk_key(key)],
-                        islands=islands_of[key]))
+                        group=group_of[root_of[key]],
+                        islands=islands_of[key],
+                        region=key[1] if _is_region(key) else -1))
     return out, tri_island, {g: len(v) for g, v in per_group.items()}
 
 
@@ -440,7 +509,9 @@ def _cuts_per_material(cuts) -> Dict[str, Dict[int, List[Tuple[int, ...]]]]:
 
 
 def load(obj_path: str,
-         cuts: Optional[Dict[int, object]] = None) -> Optional[ModelParts]:
+         cuts: Optional[Dict[int, object]] = None,
+         regions: Optional[Dict[str, Sequence[Sequence[int]]]] = None
+         ) -> Optional[ModelParts]:
     """Части модели по её OBJ. None — файла нет или в нём нет геометрии.
 
     ``cuts`` — {материал: {номер группы: список наборов островов}}. Каждый
@@ -452,13 +523,19 @@ def load(obj_path: str,
     разом — человек отрезал воротник, а разбиение головы менялось следом, и её
     покраска уезжала на чужие куски. Плоский словарь (без материалов) остаётся
     понятным и означает «одинаково для всех» — так его писали раньше.
+
+    ``regions`` — {материал: [набор номеров треугольников, …]}: области,
+    выделенные ножницами (см. начало модуля).
     """
     if not obj_path or not os.path.isfile(obj_path):
         return None
     per_mat = _cuts_per_material(cuts)
+    areas = {str(mat): tuple(tuple(sorted(int(t) for t in r)) for r in regs if r)
+             for mat, regs in (regions or {}).items() if regs}
     key = (os.path.abspath(obj_path), os.path.getmtime(obj_path),
            tuple(sorted((mat, tuple(sorted((g, tuple(v)) for g, v in clean.items())))
-                        for mat, clean in per_mat.items())))
+                        for mat, clean in per_mat.items())),
+           tuple(sorted(areas.items())))
     cached = _CACHE.get(key)
     if cached is not None:
         return cached
@@ -472,7 +549,7 @@ def load(obj_path: str,
         return None
 
     shared = per_mat.get('')
-    done = {mat: _split(tris, per_mat.get(mat, shared))
+    done = {mat: _split(tris, per_mat.get(mat, shared), areas.get(mat))
             for mat, tris in by_mat.items()}
     parts = ModelParts(
         materials={mat: got[0] for mat, got in done.items()},

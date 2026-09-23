@@ -534,19 +534,20 @@ class ViewmodelController:
             self._worker.stop(3000)
             self._worker = None
 
-    def shows(self, weapon_key: str, mode: str) -> bool:
+    def shows(self, weapon_key: str, mode: str, decor_smd: str = '') -> bool:
         """Та же сцена уже в кадре — значит хватит одних дорожек."""
         return self._shown == (weapon_key, mode,
-                               self._session.textures.active_team)
+                               self._session.textures.active_team, decor_smd)
 
     def load(self, weapon_key: str, mode: str, misc_vpk: str, textures_vpk: str,
              tf2_root: str, action: str = 'IDLE', lang: str = 'en',
-             custom_smd: str = '', keep_materials: bool = False) -> None:
+             custom_smd: str = '', keep_materials: bool = False,
+             decor_smd: str = '', decor_prefix: str = 'deco:') -> None:
         """Сцена «руки класса с оружием».
 
         `custom_smd` — меш вместо игрового: так в руке показывается чужой мод
         из VPK или своя модель. Скелет и анимации остаются игровыми, иначе
-        оружию нечем двигаться.
+        оружию нечем двигаться. `decor_smd` — гирлянда поверх оружия.
         """
         self.stop()
         from src.data import viewmodel_anims
@@ -569,6 +570,8 @@ class ViewmodelController:
             # У мода свои материалы и свои текстуры — переименовывать их в
             # игровые значит показать пустую модель.
             custom_keep_materials=keep_materials,
+            decor_smd=decor_smd,
+            decor_prefix=decor_prefix,
             lang=lang,
         )
         w.progress.connect(self.progress.emit)
@@ -580,7 +583,8 @@ class ViewmodelController:
         w.render_hints.connect(lambda h: self.render_hints.emit(h or {}))
         w.failed.connect(self.failed.emit)
         self._worker = w
-        self._shown = (weapon_key, mode, self._session.textures.active_team)
+        self._shown = (weapon_key, mode, self._session.textures.active_team,
+                       decor_smd)
         w.start()
 
     def load_taunt(self, prop_key: str, prop_mdl: str, misc_vpk: str,

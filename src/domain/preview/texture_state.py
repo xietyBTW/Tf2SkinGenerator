@@ -33,6 +33,19 @@ from src.shared.constants import Team
 # (одноматериальный случай). НЕ имя материала и НЕ должен попадать в сборку.
 SINGLE_TEX_KEY = '__single__'
 
+#: Приставка карточек гирлянды поверх оружия (праздничная версия,
+#: фестивайзер): `deco:<вид>/<материал>`. Гирлянда — отдельная модель со
+#: своими материалами: стилей у неё нет, в сборку оружия она не идёт (её
+#: собирает свой шаг, см. decor_build), а игровой оригинал лежит в
+#: `decor_stock`, а не в картах модели оружия — те пересобираются с каждой
+#: загрузкой модели.
+DECOR_PREFIX = 'deco:'
+
+
+def is_decor(mat: Optional[str]) -> bool:
+    """Карточка гирлянды, а не материал самого предмета."""
+    return bool(mat) and str(mat).startswith(DECOR_PREFIX)
+
 
 def team_priority(active_team: str) -> List[str]:
     """Порядок проверки команд: активная первой (сборка может начаться с BLU)."""
@@ -118,6 +131,11 @@ class PreviewTextureState:
     #: Грани, нарезанные из загруженной панорамы: {face: png}.
     skybox_split_faces: Dict[str, str] = field(default_factory=dict)
 
+    # ── Гирлянда поверх оружия ────────────────────────────────────────────── #
+    #: Игровые кадры гирлянды: {team: {карточка deco:…: png}}. Кладёт сеанс,
+    #: когда гирлянда разобрана; свои правки гирлянды живут в `textures`.
+    decor_stock: Dict[str, Dict[str, str]] = field(default_factory=dict)
+
     # ═══════════════════════════════════════════════════════════════════════ #
     # Ключи / классификация материалов
     # ═══════════════════════════════════════════════════════════════════════ #
@@ -143,6 +161,8 @@ class PreviewTextureState:
         расхождение этих двух путей давало «на BLU показывается RED» у
         мульти-материальных шапок с одним BLU-кадром.
         """
+        if is_decor(mat):
+            return self._decor_team(mat)
         if self.blu_name_map:
             bn = self.blu_name_map.get(mat, mat)
             return bn.lower() != mat.lower()
@@ -150,6 +170,17 @@ class PreviewTextureState:
             main_key = self.main_material or self.storage_main_key()
             return mat in (main_key, SINGLE_TEX_KEY)
         return False
+
+    def _decor_team(self, mat: str) -> bool:
+        """Командна ли карточка гирлянды: у синих свои огоньки (кадры разные).
+
+        Карта имён модели оружия (`blu_name_map`) гирлянды не знает, и
+        судить по ней значило бы считать огоньки фестивайзера общими — тогда
+        правка на красных легла бы и на синие.
+        """
+        red = self.decor_stock.get(Team.RED, {}).get(mat)
+        blu = self.decor_stock.get(Team.BLU, {}).get(mat)
+        return bool(red and blu and red != blu)
 
     def is_neutral(self, mat: str) -> bool:
         """True, если текстура не относится к конкретной команде (RED/BLU).
@@ -168,6 +199,8 @@ class PreviewTextureState:
         Имя, которое встречается ТОЛЬКО как значение (medic_hands_blue у рук),
         нейтральным по-прежнему не считается: это чисто синий материал.
         """
+        if is_decor(mat):
+            return not self._decor_team(mat)
         if self.blu_name_map:
             blu = self.blu_name_map.get(mat)
             if blu is not None:
@@ -188,7 +221,8 @@ class PreviewTextureState:
           • нейтральная → обе команды;
           • командная → только активная команда.
         """
-        if self.skin_info and self.active_skin != 0:
+        # Стилей у гирлянды нет: правка стиля оружия её не касается.
+        if self.skin_info and self.active_skin != 0 and not is_decor(mat):
             slot = self.skin_overrides.setdefault(self.active_skin, {})
             if path:
                 slot[mat] = path
@@ -240,7 +274,7 @@ class PreviewTextureState:
         # Вариантный стиль (skin > 0): своя правка, иначе ОРИГИНАЛ этого стиля
         # (у гильотины Bloody — своя игровая текстура). Базу стиль не
         # наследует: карточка без собственной текстуры остаётся пустой.
-        if self.skin_info and self.active_skin != 0:
+        if self.skin_info and self.active_skin != 0 and not is_decor(mat):
             return self.style_texture(self.active_skin, mat)
 
         if hands_blu_view and not self.is_team_material(mat):
@@ -314,6 +348,9 @@ class PreviewTextureState:
         слоями, и «убрать картинку с части» ничего бы не возвращало.
         """
         active = self.active_team
+        if is_decor(mat):
+            return (_existing(self.decor_stock.get(active, {}).get(mat))
+                    or _existing(self.decor_stock.get(Team.RED, {}).get(mat)))
         # Игровой оригинал текущей команды (карты ключуются RED-именами).
         vpk_map = self.vpk_red_tex_map if active == Team.RED else self.vpk_blu_tex_map
         g = _existing(vpk_map.get(mat))
@@ -366,7 +403,9 @@ class PreviewTextureState:
         p = _existing(blu.get(self.storage_main_key()))
         if p:
             return p
-        for candidate in blu.values():
+        for mat, candidate in blu.items():
+            if is_decor(mat):
+                continue            # огоньки не станут синим скином оружия
             p = _existing(candidate)
             if p:
                 return p
@@ -427,7 +466,7 @@ class PreviewTextureState:
         result: Dict[str, str] = {}
         for team in team_priority(self.active_team):
             for mat, path in self.textures.get(team, {}).items():
-                if mat == SINGLE_TEX_KEY or mat in result:
+                if mat == SINGLE_TEX_KEY or mat in result or is_decor(mat):
                     continue
                 if _existing(path):
                     result[mat] = path
@@ -438,8 +477,25 @@ class PreviewTextureState:
         return {
             mat: path
             for mat, path in self.textures.get(Team.BLU, {}).items()
-            if mat != SINGLE_TEX_KEY and _existing(path)
+            if mat != SINGLE_TEX_KEY and not is_decor(mat) and _existing(path)
         }
+
+    def decor_uploads(self) -> Dict[str, Dict[str, str]]:
+        """Свои текстуры гирлянд: {карточка: {команда: путь}} — как лежат.
+
+        Без подстановки чужой команды: общая картинка и так записана в обе
+        (см. set_texture), а у командных огоньков синие без своей правки
+        остаются игровыми. Сборка решает сама — по $texturegroup гирлянды,
+        который здесь неизвестен (показ мог быть выключен).
+        """
+        out: Dict[str, Dict[str, str]] = {}
+        cards = {m for paths in self.textures.values() for m in paths if is_decor(m)}
+        for card in sorted(cards):
+            red = _existing(self.textures.get(Team.RED, {}).get(card))
+            blu = _existing(self.textures.get(Team.BLU, {}).get(card))
+            if red or blu:
+                out[card] = {Team.RED: red or '', Team.BLU: blu or ''}
+        return out
 
     # ═══════════════════════════════════════════════════════════════════════ #
     # Снимок / восстановление (мини-память оружия)

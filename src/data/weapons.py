@@ -38,7 +38,8 @@ TF2_WEAPONS = {
             "c_invasion_bat": {"ru": "Световая бита", "en": "Batsaber"},
             "c_shogun_warfan": {"ru": "Веер войны", "en": "Fan O'War"},
             "c_crossing_guard": {"ru": "Регулировщик", "en": "Crossing Guard"},
-            "c_bat_xmas": {"ru": "Праздничная бита", "en": "Festive Bat"}
+            "c_bat_xmas": {"ru": "Праздничная бита", "en": "Festive Bat"},
+            "c_holymackerel_xmas": {"ru": "Праздничный Поддай леща", "en": "Festive Holy Mackerel"}
         },
         "Hands": {
             "hands": {"ru": "Руки", "en": "Hands"},
@@ -53,6 +54,7 @@ TF2_WEAPONS = {
             "c_bet_rocketlauncher": {"ru": "Прародитель", "en": "Original"},
             "c_directhit": {"ru": "Прямое попадание", "en": "Direct Hit"},
             "c_blackbox": {"ru": "Чёрный ящик", "en": "Black Box"},
+            "c_blackbox_xmas": {"ru": "Праздничный Чёрный ящик", "en": "Festive Black Box"},
             "c_dumpster_device": {"ru": "Базука бродяги", "en": "Beggar's Bazooka"},
             "c_liberty_launcher": {"ru": "Освободитель", "en": "Liberty Launcher"},
             "c_drg_cowmangler": {"ru": "Линчеватель скота 5000", "en": "Cow Mangler 5000"},
@@ -258,6 +260,7 @@ TF2_WEAPONS = {
             "c_syringegun": {"ru": "Шприцемёт", "en": "Syringe Gun"},
             "c_leechgun": {"ru": "Кровопийца", "en": "Blutsauger"},
             "c_crusaders_crossbow": {"ru": "Арбалет крестоносца", "en": "Crusader's Crossbow"},
+            "c_crusaders_crossbow_xmas": {"ru": "Праздничный Арбалет крестоносца", "en": "Festive Crusader's Crossbow"},
             "c_proto_syringegun": {"ru": "Передоз", "en": "Overdose"}
         },
         "Secondary": {
@@ -582,6 +585,9 @@ for _k in [k for k in WEAPON_MDL_PATHS if k.endswith("_xmas")]:
     WEAPON_MDL_PATHS[_k] = f"models/weapons/c_models/{_folder}/{_k}.mdl"
 # Праздничный поводырь лежит прямо в c_models/ без подпапки.
 WEAPON_MDL_PATHS["c_wrangler_xmas"] = "models/weapons/c_models/c_wrangler_xmas.mdl"
+# Цельные праздничные версии оружия из мастерской лежат в models/workshop/.
+for _k in ("c_blackbox_xmas", "c_holymackerel_xmas", "c_crusaders_crossbow_xmas"):
+    WEAPON_MDL_PATHS[_k] = f"models/workshop/weapons/c_models/{_k[:-len('_xmas')]}/{_k}.mdl"
 
 # ── Модели рук (c_class_arms) ─────────────────────────────────────────────────
 _ARM_CLASSES = [

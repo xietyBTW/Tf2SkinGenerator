@@ -186,6 +186,9 @@ ALLOWED = {
     "paints": api.paints,
     "set_paint": api.set_paint,
     "set_australium": api.set_australium,
+    "set_festive": api.set_festive,
+    "set_decor_fit": api.set_decor_fit,
+    "set_decor_bends": api.set_decor_bends,
     "set_bodygroup": api.set_bodygroup,
     "toggle_misc": api.toggle_misc,
     "force_team": api.force_team,
@@ -257,7 +260,8 @@ ALLOWED = {
     "leave_first_person": api.leave_first_person,
     "set_part_detail": api.set_part_detail,
     "toggle_part_island": api.toggle_part_island,
-    "merge_part_islands": api.merge_part_islands,
+    "add_part_region": api.add_part_region,
+    "remove_part_region": api.remove_part_region,
     "part_shape": api.part_shape,
     "part_mask": api.part_mask,
     "load_skybox": api.load_skybox,
@@ -269,6 +273,28 @@ ALLOWED = {
     "answer_model": api.answer_model,
     "export_uv": api.export_uv,
 }
+
+
+class Server(ThreadingHTTPServer):
+    """
+    Очередь входящих соединений побольше стандартных пяти.
+
+    На старте страница тянет полсотни модулей, каждый — отдельным соединением
+    (HTTP/1.0), а поток сервера в это время делит GIL с прогревом items_game.
+    Windows на переполненную очередь отвечает отказом, модуль не грузится, и
+    вместе с ним не запускается весь интерфейс: пустой каталог и ни одного
+    вызова в Python.
+    """
+    request_queue_size = 128
+
+    def handle_error(self, request, client_address) -> None:
+        # Браузер оборвал запрос (картинку заменили раньше, чем она доехала,
+        # страницу перезагрузили) — это не ошибка сервера, и трейсбек в окне
+        # консоли только пугает. Остальное печатаем как раньше.
+        import sys
+        if isinstance(sys.exc_info()[1], ConnectionError):
+            return
+        super().handle_error(request, client_address)
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -438,8 +464,11 @@ class Handler(SimpleHTTPRequestHandler):
                         line = json.dumps(ev, ensure_ascii=False)
                         self.wfile.write(b"data: " + line.encode("utf-8") + SEP)
                 self.wfile.flush()
-        except (BrokenPipeError, ConnectionResetError):
-            pass          # страницу закрыли или перезагрузили — это нормально
+        except ConnectionError:
+            # Страницу закрыли или перезагрузили — это нормально. Именно общий
+            # класс: закрытое окно WebView2 даёт ConnectionAbortedError, и он
+            # уходил мимо, трейсбеком в консоль.
+            pass
         finally:
             app.unsubscribe(mine)
 
@@ -549,7 +578,7 @@ def main() -> None:
     # заходит, поэтому там остаётся закрыто.
     DEV_CORS = True
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 5173
-    server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    server = Server(("127.0.0.1", port), Handler)
     print(f"макет: http://127.0.0.1:{port}   (API: POST /api/<метод>)")
     api.warm_up()
     try:

@@ -20,7 +20,8 @@ import { modeControls, restoreBadges } from './controls.js';
 import { syncPaint } from './paint.js';
 import { closeParts, bindParts, suspendParts, resumeParts, refreshParts } from './parts.js';
 import { updateDockSummary } from './build.js';
-import { showFit, bindFitViewer, isFitOn, dropFitSave, flushFitSave } from './custom-model.js';
+import { showFit, showDecorFit, showDecorBends, toggleDecorFit, isDecorFitOn, leaveDecorFit,
+         bindFitViewer, isFitOn, dropFitSave, flushFitSave } from './custom-model.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Данные из Python
@@ -173,6 +174,7 @@ export function resetView() {
 }
 
 export function clearPreview() {
+  decorSeq++;             // гирлянда прошлого предмета, если ещё качается, не нужна
   cardTitles = {};        // подписи прошлого мода к новому предмету не относятся
   sceneKind = '';         // и спец-сцена: у обычной модели её нет
   lastModel = null;       // и кадр превью: вернуться к чужой модели нельзя
@@ -445,6 +447,7 @@ export function applyView(st) {
     || isFitOn();
 
   showBodygroups(st.bodygroups || []);
+  showFestive(st);
 
   // «Убрать свою модель» — только когда своя геометрия и правда стоит.
   // Без неё замена была билетом в один конец: вернуть игровую можно было
@@ -453,6 +456,17 @@ export function applyView(st) {
   // Подгонка — только у импортированной модели и только в кадре предмета:
   // на руках и в насмешке призрака нет.
   showFit(work.dataset.scene === 'item' ? st.custom_fit : null);
+  // Гирлянда: её подгонка и свои картинки идут вьюверу отдельно от
+  // раздачи текстур предмета — её меши он красит своим слоем.
+  showDecorFit(st.decor_fit || null, Boolean(st.festive) && work.dataset.scene === 'item'
+                                     && Boolean(st.has_custom || st.decor_fit
+                                                || (st.decor_bends || []).length));
+  showDecorBends(st.decor_bends || []);
+  withViewer((w) => w.setDecorOverrides && w.setDecorOverrides(Object.fromEntries(
+    Object.entries(st.decor_textures || {}).map(([mesh, teams]) => [mesh, {
+      red: (teams.red || []).map(api.fileUrl),
+      blu: (teams.blu || []).map(api.fileUrl),
+    }]))));
 
   // Альбом только что пересобран — вернуть пометки «свои настройки».
   restoreBadges();
@@ -539,6 +553,120 @@ function showBodygroups(groups) {
       bar.appendChild(b);
     });
   }
+}
+
+//: Подписи видов гирлянды. Ключи задаёт Python (festive_decor / items_game).
+const FESTIVE_LABELS = { '': 'Обычная', xmas: 'Праздничная', festivizer: 'Фестивайзер' };
+
+/**
+ * Праздничная версия оружия: обычная, праздничная, фестивайзер.
+ *
+ * Только показ: гирлянда висит поверх модели своим слоем вьювера и в мод не
+ * идёт — поэтому и на своей модели она остаётся там, где её повесит игра.
+ * Ряд есть в кадре предмета и в руках: игра показывает гирлянду и там, и там.
+ */
+function showFestive(st) {
+  const bar = document.getElementById('festivebar');
+  const options = st.festive_options || [];
+  const scene = work.dataset.scene || 'item';
+  bar.querySelectorAll('.tag, .festive__note').forEach((n) => n.remove());
+  bar.hidden = !options.length || !(scene === 'item' || scene === 'fp');
+  withViewer((w) => w.setDecorTeam && w.setDecorTeam(st.team));
+  if (bar.hidden) return;
+
+  // Правки гирлянды живут и при выключенном показе — метка на кнопке
+  // говорит, что в мод уйдёт своя гирлянда (как метка правленого стиля).
+  const edited = new Set(st.festive_edited || []);
+  for (const kind of ['', ...options]) {
+    const b = document.createElement('button');
+    b.className = 'tag' + (kind === (st.festive || '') ? ' is-active' : '');
+    b.dataset.kind = kind;
+    b.textContent = t(FESTIVE_LABELS[kind] || kind) + (edited.has(kind) ? ' ●' : '');
+    b.addEventListener('click', async () => {
+      if (b.classList.contains('is-active')) return;
+      bar.querySelectorAll('.tag[data-kind]').forEach(
+        (x) => x.classList.toggle('is-active', x === b));
+      // Первое включение — разбор модели гирлянды, около секунды; повторное
+      // из памяти, и подпись тогда не мигнёт (sayBusy отложенная).
+      if (kind) sayBusy('Загрузка гирлянды…');
+      // Подгонку прошлой гирлянды — записать и закрыть: отложенная запись
+      // иначе легла бы уже на новую (или потерялась бы на «Обычная»).
+      await leaveDecorFit();
+      try {
+        applyView(await api.setFestive(kind));
+      } catch (err) {
+        say(err.message);
+        refreshView();
+      }
+    });
+    bar.appendChild(b);
+  }
+  // Подгонка гирлянды под модель — тем же инструментом, что и своя модель.
+  // Только при своей модели: на стоковой гирлянда уже стоит на месте. Уже
+  // сделанную подгонку оставляем доступной и без неё — иначе, убрав свою
+  // модель, сдвинутую гирлянду было бы не вернуть, и она ушла бы в мод.
+  if (st.festive && scene === 'item'
+      && (st.has_custom || st.decor_fit || (st.decor_bends || []).length)) {
+    const fit = document.createElement('button');
+    fit.className = 'tag festive__fit' + (isDecorFitOn() ? ' is-active' : '');
+    fit.textContent = 'Подогнать гирлянду';
+    fit.title = t('Сдвинуть, повернуть и растянуть гирлянду под свою модель (G/R/S)');
+    fit.addEventListener('click', () => {
+      toggleDecorFit();
+      fit.classList.toggle('is-active', isDecorFitOn());
+    });
+    bar.appendChild(fit);
+  }
+  // На своей модели гирлянда стоит по стоковой, пока её не подогнали: так её
+  // и повесит игра, и огоньки будут висеть мимо.
+  if (st.festive && st.has_custom && !st.decor_fit && !(st.decor_bends || []).length) {
+    const note = document.createElement('span');
+    note.className = 'label label--inline festive__note';
+    note.textContent = 'Висит как на стоковой модели — подгоните под свою';
+    bar.appendChild(note);
+  }
+}
+
+/**
+ * Гирлянда приехала (или её выключили): слой вьювера и, если открыт вид от
+ * первого лица, сцена в руках — там гирлянда собирается вместе с оружием.
+ */
+//: Номер последнего события гирлянды: OBJ качается отдельно, и за это время
+//: гирлянду могли выключить или уйти к другому предмету — старая не должна
+//: встать поверх.
+let decorSeq = 0;
+
+export async function showDecor(ev) {
+  const w = viewer();
+  if (!w || !w.setDecor) return;
+  const seq = ++decorSeq;
+  // Гирлянда пересобирается во вьювере — её подгонка там гаснет; страница
+  // обязана погасить свою половину, иначе панель висела бы без гизмо.
+  await leaveDecorFit();
+  if (!ev.kind) {
+    w.clearDecor();
+  } else {
+    try {
+      const obj = await (await fetch(api.fileUrl(ev.obj))).text();
+      if (seq !== decorSeq) return;
+      const urls = (list) => (list || []).map(api.fileUrl);
+      const mats = Object.fromEntries(Object.entries(ev.materials || {}).map(
+        ([name, m]) => [name, { ...m, red: urls(m.red), blu: urls(m.blu) }]));
+      w.setDecor(obj, mats, ev.hints || {}, ev.groups || {});
+    } catch (err) {
+      say(`Не удалось показать гирлянду: ${err.message}`);
+      return;
+    }
+  }
+  say('');
+  refreshView();
+  await reloadSceneIfFp();
+}
+
+/** Гирлянду собрать не вышло: кнопка возвращается на «Обычная». */
+export function festiveFailed() {
+  say('Гирлянду этой версии не удалось загрузить');
+  refreshView();
 }
 
 export function showSkins(info) {
@@ -943,6 +1071,9 @@ export let cardTitles = {};
 /** Как подписать карточку: служебный ключ и имена мода — особые случаи. */
 export function cardTitle(name) {
   if (name === SINGLE_TEX) return 'текстура';
+  // Карточка гирлянды: `deco:<вид>/<материал>` — вид подписью, материал как есть.
+  const decor = /^deco:([^/]+)\/(.+)$/.exec(name || '');
+  if (decor) return t('Гирлянда: {}').replace('{}', decor[2]);
   // Карточка варианта встаёт на место главной, пока он включён: подпись
   // называет вариант, а не материал — имя материала есть в подсказке.
   if (/_(gold|australium)$/i.test(name)) return 'Australium';

@@ -1310,6 +1310,17 @@ class VPKService:
                     written_textures=_written,
                 )
 
+            # Гирлянды поверх оружия — своими моделями в тот же мод.
+            if r.decor_builds:
+                from src.services.decor_build import build_decor_models
+                build_decor_models(
+                    ctx, r.decor_builds, misc_vpk=tf2_misc_vpk,
+                    textures_vpk=tf2_textures_vpk, studiomdl_exe=studiomdl_exe,
+                    tf_dir=tf_dir, size=size, format_type=format_type,
+                    flags=flags, vtf_options=vtf_options,
+                    bypass_prefix=_bypass_prefix, emit_sub=emit_sub,
+                    language=language)
+
             # Подстраховка: удаляем любые {texture}_blue.*, если их успел
             # создать другой путь, а настоящей команды у предмета нет
             # (одиночная текстура ИЛИ вариант-онли без c_xxx_blue в группе).
@@ -1336,6 +1347,53 @@ class VPKService:
             return False, t['error_model_work'].format(error=error_msg)
 
         return True, vmt_to_delete or ''
+
+    @staticmethod
+    def _is_decor_only(r: BuildRequest) -> bool:
+        """В сборке только гирлянды: ни своей текстуры оружия, ни модели.
+
+        Любая правка самого оружия (карты, стили, «сделать командным»)
+        ведёт в обычную сборку: там она либо соберётся, либо о ней скажут,
+        а молча выпасть из мода ради гирлянды она не должна.
+        """
+        from src.domain.preview.texture_state import is_decor
+        weapon_maps = [m for m in (r.material_maps or {}) if not is_decor(m)]
+        return bool(r.decor_builds) and not (
+            r.image_path or r.custom_vtf_path or r.panel_extra_textures
+            or r.panel_blu_textures or r.replace_model_enabled
+            or r.model_ready_path or r.custom_vpk_source_path
+            or weapon_maps or r.skin_build_data or r.force_team
+            or r.hat_style_builds)
+
+    @staticmethod
+    def _build_decor_only_vpk(ctx, r: BuildRequest, weapon_key: str, t: dict,
+                              emit_progress, emit_sub) -> Tuple[bool, str]:
+        """Мод из одних гирлянд: модель оружия остаётся игровой."""
+        from src.services.decor_build import build_decor_models
+        from src.shared.constants import bypass_prefix as _resolve_bypass_prefix
+
+        err, tools = VPKService._stage_locate_tools(
+            ctx, r.mode, weapon_key, r.hat_mdl_path, r.tf2_root_dir, t,
+            r.keep_temp_on_error, r.debug_mode)
+        if err is not None:
+            return err
+        studiomdl_exe, tf2_misc_vpk, tf_dir, _crowbar, _paths = tools
+        emit_progress(40, t.get('build_compiling', 'Compiling model...'))
+        built = build_decor_models(
+            ctx, r.decor_builds, misc_vpk=tf2_misc_vpk,
+            textures_vpk=TF2Paths.resolve_textures_vpk(r.tf2_root_dir),
+            studiomdl_exe=studiomdl_exe, tf_dir=tf_dir, size=r.size,
+            format_type=r.format_type, flags=r.flags or [],
+            vtf_options=r.vtf_options or {},
+            bypass_prefix=_resolve_bypass_prefix(getattr(r, 'bypass_method', 'console')),
+            emit_sub=emit_sub, language=r.language)
+        if not built:
+            ctx.cleanup(on_error=True, keep_on_error=r.keep_temp_on_error,
+                        debug_mode=r.debug_mode)
+            return False, ("Lights could not be built — see the log"
+                           if r.language == 'en' else
+                           "Гирлянду собрать не удалось — подробности в журнале")
+        return True, ''
 
     @staticmethod
     def build_vpk(
@@ -1403,11 +1461,15 @@ class VPKService:
             logger.info("Сборка отменена пользователем")
             return False, t.get('build_cancelled', 'Build cancelled by user')
 
+        # Правлена одна гирлянда: оружие в мод не идёт, собирать его незачем.
+        decor_only = VPKService._is_decor_only(r)
+
         ctx = None
         try:
             # Проверяем что все на месте, иначе потом будет больно (валидация параметров)
             validation_error = validate_build_params(
-                image_path, mode, filename, size, format_type, tf2_root_dir, t, custom_vtf_path
+                EXTRA_TEX_USE_GAME_ORIGINAL if decor_only else image_path,
+                mode, filename, size, format_type, tf2_root_dir, t, custom_vtf_path
             )
             if validation_error:
                 return False, validation_error
@@ -1460,6 +1522,13 @@ class VPKService:
                     vmt_to_delete = result[2]
                 else:
                     vmt_to_delete = None
+
+            elif decor_only:
+                ok, payload = VPKService._build_decor_only_vpk(
+                    ctx, request, weapon_key, t, emit_progress, emit_sub)
+                if not ok:
+                    return False, payload
+                vmt_to_delete = None
 
             else:
                 ok, payload = VPKService._build_model_mode_vpk(

@@ -468,6 +468,32 @@ export const EN = {
     'Model state: the game switches it by itself; here you can look at each one',
   'Собираю состояние…': 'Building the state…',
   'Такого состояния у модели нет': 'The model has no such state',
+  // ── Праздничная версия (гирлянда поверх оружия) ──
+  'Версия': 'Version',
+  'Гирлянда, которую игра вешает на это оружие. Её правки уходят в мод отдельной моделью и не задевают другие оружия':
+    'The lights the game hangs on this weapon. Edits go into the mod as a separate model and do not touch other weapons',
+  'Обычная': 'Regular',
+  'Праздничная': 'Festive',
+  'Фестивайзер': 'Festivized',
+  'Загрузка гирлянды…': 'Loading the lights…',
+  'Висит как на стоковой модели — подгоните под свою': 'Placed as on the stock model — fit it to yours',
+  'Не удалось показать гирлянду: {}': 'Could not show the lights: {}',
+  'Гирлянду этой версии не удалось загрузить': 'Could not load the lights for this version',
+  'У этого предмета такой версии нет': 'This item has no such version',
+  'Подогнать гирлянду': 'Fit the lights',
+  'Гнуть: тяните гирлянду мышью, колесо — радиус': 'Bend: drag the lights with the mouse, wheel changes the radius',
+  'Гнуть': 'Bend',
+  'Выпрямить: убрать все изгибы гирлянды': 'Straighten: remove all bends of the lights',
+  'Выпрямить': 'Straighten',
+  'Радиус': 'Radius',
+  'Радиус захвата: всё внутри тянется следом. Колесо мыши в кадре — тоже':
+    'Grab radius: everything inside follows. The mouse wheel in the frame does the same',
+  'Изгиб без точки, радиуса или сдвига': 'A bend without a point, radius or offset',
+  'Сдвинуть, повернуть и растянуть гирлянду под свою модель (G/R/S)':
+    'Move, rotate and scale the lights to fit your model (G/R/S)',
+  'Гирлянда: {}': 'Lights: {}',
+  'Сначала включите праздничную версию': 'Turn on the festive version first',
+  'Гирлянда не показана': 'The lights are not shown',
   'Части красят основное состояние модели — верните переключатель':
     'Parts paint the main state of the model — switch it back',
   'после взрыва': 'after the explosion',
@@ -562,6 +588,32 @@ export const EN = {
     'The color blends with the original — that way the part looks more natural',
   'Объединить': 'Merge',
   'Дробление': 'Detail',
+  // ── Ножницы: выделение и «Отделить» ──────────────────────────────────
+  'Деталь': 'Piece',
+  'Остров': 'Island',
+  'Острота рёбер': 'Edge sharpness',
+  'Размер кисти': 'Brush size',
+  'Стирать': 'Erase',
+  'Отделить': 'Separate',
+  'Щелчок берёт гладкую поверхность до острых рёбер': 'A click takes a smooth surface up to its sharp edges',
+  'Веди по модели — выделяется всё под кистью': 'Drag over the model — everything under the brush is selected',
+  'Щелчок берёт остров развёртки целиком': 'A click takes a whole UV island',
+  'Меньше — деталь дробится на грани, больше — берётся крупнее': 'Lower splits a detail into faces, higher takes bigger pieces',
+  'Выделенное — в отдельную часть (Enter)': 'Make the selection a separate part (Enter)',
+  'Снять выделение (Esc)': 'Clear the selection (Esc)',
+  'Разрезать все куски по островам развёртки разом': 'Split every piece along its UV islands at once',
+  'Часть возвращена на место': 'The part is back where it was',
+  'Сперва выдели на модели, что отделить': 'First select on the model what to separate',
+  'Отделяю…': 'Separating…',
+  'Отделено. Зеркальная половина отделилась вместе: у неё те же пиксели': 'Separated. The mirrored half came along: it uses the same pixels',
+  'Отделено в новую часть. Вернуть — «−» на её чипе или Ctrl+Z': 'Separated into a new part. To undo — “−” on its chip or Ctrl+Z',
+  'Выделено треугольников: {}. «Отделить» или Enter — в отдельную часть': 'Triangles selected: {}. “Separate” or Enter makes them a part',
+  'Щёлкай по модели: берётся гладкая поверхность до острых рёбер. Повторный щелчок снимает': 'Click the model: a smooth surface up to its sharp edges is taken. Click again to drop it',
+  'Веди по модели с зажатой кнопкой — выделяется всё под кистью. Мимо модели — крутит камеру': 'Drag over the model with the button held — everything under the brush is selected. Off the model it orbits the camera',
+  'Щёлкай по модели: берётся остров развёртки целиком': 'Click the model: a whole UV island is taken',
+  'Выдели на модели, что отрезать, и нажми «Отделить». Щелчок по чипу берёт часть целиком — так части сводят в одну': 'Select on the model what to cut off and press “Separate”. Clicking a chip takes the whole part — that is how parts are merged',
+  'Ничего не выделено': 'Nothing is selected',
+  'Не удалось перейти к материалу выделения — попробуй ещё раз': 'Could not switch to the selection’s material — try again',
   'Обводить': 'Outline',
   'Толщина': 'Width',
   'Отменить': 'Undo',
@@ -576,8 +628,6 @@ export const EN = {
   'Направление перехода: {}°': 'Gradient direction: {}°',
   'Щёлкать по кускам модели, чтобы дробить их мельче':
     'Click parts of the model to cut them finer',
-  'Свести отмеченные отрезки в одну часть':
-    'Merge the marked pieces into one part',
   'Обвести края покрашенных частей': 'Outline the edges of painted parts',
   'Цвет окантовки': 'Outline color',
   'Эта модель — один цельный кусок, делить нечего':
@@ -632,11 +682,6 @@ export const EN = {
   'Отрезано {} островов из {}': 'Cut off {} islands of {}',
   '. Вернуть — щелчок по нему же или «−» на его чипе':
     '. To bring it back click it again, or press “−” on its chip',
-  'Отмечать можно только отрезанное: сперва отрежь на модели':
-    'Only cut pieces can be marked: cut it on the model first',
-  'Отмечено {}. «Объединить» сведёт их в одну часть': 'Marked {}. “Merge” will bring them into one part',
-  '. То же — щелчок по ней на модели с ножницами':
-    '. Same as clicking it on the model with the scissors',
   'Наложение на часть…': 'Placing on the part…',
   'Эта часть делит развёртку с соседними — они покрасились вместе':
     'This part shares the UV map with its neighbours — they were painted together',
@@ -647,10 +692,6 @@ export const EN = {
     'Random coloring — click the parts to fix it up',
   'Отменено': 'Undone',
   'Возвращено': 'Redone',
-  'Наведи на модель — обведётся кусок развёртки, который отрежется. Щелчок режет; щелчки по отрезанным в списке отмечают их, чтобы свести в одну часть':
-    'Hover the model to outline the UV piece that will be cut. A click cuts it; clicking pieces already cut marks them so they can be merged into one part',
-  'Объединяю…': 'Merging…',
-  'Отрезки сведены в одну часть': 'The pieces are merged into one part',
   'Градиент: щёлкай по частям — переход из первого цвета. Полоса задаёт края и середину перелива, ручка — направление':
     'Gradient: click the parts to fill them from the first color. The bar sets '
     + 'the edges and the midpoint of the blend, the handle sets the direction',

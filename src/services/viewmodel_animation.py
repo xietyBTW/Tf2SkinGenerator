@@ -65,6 +65,8 @@ def build_scene(
     weapon_merge_bones: Optional[Sequence[str]] = None,
     weapon_carrier_smd: str = "",
     carrier_extra_smds: Sequence[str] = (),
+    decor_smd: str = "",
+    decor_prefix: str = "deco:",
     weapon_extra_smds: Sequence[str] = (),
     editable_mats: Optional[Sequence[str]] = None,
     arms_extra_smds: Sequence[str] = (),
@@ -97,6 +99,11 @@ def build_scene(
             кость вместо четырёх, и барабан оставался неподвижным).
         carrier_extra_smds: бодигруппы носителя — шланг медигана лежит
             отдельным SMD, и без него пушка в кадре обрублена.
+        decor_smd: гирлянда поверх оружия (праздничная версия или
+            фестивайзер, см. festive_decor). Садится в руку костями пушки,
+            материалы идут с приставкой `decor_prefix` (`deco:<вид>/`) — под
+            теми же именами, что у слоя гирлянды во вьювере, — и в правку
+            оружия не попадают.
         weapon_carrier_smd: reference SMD пушки, НА КОТОРОЙ висит модель.
             Праздничное оружие — гирлянда, а не пушка: в `c_medigun_xmas`
             лежат одни огоньки, и без носителя они висели бы в пустой
@@ -173,6 +180,9 @@ def build_scene(
         if weapon_carrier_smd:
             _add_carrier(weapon_part, weapon_carrier_smd, bind, index_of,
                          anim_smd, carrier_extra_smds)
+        if decor_smd:
+            _add_carrier(weapon_part, decor_smd, bind, index_of, anim_smd,
+                         prefix=decor_prefix)
     arms_part = _arms_part(arms_ref_smd, bind, index_of,
                            arms_extra_smds, arms_include_mats)
     if arms_part is None:
@@ -520,13 +530,17 @@ def _weapon_part(weapon_ref_smd: str, bind: viewmodel_pose.Rig,
 
 def _add_carrier(part: dict, carrier_smd: str, bind: viewmodel_pose.Rig,
                  index_of: Dict[str, int], anim_smd: str,
-                 extra_smds: Sequence[str] = ()) -> None:
+                 extra_smds: Sequence[str] = (), prefix: str = "") -> None:
     """Дописывает в часть с оружием пушку-носитель. Не вышло — молча пропускаем.
 
     Носитель — обычная модель оружия, только собранная теми же костями: у
     праздничного минигана гирлянда и сам миниган садятся в руку одинаково.
     Материалы носителя в `weaponMaterials` не попадают, поэтому перетаскивание
     текстуры на него не действует.
+
+    Тем же путём в руку садится и гирлянда поверх обычного оружия — она тоже
+    едет костями пушки. `prefix` (`deco:`) метит её материалы: текстуры им
+    даёт вьювер своим слоем, а не состояние предмета.
     """
     try:
         carrier = _weapon_part(carrier_smd, bind, index_of,
@@ -540,8 +554,9 @@ def _add_carrier(part: dict, carrier_smd: str, bind: viewmodel_pose.Rig,
     for key in ("positions", "normals", "uvs", "skinIndex", "skinWeight"):
         part[key].extend(carrier[key])
     for group in carrier["groups"]:
-        part["groups"].append({**group, "start": group["start"] + offset})
-    part["materials"].extend(carrier["materials"])
+        part["groups"].append({**group, "start": group["start"] + offset,
+                               "material": prefix + group["material"]})
+    part["materials"].extend(prefix + m for m in carrier["materials"])
 
 
 def _pack(triangles: Dict[str, list], links_of, kind: str) -> dict:

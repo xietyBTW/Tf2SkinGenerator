@@ -147,6 +147,13 @@ def _own_paths(edits: Dict[str, object], files_dir: Path) -> Dict[str, object]:
               if (owned := _own_part_image(spec, files_dir))}
         for mat, items in (edits.get('part_textures') or {}).items()
     }
+    # Своя текстура человека ПОД мазками: сама склейка из неё и собирается.
+    # Пусто — под мазками игровая, копировать нечего; пропавший файл — тоже
+    # игровая, но слот остаётся покрашенным (запись есть — склейка наша).
+    out['part_bases'] = {
+        slot: (_own_file(base, files_dir) or '') if base else ''
+        for slot, base in (edits.get('part_bases') or {}).items()
+    }
     out['australium_user_tex'] = _own_file(
         edits.get('australium_user_tex'), files_dir)
     out['custom_smd_path'] = _own_file(edits.get('custom_smd_path'), files_dir)
@@ -315,6 +322,9 @@ def _prune(edits: Dict[str, object]) -> Dict[str, object]:
     for skin, paths in list((edits.get('skin_overrides') or {}).items()):
         edits['skin_overrides'][skin] = {m: p for m, p in paths.items()
                                          if os.path.isfile(p)}
+    if 'part_bases' in edits:
+        edits['part_bases'] = {slot: (b if b and os.path.isfile(b) else '')
+                               for slot, b in (edits['part_bases'] or {}).items()}
     if edits.get('custom_smd_path') and not os.path.isfile(edits['custom_smd_path']):
         edits['custom_smd_path'] = None
     if edits.get('custom_source_path') and not os.path.isfile(edits['custom_source_path']):

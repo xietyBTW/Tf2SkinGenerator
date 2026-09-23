@@ -27,6 +27,9 @@ import { colorAt } from './sample.js';
 // показывает список, включает подсветку во вьювере и передаёт файл.
 
 export let partsMaterial = null;   // материал разобранной модели; null — не разбирали
+//: Главный разбор предмета (с чего открыли режим): к нему возвращаются с мешей
+//: без своего разбора.
+let partsMain = null;
 
 
 //: Чем сейчас работают: 'image' (положить картинку), 'brush' (красить),
@@ -63,7 +66,6 @@ export let partsShape = '';
 //: отданы вьюверу. Держим их здесь, потому что `setModelParts` заменяет карту
 //: целиком: передашь одну — сотрёшь соседний материал.
 const partsMaps = {};
-const islandMaps = {};
 //: {материал: отпечаток разбиения} — ключ кэша масок у каждого свой.
 const partsShapes = {};
 //: Идёт ли смена активного материала: курсор на границе мешей иначе слал бы
@@ -72,8 +74,8 @@ let switching = false;
 //: Часть под курсором. Нужна перерисовке полосы: список приходит ответом
 //: Python и успевает обновиться уже после того, как чип пометили.
 let hoverPart = null;
-//: Отмеченные для слияния отрезки: номера частей. Живут только в режиме резки.
-let marked = new Set();
+//: Ножницы: чем выделять и сколько выделено (ведёт вьювер, число — отсюда).
+const cutOpts = { tool: 'detail', angle: 30, radius: 0.05, erase: false };
 export let gradientOn = false;   // красить переходом из первого цвета во второй
 export let gradientAngle = 0;    // направление перехода в градусах: 0 — сверху вниз
 let gradientEnd = 1;             // какой конец перехода правит выбор цвета
@@ -109,6 +111,7 @@ export async function loadParts() {
   if (res.error) { hintParts(res.error); return null; }
 
   partsMaterial = res.material;
+  partsMain = res.material;
   showParts(res);
   showPalette(res);
 
@@ -151,11 +154,9 @@ function rememberMaps(res) {
   if (!res || !res.material) return;
   if (res.shape) partsShapes[res.material] = res.shape;
   if (res.tri_part) partsMaps[res.material] = res.tri_part;
-  if (res.tri_island) islandMaps[res.material] = res.tri_island;
   const w = viewer();
   if (!w || !res.tri_part) return;
   w.setModelParts({ ...partsMaps });
-  if (w.setModelIslands) w.setModelIslands({ ...islandMaps });
 }
 
 /**
@@ -165,13 +166,22 @@ function rememberMaps(res) {
  * разметка на текстуре должны говорить про тело. Переключение идёт по одному:
  * курсор на границе мешей иначе слал бы запрос на каждый кадр.
  */
+function partsTarget(material) {
+  return hasOwnParts(material) ? material
+    : (!String(material).startsWith('deco:') ? partsMain : null);
+}
+
 async function usePartsMaterial(material) {
-  if (!material || material === partsMaterial || switching) return;
+  if (!material || switching) return;
   if (partsMaterial === null) return;      // режим не открывали — нечего менять
-  if (!hasOwnParts(material)) return;      // переключаться не на что
+  // Меш без своего разбора — это меш предмета с картой под служебным ключом
+  // (одноматериальная модель). Раньше с него уходить было некуда; теперь рядом
+  // бывает гирлянда, и вернуться с неё на оружие надо к ГЛАВНОМУ разбору.
+  const target = partsTarget(material);
+  if (!target || target === partsMaterial) return;
   switching = true;
   try {
-    const res = await api.parts(material);
+    const res = await api.parts(target);
     if (res.error) return;
     partsMaterial = res.material;
     showParts(res);
@@ -216,12 +226,11 @@ export function bindParts(w) {
     await usePartsMaterial(material);
     pickPart(part);
   };
-  // Резать там же, где смотрят: щелчок отрезает ОБВЕДЁННЫЙ остров развёртки
-  // или приращивает его обратно. Номер части нужен, чтобы узнать её группу.
-  w.onPartCut = async (material, part, island) => {
-    await usePartsMaterial(material);
-    cutIsland(part, island);
-  };
+  // Ножницы: вьювер выделяет и сообщает, сколько; Enter и Esc приходят
+  // оттуда же — фокус после щелчка по модели у него.
+  w.onCutSelection = (count) => showCutCount(count);
+  w.onCutKey = (key) => (key === 'Enter' ? applyCut() : resetCut());
+  if (w.setCutOptions) w.setCutOptions(cutOpts);
   if (w.setCutMode) w.setCutMode(cutMode);
 }
 
@@ -454,9 +463,7 @@ export function closeParts() {
   partsGroups = {};
   partsShape = '';
   Object.keys(partsMaps).forEach((m) => delete partsMaps[m]);
-  Object.keys(islandMaps).forEach((m) => delete islandMaps[m]);
   Object.keys(partsShapes).forEach((m) => delete partsShapes[m]);
-  marked.clear();
   const w = viewer();
   if (w) w.setPartsMode(false);
   // Подгонка прячет свою кнопку, пока части открыты: сообщаем, что закрылись.
@@ -478,9 +485,6 @@ export function showParts(res) {
   partsList = res.parts;
   partsGroups = res.group_islands || {};
   partsShape = res.shape || '';
-  // Часть могла исчезнуть при перерезке: отметка на неё больше ничего не значит.
-  const alive = new Set(res.parts.map((x) => x.id));
-  [...marked].forEach((id) => { if (!alive.has(id)) marked.delete(id); });
   // Карты приходят только при смене разбиения: нет их в ответе — у вьювера
   // уже лежат нужные, и слать undefined значило бы стереть их.
   rememberMaps(res);
@@ -524,26 +528,21 @@ export function showParts(res) {
     b.addEventListener('click', (e) => {
       if (e.target.classList.contains('parts__x')
           || e.target.classList.contains('parts__cut')) return;
-      // Резать из списка нечего — какой остров имеется в виду, видно только
-      // на модели. Зато список — единственное место, где можно ткнуть в две
-      // части сразу, поэтому здесь щелчок ОТМЕЧАЕТ их для слияния.
-      if (cutMode) { markPart(part); return; }
+      // С ножницами щелчок по чипу кладёт в выделение ВСЮ часть: так две
+      // части сводят в одну — выделил обе, «Отделить».
+      if (cutMode) { selectWholePart(part); return; }
       pickPart(part.id);
     });
     if (part.color) {
       const dot = document.createElement('span');
       dot.className = 'parts__dot';
-      dot.style.background = (typeof part.color === 'object')
-        ? 'linear-gradient(90deg,' + part.color.color + ','
-          + (part.color.color2 || part.color.color) + ')'
-        : part.color;
+      const { color, color2 } = part.color;
+      dot.style.background = color2
+        ? 'linear-gradient(90deg,' + color + ',' + color2 + ')' : color;
       b.appendChild(dot);
     }
-    // Кнопка только на ОТРЕЗАННОЙ части — прирастить её обратно. Кнопки
-    // «разрезать» здесь нет и быть не может: резать надо названный остров, а
-    // из списка не видно, какой именно. Для этого есть ножницы.
-    if (part.islands && part.islands.length) {
-      b.classList.toggle('is-marked', marked.has(part.id));
+    // Кнопка только на ОТРЕЗАННОЙ части — вернуть её туда, откуда вырезали.
+    if ((part.islands && part.islands.length) || part.region >= 0) {
       b.appendChild(chunkStep(part, '\u2212', 'Прирастить обратно'));
     }
     // У части с картинками — вход в их редактор: посадка, замена, ещё одна.
@@ -578,7 +577,6 @@ export function showParts(res) {
     }
     bar.appendChild(b);
   });
-  syncMarks();          // кнопка слияния живёт по отметкам, а не по прошлому списку
 }
 
 /**
@@ -591,8 +589,17 @@ export function showParts(res) {
  * правая делят её целиком, и разрезать одну без другой нельзя: в игре у них
  * общие пиксели, краска легла бы на обе.
  */
-/** Возвращает отрезок в кусок целиком — со всеми островами, из которых он собран. */
+/** Возвращает отрезок туда, откуда вырезали: область ножниц — одним шагом,
+ *  отрезок по островам — со всеми островами, из которых он собран. */
 async function uncutPart(part) {
+  if (part.region >= 0) {
+    const res = await api.removePartRegion(partsMaterial, part.region);
+    if (res.error) { hintParts(res.error); return; }
+    applyView(res);
+    await refreshParts();
+    hintParts('Часть возвращена на место');
+    return;
+  }
   for (const island of part.islands || []) await cutIsland(part.id, island);
 }
 
@@ -620,36 +627,102 @@ async function cutIsland(partId, island) {
             + (uniq ? t('. Вернуть — щелчок по нему же или «−» на его чипе') : ''));
 }
 
-/**
- * Отмечает отрезок для слияния.
- *
- * Отмечать можно только отрезанное и только внутри одного куска: слить
- * отрезки разных кусков нельзя — это разные места модели, а не одна вещь,
- * разложенная развёрткой на два острова.
- */
-function markPart(part) {
-  if (!part.islands || !part.islands.length) {
-    hintParts('Отмечать можно только отрезанное: сперва отрежь на модели');
-    return;
-  }
-  const same = (partsList || []).filter((x) => marked.has(x.id));
-  if (same.length && same[0].group !== part.group) marked.clear();
-  if (marked.has(part.id)) marked.delete(part.id);
-  else marked.add(part.id);
-  syncMarks();
+/** Вся часть — в выделение ножниц или из него (щелчок по чипу). */
+function selectWholePart(part) {
+  const map = partsMaps[partsMaterial];
+  const w = viewer();
+  if (!map || !w || !w.toggleCutTris) return;
+  const tris = [];
+  map.forEach((owner, tri) => { if (owner === part.id) tris.push(tri); });
+  w.toggleCutTris(partsMaterial, tris);
 }
 
-/** Подсветка отметок и кнопка слияния: нажимать её не на что, пока отмечен один. */
-function syncMarks() {
-  document.querySelectorAll('#partsbar .tag').forEach((b) => {
-    b.classList.toggle('is-marked', marked.has(Number(b.dataset.part)));
-  });
-  const chosen = (partsList || []).filter((x) => marked.has(x.id));
-  document.getElementById('parts-join').hidden = chosen.length < 2;
-  if (chosen.length >= 2) {
-    hintParts(`Отмечено ${chosen.length}. «Объединить» сведёт их в одну часть`);
+/**
+ * «Отделить»: выделенное ножницами — в отдельную часть.
+ *
+ * Выделение живёт во вьювере (он его рисует и знает меш), номера
+ * треугольников уходят в Python. Зеркальную половину Python добирает сам —
+ * об этом говорим: иначе человек выделил одну сторону, а покрасились обе.
+ */
+async function applyCut() {
+  const w = viewer();
+  const sel = w && w.cutSelection ? w.cutSelection() : null;
+  if (!sel || !sel.triangles.length) {
+    hintParts('Сперва выдели на модели, что отделить');
+    return;
   }
+  await usePartsMaterial(sel.material);
+  // Переключение могло не случиться (занято другим или Python ответил
+  // ошибкой) — тогда номера треугольников ушли бы в ЧУЖОЙ материал.
+  if (partsMaterial !== partsTarget(sel.material)) {
+    hintParts('Не удалось перейти к материалу выделения — попробуй ещё раз');
+    return;
+  }
+  hintParts('Отделяю…');
+  const res = await api.addPartRegion(partsMaterial, sel.triangles);
+  if (res.error) { hintParts(res.error); return; }
+  w.clearCutSelection();
+  applyView(res);
+  await refreshParts();
+  hintParts(res.mirrored
+    ? 'Отделено. Зеркальная половина отделилась вместе: у неё те же пиксели'
+    : 'Отделено в новую часть. Вернуть — «−» на её чипе или Ctrl+Z');
 }
+
+function resetCut() {
+  const w = viewer();
+  if (w && w.clearCutSelection) w.clearCutSelection();
+}
+
+//: Что делает щелчок каждым способом выделения — подсказка к нему.
+const CUT_HINTS = {
+  detail: 'Щёлкай по модели: берётся гладкая поверхность до острых рёбер. '
+        + 'Повторный щелчок снимает',
+  brush: 'Веди по модели с зажатой кнопкой — выделяется всё под кистью. '
+       + 'Мимо модели — крутит камеру',
+  island: 'Щёлкай по модели: берётся остров развёртки целиком',
+};
+
+/** Кнопки и подсказка по числу выделенного. */
+function showCutCount(count) {
+  document.getElementById('cut-apply').disabled = !count;
+  document.getElementById('cut-reset').disabled = !count;
+  if (!cutMode) return;
+  hintParts(count
+    ? `Выделено треугольников: ${count}. «Отделить» или Enter — в отдельную часть`
+    : CUT_HINTS[cutOpts.tool]);
+}
+
+/** Способ выделения: у каждого свой ползунок, лишние прячем. */
+function setCutTool(name) {
+  cutOpts.tool = name;
+  document.querySelectorAll('#cut-modes [data-cut]').forEach((b) => {
+    b.classList.toggle('is-active', b.dataset.cut === name);
+  });
+  document.getElementById('cut-angle-box').hidden = name !== 'detail';
+  document.getElementById('cut-radius-box').hidden = name !== 'brush';
+  document.getElementById('cut-erase-box').hidden = name !== 'brush';
+  withViewer((w) => w.setCutOptions && w.setCutOptions(cutOpts));
+  hintParts(CUT_HINTS[name]);
+}
+
+document.querySelectorAll('#cut-modes [data-cut]').forEach((b) => {
+  b.addEventListener('click', () => setCutTool(b.dataset.cut));
+});
+document.getElementById('cut-angle').addEventListener('input', (e) => {
+  cutOpts.angle = Number(e.target.value);
+  withViewer((w) => w.setCutOptions && w.setCutOptions(cutOpts));
+});
+document.getElementById('cut-radius').addEventListener('input', (e) => {
+  cutOpts.radius = Number(e.target.value) / 100;
+  withViewer((w) => w.setCutOptions && w.setCutOptions(cutOpts));
+});
+document.getElementById('cut-erase').addEventListener('change', (e) => {
+  cutOpts.erase = e.target.checked;
+  withViewer((w) => w.setCutOptions && w.setCutOptions(cutOpts));
+});
+document.getElementById('cut-apply').addEventListener('click', applyCut);
+document.getElementById('cut-reset').addEventListener('click', resetCut);
 
 /** Кнопка «−» на отрезанной части: вернуть её в кусок, из которого вырезали. */
 function chunkStep(part, glyph, title) {
@@ -657,7 +730,7 @@ function chunkStep(part, glyph, title) {
   btn.className = 'parts__cut';
   btn.type = 'button';
   btn.textContent = glyph;
-  btn.title = t(title) + t('. То же — щелчок по ней на модели с ножницами');
+  btn.title = t(title);
   btn.addEventListener('click', (e) => {
     e.stopPropagation();          // щелчок по чипу красит — здесь этого не надо
     uncutPart(part);
@@ -707,7 +780,8 @@ export function paintSpec(color) {
 async function applyGradientShape() {
   const fresh = {};
   (partsList || []).forEach((part) => {
-    if (part.color && typeof part.color === 'object') {
+    // Цвет части всегда приходит записью; градиент — та, где есть второй цвет.
+    if (part.color && part.color.color2) {
       fresh[part.id] = { ...part.color, angle: gradientAngle,
                          start: gradStart, end: gradEnd, mid: gradMid };
     }
@@ -807,8 +881,9 @@ document.getElementById('part-tint').addEventListener('change', () => {
   if (partsMaterial !== null) colorParts({});
 });
 
-// «Точный цвет» — свойство всей работы, как и сила: переключили — пересобрали
-// уже покрашенное, иначе о нём можно судить только по следующему мазку.
+// «Точный цвет» — настройка КИСТИ, как и сила: уже покрашенное помнит свою
+// (см. paintSpec), здесь её только запоминаем. Python перекрашивает лишь
+// старые работы, где мазок своих настроек не хранит.
 document.getElementById('part-exact').addEventListener('change', () => {
   if (partsMaterial === null) return;
   hintParts(document.getElementById('part-exact').checked
@@ -907,14 +982,14 @@ async function stepHistory(delta) {
  */
 function setCutMode(on) {
   cutMode = !!on;
-  marked.clear();
-  syncMarks();
-  if (cutMode) hintParts('');
-  withViewer((w) => w.setCutMode && w.setCutMode(cutMode));
+  withViewer((w) => {
+    if (w.setCutOptions) w.setCutOptions(cutOpts);
+    if (w.setCutMode) w.setCutMode(cutMode);
+  });
+  showCutCount(0);
   if (cutMode) {
-    hintParts('Наведи на модель — обведётся кусок развёртки, который отрежется. '
-            + 'Щелчок режет; щелчки по отрезанным в списке отмечают их, '
-            + 'чтобы свести в одну часть');
+    hintParts('Выдели на модели, что отрезать, и нажми «Отделить». '
+            + 'Щелчок по чипу берёт часть целиком — так части сводят в одну');
   } else {
     hintParts('');
   }
@@ -1253,19 +1328,6 @@ document.getElementById('parts-fold').addEventListener('click', () => {
   const folded = bar.classList.toggle('is-folded');
   const btn = document.getElementById('parts-fold');
   btn.title = t(folded ? 'Развернуть палитру' : 'Свернуть палитру');
-});
-
-document.getElementById('parts-join').addEventListener('click', async () => {
-  const chosen = (partsList || []).filter((x) => marked.has(x.id));
-  if (chosen.length < 2) return;
-  const islands = [...new Set(chosen.flatMap((x) => x.islands || []))];
-  hintParts('Объединяю…');
-  const res = await api.mergePartIslands(partsMaterial, chosen[0].group, islands);
-  if (res.error) { hintParts(res.error); return; }
-  marked.clear();
-  applyView(res);
-  await refreshParts();
-  hintParts('Отрезки сведены в одну часть');
 });
 
 /**

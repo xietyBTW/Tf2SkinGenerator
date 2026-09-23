@@ -204,6 +204,12 @@ f 6/4 7/5 8/6
 """
 
 
+
+def _hexes(colors):
+    """Цвета частей без настроек кисти: {часть: '#rrggbb'}."""
+    return {part: spec['color'] for part, spec in (colors or {}).items()}
+
+
 class SplitTests(unittest.TestCase):
     """Что считается одной частью."""
 
@@ -223,6 +229,60 @@ class SplitTests(unittest.TestCase):
         model = parts.load(_obj(os.path.join(self.tmp, 'b.obj'), TWO_SQUARES))
         areas = [p.uv_area for p in model.parts_of('weapon')]
         self.assertEqual(areas, sorted(areas, reverse=True))
+
+    def test_a_region_cuts_inside_a_single_island(self):
+        """Ножницы режут и там, где остров развёртки один на весь кусок: у
+        обреза приклад с корпусом — один остров, и по островам резать нечего.
+        По линии разреза у области с остатком общие вершины, но не пиксели —
+        «делит развёртку» говорить нельзя."""
+        path = _obj(os.path.join(self.tmp, 'r.obj'), TWO_SQUARES)
+        model = parts.load(path, regions={'weapon': [[1]]})
+        found = model.parts_of('weapon')
+        self.assertEqual(len(found), 3)
+        cut = [p for p in found if p.region == 0]
+        self.assertEqual(len(cut), 1)
+        self.assertEqual(cut[0].triangles, (1,))
+        self.assertFalse(any(p.shared for p in found))
+        # Остаток квадрата — тот же кусок, что и область.
+        rest = next(p for p in found if 0 in p.triangles)
+        self.assertEqual(rest.chunk, cut[0].chunk)
+
+    def test_a_region_overlapping_another_piece_is_still_shared(self):
+        """Исключение для линии разреза — только внутри своего куска. С чужим
+        куском, у которого общие вершины развёртки, пиксели общие по-прежнему,
+        даже если треугольники там разбиты иначе."""
+        partial = """
+v 0 0 0
+v 1 0 0
+v 1 1 0
+v 9 0 0
+v 10 0 0
+v 9 1 0
+vt 0.0 0.0
+vt 1.0 0.0
+vt 1.0 1.0
+vt 0.0 1.0
+usemtl weapon
+f 1/1 2/2 3/3
+f 4/1 5/2 6/4
+"""
+        path = _obj(os.path.join(self.tmp, 'r4.obj'), partial)
+        found = parts.load(path, regions={'weapon': [[0]]}).parts_of('weapon')
+        cut = next(p for p in found if p.region == 0)
+        self.assertTrue(cut.shared, 'область не сказала, что делит пиксели')
+
+    def test_a_later_region_takes_triangles_from_an_earlier_one(self):
+        path = _obj(os.path.join(self.tmp, 'r2.obj'), TWO_SQUARES)
+        model = parts.load(path, regions={'weapon': [[0, 1], [1]]})
+        by_region = {p.region: p.triangles for p in model.parts_of('weapon')}
+        self.assertEqual(by_region[0], (0,))
+        self.assertEqual(by_region[1], (1,))
+
+    def test_a_region_beyond_the_model_is_ignored(self):
+        """Работа могла пережить смену модели: чужие номера не роняют разбор."""
+        path = _obj(os.path.join(self.tmp, 'r3.obj'), TWO_SQUARES)
+        model = parts.load(path, regions={'weapon': [[99, 100]]})
+        self.assertEqual(len(model.parts_of('weapon')), 2)
 
     def test_pieces_sharing_the_uv_are_marked(self):
         """В игре у них общий пиксель — покрасить по-разному нельзя, и об этом
@@ -415,6 +475,36 @@ class ComposeTests(unittest.TestCase):
         out = os.path.join(self.tmp, 'out.png')
         return compose.compose(
             self.base, [compose.Layer(polygons=polygons, image=self.patch)], out)
+
+    def test_cached_windows_match_a_fresh_compose(self):
+        """Готовые окна слоёв берутся из кэша между мазками. Правка слоя A
+        должна дойти до C и через посредника: B пересекается с обоими, а в
+        «точном цвете» он берёт среднее по всей своей маске, в том числе там,
+        где под ним лежит A. Ключ по одному B без его соседей отдал бы C
+        устаревшим."""
+        import numpy as np
+
+        rng = np.random.default_rng(3)
+        noise = rng.integers(0, 255, (64, 64, 4), dtype=np.uint8)
+        noise[..., 3] = 255
+        Image.fromarray(noise, 'RGBA').save(self.base)
+
+        def square(u0, v0, u1, v1):
+            return [((u0, v0), (u1, v0), (u1, v1)), ((u0, v0), (u1, v1), (u0, v1))]
+
+        def layers(first):
+            return [compose.Layer(polygons=square(0.0, 0.0, 0.5, 0.5), color=first, exact=True),
+                    compose.Layer(polygons=square(0.4, 0.4, 0.8, 0.8), color='#2040ff', exact=True),
+                    compose.Layer(polygons=square(0.7, 0.3, 0.95, 0.6), color='#20ff40', exact=True)]
+
+        out = os.path.join(self.tmp, 'out.png')
+        compose.clear_caches()
+        compose.compose(self.base, layers('#ff0000'), out, frames=1)
+        compose.compose(self.base, layers('#ffffff'), out, frames=1)
+        cached = np.asarray(Image.open(out))
+        compose.clear_caches()
+        compose.compose(self.base, layers('#ffffff'), out, frames=1)
+        self.assertTrue((cached == np.asarray(Image.open(out))).all())
 
     def test_patch_lands_on_the_part_and_nowhere_else(self):
         # Треугольник в левом НИЖНЕМ углу развёртки (v растёт вверх).
@@ -641,12 +731,14 @@ class ComposeTests(unittest.TestCase):
 
     def test_old_works_read_the_two_way_flag(self):
         """Работы, записанные до угла, хранят флаг horizontal — их не ломаем."""
-        from src.app.session import _paint_spec
+        from src.domain.preview.part_specs import color_spec as _paint_spec
 
         self.assertEqual(_paint_spec({'color': '#ff0000', 'horizontal': True})['angle'], 90.0)
         self.assertEqual(_paint_spec({'color': '#ff0000', 'horizontal': False})['angle'], 0.0)
         self.assertEqual(_paint_spec({'color': '#ff0000', 'angle': 137})['angle'], 137.0)
-        self.assertNotIn('angle', _paint_spec('#ff0000'))
+        # Строка из старой работы — сплошной цвет сверху вниз, без второго.
+        self.assertEqual(_paint_spec('#ff0000')['angle'], 0.0)
+        self.assertIsNone(_paint_spec('#ff0000')['color2'])
 
     def test_a_picture_keeps_its_proportions_by_default(self):
         """Растяжение по прямоугольнику корёжило логотипы, и заметно это
@@ -695,14 +787,14 @@ class ComposeTests(unittest.TestCase):
     def test_a_vanishing_scale_is_refused(self):
         """Ноль и минус — это исчезнувшая картинка; такой «результат» примут за
         поломку, а не за свою настройку."""
-        from src.app.session import _image_spec
+        from src.domain.preview.part_specs import image_spec as _image_spec
 
         self.assertGreater(_image_spec({'path': 'a.png', 'scale': 0})['scale'], 0)
         self.assertGreater(_image_spec({'path': 'a.png', 'scale': -3})['scale'], 0)
 
     def test_old_works_store_the_picture_as_a_plain_path(self):
         """Работы, записанные до настройки посадки, хранят строку — их не ломаем."""
-        from src.app.session import _image_spec
+        from src.domain.preview.part_specs import image_spec as _image_spec
 
         spec = _image_spec('C:/tmp/logo.png')
         self.assertEqual(spec['path'], 'C:/tmp/logo.png')
@@ -808,24 +900,27 @@ class ComposeTests(unittest.TestCase):
         выбрать появившиеся части."""
         from src.app.session import AppSession
 
-        app = AppSession.__new__(AppSession)
-        app._obj_path = ''
-        app.preview = type('P', (), {})()
+        from src.app.parts_editor import PartsEditor
+        host = type('Host', (), {})()
+        host._obj_path = ''
+        host.preview = type('P', (), {})()
+        host.preview.part_regions = {}
+        app = PartsEditor(host)
 
         # Разрезы хранятся ПО МАТЕРИАЛУ: отпечаток берёт только свои.
         app.preview.part_cuts = {'weapon': {0: [[1], [2]]}}
-        apart = AppSession._shape_key(app, 'weapon')
+        apart = app._shape_key('weapon')
         app.preview.part_cuts = {'weapon': {0: [[1, 2]]}}
-        together = AppSession._shape_key(app, 'weapon')
+        together = app._shape_key('weapon')
         self.assertNotEqual(apart, together)
 
         # Порядок записи на отпечаток влиять не должен.
         app.preview.part_cuts = {'weapon': {0: [[2, 1]]}}
-        self.assertEqual(together, AppSession._shape_key(app, 'weapon'))
+        self.assertEqual(together, app._shape_key('weapon'))
 
         # Разрез СОСЕДНЕГО материала на этот отпечаток не влияет.
         app.preview.part_cuts = {'weapon': {0: [[2, 1]]}, 'head': {0: [[3]]}}
-        self.assertEqual(together, AppSession._shape_key(app, 'weapon'))
+        self.assertEqual(together, app._shape_key('weapon'))
 
     def test_the_edge_of_a_part_is_painted_too(self):
         """По краю части в игре оставалась полоска исходного цвета: остров
@@ -921,17 +1016,17 @@ class SessionPartsTests(unittest.TestCase):
         работы во временной папке накопилось 1090 склеек на 248 МБ."""
         square = [0, 1]
         for step in range(10):
-            self.session.set_part_colors('', {square[0]: '#%02x0000' % (step * 20)})
-        alive = [p for p in self.session._compose_files if os.path.isfile(p)]
-        self.assertLessEqual(len(self.session._compose_files),
-                             self.session._KEEP_COMPOSITES)
-        self.assertEqual(len(alive), len(self.session._compose_files))
+            self.session.parts.set_part_colors('', {square[0]: '#%02x0000' % (step * 20)})
+        alive = [p for p in self.session.parts._compose_files if os.path.isfile(p)]
+        self.assertLessEqual(len(self.session.parts._compose_files),
+                             self.session.parts._KEEP_COMPOSITES)
+        self.assertEqual(len(alive), len(self.session.parts._compose_files))
 
     def test_the_shown_composite_is_never_deleted(self):
         """Путь склейки — это ещё и адрес картинки во вьювере: удалить только
         что показанную нельзя."""
         for step in range(6):
-            self.session.set_part_colors('', {0: '#%02x0000' % (step * 30)})
+            self.session.parts.set_part_colors('', {0: '#%02x0000' % (step * 30)})
         shown = self.session.preview.textures.uploaded_for_mat(
             self.session.preview.textures.storage_main_key())
         self.assertTrue(os.path.isfile(shown), shown)
@@ -945,18 +1040,18 @@ class SessionPartsTests(unittest.TestCase):
         shots = [Image.new('RGBA', (8, 8), (k * 4, 0, 0, 255)) for k in range(60)]
         shots[0].save(gif, save_all=True, append_images=shots[1:],
                       duration=40, loop=0)
-        self.session.set_part_texture('weapon', 0, gif)
-        self.session.set_part_texture('weapon', 1, gif)
-        self.session.set_part_colors('weapon', {'1': '#00ff00'})
+        self.session.parts.set_part_texture('weapon', 0, gif)
+        self.session.parts.set_part_texture('weapon', 1, gif)
+        self.session.parts.set_part_colors('weapon', {'1': '#00ff00'})
 
         t = self.session.preview.textures
         shown = t.uploaded_for_mat(t.storage_main_key())
         with Image.open(shown) as im:
             self.assertEqual(getattr(im, 'n_frames', 1), 1)
 
-        plan = self.session._bake_plan([shown, None, self.patch])
+        plan = self.session.parts.bake_plan([shown, None, self.patch])
         self.assertEqual(list(plan), [shown])
-        self.session._bake(plan, lambda pct, text: None)
+        self.session.parts.bake(plan, lambda pct, text: None)
         full = plan[shown][2]
         with Image.open(full) as im:
             self.assertEqual(im.n_frames, 60)
@@ -964,10 +1059,10 @@ class SessionPartsTests(unittest.TestCase):
 
         # Без гифки печь нечего: склейка превью и так полная. Гифку на части 0
         # ЗАМЕНЯЕМ (слой 0): новая картинка без слоя легла бы поверх неё.
-        self.session.set_part_texture('weapon', 0, self.patch, layer=0)
-        self.session.set_part_texture('weapon', 1, None)
+        self.session.parts.set_part_texture('weapon', 0, self.patch, layer=0)
+        self.session.parts.set_part_texture('weapon', 1, None)
         still = t.uploaded_for_mat(t.storage_main_key())
-        self.assertEqual(self.session._bake_plan([still]), {})
+        self.assertEqual(self.session.parts.bake_plan([still]), {})
 
     def test_the_viewer_gets_the_gif_frames_only_when_asked(self):
         """Гифка в 3D — настройка, по умолчанию выключенная: кадры считаются
@@ -983,16 +1078,16 @@ class SessionPartsTests(unittest.TestCase):
         got = self.session.subscribe()
 
         # Настройка читается из конфига машины — тест на него не смотрит.
-        with mock.patch.object(type(self.session), '_parts_animation_on',
+        with mock.patch.object(type(self.session.parts), '_parts_animation_on',
                                staticmethod(lambda: False)):
-            self.session.set_part_texture('weapon', 0, gif)
+            self.session.parts.set_part_texture('weapon', 0, gif)
         self.assertEqual(sum(1 for t in threading.enumerate()
                              if t.name.startswith('parts-anim')), 0)
         self.assertTrue(got.empty())
 
-        with mock.patch.object(type(self.session), '_parts_animation_on',
+        with mock.patch.object(type(self.session.parts), '_parts_animation_on',
                                staticmethod(lambda: True)):
-            self.session.set_part_colors('weapon', {'1': '#00ff00'})
+            self.session.parts.set_part_colors('weapon', {'1': '#00ff00'})
             for t in threading.enumerate():
                 if t.name.startswith('parts-anim'):
                     t.join(10)
@@ -1015,7 +1110,7 @@ class SessionPartsTests(unittest.TestCase):
         self.session._obj_path = _obj(os.path.join(self.tmp, 'seam.obj'),
                                       SEAMED_PIECE_AND_PLAIN_ONE)
         whole = len(parts.load(self.session._obj_path).parts_of('weapon'))
-        self.session.set_part_detail('weapon', 1.0)          # разрезали по швам
+        self.session.parts.set_part_detail('weapon', 1.0)          # разрезали по швам
         cut = len(parts.load(self.session._obj_path,
                              self.session.preview.part_cuts).parts_of('weapon'))
         self.assertGreater(cut, whole, 'разрез не состоялся')
@@ -1045,7 +1140,7 @@ class SessionPartsTests(unittest.TestCase):
         t.material_names = ['head', 'body']
         t.vpk_red_tex_map = {'head': self.base, 'body': other}
 
-        self.session.set_part_colors('head', {0: '#ff0000'})
+        self.session.parts.set_part_colors('head', {0: '#ff0000'})
         before = [(p.chunk, p.sub) for p in
                   parts.load(self.session._obj_path,
                              self.session.preview.part_cuts).parts_of('head')]
@@ -1054,14 +1149,14 @@ class SessionPartsTests(unittest.TestCase):
         # уже лежат в словаре по МАТЕРИАЛАМ, и план второго разреза читает их
         # заново — с плоским чтением он спотыкался об имя материала вместо
         # номера группы («invalid literal for int(): 'body'»).
-        self.session.toggle_part_island('body', 0, 0)
-        self.assertNotIn('error', self.session.toggle_part_island('body', 0, 1))
+        self.session.parts.toggle_part_island('body', 0, 0)
+        self.assertNotIn('error', self.session.parts.toggle_part_island('body', 0, 1))
 
         after = [(p.chunk, p.sub) for p in
                  parts.load(self.session._obj_path,
                             self.session.preview.part_cuts).parts_of('head')]
         self.assertEqual(before, after, 'разбиение головы поехало от чужого разреза')
-        self.assertEqual(self.session.preview.part_colors.get('head'),
+        self.assertEqual(_hexes(self.session.preview.part_colors.get('head')),
                          {0: '#ff0000'})
 
     def test_a_second_material_keeps_its_own_composite(self):
@@ -1079,75 +1174,110 @@ class SessionPartsTests(unittest.TestCase):
         t.material_names = ['head', 'body']
         t.vpk_red_tex_map = {'head': self.base, 'body': other}
 
-        self.session.set_part_colors('head', {0: '#ff0000'})
-        self.session.set_part_colors('body', {0: '#00ff00'})
+        self.session.parts.set_part_colors('head', {0: '#ff0000'})
+        self.session.parts.set_part_colors('body', {0: '#00ff00'})
         head_paint = t.uploaded_for_mat('head')
 
         # Мазки по одному материалу не должны стирать склейку соседнего.
         for step in range(6):
-            self.session.set_part_colors('body', {0: '#%02x8000' % (step * 30)})
+            self.session.parts.set_part_colors('body', {0: '#%02x8000' % (step * 30)})
 
         self.assertEqual(t.uploaded_for_mat('head'), head_paint)
         self.assertTrue(os.path.isfile(head_paint), head_paint)
 
-    def test_a_forgotten_composite_is_still_known_as_ours(self):
-        """Забыть ПУТЬ нельзя, даже удалив файл: по нему `_recompose` отличает
-        свою склейку от пользовательской текстуры, иначе правки копились бы
-        слоями."""
+    def test_a_painted_slot_stays_ours_after_its_files_are_gone(self):
+        """Признак «склейка наша» — запись основы, а не путь и не файл: старые
+        файлы склеек удаляются, а слот обязан оставаться покрашенным."""
+        t = self.session.preview.textures
         for step in range(8):
-            self.session.set_part_colors('', {0: '#%02x0000' % (step * 30)})
-        self.assertGreater(len(self.session._composites),
-                           self.session._KEEP_COMPOSITES)
+            self.session.parts.set_part_colors('', {0: '#%02x0000' % (step * 30)})
+        self.assertIn(t.storage_main_key(), self.session.preview.part_bases)
 
-    def _leave_and_return(self):
-        """Возврат к предмету: путь склейки ведёт в work/, а множество путей
-        помнит только файлы текущего запуска."""
-        self.session._composites.clear()
-        self.session._adopt_composites()
+    def _leave_and_return(self, legacy: bool = False):
+        """Возврат к предмету через работу. ``legacy`` — работа записана до
+        явной основы: её надо перевести по именам файлов."""
+        p = self.session.preview
+        edits = p.user_edits()
+        if legacy:
+            edits.pop('part_bases')
+        p.forget_user_edits()
+        p.apply_user_edits(edits)
 
     def test_clearing_works_after_returning_to_the_item(self):
         """«Убрать всё» ничего не убирало: вернувшуюся с диска склейку
         приложение считало ЧУЖОЙ текстурой и не имело права её снять."""
         t = self.session.preview.textures
-        self.session.set_part_colors('', {0: '#ff0000'})
-        self.assertTrue(t.uploaded_for_mat(t.storage_main_key()))
-
-        self._leave_and_return()
-        self.session.clear_parts('')
-        self.assertFalse(t.uploaded_for_mat(t.storage_main_key()))
+        for legacy in (False, True):
+            self.session.parts.set_part_colors('', {0: '#ff0000'})
+            self.assertTrue(t.uploaded_for_mat(t.storage_main_key()))
+            self._leave_and_return(legacy)
+            self.session.parts.clear_parts('')
+            self.assertFalse(t.uploaded_for_mat(t.storage_main_key()), legacy)
 
     def test_repaint_does_not_stack_on_the_old_composite(self):
         """Прежняя склейка бралась ОСНОВОЙ следующей: под новым цветом
         просвечивал старый, и цвета грязнились с каждой перекраской."""
         t = self.session.preview.textures
-        self.session.set_part_colors('', {0: '#ffee00'})
-        self._leave_and_return()
-        self.session.set_part_colors('', {0: '#0040ff'})
+        self.session.parts.set_part_colors('', {0: '#ffee00'})
+        self._leave_and_return(legacy=True)
+        self.session.parts.set_part_colors('', {0: '#0040ff'})
         after = Image.open(t.uploaded_for_mat(t.storage_main_key())).convert('RGB')
 
-        self.session.clear_parts('')
-        self.session.set_part_colors('', {0: '#0040ff'})
+        self.session.parts.clear_parts('')
+        self.session.parts.set_part_colors('', {0: '#0040ff'})
         clean = Image.open(t.uploaded_for_mat(t.storage_main_key())).convert('RGB')
         self.assertEqual(after.getpixel((32, 32)), clean.getpixel((32, 32)))
 
-    def test_a_users_own_texture_is_not_mistaken_for_a_composite(self):
-        """Одних данных частей мало: человек мог положить на материал свою
-        текстуру поверх покраски, и стирать её нельзя."""
+    def test_own_texture_on_a_painted_card_goes_under_the_strokes(self):
+        """Своя текстура на покрашенную карточку раньше ЗАМЕНЯЛА склейку:
+        чипы говорили «покрашено», а на модели мазков не было. Теперь она
+        ложится основой под них, а «Убрать всё» возвращает именно её."""
         t = self.session.preview.textures
-        self.session.set_part_colors('', {0: '#ff0000'})
+        key = t.storage_main_key()
+        self.session.parts.set_part_colors('', {0: '#ff0000'})
         mine = os.path.join(self.tmp, 'mine.png')
         Image.new('RGBA', (64, 64), (0, 255, 0, 255)).save(mine)
-        t.set_texture(t.storage_main_key(), mine)
 
-        self.session._composites.clear()
-        self.session._adopt_composites()
-        self.assertNotIn(mine, self.session._composites)
+        self.session.set_texture(key, mine)
+        shown = t.uploaded_for_mat(key)
+        self.assertNotEqual(shown, mine, 'мазки пропали с модели')
+        colors = {c for _, c in Image.open(shown).convert('RGB').getcolors(65536)}
+        self.assertIn((0, 255, 0), colors, 'своя текстура не легла основой')
+
+        self.session.parts.clear_parts('')
+        self.assertEqual(t.uploaded_for_mat(key), mine)
+
+    def test_an_old_work_with_own_texture_over_strokes_keeps_it(self):
+        """Перевод старой работы: своя текстура поверх мазков (не склейка по
+        имени) становится основой, а не теряется."""
+        t = self.session.preview.textures
+        key = t.storage_main_key()
+        self.session.parts.set_part_colors('', {0: '#ff0000'})
+        mine = os.path.join(self.tmp, 'mine.png')
+        Image.new('RGBA', (64, 64), (0, 255, 0, 255)).save(mine)
+        t.set_texture(key, mine)
+
+        self._leave_and_return(legacy=True)
+        self.assertEqual(self.session.preview.part_bases.get(key), mine)
+
+    def test_an_old_hanging_composite_is_dropped(self):
+        """Склейка без мазков — след старого бага «Убрать всё не сработало»:
+        перевод работы её снимает."""
+        t = self.session.preview.textures
+        key = t.storage_main_key()
+        self.session.parts.set_part_colors('', {0: '#ff0000'})
+        edits = self.session.preview.user_edits()
+        edits.pop('part_bases')
+        edits['part_colors'] = {}
+        self.session.preview.forget_user_edits()
+        self.session.preview.apply_user_edits(edits)
+        self.assertFalse(t.uploaded_for_mat(key))
 
     def test_a_saved_composite_keeps_its_renamed_form(self):
         """work_store дописывает к имени хвост, когда рядом уже лежит файл от
         другого материала: на диске склейка зовётся parts_1_25.png. Без хвоста
         в шаблоне «Убрать всё» её не узнавало."""
-        from src.app.session import _is_composite_name
+        from src.domain.preview.part_specs import is_composite_name as _is_composite_name
 
         self.assertTrue(_is_composite_name('parts_1.png'))
         self.assertTrue(_is_composite_name('parts_1_25.png'))
@@ -1173,7 +1303,7 @@ class SessionPartsTests(unittest.TestCase):
         """Разбор ЧУЖОЙ модели опаснее отказа: путь от прошлого предмета дал бы
         части, которых на экране нет."""
         self.session._forget_model()
-        self.assertIn('error', self.session.parts())
+        self.assertIn('error', self.session.parts.describe())
 
     def _painted(self):
         return self.session.preview.textures.textures[self.Team.RED].get('weapon')
@@ -1181,38 +1311,38 @@ class SessionPartsTests(unittest.TestCase):
     def test_parts_are_listed_with_a_number_for_every_triangle(self):
         """Вьювер возвращает попадание номером треугольника — без этой карты
         клик не с чем связать."""
-        res = self.session.parts()
+        res = self.session.parts.describe()
         self.assertEqual(len(res['parts']), 2)
         self.assertEqual(len(res['tri_part']), 4)
 
     def test_painting_a_part_produces_the_material_texture(self):
         """Склейка ложится туда же, куда обычная своя текстура: дальше по
         конвейеру про части никто не знает."""
-        self.session.set_part_texture('weapon', 0, self.patch)
+        self.session.parts.set_part_texture('weapon', 0, self.patch)
         painted = self._painted()
         self.assertTrue(painted and os.path.isfile(painted))
         self.assertNotEqual(painted, self.base)
 
     def test_clearing_the_last_part_returns_the_game_texture(self):
-        self.session.set_part_texture('weapon', 0, self.patch)
-        self.session.set_part_texture('weapon', 0, None)
+        self.session.parts.set_part_texture('weapon', 0, self.patch)
+        self.session.parts.set_part_texture('weapon', 0, None)
         self.assertIsNone(self._painted())
         self.assertEqual(self.session.preview.part_textures, {})
 
     def test_second_part_is_composed_over_the_game_texture_not_the_previous_glue(self):
         """Иначе правки копились бы слоями и часть нельзя было бы перекрасить."""
-        self.session.set_part_texture('weapon', 0, self.patch)
+        self.session.parts.set_part_texture('weapon', 0, self.patch)
         first = self._painted()
         green = os.path.join(self.tmp, 'green.png')
         Image.new('RGBA', (8, 8), (0, 255, 0, 255)).save(green)
-        self.session.set_part_texture('weapon', 0, green)
+        self.session.parts.set_part_texture('weapon', 0, green)
         second = self._painted()
         self.assertNotEqual(first, second)
         colors = {c for _, c in Image.open(second).convert('RGB').getcolors(4096)}
         self.assertNotIn((255, 0, 0), colors)
 
     def test_colour_paints_the_part(self):
-        self.session.set_part_colors('weapon', {'0': '#ff0000'})
+        self.session.parts.set_part_colors('weapon', {'0': '#ff0000'})
         painted = self._painted()
         self.assertTrue(painted and os.path.isfile(painted))
 
@@ -1222,25 +1352,25 @@ class SessionPartsTests(unittest.TestCase):
         Иначе переключатель «точный цвет» или окантовка перекрашивали задним
         числом всё, что человек уже сделал, — а он менял кисть для следующего
         мазка, как в любом редакторе."""
-        from src.app.session import _paint_spec
+        from src.domain.preview.part_specs import color_spec as _paint_spec
 
-        self.session.set_part_colors('weapon', {0: {'color': '#ff0000',
+        self.session.parts.set_part_colors('weapon', {0: {'color': '#ff0000',
                                                     'exact': False}})
-        self.session.set_part_colors('weapon', {1: {'color': '#00ff00',
+        self.session.parts.set_part_colors('weapon', {1: {'color': '#00ff00',
                                                     'exact': True}})
         kept = self.session.preview.part_colors['weapon']
         self.assertFalse(_paint_spec(kept[0])['exact'])
         self.assertTrue(_paint_spec(kept[1])['exact'])
 
         # Переключатель окантовки трогает КИСТЬ, а не сделанное.
-        self.session.set_part_edge('weapon', 0.01, '#000000')
+        self.session.parts.set_part_edge('weapon', 0.01, '#000000')
         after = self.session.preview.part_colors['weapon']
         self.assertEqual(_paint_spec(after[0])['edge'], 0.0)
         self.assertEqual(_paint_spec(after[1])['edge'], 0.0)
 
     def test_an_old_work_takes_the_current_brush(self):
         """У работ до этой правки настроек в мазке нет — им достаются общие."""
-        from src.app.session import _paint_spec
+        from src.domain.preview.part_specs import color_spec as _paint_spec
 
         spec = _paint_spec('#ff0000', {'strength': 0.4, 'exact': True,
                                        'edge': 0.02, 'edge_color': '#111111'})
@@ -1254,12 +1384,12 @@ class SessionPartsTests(unittest.TestCase):
         Цвет тонирует игровую текстуру (детали под ним остаются), картинка
         ложится на деталь сверху. Раньше второе действие молча стирало первое:
         покрасил корпус, наклеил на него знак — и покраска исчезала."""
-        self.session.set_part_texture('weapon', 0, self.patch)
-        self.session.set_part_colors('weapon', {'0': '#00ff00'})
+        self.session.parts.set_part_texture('weapon', 0, self.patch)
+        self.session.parts.set_part_colors('weapon', {'0': '#00ff00'})
         self.assertIn(0, self.session.preview.part_textures.get('weapon', {}))
         self.assertIn(0, self.session.preview.part_colors.get('weapon', {}))
 
-        self.session.set_part_texture('weapon', 0, self.patch)
+        self.session.parts.set_part_texture('weapon', 0, self.patch)
         self.assertIn(0, self.session.preview.part_colors.get('weapon', {}))
 
     def test_cutting_keeps_both_layers_of_a_part(self):
@@ -1268,9 +1398,9 @@ class SessionPartsTests(unittest.TestCase):
         Перенос делался через `elif` (наследие правила «либо цвет, либо
         картинка»): у части с картинкой цвет при первом же разрезе исчезал —
         со стороны «порезал ножницами, и цвет слетел»."""
-        self.session.set_part_colors('weapon', {'0': '#2266ff'})
-        self.session.set_part_texture('weapon', 0, self.patch, {'scale': 0.5})
-        self.session.set_part_detail('weapon', 1.0)      # разрезать по всем швам
+        self.session.parts.set_part_colors('weapon', {'0': '#2266ff'})
+        self.session.parts.set_part_texture('weapon', 0, self.patch, {'scale': 0.5})
+        self.session.parts.set_part_detail('weapon', 1.0)      # разрезать по всем швам
 
         colors = self.session.preview.part_colors.get('weapon', {})
         images = self.session.preview.part_textures.get('weapon', {})
@@ -1285,35 +1415,35 @@ class SessionPartsTests(unittest.TestCase):
         Якорь — габарит части, на которую наклейку клали; после разреза он
         единственный говорит, где она была. Потеряв его при первой же правке
         посадки, картинка прыгнула бы в габарит половинки."""
-        from src.app.session import _image_spec, _image_specs
+        from src.domain.preview.part_specs import image_list as _image_specs, image_spec as _image_spec
 
         images = lambda part: [_image_spec(v) for v in _image_specs(
             self.session.preview.part_textures['weapon'][part])]
-        self.session.set_part_texture('weapon', 0, self.patch)
-        self.session.set_part_detail('weapon', 1.0)          # разрезали
+        self.session.parts.set_part_texture('weapon', 0, self.patch)
+        self.session.parts.set_part_detail('weapon', 1.0)          # разрезали
         part = sorted(self.session.preview.part_textures['weapon'])[0]
         anchor = images(part)[0]['anchor']
         self.assertIsNotNone(anchor, 'разрез не поставил якорь')
 
-        self.session.set_part_texture('weapon', part, None, {'scale': 1.5})
+        self.session.parts.set_part_texture('weapon', part, None, {'scale': 1.5})
         spec = images(part)[0]
         self.assertEqual(spec['anchor'], anchor)
         self.assertAlmostEqual(spec['scale'], 1.5)
 
         # А новая картинка начинает с чистого листа: она про ЭТУ часть.
-        self.session.set_part_texture('weapon', part, self.patch)
+        self.session.parts.set_part_texture('weapon', part, self.patch)
         fresh = images(part)[-1]
         self.assertIsNone(fresh['anchor'])
 
     def test_images_stack_on_a_part(self):
         """Картинок на части может быть несколько — слоями, снизу вверх:
         новая ложится поверх, а не стирает предыдущую."""
-        from src.app.session import _image_specs
+        from src.domain.preview.part_specs import image_list as _image_specs
 
         green = os.path.join(self.tmp, 'green.png')
         Image.new('RGBA', (8, 8), (0, 255, 0, 255)).save(green)
-        self.session.set_part_texture('weapon', 0, self.patch, {'scale': 0.5})
-        self.session.set_part_texture('weapon', 0, green, {'scale': 0.2})
+        self.session.parts.set_part_texture('weapon', 0, self.patch, {'scale': 0.5})
+        self.session.parts.set_part_texture('weapon', 0, green, {'scale': 0.2})
         stack = _image_specs(self.session.preview.part_textures['weapon'][0])
         self.assertEqual([s['path'] for s in stack], [self.patch, green])
         # Верхняя — зелёная и мельче: снизу видна и красная.
@@ -1323,58 +1453,58 @@ class SessionPartsTests(unittest.TestCase):
         self.assertIn((0, 255, 0), colors)
 
     def test_a_named_layer_is_edited_replaced_and_removed(self):
-        from src.app.session import _image_spec, _image_specs
+        from src.domain.preview.part_specs import image_list as _image_specs, image_spec as _image_spec
 
         green = os.path.join(self.tmp, 'green.png')
         Image.new('RGBA', (8, 8), (0, 255, 0, 255)).save(green)
-        self.session.set_part_texture('weapon', 0, self.patch)
-        self.session.set_part_texture('weapon', 0, green)
+        self.session.parts.set_part_texture('weapon', 0, self.patch)
+        self.session.parts.set_part_texture('weapon', 0, green)
         stack = lambda: _image_specs(self.session.preview.part_textures['weapon'][0])
 
         # Посадка — у названного слоя, верхний не трогаем.
-        self.session.set_part_texture('weapon', 0, None, {'scale': 2.0}, layer=0)
+        self.session.parts.set_part_texture('weapon', 0, None, {'scale': 2.0}, layer=0)
         self.assertAlmostEqual(_image_spec(stack()[0])['scale'], 2.0)
         self.assertAlmostEqual(_image_spec(stack()[1])['scale'], 1.0)
         # Без слоя правится верхняя.
-        self.session.set_part_texture('weapon', 0, None, {'scale': 3.0})
+        self.session.parts.set_part_texture('weapon', 0, None, {'scale': 3.0})
         self.assertAlmostEqual(_image_spec(stack()[1])['scale'], 3.0)
         # Замена картинки слоя — на его месте.
-        self.session.set_part_texture('weapon', 0, green, layer=0)
+        self.session.parts.set_part_texture('weapon', 0, green, layer=0)
         self.assertEqual([_image_spec(s)['path'] for s in stack()], [green, green])
-        self.assertIn('error', self.session.set_part_texture(
+        self.assertIn('error', self.session.parts.set_part_texture(
             'weapon', 0, None, {'scale': 1.0}, layer=5))
         # Снять один слой — остаётся другой; снять без слоя — все.
-        self.session.set_part_texture('weapon', 0, None, layer=0)
+        self.session.parts.set_part_texture('weapon', 0, None, layer=0)
         self.assertEqual(len(stack()), 1)
-        self.session.set_part_texture('weapon', 0, None)
+        self.session.parts.set_part_texture('weapon', 0, None)
         self.assertNotIn(0, self.session.preview.part_textures.get('weapon', {}))
 
     def test_a_layer_moved_up_the_stack_shows_on_top(self):
         """Порядок стопки и есть наложение: переставил выше — легла поверх."""
-        from src.app.session import _image_specs
+        from src.domain.preview.part_specs import image_list as _image_specs
 
         green = os.path.join(self.tmp, 'green.png')
         Image.new('RGBA', (8, 8), (0, 255, 0, 255)).save(green)
-        self.session.set_part_texture('weapon', 0, self.patch)
-        self.session.set_part_texture('weapon', 0, green)
+        self.session.parts.set_part_texture('weapon', 0, self.patch)
+        self.session.parts.set_part_texture('weapon', 0, green)
         pixels = lambda: {c for _, c in
                           Image.open(self._painted()).convert('RGB').getcolors(65536)}
         self.assertIn((0, 255, 0), pixels())
         self.assertNotIn((255, 0, 0), pixels())
 
-        self.session.move_part_texture('weapon', 0, 0, -1)     # красную наверх
+        self.session.parts.move_part_texture('weapon', 0, 0, -1)     # красную наверх
         stack = _image_specs(self.session.preview.part_textures['weapon'][0])
         self.assertEqual([s['path'] for s in stack], [green, self.patch])
         self.assertIn((255, 0, 0), pixels())
         self.assertNotIn((0, 255, 0), pixels())
-        self.assertIn('error', self.session.move_part_texture('weapon', 0, 0, 7))
+        self.assertIn('error', self.session.parts.move_part_texture('weapon', 0, 0, 7))
 
     def test_a_cut_moves_every_layer(self):
-        from src.app.session import _image_specs
+        from src.domain.preview.part_specs import image_list as _image_specs
 
-        self.session.set_part_texture('weapon', 0, self.patch)
-        self.session.set_part_texture('weapon', 0, self.patch)
-        self.session.set_part_detail('weapon', 1.0)
+        self.session.parts.set_part_texture('weapon', 0, self.patch)
+        self.session.parts.set_part_texture('weapon', 0, self.patch)
+        self.session.parts.set_part_detail('weapon', 1.0)
         part = sorted(self.session.preview.part_textures['weapon'])[0]
         self.assertEqual(len(_image_specs(
             self.session.preview.part_textures['weapon'][part])), 2)
@@ -1385,9 +1515,9 @@ class SessionPartsTests(unittest.TestCase):
         Image.new('RGBA', (64, 64), (0, 0, 0, 255)).save(self.base)
         green = os.path.join(self.tmp, 'green.png')
         Image.new('RGBA', (8, 8), (0, 255, 0, 255)).save(green)
-        self.session.set_part_texture('weapon', 0, self.patch, {'scale': 0.5})
-        self.session.set_part_texture('weapon', 1, green)
-        shape = self.session.part_shape('weapon', 0, layer=0)
+        self.session.parts.set_part_texture('weapon', 0, self.patch, {'scale': 0.5})
+        self.session.parts.set_part_texture('weapon', 1, green)
+        shape = self.session.parts.part_shape('weapon', 0, layer=0)
         self.assertEqual(shape['layer'], 0)
         self.assertEqual(shape['image']['path'], self.patch)
         colors = {c for _, c in
@@ -1395,7 +1525,7 @@ class SessionPartsTests(unittest.TestCase):
         self.assertIn((0, 255, 0), colors, 'соседний слой не виден')
         self.assertNotIn((255, 0, 0), colors, 'правимый слой запечён в основу')
         # Новая картинка: посадки нет, основа — со всеми слоями.
-        fresh = self.session.part_shape('weapon', 0)
+        fresh = self.session.parts.part_shape('weapon', 0)
         self.assertIsNone(fresh['image'])
         colors = {c for _, c in
                   Image.open(fresh['base']).convert('RGB').getcolors(65536)}
@@ -1411,24 +1541,24 @@ class SessionPartsTests(unittest.TestCase):
         t.australium_mat_name = 'weapon_gold'
 
         t.australium_active = True
-        self.session.set_part_colors('', {'0': '#ff0000'})
+        self.session.parts.set_part_colors('', {'0': '#ff0000'})
         self.assertIn('weapon_gold', self.session.preview.part_colors)
         self.assertNotIn('weapon', self.session.preview.part_colors)
         painted = t.uploaded_for_mat('weapon_gold')
         self.assertTrue(painted and os.path.isfile(painted))
         self.assertIsNone(self._painted())
         # Странице — ключ геометрии, а не карточка варианта.
-        self.assertEqual(self.session.parts('')['material'], 'weapon')
+        self.assertEqual(self.session.parts.describe('')['material'], 'weapon')
         # Основа склейки — gold-кадр, не игровая текстура главной.
         colors = {c for _, c in Image.open(painted).convert('RGB').getcolors(65536)}
         self.assertNotIn((0, 0, 0), colors)
 
         t.australium_active = False
-        self.session.set_part_colors('', {'1': '#00ff00'})
+        self.session.parts.set_part_colors('', {'1': '#00ff00'})
         self.assertIn('weapon', self.session.preview.part_colors)
-        self.assertEqual(self.session.preview.part_colors['weapon_gold'], {0: '#ff0000'})
+        self.assertEqual(_hexes(self.session.preview.part_colors['weapon_gold']), {0: '#ff0000'})
         # По имени карточка варианта достижима и без переключателя.
-        self.assertEqual(self.session.parts('weapon_gold')['parts'][0]['color'], '#ff0000')
+        self.assertEqual(self.session.parts.describe('weapon_gold')['parts'][0]['color']['color'], '#ff0000')
 
     def test_a_style_keeps_its_own_strokes_over_its_own_game_texture(self):
         """Мазки стиля — свои: покрасил Bloody, вернулся на базовый — там
@@ -1441,7 +1571,7 @@ class SessionPartsTests(unittest.TestCase):
         self.session.preview.skin_chosen = {1: {'weapon'}}
 
         t.active_skin = 1
-        self.session.set_part_colors('weapon', {'0': '#00ff00'})
+        self.session.parts.set_part_colors('weapon', {'0': '#00ff00'})
         styled = t.skin_overrides.get(1, {}).get('weapon')
         self.assertTrue(styled and os.path.isfile(styled), 'склейка не в стиле')
         colors = {c for _, c in Image.open(styled).convert('RGB').getcolors(65536)}
@@ -1450,12 +1580,158 @@ class SessionPartsTests(unittest.TestCase):
 
         t.active_skin = 0
         self.assertIsNone(self._painted())
-        self.assertFalse([p for p in self.session.parts('weapon')['parts'] if p['color']])
-        self.session.set_part_colors('weapon', {'1': '#0000ff'})
-        self.assertEqual(self.session.preview.part_colors['weapon'], {1: '#0000ff'})
-        self.assertEqual(self.session.preview.part_colors['weapon@style1'], {0: '#00ff00'})
+        self.assertFalse([p for p in self.session.parts.describe('weapon')['parts'] if p['color']])
+        self.session.parts.set_part_colors('weapon', {'1': '#0000ff'})
+        self.assertEqual(_hexes(self.session.preview.part_colors['weapon']), {1: '#0000ff'})
+        self.assertEqual(_hexes(self.session.preview.part_colors['weapon@style1']), {0: '#00ff00'})
         # Склейка стиля от базового мазка не пострадала.
         self.assertEqual(t.skin_overrides[1]['weapon'], styled)
+
+    def test_a_style_composite_survives_strokes_on_another_style(self):
+        """Склейка стиля живёт в `skin_overrides`, а уборка старых склеек
+        смотрела только в `textures`: пять мазков на базовом стиле удаляли
+        файл Bloody, путь к нему оставался — и стиль молча терял покраску."""
+        t = self.session.preview.textures
+        t.skin_info = {'num_skins': 2}
+        self.session.preview.skin_chosen = {1: {'weapon'}}
+        t.active_skin = 1
+        self.session.parts.set_part_colors('weapon', {'0': '#00ff00'})
+        styled = t.skin_overrides[1]['weapon']
+
+        t.active_skin = 0
+        for step in range(self.session.parts._KEEP_COMPOSITES + 2):
+            self.session.parts.set_part_colors('weapon', {'1': '#%02x0000' % (step * 30)})
+        self.assertTrue(os.path.isfile(styled), 'склейку стиля удалили')
+
+    def test_brush_change_does_not_repaint_fresh_strokes(self):
+        """Сила и «точный цвет» едут внутри мазка, а смена ползунка всё равно
+        пересобирала склейку: секунда на 2048 и холостой шаг Ctrl+Z."""
+        t = self.session.preview.textures
+        self.session.parts.set_part_colors('weapon', {'0': {'color': '#ff0000',
+                                                      'strength': 1.0,
+                                                      'exact': False}})
+        painted = t.uploaded_for_mat(t.storage_main_key())
+        steps = len(self.session._edit_history)
+
+        self.session.parts.set_part_colors('weapon', {}, strength=0.3, exact=True)
+        self.assertEqual(t.uploaded_for_mat(t.storage_main_key()), painted)
+        self.assertEqual(len(self.session._edit_history), steps)
+        self.assertEqual(self.session.preview.part_tint, 0.3)
+
+    def test_scissors_cut_a_region_and_keep_the_paint(self):
+        """Выделенное ножницами становится частью; покраска куска, из которого
+        вырезали, остаётся и на ней — перенос идёт по треугольникам."""
+        ed = self.session.parts
+        ed.set_part_colors('weapon', {'0': '#ff0000'})
+        out = ed.add_part_region('weapon', [1])
+        self.assertNotIn('error', out)
+        listed = ed.describe('weapon')['parts']
+        cut = [p for p in listed if p['region'] == 0]
+        self.assertEqual(len(cut), 1)
+        self.assertEqual(len(listed), 3)
+        self.assertEqual(cut[0]['color']['color'], '#ff0000')
+
+        # «Вернуть» снимает область: частей снова две, покраска на месте.
+        ed.remove_part_region('weapon', 0)
+        listed = ed.describe('weapon')['parts']
+        self.assertEqual(len(listed), 2)
+        self.assertFalse(self.session.preview.part_regions)
+
+    def test_scissors_take_the_mirrored_half_along(self):
+        """Зеркальная половина с теми же пикселями красится вместе в игре —
+        часть обязана её включать, а страница — об этом сказать."""
+        self.session._obj_path = _obj(os.path.join(self.tmp, 'mirror.obj'), SHARED_UV)
+        out = self.session.parts.add_part_region('weapon', [0])
+        self.assertEqual(out['mirrored'], 1)
+        self.assertEqual(self.session.preview.part_regions['weapon'], [[0, 1]])
+
+    def test_scissors_with_nothing_selected_say_so(self):
+        self.assertIn('error', self.session.parts.add_part_region('weapon', []))
+
+    def test_scissors_are_undone_like_any_edit(self):
+        ed = self.session.parts
+        ed.set_part_colors('weapon', {'0': '#ff0000'})
+        ed.add_part_region('weapon', [1])
+        self.session.undo_edits(-1)
+        self.assertFalse(self.session.preview.part_regions)
+
+    def test_an_overtaken_composite_is_thrown_away(self):
+        """Склейка считается вне замка сеанса. Результат, который обогнала
+        более свежая правка, не должен лечь поверх неё — даже если досчитался
+        позже."""
+        from src.domain.preview.part_specs import color_spec
+
+        ed = self.session.parts
+        t = self.session.preview.textures
+        model, obj_mat, card = ed._parts_model('weapon')
+        slot = ed._slot(card)
+        self.session.preview.part_colors[slot] = {0: color_spec('#ff0000')}
+        with self.session._lock:
+            old = ed._plan(model, obj_mat, card)
+        self.session.preview.part_colors[slot] = {0: color_spec('#0000ff')}
+        with self.session._lock:
+            new = ed._plan(model, obj_mat, card)
+
+        self.assertTrue(ed._finish([new]))
+        self.assertFalse(ed._finish([old]))
+        self.assertEqual(t.uploaded_for_mat(t.storage_main_key()), new['out'])
+        self.assertFalse(os.path.exists(old['out']), 'обогнанный файл остался')
+
+    def test_a_composite_does_not_land_on_a_replaced_state(self):
+        """Пересборка досчиталась после «Забыть правки» (или отмены, или
+        другого предмета) — её результат не должен вернуть забытую покраску."""
+        from src.domain.preview.part_specs import color_spec
+
+        ed = self.session.parts
+        t = self.session.preview.textures
+        model, obj_mat, card = ed._parts_model('weapon')
+        self.session.preview.part_colors[ed._slot(card)] = {0: color_spec('#ff0000')}
+        with self.session._lock:
+            job = ed._plan(model, obj_mat, card)
+        self.session.preview.forget_user_edits()
+
+        self.assertFalse(ed._finish([job]))
+        self.assertFalse(t.uploaded_for_mat(t.storage_main_key()))
+
+    def test_force_team_keeps_a_base_per_team(self):
+        """Под «сделать командным» у нейтральной карточки RED и BLU правят
+        порознь: синяя склейка не должна собираться на красной основе."""
+        from src.shared.constants import Team
+
+        t = self.session.preview.textures
+        key = t.storage_main_key()
+        red = os.path.join(self.tmp, 'red.png')
+        blue = os.path.join(self.tmp, 'blue.png')
+        Image.new('RGBA', (64, 64), (200, 0, 0, 255)).save(red)
+        Image.new('RGBA', (64, 64), (0, 0, 200, 255)).save(blue)
+        t.force_team = True
+        t.set_texture(key, red)
+        t.active_team = Team.BLU
+        t.set_texture(key, blue)
+
+        t.active_team = Team.RED
+        self.session.parts.set_part_colors('weapon', {'0': '#00ff00'})
+        t.active_team = Team.BLU
+        self.session.parts.set_part_colors('weapon', {'0': '#00ff00'})
+        painted = t.textures[Team.BLU][key]
+        colors = {c for _, c in Image.open(painted).convert('RGB').getcolors(65536)}
+        self.assertIn((0, 0, 200), colors, 'синяя склейка легла на красную основу')
+        self.assertNotIn((200, 0, 0), colors)
+
+    def test_own_texture_while_the_model_is_switched_is_refused(self):
+        """Пересобрать нельзя (включена бодигруппа) — основу не трогаем и
+        говорим об этом, а не оставляем на экране склейку на прежней основе."""
+        t = self.session.preview.textures
+        key = t.storage_main_key()
+        self.session.parts.set_part_colors('weapon', {'0': '#ff0000'})
+        shown = t.uploaded_for_mat(key)
+        mine = os.path.join(self.tmp, 'mine.png')
+        Image.new('RGBA', (64, 64), (0, 255, 0, 255)).save(mine)
+
+        self.session._bodygroups = {'bottle': 1}
+        self.assertIn('error', self.session.set_texture(key, mine))
+        self.assertEqual(self.session.preview.part_bases.get(key), '')
+        self.assertEqual(t.uploaded_for_mat(key), shown)
 
     def test_blu_strokes_do_not_leak_into_red(self):
         from src.shared.constants import Team
@@ -1465,7 +1741,7 @@ class SessionPartsTests(unittest.TestCase):
         t = self.session.preview.textures
         t.blu_frames = [blue]                       # командный материал
         t.active_team = Team.BLU
-        self.session.set_part_colors('weapon', {'0': '#ff0000'})
+        self.session.parts.set_part_colors('weapon', {'0': '#ff0000'})
         painted = t.textures[Team.BLU].get('weapon')
         self.assertTrue(painted and os.path.isfile(painted))
         self.assertNotIn('weapon', t.textures[Team.RED])
@@ -1473,17 +1749,17 @@ class SessionPartsTests(unittest.TestCase):
         self.assertIn((0, 0, 120), colors, 'основа синей склейки — не синий кадр')
 
         t.active_team = Team.RED
-        self.assertFalse([p for p in self.session.parts('weapon')['parts'] if p['color']])
+        self.assertFalse([p for p in self.session.parts.describe('weapon')['parts'] if p['color']])
 
     def test_a_cut_moves_the_strokes_of_every_style(self):
         t = self.session.preview.textures
         t.skin_info = {'num_skins': 2}
         self.session.preview.skin_chosen = {1: {'weapon'}}
         t.active_skin = 1
-        self.session.set_part_colors('weapon', {'0': '#00ff00'})
+        self.session.parts.set_part_colors('weapon', {'0': '#00ff00'})
         t.active_skin = 0
-        self.session.set_part_colors('weapon', {'0': '#ff0000'})
-        self.session.set_part_detail('weapon', 1.0)
+        self.session.parts.set_part_colors('weapon', {'0': '#ff0000'})
+        self.session.parts.set_part_detail('weapon', 1.0)
         self.assertTrue(self.session.preview.part_colors.get('weapon'))
         self.assertTrue(self.session.preview.part_colors.get('weapon@style1'))
 
@@ -1491,75 +1767,89 @@ class SessionPartsTests(unittest.TestCase):
         """Порядок слоёв: сперва тонировка, потом наклейка. Наоборот картинка
         уходила бы под цвет и красилась им же."""
         Image.new('RGBA', (64, 64), (128, 128, 128, 255)).save(self.base)
-        self.session.set_part_colors('weapon', {'0': '#00ff00'})
+        self.session.parts.set_part_colors('weapon', {'0': '#00ff00'})
         # Картинка мельче части: рядом с ней должна остаться видна тонировка.
-        self.session.set_part_texture('weapon', 0, self.patch, {'scale': 0.4})
+        self.session.parts.set_part_texture('weapon', 0, self.patch, {'scale': 0.4})
         pixels = [c for _, c in
                   Image.open(self._painted()).convert('RGB').getcolors(65536)]
         self.assertTrue(any(r > g + 40 for r, g, _ in pixels), 'картинки не видно')
         self.assertTrue(any(g > r + 40 for r, g, _ in pixels), 'тонировки не видно')
 
     def test_clearing_everything_returns_the_game_texture(self):
-        self.session.set_part_colors('weapon', {'0': '#ff0000', '1': '#00ff00'})
-        self.session.clear_parts('weapon')
+        self.session.parts.set_part_colors('weapon', {'0': '#ff0000', '1': '#00ff00'})
+        self.session.parts.clear_parts('weapon')
         self.assertIsNone(self._painted())
         self.assertEqual(self.session.preview.part_colors, {})
 
     def test_tint_strength_is_remembered(self):
-        self.session.set_part_colors('weapon', {'0': '#ff0000'}, strength=0.4)
+        self.session.parts.set_part_colors('weapon', {'0': '#ff0000'}, strength=0.4)
         self.assertAlmostEqual(self.session.preview.part_tint, 0.4)
 
     def test_undo_returns_the_previous_painting(self):
         """Красят на ощупь: без отмены каждый щелчок приходится обдумывать."""
-        self.session.set_part_colors('weapon', {'0': '#ff0000'})
-        self.session.set_part_colors('weapon', {'1': '#00ff00'})
-        self.session.undo_parts('weapon')
-        self.assertEqual(self.session.preview.part_colors['weapon'],
+        self.session.parts.set_part_colors('weapon', {'0': '#ff0000'})
+        self.session.parts.set_part_colors('weapon', {'1': '#00ff00'})
+        self.session.undo_edits(-1)
+        self.assertEqual(_hexes(self.session.preview.part_colors['weapon']),
                          {0: '#ff0000'})
 
     def test_undo_walks_back_to_the_clean_texture(self):
-        self.session.set_part_colors('weapon', {'0': '#ff0000'})
-        self.session.undo_parts('weapon')
+        self.session.parts.set_part_colors('weapon', {'0': '#ff0000'})
+        self.session.undo_edits(-1)
         self.assertIsNone(self._painted())
 
     def test_nothing_to_undo_is_said_plainly(self):
-        self.assertIn('error', self.session.undo_parts('weapon'))
+        self.assertIn('error', self.session.undo_edits(-1))
 
     def test_undo_returns_the_strength_too(self):
         """Ползунок силы — тоже правка. Без него отмена была холостой."""
-        self.session.set_part_colors('weapon', {'0': '#ff0000'}, strength=1.0)
-        self.session.set_part_colors('weapon', {}, strength=0.4)
-        self.session.undo_parts('weapon')
+        self.session.parts.set_part_colors('weapon', {'0': '#ff0000'}, strength=1.0)
+        self.session.parts.set_part_colors('weapon', {}, strength=0.4)
+        self.session.undo_edits(-1)
         self.assertAlmostEqual(self.session.preview.part_tint, 1.0)
 
     def test_undo_returns_the_outline_too(self):
-        self.session.set_part_colors('weapon', {'0': '#ff0000'})
-        self.session.set_part_edge('weapon', 0.01, '#000000')
-        self.session.undo_parts('weapon')
+        self.session.parts.set_part_colors('weapon', {'0': '#ff0000'})
+        self.session.parts.set_part_edge('weapon', 0.01, '#000000')
+        self.session.undo_edits(-1)
         self.assertAlmostEqual(self.session.preview.part_edge, 0.0)
 
     def test_redo_puts_the_undone_step_back(self):
-        self.session.set_part_colors('weapon', {'0': '#ff0000'})
-        self.session.set_part_colors('weapon', {'1': '#00ff00'})
-        self.session.undo_parts('weapon')
-        self.session.redo_parts('weapon')
-        self.assertEqual(self.session.preview.part_colors['weapon'],
+        self.session.parts.set_part_colors('weapon', {'0': '#ff0000'})
+        self.session.parts.set_part_colors('weapon', {'1': '#00ff00'})
+        self.session.undo_edits(-1)
+        self.session.undo_edits(1)
+        self.assertEqual(_hexes(self.session.preview.part_colors['weapon']),
                          {0: '#ff0000', 1: '#00ff00'})
 
     def test_a_new_stroke_forgets_the_way_forward(self):
         """Вернуться в ветку, которой уже не будет, нельзя."""
-        self.session.set_part_colors('weapon', {'0': '#ff0000'})
-        self.session.undo_parts('weapon')
-        self.session.set_part_colors('weapon', {'1': '#00ff00'})
-        self.assertIn('error', self.session.redo_parts('weapon'))
+        self.session.parts.set_part_colors('weapon', {'0': '#ff0000'})
+        self.session.undo_edits(-1)
+        self.session.parts.set_part_colors('weapon', {'1': '#00ff00'})
+        self.assertIn('error', self.session.undo_edits(1))
 
     def test_unknown_file_is_an_error(self):
-        self.assertIn('error', self.session.set_part_texture('weapon', 0, 'нет.png'))
+        self.assertIn('error', self.session.parts.set_part_texture('weapon', 0, 'нет.png'))
 
     def test_without_a_model_there_are_no_parts(self):
         from src.app.session import AppSession
-        self.assertIn('error', AppSession().parts())
+        self.assertIn('error', AppSession().parts.describe())
 
 
 if __name__ == '__main__':
     unittest.main()
+
+
+def test_leaving_a_custom_model_forgets_its_parts():
+    """Номера частей и области были треугольниками СВОЕЙ модели: на игровой
+    они легли бы на случайные куски."""
+    from src.domain.preview.session import PreviewSession
+
+    p = PreviewSession()
+    p.custom_smd_path = 'own.smd'
+    p.part_regions = {'weapon': [[1, 2]]}
+    p.part_cuts = {'weapon': {0: [[1]]}}
+    p.part_colors = {'weapon': {0: {'color': '#ff0000'}}}
+    p.begin_game_model()
+    assert not (p.part_regions or p.part_cuts or p.part_colors)

@@ -27,13 +27,12 @@ import subprocess
 import sys
 import threading
 import webbrowser
-from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT.parent))
 
-from frontend.devserver import Handler  # noqa: E402  — после правки sys.path
+from frontend.devserver import Handler, Server  # noqa: E402  — после правки sys.path
 from src.app import api  # noqa: E402
 
 TITLE = "TF2 Skin Generator"
@@ -55,9 +54,9 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
-def _serve(port: int) -> ThreadingHTTPServer:
+def _serve(port: int) -> Server:
     """Поднимает локальный сервер в фоновом потоке."""
-    server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    server = Server(("127.0.0.1", port), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return server
 

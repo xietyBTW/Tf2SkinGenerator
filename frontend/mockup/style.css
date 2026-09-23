@@ -1184,6 +1184,15 @@
 
 /* Видна ровно одна группа: человек в момент времени либо красит, либо режет,
    либо обводит. */
+/* Ножницы: способ выделения и действия над выделением — каждое своим рядом,
+   чтобы кнопки не переезжали от смены способа (ползунки у способов разные). */
+.parts__modes,
+.parts__cutacts {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
 .parts__group {
   display: flex;
   flex-direction: column;
@@ -2660,7 +2669,7 @@
    выезжать, задаёт `--reveal-from` у элемента (по умолчанию — чуть сверху). */
 [data-panels="float"] .catalog,
 .viewport__hint,
-#fpbar, #tauntbar, #skinbar, #bodybar, #hatstyles, #hatclasses,
+#fpbar, #tauntbar, #skinbar, #bodybar, #festivebar, #hatstyles, #hatclasses,
 #partsbar, #fitpanel, #partspaint,
 .build, .pbuild, .menu__list, .ctx, .console {
   --reveal-from: translateY(-4px);
@@ -2669,7 +2678,8 @@
 }
 [data-panels="float"] .catalog[hidden],
 .viewport__hint[hidden],
-#fpbar[hidden], #tauntbar[hidden], #skinbar[hidden], #bodybar[hidden], #hatstyles[hidden],
+#fpbar[hidden], #tauntbar[hidden], #skinbar[hidden], #bodybar[hidden], #festivebar[hidden],
+#hatstyles[hidden],
 #hatclasses[hidden], #partsbar[hidden], #fitpanel[hidden], #partspaint[hidden],
 .build[hidden], .pbuild[hidden], .menu__list[hidden], .ctx[hidden],
 .console[hidden] {
@@ -2680,7 +2690,7 @@
   [data-panels="float"] .catalog:not([hidden]),
   .viewport__hint:not([hidden]),
   #fpbar:not([hidden]), #tauntbar:not([hidden]), #skinbar:not([hidden]),
-  #bodybar:not([hidden]), #hatstyles:not([hidden]), #hatclasses:not([hidden]),
+  #bodybar:not([hidden]), #festivebar:not([hidden]), #hatstyles:not([hidden]), #hatclasses:not([hidden]),
   #partsbar:not([hidden]), #fitpanel:not([hidden]), #partspaint:not([hidden]),
   .build:not([hidden]), .pbuild:not([hidden]), .menu__list:not([hidden]),
   .ctx:not([hidden]), .console:not([hidden]) {

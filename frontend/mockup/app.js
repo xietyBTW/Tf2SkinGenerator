@@ -98,5 +98,9 @@ boot().then(offerTf2).catch((err) => {
   console.error(err);
 });
 
+// Все модули загрузились: счётчик повторов из index.html больше не нужен.
+window.__booted = true;
+try { sessionStorage.removeItem('bootTries'); } catch (e) { /* приватный режим */ }
+
 // Стартовые вызовы — в самом конце: до них должны отработать все модули.
 syncViewerTheme();

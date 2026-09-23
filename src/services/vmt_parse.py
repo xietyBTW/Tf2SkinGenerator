@@ -249,7 +249,45 @@ def basetexture(text: str) -> Optional[str]:
 def animated_framerate(text: str) -> Optional[float]:
     """animatedtextureframerate из прокси AnimatedTexture (или None).
 
-    Ищем по всему дереву: параметр лежит внутри `proxies { AnimatedTexture }`.
+    Прокси бывает несколько, и частота нужна того, что листает
+    `$basetexture`. У гирлянд первым идёт прокси огня (`$detail`, 30 кадров
+    в секунду), а сами лампочки мигают раз в секунду — первый попавшийся
+    параметр давал мерцание в тридцать раз быстрее игры. Прокси без
+    `animatedtexturevar` и VMT без прокси ищутся по-старому, по всему дереву.
     """
-    fps = parse(text).number("animatedtextureframerate", deep=True)
+    doc = parse(text)
+    for node in blocks_named(doc.root, "animatedtexture"):
+        if _key(node.get("animatedtexturevar") or "") == "basetexture":
+            fps = _number(node.get("animatedtextureframerate"))
+            if fps is not None:
+                return max(0.1, fps)
+    fps = doc.number("animatedtextureframerate", deep=True)
     return max(0.1, fps) if fps is not None else None
+
+
+def blocks_named(node: VmtNode, name: str):
+    """Все блоки с этим именем на любой глубине — прокси бывают и внутри
+    ветки качества (`>=DX90 { Proxies { … } }`)."""
+    key = _key(name)
+    for child_key, children in node.blocks.items():
+        for child in children:
+            if child_key == key:
+                yield child
+            yield from blocks_named(child, name)
+
+
+def params_named(node: VmtNode, name: str):
+    """Все значения параметра на любой глубине: свой уровень, затем ветки."""
+    key = _key(name)
+    if key in node.params:
+        yield node.params[key]
+    for children in node.blocks.values():
+        for child in children:
+            yield from params_named(child, name)
+
+
+def _number(raw: Optional[str]) -> Optional[float]:
+    try:
+        return float(str(raw).strip())
+    except (TypeError, ValueError):
+        return None

@@ -78,6 +78,9 @@ ARMS_PROP_MATERIALS = frozenset({"w_rocket01"})
 #: оружия анимируются как база. В items_game таких моделей нет вовсе.
 _VARIANT_SUFFIXES = ("_xmas", "_festivizer", "_festive")
 
+#: Виды гирлянд, в порядке показа: праздничная версия предмета и фестивайзер.
+DECOR_KINDS = ("xmas", "festivizer")
+
 _MODEL_RE = _compile(r'"model_player[^"]*"\s+"([^"]+\.mdl)"', IGNORECASE)
 _PER_CLASS_RE = _compile(r'"([^"]+)"\s+"([^"]*\.mdl)"', IGNORECASE)
 #: Пара «активность → чем её подменить» внутри animation_replacement.
@@ -91,7 +94,8 @@ _CACHE_FILE = data_dir() / "cache" / "weapon_anim_slots.json"
 #: тогда не «почти подходит», а просто разбирается заново.
 #: 2 — добавлена подмена активностей (animation_replacement).
 #: 3 — добавлена модель-носитель праздничных гирлянд (carried_on).
-_CACHE_VERSION = 3
+#: 4 — добавлены гирлянды самой модели (decor).
+_CACHE_VERSION = 4
 
 #: tf2_root → индекс (чтобы не разбирать 8 МБ повторно за сессию).
 _MEM: Dict[str, Dict[str, "WeaponAnimInfo"]] = {}
@@ -118,6 +122,12 @@ class WeaponAnimInfo:
     #: `model_player` у предмета остаётся минигановским. Без носителя вид от
     #: первого лица показывал бы огоньки, висящие в пустой руке.
     carried_on: str = ""
+    #: Гирлянды, которые игра навешивает на ЭТУ модель: (("xmas", mdl),
+    #: ("festivizer", mdl)). Праздничная — `attached_models` праздничного
+    #: предмета с той же моделью; фестивайзер — `attached_models_festive`,
+    #: включается атрибутом `is_festivized`. Собирается со всех предметов
+    #: модели: у обреза праздничную даёт один предмет, фестивайзер — другой.
+    decor: Tuple[Tuple[str, str], ...] = ()
 
     @property
     def replacement(self) -> Dict[str, str]:
@@ -183,6 +193,19 @@ def anim_info(weapon_key: str, tf2_root: str) -> Optional[WeaponAnimInfo]:
             logger.debug(f"[vm] {weapon_key}: анимации взяты от c_-модели")
             return found
     return None
+
+
+def decor_models(weapon_key: str, tf2_root: str) -> Dict[str, str]:
+    """{вид гирлянды: путь MDL} для модели; пусто — гирлянд у неё нет.
+
+    Только точное совпадение имени: `anim_info` для `c_scattergun_xmas`
+    отдал бы данные обреза, и гирлянда предлагала бы повесить на себя
+    саму себя.
+    """
+    if not weapon_key:
+        return {}
+    info = anim_index(tf2_root).get(weapon_key.lower())
+    return dict(info.decor) if info else {}
 
 
 def slot_for(weapon_key: str, tf2_root: str) -> str:
@@ -288,6 +311,7 @@ def _build_index(items_path: Path) -> Dict[str, WeaponAnimInfo]:
 
     game = items_game_kv.ItemsGame.parse(content)
     index: Dict[str, WeaponAnimInfo] = {}
+    decor: Dict[str, Dict[str, list]] = {}
     for _defindex, block in game.items:
         info = WeaponAnimInfo(
             item_class=(game.inherited(block, "item_class") or "").lower(),
@@ -298,8 +322,25 @@ def _build_index(items_path: Path) -> Dict[str, WeaponAnimInfo]:
         stems = _model_stems(game, block)
         for stem in stems:
             index.setdefault(stem, info)   # первый предмет с моделью выигрывает
-        for stem in _attached_stems(game, block):
-            index.setdefault(stem, replace(info, carried_on=stems[0] if stems else ""))
+        attached = _attached_paths(game, block, "attached_models")
+        for path in attached:
+            index.setdefault(_stem(path), replace(info, carried_on=stems[0] if stems else ""))
+        festive = _attached_paths(game, block, "attached_models_festive")
+        for stem in stems:
+            found = decor.setdefault(stem, {})
+            found.setdefault("xmas", []).extend(
+                p for p in attached if _stem(p).endswith("_xmas"))
+            found.setdefault("festivizer", []).extend(festive)
+
+    for stem, found in decor.items():
+        # Цельная праздничная модель (`c_ambassador_xmas`) — отдельный скелет
+        # с огоньками внутри: гирлянда базы на ней висела бы не на тех костях.
+        if stem not in index or stem.endswith("_xmas"):
+            continue
+        chosen = tuple((kind, _pick_decor(stem, kind, found.get(kind) or []))
+                       for kind in DECOR_KINDS if found.get(kind))
+        if chosen:
+            index[stem] = replace(index[stem], decor=chosen)
 
     logger.info(f"[vm] индекс анимаций из items_game: {len(index)} моделей")
     _save_cache(items_path, index)
@@ -320,17 +361,33 @@ def _replacement(game: "items_game_kv.ItemsGame", block: str) -> tuple:
                  for src, dst in _ACT_PAIR_RE.findall(nested))
 
 
-def _attached_stems(game: "items_game_kv.ItemsGame", block: str) -> list:
-    """Имена моделей из `visuals → attached_models` без расширения.
+def _pick_decor(stem: str, kind: str, paths: list) -> str:
+    """Гирлянда модели, если предметов с ней несколько.
+
+    Одна модель — много предметов, и гирлянды у них не всегда одни: у
+    медигана раскрашенные версии висят с `c_medigun_festivizer`, а один
+    предмет — с чужой `c_overhealer_festivizer`. Своя по имени (`<модель>_<вид>`)
+    выигрывает; нет своей — та, что встретилась первой (у дожигателя
+    гирлянда огнемёта, и другой у него нет).
+    """
+    own = f"{stem}_{kind}"
+    return next((p for p in paths if _stem(p) == own), paths[0])
+
+
+def _attached_paths(game: "items_game_kv.ItemsGame", block: str,
+                    key: str) -> list:
+    """Пути моделей из `visuals → attached_models` (или `…_festive`).
 
     Так задано всё праздничное оружие: сама пушка остаётся в `model_player`, а
     `c_*_xmas` — навесная гирлянда. Отдельной моделью она не выглядит никак:
     в `c_medigun_xmas` лежат только огоньки, габарит 21 против 68 у медигана.
+    Навешивается и не только гирлянда: у огнемёта так висит запальник.
     """
-    nested = game.inherited_block(block, "attached_models")
+    nested = game.inherited_block(block, key)
     if not nested:
         return []
-    return [_stem(path) for path in _MODEL_PATH_RE.findall(nested)]
+    return [path.replace("\\", "/").lower()
+            for path in _MODEL_PATH_RE.findall(nested)]
 
 
 def _model_stems(game: "items_game_kv.ItemsGame", block: str) -> list:
@@ -367,10 +424,13 @@ def _load_cache(items_path: Path) -> Optional[Dict[str, WeaponAnimInfo]]:
         items = raw.get("items") or {}
         if not items:
             return None
-        # JSON не знает кортежей: подмена активностей вернётся списками пар.
+        # JSON не знает кортежей: подмена активностей и гирлянды вернутся
+        # списками пар.
         return {k: WeaponAnimInfo(
-                    **{**v, "animation_replacement": tuple(
-                        tuple(pair) for pair in v.get("animation_replacement") or ())})
+                    **{**v,
+                       "animation_replacement": tuple(
+                           tuple(pair) for pair in v.get("animation_replacement") or ()),
+                       "decor": tuple(tuple(pair) for pair in v.get("decor") or ())})
                 for k, v in items.items()}
     except Exception as exc:
         logger.debug(f"[vm] кэш анимаций не прочитан: {exc}")

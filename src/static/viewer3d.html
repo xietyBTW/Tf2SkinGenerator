@@ -269,6 +269,8 @@ import { firstEditableHit as _firstEditableHit } from './js/viewer_meshes.js';
 import { buildSkinnedScene as _buildSkinnedScene,
          applyClip as _applyViewmodelClip,
          updateHidden as _updateSkinnedHidden } from './js/viewer_skinned.js';
+import { applyBends as _applyBends, toSmd as _bendToSmd } from './js/viewer_bend.js';
+import * as _select from './js/viewer_select.js';
 
 // ── Python bridge (QWebChannel JS → Python) ──────────────────────────────── //
 // Инициализируется асинхронно; вызовы _notifyTextureDrop() безопасны до готовности.
@@ -498,6 +500,419 @@ function stopAnimation() {
   ++_animGeneration;   // делаем все незавершённые _loadTextureThen-коллбэки устаревшими
 }
 
+// ── Гирлянда поверх оружия ───────────────────────────────────────────────── //
+//
+// Праздничная версия и фестивайзер: отдельная модель, которую игра рисует
+// костями оружия. Здесь это СВОЙ слой. Меши с материалами `deco:` висят в
+// currentModel, но не в группе подгонки своей модели — у гирлянды своя
+// подгонка (цель 'decor'), и игра вешает её по стоковой, пока её не сдвинули.
+// Текстуру предмета они не берут: makeMeshMaterial отдаёт им их собственные
+// кадры либо свою картинку человека (`_decorOverrides`). Мышь их видит: на
+// гирлянду кладут картинку и режут её на части, как любой меш. Сцена от
+// первого лица приезжает с гирляндой внутри — с теми же именами, так что
+// кадры ей даёт тот же реестр.
+const DECOR_PREFIX = 'deco:';
+const DECOR_TICK_MS = 125;       // лампочки мигают раз в секунду — хватает
+let _decorObject = null;         // THREE.Group из OBJ гирлянды
+let _decorMats   = {};           // {имя: {red:[url], blu:[url], fps, glow}}
+let _decorTex    = {};           // {url: THREE.Texture}
+let _decorHints  = {};
+let _decorTeam   = 'red';
+let _decorTimer  = null;
+let _decorGen    = 0;
+const _decorT0   = performance.now();
+let _decorOverrides = {};        // {имя: {red: url, blu: url}} — свои картинки
+// Изгибы гирлянды ({c, r, d} в осях SMD, по порядку) и инструмент «гнуть»:
+// схватили гирлянду — всё в радиусе тянется следом (js/viewer_bend.js).
+let _decorBends     = [];
+let _decorBendsKey  = '';
+let _bendOn         = false;
+let _bendRadius     = 4;
+let _bendDrag       = null;      // {start, plane, parts, bend}
+let _bendMarker     = null;      // кольцо радиуса захвата
+let _bendMarkerAt_  = null;      // где оно стоит (в осях гирлянды)
+let _decorFitState  = null;      // [scale, rotate, offset] подгонки гирлянды
+
+function _isDecorName(name) { return String(name || '').startsWith(DECOR_PREFIX); }
+
+function _isDecorMesh(obj) {
+  return obj.isMesh && obj.material && !Array.isArray(obj.material)
+    && _isDecorName(obj.material.name);
+}
+
+/** Кадр материала гирлянды сейчас: команда, мигание, «без анимаций». */
+function _decorUrl(name) {
+  // Своя картинка человека приходит кадрами мигания (их считает Python по
+  // игровым кадрам) — мигает так же, как игровая.
+  const m = _decorMats[name];
+  const own = _decorOverrides[name];
+  const mine = own && own[_decorTeam];
+  const frames = (mine && mine.length) ? mine
+    : (m ? ((_decorTeam === 'blu' ? m.blu : m.red) || []) : []);
+  if (!frames.length) return null;
+  const fps = m ? m.fps : 0;
+  if (!(fps > 0) || frames.length < 2 || _noMotion()) return frames[0];
+  const i = Math.floor((performance.now() - _decorT0) / 1000 * fps);
+  return frames[i % frames.length];
+}
+
+function _decorMaterial(name) {
+  const url = _decorUrl(name);
+  const tex = (url && _decorTex[url]) || null;
+  const mat = _makeMeshMaterial(THREE, { map: tex, name }, _decorHints);
+  // Лампочки в игре светятся сами ($selfillum): под одним Ламбертом они
+  // выглядели бы крашеным пластиком.
+  // Маска свечения в своих кадрах — игровая, поэтому светятся и они.
+  if (tex && _decorMats[name] && _decorMats[name].glow) {
+    mat.emissive = new THREE.Color(0xffffff);
+    mat.emissiveMap = tex;
+    mat.emissiveIntensity = 0.6;
+  }
+  mat.userData.decorUrl = tex ? url : null;
+  return mat;
+}
+
+/** Переодевает меши гирлянды в текущий кадр — только те, где он сменился. */
+function _paintDecor() {
+  scene.traverse(obj => {
+    if (!_isDecorMesh(obj)) return;
+    const name = obj.material.name;
+    const url = _decorUrl(name);
+    if (obj.material.userData.decorUrl === url && (!url || _decorTex[url])) return;
+    if (url && !_decorTex[url]) { _loadDecorTex(url); return; }   // ещё грузится
+    const old = obj.material;
+    obj.material = _decorMaterial(name);
+    old.dispose();
+  });
+}
+
+/** Текстура кадра или своей картинки — один раз на адрес. */
+const _decorLoading = new Set();
+function _loadDecorTex(url) {
+  if (_decorTex[url] || _decorLoading.has(url)) return;
+  _decorLoading.add(url);
+  const gen = _decorGen;
+  _loadTextureThen(url, tex => {
+    _decorLoading.delete(url);
+    if (gen !== _decorGen) { tex.dispose(); return; }
+    _decorTex[url] = tex;
+    _paintDecor();
+  });
+}
+
+/** Вешает гирлянду на показанную модель. Сцены (руки, насмешка) — мимо:
+ *  у рук гирлянда уже в сцене, у насмешки её нет. */
+function _mountDecor() {
+  if (!_decorObject) return;
+  if (_decorObject.parent) _decorObject.parent.remove(_decorObject);
+  if (!currentModel || _viewRig || _skinned || _isCritHitMode) return;
+  currentModel.add(_decorObject);
+  _placeDecorFit();
+}
+
+/** Своя картинка на гирлянде: {меш: {red: [кадры], blu: [кадры]}}. Пусто —
+ *  игровые кадры. */
+window.setDecorOverrides = function(map) {
+  _decorOverrides = map || {};
+  Object.values(_decorOverrides).forEach(teams =>
+    Object.values(teams || {}).forEach(list => (list || []).forEach(_loadDecorTex)));
+  _paintDecor();
+};
+
+window.setDecor = function(objText, mats, hints, groups) {
+  window.clearDecor();
+  _decorMats = mats || {};
+  _decorHints = hints || {};
+  try {
+    _decorObject = new OBJLoader().parse(objText || '');
+  } catch (err) {
+    console.error('decor OBJ error:', err);
+    _decorObject = null;
+    return;
+  }
+  _decorObject.name = 'decor';
+  let bendable = true;
+  _decorObject.traverse(c => {
+    if (!c.isMesh) return;
+    const name = (c.material && !Array.isArray(c.material) && c.material.name) || c.name;
+    c.material = makeMeshMaterial({ name });
+    // Для изгиба: исходные вершины и жёсткие группы (их считает Python по
+    // тому же SMD и в том же порядке). Не сошлось число — меш не гнём.
+    const pos = c.geometry.attributes.position;
+    const g = (groups || {})[name];
+    c.userData.bendGroups = g || null;
+    c.userData.basePos = Float32Array.from(pos.array);
+    if (!g || g.length !== pos.count) bendable = false;
+  });
+  // Жёсткая группа тянется через меши (лампочка и патрон — разные материалы):
+  // без одного меша центры посчитались бы не как у сборки. Не сошлось хоть
+  // где-то — не гнём гирлянду вовсе, чем гнуть её не так.
+  if (!bendable) {
+    console.warn('decor: группы вершин не сошлись с мешами — изгиб выключен');
+    _decorObject.traverse(c => { if (c.isMesh) c.userData.bendGroups = null; });
+  }
+  _mountDecor();
+  _paintDecor();
+
+  Object.values(_decorMats).forEach(m =>
+    [...(m.red || []), ...(m.blu || [])].forEach(_loadDecorTex));
+  if (Object.values(_decorMats).some(m => m.fps > 0 && (m.red || []).length > 1)) {
+    _decorTimer = setInterval(_paintDecor, DECOR_TICK_MS);
+  }
+};
+
+window.clearDecor = function() {
+  ++_decorGen;
+  _cancelBendDrag();
+  if (_fitTarget === 'decor') window.setFitMode(false);
+  _decorFitState = null;
+  _decorOverrides = {};
+  _decorBends = [];
+  _decorBendsKey = '';
+  if (_bendMarker) {              // кольцо живёт в сцене, а не в гирлянде
+    scene.remove(_bendMarker);
+    _bendMarker.traverse(o => { if (o.geometry) o.geometry.dispose();
+                                if (o.material) o.material.dispose(); });
+    _bendMarker = null;
+  }
+  _decorLoading.clear();
+  if (_decorTimer !== null) { clearInterval(_decorTimer); _decorTimer = null; }
+  if (_decorObject) {
+    if (_decorObject.parent) _decorObject.parent.remove(_decorObject);
+    _decorObject.traverse(c => {
+      if (!c.isMesh) return;
+      if (c.geometry) c.geometry.dispose();
+      if (c.material && c.material.dispose) c.material.dispose();
+    });
+    _decorObject = null;
+  }
+  Object.values(_decorTex).forEach(t => t.dispose());
+  _decorTex = {};
+  _decorMats = {};
+  _decorHints = {};
+};
+
+window.setDecorTeam = function(team) {
+  const next = String(team || '').toLowerCase() === 'blu' ? 'blu' : 'red';
+  if (next === _decorTeam) return;
+  _decorTeam = next;
+  _paintDecor();
+};
+
+// ── Изгиб гирлянды ──────────────────────────────────────────────────────────
+
+/** Вершины мешей гирлянды: исходные ('base') или после сделанных изгибов. */
+function _bendParts(source) {
+  const parts = [];
+  if (!_decorObject) return parts;
+  _decorObject.traverse(c => {
+    if (!c.isMesh || !c.userData.bendGroups) return;
+    const src = source === 'base' ? c.userData.basePos
+      : (c.userData.shaped || c.userData.basePos);
+    parts.push({ mesh: c, positions: Float32Array.from(src), groups: c.userData.bendGroups });
+  });
+  return parts;
+}
+
+/** Вершины — в меши. `keep` — это новое «сделанное», от него гнут дальше. */
+function _writeParts(parts, keep) {
+  for (const p of parts) {
+    const attr = p.mesh.geometry.attributes.position;
+    attr.array.set(p.positions);
+    attr.needsUpdate = true;
+    p.mesh.geometry.computeBoundingSphere();   // иначе мышь промахивалась бы
+    p.mesh.geometry.computeBoundingBox();
+    if (keep) p.mesh.userData.shaped = p.positions;
+  }
+}
+
+function _reshapeDecor() {
+  const parts = _bendParts('base');
+  _applyBends(parts, _decorBends);
+  _writeParts(parts, true);
+}
+
+/** Изгибы из состояния (отмена, возврат работы). Тот же список — не трогаем. */
+window.setDecorBends = function(bends) {
+  const key = JSON.stringify(bends || []);
+  if (key === _decorBendsKey || _bendDrag) return;
+  _decorBendsKey = key;
+  _decorBends = (bends || []).map(b => ({ ...b }));
+  _reshapeDecor();
+};
+
+window.setBendRadius = function(r) {
+  const v = Number(r);
+  if (!(v > 0)) return;
+  _bendRadius = Math.min(60, Math.max(0.3, v));
+  if (_bendMarker && _bendMarker.visible && _bendMarkerAt_) _bendMarkerAt(_bendMarkerAt_);
+};
+
+// Радиус захвата — тонкое кольцо лицом к камере с точкой в центре. Сплошная
+// сфера закрывала то, что тянут. И кольцо стоит в САМОЙ сцене, а не внутри
+// модели: одноматериальную модель страница красит обходом всех её мешей, и
+// сфера внутри неё получала текстуру оружия.
+function _bendMarkerAt(local) {
+  if (!_decorObject) return;
+  if (!_bendMarker) {
+    const pts = [];
+    for (let i = 0; i < 64; i++) {
+      const a = i / 64 * Math.PI * 2;
+      pts.push(new THREE.Vector3(Math.cos(a), Math.sin(a), 0));
+    }
+    const ring = new THREE.LineLoop(
+      new THREE.BufferGeometry().setFromPoints(pts),
+      new THREE.LineBasicMaterial({ color: 0xffc04d, transparent: true, opacity: 0.9,
+                                    depthTest: false }));
+    const dot = new THREE.Mesh(
+      new THREE.CircleGeometry(0.05, 16),
+      new THREE.MeshBasicMaterial({ color: 0xffc04d, depthTest: false }));
+    _bendMarker = new THREE.Group();
+    for (const o of [ring, dot]) {
+      o.renderOrder = 999;
+      o.raycast = () => {};
+      _bendMarker.add(o);
+    }
+  }
+  if (_bendMarker.parent !== scene) scene.add(_bendMarker);
+  _bendMarkerAt_ = local.clone();
+  _bendMarker.position.copy(_decorObject.localToWorld(local.clone()));
+  _bendMarker.quaternion.copy(camera.quaternion);
+  const s = new THREE.Vector3();
+  _decorObject.getWorldScale(s);
+  _bendMarker.scale.setScalar(_bendRadius * s.x);
+  _bendMarker.visible = true;
+}
+
+function _hideBendMarker() {
+  if (_bendMarker) _bendMarker.visible = false;
+}
+
+/** Точка на гирлянде под курсором (мир), либо null. */
+function _decorHit(e) {
+  if (!_decorObject || !_decorObject.parent) return null;
+  _raycaster.setFromCamera(_ndcFromEvent(e), camera);
+  const hits = _raycaster.intersectObject(_decorObject, true)
+    .filter(h => _isDecorMesh(h.object));
+  return hits[0] || null;
+}
+
+const _round4 = (v) => Math.round(v * 1e4) / 1e4;
+
+/** Бросить протяжку: вершины — как до неё, орбита — обратно. Зовут все, кто
+ *  уводит из режима «гнуть» посреди протяжки (смена инструмента, выход,
+ *  новая гирлянда, потерянный указатель). */
+function _cancelBendDrag() {
+  if (!_bendDrag) return;
+  const drag = _bendDrag;
+  _bendDrag = null;
+  controls.enabled = !_fitOp;
+  try { renderer.domElement.releasePointerCapture(drag.pointerId); } catch (_) { /* нет */ }
+  if (drag.parts.length && drag.parts[0].mesh.parent) _writeParts(drag.parts, false);
+}
+
+// Схватили гирлянду: тянем в плоскости экрана через точку захвата. Слушатели
+// с захватом — раньше орбиты, иначе кадр крутился бы вместе с проводом.
+renderer.domElement.addEventListener('pointerdown', e => {
+  if (!_bendOn || e.button !== 0 || _fitOp) return;
+  const hit = _decorHit(e);
+  if (!hit) return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  const normal = camera.getWorldDirection(new THREE.Vector3());
+  _bendDrag = {
+    start: _decorObject.worldToLocal(hit.point.clone()),
+    plane: new THREE.Plane().setFromNormalAndCoplanarPoint(normal, hit.point.clone()),
+    parts: _bendParts('shaped'),
+    bend: null,
+    pointerId: e.pointerId,
+  };
+  controls.enabled = false;
+  // Отпустили кнопку за кадром — pointerup всё равно придёт сюда.
+  try { renderer.domElement.setPointerCapture(e.pointerId); } catch (_) { /* нет */ }
+}, true);
+renderer.domElement.addEventListener('pointercancel', _cancelBendDrag);
+renderer.domElement.addEventListener('lostpointercapture', () => {
+  if (_bendDrag) window.dispatchEvent(new PointerEvent('pointerup'));
+});
+
+window.addEventListener('pointermove', e => {
+  if (!_bendOn) return;
+  if (!_bendDrag) {
+    const hit = _decorHit(e);
+    if (hit) _bendMarkerAt(_decorObject.worldToLocal(hit.point.clone()));
+    else _hideBendMarker();
+    return;
+  }
+  _raycaster.setFromCamera(_ndcFromEvent(e), camera);
+  const world = new THREE.Vector3();
+  if (!_raycaster.ray.intersectPlane(_bendDrag.plane, world)) return;
+  const d = _decorObject.worldToLocal(world).sub(_bendDrag.start);
+  _bendDrag.bend = { c: _bendToSmd(_bendDrag.start.toArray()).map(_round4),
+                     r: _round4(_bendRadius),
+                     d: _bendToSmd(d.toArray()).map(_round4) };
+  const parts = _bendDrag.parts.map(p => ({ ...p, positions: Float32Array.from(p.positions) }));
+  _applyBends(parts, [_bendDrag.bend]);
+  _writeParts(parts, false);
+  _bendMarkerAt(_bendDrag.start.clone().add(d));
+});
+
+window.addEventListener('pointerup', () => {
+  if (!_bendDrag) return;
+  if (!_bendOn) { _cancelBendDrag(); return; }
+  const drag = _bendDrag;
+  _bendDrag = null;
+  controls.enabled = !_fitOp;
+  try { renderer.domElement.releasePointerCapture(drag.pointerId); } catch (_) { /* нет */ }
+  const bend = drag.bend;
+  if (!bend || Math.hypot(...bend.d) < 1e-3) { _writeParts(drag.parts, false); return; }
+  _decorBends.push(bend);
+  _decorBendsKey = JSON.stringify(_decorBends);
+  const parts = drag.parts.map(p => ({ ...p, positions: Float32Array.from(p.positions) }));
+  _applyBends(parts, [bend]);
+  _writeParts(parts, true);
+  if (typeof window.onDecorBends === 'function') {
+    window.onDecorBends(_decorBends.map(b => ({ ...b })));
+  }
+});
+
+// Колесо в режиме «гнуть» — радиус захвата, а не приближение (оно выключено).
+renderer.domElement.addEventListener('wheel', e => {
+  if (!_bendOn) return;
+  e.preventDefault();
+  window.setBendRadius(_bendRadius * (e.deltaY > 0 ? 1 / 1.15 : 1.15));
+  if (typeof window.onBendRadius === 'function') window.onBendRadius(_bendRadius);
+}, { capture: true, passive: false });
+
+/** Для автопроверки: что гирлянда сейчас делает. */
+window.decorDebug = () => {
+  const meshes = [];
+  scene.traverse(o => { if (_isDecorMesh(o)) meshes.push({
+    name: o.material.name, textured: !!o.material.map,
+    inModel: !!currentModel && currentModel.getObjectById(o.id) === o,
+    inFit: !!_fitGroup && _fitGroup.getObjectById(o.id) === o,
+    own: !!_decorOverrides[o.material.name],
+  }); });
+  const d = _decorObject;
+  // Точка провода на экране — чтобы автопроверка могла за него схватиться.
+  let probe = null;
+  if (d && d.parent) {
+    d.traverse(c => {
+      if (probe || !c.isMesh || !c.userData.bendGroups) return;
+      const i = c.userData.bendGroups.indexOf(-1);
+      if (i < 0) return;
+      const a = c.geometry.attributes.position;
+      c.updateMatrixWorld(true);
+      const w = new THREE.Vector3(a.getX(i), a.getY(i), a.getZ(i)).applyMatrix4(c.matrixWorld);
+      probe = _screenOf(w);
+    });
+  }
+  return { team: _decorTeam, blinking: _decorTimer !== null, meshes, probe,
+           bends: _decorBends.length, bendOn: _bendOn, radius: _bendRadius,
+           fit: d ? { scale: +d.scale.x.toFixed(3),
+                      pos: d.position.toArray().map(v => +v.toFixed(2)) } : null };
+};
+
 // ── Свойства материалов из VMT ───────────────────────────────────────────── //
 //
 // {имя материала: {blend, opacity, alphaTest, twoSided}} — присылает Python
@@ -507,6 +922,9 @@ function stopAnimation() {
 let _matHints = {};
 
 function makeMeshMaterial(opts) {
+  // Гирлянда поверх оружия: у неё свои кадры, и любая раздача текстур
+  // предмета (глобальная, по материалам, анимация) проходит мимо неё.
+  if (opts && _isDecorName(opts.name)) return _decorMaterial(opts.name);
   // Призрак оригинала (подгонка импортированной модели): всегда прозрачный
   // серый, текстуры на него не ложатся — он ориентир, а не часть предмета.
   if (opts && String(opts.name || '').startsWith('ghost:')) {
@@ -529,6 +947,9 @@ function makeMeshMaterial(opts) {
 let _fitGroup = null;
 let _fitState = null;   // последняя подгонка — повторяется после перезагрузки OBJ
 let _fitMode = false;
+// Что подгоняем: 'model' — свою модель (группа `fit`), 'decor' — гирлянду
+// поверх оружия. Гизмо, G/R/S и числа у обеих одни и те же.
+let _fitTarget = 'model';
 let _fitControls = null;
 // Оси SMD → оси сцены: (x, y, z) → (x, z, −y), как в SmdToObjService.
 const _FIT_C = new THREE.Matrix4().set(1, 0, 0, 0,  0, 0, 1, 0,  0, -1, 0, 0,  0, 0, 0, 1);
@@ -539,18 +960,46 @@ function _isGhost(obj) {
     && String(obj.material.name).startsWith('ghost:');
 }
 
+/** Узел, который сейчас подгоняют: группа своей модели или гирлянда. */
+function _fitNode() {
+  if (_fitTarget === 'decor') {
+    return (_decorObject && _decorObject.parent) ? _decorObject : null;
+  }
+  return _ensureFitGroup();
+}
+
+/** Числа подгонки в осях SMD → положение узла в осях сцены. */
+function _fitPose(scale, rotate, offset) {
+  const d = Math.PI / 180;
+  const R = new THREE.Matrix4().makeRotationZ(rotate[2] * d)
+    .multiply(new THREE.Matrix4().makeRotationY(rotate[1] * d))
+    .multiply(new THREE.Matrix4().makeRotationX(rotate[0] * d));
+  const M = _FIT_C.clone().multiply(R).multiply(_FIT_CT);
+  return { quat: new THREE.Quaternion().setFromRotationMatrix(M),
+           scale, pos: new THREE.Vector3(offset[0], offset[2], -offset[1]) };
+}
+
+/** Гирлянда встаёт по своей подгонке (единица — где её вешает игра). */
+function _placeDecorFit() {
+  if (!_decorObject) return;
+  const f = _decorFitState || [1, [0, 0, 0], [0, 0, 0]];
+  _placeFit(_decorObject, _fitPose(f[0], f[1], f[2]));
+}
+
 /** Группа подгонки текущей модели (создаётся при первом обращении). */
 function _ensureFitGroup() {
   if (!currentModel) return null;
   if (_fitGroup && _fitGroup.parent === currentModel) return _fitGroup;
   _fitGroup = new THREE.Group();
   _fitGroup.name = 'fit';
-  currentModel.children.filter(c => !_isGhost(c))
+  // Гирлянда за своей моделью не едет: игра вешает её на кости стоковой, и
+  // подгонка должна показывать, совпадёт ли с ней модель, а не тащить её.
+  currentModel.children.filter(c => !_isGhost(c) && c !== _decorObject)
     .forEach(c => _fitGroup.add(c));   // add() переносит из currentModel
   currentModel.add(_fitGroup);
   // attach() у TransformControls сам включает visible: вне режима гизмо
   // висело бы над моделью, у которой просто выставили числа подгонки.
-  if (_fitControls && _fitMode) _fitControls.attach(_fitGroup);
+  if (_fitControls && _fitMode && _fitTarget === 'model') _fitControls.attach(_fitGroup);
   return _fitGroup;
 }
 
@@ -560,18 +1009,19 @@ function _ensureFitGroup() {
 const FIT_TWEEN_MS = 220;
 let _fitTween = null;      // {group, from:{quat,scale,pos}, to:{...}, t0}
 
-window.setFitTransform = function(scale, rotate, offset, animate = false) {
+window.setFitTransform = function(scale, rotate, offset, animate = false, target = 'model') {
   const identity = scale === 1 && rotate.every(v => !v) && offset.every(v => !v);
-  _fitState = identity ? null : [scale, rotate.slice(), offset.slice()];
-  const group = _ensureFitGroup();
+  const state = identity ? null : [scale, rotate.slice(), offset.slice()];
+  let group;
+  if (target === 'decor') {
+    _decorFitState = state;
+    group = _decorObject;           // встанет и неповешенной — до прихода модели
+  } else {
+    _fitState = state;
+    group = _ensureFitGroup();
+  }
   if (!group) return;
-  const d = Math.PI / 180;
-  const R = new THREE.Matrix4().makeRotationZ(rotate[2] * d)
-    .multiply(new THREE.Matrix4().makeRotationY(rotate[1] * d))
-    .multiply(new THREE.Matrix4().makeRotationX(rotate[0] * d));
-  const M = _FIT_C.clone().multiply(R).multiply(_FIT_CT);
-  const to = { quat: new THREE.Quaternion().setFromRotationMatrix(M),
-               scale, pos: new THREE.Vector3(offset[0], offset[2], -offset[1]) };
+  const to = _fitPose(scale, rotate, offset);
   if (!animate || _noMotion()) { _fitTween = null; _placeFit(group, to); return; }
   _fitTween = {
     group, to, t0: performance.now(),
@@ -588,7 +1038,7 @@ function _placeFit(group, f) {
 function _stepFitTween() {
   if (!_fitTween) return;
   const { group, from, to } = _fitTween;
-  if (group !== _fitGroup) { _fitTween = null; return; }   // модель сменилась
+  if (group !== _fitGroup && group !== _decorObject) { _fitTween = null; return; }   // модель сменилась
   const k = Math.min(1, (performance.now() - _fitTween.t0) / FIT_TWEEN_MS);
   const e = 1 - Math.pow(1 - k, 3);
   _placeFit(group, {
@@ -615,23 +1065,22 @@ function _fitFromGroup(group) {
            offset: [r1(p.x), r1(-p.z), r1(p.y)] };
 }
 
-window.setFitMode = function(on) {
+window.setFitMode = function(on, target = 'model') {
   _fitMode = Boolean(on);
-  if (currentModel) currentModel.traverse(c => { if (_isGhost(c)) c.visible = _fitMode; });
+  if (_fitMode) _fitTarget = target === 'decor' ? 'decor' : 'model';
+  // Призрак оригинала — ориентир своей модели; гирлянду подгоняют к самой
+  // модели в кадре, и серый двойник только мешал бы.
+  const ghosts = _fitMode && _fitTarget === 'model';
+  if (currentModel) currentModel.traverse(c => { if (_isGhost(c)) c.visible = ghosts; });
   if (_fitMode) {
     if (!_fitControls) {
       _fitControls = new TransformControls(camera, renderer.domElement);
       _fitControls.setSpace('local');
       _fitControls.addEventListener('dragging-changed', e => { controls.enabled = !e.value; });
-      _fitControls.addEventListener('objectChange', () => {
-        if (!_fitGroup) return;
-        const fit = _fitFromGroup(_fitGroup);
-        _fitState = [fit.scale, fit.rotate, fit.offset];
-        if (typeof window.onFitChanged === 'function') window.onFitChanged(fit);
-      });
+      _fitControls.addEventListener('objectChange', () => _fitOpEmit());
       scene.add(_fitControls);
     }
-    const group = _ensureFitGroup();
+    const group = _fitNode();
     if (group) _fitControls.attach(group); else _fitControls.detach();
     _fitControls.enabled = true;
   } else if (_fitControls) {
@@ -641,11 +1090,27 @@ window.setFitMode = function(on) {
     _fitControls.detach();
     _fitControls.enabled = false;
   }
+  if (!_fitMode) {
+    _cancelBendDrag();
+    _fitTarget = 'model';
+    _bendOn = false;
+    controls.enableZoom = true;
+    _hideBendMarker();
+  }
 };
 
-/** Инструмент гизмо: 'translate' | 'rotate' | 'scale'. */
+/** Инструмент: гизмо 'translate' | 'rotate' | 'scale' либо 'bend' — гнуть
+ *  гирлянду мышью (только у гирлянды: у своей модели гнуть нечего). */
 window.setFitTool = function(mode) {
-  if (_fitControls) _fitControls.setMode(mode);
+  _bendOn = mode === 'bend' && _fitMode && _fitTarget === 'decor';
+  if (!_bendOn) _cancelBendDrag();
+  controls.enableZoom = !_bendOn;
+  if (!_bendOn) _hideBendMarker();
+  if (!_fitControls) return;
+  if (_bendOn) { _fitControls.detach(); return; }
+  _fitControls.setMode(mode);
+  const node = _fitMode ? _fitNode() : null;
+  if (node && _fitControls.object !== node) _fitControls.attach(node);
 };
 
 // ── Модальные операции, как в Blender ──────────────────────────────────────
@@ -670,14 +1135,17 @@ function _screenOf(worldPos) {
 }
 
 function _fitOpEmit() {
-  const fit = _fitFromGroup(_fitGroup);
-  _fitState = [fit.scale, fit.rotate, fit.offset];
-  if (typeof window.onFitChanged === 'function') window.onFitChanged(fit);
+  const node = _fitNode();
+  if (!node) return;
+  const fit = _fitFromGroup(node);
+  const state = [fit.scale, fit.rotate, fit.offset];
+  if (_fitTarget === 'decor') _decorFitState = state; else _fitState = state;
+  if (typeof window.onFitChanged === 'function') window.onFitChanged(fit, _fitTarget);
 }
 
 window.startFitOp = function(tool) {
   if (!_fitMode) return;
-  const group = _ensureFitGroup();
+  const group = _fitNode();
   if (!group) return;
   if (_fitOp) _fitOpCancel();
   _fitTween = null;                 // рукой — значит с того места, где модель сейчас
@@ -733,15 +1201,18 @@ function _dropModel() {
   _fitTween = null;
   if (currentModel) { scene.remove(currentModel); currentModel = null; }
   if (_critSprite)  { scene.remove(_critSprite);  _critSprite  = null; }
+  // Выделение ножниц — номера треугольников УШЕДШЕЙ модели.
+  if (window.clearCutSelection) window.clearCutSelection();
 }
 
 /** Отмена операции; false — операции не было (Esc тогда достаётся странице). */
 function _fitOpCancel() {
-  if (!_fitOp || !_fitGroup) return false;
+  const node = _fitOp ? _fitNode() : null;
+  if (!node) return false;
   const { pos, quat, scale } = _fitOp.start;
-  _fitGroup.position.copy(pos);
-  _fitGroup.quaternion.copy(quat);
-  _fitGroup.scale.setScalar(scale);
+  node.position.copy(pos);
+  node.quaternion.copy(quat);
+  node.scale.setScalar(scale);
   _fitOpEmit();
   _fitOpEnd();
   return true;
@@ -756,7 +1227,7 @@ window.setFitAxis = function(axis) {
 
 /** Пересчитывает трансформ группы по положению мыши относительно старта. */
 function _fitOpApply() {
-  const op = _fitOp, group = _fitGroup;
+  const op = _fitOp, group = op ? _fitNode() : null;
   if (!op || !group) return;
   const { start, pivot, mouse0 } = op;
   const dx = _mouse.x - mouse0.x, dy = _mouse.y - mouse0.y;
@@ -843,7 +1314,7 @@ window.fitDebug = function() {
     : [b.min.toArray(), b.max.toArray()].map(a => a.map(v => +v.toFixed(3)));
   const ghost = currentModel.children.filter(_isGhost);
   const own = _fitGroup && _fitGroup.parent === currentModel ? [_fitGroup]
-    : currentModel.children.filter(c => !ghost.includes(c));
+    : currentModel.children.filter(c => !ghost.includes(c) && c !== _decorObject);
   const union = (list) => list.reduce((b, o) => b.expandByObject(o), new THREE.Box3());
   return { model: dump(union(own)), ghost: dump(union(ghost)), fit: _fitState, mode: _fitMode };
 };
@@ -1363,8 +1834,12 @@ window.loadModelFromContent = function(objContent, texDataUrl, cx, cy, cz, scale
       object.traverse(c => { if (_isGhost(c)) c.visible = _fitMode; });
       if (!_viewRig) {
         if (_fitState) window.setFitTransform(..._fitState);
-        if (_fitMode) window.setFitMode(true);
+        if (_fitMode) window.setFitMode(true, _fitTarget);
       }
+      // Гирлянда пережила смену модели так же, как подгонка: своя модель,
+      // возврат из вида от первого лица, смена состояния — предмет тот же.
+      _mountDecor();
+      _paintDecor();
 
       if (_pendingTexUrl) {
         // Одиночная текстура, запрошенная во время загрузки OBJ. Применяем
@@ -1429,6 +1904,10 @@ window.loadViewmodelAnimated = function(data, loadSeq) {
 
   scene.add(_skinned.group);
   currentModel = _skinned.group;
+  // Гирлянда у рук своя, в самой сцене: слой обычной модели здесь не нужен,
+  // а мышь её мешей видеть не должна.
+  _mountDecor();
+  _paintDecor();
   _revealCanvas();
   // Вид от первого лица ставит камеру ригом, и габариты ему не нужны. Сцену
   // же, которую смотрят со стороны (насмешка), надо вписать в кадр самим:
@@ -1637,6 +2116,7 @@ window.resetViewer = function() {
   // успев загрузиться раньше ответа страницы, вставала повёрнутой и в гизмо.
   _fitState = null;
   _fitMode = false;
+  window.clearDecor();          // и гирлянда: она висела на прошлом предмете
   window.setViewRig(null);      // сброс режима — обратно к орбите
   stopAnimation();
   _exitSkyboxView();
@@ -1699,20 +2179,193 @@ let _cutMode = false;
 window.setCutMode = function(on) {
   _cutMode = !!on;
   document.getElementById('canvas-container').classList.toggle('cutting', _cutMode);
-  // Обводка строится по разным картам в разных режимах — старую снимаем, иначе
-  // на экране останется контур части поверх режима островов.
-  _clearPartHover();
+  // Наведение на часть снимаем ВМЕСТЕ с сообщением странице: иначе на кадре
+  // текстуры оставалась разметка части, наведённой до ножниц.
+  _setPartHover(null);
+  _clearCutHover();
+  if (!_cutMode) window.clearCutSelection();
 };
 
-// Щелчок отрезает обведённый остров или приращивает его обратно — то же
-// действие в обе стороны, поэтому ни колеса, ни второй кнопки не нужно.
-function _cutAt(e) {
-  const found = _partAt(_ndcFromEvent(e));
-  if (found && typeof window.onPartCut === 'function') {
-    window.onPartCut(found.material, found.owner, found.part);
+// ── Ножницы: ВЫДЕЛЕНИЕ того, что станет отдельной частью ──────────────────
+//
+// Раньше щелчок отрезал остров развёртки, а острова редко совпадают с
+// деталями: у обреза приклад с корпусом — один остров, и резать было нечего.
+// Теперь человек набирает выделение (деталь до острых рёбер, кисть или остров),
+// видит его на модели и отделяет кнопкой на странице. Сами обходы — в
+// js/viewer_select.js; здесь только луч, подсветка и события.
+let _cutTool   = 'detail';   // 'detail' | 'brush' | 'island'
+let _cutAngle  = 30;         // порог острого ребра, градусы
+let _cutRadius = 0.05;       // кисть: доля размера модели
+let _cutErase  = false;      // кисть стирает выделение, а не добавляет
+let _cutSel    = null;       // {mesh, material, tris: Set, overlay}
+let _cutHover  = null;       // overlay того, что возьмёт щелчок
+let _cutPaint  = false;      // кисть ведут прямо сейчас
+const _cutTopos = new WeakMap();   // mesh → {topo, labels, angle}
+
+window.setCutOptions = function(opts) {
+  const o = opts || {};
+  if (o.tool) _cutTool = o.tool;
+  if (o.angle != null) _cutAngle = Number(o.angle);
+  if (o.radius != null) _cutRadius = Number(o.radius);
+  if (o.erase != null) _cutErase = !!o.erase;
+  _clearCutHover();
+};
+
+window.cutSelection = function() {
+  if (!_cutSel || !_cutSel.tris.size) return { material: '', triangles: [] };
+  return { material: _cutSel.material,
+           triangles: [..._cutSel.tris].sort((x, y) => x - y) };
+};
+
+window.clearCutSelection = function() {
+  if (_cutSel && _cutSel.overlay) _dropOverlay(_cutSel.overlay);
+  const had = !!(_cutSel && _cutSel.tris.size);
+  _cutSel = null;
+  if (had) _tellCutSelection();
+};
+
+// Щелчок по чипу части на странице: вся часть — в выделение или из него.
+window.toggleCutTris = function(material, tris) {
+  const mesh = _meshWithParts(material);
+  if (mesh && tris && tris.length) _cutApply(mesh, tris, null);
+};
+
+function _tellCutSelection() {
+  if (typeof window.onCutSelection === 'function') {
+    window.onCutSelection(_cutSel ? _cutSel.tris.size : 0,
+                          _cutSel ? _cutSel.material : '');
   }
+}
+
+// Связи треугольников меша — один раз на меш; метки деталей — на порог.
+function _cutTopo(mesh) {
+  let got = _cutTopos.get(mesh);
+  // Изгиб гирлянды двигает вершины на месте: по старым связям кисть мерила бы
+  // до прежних положений, а «деталь» брала бы прежние нормали.
+  if (got && got.version !== mesh.geometry.attributes.position.version) got = null;
+  if (!got) {
+    const geo = mesh.geometry;
+    const pos = geo.attributes.position;
+    const uv = geo.attributes.uv;
+    const count = geo.index ? geo.index.count / 3 : pos.count / 3;
+    const positions = new Float32Array(count * 9);
+    const uvs = uv ? new Float32Array(count * 6) : null;
+    for (let t = 0; t < count; t++) {
+      for (let c = 0; c < 3; c++) {
+        const v = geo.index ? geo.index.getX(t * 3 + c) : t * 3 + c;
+        positions.set([pos.getX(v), pos.getY(v), pos.getZ(v)], t * 9 + c * 3);
+        if (uvs) uvs.set([uv.getX(v), uv.getY(v)], t * 6 + c * 2);
+      }
+    }
+    got = { topo: _select.topology(positions, uvs), labels: null, angle: null,
+            version: pos.version };
+    _cutTopos.set(mesh, got);
+  }
+  if (got.angle !== _cutAngle) {
+    got.labels = _select.detailLabels(got.topo, _cutAngle);
+    got.angle = _cutAngle;
+  }
+  return got;
+}
+
+// Что возьмёт инструмент в этой точке экрана: {mesh, material, tris} или null.
+function _cutTarget(ndc) {
+  const hit = _hitsAt(ndc)[0];
+  if (!hit || hit.faceIndex == null || !_partListFor(hit.object)) return null;
+  const mesh = hit.object;
+  const { topo, labels } = _cutTopo(mesh);
+  let tris;
+  if (_cutTool === 'island') {
+    tris = topo.islands[hit.faceIndex] === -1
+      ? [hit.faceIndex] : _select.withLabel(topo.islands, hit.faceIndex);
+  } else if (_cutTool === 'brush') {
+    const local = mesh.worldToLocal(hit.point.clone());
+    const scale = mesh.matrixWorld.getMaxScaleOnAxis() || 1;
+    tris = _select.brushTriangles(topo, hit.faceIndex, [local.x, local.y, local.z],
+                                  (_cutRadius * _modelSpan()) / scale);
+  } else {
+    tris = _select.withLabel(labels, hit.faceIndex);
+  }
+  return { mesh, tris, material: (mesh.material || {}).name || '' };
+}
+
+// Размер модели в мире — мерило радиуса кисти: «5% модели» одинаково и на
+// пистолете, и на пулемёте.
+let _spanOf = null;
+function _modelSpan() {
+  if (!_spanOf || _spanOf.model !== currentModel) {
+    const size = new THREE.Box3().setFromObject(currentModel).getSize(new THREE.Vector3());
+    _spanOf = { model: currentModel, span: Math.max(size.x, size.y, size.z) || 1 };
+  }
+  return _spanOf.span;
+}
+
+// add = true/false — добавить/убрать; null — переключить: всё уже выделено —
+// убрать, иначе добавить. Так щелчок по выделенной детали снимает её.
+function _cutApply(mesh, tris, add) {
+  if (!_cutSel || _cutSel.mesh !== mesh) {
+    // Выделение — из одного материала: у другого своя развёртка и свои номера.
+    window.clearCutSelection();
+    _cutSel = { mesh, material: (mesh.material || {}).name || '', tris: new Set(), overlay: null };
+  }
+  const sel = _cutSel.tris;
+  const put = add === null ? !tris.every(t => sel.has(t)) : add;
+  for (const t of tris) { if (put) sel.add(t); else sel.delete(t); }
+  if (_cutSel.overlay) _dropOverlay(_cutSel.overlay);
+  _cutSel.overlay = _trisOverlay(mesh, sel, 0x3ec7ff, 0.6);
+  _tellCutSelection();
+}
+
+function _hoverCut(ndc) {
+  if (_cutPaint) return;
+  const found = _cutTarget(ndc);
+  _clearCutHover();
+  if (found) _cutHover = _trisOverlay(found.mesh, found.tris, 0xffb347, 0.45);
+}
+
+function _clearCutHover() {
+  if (_cutHover) _dropOverlay(_cutHover);
+  _cutHover = null;
+}
+
+function _cutClick(e) {
+  const found = _cutTarget(_ndcFromEvent(e));
+  if (found) _cutApply(found.mesh, found.tris, null);
   return !!found;
 }
+
+// Кисть ведут протяжкой. Перехватываем только нажатие НА модели: мимо неё
+// протяжка по-прежнему крутит камеру.
+(function bindCutBrush() {
+  const box = document.getElementById('canvas-container');
+  box.addEventListener('pointerdown', e => {
+    if (!_partsMode || !_cutMode || _cutTool !== 'brush' || e.button !== 0) return;
+    const found = _cutTarget(_ndcFromEvent(e));
+    if (!found) return;
+    e.stopPropagation();
+    e.preventDefault();
+    _cutPaint = true;
+    box.setPointerCapture(e.pointerId);
+    _clearCutHover();
+    _cutApply(found.mesh, found.tris, !_cutErase);
+  }, true);
+  box.addEventListener('pointermove', e => {
+    if (!_cutPaint) return;
+    e.stopPropagation();
+    const found = _cutTarget(_ndcFromEvent(e));
+    if (found && _cutSel && found.mesh === _cutSel.mesh) {
+      _cutApply(found.mesh, found.tris, !_cutErase);
+    }
+  }, true);
+  const finish = e => {
+    if (!_cutPaint) return;
+    e.stopPropagation();
+    _cutPaint = false;
+    if (box.hasPointerCapture(e.pointerId)) box.releasePointerCapture(e.pointerId);
+  };
+  box.addEventListener('pointerup', finish, true);
+  box.addEventListener('pointercancel', finish, true);
+})();
 
 // ── FOV-зум колесом (только скайбокс) ────────────────────────────────────── //
 // Фон-кубмапа бесконечно далёкая: долли-зум OrbitControls для неё ничего не
@@ -2104,7 +2757,15 @@ function _hitEditableMeshAt(ndc) {
 function _hitsAt(ndc) {
   if (!currentModel || _isCritHitMode) return [];
   _raycaster.setFromCamera(ndc, camera);
-  return _raycaster.intersectObject(currentModel, true);
+  // Луч three.js не пропускает спрятанное: призрак оригинала своей модели
+  // висит в сцене и вне подгонки, и щелчок по нему отдавал номера ЕГО
+  // треугольников как номера модели — ножницы резали не то.
+  return _raycaster.intersectObject(currentModel, true).filter(h => _shown(h.object));
+}
+
+function _shown(obj) {
+  for (let o = obj; o; o = o.parent) if (!o.visible) return false;
+  return true;
 }
 
 // Подсвечивает меш при перетаскивании над ним
@@ -2307,6 +2968,8 @@ let _partHover = null;   // {mesh, material, part, overlay}
 window.setModelParts = function(map) {
   _partsMap = (map && Object.keys(map).length) ? map : null;
   _clearPartHover();
+  // Новая модель — номера треугольников чужие, выделение с них снять.
+  if (!_partsMap) window.clearCutSelection();
 };
 
 window.setPartsMode = function(on) {
@@ -2379,16 +3042,19 @@ function _listFrom(map, mesh) {
   const name = (mesh.material && !Array.isArray(mesh.material) && mesh.material.name)
     || mesh.name || '';
   if (map[name]) return map[name];
-  const only = Object.keys(map);
-  return only.length === 1 ? map[only[0]] : null;
+  // Призрак оригинала — не часть предмета: своих частей у него нет, а чужая
+  // карта дала бы его треугольникам номера модели.
+  if (String(name).startsWith('ghost:')) return null;
+  // Единственная карта предмета годится любому его мешу (у одноматериальной
+  // модели она лежит под служебным ключом). Гирлянда в счёт не идёт: у неё
+  // свои карты под именами мешей, и чужую ей подставлять нельзя.
+  // Меш гирлянды — только своя карта: у её материалов разборы разные.
+  if (_isDecorName(name)) return null;
+  const own = Object.keys(map).filter(k => !_isDecorName(k));
+  return own.length === 1 ? map[own[0]] : null;
 }
 
 function _partListFor(mesh) { return _listFrom(_partsMap, mesh); }
-
-// Карта «треугольник → остров развёртки». В режиме резки обводится и режется
-// именно остров: увидеть, ЧТО отрежется, нужно до щелчка, а не после.
-let _islandsMap = null;
-window.setModelIslands = function(map) { _islandsMap = map || null; };
 
 function _partAt(ndc) {
   // Во время перетаскивания части работают и без включённого режима: человек
@@ -2396,10 +3062,7 @@ function _partAt(ndc) {
   if (!_partsMode && _dragDepth <= 0) return null;
   const hit = _hitsAt(ndc)[0];
   if (!hit || hit.faceIndex == null) return null;
-  // В режиме резки подсвечиваем и берём ОСТРОВ, иначе — часть. Обводка рисуется
-  // одним и тем же кодом: ему всё равно, по какой карте группировать.
-  const map = (_cutMode && _islandsMap) ? _islandsMap : _partsMap;
-  const list = _listFrom(map, hit.object);
+  const list = _listFrom(_partsMap, hit.object);
   if (!list) return null;
   const part = list[hit.faceIndex];
   if (part == null) return null;
@@ -2413,12 +3076,20 @@ function _partAt(ndc) {
 // подмена материала: материал у всей модели общий, и подменять его значило бы
 // подсветить модель целиком.
 function _partOverlay(mesh, list, part) {
+  const tris = [];
+  for (let tri = 0; tri < list.length; tri++) if (list[tri] === part) tris.push(tri);
+  return _trisOverlay(mesh, tris, 0xffb347, 0.55);
+}
+
+// Подсветка набора треугольников: наведение на часть, что возьмут ножницы,
+// выделение ножниц. Цвет — по смыслу: оранжевый «сюда», голубой «выделено».
+function _trisOverlay(mesh, tris, color, opacity) {
   const src = mesh.geometry.attributes.position;
+  const index = mesh.geometry.index;
   const keep = [];
-  for (let tri = 0; tri < list.length; tri++) {
-    if (list[tri] !== part) continue;
+  for (const tri of tris) {
     for (let corner = 0; corner < 3; corner++) {
-      const v = tri * 3 + corner;
+      const v = index ? index.getX(tri * 3 + corner) : tri * 3 + corner;
       keep.push(src.getX(v), src.getY(v), src.getZ(v));
     }
   }
@@ -2434,7 +3105,7 @@ function _partOverlay(mesh, list, part) {
   // убирает это, а перекрытие остаётся честным: часть с обратной стороны
   // модели сквозь неё не светит.
   const overlay = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({
-    color: 0xffb347, transparent: true, opacity: 0.55,
+    color, transparent: true, opacity,
     // С ОБЕИХ сторон: у одежды часть треугольников намотана «изнанкой»
     // наружу, сама модель их показывает (её материал двусторонний), а
     // односторонняя подсветка их отбрасывала — у шпиона от подсветки тела
@@ -2465,8 +3136,10 @@ function _meshWithParts(material) {
   if (currentModel) {
     currentModel.traverse(obj => {
       if (!obj.isMesh || !_partListFor(obj)) return;
-      if (!any) any = obj;
       const name = (obj.material || {}).name || '';
+      // «Любой» — только меш предмета: карта одноматериальной модели лежит
+      // под служебным ключом и гирлянде не подходит.
+      if (!any && !_isDecorName(name)) any = obj;
       if (!named && material && name === material) named = obj;
     });
   }
@@ -2502,12 +3175,15 @@ function _setPartHover(found) {
 }
 
 function _clearPartHover() {
-  if (_partHover && _partHover.overlay) {
-    _partHover.overlay.removeFromParent();
-    _partHover.overlay.geometry.dispose();
-    _partHover.overlay.material.dispose();
-  }
+  if (_partHover && _partHover.overlay) _dropOverlay(_partHover.overlay);
   _partHover = null;
+}
+
+function _dropOverlay(overlay) {
+  if (!overlay) return;
+  overlay.removeFromParent();
+  overlay.geometry.dispose();
+  overlay.material.dispose();
 }
 
 // Наведение считаем не чаще раза в кадр. mousemove и dragover приходят сотнями
@@ -2532,6 +3208,7 @@ function _hoverParts(ndc) {
   // Пока берут цвет, подсветки нет: она закрашивает ровно тот пиксель, на
   // который целятся. Это и выбранная пипетка, и Alt при кисти — там подсветка
   // успела бы мигнуть на время протяжки.
+  if (_partsMode && _cutMode) { _hoverCut(ndc); return; }
   if (_partsMode && _partsTool !== 'pick' && !_pickDrag) {
     _setPartHover(_partAt(ndc));
   }
@@ -2555,7 +3232,7 @@ renderer.domElement.addEventListener('pointerup', e => {
   // В режиме резки щелчок режет, а не красит: два ответа на один щелчок —
   // это и есть та неоднозначность, из-за которой человек вместо разреза
   // получал окно выбора текстуры.
-  if (_cutMode) { _cutAt(e); return; }
+  if (_cutMode) { if (_cutTool !== 'brush') _cutClick(e); return; }
   const found = _partAt(_ndcFromEvent(e));
   if (found && typeof window.onPartPicked === 'function') {
     window.onPartPicked(found.material, found.part);
@@ -2633,6 +3310,13 @@ function _tellSample(hex, e) {
 // работал, пока не щёлкнешь мимо кадра. Своей обработки не заводим: история
 // покраски живёт на странице, здесь только передача нажатия.
 window.addEventListener('keydown', e => {
+  // Ножницы: Enter отделяет выделенное, Esc сбрасывает — решает страница,
+  // у неё кнопки и ответ Python.
+  if (_cutMode && (e.key === 'Enter' || e.key === 'Escape')
+      && typeof window.onCutKey === 'function') {
+    window.onCutKey(e.key);
+    return;
+  }
   if (!(e.ctrlKey || e.metaKey)) return;
   if (typeof window.onPartsKey === 'function') window.onPartsKey(e);
 });

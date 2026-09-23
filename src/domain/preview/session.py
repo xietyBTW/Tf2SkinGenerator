@@ -22,8 +22,11 @@ import os
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from src.domain.preview import part_specs
 from src.domain.preview.mode import PreviewState
-from src.domain.preview.texture_state import SINGLE_TEX_KEY, PreviewTextureState
+from src.domain.preview.texture_state import (
+    SINGLE_TEX_KEY, PreviewTextureState, is_decor,
+)
 from src.shared.constants import Team
 
 #: Поля работы, ради которых её стоит хранить и предлагать вернуть.
@@ -45,6 +48,9 @@ EDIT_FIELDS = (
     'textures', 'skin_overrides', 'australium_user_tex', 'force_team',
     'texture_maps', 'part_textures', 'part_colors',
     'custom_smd_path', 'custom_qc_text', 'custom_source_path',
+    # Подгонка и изгибы гирлянды под свою модель: своя форма гирлянды —
+    # такая же правка, как своя геометрия предмета.
+    'decor_fit', 'decor_bends',
 )
 
 
@@ -92,6 +98,16 @@ class PreviewSession:
     custom_source_path: Optional[str] = None
     #: Подгонка импортированной модели: {scale, rotate, offset} в осях SMD.
     custom_fit: Optional[dict] = None
+    #: Подгонка гирлянд: {вид: {scale, rotate, offset}} в осях SMD оружия.
+    #: Своя модель оружия иной формы, и гирлянду сдвигают под неё; стоковая
+    #: подгонка (единица) не хранится.
+    decor_fit: Dict[str, dict] = field(default_factory=dict)
+    #: Изгибы гирлянд: {вид: [{c, r, d}, …]} в осях SMD гирлянды, по порядку
+    #: (см. festive_decor.apply_bends). Провод обматывают вокруг своей модели.
+    decor_bends: Dict[str, List[dict]] = field(default_factory=dict)
+    #: Карточки показанной гирлянды (`deco:<вид>/<материал>`). Пусто — гирлянда
+    #: выключена: её правки остаются в работе, но в альбоме их не видно.
+    decor_cards: List[str] = field(default_factory=list)
     #: Точные имена материалов модели из SMD — для наложения текстур мода на
     #: правильные меши в режиме custom-VPK.
     custom_model_materials: List[str] = field(default_factory=list)
@@ -117,17 +133,31 @@ class PreviewSession:
     #: {материал: {size, format, flags, options}} — СВОИ настройки сборки.
     #: Разреженно: есть запись ⟺ материал собирается не как все остальные.
     texture_overrides: Dict[str, dict] = field(default_factory=dict)
-    #: {материал: {номер части: картинка}} — картинки, положенные на ОТДЕЛЬНЫЕ
-    #: куски модели. Сама текстура материала из них склеивается и лежит, как
-    #: обычная пользовательская, в textures: дальше по конвейеру про части
-    #: никто не знает.
-    #: Запись бывает строкой (путь) ИЛИ словарём с настройкой посадки: как
-    #: положить картинку на место части — вписать, повернуть, сдвинуть. Старые
-    #: работы писались строкой, и ломать их из-за новой возможности незачем.
-    part_textures: Dict[str, Dict[int, Any]] = field(default_factory=dict)
-    #: {материал: {номер части: '#rrggbb'}} — тонировка отдельных кусков. Живёт
-    #: рядом с картинками: у части либо своя картинка, либо цвет.
-    part_colors: Dict[str, Dict[int, str]] = field(default_factory=dict)
+    #: {слот: {номер части: [картинка, ...]}} — картинки, положенные на
+    #: ОТДЕЛЬНЫЕ куски модели, снизу вверх. Слот — карточка плюс стиль или
+    #: команда (см. part_specs.slot_key). Текстура материала из них
+    #: склеивается и лежит, как обычная пользовательская, в textures: дальше
+    #: по конвейеру про части никто не знает. Запись всегда полная
+    #: (part_specs.image_spec): старые виды приводятся при возврате работы.
+    part_textures: Dict[str, Dict[int, List[dict]]] = field(default_factory=dict)
+    #: {слот: {номер части: цвет}} — тонировка кусков, полной записью
+    #: (part_specs.color_spec). Цвет и картинки у одной части уживаются.
+    part_colors: Dict[str, Dict[int, dict]] = field(default_factory=dict)
+    #: {слот: своя текстура под мазками или '' — игровая}. Есть запись ⟺
+    #: текстура слота — НАША склейка, а не своя картинка человека. Раньше это
+    #: угадывали по имени файла и по списку путей текущего запуска, и оттуда
+    #: шли баги «Убрать всё не убирает» и «цвета копятся слоями».
+    part_bases: Dict[str, str] = field(default_factory=dict)
+    #: {материал OBJ: [набор номеров треугольников, …]} — области, выделенные
+    #: ножницами: каждая — своя часть поверх разбора на куски и острова.
+    #: Номера — порядок треугольников в OBJ, тот же, что у вьювера. Как и
+    #: разрезы, это не правка сама по себе, а то, на что ложатся мазки.
+    part_regions: Dict[str, List[List[int]]] = field(default_factory=dict)
+    #: Эпоха правок: растёт, когда состояние правок подменяют ЦЕЛИКОМ (другой
+    #: предмет, возврат работы, отмена, «забыть»). Склейка частей считается
+    #: вне замка сеанса, и досчитавшаяся после такой подмены легла бы уже на
+    #: чужое состояние — по эпохе её узнают и выбрасывают.
+    edits_epoch: int = 0
     #: Сила тонировки, общая на предмет: 1.0 — в цвет, 0.3 — лёгкий оттенок.
     part_tint: float = 1.0
     #: Красить ровно выбранным цветом, а не смешивать его с оригиналом.
@@ -262,9 +292,12 @@ class PreviewSession:
         """
         if self.misc_mode and self.misc_materials:
             return list(self.misc_materials)
+        # Гирлянда — после своих карточек предмета; стилей у неё нет, поэтому
+        # она видна и в стиле.
+        decor = [c for c in self.decor_cards if is_decor(c)]
         if self.active_style:
             chosen = self.skin_chosen.get(self.active_style) or set()
-            return [m for m in self.textures.material_names if m in chosen]
+            return [m for m in self.textures.material_names if m in chosen] + decor
         cards = list(self.textures.material_names)
         # Австралий — своя карточка со своей текстурой, но показывается она
         # НА МЕСТЕ главной, пока вариант включён: как у RED/BLU, карточка
@@ -275,7 +308,7 @@ class PreviewSession:
         if gold and cards and self.textures.australium_active and not self.custom_vpk_mode:
             main = self.textures.stable_main() or cards[0]
             cards = [gold if c == main else c for c in cards]
-        return cards
+        return cards + decor
 
     @property
     def active_style(self) -> int:
@@ -555,10 +588,13 @@ class PreviewSession:
                                   for mat, settings in self.texture_overrides.items()},
             # Номера частей — числа; в JSON они станут строками, поэтому
             # приводим сразу здесь.
-            'part_textures': {mat: {str(part): path for part, path in items.items()}
-                              for mat, items in self.part_textures.items()},
-            'part_colors': {mat: {str(part): color for part, color in items.items()}
-                            for mat, items in self.part_colors.items()},
+            'part_textures': {slot: {str(part): [dict(i) for i in images]
+                                     for part, images in items.items()}
+                              for slot, items in self.part_textures.items()},
+            'part_colors': {slot: {str(part): dict(color)
+                                   for part, color in items.items()}
+                            for slot, items in self.part_colors.items()},
+            'part_bases': dict(self.part_bases),
             # Разрезы — часть работы, а не настройка показа: номера частей от
             # них зависят, и без них вернувшаяся покраска легла бы на чужие
             # куски. Сами по себе они правкой не считаются (см. EDIT_FIELDS):
@@ -566,6 +602,8 @@ class PreviewSession:
             'part_cuts': {mat: {str(group): [list(bundle) for bundle in made]
                                 for group, made in (cuts or {}).items()}
                           for mat, cuts in self.part_cuts.items()},
+            'part_regions': {mat: [list(r) for r in regions]
+                             for mat, regions in self.part_regions.items() if regions},
             'part_tint': float(self.part_tint),
             'part_exact': bool(self.part_exact),
             # Окантовка — настройка кисти на предмет, как сила: без неё
@@ -577,6 +615,9 @@ class PreviewSession:
             'custom_qc_text': self.custom_qc_text,
             'custom_source_path': self.custom_source_path,
             'custom_fit': dict(self.custom_fit) if self.custom_fit else None,
+            'decor_fit': {kind: dict(fit) for kind, fit in self.decor_fit.items()},
+            'decor_bends': {kind: [dict(b) for b in bends]
+                            for kind, bends in self.decor_bends.items() if bends},
         }
 
     def has_user_edits(self) -> bool:
@@ -592,6 +633,7 @@ class PreviewSession:
         """
         if not edits:
             return
+        self.edits_epoch += 1
         t = self.textures
 
         for team, paths in (edits.get('textures') or {}).items():
@@ -607,16 +649,36 @@ class PreviewSession:
                              in (edits.get('texture_maps') or {}).items()}
         self.texture_overrides = {mat: dict(settings) for mat, settings
                                   in (edits.get('texture_overrides') or {}).items()}
+        # Мазки — полной записью. Старые работы своих настроек кисти не
+        # помнили: им достаются те, что работа хранила рядом, — ровно то, что
+        # они и показывали.
+        brush = {'strength': float(edits.get('part_tint') or 1.0),
+                 'exact': bool(edits.get('part_exact')),
+                 'edge': float(edits.get('part_edge') or 0.0),
+                 'edge_color': edits.get('part_edge_color') or None}
         self.part_textures = {
-            mat: {int(part): path for part, path in (items or {}).items()}
-            for mat, items in (edits.get('part_textures') or {}).items()}
+            slot: {int(part): images for part, value in (items or {}).items()
+                   if (images := part_specs.image_list(value, brush))}
+            for slot, items in (edits.get('part_textures') or {}).items()}
         self.part_colors = {
-            mat: {int(part): color for part, color in (items or {}).items()}
-            for mat, items in (edits.get('part_colors') or {}).items()}
+            slot: {int(part): part_specs.color_spec(color, brush)
+                   for part, color in (items or {}).items() if color}
+            for slot, items in (edits.get('part_colors') or {}).items()}
+        painted = {slot for slot in [*self.part_textures, *self.part_colors]
+                   if self.part_textures.get(slot) or self.part_colors.get(slot)}
+        if 'part_bases' in edits:
+            self.part_bases = {slot: str(base or '') for slot, base
+                               in (edits.get('part_bases') or {}).items()}
+        else:
+            self.part_bases = part_specs.migrate_part_bases(
+                t.textures, t.skin_overrides, painted)
         self.part_cuts = {
             mat: {int(group): [list(bundle) for bundle in (made or ())]
                   for group, made in (cuts or {}).items()}
             for mat, cuts in (edits.get('part_cuts') or {}).items()}
+        self.part_regions = {
+            str(mat): [sorted({int(t) for t in r}) for r in (regions or ()) if r]
+            for mat, regions in (edits.get('part_regions') or {}).items()}
         self.part_tint = float(edits.get('part_tint') or 1.0)
         self.part_exact = bool(edits.get('part_exact'))
         self.part_edge = float(edits.get('part_edge') or 0.0)
@@ -627,9 +689,14 @@ class PreviewSession:
         self.custom_qc_text = edits.get('custom_qc_text') or None
         self.custom_source_path = edits.get('custom_source_path') or None
         self.custom_fit = dict(edits['custom_fit']) if edits.get('custom_fit') else None
+        self.decor_fit = {str(kind): dict(fit) for kind, fit
+                          in (edits.get('decor_fit') or {}).items() if fit}
+        self.decor_bends = {str(kind): [dict(b) for b in bends] for kind, bends
+                            in (edits.get('decor_bends') or {}).items() if bends}
 
     def forget_user_edits(self) -> None:
         """Сброс правок предмета — «начать с чистого» без смены предмета."""
+        self.edits_epoch += 1
         self.textures.textures = {Team.RED: {}, Team.BLU: {}}
         self.textures.skin_overrides = {}
         self.textures.australium_user_tex = None
@@ -639,11 +706,15 @@ class PreviewSession:
         self.texture_overrides = {}
         self.part_textures = {}
         self.part_colors = {}
+        self.part_bases = {}
+        self.part_regions = {}
         self.part_cuts = {}
         self.part_edge = 0.0
         self.part_edge_color = PreviewSession.part_edge_color
         self.reset_custom_model()
         self.custom_qc_text = None
+        self.decor_fit = {}
+        self.decor_bends = {}
 
     # ═══════════════════════════════════════════════════════════════════════ #
     # Частичные сбросы (у каждого есть своя половина в виджетах панели)
@@ -717,6 +788,7 @@ class PreviewSession:
 
         self.weapon_key = weapon_key
         self.weapon_mode = mode
+        self.edits_epoch += 1
 
         t = self.textures
         t.textures = {Team.RED: {}, Team.BLU: {}}
@@ -733,15 +805,37 @@ class PreviewSession:
         # другой кусок.
         self.part_textures = {}
         self.part_colors = {}
+        self.part_bases = {}
+        self.part_regions = {}
         self.part_cuts = {}
         self.part_edge = 0.0
         self.custom_qc_text = None
+        # Гирлянда — у каждого оружия своя.
+        self.decor_fit = {}
+        self.decor_bends = {}
+        self.decor_cards = []
+        self.textures.decor_stock = {}
         self.per_mesh_active = False
         self.per_mesh_base_image = None
         self.current_object = None
         self.scene_extra_textures = {}
         self.scene_item_materials = []
         return True
+
+    def forget_parts_layout(self) -> None:
+        """
+        Забывает разбиение на части и мазки по ним — геометрия сменилась.
+
+        Номера частей, разрезы по островам и области ножниц — это номера
+        треугольников ПРЕЖНЕЙ модели; на другой они легли бы на случайные
+        куски. Сама текстура остаётся как есть: склейка становится обычной
+        своей текстурой (записи основы больше нет).
+        """
+        self.part_textures = {}
+        self.part_colors = {}
+        self.part_bases = {}
+        self.part_regions = {}
+        self.part_cuts = {}
 
     def begin_game_model(self) -> bool:
         """
@@ -757,6 +851,9 @@ class PreviewSession:
         """
         was_custom = self.has_custom_model
 
+        # Уходим со СВОЕЙ геометрии: номера частей и треугольников были её.
+        if was_custom:
+            self.forget_parts_layout()
         self.reset_skins()
         self.reset_custom_model()
         # Чужой мод остался позади вместе со своим оружием: иначе вид от

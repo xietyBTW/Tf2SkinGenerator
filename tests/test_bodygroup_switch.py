@@ -138,7 +138,7 @@ class SessionSwitchTests(unittest.TestCase):
         self.s._bodygroups = {'broken': 1}
         self.s._obj_path = __file__            # хоть какой-то файл: до разбора не дойдёт
         with patch('src.services.mesh_parts_service.load', return_value=MagicMock()):
-            self.assertIn('error', self.s._parts_model(''))
+            self.assertIn('error', self.s.parts._parts_model(''))
 
     def test_no_switch_for_own_model_or_other_kinds(self):
         self.s.preview.custom_smd_path = self.qc

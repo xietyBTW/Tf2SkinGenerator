@@ -183,6 +183,9 @@ export const setTeam      = (team) => call('set_team', { team });
 export const paints       = () => call('paints', {});
 export const setPaint     = (key) => call('set_paint', { key });
 export const setAustralium = (active) => call('set_australium', { active });
+export const setFestive = (kind) => call('set_festive', { kind });
+export const setDecorFit = (fit) => call('set_decor_fit', { fit });
+export const setDecorBends = (bends) => call('set_decor_bends', { bends });
 export const setSkin      = (index) => call('set_skin', { index });
 export const setBodygroup = (name, variant) => call('set_bodygroup', { name, variant });
 export const addToStyle   = (material) => call('add_to_style', { material });
@@ -317,8 +320,11 @@ export const setPartDetail = (material, detail) =>
   call('set_part_detail', { material, detail });
 export const togglePartIsland = (material, group, island) =>
   call('toggle_part_island', { material, group, island });
-export const mergePartIslands = (material, group, islands) =>
-  call('merge_part_islands', { material, group, islands });
+//: Ножницы: выделенные треугольники меша — в отдельную часть, и обратно.
+export const addPartRegion = (material, triangles) =>
+  call('add_part_region', { material, triangles });
+export const removePartRegion = (material, region) =>
+  call('remove_part_region', { material, region });
 export const loadSkybox   = (sky_name) => call('load_skybox', { sky_name });
 export const setTexture   = (material, path) => call('set_texture', { material, path });
 export const build        = (params) => call('build', { params });
@@ -346,14 +352,11 @@ export async function upload(file) {
  *
  * Воркеры работают в своих потоках, и результат приезжает не ответом на
  * запрос, а потоком: progress → model_ready → materials. В окне приложения
- * события будет толкать pywebview через evaluate_js — там достаточно завести
- * глобальный приёмник; здесь их приносит SSE.
+ * события приносит SSE — и в окне pywebview тоже. Ветки «pywebview толкает сам»
+ * здесь быть не должно: Python ничего не толкает, а window.pywebview
+ * появляется после загрузки страницы, и такая ветка молча теряла бы события.
  */
 export function subscribe(onEvent) {
-  if (window.pywebview) {
-    window.__tf2Event = onEvent;      // pywebview вызовет его из Python
-    return () => { delete window.__tf2Event; };
-  }
   const src = new EventSource('/events');
   src.onmessage = (e) => {
     try {

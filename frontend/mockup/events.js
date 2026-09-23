@@ -30,6 +30,8 @@ import {
   addFrame,
   setCardTitles,
   showPartsAnimation,
+  showDecor,
+  festiveFailed,
 } from './preview.js';
 
 // ── События воркеров ─────────────────────────────────────────────────────
@@ -66,6 +68,14 @@ api.subscribe((ev) => {
     // состояние уже знает об этом (blu_matches_red).
     case 'blu_same_as_red':
       refreshView();
+      break;
+
+    // Гирлянда поверх оружия — своим слоем вьювера, мимо альбома.
+    case 'festive_decor':
+      showDecor(ev);
+      break;
+    case 'festive_failed':
+      festiveFailed();
       break;
 
     case 'animated':

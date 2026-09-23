@@ -12,12 +12,15 @@
 
 from __future__ import annotations
 
+import hashlib
 import io
 import math
 import os
 import struct
+import threading
 import zlib
-from dataclasses import dataclass
+from collections import OrderedDict
+from dataclasses import dataclass, fields
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
@@ -544,47 +547,211 @@ class _ApngWriter:
         self._chunk(b'IEND', b'')
 
 
+class _Lru:
+    """
+    Кэш с потолком по БАЙТАМ, а не по числу записей: окно слоя бывает и в
+    полсотни килобайт, и во всю текстуру (16 МБ на 2048²).
+
+    Под замком: склейка идёт вне замка сеанса, и два мазка подряд, печь сборки
+    и кадры анимации в 3D считают её в разных потоках одновременно.
+    """
+
+    def __init__(self, budget: int):
+        self._items: "OrderedDict[object, Tuple[object, int]]" = OrderedDict()
+        self._budget = budget
+        self._used = 0
+        self._lock = threading.Lock()
+
+    def get(self, key):
+        with self._lock:
+            hit = self._items.get(key)
+            if hit is None:
+                return None
+            self._items.move_to_end(key)
+            return hit[0]
+
+    def put(self, key, value, size: int) -> None:
+        if size > self._budget:
+            return
+        with self._lock:
+            old = self._items.pop(key, None)
+            if old is not None:
+                self._used -= old[1]
+            self._items[key] = (value, size)
+            self._used += size
+            while self._used > self._budget:
+                _, (_, freed) = self._items.popitem(last=False)
+                self._used -= freed
+
+    def clear(self) -> None:
+        with self._lock:
+            self._items.clear()
+            self._used = 0
+
+
+def _bytes(image: Image.Image) -> int:
+    return image.width * image.height * len(image.getbands())
+
+
+#: Маски частей между мазками. Геометрия части от мазка к мазку та же, а маску
+#: каждый раз растеризовали заново.
+_MASKS = _Lru(96 * 1024 * 1024)
+#: Готовые окна слоёв (см. `_layer_keys`): мазок меняет обычно одну часть, и
+#: остальные слои из прошлой склейки годятся как есть.
+_WINDOWS = _Lru(256 * 1024 * 1024)
+#: Раскодированные основы: PNG 2048² раскрывается ~0.1 с на каждый мазок.
+_BASES = _Lru(96 * 1024 * 1024)
+
+
+def clear_caches() -> None:
+    """Забыть всё закэшированное (тесты и замеры)."""
+    for cache in (_MASKS, _WINDOWS, _BASES):
+        cache.clear()
+
+
+def _digest(*parts: object) -> str:
+    return hashlib.sha1(repr(parts).encode('utf-8')).hexdigest()
+
+
+def _file_id(path: Optional[str]) -> tuple:
+    """Файл по пути, времени правки и размеру: перезаписанный — уже другой."""
+    try:
+        info = os.stat(path) if path else None
+    except OSError:
+        info = None
+    return (path, info.st_mtime_ns, info.st_size) if info else (path, 0, 0)
+
+
+def _layer_sig(layer: Layer, polygons_key: str) -> str:
+    """Всё, от чего зависит слой, кроме того, что лежит под ним."""
+    own = tuple(getattr(layer, f.name) for f in fields(Layer)
+                if f.name != 'polygons')
+    return _digest(polygons_key, own, _file_id(layer.image))
+
+
+def _overlap(a: Tuple[int, int, int, int], b: Tuple[int, int, int, int]) -> bool:
+    return a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]
+
+
+def _layer_keys(layers: Sequence[Layer], ready, base_id: tuple) -> List[Optional[str]]:
+    """
+    Ключ готового окна каждого слоя.
+
+    Окно слоя зависит от него самого и от того, что под ним: от основы и от
+    более ранних слоёв, чьи окна с ним пересекаются. Ключ такого соседа входит
+    в ключ целиком — вместе с ЕГО соседями: «точный цвет» берёт среднее по всей
+    своей маске, и правка далёкого слоя могла дойти сюда через него.
+    """
+    keys: List[Optional[str]] = []
+    for i, prepared in enumerate(ready):
+        if prepared is None:
+            keys.append(None)
+            continue
+        window, poly_key = prepared[2], prepared[3]
+        under = [keys[j] for j in range(i)
+                 if ready[j] is not None and _overlap(ready[j][2], window)]
+        keys.append(_digest(base_id, _layer_sig(layers[i], poly_key), under))
+    return keys
+
+
 def _masks_for(layers: Sequence[Layer], size: Tuple[int, int]):
     """
-    Маска и место каждого слоя — ОДИН раз на всю анимацию.
+    Маска, место и ОКНО каждого слоя — один раз на всю анимацию.
 
-    Маска чисто геометрическая: от кадра она не зависит, а стоит дорого (0.08 с
-    на полутора тысячах треугольников при 2048×2048). Считать её в цикле кадров
-    значило подарить пять секунд на каждую перекраску шестидесяти четырёх
-    кадров — при том что результат каждый раз один и тот же.
+    Маска чисто геометрическая: от кадра она не зависит, а стоит дорого. Считать
+    её в цикле кадров значило подарить пять секунд на каждую перекраску
+    шестидесяти четырёх кадров — при том что результат каждый раз один и тот же.
+
+    Окно — габарит части с запасом под расширение краёв и под окантовку. Всё
+    дальнейшее (расширение, тонировка, вклейка, окантовка) считается только в
+    нём: часть занимает малую долю развёртки, а раньше каждый слой гонял через
+    себя весь холст 2048×2048 — по 0.1 с на часть на КАЖДЫЙ мазок. Результат
+    побайтово тот же: вне окна маска нулевая, а запаса хватает, чтобы ни
+    расширение, ни ужатие не дотянулись до его края.
+
+    Маски живут и между мазками (`_MASKS`): геометрия части та же, пока её
+    не перерезали.
+
+    Возвращает на слой (маска окна, место части на холсте, окно, ключ
+    треугольников) или None.
     """
     out = []
     width, height = size
+    grow = _bleed_for(size)
     for layer in layers:
         if not layer.polygons:
             out.append(None)
             continue
-        mask = _mask(layer.polygons, size)
-        box = mask.getbbox()
-        if box and layer.anchor:
+        poly_key = _digest(tuple(map(tuple, layer.polygons)))
+        pad = grow + round(max(size) * max(0.0, layer.edge)) + 2
+        cached = _MASKS.get((size, pad, poly_key))
+        if cached is None:
+            cached = _cut_mask(layer.polygons, size, grow, pad) or ()
+            _MASKS.put((size, pad, poly_key), cached,
+                       _bytes(cached[0]) if cached else 1)
+        if not cached:
+            out.append(None)                     # часть вне холста
+            continue
+        mask, box, window = cached
+        if layer.anchor:
             # Якорь задан в координатах развёртки, а v там растёт снизу — как и
             # в самой маске.
             u0, v0, u1, v1 = layer.anchor
             box = (int(u0 * width), int((1.0 - v1) * height),
                    int(u1 * width), int((1.0 - v0) * height))
-        out.append((mask, box) if box else None)   # None — часть вне холста
+        out.append((mask, box, window, poly_key))
     return out
 
 
+def _cut_mask(polygons: Iterable[UvTri], size: Tuple[int, int], grow: int, pad: int):
+    """Маска части в её окне: (маска, место на холсте, окно) или None."""
+    width, height = size
+    full = Image.new('L', size, 0)
+    draw = ImageDraw.Draw(full)
+    for tri in polygons:
+        draw.polygon([(u * width, (1.0 - v) * height) for u, v in tri], fill=255)
+    tight = full.getbbox()
+    if not tight:
+        return None
+    window = (max(0, tight[0] - pad), max(0, tight[1] - pad),
+              min(width, tight[2] + pad), min(height, tight[3] + pad))
+    mask = _spread(full.crop(window), grow, True)
+    inner = mask.getbbox()
+    box = (inner[0] + window[0], inner[1] + window[1],
+           inner[2] + window[0], inner[3] + window[1])
+    return mask, box, window
+
+
 def _compose_frame(base: Image.Image, layers: Sequence[Layer],
-                   ready, patches: Dict[str, Optional[Image.Image]]
+                   ready, patches: Dict[str, Optional[Image.Image]],
+                   keys: Optional[List[Optional[str]]] = None
                    ) -> Tuple[Image.Image, int]:
     """Один кадр склейки: база плюс все слои. Возвращает (картинка, сколько легло).
 
     ``patches`` — картинка каждого слоя НА ЭТОТ КАДР, по пути файла: одна
     гифка на двух частях декодируется один раз, а не дважды.
+
+    Каждый слой работает в своём окне (см. `_masks_for`) и вклеивается обратно.
+    Основа копируется: она общая на все кадры анимации.
+
+    ``keys`` — ключи готовых окон (`_layer_keys`): есть в кэше — окно берётся
+    оттуда, посчитанное туда кладётся.
     """
     size = base.size
+    base = base.copy()
     drawn = 0
-    for layer, prepared in zip(layers, ready):
+    for index, (layer, prepared) in enumerate(zip(layers, ready)):
         if prepared is None:
             continue
-        mask, box = prepared
+        mask, box, window, _poly = prepared
+        x0, y0 = window[0], window[1]
+        key = keys[index] if keys else None
+        done = _WINDOWS.get(key) if key else None
+        if done is not None:
+            base.paste(done, (x0, y0))
+            drawn += 1
+            continue
+        part = base.crop(window)
 
         if layer.image:
             patch = patches.get(layer.image)
@@ -592,11 +759,14 @@ def _compose_frame(base: Image.Image, layers: Sequence[Layer],
                 continue
             # Картинка ложится на место части: человек кладёт её «на ствол», а
             # не в угол развёртки. Как именно — решает настройка слоя.
+            # Место считаем в координатах ХОЛСТА и только потом переводим в
+            # окно: round() в Python банковский, и сдвиг на нечётное число
+            # пикселей до расчёта уводил картинку на пиксель от предпросмотра.
             patch, at = place_image(patch, box, layer.fit, layer.image_angle,
                                     layer.image_scale, layer.image_offset,
                                     layer.image_scale_y)
-            canvas = Image.new('RGBA', size, (0, 0, 0, 0))
-            canvas.paste(patch, at)
+            canvas = Image.new('RGBA', part.size, (0, 0, 0, 0))
+            canvas.paste(patch, (at[0] - x0, at[1] - y0))
             # Прозрачность картинки уважаем: иначе PNG с альфой затирал бы
             # часть чёрным вместо того, чтобы показать текстуру под собой.
             # Не портим общую маску: она одна на все кадры.
@@ -606,14 +776,16 @@ def _compose_frame(base: Image.Image, layers: Sequence[Layer],
             if not rgb:
                 continue
             canvas = _tinted(
-                base,
-                _paint_layer(size, box, rgb, _rgb(layer.color2 or ''),
+                part,
+                _paint_layer(part.size, (box[0] - x0, box[1] - y0,
+                                         box[2] - x0, box[3] - y0),
+                             rgb, _rgb(layer.color2 or ''),
                              layer.angle, layer.start, layer.end, layer.mid),
                 layer.strength, mask, layer.exact)
         else:
             continue
 
-        base = Image.composite(canvas, base, mask)
+        part = Image.composite(canvas, part, mask)
 
         # Окантовка — поверх слоя: она обводит саму часть, и картинка её
         # перекрывать не должна. Ширина в долях стороны, чтобы одна и та же
@@ -623,9 +795,12 @@ def _compose_frame(base: Image.Image, layers: Sequence[Layer],
             width = round(max(size) * layer.edge)
             if rim and width >= 1:
                 band = ImageChops.multiply(edge_band(mask, width), mask)
-                base = Image.composite(
-                    Image.new('RGBA', size, (*rim, 255)), base, band)
+                part = Image.composite(
+                    Image.new('RGBA', part.size, (*rim, 255)), part, band)
 
+        base.paste(part, (x0, y0))
+        if key:
+            _WINDOWS.put(key, part, _bytes(part))
         drawn += 1
     return base, drawn
 
@@ -666,18 +841,25 @@ def iter_frames(base_path: str, layers: Sequence[Layer],
     if not (base_path and os.path.isfile(base_path)):
         logger.warning(f"склейка частей: нет базовой текстуры {base_path!r}")
         return
-    try:
-        base = Image.open(base_path).convert('RGBA')
-    except OSError as exc:
-        logger.warning(f"склейка частей: {base_path} не читается: {exc}")
-        return
-    if size and max(base.size) > size:
-        k = size / max(base.size)
-        base = base.resize((max(1, round(base.size[0] * k)),
-                            max(1, round(base.size[1] * k))), Image.LANCZOS)
+    base_id = (_file_id(base_path), size)
+    base = _BASES.get(base_id)
+    if base is None:
+        try:
+            base = Image.open(base_path).convert('RGBA')
+        except OSError as exc:
+            logger.warning(f"склейка частей: {base_path} не читается: {exc}")
+            return
+        if size and max(base.size) > size:
+            k = size / max(base.size)
+            base = base.resize((max(1, round(base.size[0] * k)),
+                                max(1, round(base.size[1] * k))), Image.LANCZOS)
+        _BASES.put(base_id, base, _bytes(base))
 
     paths, count, longest = _plan(layers, frames)
     ready = _masks_for(layers, base.size)
+    # Готовые окна — только у неподвижной склейки: у анимации картинка слоя
+    # своя на каждый кадр, и ключ пришлось бы вести ещё и по кадру.
+    keys = _layer_keys(layers, ready, base_id) if count == 1 else None
     readers = {p: _read_frames(p) for p in paths}
     try:
         for index in range(count):
@@ -689,7 +871,7 @@ def iter_frames(base_path: str, layers: Sequence[Layer],
                 patches[path], took = next(reader)
                 if path == longest:
                     delay = took
-            frame, hits = _compose_frame(base, layers, ready, patches)
+            frame, hits = _compose_frame(base, layers, ready, patches, keys)
             if not hits:
                 return                    # первый кадр пуст — пусты и остальные
             yield frame, delay
@@ -734,7 +916,10 @@ def compose(base_path: str,
         for frame, delay in iter_frames(base_path, layers, frames):
             drawn += 1
             if count == 1:
-                frame.save(fp, 'PNG')
+                # Уровень 1, как у кадров APNG: склейку тут же читают вьювер и
+                # сборка, а умолчание Pillow (6) на 2048² — это 0.3 с из
+                # каждого мазка ради вдвое меньшего файла.
+                frame.save(fp, 'PNG', compress_level=1)
                 break
             if writer is None:
                 writer = _ApngWriter(fp, frame.size, count)

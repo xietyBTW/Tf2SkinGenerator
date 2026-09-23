@@ -105,11 +105,17 @@ class ViewmodelPreviewWorker(BaseWorker):
         custom_smd_path: str = "",
         custom_keep_materials: bool = False,
         team: str = "red",
+        decor_smd: str = "",
+        decor_prefix: str = "deco:",
         lang: str = 'en',
         parent=None,
     ):
         super().__init__(parent)
         self.weapon_key = weapon_key
+        #: Гирлянда поверх оружия (см. festive_decor). Текстуры ей даёт
+        #: вьювер своим слоем, здесь нужна только геометрия.
+        self.decor_smd = decor_smd or ""
+        self.decor_prefix = decor_prefix
         self.misc_vpk_path = misc_vpk_path
         self.textures_vpk_path = textures_vpk_path
         self.tf2_root = tf2_root
@@ -406,10 +412,14 @@ class ViewmodelPreviewWorker(BaseWorker):
                 weapon_merge_bones=merge_bones,
                 weapon_carrier_smd=carrier_smd,
                 carrier_extra_smds=carrier_extra,
+                decor_smd=self.decor_smd,
+                decor_prefix=self.decor_prefix,
                 weapon_extra_smds=weapon_extra,
                 arms_extra_smds=arms_extra,
                 arms_include_mats=self._arms_whitelist(arms_smd, arms_extra),
             ), carrier_dir
+        # ponytail: статичная ветка без гирлянды — продакшн-вызовов у неё нет
+        # (страница всегда просит анимированную), доучить, если появятся.
         return viewmodel_scene.build(
             os.path.join(self._preview_dir, "viewmodel.obj"),
             weapon_ref_smd=weapon_smd,
@@ -503,6 +513,10 @@ class ViewmodelPreviewWorker(BaseWorker):
         if screen:
             weapon_cd, arms_cd = weapon_cd + ['vgui'], arms_cd + ['vgui']
         weapon_names, arms_names = _scene_materials(scene)
+        # Гирлянда красится слоем вьювера: искать её `deco:`-имена в VPK
+        # бессмысленно, а положенная сюда текстура стала бы подложкой сцены.
+        from src.services.festive_decor import PREFIX
+        weapon_names = [n for n in weapon_names if not n.startswith(PREFIX)]
 
         textures: dict = {}
         hints: dict = {}

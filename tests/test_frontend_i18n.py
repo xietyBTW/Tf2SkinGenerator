@@ -22,7 +22,8 @@ ROOT = Path(__file__).resolve().parent.parent
 MOCKUP = ROOT / "frontend" / "mockup"
 
 #: Сообщения Python, которые доходят до человека подписью на странице.
-PY_SOURCES = ("src/app/api.py", "src/app/session.py",
+PY_SOURCES = ("src/app/api.py", "src/app/session.py", "src/app/parts_editor.py",
+              "src/app/particles_editor.py",
               "src/services/build_worker.py",
               # Ошибки импорта OBJ/GLB приходят человеку текстом как есть.
               "src/services/mesh_import_service.py",
@@ -56,6 +57,7 @@ NOT_SHOWN = {
     "каталог оружия для списка моделей не прочитан: {}",
     "режим без модели: {}",
     "мод из VPK: {}",
+    "гирлянда не собралась: {}/{}: {}",
     "своя модель: {} keep={} материалов={}",
     "призрак оригинала не показан: модель ещё не разобрана",
     "своя модель из работы не показана: {}",

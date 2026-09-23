@@ -9,7 +9,7 @@
 
 import unittest
 
-from src.app.session import _tree_nodes
+from src.app.particles_editor import tree_nodes as _tree_nodes
 
 
 class TreeNodesTests(unittest.TestCase):

@@ -343,12 +343,37 @@
 
             <!-- ── Нарезка ───────────────────────────────────────────────── -->
             <div class="parts__group" data-group="cut" hidden>
-              <!-- Развёртка режет вещи не так, как их видит человек: палец у неё
-                   нередко разложен на верх и низ. Кнопка появляется, только
-                   когда отмечено больше одного отрезка одного куска. -->
-              <button class="textbtn textbtn--sm" id="parts-join" hidden
-                      title="Свести отмеченные отрезки в одну часть">Объединить</button>
-              <label class="parts__strength">
+              <!-- Ножницы ВЫДЕЛЯЮТ, что станет отдельной частью, а «Отделить»
+                   делает её. Способ выделения — видимой кнопкой, не
+                   модификатором: жест Alt+колесо здесь уже проваливался. -->
+              <div class="parts__modes" id="cut-modes">
+                <button class="tag is-active" type="button" data-cut="detail"
+                        title="Щелчок берёт гладкую поверхность до острых рёбер">Деталь</button>
+                <button class="tag" type="button" data-cut="brush"
+                        title="Веди по модели — выделяется всё под кистью">Кисть</button>
+                <button class="tag" type="button" data-cut="island"
+                        title="Щелчок берёт остров развёртки целиком">Остров</button>
+              </div>
+              <label class="parts__strength" id="cut-angle-box"
+                     title="Меньше — деталь дробится на грани, больше — берётся крупнее">
+                Острота рёбер
+                <input type="range" id="cut-angle" min="5" max="80" value="30">
+              </label>
+              <label class="parts__strength" id="cut-radius-box" hidden>
+                Размер кисти
+                <input type="range" id="cut-radius" min="1" max="30" value="5">
+              </label>
+              <label class="check" id="cut-erase-box" hidden>
+                <input type="checkbox" id="cut-erase"><span>Стирать</span>
+              </label>
+              <div class="parts__cutacts">
+                <button class="textbtn textbtn--sm" type="button" id="cut-apply" disabled
+                        title="Выделенное — в отдельную часть (Enter)">Отделить</button>
+                <button class="textbtn textbtn--sm" type="button" id="cut-reset" disabled
+                        title="Снять выделение (Esc)">Сбросить</button>
+              </div>
+              <label class="parts__strength"
+                     title="Разрезать все куски по островам развёртки разом">
                 Дробление
                 <input type="range" id="part-detail" min="0" max="100" value="0">
               </label>
@@ -449,6 +474,14 @@
                   <path d="M2.5 8.5v5h5"/><path d="M13.5 2.5 6 10"/><path d="M9.5 2.5h4v4"/>
                 </svg>
               </button>
+              <!-- Гнуть — только у гирлянды: провод и лампочки тянутся мышью,
+                   колесо меняет радиус захвата. -->
+              <button class="ptools__btn" type="button" data-tool="bend" data-decor hidden
+                      title="Гнуть: тяните гирлянду мышью, колесо — радиус" aria-label="Гнуть">
+                <svg viewBox="0 0 16 16" aria-hidden="true">
+                  <path d="M2 12c3 0 3-8 6-8s3 8 6 8"/><circle cx="8" cy="4" r="1.5"/>
+                </svg>
+              </button>
 
               <span class="ptools__sep"></span>
 
@@ -456,6 +489,12 @@
                       title="Сбросить подгонку" aria-label="Сбросить">
                 <svg viewBox="0 0 16 16" aria-hidden="true">
                   <path d="M3 8a5 5 0 1 0 1.5-3.5"/><path d="M4.5 1.5v3h3"/>
+                </svg>
+              </button>
+              <button class="ptools__btn" type="button" id="fit-straighten" data-decor hidden
+                      title="Выпрямить: убрать все изгибы гирлянды" aria-label="Выпрямить">
+                <svg viewBox="0 0 16 16" aria-hidden="true">
+                  <path d="M2 8h12"/><path d="M4 5 2 8l2 3M12 5l2 3-2 3"/>
                 </svg>
               </button>
               <button class="ptools__btn" type="button" id="fit-done"
@@ -471,6 +510,11 @@
                ствола). Правятся и руками — точные 90° мышью не поймать. -->
           <div class="ptools__opts">
             <span class="label ptools__title">Подгонка</span>
+            <label class="parts__strength" id="fit-radius-box" hidden
+                   title="Радиус захвата: всё внутри тянется следом. Колесо мыши в кадре — тоже">
+              Радиус
+              <input class="input input--num" id="fit-radius" type="number" step="0.5" min="0.3" value="4">
+            </label>
             <label class="parts__strength">
               Масштаб
               <input class="input input--num" id="fit-scale" type="number" step="0.1" min="0.001" value="1">
@@ -562,6 +606,14 @@
              посмотреть. Ряды строит applyView по ответу Python. -->
         <div class="styles" id="bodybar" hidden
              title="Состояние модели: игра переключает его сама, здесь можно посмотреть каждое"></div>
+        <!-- Праздничная версия: гирлянда, которую игра вешает на ЭТО оружие
+             (праздничный предмет или фестивайзер). Её можно перекрасить и
+             подогнать — в мод она идёт своей моделью, другие оружия не
+             задевает. Кнопки по ответу Python: у каждого оружия свой набор. -->
+        <div class="styles" id="festivebar" hidden
+             title="Гирлянда, которую игра вешает на это оружие. Её правки уходят в мод отдельной моделью и не задевают другие оружия">
+          <span class="label label--inline">Версия</span>
+        </div>
         <!-- Классы мультиклассовой шапки: у каждого своя модель, и собирать
              все девять ради одного незачем. -->
         <div class="styles" id="hatclasses" hidden
@@ -1244,6 +1296,10 @@
   <p class="console__note" id="lognote" hidden></p>
 </aside>
 
-<script type="module" src="app.js"></script>
+<!-- Не догрузился модуль — не работает ВСЁ: пустой каталог без единого вызова
+     в Python. Сервер локальный, сбой разовый (обрыв соединения на старте),
+     поэтому пробуем ещё пару раз, а упавший код хотя бы называем. -->
+<script>addEventListener('error',function(e){var n=document.getElementById('cat-note');if(n&&!window.__booted){n.hidden=false;n.textContent='JS: '+e.message}})</script>
+<script type="module" src="app.js" onerror="try{var n=+sessionStorage.getItem('bootTries')||0;if(n<3){sessionStorage.setItem('bootTries',n+1);location.reload()}}catch(e){}"></script>
 </body>
 </html>
