@@ -44,6 +44,8 @@ export const els = {
   fClass:document.getElementById('f-class'),
   fHat:  document.getElementById('f-hat'),
   fRegion: document.getElementById('f-region'),
+  fCollection: document.getElementById('f-collection'),
+  collection: document.getElementById('collection'),
   fSource: document.getElementById('f-source'),
   fType: document.getElementById('f-type'),
   catLabel: document.getElementById('catlabel'),
@@ -52,7 +54,8 @@ export const els = {
 };
 
 export const sel = { section: 'weapons', category: 'weapon', cls: null,
-              type: null, region: null, mode: 'normal', query: '' };
+              type: null, region: null, collection: null, mode: 'normal',
+              query: '' };
 
 /** Рисует ряд фильтров; null-кнопка «Все» снимает ограничение. */
 export function fillFilters(row, list, chosen, onPick) {
@@ -191,7 +194,10 @@ export function makePick(item, onPick) {
       const mark = document.createElement('i');
       mark.className = 'pick__styles';
       mark.textContent = styles + ' ' + plural(styles, 'стиль', 'стиля', 'стилей');
-      b.querySelector('.pick__box').appendChild(mark);
+      // На самой карточке, а не в обложке: в прибитой панели обложка — метка
+      // в 26 px, и пометка ложилась поверх картинки и имени. Где ей стоять в
+      // каждом режиме, решает CSS.
+      b.appendChild(mark);
     }
     b.addEventListener('click', onPick);
     return b;
@@ -438,7 +444,7 @@ export async function reload() {
   }, 250);
   const hats = sel.section === 'hats'
     ? await api.hats({ query: sel.query || '', tf2_class: sel.cls,
-                       region: sel.region })
+                       region: sel.region, collection: sel.collection })
     : null;
   const list = hats ? hats.items
     // Поиск работает во всех разделах, а не только у косметики: поле над
@@ -455,6 +461,7 @@ export async function reload() {
       regions.push({ key: sel.region, name: sel.region, count: 0 });
     }
     fillFilters(els.fRegion, regions, sel.region, pickRegion);
+    fillCollections(hats.collections);
   }
 
   // Кастомный мод: предмет здесь — файл на диске. Список берётся не из
@@ -494,6 +501,27 @@ function maybe(words) {
   });
   return out;
 }
+
+/** Выпадающий список коллекций. Выбранная остаётся, даже если под текущим
+ *  запросом в ней пусто, — как и у «Куда»: иначе её не снять. */
+function fillCollections(list) {
+  const items = list.slice();
+  if (sel.collection && !items.some((c) => c.key === sel.collection)) {
+    items.push({ key: sel.collection, name: sel.collection, count: 0 });
+  }
+  els.collection.innerHTML = '';
+  els.collection.append(new Option('Все коллекции', ''));
+  for (const c of items) {
+    els.collection.append(new Option(`${c.name} (${c.count})`, c.key));
+  }
+  els.collection.value = sel.collection || '';
+  els.fCollection.hidden = items.length === 0;
+}
+
+els.collection.addEventListener('change', async () => {
+  sel.collection = els.collection.value || null;
+  await reload();
+});
 
 export async function pickRegion(key) {
   sel.region = key;
@@ -592,6 +620,7 @@ export async function pickSection(name) {
   els.cat.parentElement.parentElement.hidden = это_шапки;   // категорию прячем
   els.fType.hidden = true;
   els.fRegion.hidden = !это_шапки;
+  els.fCollection.hidden = !это_шапки;
   els.fSource.hidden = !это_частицы;
   els.fClass.hidden = это_частицы;
   els.fHat.hidden = !это_шапки;
@@ -635,6 +664,7 @@ export async function pickSection(name) {
     sel.category = 'hat';
     sel.cls = null;
     sel.region = null;
+    sel.collection = null;
     fillFilters(els.fClass, await api.classes(), null, pickClass);
     els.fClass.hidden = false;
     await fillHatFilters();
@@ -693,13 +723,22 @@ export async function pickCategory(key) {
  * приложения — то же, что видит панель шапок в окне.
  */
 export async function fillHatFilters() {
-  els.fHat.querySelectorAll('.tag').forEach((b) => b.remove());
+  els.fHat.querySelectorAll('.underlined').forEach((b) => b.remove());
   for (const f of await api.hatFilters()) {
     const b = document.createElement('button');
-    b.className = 'tag' + (f.hidden ? ' is-active' : '');
+    // Тот же вид, что у «Класс» и «Куда»: залитые плашки в прибитой узкой
+    // колонке не помещались в строку и рвались столбиком.
+    b.className = 'underlined' + (f.hidden ? ' is-active' : '');
     // Имя короткое, подсказка полная: обрезать здесь по «Скрыть » значило бы
     // держать в разметке правило одного языка.
     b.textContent = f.name;
+    // Сколько кнопка прячет — так же, как число у фасета «Куда».
+    if (f.count) {
+      const n = document.createElement('i');
+      n.className = 'underlined__n mono';
+      n.textContent = f.count;
+      b.append(n);
+    }
     b.title = f.tip || f.name;
     b.addEventListener('click', async () => {
       const state = await api.setHatFilter(f.key, !b.classList.contains('is-active'));

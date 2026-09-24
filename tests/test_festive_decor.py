@@ -469,5 +469,125 @@ class BlinkTests(unittest.TestCase):
                          ["own.png"])
 
 
+STOCK = """version 1
+nodes
+  0 "weapon_bone" -1
+  1 "lights" 0
+end
+skeleton
+time 0
+  0 0 0 0 0 0 0
+  1 0 0 0 0 0 0
+end
+triangles
+festive_lights_red
+  1 0 0 0 0 0 1 0 0
+  1 1 0 0 0 0 1 1 0
+  1 0 1 0 0 0 1 1 1
+end
+"""
+
+OWN = """version 1
+nodes
+  0 "root" -1
+end
+skeleton
+time 0
+  0 0 0 0 0 0 0
+end
+triangles
+My.Wire
+  0 5 0 0 0 0 1 0 0
+  0 6 0 0 0 0 1 1 0
+  0 5 1 0 0 0 1 1 1
+end
+"""
+
+
+class OwnGarlandTests(unittest.TestCase):
+    """Своя модель гирлянды: скелет стоковой, материалы свои, хранится в работе."""
+
+    def setUp(self):
+        self._tmp = TemporaryDirectory()
+        self.dir = Path(self._tmp.name)
+        (self.dir / "stock.smd").write_text(STOCK, encoding="utf-8")
+        (self.dir / "own.smd").write_text(OWN, encoding="utf-8")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_own_mesh_sits_on_stock_skeleton(self):
+        from src.services import festive_decor as fd
+        out = fd.own_on_stock(str(self.dir / "own.smd"), str(self.dir / "stock.smd"),
+                              str(self.dir / "out.smd"))
+        text = Path(out).read_text(encoding="utf-8")
+        self.assertIn('"lights"', text)                 # кости стоковые
+        self.assertIn("my_wire", text)                  # материал свой, как в studiomdl
+        self.assertNotIn("festive_lights_red", text)    # треугольники только свои
+        # Кость `root` в стоковой не нашлась — вершины на главной кости.
+        rows = [ln.split() for ln in text.splitlines() if ln.startswith("  0 5")]
+        self.assertTrue(rows and all(r[0] == "0" for r in rows))
+
+    def test_kept_in_edits_and_work_files(self):
+        from src.domain.preview.session import PreviewSession
+        from src.services import work_store
+        s = PreviewSession()
+        s.decor_models = {"xmas": str(self.dir / "own.smd")}
+        self.assertTrue(s.has_user_edits())
+        edits = work_store._own_paths(s.user_edits(), self.dir / "files")
+        own = edits["decor_models"]["xmas"]
+        self.assertEqual(Path(own).parent, self.dir / "files")
+        back = PreviewSession()
+        back.apply_user_edits(edits)
+        self.assertEqual(back.decor_models, {"xmas": own})
+        Path(own).unlink()
+        self.assertEqual(work_store._prune(dict(edits))["decor_models"], {})
+        back.forget_user_edits()
+        self.assertEqual(back.decor_models, {})
+
+    def test_obj_becomes_smd_with_its_textures(self):
+        from src.app.session import _garland_smd
+        (self.dir / "g.png").write_bytes(b"x")
+        (self.dir / "g.mtl").write_text("newmtl Bulb\nmap_Kd g.png\n", encoding="utf-8")
+        (self.dir / "g.obj").write_text(
+            "mtllib g.mtl\nv 0 0 0\nv 1 0 0\nv 0 1 0\nvt 0 0\nvt 1 0\nvt 0 1\n"
+            "usemtl Bulb\nf 1/1 2/2 3/3\n", encoding="utf-8")
+        smd, textures = _garland_smd(str(self.dir / "g.obj"))
+        self.assertTrue(smd.endswith(".smd") and Path(smd).is_file())
+        self.assertEqual(list(textures.values()), [str(self.dir / "g.png")])
+        # Свой SMD — копией: загрузки лежат под постоянным именем.
+        copy, none = _garland_smd(str(self.dir / "own.smd"))
+        self.assertNotEqual(Path(copy).parent, self.dir)
+        self.assertEqual((Path(copy).read_text(encoding="utf-8"), none), (OWN, {}))
+
+    def test_unreadable_smd_is_refused(self):
+        from src.app.session import _garland_smd
+        from src.services.mesh_import_service import MeshImportError
+        (self.dir / "bad.smd").write_bytes(bytes([0xFF, 0xFE]) + b" junk")
+        with self.assertRaises(MeshImportError):
+            _garland_smd(str(self.dir / "bad.smd"))
+
+    def test_new_model_forgets_old_look_of_that_kind_only(self):
+        from src.domain.preview.session import PreviewSession
+        s = PreviewSession()
+        png = str(self.dir / "a.png")
+        Path(png).write_bytes(b"x")
+        mine, other = "deco:xmas/lights", "deco:festivizer/lights"
+        for card in (mine, other):
+            s.textures.set_texture(card, png)
+            s.part_colors[card] = {0: {"color": "#ff0000"}}
+            s.part_regions[card] = [[1, 2]]
+            s.part_bases[f"{card}@style1"] = ""
+        s.decor_bends = {"xmas": [{"c": [0, 0, 0], "r": 1, "d": [0, 0, 1]}]}
+        s.decor_fit = {"xmas": {"scale": 2}}
+        s.forget_decor_look("xmas")
+        self.assertEqual(set(s.textures.decor_uploads()), {other})
+        self.assertEqual(set(s.part_colors), {other})
+        self.assertEqual(set(s.part_regions), {other})
+        self.assertEqual(set(s.part_bases), {f"{other}@style1"})
+        self.assertEqual(s.decor_bends, {})
+        self.assertEqual(s.decor_fit, {"xmas": {"scale": 2}})     # место на оружии остаётся
+
+
 if __name__ == "__main__":
     unittest.main()

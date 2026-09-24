@@ -27,6 +27,7 @@ ITEMS_GAME = '''
 \t\t{
 \t\t\t"name"\t"The Test Riff"
 \t\t\t"item_name"\t"#TF_TestRiff"
+\t\t\t"prefab"\t"no_craft taunt"
 \t\t\t"image_inventory"\t"backpack\\workshop\\taunts\\riff"
 \t\t\t"model_player_per_class"
 \t\t\t{
@@ -56,6 +57,18 @@ ITEMS_GAME = '''
 \t\t"3"
 \t\t{
 \t\t\t"item_name"\t"#TF_JustAHat"
+\t\t}
+\t\t"4"
+\t\t{
+\t\t\t"item_slot"\t"secondary"
+\t\t\t"image_inventory"\t"backpack/weapons/rocketpack"
+\t\t\t"taunt"
+\t\t\t{
+\t\t\t\t"custom_taunt_prop_per_class"
+\t\t\t\t{
+\t\t\t\t\t"pyro"\t"models/taunts/matchbox.mdl"
+\t\t\t\t}
+\t\t\t}
 \t\t}
 \t}
 }
@@ -87,7 +100,7 @@ class LoadTests(unittest.TestCase):
 
     def test_only_items_with_a_prop_get_in(self):
         """У шапки блока насмешки нет — ей в этом списке не место."""
-        self.assertEqual(sorted(self._load()), ['riff', 'solo'])
+        self.assertEqual(sorted(self._load()), ['matchbox', 'riff', 'solo'])
 
     def test_key_and_path_come_from_the_scouts_model(self):
         """У всеклассовой насмешки девять моделей, разница только в размере.
@@ -113,6 +126,10 @@ class LoadTests(unittest.TestCase):
     def test_icon_path_is_normalized(self):
         self.assertEqual(self._load()['riff']['icon'],
                          'backpack/workshop/taunts/riff')
+
+    def test_weapon_taunt_prop_does_not_take_the_weapon_icon(self):
+        """Коробок Thermal Thruster: иконка предмета рисует ранец, не коробок."""
+        self.assertEqual(self._load()['matchbox']['icon'], '')
 
 
 class MergeTests(unittest.TestCase):

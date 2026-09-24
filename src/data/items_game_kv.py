@@ -66,8 +66,12 @@ def skip_to_close_brace(content: str, pos: int) -> int:
 
 
 def flat_value(block: str, key: str) -> Optional[str]:
-    """Значение "key" "value" (не вложенное) из блока."""
-    m = re.search(rf'"{re.escape(key)}"\s+"([^"]*)"', block, re.IGNORECASE)
+    """Значение "key" "value" (не вложенное) из блока.
+
+    Пробела между ключом и значением может и не быть: у Valve бывает слитно
+    (`"item_type_name""#TF_Wearable_Hat"` — 34 раза в items_game).
+    """
+    m = re.search(rf'"{re.escape(key)}"\s*"([^"]*)"', block, re.IGNORECASE)
     return m.group(1) if m else None
 
 

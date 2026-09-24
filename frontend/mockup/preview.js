@@ -340,7 +340,11 @@ export function wearCard(name) {
  * (PreviewTextureState.resolve_card). Здесь только раздача: альбом, вьювер и
  * видимость кнопок команд.
  */
+//: Последнее состояние показа: кнопкам модели нужно знать, что есть.
+export let lastView = null;
+
 export function applyView(st) {
+  lastView = st;
   // До перерисовки альбома: showMaterials пересобирает его и синхронизирует на
   // первую карточку, а та сразу надевается на меш (wearCard из album.js).
   cardMesh = st.card_mesh || [];
@@ -449,18 +453,17 @@ export function applyView(st) {
   showBodygroups(st.bodygroups || []);
   showFestive(st);
 
-  // «Убрать свою модель» — только когда своя геометрия и правда стоит.
-  // Без неё замена была билетом в один конец: вернуть игровую можно было
-  // только выбрав предмет заново.
-  document.getElementById('dropmodel').hidden = !st.has_custom;
+  // «Убрать свою модель» — только когда своя геометрия (оружия или
+  // гирлянды) и правда стоит. Без неё замена была билетом в один конец.
+  document.getElementById('dropmodel').hidden =
+    !(st.has_custom || (st.decor_models || []).length);
   // Подгонка — только у импортированной модели и только в кадре предмета:
   // на руках и в насмешке призрака нет.
   showFit(work.dataset.scene === 'item' ? st.custom_fit : null);
   // Гирлянда: её подгонка и свои картинки идут вьюверу отдельно от
   // раздачи текстур предмета — её меши он красит своим слоем.
   showDecorFit(st.decor_fit || null, Boolean(st.festive) && work.dataset.scene === 'item'
-                                     && Boolean(st.has_custom || st.decor_fit
-                                                || (st.decor_bends || []).length));
+                                     && decorFittable(st));
   showDecorBends(st.decor_bends || []);
   withViewer((w) => w.setDecorOverrides && w.setDecorOverrides(Object.fromEntries(
     Object.entries(st.decor_textures || {}).map(([mesh, teams]) => [mesh, {
@@ -556,6 +559,10 @@ function showBodygroups(groups) {
 }
 
 //: Подписи видов гирлянды. Ключи задаёт Python (festive_decor / items_game).
+/** Гирлянду есть что подгонять: своя модель (оружия или её самой) или уже правлена. */
+const decorFittable = (st) => Boolean(st.has_custom || st.decor_fit
+  || (st.decor_bends || []).length || (st.decor_models || []).includes(st.festive));
+
 const FESTIVE_LABELS = { '': 'Обычная', xmas: 'Праздничная', festivizer: 'Фестивайзер' };
 
 /**
@@ -605,8 +612,7 @@ function showFestive(st) {
   // Только при своей модели: на стоковой гирлянда уже стоит на месте. Уже
   // сделанную подгонку оставляем доступной и без неё — иначе, убрав свою
   // модель, сдвинутую гирлянду было бы не вернуть, и она ушла бы в мод.
-  if (st.festive && scene === 'item'
-      && (st.has_custom || st.decor_fit || (st.decor_bends || []).length)) {
+  if (st.festive && scene === 'item' && decorFittable(st)) {
     const fit = document.createElement('button');
     fit.className = 'tag festive__fit' + (isDecorFitOn() ? ' is-active' : '');
     fit.textContent = 'Подогнать гирлянду';

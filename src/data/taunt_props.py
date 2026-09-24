@@ -54,7 +54,9 @@ TAUNT_PROPS: Dict[str, dict] = {
         "mdl_path": "models/player/items/taunts/cash_wad.mdl",
     },
     "matchbox": {
-        "ru": "Спичечный коробок", "en": "Matchbox",
+        # Реквизит насмешки ОРУЖИЯ (Gas Blast у Thermal Thruster), своего
+        # предмета и иконки у него нет — без подсказки непонятно, откуда он.
+        "ru": "Спичечный коробок (Термическая тяга)", "en": "Matchbox (Thermal Thruster)",
         "mdl_path": "models/player/items/taunts/matchbox/matchbox.mdl",
     },
     "demo_nuke_bottle": {
@@ -104,6 +106,8 @@ TAUNT_PROPS: Dict[str, dict] = {
     "taunt_killer_joke_scout": {
         "ru": "Killer Joke", "en": "Killer Joke",
         "mdl_path": "models/workshop/player/items/all_class/taunt_killer_joke/taunt_killer_joke_scout.mdl",
+        # items_game знает только реквизит-барабаны, и иконка по ключу не находилась.
+        "icon": "backpack/workshop/player/items/all_class/taunt_killer_joke/taunt_killer_joke",
     },
     "taunt_the_final_score_scout": {
         "ru": "The Final Score", "en": "The Final Score",

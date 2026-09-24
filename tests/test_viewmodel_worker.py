@@ -94,13 +94,14 @@ def _run(worker, *, sequence=SEQUENCE, scene=SCENE, animated=ANIMATED,
     recorder = _Recorder(worker)
     recorder.asked = {}
 
-    def _find(slot, action, replacement=None):
-        recorder.asked.update(slot=slot, action=action, replacement=replacement)
+    def _find(slot, action, replacement=None, inspect_slot=""):
+        recorder.asked.update(slot=slot, action=action, replacement=replacement,
+                              inspect_slot=inspect_slot)
         return sequence
 
     catalog = SimpleNamespace(
         find=_find,
-        actions_for=lambda _slot, _rep=None: dict.fromkeys(catalog_actions))
+        actions_for=lambda _slot, _rep=None, _insp="": dict.fromkeys(catalog_actions))
     with patch.object(vw, "GameVpkReader", lambda *_a: SimpleNamespace(close=lambda: None)), \
          patch.object(vw.mds, "ensure_decompiled", decompile), \
          patch.object(vw.anim_catalog, "load", lambda _d: catalog), \
@@ -285,7 +286,7 @@ def test_activity_replacement_reaches_the_catalog():
     обычного ножа-бабочки.
     """
     kunai = {"ACT_VM_IDLE": "ACT_ITEM2_VM_IDLE"}
-    info = SimpleNamespace(slot="melee", replacement=kunai)
+    info = SimpleNamespace(slot="melee", item_slot="melee", replacement=kunai)
     with patch.object(vw.viewmodel_anims, "anim_info", lambda *_a: info):
         rec = _run(_worker("c_shogun_kunai"))
     assert rec.asked["replacement"] == kunai

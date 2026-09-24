@@ -25,7 +25,7 @@ from typing import Any, Dict, List, Optional
 from src.domain.preview import part_specs
 from src.domain.preview.mode import PreviewState
 from src.domain.preview.texture_state import (
-    SINGLE_TEX_KEY, PreviewTextureState, is_decor,
+    DECOR_PREFIX, SINGLE_TEX_KEY, PreviewTextureState, is_decor,
 )
 from src.shared.constants import Team
 
@@ -50,7 +50,7 @@ EDIT_FIELDS = (
     'custom_smd_path', 'custom_qc_text', 'custom_source_path',
     # Подгонка и изгибы гирлянды под свою модель: своя форма гирлянды —
     # такая же правка, как своя геометрия предмета.
-    'decor_fit', 'decor_bends',
+    'decor_fit', 'decor_bends', 'decor_models',
 )
 
 
@@ -105,6 +105,9 @@ class PreviewSession:
     #: Изгибы гирлянд: {вид: [{c, r, d}, …]} в осях SMD гирлянды, по порядку
     #: (см. festive_decor.apply_bends). Провод обматывают вокруг своей модели.
     decor_bends: Dict[str, List[dict]] = field(default_factory=dict)
+    #: Свои модели гирлянд: {вид: SMD}. Кости и QC остаются стоковые (см.
+    #: festive_decor.build), материалы — свои.
+    decor_models: Dict[str, str] = field(default_factory=dict)
     #: Карточки показанной гирлянды (`deco:<вид>/<материал>`). Пусто — гирлянда
     #: выключена: её правки остаются в работе, но в альбоме их не видно.
     decor_cards: List[str] = field(default_factory=list)
@@ -618,6 +621,7 @@ class PreviewSession:
             'decor_fit': {kind: dict(fit) for kind, fit in self.decor_fit.items()},
             'decor_bends': {kind: [dict(b) for b in bends]
                             for kind, bends in self.decor_bends.items() if bends},
+            'decor_models': dict(self.decor_models),
         }
 
     def has_user_edits(self) -> bool:
@@ -693,6 +697,8 @@ class PreviewSession:
                           in (edits.get('decor_fit') or {}).items() if fit}
         self.decor_bends = {str(kind): [dict(b) for b in bends] for kind, bends
                             in (edits.get('decor_bends') or {}).items() if bends}
+        self.decor_models = {str(kind): str(smd) for kind, smd
+                             in (edits.get('decor_models') or {}).items() if smd}
 
     def forget_user_edits(self) -> None:
         """Сброс правок предмета — «начать с чистого» без смены предмета."""
@@ -715,6 +721,7 @@ class PreviewSession:
         self.custom_qc_text = None
         self.decor_fit = {}
         self.decor_bends = {}
+        self.decor_models = {}
 
     # ═══════════════════════════════════════════════════════════════════════ #
     # Частичные сбросы (у каждого есть своя половина в виджетах панели)
@@ -729,6 +736,20 @@ class PreviewSession:
         """Забывает, что заменял прошлый мод."""
         self.custom_vpk_weapon = None
         self.custom_vpk_smd = None
+
+    def forget_decor_look(self, kind: str) -> None:
+        """Правки гирлянды вида `kind`, привязанные к её геометрии: краска,
+        части и изгибы. Зовётся при смене её модели — у новой треугольники и
+        материалы другие. Подгонка остаётся: она про место на оружии."""
+        prefix = f"{DECOR_PREFIX}{kind}/"
+        for team in self.textures.textures.values():
+            for card in [c for c in team if c.startswith(prefix)]:
+                del team[card]
+        for store in (self.part_textures, self.part_colors, self.part_bases,
+                      self.part_regions, self.part_cuts):
+            for key in [k for k in store if str(k).startswith(prefix)]:
+                del store[key]
+        self.decor_bends.pop(kind, None)
 
     def reset_custom_model(self) -> None:
         """Забывает подставленную пользователем геометрию."""
@@ -813,6 +834,7 @@ class PreviewSession:
         # Гирлянда — у каждого оружия своя.
         self.decor_fit = {}
         self.decor_bends = {}
+        self.decor_models = {}
         self.decor_cards = []
         self.textures.decor_stock = {}
         self.per_mesh_active = False
@@ -852,7 +874,9 @@ class PreviewSession:
         was_custom = self.has_custom_model
 
         # Уходим со СВОЕЙ геометрии: номера частей и треугольников были её.
-        if was_custom:
+        # Именно геометрия, а не `has_custom_model`: тот верен и у оружия со
+        # стилями (skin_info), и покраска стиралась при каждом его открытии.
+        if self.custom_smd_path:
             self.forget_parts_layout()
         self.reset_skins()
         self.reset_custom_model()

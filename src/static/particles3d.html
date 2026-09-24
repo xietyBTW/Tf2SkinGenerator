@@ -171,7 +171,25 @@ const controls = new OrbitControls(camera, renderer.domElement);
 controls.target.set(0, 0, 40);
 controls.enableDamping = true;
 controls.dampingFactor = 0.08;
+// Без предела колесо уводило камеру на миллионы юнитов — за дальнюю
+// плоскость (20000), и сцена просто исчезала. Самые большие эффекты (небо,
+// эмбиент карты) — несколько тысяч юнитов, им хватает.
+controls.maxDistance = 8000;
 controls.update();
+controls.saveState();   // «дом» камеры для returnIfLost
+
+//: Дальше этого считаем, что человек улетел: центр обзора ушёл за край
+//: сетки (она 512 юнитов) или камера отъехала так, что эффект — точка.
+const LOST_TARGET = 400;
+const LOST_DISTANCE = 2000;
+
+/** Вернуть камеру домой, если её увели далеко. Ближний ракурс не трогаем:
+ *  его выбирали нарочно, чтобы сравнить эффекты с одной точки. */
+function returnIfLost() {
+  const far = controls.target.distanceTo(controls.target0) > LOST_TARGET
+    || camera.position.distanceTo(controls.target) > LOST_DISTANCE;
+  if (far) controls.reset();
+}
 
 const grid = new THREE.GridHelper(512, 16, 0x333333, 0x262626);
 grid.rotation.x = Math.PI / 2;   // XZ → XY (пол Source)
@@ -1355,6 +1373,9 @@ window.setRootSystem = function(name) {
     const def = systemsJson[name];
     if (!def) { window.showError(I18N[lang].error_load + ': ' + name); return; }
     disposeBatches();
+    // Только при СМЕНЕ эффекта: правка атрибута тоже приходит сюда, и
+    // камера не должна прыгать, пока человек крутит ползунок.
+    if (name !== currentRootName) returnIfLost();
     rootInstance = new ParticleSystemInstance(def, systemsJson, materialsJson, controller);
     currentRootName = name;
     rebuildGizmo(def);
@@ -1660,6 +1681,8 @@ function drawFrame(dt) {
 }
 
 window.particleDebugRender = () => drawFrame(0);
+window.particleDebugCamera = () => ({ pos: camera.position.toArray(),
+                                      target: controls.target.toArray() });
 window.showPrompt();
 animate();
 

@@ -192,13 +192,15 @@ class BonemergeTests(unittest.TestCase):
         # висеть на своём bind-смещении от корня.
         self.assertEqual(_at(mats, 1, (0, 0, 5)), (-17.0, 0.0, 0.0))
 
-    def test_without_a_list_a_bone_that_flew_away_is_left_alone(self):
-        """Обратный случай: одноимённая кость принадлежит ДРУГОМУ оружию.
+    def test_without_a_list_a_bone_that_flew_away_follows_too(self):
+        """Кость, унесённая далеко от оружия, — не чужая: так прячут патроны.
 
-        Скелет модели анимаций один на весь класс, и в кадре `idle` шпиона
-        `weapon_bone_4` уезжает на 58 единиц от `weapon_bone` при собственных
-        3.9 — это кость не револьвера. Пока сливалось всё подряд, Карающий и
-        праздничный револьвер разлетались по всему кадру.
+        В `idle` шпиона `weapon_bone_4` (патроны револьвера, 528 вершин) стоит
+        в 58 единицах от `weapon_bone`, у Shortstop патроны — в 110. К оружию
+        они возвращаются только в перезарядке. Движок сливает ВСЕ одноимённые
+        кости (`CBoneMergeCache::UpdateCache`), и в игре патронов в idle не
+        видно. Пока такие кости оставлялись на bind-месте, патроны торчали из
+        оружия всё время.
         """
         weapon = self.dir / "c_snub_nose_reference.smd"
         weapon.write_text(_smd([
@@ -218,14 +220,12 @@ class BonemergeTests(unittest.TestCase):
 
         mats = viewmodel_pose.bonemerge_skinning(str(weapon), pose)
         self.assertEqual(_at(mats, 0, (0, 0, 0)), (-12.0, 0.0, 0.0))
-        # Деталь осталась на своём смещении от корня оружия, а не улетела.
-        self.assertEqual(_at(mats, 1, (0, 0, 5)), (-12.0, 0.0, 5.0))
+        # Деталь ушла туда, куда её унесла анимация.
+        self.assertEqual(_at(mats, 1, (0, 0, 5)), (-50.0, 0.0, 0.0))
 
-    def test_bone_is_judged_on_every_frame_it_is_shown(self):
-        """Кость может стоять на месте в первом кадре и улететь в середине.
-
-        У Ответного удара патрон в `reload_loop` именно так себя и вёл, и
-        отбор по одному кадру растягивал модель с 39 единиц до 206.
+    def test_bone_that_flies_off_mid_animation_is_still_merged(self):
+        """Патрон на месте в первом кадре и улетает в середине (Ответный удар,
+        `reload_loop`) — это выброс гильзы, и кость по-прежнему ведёт анимация.
         """
         weapon = self.dir / "c_reserve_shooter_reference.smd"
         weapon.write_text(_smd([
@@ -246,11 +246,9 @@ class BonemergeTests(unittest.TestCase):
 
         first = viewmodel_pose.load_rig(str(anim), 0)
         second = viewmodel_pose.load_rig(str(anim), 1)
-        self.assertIn("weapon_bone_1",
-                      viewmodel_pose.merged_bone_names(str(weapon), first))
         self.assertEqual(
             viewmodel_pose.merged_bone_names(str(weapon), [first, second]),
-            ["weapon_bone"])
+            ["weapon_bone", "weapon_bone_1"])
 
     def test_a_second_grip_above_the_anchor_still_merges(self):
         """У медигана `weapon_bone_L` — левая рука, и он КОРЕНЬ скелета.

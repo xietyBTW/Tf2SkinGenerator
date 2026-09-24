@@ -68,6 +68,9 @@ class Decor:
     #: {меш: [жёсткая группа каждой вершины OBJ]} — для изгиба во вьювере
     #: (см. rigid_groups): лампочки двигаются целиком, провод гнётся.
     groups: Dict[str, List[int]] = field(default_factory=dict)
+    #: Своя модель гирлянды, из которой собрана эта (пусто — стоковая): по
+    #: ней кэш показа отличает старую сборку от новой.
+    source: str = ''
 
     @property
     def has_team(self) -> bool:
@@ -92,8 +95,13 @@ def kinds(weapon_key: str, tf2_root: str) -> Dict[str, str]:
 
 def build(weapon_key: str, kind: str, misc_vpk: str, textures_vpk: str,
           tf2_root: str, cancelled: Optional[Callable[[], bool]] = None,
-          on_progress: Optional[Callable] = None) -> Optional[Decor]:
+          on_progress: Optional[Callable] = None,
+          custom_smd: str = '') -> Optional[Decor]:
     """Достаёт гирлянду и готовит её к показу. None — гирлянды нет.
+
+    `custom_smd` — своя модель гирлянды: её треугольники садятся на скелет
+    стоковой (кости по имени, остальное — на главную), QC остаётся стоковым.
+    Материалы — свои; у каких в игре нет текстуры, те серые до покраски.
 
     Raises:
         model_decompile_service.DecompileError: нет Crowbar или он упал.
@@ -120,6 +128,8 @@ def build(weapon_key: str, kind: str, misc_vpk: str, textures_vpk: str,
         return None
 
     out_dir = tempfile.mkdtemp(prefix="tf2sg_decor_")
+    if custom_smd:
+        smd = own_on_stock(custom_smd, smd, os.path.join(out_dir, "custom.smd"))
     obj = os.path.join(out_dir, "decor.obj")
     ok, names = SmdToObjService.convert_parts(
         [MeshPart(smd_path=smd, skinning=_weapon_pose(weapon_key, smd),
@@ -129,14 +139,22 @@ def build(weapon_key: str, kind: str, misc_vpk: str, textures_vpk: str,
 
     reader = GameVpkReader([textures_vpk, misc_vpk])
     try:
-        materials, hints = _materials(reader, model, names, out_dir, card(kind, ""))
+        materials, hints = _materials(reader, model, names, out_dir, card(kind, ""),
+                                      blank=bool(custom_smd))
     finally:
         reader.close()
     logger.info(f"[гирлянда] {weapon_key}: {kind} = {stem}, "
                 f"материалы {sorted(materials)}")
     return Decor(kind=kind, weapon_key=weapon_key, obj_path=obj,
                  smd_path=smd, materials=materials, hints=hints,
-                 groups=bend_groups(smd, card(kind, "")))
+                 groups=bend_groups(smd, card(kind, "")), source=custom_smd)
+
+
+def own_on_stock(custom_smd: str, stock_smd: str, out_path: str) -> str:
+    """Своя гирлянда на скелете стоковой: в игре её везут кости оружия."""
+    from src.services.smd_service import SMDService
+    return SMDService.replace_model_sections(custom_smd, stock_smd, out_path,
+                                             keep_user_materials=True)
 
 
 def _weapon_pose(weapon_key: str, decor_smd: str) -> Optional[dict]:
@@ -440,6 +458,14 @@ def shaped_smd(smd_path: str, fit: Optional[dict],
 # предполагается — только «насколько этот пиксель в кадре тусклее, чем горя».
 
 
+def _grey_png(out_dir: str, name: str) -> str:
+    from PIL import Image
+    safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in name)
+    path = os.path.join(out_dir, f"{safe}_blank.png")
+    Image.new("RGBA", (64, 64), (160, 160, 160, 255)).save(path)
+    return path
+
+
 def _sibling(path: str, suffix: str) -> str:
     stem, ext = os.path.splitext(path)
     return f"{stem}_{suffix}{ext or '.png'}"
@@ -499,8 +525,12 @@ def blink_like(image: str, stock: List[str], out_dir: str, name: str) -> List[st
 
 
 def _materials(reader, model, names: List[str], out_dir: str,
-               prefix: str) -> tuple:
-    """Кадры RED/BLU и свойства рисования каждого материала гирлянды."""
+               prefix: str, blank: bool = False) -> tuple:
+    """Кадры RED/BLU и свойства рисования каждого материала гирлянды.
+
+    `blank` — своя модель: материал без игровой текстуры получает серую
+    основу, чтобы у него была карточка и его можно было покрасить.
+    """
     from src.services import vmt_parse, vmt_tint
     from src.services.material_resolver import MaterialResolver
     from src.services.vtf_preview_service import vtf_bytes_to_frame_pngs
@@ -532,6 +562,8 @@ def _materials(reader, model, names: List[str], out_dir: str,
     for name in names:
         raw = name[len(prefix):]
         red, fps, glow = frames(raw)
+        if not red and blank:
+            red = [_grey_png(out_dir, raw)]
         if not red:
             logger.info(f"[гирлянда] без текстуры: {raw}")
             continue
@@ -565,8 +597,10 @@ class FestiveDecorWorker(BaseWorker):
     }
 
     def __init__(self, weapon_key: str, kind: str, misc_vpk: str,
-                 textures_vpk: str, tf2_root: str, lang: str = "en"):
+                 textures_vpk: str, tf2_root: str, lang: str = "en",
+                 custom_smd: str = ''):
         super().__init__()
+        self.custom_smd = custom_smd
         self.weapon_key = weapon_key
         self.kind = kind
         self._args = (misc_vpk, textures_vpk, tf2_root)
@@ -577,7 +611,8 @@ class FestiveDecorWorker(BaseWorker):
         try:
             decor = build(self.weapon_key, self.kind, misc_vpk, textures_vpk,
                           tf2_root, cancelled=self.isInterruptionRequested,
-                          on_progress=lambda s: self.progress.emit(self._p[s.value]))
+                          on_progress=lambda s: self.progress.emit(self._p[s.value]),
+                          custom_smd=self.custom_smd)
         except Exception as exc:                              # noqa: BLE001
             logger.warning(f"[гирлянда] {self.weapon_key}/{self.kind}: {exc}",
                            exc_info=True)

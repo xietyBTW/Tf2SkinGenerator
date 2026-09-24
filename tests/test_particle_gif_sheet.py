@@ -84,3 +84,26 @@ def test_gif_material_gets_animated_texture_proxy(tmp_path):
     assert '"$frame" "0"' in vmt
     # Превью получает лист, а не первый кадр
     assert info["sheet"] is not None
+
+
+def test_image_to_vtf_keeps_aspect(tmp_path):
+    """1024×512 при потолке 512: спрайту — квадрат с полями, верёвке — 512×256."""
+    import base64
+    import io
+
+    from PIL import Image
+
+    png = tmp_path / "wide.png"
+    Image.new("RGBA", (1024, 512), (255, 0, 0, 255)).save(png)
+
+    rope = ParticleEditorService._image_to_vtf(str(png), 512, uncompressed=True)
+    if rope is None:
+        pytest.skip("VTFLib недоступен")
+    assert (rope["w"], rope["h"]) == (512, 256)
+
+    sprite = ParticleEditorService._image_to_vtf(
+        str(png), 512, uncompressed=True, square=True)
+    assert (sprite["w"], sprite["h"]) == (512, 512)
+    img = Image.open(io.BytesIO(base64.b64decode(sprite["png_b64"])))
+    assert img.getpixel((256, 10))[3] == 0      # верхнее поле прозрачное
+    assert img.getpixel((256, 256))[:3] == (255, 0, 0)

@@ -192,6 +192,20 @@ class ResolverTests(unittest.TestCase):
         tex = r.texture_map(["body", "lens"], CD)
         self.assertTrue(all(Path(p).is_file() for p in tex.values()))
 
+    def test_texture_map_keeps_the_name_as_given(self):
+        """Вьювер ищет меш по ТОЧНОМУ имени материала: `sniper_handL_red`.
+
+        В архиве путь в нижнем регистре, и ключ `sniper_handl_red` меш не
+        находил — левая кисть снайпера оставалась без текстуры.
+        """
+        files = {
+            f"materials/{CD[0]}/sniper_handl_red.vmt":
+                vmt(basetexture="models/hat/hand"),
+            "materials/models/hat/hand.vtf": _png_bytes(),
+        }
+        tex = self._resolver(files).texture_map(["sniper_handL_red"], CD)
+        self.assertEqual(list(tex), ["sniper_handL_red"])
+
     def test_out_name_keeps_files_apart(self):
         """RED и BLU одного материала не должны затирать PNG друг друга."""
         files = {

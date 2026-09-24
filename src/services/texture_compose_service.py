@@ -76,6 +76,9 @@ class Layer:
     image_scale_y: Optional[float] = None
     #: Сдвиг центра в долях места части: (0.5, 0) — на пол-ширины вправо.
     image_offset: Tuple[float, float] = (0.0, 0.0)
+    #: Отражение картинки по её собственным осям — ДО поворота, как в окне.
+    image_flip_x: bool = False
+    image_flip_y: bool = False
     #: Куда вписывать картинку, если не в габарит самой части: габарит развёртки
     #: (u0, v0, u1, v1) той части, на которую её клали. Нужен после РЕЗКИ:
     #: разрезанная деталь становится двумя частями, у каждой свой габарит, и
@@ -119,13 +122,15 @@ class Layer:
 def place_image(patch: Image.Image, box: Tuple[int, int, int, int],
                 fit: str = 'contain', angle: float = 0.0, scale: float = 1.0,
                 offset: Tuple[float, float] = (0.0, 0.0),
-                scale_y: Optional[float] = None):
+                scale_y: Optional[float] = None,
+                flip_x: bool = False, flip_y: bool = False):
     """
-    Готовит картинку к вклейке: размер, поворот, положение.
+    Готовит картинку к вклейке: размер, отражение, поворот, положение.
 
     Возвращает (картинка, куда её положить). Порядок — размер, потом поворот:
     поворот увеличивает холст под углы, и вписывать после него значило бы
-    вписывать пустоту вместе с картинкой.
+    вписывать пустоту вместе с картинкой. Отражение — по осям самой картинки,
+    до поворота: так же его рисует окно посадки.
 
     Публичная: тем же расчётом страница рисует предпросмотр, и разойтись им
     нельзя — человек настраивает по одному изображению, а в мод уходит другое.
@@ -148,6 +153,10 @@ def place_image(patch: Image.Image, box: Tuple[int, int, int, int],
     ky = max(0.01, float(scale if scale_y is None else scale_y))
     target = (max(1, round(target[0] * kx)), max(1, round(target[1] * ky)))
     patch = patch.resize(target, Image.LANCZOS)
+    if flip_x:
+        patch = patch.transpose(Image.FLIP_LEFT_RIGHT)
+    if flip_y:
+        patch = patch.transpose(Image.FLIP_TOP_BOTTOM)
     if angle:
         # PIL крутит против часовой, а угол задаём по часовой — как у ручки
         # направления градиента, чтобы два поворота в одном окне не спорили.
@@ -764,7 +773,8 @@ def _compose_frame(base: Image.Image, layers: Sequence[Layer],
             # пикселей до расчёта уводил картинку на пиксель от предпросмотра.
             patch, at = place_image(patch, box, layer.fit, layer.image_angle,
                                     layer.image_scale, layer.image_offset,
-                                    layer.image_scale_y)
+                                    layer.image_scale_y, layer.image_flip_x,
+                                    layer.image_flip_y)
             canvas = Image.new('RGBA', part.size, (0, 0, 0, 0))
             canvas.paste(patch, (at[0] - x0, at[1] - y0))
             # Прозрачность картинки уважаем: иначе PNG с альфой затирал бы

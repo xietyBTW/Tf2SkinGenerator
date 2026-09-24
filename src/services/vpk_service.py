@@ -58,6 +58,20 @@ class _MaterialPlan:
 
 class VPKService:
     """Главный конвейер сборки VPK файлов. Детали ошибок — в логах."""
+
+    @staticmethod
+    def _is_attachment_only(weapon_key: str, tf2_misc_vpk: str) -> bool:
+        """Навесное украшение (гирлянда `*_xmas`), а не само оружие: items_game
+        вешает его на базовую пушку через `attached_models`."""
+        try:
+            from src.data.weapon_model_index import (
+                attachment_only_models, tf2_root_from_misc_vpk,
+            )
+            return weapon_key.lower() in attachment_only_models(
+                tf2_root_from_misc_vpk(tf2_misc_vpk))
+        except Exception as exc:                  # noqa: BLE001 — только уточнение
+            logger.debug(f"attachment check: {exc}")
+            return False
     
     @staticmethod
     def build_with_progress(
@@ -867,20 +881,12 @@ class VPKService:
         # в списке гирлянда выглядит как оружие, но перекрашивается только она.
         # Молчать нельзя: пользователь красит «Праздничный пулемёт» и не видит
         # изменений на стволе (items_game: "attached_models").
-        if mode != "hat":
-            try:
-                from src.data.weapon_model_index import (
-                    attachment_only_models, tf2_root_from_misc_vpk,
-                )
-                _root = tf2_root_from_misc_vpk(tf2_misc_vpk)
-                if weapon_key.lower() in attachment_only_models(_root):
-                    ctx.warn(
-                        f"'{weapon_key}' — это навесное украшение (гирлянда), а не сам "
-                        f"ствол: игра рисует его поверх базового оружия. Красится только "
-                        f"украшение; чтобы изменить сам ствол, соберите базовое оружие."
-                    )
-            except Exception as _att_exc:
-                logger.debug(f"attachment check: {_att_exc}")
+        if mode != "hat" and VPKService._is_attachment_only(weapon_key, tf2_misc_vpk):
+            ctx.warn(
+                f"'{weapon_key}' — это навесное украшение (гирлянда), а не сам "
+                f"ствол: игра рисует его поверх базового оружия. Красится только "
+                f"украшение; чтобы изменить сам ствол, соберите базовое оружие."
+            )
 
         if is_cancelled():
             return _fail(cancelled_result(ctx))
@@ -1021,6 +1027,17 @@ class VPKService:
             original_cdmaterials_path = ModelBuildService.extract_cdmaterials_path_from_qc(qc_path)
             # Все $cdmaterials пути (для поиска оригинальных VTF в VPK игры)
             original_cdmaterials_paths = ModelBuildService.extract_all_cdmaterials_paths_from_qc(qc_path)
+
+            # Гирлянда праздничного оружия берёт огоньки из ОБЩЕЙ папки: у 26
+            # гирлянд `models/player/items/heavy/xms_colored_lights` один на
+            # всех. Мод двух разных праздничных оружий писал бы одну и ту же
+            # текстуру, и в игре обе гирлянды показали бы ту, чей VPK победил.
+            # Своя папка на модель — та же, что у сборки гирлянды через
+            # переключатель на базовом оружии (decor_build). Исходные пути уже
+            # сняты выше: по ним ищутся оригиналы в игре.
+            if VPKService._is_attachment_only(weapon_key, tf2_misc_vpk):
+                from src.services.decor_build import DECOR_MATERIALS_ROOT, _set_cdmaterials
+                _set_cdmaterials(qc_path, f"{DECOR_MATERIALS_ROOT}\\{Path(found_mdl_path).stem}")
 
             if not original_cdmaterials_path:
                 ctx.cleanup(on_error=True, keep_on_error=keep_temp_on_error, debug_mode=debug_mode)

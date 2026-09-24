@@ -1454,7 +1454,8 @@ class ParticleEditorService:
         Кастомный VTF кладётся по пути $basetexture стокового VMT.
         """
         vmt_text, tex_rel = self._resolve_texture_path(material_name, tf2_root_dir)
-        built = self._image_to_vtf(image_path, max_size, uncompressed)
+        built = self._image_to_vtf(image_path, max_size, uncompressed,
+                                   square=self._sprite_only_material(material_name))
         if built is None:
             return None
         vtf_bytes, w, h = built["vtf"], built["w"], built["h"]
@@ -1587,10 +1588,28 @@ class ParticleEditorService:
                     f"({count} кадров): {os.path.basename(image_path)}")
         return sheet_img, sheet
 
+    #: Рендереры, рисующие частицу квадратом: текстура растягивается на него
+    #: целиком, какой бы формы она ни была.
+    _SQUARE_RENDERERS = {"render_animated_sprites", "render_screen_velocity_rotate"}
+
+    def _sprite_only_material(self, material_name: str) -> bool:
+        """True, если материал рисуют только квадратные спрайты (не верёвки/следы)."""
+        key = _norm_mat(material_name)
+        fns = {(m.get("functionName") or "").lower()
+               for s in self.systems_json().values()
+               if _norm_mat((s["attrs"].get("material") or {}).get("v") or "") == key
+               for m in s.get("renderers") or []}
+        return bool(fns) and fns <= self._SQUARE_RENDERERS
+
     @staticmethod
-    def _image_to_vtf(image_path: str, max_size: int, uncompressed: bool):
+    def _image_to_vtf(image_path: str, max_size: int, uncompressed: bool,
+                      square: bool = False):
         """Картинка → {vtf, w, h, png_b64, sheet, fps} либо None при ошибке.
-        Размеры → степени двойки (<= max_size, потолок 1024). NOMIP|NOLOD.
+        Размеры → степени двойки (<= max_size, потолок 1024) с сохранением
+        пропорций. NOMIP|NOLOD.
+
+        square=True — неквадратная картинка дополняется прозрачными полями до
+        квадрата: спрайт в игре квадратный, иначе 1024×512 на нём сплющится.
 
         Анимированная картинка (GIF/APNG/WebP): VTF многокадровый (в игре кадры
         крутит прокси AnimatedTexture, fps != None), а в превью уходит спрайт-лист
@@ -1623,7 +1642,16 @@ class ParticleEditorService:
                 logger.warning(f"Гифка → спрайт-лист не удалась: {exc}", exc_info=True)
                 sheet = preview_img = None
 
-        w, h = _pot(img.width), _pot(img.height)
+        if square and sheet is None and img.width != img.height:
+            # ponytail: гифки по-прежнему тянутся на квадратные клетки листа.
+            side = max(img.size)
+            canvas = Image.new("RGBA", (side, side), (0, 0, 0, 0))
+            canvas.paste(img, ((side - img.width) // 2, (side - img.height) // 2))
+            img = canvas
+        # Потолок по большей стороне, а не по каждой отдельно: иначе
+        # 1024×512 при потолке 512 становилось 512×512.
+        k = min(1.0, cap / max(img.size))
+        w, h = _pot(round(img.width * k)), _pot(round(img.height * k))
         if (w, h) != img.size:
             img = img.resize((w, h), Image.LANCZOS)
         if preview_img is None:

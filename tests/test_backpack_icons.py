@@ -55,3 +55,55 @@ class IconLookupTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class WeaponIconFromItemsGameTests(unittest.TestCase):
+    """Иконка по items_game, когда её имя не совпадает с именем модели."""
+
+    ITEMS_GAME = '''"items_game"
+{
+    "prefabs"
+    {
+        "sticky_defender" { "image_inventory" "backpack/weapons/w_models/w_stickybomb_defender" }
+        "buff" { "image_inventory" "backpack/weapons/c_models/c_buffpack/c_buffpack"
+                 "extra_wearable" "models/weapons/c_models/c_buffpack/c_buffpack.mdl" }
+    }
+    "items"
+    {
+        "129" { "prefab" "valve buff" }
+        "130" { "prefab" "sticky_defender"
+                "model_player" "models/weapons/c_models/c_scottish_resistance.mdl" }
+        "230" { "image_inventory" "backpack/workshop/c_sydney_sleeper"
+                "model_player" "models/workshop/c_sydney_sleeper.mdl" }
+        "900" { "image_inventory" "backpack/gold_copy"
+                "model_player" "models/weapons/c_models/c_scottish_resistance.mdl" }
+    }
+}'''
+
+    def setUp(self):
+        import tempfile
+        from pathlib import Path
+        from src.data import weapon_model_index as wmi
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        items = Path(tmp.name, 'tf', 'scripts', 'items')
+        items.mkdir(parents=True)
+        (items / 'items_game.txt').write_text(self.ITEMS_GAME, encoding='utf-8')
+        self.root = tmp.name
+        self.icon = wmi.weapon_icon
+        self.addCleanup(wmi._icon_index.cache_clear)
+
+    def test_icon_inherited_from_prefab_first_item_wins(self):
+        self.assertEqual(self.icon('c_scottish_resistance', self.root),
+                         'backpack/weapons/w_models/w_stickybomb_defender')
+
+    def test_alias_and_extra_wearable(self):
+        self.assertEqual(self.icon('c_dartgun', self.root),
+                         'backpack/workshop/c_sydney_sleeper')
+        self.assertEqual(self.icon('c_batt_buffpack', self.root),
+                         'backpack/weapons/c_models/c_buffpack/c_buffpack')
+
+    def test_unknown(self):
+        self.assertIsNone(self.icon('c_nothing', self.root))
+        self.assertIsNone(self.icon('c_dartgun', ''))

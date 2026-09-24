@@ -63,6 +63,17 @@ export const EN = {
   'Сделать командным': 'Make team-colored',
   'Разделить на части': 'Split into parts',
   'Убрать свою модель': 'Remove custom model',
+  // Что заменить: оружие или его гирлянду
+  'Что заменить?': 'What to replace?',
+  'Что вернуть к игровому?': 'What to restore to stock?',
+  'Выбрать файл': 'Choose file',
+  'Само оружие': 'The weapon itself',
+  'Праздничная гирлянда': 'Festive lights',
+  'Гирлянда фестивайзера': 'Festivizer lights',
+  'Своя гирлянда': 'Custom lights',
+  'Своя гирлянда; текстур из файла: {}': 'Custom lights; textures from the file: {}',
+  'Гирлянда снова стоковая': 'Lights are stock again',
+  'SMD не читается: нет треугольников': 'The SMD cannot be read: it has no triangles',
   // Подгонка импортированной модели (OBJ/GLB)
   'Масштаб': 'Scale',
   'Сдвиг': 'Offset',
@@ -133,6 +144,8 @@ export const EN = {
   'Тип': 'Type',
   'Скрыть': 'Hide',
   'Куда': 'Where',
+  'Коллекция': 'Collection',
+  'Все коллекции': 'All collections',
   'Краска': 'Paint',
   'Без краски': 'No paint',
   'Как выглядит с краской из игры': 'How it looks with a paint from the game',
@@ -363,6 +376,11 @@ export const EN = {
   'Своя картинка…': 'Custom image…',
   'Игровая текстура из списка…': 'Game texture from the list…',
   'Переименовать материал…': 'Rename the material…',
+  'Разрешение своей картинки: {}': 'Custom image resolution: {}',
+  'Разрешение своей картинки': 'Custom image resolution',
+  'Больше — чётче вблизи, но тяжелее мод. У надписей крита в игре 256.':
+    'Bigger is sharper up close but makes the mod heavier. Crit text in the game is 256.',
+  'Разрешение {} возьмёт следующая картинка': 'The next image will use {}',
   'Вернуть текстуру игры': 'Bring back the game texture',
   'Текстура из эффектов игры': 'Texture from the game effects',
   'Такой материал уже есть в игре, поэтому мод работает в казуале.':
@@ -587,7 +605,6 @@ export const EN = {
   'Цвет смешивается с оригиналом — так деталь выглядит естественнее':
     'The color blends with the original — that way the part looks more natural',
   'Объединить': 'Merge',
-  'Дробление': 'Detail',
   // ── Ножницы: выделение и «Отделить» ──────────────────────────────────
   'Деталь': 'Piece',
   'Остров': 'Island',
@@ -613,6 +630,20 @@ export const EN = {
   'Щёлкай по модели: берётся остров развёртки целиком': 'Click the model: a whole UV island is taken',
   'Выдели на модели, что отрезать, и нажми «Отделить». Щелчок по чипу берёт часть целиком — так части сводят в одну': 'Select on the model what to cut off and press “Separate”. Clicking a chip takes the whole part — that is how parts are merged',
   'Ничего не выделено': 'Nothing is selected',
+  'Выделено: {}': 'Selected: {}',
+  'Нарезать по островам': 'Split by UV islands',
+  // ── Посадка картинки: отражение, копия, сетка ────────────────────────
+  'Сетка': 'Mesh',
+  'Показать сетку треугольников детали вместо её контура — на мелкой детали видно, куда именно ляжет картинка': 'Show the part’s triangle mesh instead of its outline — on a small part you see exactly where the picture lands',
+  'Тяни мышью · размер — за квадратики, за край дальше противоположного — отражение · поворот — за маркер или стрелками · колесо — ближе': 'Drag to move · size — by the squares, past the opposite edge — mirror · rotate — by the handle or arrow keys · wheel — closer',
+  'Скопировать картинку с посадкой (Ctrl+C)': 'Copy the picture with its placement (Ctrl+C)',
+  'Вставить скопированную картинку поверх (Ctrl+V)': 'Paste the copied picture on top (Ctrl+V)',
+  'Минус — отражение по ширине': 'Minus mirrors horizontally',
+  'Минус — отражение по высоте': 'Minus mirrors vertically',
+  'Вставляю…': 'Pasting…',
+  'Картинка скопирована. На другую часть — наведи на неё на модели и нажми Ctrl+V': 'Picture copied. For another part — hover it on the model and press Ctrl+V',
+  'Тяни за заголовок — двигать, за уголок справа снизу — менять размер. Двойной щелчок — вернуть на место': 'Drag the title to move, the bottom-right corner to resize. Double-click puts it back',
+  'Картинка вставлена — поправить посадку можно в «…»': 'Picture pasted — adjust its placement with “…”',
   'Не удалось перейти к материалу выделения — попробуй ещё раз': 'Could not switch to the selection’s material — try again',
   'Обводить': 'Outline',
   'Толщина': 'Width',
@@ -712,15 +743,10 @@ export const EN = {
   'Верхний лежит поверх остальных. Тяни строку, чтобы переставить':
     'The top one lies over the rest. Drag a row to reorder',
   'Показ': 'View',
-  'Контур': 'Outline',
   'Приблизить холст к куску: класть картинку, глядя на всю текстуру, — целиться в спичку с другого конца комнаты':
     'Zoom the canvas to the piece: placing an image while looking at the whole texture is like aiming at a match from across the room',
   'Спрятать игровую текстуру: на пёстрой не видно границ своей картинки':
     'Hide the game texture: on a busy one the edges of your image are hard to see',
-  'Только внешний контур куска вместо сетки треугольников':
-    'Only the outer outline of the piece instead of the triangle mesh',
-  'Тяни мышью · размер — за квадратики · поворот — за маркер или стрелками · колесо — ближе':
-    'Drag with the mouse · size — by the squares · rotate — by the handle or arrow keys · wheel — closer',
   'Целиком в место части, с сохранением пропорций':
     'Whole into the part area, proportions kept',
   'Заполнить место части, края уйдут под маску':

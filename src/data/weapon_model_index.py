@@ -13,6 +13,7 @@
 import json
 import os
 import re
+from functools import lru_cache
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -147,6 +148,80 @@ def attachment_only_models(tf2_root: str) -> set:
     _MEM_ATTACHED[tf2_root] = result
     logger.info(f"items_game: моделей-украшений (attached_models): {len(result)}")
     return result
+
+
+#: Ключи нашего списка, которых items_game не знает под этим именем: модель
+#: в каталоге старая или переименованная, а иконка объявлена у нынешней.
+_ICON_ALIASES = {
+    "c_dartgun": "c_sydney_sleeper",      # Sydney Sleeper
+    "c_batt_buffpack": "c_buffpack",      # Buff Banner (extra_wearable)
+    "tankerboots": "mantreads",           # Mantreads
+}
+_ANY_MDL_RE = re.compile(r'"([^"]+\.mdl)"', re.IGNORECASE)
+
+
+def _mdl_stems(game, block: str, depth: int = 0) -> list:
+    """Стебли всех .mdl блока и его цепочки prefab (model_player, model_world,
+    extra_wearable, model_player_per_class — ключ здесь не важен)."""
+    from src.data.items_game_kv import MAX_PREFAB_DEPTH, flat_value
+
+    stems = [os.path.splitext(os.path.basename(m.replace("\\", "/").lower()))[0]
+             for m in _ANY_MDL_RE.findall(block)]
+    if depth < MAX_PREFAB_DEPTH:
+        for name in (flat_value(block, "prefab") or "").split():
+            parent = game.prefabs.get(name)
+            if parent is not None:
+                stems += _mdl_stems(game, parent, depth + 1)
+    return stems
+
+
+@lru_cache(maxsize=4)
+def _icon_index(tf2_root: str) -> Dict[str, str]:
+    """{стебель модели: image_inventory}. Первый предмет выигрывает: items_game
+    идёт по defindex, и стоковое оружие стоит раньше скинов и промо-копий."""
+    from src.data.items_game_kv import ItemsGame
+
+    items = get_items_game_path(tf2_root)
+    if not items:
+        return {}
+    try:
+        game = ItemsGame.parse(items.read_text(encoding="utf-8", errors="replace"))
+    except Exception as e:
+        logger.warning(f"weapon icons: не прочитать {items}: {e}")
+        return {}
+    idx: Dict[str, str] = {}
+    for _key, block in game.items:
+        icon = game.inherited(block, "image_inventory")
+        if not icon:
+            continue
+        icon = icon.replace("\\", "/").strip().lower()
+        for stem in _mdl_stems(game, block):
+            idx.setdefault(stem, icon)
+    return idx
+
+
+def weapon_icon(weapon_key: str, tf2_root: str) -> Optional[str]:
+    """
+    Иконка рюкзака (путь image_inventory) для ключа оружия, либо None.
+
+    Имя иконки часто не совпадает с именем модели (Scottish Resistance —
+    `w_stickybomb_defender`), и поиск по имени файла отдавал развёртку
+    текстуры вместо иконки. items_game связывает их напрямую.
+    """
+    if not weapon_key or not tf2_root:
+        return None
+    from src.data.weapons import WEAPON_MDL_PATHS
+
+    key = weapon_key.lower()
+    mdl = WEAPON_MDL_PATHS.get(weapon_key, "")
+    candidates = (key, _ICON_ALIASES.get(key),
+                  os.path.splitext(os.path.basename(mdl.lower()))[0] if mdl else None,
+                  "c_" + key[2:] if key.startswith("w_") else None)
+    idx = _icon_index(tf2_root)
+    for c in candidates:
+        if c and c in idx:
+            return idx[c]
+    return None
 
 
 def tf2_root_from_misc_vpk(misc_vpk_path: Optional[str]) -> Optional[str]:

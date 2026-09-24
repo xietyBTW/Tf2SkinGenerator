@@ -56,6 +56,7 @@ ITEMS_GAME = '''
                 "animation_replacement"
                 {
                     "ACT_VM_IDLE"       "ACT_ITEM2_VM_IDLE"
+                    "ACT_VM_DRAW""ACT_ITEM2_VM_DRAW"
                     "ACT_VM_HITCENTER"  "ACT_ITEM2_VM_HITCENTER"
                 }
             }
@@ -132,8 +133,11 @@ class ItemsGameParsingTests(unittest.TestCase):
         обычного ножа-бабочки.
         """
         info = viewmodel_anims.anim_info("c_shogun_kunai", "root")
+        # Средняя пара записана слитно, как у Valve в Shortstop: пока разбор
+        # требовал пробел, всё ниже неё съезжало на одну позицию.
         self.assertEqual(info.replacement, {
             "ACT_VM_IDLE": "ACT_ITEM2_VM_IDLE",
+            "ACT_VM_DRAW": "ACT_ITEM2_VM_DRAW",
             "ACT_VM_HITCENTER": "ACT_ITEM2_VM_HITCENTER",
         })
         # У обычного оружия подмены нет — слота достаточно.

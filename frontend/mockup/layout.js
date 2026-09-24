@@ -174,3 +174,13 @@ export async function showTf2Path() {
   el.textContent = t('TF2 найдена · ') + paths.root
     + (paths.crowbar ? t(' · Crowbar готов') : t(' · Crowbar НЕ НАЙДЕН'));
 }
+
+// Высота колонки значков — панели настроек рядом (--bar-h): она встаёт вровень
+// с верхом колонки и растёт вниз, а не от центра (см. .ptools__opts). Колонка
+// меняет высоту, когда её сворачивают, — поэтому наблюдатель, а не замер.
+document.querySelectorAll('.ptools').forEach((pal) => {
+  const bar = pal.querySelector('.ptools__bar');
+  if (!bar) return;
+  new ResizeObserver(() => pal.style.setProperty('--bar-h', bar.offsetHeight + 'px'))
+    .observe(bar);
+});

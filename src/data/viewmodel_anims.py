@@ -84,7 +84,11 @@ DECOR_KINDS = ("xmas", "festivizer")
 _MODEL_RE = _compile(r'"model_player[^"]*"\s+"([^"]+\.mdl)"', IGNORECASE)
 _PER_CLASS_RE = _compile(r'"([^"]+)"\s+"([^"]*\.mdl)"', IGNORECASE)
 #: Пара «активность → чем её подменить» внутри animation_replacement.
-_ACT_PAIR_RE = _compile(r'"(ACT_[A-Z0-9_]+)"\s+"(ACT_[A-Z0-9_]+)"', IGNORECASE)
+#: Между ключом и значением `\s*`, а не `\s+`: у Valve бывает и слитно
+#: (`"ACT_MP_ATTACK_CROUCH_SECONDARYFIRE""ACT_MP_PUSH_CROUCH_SECONDARY"` у
+#: Shortstop), KeyValues это читает. С `\s+` пара срывалась, значение цеплялось
+#: к следующему ключу, и вся таблица ниже съезжала на одну позицию.
+_ACT_PAIR_RE = _compile(r'"(ACT_[A-Z0-9_]+)"\s*"(ACT_[A-Z0-9_]+)"', IGNORECASE)
 #: Любой путь до .mdl внутри вложенного блока.
 _MODEL_PATH_RE = _compile(r'"([^"]+\.mdl)"', IGNORECASE)
 
@@ -95,7 +99,8 @@ _CACHE_FILE = data_dir() / "cache" / "weapon_anim_slots.json"
 #: 2 — добавлена подмена активностей (animation_replacement).
 #: 3 — добавлена модель-носитель праздничных гирлянд (carried_on).
 #: 4 — добавлены гирлянды самой модели (decor).
-_CACHE_VERSION = 4
+#: 5 — пары подмены, записанные без пробела, больше не сдвигают таблицу.
+_CACHE_VERSION = 5
 
 #: tf2_root → индекс (чтобы не разбирать 8 МБ повторно за сессию).
 _MEM: Dict[str, Dict[str, "WeaponAnimInfo"]] = {}
@@ -225,6 +230,30 @@ def slot_for(weapon_key: str, tf2_root: str) -> str:
     if info and info.slot:
         return info.slot
     return _own_slot(weapon_key)
+
+
+#: Слоты снаряжения, у которых в игре есть свой набор осмотра
+#: (`CTFWeaponBase::GetInspectActivity`, source-sdk-2013).
+INSPECT_SLOTS = ("primary", "secondary", "melee", "building")
+
+
+def inspect_slot_for(weapon_key: str, tf2_root: str) -> str:
+    """
+    Слот, по которому игра выбирает ОСМОТР.
+
+    Не слот анимаций: `GetInspectActivity` смотрит на слот СНАРЯЖЕНИЯ
+    (`GetLoadoutSlot`). У подрывника они перекрёстные — гранатомёт стоит в
+    primary, но idle/fire/reload у него `ACT_SECONDARY_*`, у липучкомёта
+    наоборот. По слоту анимаций гранатомёт получал осмотр липучкомёта (и
+    разваливался в руке), а липучкомёт — гранатомёта. Подтверждает и сам
+    items_game: Loch-n-Load (слот анимаций secondary) подменяет именно
+    `ACT_PRIMARY_VM_INSPECT_*`.
+
+    Слоты вне таблицы игры (ПДА, часы) остаются при слоте анимаций — как было.
+    """
+    info = anim_info(weapon_key, tf2_root)
+    loadout = ((info.item_slot if info else "") or _own_slot(weapon_key)).lower()
+    return loadout if loadout in INSPECT_SLOTS else slot_for(weapon_key, tf2_root)
 
 
 #: Раздел приложения со всеклассовым оружием — сам по себе не класс.

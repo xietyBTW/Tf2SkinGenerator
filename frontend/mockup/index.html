@@ -116,6 +116,13 @@
       <span class="label label--inline">Куда</span>
     </div>
 
+    <!-- Коллекция игры (кейсы с 2015 года). Их почти сорок — в ряд кнопок не
+         влезают, поэтому выпадающий список; числа под текущим запросом. -->
+    <div class="catalog__filters" id="f-collection" hidden>
+      <label class="label label--inline" for="collection">Коллекция</label>
+      <div class="select"><select id="collection"></select></div>
+    </div>
+
     <!-- Чем вызывается эффект: оружие, постройки, игрок, анюжуалы… Список
          приходит из Python вместе с эффектами — только те виды, что есть. -->
     <div class="catalog__filters" id="f-source" hidden>
@@ -342,16 +349,17 @@
             </div>
 
             <!-- ── Нарезка ───────────────────────────────────────────────── -->
-            <div class="parts__group" data-group="cut" hidden>
-              <!-- Ножницы ВЫДЕЛЯЮТ, что станет отдельной частью, а «Отделить»
-                   делает её. Способ выделения — видимой кнопкой, не
-                   модификатором: жест Alt+колесо здесь уже проваливался. -->
-              <div class="parts__modes" id="cut-modes">
-                <button class="tag is-active" type="button" data-cut="detail"
+            <div class="parts__group cut" data-group="cut" hidden>
+              <!-- Три блока сверху вниз: ЧЕМ выделять, выделенное и что с ним
+                   сделать, и отдельно — нарезать всё разом. Способ — видимым
+                   переключателем, не модификатором: жест Alt+колесо здесь уже
+                   проваливался. -->
+              <div class="seg cut__modes" id="cut-modes">
+                <button type="button" class="is-active" data-cut="detail"
                         title="Щелчок берёт гладкую поверхность до острых рёбер">Деталь</button>
-                <button class="tag" type="button" data-cut="brush"
+                <button type="button" data-cut="brush"
                         title="Веди по модели — выделяется всё под кистью">Кисть</button>
-                <button class="tag" type="button" data-cut="island"
+                <button type="button" data-cut="island"
                         title="Щелчок берёт остров развёртки целиком">Остров</button>
               </div>
               <label class="parts__strength" id="cut-angle-box"
@@ -366,15 +374,25 @@
               <label class="check" id="cut-erase-box" hidden>
                 <input type="checkbox" id="cut-erase"><span>Стирать</span>
               </label>
-              <div class="parts__cutacts">
-                <button class="textbtn textbtn--sm" type="button" id="cut-apply" disabled
-                        title="Выделенное — в отдельную часть (Enter)">Отделить</button>
-                <button class="textbtn textbtn--sm" type="button" id="cut-reset" disabled
-                        title="Снять выделение (Esc)">Сбросить</button>
+
+              <!-- Действия над выделением — только когда оно есть: две
+                   кнопки, которые нечего делать, обещали действие, которого
+                   нет. -->
+              <div class="cut__sel" id="cut-sel" hidden>
+                <span class="label cut__count" id="cut-count"></span>
+                <div class="cut__acts">
+                  <button class="cut__apply" type="button" id="cut-apply"
+                          title="Выделенное — в отдельную часть (Enter)">Отделить</button>
+                  <button class="textbtn textbtn--sm" type="button" id="cut-reset"
+                          title="Снять выделение (Esc)">Сбросить</button>
+                </div>
               </div>
-              <label class="parts__strength"
+
+              <!-- Нарезка всего разом — не действие над выделением, поэтому
+                   отдельным блоком. -->
+              <label class="parts__strength cut__auto"
                      title="Разрезать все куски по островам развёртки разом">
-                Дробление
+                Нарезать по островам
                 <input type="range" id="part-detail" min="0" max="100" value="0">
               </label>
             </div>
@@ -445,7 +463,14 @@
              она состоит»), а не про инструмент. Наведение на пункт подсвечивает
              кусок в кадре между ними. -->
         <div class="parts parts__list" id="partsbar" hidden>
-          <span class="label parts__head">Части</span>
+          <div class="parts__head"
+               title="Тяни за заголовок — двигать, за уголок справа снизу — менять размер. Двойной щелчок — вернуть на место">
+            <span class="label">Части</span>
+            <span class="label parts__count" id="parts-count"></span>
+          </div>
+          <!-- Сеткой, а не столбцом: частей бывает под три десятка, и столбец
+               из одинаковых номеров уходил под подсказку и в прокрутку. -->
+          <div class="parts__grid" id="parts-grid"></div>
         </div>
 
         <!-- ═══ Подгонка своей модели ═════════════════════════════════════
@@ -961,6 +986,14 @@
         <div class="place__list" id="place-list"></div>
         <button class="place__add" type="button" id="place-add"
                 title="Ещё одна картинка поверх">+ Добавить</button>
+        <!-- Копия переносит картинку С РАЗМЕРОМ на текстуре: вставленная на
+             другую деталь выходит того же размера, а не «того же масштаба». -->
+        <div class="place__layeracts">
+          <button class="textbtn textbtn--sm" type="button" id="place-copy"
+                  title="Скопировать картинку с посадкой (Ctrl+C)">Копировать</button>
+          <button class="textbtn textbtn--sm" type="button" id="place-paste" disabled
+                  title="Вставить скопированную картинку поверх (Ctrl+V)">Вставить</button>
+        </div>
         <div class="place__layeracts">
           <button class="textbtn textbtn--sm" type="button" id="place-replace"
                   title="Другой файл на место этой картинки, посадка останется">Заменить…</button>
@@ -990,10 +1023,10 @@
             <input type="checkbox" id="place-bare"><span>Без игровой</span>
           </label>
           <label class="check place__toggle"
-                 title="Только внешний контур куска вместо сетки треугольников">
-            <input type="checkbox" id="place-outline"><span>Контур</span>
+                 title="Показать сетку треугольников детали вместо её контура — на мелкой детали видно, куда именно ляжет картинка">
+            <input type="checkbox" id="place-mesh"><span>Сетка</span>
           </label>
-          <span class="place__keys">Тяни мышью · размер — за квадратики · поворот — за маркер или стрелками · колесо — ближе</span>
+          <span class="place__keys">Тяни мышью · размер — за квадратики, за край дальше противоположного — отражение · поворот — за маркер или стрелками · колесо — ближе</span>
         </div>
       </section>
 
@@ -1014,12 +1047,14 @@
             <label class="place__field">
               <span>Ширина</span>
               <input class="input input--num" id="place-w" type="number"
-                     min="5" max="2000" step="5" value="100">
+                     min="-2000" max="2000" step="5" value="100"
+                     title="Минус — отражение по ширине">
             </label>
             <label class="place__field">
               <span>Высота</span>
               <input class="input input--num" id="place-h" type="number"
-                     min="5" max="2000" step="5" value="100">
+                     min="-2000" max="2000" step="5" value="100"
+                     title="Минус — отражение по высоте">
             </label>
           </div>
         </div>

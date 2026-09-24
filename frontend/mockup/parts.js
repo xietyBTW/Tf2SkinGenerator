@@ -16,7 +16,7 @@ import { t } from './i18n.js';
 import { stage, withViewer, viewer, say } from './stage.js';
 import { root } from './layout.js';
 import { applyView } from './preview.js';
-import { editPartLayers } from './place.js';
+import { editPartLayers, imageClip, pasteImageTo } from './place.js';
 import { pickColor, pickInto, picking, closeColor, hsvToHex, armDrop }
   from './picker.js';
 import { colorAt } from './sample.js';
@@ -74,6 +74,9 @@ let switching = false;
 //: Часть под курсором. Нужна перерисовке полосы: список приходит ответом
 //: Python и успевает обновиться уже после того, как чип пометили.
 let hoverPart = null;
+//: Часть под курсором НА МОДЕЛИ — цель Ctrl+V для скопированной картинки.
+//: Только модель: в списке частей вставки нет.
+let modelHover = null;
 //: Ножницы: чем выделять и сколько выделено (ведёт вьювер, число — отсюда).
 const cutOpts = { tool: 'detail', angle: 30, radius: 0.05, erase: false };
 export let gradientOn = false;   // красить переходом из первого цвета во второй
@@ -205,7 +208,10 @@ export function bindParts(w) {
   // Материал приходит со ВСЕМИ вызовами вьювера: у модели их бывает
   // несколько, и часть под курсором принадлежит своему, а не тому, что сейчас
   // показан полосой.
-  w.onPartHover = (part, material) => spotlightPart(part, material);
+  w.onPartHover = (part, material) => {
+    modelHover = (part === null || part === undefined) ? null : { part, material };
+    spotlightPart(part, material);
+  };
   w.onPartDropped = async (material, part, file) => {
     await usePartsMaterial(material);
     paintPart(part, file);
@@ -473,8 +479,14 @@ export function closeParts() {
 /** Полоса частей: крупные первыми, покрашенные помечены. */
 export function showParts(res) {
   const bar = document.getElementById('partsbar');
-  bar.querySelectorAll('.tag').forEach((b) => b.remove());
+  const grid = document.getElementById('parts-grid');
+  grid.replaceChildren();
   bar.hidden = false;
+  document.getElementById('parts-count').textContent = String(res.parts.length);
+  bar.dispatchEvent(new Event('parts:shown'));
+  // Доля развёртки — относительно самой крупной части, корнем: винтик рядом со
+  // стволом иначе был бы полоской в пиксель.
+  const biggest = Math.max(1e-9, ...res.parts.map((x) => x.area || 0));
   document.dispatchEvent(new Event('parts:changed'));
 
   // Карту «треугольник → часть» вьювер получает по имени материала: у него
@@ -495,6 +507,7 @@ export function showParts(res) {
     b.className = 'tag' + (images.length || part.color ? ' is-painted' : '')
       + (part.shared.length ? ' tag--shared' : '');
     b.dataset.part = part.id;
+    b.style.setProperty('--share', Math.sqrt((part.area || 0) / biggest).toFixed(3));
     // На кнопке — только номер: частей бывает под три десятка, и «Часть 7 · 3%»
     // в двух строках делало из полосы стену. Доля развёртки ушла в подсказку —
     // «0%» там читается как поломка, поэтому у винтика пишем «<1%».
@@ -504,11 +517,17 @@ export function showParts(res) {
     // кусок даёт «04·1», «04·2» — видно и что это одно место модели, и что их
     // теперь несколько.
     const share = part.area >= 0.01 ? Math.round(part.area * 100) + '%' : '<1%';
-    b.textContent = String(part.chunk + 1).padStart(2, '0')
-                  + (part.sub ? '\u00b7' + part.sub : '');
+    const label = String(part.chunk + 1).padStart(2, '0')
+                + (part.sub ? '\u00b7' + part.sub : '');
+    const num = document.createElement('span');
+    num.textContent = label;
+    b.append(num);
+    const size = document.createElement('span');
+    size.className = 'part__size';
+    b.append(size);
     // Куски, делящие развёртку, в игре красятся вместе — сказать об этом надо
     // до того, как человек нарисует и удивится.
-    b.title = t('Часть ') + b.textContent + ' · ' + share + t(' развёртки')
+    b.title = t('Часть ') + label + ' · ' + share + t(' развёртки')
       + (part.shared.length
         ? '\n' + t('Делит развёртку с другими: в игре они покрасятся вместе, '
           + 'разными их сделать нельзя')
@@ -526,20 +545,16 @@ export function showParts(res) {
       spotlightPart(null);
     });
     b.addEventListener('click', (e) => {
-      if (e.target.classList.contains('parts__x')
-          || e.target.classList.contains('parts__cut')) return;
+      if (e.target.closest('.parts__x, .parts__cut')) return;
       // С ножницами щелчок по чипу кладёт в выделение ВСЮ часть: так две
       // части сводят в одну — выделил обе, «Отделить».
       if (cutMode) { selectWholePart(part); return; }
       pickPart(part.id);
     });
     if (part.color) {
-      const dot = document.createElement('span');
-      dot.className = 'parts__dot';
       const { color, color2 } = part.color;
-      dot.style.background = color2
-        ? 'linear-gradient(90deg,' + color + ',' + color2 + ')' : color;
-      b.appendChild(dot);
+      b.style.setProperty('--paint', color2
+        ? 'linear-gradient(180deg,' + color + ',' + color2 + ')' : color);
     }
     // Кнопка только на ОТРЕЗАННОЙ части — вернуть её туда, откуда вырезали.
     if ((part.islands && part.islands.length) || part.region >= 0) {
@@ -575,7 +590,9 @@ export function showParts(res) {
       });
       b.appendChild(x);
     }
-    bar.appendChild(b);
+    // Действий на чипе больше одного — одна клетка сетки для них узка.
+    if (b.querySelectorAll('button').length > 1) b.classList.add('part--wide');
+    grid.appendChild(b);
   });
 }
 
@@ -683,10 +700,10 @@ const CUT_HINTS = {
   island: 'Щёлкай по модели: берётся остров развёртки целиком',
 };
 
-/** Кнопки и подсказка по числу выделенного. */
+/** Блок выделенного — только когда оно есть; и подсказка по нему. */
 function showCutCount(count) {
-  document.getElementById('cut-apply').disabled = !count;
-  document.getElementById('cut-reset').disabled = !count;
+  document.getElementById('cut-sel').hidden = !count;
+  document.getElementById('cut-count').textContent = t(`Выделено: ${count}`);
   if (!cutMode) return;
   hintParts(count
     ? `Выделено треугольников: ${count}. «Отделить» или Enter — в отдельную часть`
@@ -1450,6 +1467,12 @@ function historyKey(e) {
       || document.querySelector('dialog[open]')
       // У эффектов история своя, у звуков предмета нет вовсе.
       || root.dataset.section === 'particles' || root.dataset.section === 'sounds') return;
+  // Скопированная в окне посадки картинка — на деталь под курсором.
+  if (e.code === 'KeyV' && modelHover && imageClip()) {
+    e.preventDefault();
+    pasteOnModel(modelHover);
+    return;
+  }
   // По коду клавиши, а не по символу: в русской раскладке Z — это «я».
   const back = e.code === 'KeyZ' && !e.shiftKey;
   const forward = e.code === 'KeyY' || (e.code === 'KeyZ' && e.shiftKey);
@@ -1459,6 +1482,84 @@ function historyKey(e) {
 }
 
 document.addEventListener('keydown', historyKey);
+
+/** Ctrl+V над деталью: скопированная картинка того же размера — на неё. */
+async function pasteOnModel(target) {
+  await usePartsMaterial(target.material);
+  hintParts('Вставляю…');
+  if (await pasteImageTo(target.part)) {
+    hintParts('Картинка вставлена — поправить посадку можно в «…»');
+  }
+}
+
+/*
+ * Панель частей двигают за заголовок и тянут за угол.
+ *
+ * Размер — штатный `resize` (уголок справа снизу), место — своей тягой: у
+ * браузера её нет. Сетка внутри перекладывается сама (`auto-fill`), лишнее
+ * по высоте прокручивается. Место и размер помнятся — это удобство одного
+ * человека на одной машине, поэтому localStorage, и без него всё работает.
+ * Двойной щелчок по заголовку возвращает панель на место.
+ */
+(function bindPartsPanel() {
+  const bar = document.getElementById('partsbar');
+  const head = bar.querySelector('.parts__head');
+  const KEY = 'tf2sg.partsPanel';
+  const save = () => {
+    try {
+      localStorage.setItem(KEY, JSON.stringify({
+        left: bar.style.left, top: bar.style.top,
+        width: bar.style.width, height: bar.style.height }));
+    } catch (e) { /* приватный режим — просто не запомним */ }
+  };
+  try {
+    const was = JSON.parse(localStorage.getItem(KEY) || 'null');
+    if (was) Object.assign(bar.style, was);
+  } catch (e) { /* испорченная запись — панель на месте по умолчанию */ }
+
+  // Не дальше краёв кадра: иначе заголовок уехал бы туда, откуда его не
+  // достать, — например после того, как окно сузили.
+  const clamp = (left, top) => {
+    const box = bar.offsetParent;
+    if (!box) return [left, top];
+    return [Math.max(0, Math.min(left, box.clientWidth - bar.offsetWidth)),
+            Math.max(0, Math.min(top, box.clientHeight - bar.offsetHeight))];
+  };
+  bar.addEventListener('parts:shown', () => {
+    if (!bar.style.left) return;
+    const [left, top] = clamp(bar.offsetLeft, bar.offsetTop);
+    bar.style.left = left + 'px';
+    bar.style.top = top + 'px';
+  });
+
+  let drag = null;
+  head.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    drag = { x: e.clientX, y: e.clientY, left: bar.offsetLeft, top: bar.offsetTop };
+    head.setPointerCapture(e.pointerId);
+  });
+  head.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    const [left, top] = clamp(drag.left + e.clientX - drag.x, drag.top + e.clientY - drag.y);
+    bar.style.left = left + 'px';
+    bar.style.top = top + 'px';
+  });
+  const finish = (e) => {
+    if (!drag) return;
+    drag = null;
+    if (head.hasPointerCapture(e.pointerId)) head.releasePointerCapture(e.pointerId);
+    save();
+  };
+  head.addEventListener('pointerup', finish);
+  head.addEventListener('pointercancel', finish);
+  head.addEventListener('dblclick', () => {
+    ['left', 'top', 'width', 'height'].forEach((k) => { bar.style[k] = ''; });
+    try { localStorage.removeItem(KEY); } catch (e) { /* нечего забывать */ }
+  });
+  // Размер меняет браузер (уголок `resize`): запоминаем, когда он его задал.
+  new ResizeObserver(() => { if (bar.style.width || bar.style.height) save(); })
+    .observe(bar);
+})();
 
 document.getElementById('parts-clear').addEventListener('click', async () => {
   const res = await api.clearParts(partsMaterial);

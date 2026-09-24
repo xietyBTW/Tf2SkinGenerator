@@ -11,11 +11,39 @@ import { ask } from './ask.js';
 import { chooseFiles } from './util.js';
 import { t } from './i18n.js';
 import { say, viewer, withViewer } from './stage.js';
-import { refreshView, reloadSceneIfFp } from './preview.js';
+import { applyView, lastView, refreshView, reloadSceneIfFp } from './preview.js';
 import { closeParts } from './parts.js';
 
-/** Возвращает игровую модель вместо своей. */
+//: Гирлянды оружия — отдельные модели, и заменить можно каждую.
+const GARLANDS = { xmas: 'Праздничная гирлянда', festivizer: 'Гирлянда фестивайзера' };
+
+/**
+ * Что заменить или убрать: само оружие или одну из его гирлянд. Вопрос —
+ * только когда выбирать есть из чего; `kinds` — виды гирлянд.
+ */
+async function pickTarget(title, withModel, kinds, ok) {
+  const list = [
+    ...(withModel ? [{ label: 'Само оружие', value: '' }] : []),
+    ...kinds.map((kind) => ({ label: GARLANDS[kind] || kind, value: kind })),
+  ];
+  if (list.length < 2) return list.length ? list[0].value : null;
+  return ask({ title, list, ok });
+}
+
+/** Возвращает игровую модель (или стоковую гирлянду) вместо своей. */
 export async function dropModel() {
+  const st = lastView || {};
+  const kind = await pickTarget('Что вернуть к игровому?', Boolean(st.has_custom),
+                                st.decor_models || [], 'Убрать');
+  if (kind === null) return;
+  if (kind) {
+    await leaveDecorFit();
+    const res = await api.dropDecorModel(kind);
+    if (res.error) { say(res.error); return; }
+    applyView(res);            // сцену в руках пересоберёт приезд гирлянды
+    say('Гирлянда снова стоковая');
+    return;
+  }
   dropFitSave();            // подгонки больше не будет — и записывать нечего
   const res = await api.dropCustomModel();
   if (res.error) { say(res.error); return; }
@@ -35,6 +63,11 @@ export async function dropModel() {
  * ложатся в одну папку, и ссылки из OBJ/glTF находят их.
  */
 export async function replaceModel() {
+  // У оружия с гирляндами заменить можно и её: каждая замена своя, так что
+  // оружие и гирлянда меняются вместе — просто двумя заходами.
+  const kind = await pickTarget('Что заменить?', true,
+                                (lastView || {}).festive_options || [], 'Выбрать файл');
+  if (kind === null) return;
   const files = await chooseFiles(
     '.smd,.obj,.glb,.gltf,.mtl,.bin,.png,.jpg,.jpeg,.webp,.tga');
   const file = files.find((f) => /\.(smd|obj|glb|gltf)$/i.test(f.name));
@@ -43,6 +76,7 @@ export async function replaceModel() {
   say(`Конвертация ${file.name}…`);
   for (const extra of files) if (extra !== file) await api.upload(extra);
   const path = await api.upload(file);
+  if (kind) { await replaceGarland(kind, path); return; }
   const first = await api.loadCustomModel(path);
   if (first.error) { say(first.error); return; }
 
@@ -81,6 +115,15 @@ export async function replaceModel() {
   say(notes.map(t).join('; '));
   refreshView();
   await reloadSceneIfFp();
+}
+
+/** Своя модель гирлянды: кости стоковой, материалы свои. */
+async function replaceGarland(kind, path) {
+  await leaveDecorFit();
+  const res = await api.loadDecorModel(kind, path);
+  if (res.error) { say(res.error); return; }
+  applyView(res);            // сцену в руках пересоберёт приезд гирлянды
+  say(res.textures ? t(`Своя гирлянда; текстур из файла: ${res.textures}`) : 'Своя гирлянда');
 }
 
 // ── Подгонка своей модели и гирлянды ─────────────────────────────────────

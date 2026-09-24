@@ -140,7 +140,19 @@
   padding: 0 var(--rhythm) var(--gap);
 }
 [data-panels="float"]  .stage { grid-template-columns: minmax(0, 1fr); }
-[data-panels="pinned"] .stage { grid-template-columns: 230px minmax(0, 1fr) 280px; }
+/* Ширины боковых колонок тянут за край (panel-resize.js); пока не тянули —
+   230 и 280. У частиц справа своя панель и своя ширина (`--pw`). */
+[data-panels="pinned"] .stage {
+  grid-template-columns: var(--lw, 230px) minmax(0, 1fr) var(--bw, 280px);
+}
+[data-section="particles"][data-panels="pinned"] .stage {
+  grid-template-columns: var(--lw, 230px) minmax(0, 1fr) var(--pw, 280px);
+}
+/* Край, за который сейчас можно взяться. !important — намеренно: рамку
+   панели красят с полдюжины правил по режимам и разделам, а подсветка на
+   время наведения должна перебить любое. */
+.is-grip--left  { cursor: col-resize; border-left-color: var(--accent) !important; }
+.is-grip--right { cursor: col-resize; border-right-color: var(--accent) !important; }
 
 /* ── Работа: текстуры и модель ───────────────────────────────────────── */
 .work {
@@ -192,7 +204,9 @@
 /* Режимы показа стоят рядом с командами, а не внутри половины сцены: внутри
    они исчезали вместе с ней при переключении на «Текстуру». */
 .modes { display: flex; gap: 22px; }
-.styles { display: flex; align-items: center; gap: 12px; }
+/* Ряды под кадром (анимации, стили, версии) переносятся: у демомана девять
+   кнопок анимаций, и при прибитых панелях ряд уезжал за край колонки. */
+.styles { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
 
 /* Ряд действий: операции над тем, что рядом. Все текстовые, чтобы ни одна
    не спорила по весу с «Собрать VPK». */
@@ -534,11 +548,16 @@
   overflow: auto;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  /* Ряды — к верху. Сетка высотой во весь экран, и при двух рядах (фильтр
+     «Снайпер · Основное») по умолчанию лишняя высота делилась между ними —
+     карточки разъезжались. */
+  align-content: start;
   gap: 22px 18px;
   padding-bottom: 4px;
 }
 
 .pick {
+  position: relative;       /* для пометки стилей (.pick__styles) */
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -648,6 +667,19 @@
 }
 [data-panels="pinned"] .pick__name,
 [data-panels="pinned"] .pick .mono { grid-column: 2; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Пометка стилей — отдельной колонкой справа от имени: на обложке в 26 px
+   ей места нет. Колонка `auto` появляется только у шапок со стилями. */
+[data-panels="pinned"] .pick:has(.pick__styles) {
+  grid-template-columns: 26px minmax(0, 1fr) auto;
+}
+[data-panels="pinned"] .pick__styles {
+  position: static;
+  grid-column: 3;
+  grid-row: 1 / 3;
+  align-self: center;
+  margin-right: 8px;
+  border: 1px solid var(--hairline);
+}
 
 /* Вложенность системы частиц: ребёнка видно, что он ребёнок. */
 .pick__name, .pick .mono { padding-left: calc(var(--depth, 0) * 9px); }
@@ -808,17 +840,6 @@
    даже когда панели откреплены. */
 [data-section="particles"][data-panels="float"] .stage {
   grid-template-columns: minmax(0, 1fr) var(--pw, 300px);
-}
-/* Ширину колонки задаёт человек, потянув за левый край (particles/resize.js).
-   Пока не тянул — та же, что у панели сборки. */
-[data-section="particles"][data-panels="pinned"] .stage {
-  grid-template-columns: 230px minmax(0, 1fr) var(--pw, 280px);
-}
-/* Селектор с разделом намеренно: границу панели красят и прибитый режим,
-   и плавающий, каждый своим правилом — подсветка края должна перебить оба. */
-[data-section="particles"] .params.is-grip {
-  cursor: col-resize;
-  border-left-color: var(--accent);
 }
 [data-section="particles"][data-panels="float"] .params {
   position: static;
@@ -1111,12 +1132,12 @@
 .ptools.is-folded .ptools__opts { display: none; }
 .ptools.is-folded .ptools__opts, .ptools__opts[hidden] {
   opacity: 0;
-  transform: translate(16px, -50%);
+  transform: translateX(16px);
 }
 @starting-style {
   .ptools:not(.is-folded) .ptools__opts:not([hidden]) {
     opacity: 0;
-    transform: translate(16px, -50%);
+    transform: translateX(16px);
   }
 }
 .ptools.is-folded .ptools__fold { border-bottom: 0; }
@@ -1162,16 +1183,18 @@
 .ptools__color:hover .ptools__fg,
 .ptools__color:hover .ptools__bg { border-color: var(--ink); }
 
-/* Настройки выбранного значка — слева от колонки и по центру, столбцом:
-   рядом с колонкой широкой панели нет места, да и сверху вниз читается
-   быстрее. Прокрутка на случай низкого окна. */
+/* Настройки выбранного значка — слева от колонки, столбцом: рядом с колонкой
+   широкой панели нет места, да и сверху вниз читается быстрее.
+   Верх — вровень с верхом колонки (её высоту отдаёт layout.js в --bar-h), а
+   не по центру: у центрированной панели при появлении блока (выделение
+   ножниц) верх уезжал вверх, и переключатель уходил из-под курсора. Теперь
+   панель растёт только вниз. Прокрутка — на случай низкого окна. */
 .ptools__opts {
   position: absolute;
   right: 58px;
-  top: 50%;
-  transform: translateY(-50%);
+  top: calc(50% - var(--bar-h, 0px) / 2);
   width: 190px;
-  max-height: calc(100% - 24px);
+  max-height: calc(50% + var(--bar-h, 0px) / 2 - 12px);
   padding: 12px;
   border: 1px solid var(--hairline-strong);
   background: var(--surface);
@@ -1184,14 +1207,43 @@
 
 /* Видна ровно одна группа: человек в момент времени либо красит, либо режет,
    либо обводит. */
-/* Ножницы: способ выделения и действия над выделением — каждое своим рядом,
-   чтобы кнопки не переезжали от смены способа (ползунки у способов разные). */
-.parts__modes,
-.parts__cutacts {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
+/* Ножницы: способ — переключателем во всю ширину, выделенное и нарезка всего
+   разом — своими блоками под волосяной линией. */
+.cut__modes,
+.cut__sel,
+.cut__auto { align-self: stretch; }
+.cut__sel,
+.cut__auto {
+  padding-top: 10px;
+  border-top: 1px solid var(--hairline);
 }
+.cut__sel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.cut__count { font-variant-numeric: tabular-nums; }
+.cut__acts {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+/* «Отделить» — главное действие блока: залита, как основная кнопка окна,
+   только в размер панели. */
+.cut__apply {
+  flex: 1 1 auto;
+  padding: 7px 10px;
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  color: var(--surface);
+  font: inherit;
+  font-size: 9.5px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background var(--dur), border-color var(--dur);
+}
+.cut__apply:hover { background: var(--accent); border-color: var(--accent); }
 
 .parts__group {
   display: flex;
@@ -1199,7 +1251,7 @@
   align-items: flex-start;
   gap: 10px;
 }
-/* Подпись НАД ползунком: в столбце шириной с сам ползунок «Дробление» рядом
+/* Подпись НАД ползунком: в столбце шириной с сам ползунок «Нарезать по островам» рядом
    с ним не помещается. */
 .ptools .parts__strength { flex-direction: column; align-items: stretch; gap: 5px; }
 .ptools .parts__strength input { width: 100%; }
@@ -1290,22 +1342,55 @@
 /* Список частей — у противоположного края: он про модель, а не про
    инструмент. Частей бывает под три десятка, поэтому столбец прокручивается,
    а не растёт за край; снизу оставлено место подсказке. */
+/* Панель двигают за заголовок (parts.js) и тянут за уголок справа снизу —
+   штатный `resize`. Прокручивается только сетка: заголовок, за который
+   держат, всегда на виду. */
 .parts__list {
   position: absolute;
   left: 12px;
   top: 12px;
   z-index: 2;
-  max-height: calc(100% - 80px);
+  width: 200px;
+  min-width: 96px;
+  min-height: 72px;
+  max-width: calc(100% - 24px);
+  max-height: calc(100% - 24px);
   display: flex;
   flex-direction: column;
-  align-items: stretch;
-  gap: 6px;
+  gap: 8px;
   padding: 10px;
   border: 1px solid var(--hairline-strong);
   background: var(--surface);
+  overflow: hidden;
+  resize: both;
+}
+.parts__head {
+  flex: none;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  cursor: move;
+  user-select: none;
+  touch-action: none;
+}
+.parts__count { font-variant-numeric: tabular-nums; }
+
+/* Столбцов столько, сколько влезает: растянул панель — части разложились
+   шире, сузил — выше, а лишнее по высоте прокручивается. */
+.parts__grid {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(52px, 1fr));
+  /* Ряд — по содержимому: у чипа `overflow: hidden`, его наименьшая высота
+     для сетки нулевая, и в низкой панели ряды сплющивались вместо прокрутки. */
+  grid-auto-rows: max-content;
+  align-content: start;
+  gap: 4px;
   overflow-y: auto;
 }
-.parts__head { flex: none; }
+/* Чип с двумя-тремя действиями не влезает в треть — он занимает две. */
+.parts__grid .tag.part--wide { grid-column: span 2; }
 
 /* Номер вместо «Часть 7 · 3%»: доля развёртки уехала в подсказку. Двухстрочные
    чипы были втрое шире любого другого тега в приложении. */
@@ -1315,6 +1400,40 @@
   padding: 4px 9px;
   font-variant-numeric: tabular-nums;
 }
+/* Чип части: номер по центру, действия справа, доля развёртки — полоской по
+   нижнему краю. По полоске крупные детали находятся глазом сразу: одинаковые
+   номера сами по себе ничего не говорят о том, где ствол, а где винтик. */
+.parts__grid .tag {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-width: 0;
+  padding: 5px 4px 7px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.part__size {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  width: calc(var(--share, 0) * 100%);
+  background: currentColor;
+  opacity: 0.35;
+}
+/* Покрашенная часть — полосой своего цвета слева: цвет виден сразу, а не
+   точкой в полпикселя рядом с номером. */
+.parts__grid .tag.is-painted::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: var(--paint, var(--accent));
+}
+.parts__grid .tag.is-painted { padding-left: 9px; }
 .parts .tag.is-painted { border-color: var(--accent); color: var(--accent); }
 /* Отмечен для слияния. Инверсия, как у всего выбранного в этом интерфейсе, —
    и она не спорит с рамкой покраски: та про цвет, эта про выбор. */
@@ -1328,7 +1447,7 @@
 /* Крестик у покрашенной части виден всегда: искать его наведением — то же
    самое, что прятать. */
 .parts__x {
-  margin-left: 6px;
+  margin-left: 2px;
   border: none;
   background: none;
   color: inherit;
@@ -1339,7 +1458,7 @@
 /* Кнопки дробления на чипе. Тот же вес, что у крестика: это соседние по
    смыслу действия над одной и той же частью. */
 .parts__cut {
-  margin-left: 6px;
+  margin-left: 2px;
   border: none;
   background: none;
   color: var(--ink-mute);
@@ -1348,16 +1467,6 @@
   cursor: pointer;
 }
 .parts__cut:hover { color: var(--accent); }
-
-/* Цвет, которым покрашена часть, виден на самой кнопке. */
-.parts__dot {
-  display: inline-block;
-  width: 7px;
-  height: 7px;
-  margin-left: 6px;
-  border: 1px solid var(--hairline-strong);
-  vertical-align: middle;
-}
 
 /* Поле цвета — мелкий квадрат в такой же волосяной рамке, как всё остальное:
    нативный input иначе рисует рамку и подложку от системы. */
@@ -2361,8 +2470,9 @@
    значит «твоё/активное», и 224 оранжевых чипа это значение бы стёрли. */
 .pick__styles {
   position: absolute;
-  left: 0;
-  top: 0;
+  /* Внутри рамки обложки: пометка — ребёнок карточки, а не обложки. */
+  left: 1px;
+  top: 1px;
   padding: 2px 5px;
   border-right: 1px solid var(--hairline);
   border-bottom: 1px solid var(--hairline);

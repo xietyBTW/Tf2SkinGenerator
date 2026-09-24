@@ -110,11 +110,14 @@ def _weapon_items(tf2_class: Optional[str], weapon_type: Optional[str],
     out: List[dict] = []
     class_names = [tf2_class] if tf2_class else list(TF2_WEAPONS)
     type_names = [weapon_type] if weapon_type else WEAPON_SLOT_TYPES
+    garlands = _garland_keys()
 
     for cls in class_names:
         slots = TF2_WEAPONS.get(cls, {})
         for slot in type_names:
             for key in slots.get(slot, {}):
+                if key.lower() in garlands:
+                    continue
                 out.append({
                     'key': key,
                     'name': get_weapon_name(cls, slot, key, lang),
@@ -127,6 +130,24 @@ def _weapon_items(tf2_class: Optional[str], weapon_type: Optional[str],
                     'mode': f'{cls.lower()}_{key}',
                 })
     return out
+
+
+def _garland_keys() -> set:
+    """
+    Праздничные «оружия», которые на деле только гирлянда на обычной пушке.
+
+    В игре у них нет своей модели оружия: items_game вешает гирлянду на
+    базовое через `attached_models` (у праздничного обреза `c_scattergun_xmas`
+    — одни лампочки). Отдельным пунктом каталога такая гирлянда открывалась без
+    ствола и жила своей работой — отдельно от того же оружия с переключателем
+    «Праздничная», где её красят вместе с пушкой. Теперь она только там.
+    Цельные праздничные модели (Посол, Чёрный ящик…) остаются в каталоге.
+
+    Без пути к игре фильтровать не по чему — каталог показывает всё.
+    """
+    from src.data.weapon_model_index import attachment_only_models
+    paths = tf2_paths()
+    return set() if 'error' in paths else attachment_only_models(paths['root'])
 
 
 def _character_items(tf2_class: Optional[str], lang: str) -> List[dict]:
@@ -491,6 +512,16 @@ def icon_png(key: str) -> Optional[bytes]:
     icon = png_bytes(key, paths['textures_vpk'])
     if icon is not None:
         return icon
+
+    # Имя иконки не совпало с именем модели (Scottish Resistance, Sydney
+    # Sleeper…) — спрашиваем items_game. Вторым, а не первым: модель делят и
+    # золотые/промо-копии, и по ней иногда находится не та иконка.
+    from src.data.weapon_model_index import weapon_icon
+    icon_path = weapon_icon(key, paths['root'])
+    if icon_path:
+        icon = png_bytes(icon_path, paths['textures_vpk'])
+        if icon is not None:
+            return icon
 
     from src.data.weapons import WEAPON_MDL_PATHS
     mdl = key if key.lower().endswith('.mdl') else WEAPON_MDL_PATHS.get(key, '')
@@ -1086,6 +1117,10 @@ _UI_STATE = {
     # разная у прибитого режима (280) и у плавающего (300): подставить сюда
     # одно число значило бы сломать один из двух.
     'params_width': (0, 2000, 0),
+    # Ширины прибитых каталога слева и панели сборки справа; 0 — край не
+    # тянули, ширину задаёт CSS (230 и 280).
+    'catalog_width': (0, 2000, 0),
+    'build_width': (0, 2000, 0),
     # Доля левой половины работы в процентах; 0 — границу не трогали, поровну.
     'split_percent': (0, 85, 0),
     'sound_volume': (0, 100, 100),
@@ -1096,6 +1131,9 @@ _UI_STATE = {
     # толкует, ему это просто число, которое надо запомнить.
     # Умолчание 7 — обмен + ошибки + предупреждения.
     'console_filter': (0, 31, 7),
+    # Потолок размера своей картинки в редакторе частиц. Меньшие картинки
+    # не растягиваются; не-степень двойки сервер округлит вниз сам.
+    'particle_tex_size': (256, 1024, 512),
 }
 
 
@@ -1565,6 +1603,18 @@ def drop_custom_model(lang: str = '') -> Dict[str, object]:
     return session().drop_custom_model(lang=_lang(lang))
 
 
+def load_decor_model(kind: str = '', path: str = '', lang: str = '') -> Dict[str, object]:
+    """Своя модель гирлянды вида `kind` вместо стоковой."""
+    from src.app.session import session
+    return session().load_decor_model(kind, path, lang=_lang(lang))
+
+
+def drop_decor_model(kind: str = '', lang: str = '') -> Dict[str, object]:
+    """Возвращает стоковую модель гирлянды вида `kind`."""
+    from src.app.session import session
+    return session().drop_decor_model(kind, lang=_lang(lang))
+
+
 def qc_text() -> Dict[str, object]:
     """QC своей модели для правки."""
     from src.app.session import session
@@ -1956,10 +2006,10 @@ def set_particle_param(system: str, key: str, value) -> Dict[str, object]:
 # Шапки и косметика
 # ═══════════════════════════════════════════════════════════════════════════ #
 
-#: Категории, которые можно скрыть — те же, что в панели шапок приложения.
-#: Значение живёт в общем конфиге (`hats_hidden_tags`), поэтому фильтр
-#: одинаков и в окне, и здесь.
-HAT_TAGS = ('medals', 'halloween', 'holiday')
+#: Категории, которые можно скрыть: медали и шапки, которые игра рисует только
+#: в Хэллоуин. Значение живёт в общем конфиге (`hats_hidden_tags`); прежние
+#: «holiday», «smissmas», «summer» там игнорируются.
+HAT_TAGS = ('medals', 'halloween')
 
 def _model_file_name(mdl_path: str) -> str:
     """Имя файла модели без пути и расширения — подпись карточки косметики."""
@@ -1973,12 +2023,24 @@ def hat_filters(lang: str = '') -> List[dict]:
     Имя короткое, подсказка полная: в ряду фильтров «Скрыть сезонные
     (Christmas и др.)» не помещается, а на кнопке нужно одно слово.
     """
+    from src.app.session import session
+    from src.data.hats_parser import parse_hats
+
     lang = _lang(lang)
     t = _t(lang)
     hidden = hidden_hat_tags()
+    # Число на кнопке объясняет её лучше подсказки: «Хэллоуин 473» — сразу
+    # видно, что и сколько она прячет. Список в памяти, подсчёт дешёвый.
+    counts: Dict[str, int] = {}
+    paths = session().tf2_paths()
+    for h in ([] if 'error' in paths else parse_hats(paths['root'], lang)):
+        tag = 'medals' if h.is_medal else 'halloween' if h.is_halloween else ''
+        if tag:
+            counts[tag] = counts.get(tag, 0) + 1
     return [{'key': k,
              'name': t.get(f'hat_filter_{k}', k),
              'tip': t.get(f'hat_filter_{k}_tip', ''),
+             'count': counts.get(k, 0),
              'hidden': k in hidden}
             for k in HAT_TAGS]
 
@@ -2009,9 +2071,10 @@ def set_hat_filter(tag: str, hidden: bool) -> List[dict]:
 
 
 def hats(query: str = '', tf2_class: Optional[str] = None,
-         region: str = '', lang: str = '') -> Dict[str, object]:
+         region: str = '', collection: str = '',
+         lang: str = '') -> Dict[str, object]:
     """
-    Косметика TF2 из items_game.txt: {items, regions, suggest}.
+    Косметика TF2 из items_game.txt: {items, regions, collections, suggest}.
 
     Скрытые категории берём из конфига (`hats_hidden_tags`) — так же, как
     панель шапок. Отдаём ВСЁ, что прошло фильтры: косметики 9504, и отрисовка
@@ -2021,8 +2084,9 @@ def hats(query: str = '', tf2_class: Optional[str] = None,
     Поиск ранжирует: имя целиком, с начала, по началам слов, подстрока;
     ищет и по английскому имени, когда интерфейс русский. `regions` — фасет
     «куда надевается» с числами под текущим запросом и классом (без своего
-    фильтра, иначе из «Лица» нельзя было бы уйти). `suggest` — похожие имена,
-    когда ничего не нашлось.
+    фильтра, иначе из «Лица» нельзя было бы уйти). `collections` — то же для
+    коллекций игры, новые сверху. `suggest` — похожие имена, когда ничего не
+    нашлось.
     """
     from src.app.session import session
     from src.data.hats_parser import REGION_ORDER, parse_hats
@@ -2031,10 +2095,13 @@ def hats(query: str = '', tf2_class: Optional[str] = None,
     t = _t(lang)
     paths = session().tf2_paths()
     if 'error' in paths:
-        return {'items': [], 'regions': [], 'suggest': []}
+        return {'items': [], 'regions': [], 'collections': [], 'suggest': []}
 
     hidden = set(hidden_hat_tags())
     region = (region or '').strip().lower()
+    collection = (collection or '').strip()
+    # {ключ: [номер, название, число]} — фасет коллекций.
+    col_counts: Dict[str, list] = {}
     words = _hat_plain(str(query)).split()
     english = _english_names(paths['root']) if words and lang != 'en' else {}
     counts: Dict[str, int] = {}
@@ -2045,23 +2112,32 @@ def hats(query: str = '', tf2_class: Optional[str] = None,
             continue
         if 'halloween' in hidden and h.is_halloween:
             continue
-        if 'holiday' in hidden and h.is_holiday:
-            continue
         if not h.matches([], tf2_class or None):
             continue
         names.append(h.name)
         rank = _hat_rank(h, words, english.get(h.defindex, ''))
         if rank is None:
             continue
-        counts[h.region] = counts.get(h.region, 0) + 1
-        if region and h.region != region:
-            continue
-        found.append((rank, h.name.lower(), h))
+        # Каждый фасет считается под ЧУЖИМ фильтром, но не под своим: иначе
+        # из выбранной коллекции нельзя было бы увидеть соседние.
+        in_region = not region or h.region == region
+        in_collection = not collection or h.collection == collection
+        if in_collection:
+            counts[h.region] = counts.get(h.region, 0) + 1
+        if in_region and h.collection:
+            col = col_counts.setdefault(
+                h.collection, [h.collection_rank, h.collection_name, 0])
+            col[2] += 1
+        if in_region and in_collection:
+            found.append((rank, h.name.lower(), h))
     found.sort(key=lambda f: (f[0], f[1]))
     return {
         'items': [_hat_row(h, t) for _, _, h in found],
         'regions': [{'key': k, 'name': t.get(f'hat_region_{k}', k), 'count': n}
                     for k in REGION_ORDER if (n := counts.get(k))],
+        'collections': [{'key': k, 'name': name, 'count': n}
+                        for k, (_, name, n) in sorted(
+                            col_counts.items(), key=lambda kv: -kv[1][0])],
         'suggest': _hat_suggest(words, names, english) if words and not found else [],
     }
 

@@ -104,6 +104,10 @@ def image_spec(value: Any, brush: Optional[Dict[str, Any]] = None) -> Dict[str, 
         # По высоте — свой множитель; нет его — равен ширинному.
         'scale_y': max(0.05, min(20.0, float(raw.get('scale_y') or scale))),
         'offset': [float(offset[0]), float(offset[1])],
+        # Отражение по своим осям картинки: тянут сторону рамки за
+        # противоположную — картинка переворачивается, как в редакторах.
+        'flip_x': bool(raw.get('flip_x')),
+        'flip_y': bool(raw.get('flip_y')),
         # Габарит части, в который картинку вписали изначально: после разреза
         # наклейка остаётся на месте развёртки, а не рисуется в каждой половине.
         'anchor': _anchor(raw.get('anchor')),

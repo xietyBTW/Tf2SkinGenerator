@@ -30,8 +30,11 @@ logger = logging.getLogger(__name__)
 # v8: добавлено поле icon (image_inventory) — иконка предмета из рюкзака.
 # v9: %s раскрывается токеном КЛАССА ИЗ ПУТЕЙ («demo», а не «demoman»).
 # v10: regions — equip_region с учётом prefab (фасет «куда надевается»).
+# v11: holiday с учётом prefab.
+# v12: collection — коллекция игры (фильтр каталога).
+# v13: убран event (сезон): фильтр прячет только хэллоуинские по ограничению.
 # Смена версии форсирует одноразовый перепарс старого кэша.
-_CACHE_VERSION = "v10"
+_CACHE_VERSION = "v13"
 _CACHE_DIR = data_dir() / "cache"
 
 #: Как называется файл локализации у языка приложения. Один словарь на модуль:
@@ -94,6 +97,12 @@ class HatItem:
     # Праздничное ограничение ("holiday_restriction"), напр.
     # "halloween_or_fullmoon" / "christmas" — по нему фильтруем сезонное.
     holiday: str = ""
+    # Коллекция игры (item_collections): ключ, название из локализации и
+    # порядковый номер в items_game — он же хронология выпуска. Пусто / -1 —
+    # предмет ни в одну не входит (всё, что старше 2015 года).
+    collection: str = ""
+    collection_name: str = ""
+    collection_rank: int = -1
     # "image_inventory" — иконка рюкзака без расширения, напр.
     # "backpack/player/items/soldier/soldier_officer". Пусто = не объявлена,
     # тогда иконку ищут по имени модели (см. services/backpack_icons).
@@ -125,12 +134,12 @@ class HatItem:
 
     @property
     def is_halloween(self) -> bool:
-        return "halloween" in self.holiday.lower()
+        """Игра рисует предмет только в Хэллоуин и в полнолуние.
 
-    @property
-    def is_holiday(self) -> bool:
-        """Любое сезонное ограничение (Halloween, Christmas, birthday…)."""
-        return bool(self.holiday)
+        Хэллоуинские по теме, но без ограничения (Scream Fortress с 2015 года
+        носится круглый год) сюда не входят: их видно всегда, прятать незачем.
+        """
+        return "halloween" in self.holiday.lower()
 
     @property
     def classes_str(self) -> str:
@@ -334,6 +343,34 @@ def _find_items_section(content: str) -> int:
     return items_game_kv.find_section(content, "items")
 
 
+# ── Коллекция предмета ──────────────────────────────────────────────────────── #
+
+def _item_collections(content: str,
+                      localization: Dict[str, str]) -> Dict[str, tuple]:
+    """{внутреннее имя предмета (lower): (номер, ключ, название)}.
+
+    Справочные коллекции («Halloween_master_collection») пропускаем: в них не
+    предметы, а другие коллекции.
+    """
+    out: Dict[str, tuple] = {}
+    section = items_game_kv.find_section(content, "item_collections")
+    for rank, (key, block) in enumerate(items_game_kv.iter_blocks(content, section)):
+        if _flat_value(block, "is_reference_collection") == "1":
+            continue
+        token = (_flat_value(block, "name") or "").lstrip("#")
+        name = localization.get(token) or localization.get(token.lower()) or key
+        for item in re.findall(r'"([^"]+)"\s+"\d+"', block):
+            out.setdefault(item.lower(), (rank, key, name))
+    return out
+
+
+def _collection_fields(found: Optional[tuple]) -> dict:
+    if not found:
+        return {}
+    rank, key, name = found
+    return {"collection": key, "collection_name": name, "collection_rank": rank}
+
+
 # ── Парсинг items_game.txt ─────────────────────────────────────────────────── #
 
 def _parse_items_game(filepath: str,
@@ -364,9 +401,11 @@ def _parse_items_game(filepath: str,
 
     logger.info(f"Секция 'items' найдена на позиции {items_brace}")
 
-    # Prefab нужны только областям: остальное шапки читают из своего блока.
+    # Prefab нужны областям и праздничному ограничению: остальное шапки читают
+    # из своего блока.
     game = items_game_kv.ItemsGame(items=[], prefabs=dict(items_game_kv.iter_blocks(
         content, items_game_kv.find_section(content, "prefabs"))))
+    item_collections = _item_collections(content, localization)
 
     results: List[HatItem] = []
     pos = items_brace + 1  # сразу после {
@@ -520,7 +559,9 @@ def _parse_items_game(filepath: str,
         # Метки для фильтрации: тип предмета (медали) и сезонность (Halloween).
         item_type = _flat_value(block, "item_type_name") or ""
         prefab = _flat_value(block, "prefab") or ""
-        holiday = _flat_value(block, "holiday_restriction") or ""
+        # С prefab: у хэллоуинских 2011–2014 ограничение живёт в prefab
+        # («halloween2013»), и в блоке его видно у одной шапки из пяти.
+        holiday = game.inherited(block, "holiday_restriction") or ""
         icon = _flat_value(block, "image_inventory") or ""
 
         results.append(HatItem(
@@ -536,6 +577,7 @@ def _parse_items_game(filepath: str,
             prefab=prefab,
             item_name_token=item_name_token,
             holiday=holiday,
+            **_collection_fields(item_collections.get(internal_name.lower())),
             icon=icon,
             regions=_extract_regions(block, game),
         ))

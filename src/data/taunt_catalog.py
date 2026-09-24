@@ -37,6 +37,7 @@ _ITEM_HEAD = re.compile(r'\n\t\t"\d+"\s*\n\t\t\{')
 _BRACE = re.compile(r'[{}]')
 _ITEM_NAME = re.compile(r'"item_name"\s+"([^"]+)"')
 _IMAGE = re.compile(r'"image_inventory"\s+"([^"]+)"')
+_PREFAB = re.compile(r'"prefab"\s+"([^"]+)"')
 
 _lock = threading.Lock()
 #: Папка игры, для которой список уже влит. Второй раз работу не делаем.
@@ -122,7 +123,12 @@ def load(tf2_root: str) -> Dict[str, dict]:
         if key in out:
             continue
         token = _ITEM_NAME.search(body)
-        icon = _IMAGE.search(body)
+        # Иконка — только у предмета-насмешки. Реквизит бывает и у насмешки
+        # ОРУЖИЯ (спичечный коробок Thermal Thruster), и тогда иконка предмета
+        # рисует ранец, а не коробок: лучше развёртка самого реквизита.
+        prefab = _PREFAB.search(body)
+        is_taunt = bool(prefab) and 'taunt' in prefab.group(1).lower().split()
+        icon = _IMAGE.search(body) if is_taunt else None
         token = token.group(1) if token else ''
         out[key] = {
             'ru': _display(names['russian'], token, key),

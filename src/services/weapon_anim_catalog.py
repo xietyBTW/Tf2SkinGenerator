@@ -100,6 +100,10 @@ class Action(Enum):
     def tokens(self) -> tuple:
         return self.value
 
+    @property
+    def is_inspect(self) -> bool:
+        return self.name.startswith("INSPECT_")
+
 
 @dataclass(frozen=True)
 class AnimSequence:
@@ -127,15 +131,20 @@ class AnimCatalog:
     by_name: Dict[str, AnimSequence]
 
     def find(self, slot: str, action: Action,
-             replacement: Optional[Dict[str, str]] = None
-             ) -> Optional[AnimSequence]:
+             replacement: Optional[Dict[str, str]] = None,
+             inspect_slot: str = "") -> Optional[AnimSequence]:
         """Последовательность для слота и действия. None — такой в модели нет.
 
         Args:
             replacement: подмена активностей из items_game
                 (`visuals → animation_replacement`). Это самый точный источник:
                 у куная слот остаётся melee, но играет он набор ITEM2.
+            inspect_slot: слот снаряжения для осмотра — игра выбирает осмотр
+                по нему, а не по слоту анимаций (см.
+                `viewmodel_anims.inspect_slot_for`). Пусто — как у остальных.
         """
+        if action.is_inspect and inspect_slot:
+            slot = inspect_slot
         for activity in activity_candidates(slot, action, replacement):
             found = self.by_activity.get(activity)
             if found is not None and found.exists:
@@ -143,7 +152,8 @@ class AnimCatalog:
         return None
 
     def actions_for(self, slot: str,
-                    replacement: Optional[Dict[str, str]] = None
+                    replacement: Optional[Dict[str, str]] = None,
+                    inspect_slot: str = ""
                     ) -> Dict[Action, AnimSequence]:
         """Все действия, доступные оружию этого слота.
 
@@ -152,7 +162,7 @@ class AnimCatalog:
         """
         found = {}
         for action in Action:
-            seq = self.find(slot, action, replacement)
+            seq = self.find(slot, action, replacement, inspect_slot)
             if seq is not None:
                 found[action] = seq
         return found

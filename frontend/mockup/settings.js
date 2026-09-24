@@ -11,13 +11,14 @@ import { fillSelect, fileSize, plural } from './util.js';
 import { ask } from './ask.js';
 import { say, withViewer } from './stage.js';
 import { showTf2Path, setPinned, pinnedFits } from './layout.js';
-import { setParamsWidth } from './particles/resize.js';
+import { setParamsWidth, setCatalogWidth, setBuildWidth } from './panel-resize.js';
 import { setSplit } from './split.js';
 import { relabel, sel } from './catalog.js';
 import { setTheme, setConsoleWidth, setConsoleFilter } from './log.js';
 import { useDict, t } from './i18n.js';
 import { EN } from './strings.js';
 import { refreshView, stopPartsAnimation } from './preview.js';
+import { setTexSize } from './particles/materials.js';
 
 // ── Настройки ───────────────────────────────────────────────────────────
 // Конфиг общий с окном приложения, поэтому здесь только показ и запись: что
@@ -37,14 +38,17 @@ const cfgDlg = document.getElementById('cfgdlg');
 export function applyLook(values) {
   setTheme(values.theme || 'light');
   setPinned(Boolean(values.panels_pinned));
-  // Ширина панели частиц и граница половин: их тянут мышью, а не выбирают в
+  // Ширины боковых панелей и граница половин: их тянут мышью, а не выбирают в
   // этом окне, но читаются они тем же ответом — настройки внешнего вида
   // страница спрашивает один раз.
   setParamsWidth(values.params_width);
+  setCatalogWidth(values.catalog_width);
+  setBuildWidth(values.build_width);
   setSplit(values.split_percent);
   // Консоль: ширина, которую тянули за край, и выбранные категории.
   setConsoleWidth(values.console_width);
   setConsoleFilter(values.console_filter);
+  setTexSize(values.particle_tex_size);
   // Язык: ответы Python берут его из общего конфига сами, а вьюверу сказать
   // некому — он живёт отдельным документом и до конфига не дотягивается.
   api.setLang(values.language);

@@ -34,6 +34,28 @@ import { partsMaterial, hintParts, refreshParts } from './parts.js';
 const placeDlg = document.getElementById('placedlg');
 
 /**
+ * Скопированная картинка части: файл и посадка с размером В ДОЛЯХ ТЕКСТУРЫ.
+ *
+ * Именно так, а не масштабом: масштаб считается от габарита части, и тот же
+ * масштаб на другой детали дал бы другой размер. Python пересчитывает
+ * `size_uv` в масштаб новой части (PartsEditor._absolute_size).
+ */
+let clip = null;
+
+/** Есть ли что вставить: Ctrl+V над деталью на модели смотрит сюда. */
+export const imageClip = () => clip;
+
+function remember(value) {
+  clip = value;
+}
+
+/** Вставляет скопированную картинку на часть — новым слоем поверх. */
+export async function pasteImageTo(part) {
+  if (!clip) return false;
+  return persist(part, clip.path, clip.options, null);
+}
+
+/**
  * Куда и какого размера ляжет картинка — в пикселях холста развёртки.
  *
  * Холст повторяет ПРОПОРЦИИ текстуры (W × H), а не квадрат: у тела шпиона
@@ -141,6 +163,9 @@ function drawPlace(state) {
     g.save();
     g.translate(rect.x, rect.y);
     g.rotate(state.spec.angle * Math.PI / 180);
+    // Отражение — по осям самой картинки, до поворота: так же его делает
+    // склейка (place_image), иначе окно и мод разошлись бы.
+    g.scale(state.spec.flip_x ? -1 : 1, state.spec.flip_y ? -1 : 1);
     g.drawImage(shown, -rect.w / 2, -rect.h / 2, rect.w, rect.h);
     g.restore();
   };
@@ -193,12 +218,37 @@ function drawPlace(state) {
     g.restore();
   }
 
+  // Всё, что вне детали, притемняем: пёстрая текстура вокруг спорила с
+  // картинкой, и было не видно, куда она ляжет. Тёмный слой рисуем на
+  // отдельном холсте и вырезаем из него деталь.
+  const veil = state.veil || (state.veil = document.createElement('canvas'));
+  veil.width = W;
+  veil.height = H;
+  const v = veil.getContext('2d');
+  v.setTransform(1, 0, 0, 1, 0, 0);
+  v.fillStyle = 'rgba(10, 9, 8, 0.55)';
+  v.fillRect(0, 0, W, H);
+  v.setTransform(view.k, 0, 0, view.k, view.dx, view.dy);
+  v.globalCompositeOperation = 'destination-out';
+  v.beginPath();
+  for (const [a, b, c] of state.polygons) {
+    v.moveTo(a[0] * W, (1 - a[1]) * H);
+    v.lineTo(b[0] * W, (1 - b[1]) * H);
+    v.lineTo(c[0] * W, (1 - c[1]) * H);
+    v.closePath();
+  }
+  v.fill();
+  g.save();
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  g.drawImage(veil, 0, 0);
+  g.restore();
+
   // Контур маски поверх всего: без него не видно, докуда картинка доживёт.
   // Толщину делим на масштаб — иначе при приближении он превращается в брус.
   g.strokeStyle = '#cc5522';
   g.lineWidth = 1 / view.k;
   g.beginPath();
-  if (state.outline) {
+  if (!state.mesh) {
     // Считаем один раз: треугольники за время окна не меняются.
     if (!state.edges) state.edges = outlineOf(state.polygons);
     for (const [from, to] of state.edges) {
@@ -311,6 +361,9 @@ function localPoint(state, rect, clientX, clientY, cv) {
  * только размер, но и центр, а центр здесь живёт в сдвиге (`offset`), в долях
  * места части.
  *
+ * Протянул край ЗА противоположный — картинка отражается по этой оси, как в
+ * Photoshop: отдельной кнопки «отразить» нет, это то же движение руки.
+ *
  * Угол тянет обе оси разом, сохраняя пропорции: чаще всего наклейку просто
  * увеличивают. Сторона тянет свою — ею картинку и вытягивают под деталь.
  */
@@ -319,29 +372,35 @@ function resizeBy(state, drag, event, cv) {
   // Считаем в системе рамки НА МОМЕНТ НАЖАТИЯ: она не должна ехать вслед за
   // собственным изменением, иначе тяга разгоняется сама по себе.
   const [lx, ly] = localPoint(state, drag.rect, event.clientX, event.clientY, cv);
-  let w = drag.w0;
-  let h = drag.h0;
-  if (sx) w = Math.max(4, Math.abs(lx + sx * drag.w0 / 2));
-  if (sy) h = Math.max(4, Math.abs(ly + sy * drag.h0 / 2));
+  // Размер со ЗНАКОМ, от неподвижного края: меньше нуля — край протащили за
+  // противоположный.
+  let sw = sx ? sx * lx + drag.w0 / 2 : drag.w0;
+  let sh = sy ? sy * ly + drag.h0 / 2 : drag.h0;
   if (sx && sy) {
-    const k = Math.hypot(w, h) / Math.hypot(drag.w0, drag.h0);
-    w = drag.w0 * k;
-    h = drag.h0 * k;
+    const k = Math.hypot(sw, sh) / Math.hypot(drag.w0, drag.h0);
+    sw = (sw < 0 ? -1 : 1) * drag.w0 * k;
+    sh = (sh < 0 ? -1 : 1) * drag.h0 * k;
   }
+  const w = Math.max(4, Math.abs(sw));
+  const h = Math.max(4, Math.abs(sh));
+  const dirX = sw < 0 ? -1 : 1;
+  const dirY = sh < 0 ? -1 : 1;
 
   const clamp = (value) => Math.max(0.05, Math.min(20, value));
   state.spec.scale = clamp(drag.scale0 * w / drag.w0);
   state.spec.scale_y = clamp(drag.scaleY0 * h / drag.h0);
+  state.spec.flip_x = drag.flipX0 !== (dirX < 0);
+  state.spec.flip_y = drag.flipY0 !== (dirY < 0);
 
-  // Двигаем центр так, чтобы противоположный край остался там же, где был.
-  const shiftX = -sx * (w - drag.w0) / 2;
-  const shiftY = -sy * (h - drag.h0) / 2;
+  // Новый центр — посередине между неподвижным краем и тем, что тянут.
+  const shiftX = sx ? -sx * drag.w0 / 2 + sx * dirX * w / 2 : 0;
+  const shiftY = sy ? -sy * drag.h0 / 2 + sy * dirY * h / 2 : 0;
   const rad = state.spec.angle * Math.PI / 180;
   const worldX = shiftX * Math.cos(rad) - shiftY * Math.sin(rad);
   const worldY = shiftX * Math.sin(rad) + shiftY * Math.cos(rad);
   const bw = Math.max(1, (state.bbox[2] - state.bbox[0]) * cv.width);
   const bh = Math.max(1, (state.bbox[3] - state.bbox[1]) * cv.height);
-  state.spec.offset = [drag.off0[0] - worldX / bw, drag.off0[1] - worldY / bh];
+  state.spec.offset = [drag.off0[0] + worldX / bw, drag.off0[1] + worldY / bh];
   drawPlace(state);
 }
 
@@ -365,7 +424,8 @@ export async function askPlacement(shape, imageUrl, spec, layers = null) {
     bbox: shape.bbox || [0, 0, 1, 1],
     spec: { fit: spec.fit, angle: spec.angle, scale: spec.scale,
             scale_y: spec.scale_y === undefined ? spec.scale : spec.scale_y,
-            offset: [spec.offset[0], spec.offset[1]] },
+            offset: [spec.offset[0], spec.offset[1]],
+            flip_x: !!spec.flip_x, flip_y: !!spec.flip_y },
     base: shape.base ? await loadImage(api.fileUrl(shape.base, true)) : null,
     image: await loadImage(imageUrl),
   };
@@ -385,20 +445,21 @@ export async function askPlacement(shape, imageUrl, spec, layers = null) {
   const shiftY = document.getElementById('place-y');
   const bare = document.getElementById('place-bare');
   const zoom = document.getElementById('place-zoom');
-  const outline = document.getElementById('place-outline');
+  const mesh = document.getElementById('place-mesh');
   // Галки показа под холстом — настройки ОКНА, а не предмета, и каждое
   // открытие начинает с одного и того же:
   //  • игровая текстура под наклейкой видна — контекст, хоть и пёстрый;
-  //  • контур выключен — сетка треугольников нужна только на мелкой детали;
+  //  • сетка треугольников выключена — виден контур детали: сетка из сотен
+  //    рёбер закрывала картинку, а нужна только на мелкой детали;
   //  • приближение включено: класть картинку на кусок, глядя на всю
   //    текстуру, — то же, что целиться в спичку с другого конца комнаты.
   state.bare = false;
-  state.outline = false;
+  state.mesh = false;
   state.zoom = true;
   state.zoomK = 1;
   state.focus = null;
   bare.checked = false;
-  outline.checked = false;
+  mesh.checked = false;
   zoom.checked = true;
 
   // Кадры анимации приходят от Python отдельными картинками: браузер их из
@@ -418,9 +479,11 @@ export async function askPlacement(shape, imageUrl, spec, layers = null) {
 
   //: Числа в полях — то же самое, что показывает рамка. Тянут её мышью, а
   //: поля обязаны идти следом: иначе они врут о том, что сейчас на холсте.
+  // Отражённая по оси — со знаком минус, как в Photoshop: −100% это «тот же
+  // размер, перевёрнутая».
   const syncNumbers = () => {
-    wide.value = Math.round(state.spec.scale * 100);
-    tall.value = Math.round(state.spec.scale_y * 100);
+    wide.value = Math.round(state.spec.scale * 100) * (state.spec.flip_x ? -1 : 1);
+    tall.value = Math.round(state.spec.scale_y * 100) * (state.spec.flip_y ? -1 : 1);
     angle.value = Math.round(state.spec.angle);
     shiftX.value = Math.round(state.spec.offset[0] * 100);
     shiftY.value = Math.round(state.spec.offset[1] * 100);
@@ -489,6 +552,7 @@ export async function askPlacement(shape, imageUrl, spec, layers = null) {
       else if (grip) {
         drag = { grip, rect, w0: rect.w, h0: rect.h,
                  scale0: state.spec.scale, scaleY0: state.spec.scale_y,
+                 flipX0: state.spec.flip_x, flipY0: state.spec.flip_y,
                  off0: [...state.spec.offset] };
       } else {
         drag = { x: e.clientX, y: e.clientY, from: [...state.spec.offset] };
@@ -557,9 +621,33 @@ export async function askPlacement(shape, imageUrl, spec, layers = null) {
       sync();
     });
 
+    // Копировать — картинку и её посадку с размером на ТЕКСТУРЕ; вставить —
+    // новым слоем на эту же часть (на другую — кнопкой на её чипе).
+    const copyButton = document.getElementById('place-copy');
+    const pasteButton = document.getElementById('place-paste');
+    pasteButton.disabled = !clip;
+    const copy = () => {
+      const rect = rectNow();
+      if (!rect || !spec.path) return;
+      remember({ path: spec.path, name: String(spec.path).split(/[\\/]/).pop(),
+                 options: { fit: state.spec.fit, angle: state.spec.angle,
+                            flip_x: state.spec.flip_x, flip_y: state.spec.flip_y,
+                            size_uv: [rect.w / cv.width, rect.h / cv.height] } });
+      pasteButton.disabled = false;
+      hintParts('Картинка скопирована. На другую часть — наведи на неё на модели и нажми Ctrl+V');
+    };
+    on(copyButton, 'click', copy);
+    on(pasteButton, 'click', () => { if (clip) settle({ act: 'paste' }, false); });
+
     // Поворот стрелками: маркер мышкой — привычно, но не единственный способ
     // должен быть у того, кто мышью не работает.
     on(cv, 'keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.code === 'KeyC') { e.preventDefault(); copy(); return; }
+      if ((e.ctrlKey || e.metaKey) && e.code === 'KeyV' && clip) {
+        e.preventDefault();
+        settle({ act: 'paste' }, false);
+        return;
+      }
       const step = { ArrowLeft: -15, ArrowDown: -15, ArrowRight: 15, ArrowUp: 15 }[e.key];
       if (step === undefined) return;
       e.preventDefault();
@@ -569,14 +657,16 @@ export async function askPlacement(shape, imageUrl, spec, layers = null) {
     });
 
     // Поля — для точного числа; мышью то же самое делают ручки на рамке.
-    const byNumber = (field, axis) => on(field, 'input', () => {
+    // Минус в поле — отражение по этой оси.
+    const byNumber = (field, axis, flip) => on(field, 'input', () => {
       const value = Number(field.value) / 100;
-      if (!(value > 0)) return;              // пустое поле — человек его чистит
-      state.spec[axis] = Math.max(0.05, Math.min(20, value));
+      if (!value || !Number.isFinite(value)) return;   // пустое — человек его чистит
+      state.spec[axis] = Math.max(0.05, Math.min(20, Math.abs(value)));
+      state.spec[flip] = value < 0;
       drawPlace(state);
     });
-    byNumber(wide, 'scale');
-    byNumber(tall, 'scale_y');
+    byNumber(wide, 'scale', 'flip_x');
+    byNumber(tall, 'scale_y', 'flip_y');
     // Поворот и сдвиг числом: то же, что маркер и перетаскивание, только точно.
     on(angle, 'input', () => {
       const value = Number(angle.value);
@@ -595,8 +685,8 @@ export async function askPlacement(shape, imageUrl, spec, layers = null) {
     byShift(shiftX, 0);
     byShift(shiftY, 1);
     on(bare, 'change', () => { state.bare = bare.checked; drawPlace(state); });
-    on(outline, 'change', () => {
-      state.outline = outline.checked;
+    on(mesh, 'change', () => {
+      state.mesh = mesh.checked;
       drawPlace(state);
     });
     on(zoom, 'change', () => {
@@ -608,7 +698,7 @@ export async function askPlacement(shape, imageUrl, spec, layers = null) {
 
     on(document.getElementById('place-reset'), 'click', () => {
       state.spec = { fit: 'contain', angle: 0, scale: 1, scale_y: 1,
-                     offset: [0, 0] };
+                     offset: [0, 0], flip_x: false, flip_y: false };
       state.zoomK = 1;
       state.focus = null;
       sync();
@@ -773,6 +863,9 @@ export async function editPartLayers(part, layer = -1) {
     } else if (res.act === 'add') {
       if (!await persist(part, await api.upload(res.file), null, null)) return;
       current = -1;                                   // новая — верхняя
+    } else if (res.act === 'paste') {
+      if (!await pasteImageTo(part)) return;
+      current = -1;                                   // вставленная — верхняя
     } else if (res.act === 'replace') {
       if (!await persist(part, await api.upload(res.file), res.spec, current)) return;
     } else if (res.act === 'move') {

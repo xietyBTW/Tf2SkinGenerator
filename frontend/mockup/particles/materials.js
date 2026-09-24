@@ -21,6 +21,20 @@ import { pSystem } from './state.js';
 // остальное. Разница между «своей картинкой» и «материалом игры» важна:
 // первая добавляет в мод новый файл, и в казуале обход sv_pure его не берёт.
 
+//: Потолок размера своей картинки (256/512/1024) — общий на все материалы,
+//: живёт в конфиге. Картинку меньше потолка не растягиваем.
+const TEX_SIZES = [256, 512, 1024];
+let texSize = 512;
+
+/** Ставит сохранённый потолок. Зовётся из настроек вместе с раскладкой. */
+export function setTexSize(px) {
+  if (TEX_SIZES.includes(Number(px))) texSize = Number(px);
+}
+
+//: Последняя своя картинка каждого материала — чтобы смена разрешения
+//: пересобрала текстуру сразу. Файлы живут до перезапуска страницы.
+const lastFile = new Map();
+
 /** Загружает картинку на диск и ставит её материалу. */
 export async function applyTexture(material, file, sheet) {
   if (!file) return;
@@ -35,8 +49,9 @@ export async function applyTexture(material, file, sheet) {
   }
   say('Замена текстуры…');
   const path = await api.upload(file);
-  const res = await api.setParticleTexture(material, path);
+  const res = await api.setParticleTexture(material, path, texSize);
   if (res.error) { say(res.error); return; }
+  lastFile.set(material, file);
   withParticles((w) => w.loadParticleData({ ...res, rootName: pSystem }));
   await showParticleMaterials();
   say('');
@@ -48,6 +63,7 @@ export async function materialMenu(e, mat) {
     { label: 'Своя картинка…', value: 'image' },
     { label: 'Игровая текстура из списка…', value: 'game' },
     null,
+    { label: t('Разрешение своей картинки: {}').replace('{}', texSize), value: 'size' },
     { label: 'Переименовать материал…', value: 'rename' },
     { label: 'Вернуть текстуру игры', value: 'reset', disabled: !mat.custom },
   ]);
@@ -70,6 +86,23 @@ export async function materialMenu(e, mat) {
     if (res.error) { say(res.error); return; }
     withParticles((w) => w.loadParticleData({ ...res, rootName: pSystem }));
     await showParticleMaterials();
+    return;
+  }
+  if (chosen === 'size') {
+    const size = await ask({
+      title: 'Разрешение своей картинки',
+      text: 'Больше — чётче вблизи, но тяжелее мод. У надписей крита в игре 256.',
+      list: TEX_SIZES.map((n) => ({ label: `${n}×${n}`, value: n })),
+      ok: 'Выбрать',
+    });
+    if (!size || size === texSize) return;
+    texSize = size;
+    api.setUiState('particle_tex_size', size).catch(() => {});
+    // Своя картинка уже стоит — пересобираем её в новом размере. После
+    // перезапуска файла под рукой нет: новый размер возьмёт следующая.
+    const file = lastFile.get(mat.name);
+    if (mat.custom && file) await applyTexture(mat.name, file, false);
+    else if (mat.custom) say(t('Разрешение {} возьмёт следующая картинка').replace('{}', size));
     return;
   }
   if (chosen === 'rename') {

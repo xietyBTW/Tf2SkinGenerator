@@ -584,16 +584,14 @@ TRANSLATIONS = {
         # подсказку: в ряду фильтров «Скрыть сезонные (Christmas и др.)» не
         # помещается.
         'hat_filter_medals': 'Медали',
-        'hat_filter_medals_tip': 'Скрыть медали',
-        'hat_filter_halloween': 'Halloween',
-        'hat_filter_halloween_tip': 'Скрыть Halloween',
-        'hat_filter_holiday': 'Сезонные',
-        'hat_filter_holiday_tip': 'Скрыть сезонные (Christmas и др.)',
+        'hat_filter_medals_tip': 'Скрыть турнирные и общественные медали (их больше семи тысяч)',
+        'hat_filter_halloween': 'Хэллоуин',
+        'hat_filter_halloween_tip': 'Скрыть шапки, которые игра показывает только в Хэллоуин и в полнолуние',
         # Куда надевается (equip_region игры, сведённый к группам).
         'hat_region_head': 'Голова',
         'hat_region_face': 'Лицо',
         'hat_region_body': 'Тело',
-        'hat_region_medal': 'Медали',
+        'hat_region_medal': 'Значки',
         'hat_region_other': 'Прочее',
 
         # Hat Game Paints Dialog
@@ -1224,17 +1222,15 @@ TRANSLATIONS = {
         # Cosmetics list filter: these hide, not show (medals alone are 7628
         # of 9504). Short name goes on the button, full one into the tooltip.
         'hat_filter_medals': 'Medals',
-        'hat_filter_medals_tip': 'Hide medals',
+        'hat_filter_medals_tip': 'Hide tournament and community medals (over seven thousand)',
         # Where it is worn (the game's equip_region, grouped).
         'hat_region_head': 'Head',
         'hat_region_face': 'Face',
         'hat_region_body': 'Body',
-        'hat_region_medal': 'Medals',
+        'hat_region_medal': 'Badges',
         'hat_region_other': 'Other',
         'hat_filter_halloween': 'Halloween',
-        'hat_filter_halloween_tip': 'Hide Halloween',
-        'hat_filter_holiday': 'Seasonal',
-        'hat_filter_holiday_tip': 'Hide seasonal (Christmas and others)',
+        'hat_filter_halloween_tip': 'Hide cosmetics the game only shows on Halloween and full moons',
 
         # Hat Game Paints Dialog
         'hat_game_paints_title': 'Game Paints',

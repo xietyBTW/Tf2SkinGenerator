@@ -148,6 +148,7 @@ class ViewmodelPreviewWorker(BaseWorker):
         self.team = (team or "red").lower()
         #: Подмена активностей из items_game — заполняется в run().
         self._replacement: dict = {}
+        self._inspect_slot: str = ""
         self._p = self._PROGRESS.get(lang, self._PROGRESS['en'])
         self._preview_dir: Optional[str] = None
 
@@ -167,6 +168,9 @@ class ViewmodelPreviewWorker(BaseWorker):
             # Большого добытчика слот остаётся melee, а играют они набор ITEM2.
             info = viewmodel_anims.anim_info(self.weapon_key, self.tf2_root)
             self._replacement = info.replacement if info else {}
+            # Осмотр игра выбирает по слоту СНАРЯЖЕНИЯ, а не анимаций.
+            self._inspect_slot = viewmodel_anims.inspect_slot_for(
+                self.weapon_key, self.tf2_root)
 
             # Часы шпиона показываются СВОЕЙ моделью вида: руки, часы и
             # последовательности лежат в ней вместе, и рук класса ей не надо.
@@ -339,9 +343,11 @@ class ViewmodelPreviewWorker(BaseWorker):
             return None
         # Что доступно этому оружию — наверх сразу: список нужен интерфейсу
         # даже тогда, когда выбранного действия у оружия нет.
-        available = [a.name for a in catalog.actions_for(slot, self._replacement)]
+        available = [a.name for a in catalog.actions_for(
+            slot, self._replacement, self._inspect_slot)]
         self.actions_available.emit(available)
-        sequence = catalog.find(slot, self.action, self._replacement)
+        sequence = catalog.find(slot, self.action, self._replacement,
+                                    self._inspect_slot)
         if sequence is None and available:
             # Набор действий у каждого оружия свой: перезарядки у биты нет.
             # Показать первое, что оно умеет, честнее, чем «вида от первого
@@ -350,7 +356,8 @@ class ViewmodelPreviewWorker(BaseWorker):
             logger.info(f"[fp] {self.weapon_key}: {self.action.name} нет для "
                         f"слота '{slot}' — показываю {available[0]}")
             self.action = Action[available[0]]
-            sequence = catalog.find(slot, self.action, self._replacement)
+            sequence = catalog.find(slot, self.action, self._replacement,
+                                    self._inspect_slot)
         if sequence is None:
             logger.info(
                 f"[fp] {self.weapon_key}: нет {self.action.name} для слота "

@@ -9,6 +9,7 @@
 import os
 import tempfile
 import unittest
+from unittest import mock
 
 from PIL import Image
 
@@ -475,6 +476,22 @@ class ComposeTests(unittest.TestCase):
         out = os.path.join(self.tmp, 'out.png')
         return compose.compose(
             self.base, [compose.Layer(polygons=polygons, image=self.patch)], out)
+
+    def test_a_flipped_picture_is_mirrored_in_the_composite(self):
+        """Отражение, сделанное в окне посадки, доезжает до склейки: левое и
+        правое меняются местами, верх остаётся верхом."""
+        patch = Image.new('RGBA', (8, 8), (0, 0, 255, 255))
+        for y in range(8):
+            for x in range(4):
+                patch.putpixel((x, y), (255, 0, 0, 255))       # левая половина — красная
+        patch.save(self.patch)
+        square = [((0.0, 0.0), (1.0, 0.0), (1.0, 1.0)), ((0.0, 0.0), (1.0, 1.0), (0.0, 1.0))]
+        out = os.path.join(self.tmp, 'flip.png')
+        compose.compose(self.base, [compose.Layer(polygons=square, image=self.patch,
+                                                  fit='stretch', image_flip_x=True)], out)
+        image = Image.open(out).convert('RGB')
+        self.assertEqual(image.getpixel((4, 32)), (0, 0, 255))   # слева теперь синее
+        self.assertEqual(image.getpixel((60, 32)), (255, 0, 0))
 
     def test_cached_windows_match_a_fresh_compose(self):
         """Готовые окна слоёв берутся из кэша между мазками. Правка слоя A
@@ -1603,6 +1620,18 @@ class SessionPartsTests(unittest.TestCase):
             self.session.parts.set_part_colors('weapon', {'1': '#%02x0000' % (step * 30)})
         self.assertTrue(os.path.isfile(styled), 'склейку стиля удалили')
 
+    def test_brush_change_does_not_delete_a_draft(self):
+        """Предмет открыт без своего черновика, человек сдвинул силу кисти —
+        пустое сохранение стёрло бы черновик, которого он даже не вернул."""
+        from src.services import work_keeper, work_store
+
+        self.session.preview.weapon_key = 'c_scattergun'     # у работы есть ключ
+        with mock.patch.object(work_keeper, 'is_enabled', return_value=True), \
+                mock.patch.object(work_store, 'forget') as forget, \
+                mock.patch.object(work_store, 'has', return_value=True):
+            self.session.parts.set_part_colors('weapon', {}, strength=0.4)
+        forget.assert_not_called()
+
     def test_brush_change_does_not_repaint_fresh_strokes(self):
         """Сила и «точный цвет» едут внутри мазка, а смена ползунка всё равно
         пересобирала склейку: секунда на 2048 и холостой шаг Ctrl+Z."""
@@ -1617,6 +1646,20 @@ class SessionPartsTests(unittest.TestCase):
         self.assertEqual(t.uploaded_for_mat(t.storage_main_key()), painted)
         self.assertEqual(len(self.session._edit_history), steps)
         self.assertEqual(self.session.preview.part_tint, 0.3)
+
+    def test_a_pasted_picture_keeps_its_size_on_the_texture(self):
+        """Вставка «того же размера» — того же на ТЕКСТУРЕ: масштаб считается
+        от габарита части, и тот же масштаб на другой детали дал бы другую
+        картинку. Часть 0 — квадрат 0.4 текстуры (25.6 px из 64), картинка 8×8
+        вписывается в него целиком; четверть текстуры (16 px) — масштаб 0.625."""
+        self.session.parts.set_part_texture(
+            'weapon', 0, self.patch, {'fit': 'contain', 'size_uv': [0.25, 0.25],
+                                      'flip_x': True})
+        spec = self.session.preview.part_textures['weapon'][0][-1]
+        self.assertAlmostEqual(spec['scale'], 0.625, places=3)
+        self.assertAlmostEqual(spec['scale_y'], 0.625, places=3)
+        self.assertTrue(spec['flip_x'])
+        self.assertNotIn('size_uv', spec)
 
     def test_scissors_cut_a_region_and_keep_the_paint(self):
         """Выделенное ножницами становится частью; покраска куска, из которого
@@ -1853,3 +1896,15 @@ def test_leaving_a_custom_model_forgets_its_parts():
     p.part_colors = {'weapon': {0: {'color': '#ff0000'}}}
     p.begin_game_model()
     assert not (p.part_regions or p.part_cuts or p.part_colors)
+
+
+def test_a_weapon_with_styles_keeps_its_parts_on_reload():
+    """У оружия со стилями `has_custom_model` верен и без своей геометрии —
+    по нему покраска частей стиралась при каждом открытии предмета."""
+    from src.domain.preview.session import PreviewSession
+
+    p = PreviewSession()
+    p.textures.skin_info = {'num_skins': 2}
+    p.part_colors = {'weapon': {0: {'color': '#ff0000'}}}
+    p.begin_game_model()
+    assert p.part_colors

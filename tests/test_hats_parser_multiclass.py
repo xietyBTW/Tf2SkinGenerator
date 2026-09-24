@@ -231,16 +231,30 @@ class HatItemFlagTests(unittest.TestCase):
         self.assertTrue(self._hat(item_name_token="#TF_TournamentMedal_AFC_Div1_1st").is_medal)
         self.assertFalse(self._hat(prefab="hat", item_name_token="#Some_Cool_Hat").is_medal)
 
-    def test_halloween_and_holiday(self):
-        h = self._hat(holiday="halloween_or_fullmoon")
-        self.assertTrue(h.is_halloween)
-        self.assertTrue(h.is_holiday)
-        x = self._hat(holiday="christmas")
-        self.assertFalse(x.is_halloween)
-        self.assertTrue(x.is_holiday)
-        n = self._hat()
-        self.assertFalse(n.is_halloween)
-        self.assertFalse(n.is_holiday)
+    def test_item_collections(self):
+        """Название — из локализации, справочные коллекции пропускаются."""
+        from src.data.hats_parser import _item_collections
+
+        content = '''"items_game"
+{
+    "item_collections"
+    {
+        "Halloween_master_collection"
+        { "name" "#master" "is_reference_collection" "1"
+          "items" { "Halloween 2018 Collection Dummy" "10" } }
+        "halloween2018_collection"
+        { "name" "#hw18" "items" { "rare" { "Deadbeats" "10" } } }
+    }
+}'''
+        found = _item_collections(content, {"hw18": "Scream Fortress 2018"})
+        self.assertEqual(found, {"deadbeats": (1, "halloween2018_collection",
+                                               "Scream Fortress 2018")})
+
+    def test_is_halloween_means_holiday_restriction(self):
+        """Только то, что игра рисует лишь в Хэллоуин: по holiday_restriction."""
+        self.assertTrue(self._hat(holiday="halloween_or_fullmoon").is_halloween)
+        self.assertFalse(self._hat(holiday="christmas").is_halloween)
+        self.assertFalse(self._hat().is_halloween)
 
 
 class DemomanModelTokenTests(unittest.TestCase):

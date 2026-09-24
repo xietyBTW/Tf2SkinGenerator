@@ -90,6 +90,20 @@ $sequence "lost_anim" {
 	fps 30
 }
 
+$sequence "primary_inspect_idle" {
+	"anims\primary_inspect_idle.smd"
+	activity "ACT_PRIMARY_VM_INSPECT_IDLE" 1
+	fps 24
+	loop
+}
+
+$sequence "secondary_inspect_idle" {
+	"anims\secondary_inspect_idle.smd"
+	activity "ACT_SECONDARY_VM_INSPECT_IDLE" 1
+	fps 30
+	loop
+}
+
 $sequence "r_handposes" {
 	"anims\\r_handposes.smd"
 	fps 30
@@ -98,7 +112,8 @@ $sequence "r_handposes" {
 
 ON_DISK = ["sg_idle", "sg_reload_start", "db_idle", "ss_idle",
            "melee_allclass_idle", "box_idle", "r_handposes",
-           "eternal_idle", "knife_stab_a", "offhand_idle", "c_sapper_idle"]
+           "eternal_idle", "knife_stab_a", "offhand_idle", "c_sapper_idle",
+           "primary_inspect_idle", "secondary_inspect_idle"]
 
 
 class CatalogTests(unittest.TestCase):
@@ -181,8 +196,29 @@ class CatalogTests(unittest.TestCase):
     def test_actions_for_lists_what_the_weapon_can_do(self):
         """Из этого списка интерфейс потом строит выбор анимации."""
         self.assertEqual(set(self.catalog.actions_for("primary")),
-                         {Action.IDLE, Action.RELOAD_START})
+                         {Action.IDLE, Action.RELOAD_START, Action.INSPECT_IDLE})
         self.assertEqual(set(self.catalog.actions_for("item2")), {Action.IDLE})
+
+    # ── Осмотр: по слоту снаряжения ───────────────────────────────────────── #
+
+    def test_inspect_follows_the_loadout_slot(self):
+        """Гранатомёт: слот анимаций secondary, слот снаряжения primary.
+
+        Игра берёт осмотр по слоту СНАРЯЖЕНИЯ (GetInspectActivity), и по слоту
+        анимаций гранатомёт получал осмотр липучкомёта — модель разваливалась.
+        """
+        self.assertEqual(
+            self.catalog.find("secondary", Action.INSPECT_IDLE,
+                              inspect_slot="primary").name,
+            "primary_inspect_idle")
+        self.assertEqual(
+            set(self.catalog.actions_for("secondary", inspect_slot="primary")),
+            {Action.INSPECT_IDLE})     # лежит на диске только осмотр
+
+    def test_inspect_slot_does_not_touch_other_actions(self):
+        self.assertEqual(
+            self.catalog.find("primary", Action.IDLE, inspect_slot="secondary").name,
+            "sg_idle")
 
     # ── Подмена активностей из items_game ─────────────────────────────────── #
 

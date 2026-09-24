@@ -59,7 +59,8 @@ def build_decor_models(
 ) -> int:
     """Собирает гирлянды в `ctx.vpkroot_dir`. Возвращает, сколько собрано.
 
-    Элемент `entries`: {'kind', 'mdl' (путь в VPK), 'fit' (dict | None),
+    Элемент `entries`: {'kind', 'mdl' (путь в VPK), 'smd' (своя модель
+    гирлянды или пусто), 'fit' (dict | None),
     'bends' ([{c, r, d}] — изгибы, festive_decor.apply_bends),
     'textures': {материал: {'red': png, 'blu': png}}}.
     """
@@ -108,8 +109,11 @@ def _build_one(ctx, entry: dict, mdl: str, stem: str, misc_vpk: str,
     if model is None or not ref:
         raise FileNotFoundError(f"в разборе {stem} нет QC или меша")
 
-    # Сначала изгибы (по самой гирлянде), потом подгонка — как во вьювере.
     from src.services import festive_decor
+    # Своя модель — на скелет стоковой, как в превью (festive_decor.build).
+    if entry.get('smd'):
+        festive_decor.own_on_stock(entry['smd'], ref, ref)
+    # Сначала изгибы (по самой гирлянде), потом подгонка — как во вьювере.
     if entry.get('bends'):
         festive_decor.bend_smd(ref, ref, entry['bends'],
                                festive_decor.weapon_pose(entry.get('weapon') or '', ref))
@@ -137,11 +141,17 @@ def _build_one(ctx, entry: dict, mdl: str, stem: str, misc_vpk: str,
     try:
         for name in materials:
             found_vmt = reader.find_vmt(original_cd, name.lower())
-            if not found_vmt:
+            image = images.get(name.lower())
+            if found_vmt:
+                text = found_vmt[1]
+            elif entry.get('smd'):
+                # Материал своей модели: в игре его нет, VMT пишем сами; без
+                # картинки — серый, как в превью (festive_decor._grey_png).
+                text = '"VertexLitGeneric"\n{\n\t"$basetexture" ""\n}\n'
+                image = image or festive_decor._grey_png(str(work), name)
+            else:
                 logger.info(f"[гирлянда] {stem}: VMT {name} не найден — пропуск")
                 continue
-            text = found_vmt[1]
-            image = images.get(name.lower())
             if image and os.path.isfile(image):
                 # Лампочки мигают кадрами игровой текстуры — своя картинка
                 # раскладывается на те же кадры (festive_decor.blink_like).

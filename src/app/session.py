@@ -1748,8 +1748,10 @@ class AppSession:
                     textures[material] = dict(teams)
             fit = self.preview.decor_fit.get(kind)
             bends = self.preview.decor_bends.get(kind) or []
-            if textures or fit or bends:
-                out.append({'kind': kind, 'mdl': mdl, 'fit': dict(fit) if fit else None,
+            smd = self.preview.decor_models.get(kind) or ''
+            if textures or fit or bends or smd:
+                out.append({'kind': kind, 'mdl': mdl, 'smd': smd,
+                            'fit': dict(fit) if fit else None,
                             'bends': [dict(b) for b in bends], 'textures': textures,
                             # Оружие — ради позы превью: изгибы сделаны в ней.
                             'weapon': key})
@@ -2398,6 +2400,11 @@ class AppSession:
         from src.services import work_keeper
         if step:
             self._edits_commit()
+        elif not self.preview.has_user_edits():
+            # Одна настройка кисти — не работа. Пустое сохранение УДАЛЯЕТ
+            # черновик (work_keeper.save), и сдвинутый ползунок на только что
+            # открытом предмете стирал его работу, которую даже не вернули.
+            return
         work_keeper.save(self.preview, self._work_key(),
                          self._style_snapshots(), self._item_id())
 
@@ -2496,6 +2503,7 @@ class AppSession:
         with self._lock:
             was_smd, obj, was_fit = p.custom_smd_path, p.custom_obj_path, p.custom_fit
             was_pano = p.textures.skybox_pano()
+            was_decor = dict(p.decor_models)
             painted = set(p.part_textures) | set(p.part_colors)
             p.forget_user_edits()
             # Своя модель уходит — кадр возвращается к игровой: с её кадрами
@@ -2533,6 +2541,7 @@ class AppSession:
         # Склейки частей: старые файлы уже могли уйти с диска (см.
         # `_drop_old_composites`), а без части — вернуть материалу основу.
         self.parts.recompose_slots(painted)
+        self._reshow_decor(was_decor, lang)
 
         if mode == SKYBOX_MODE:
             pano = p.textures.skybox_pano()
@@ -2615,6 +2624,7 @@ class AppSession:
         from src.services import work_keeper
         with self._lock:
             had_custom = bool(self.preview.custom_smd_path)
+            was_decor = dict(self.preview.decor_models)
             work_keeper.forget(self.preview, self._work_key())
             # Стили шапки — тот же предмет: оставить их правки значило бы
             # собрать в мод то, что человек только что попросил забыть.
@@ -2623,6 +2633,7 @@ class AppSession:
         # оставалась до перезагрузки предмета.
         if had_custom:
             self.drop_custom_model(lang)
+        self._reshow_decor(was_decor, lang)
         return self.view_state()
 
     def keep_work(self) -> Dict[str, Any]:
@@ -2638,10 +2649,12 @@ class AppSession:
     def restore_work(self, lang: str = 'ru') -> Dict[str, Any]:
         """Возвращает отложенную работу над открытым предметом."""
         # Замок берёт сам `_restore_work` — он же зовётся при открытии предмета.
+        was_decor = dict(self.preview.decor_models)
         if not self._restore_work(asked=True):
             return {'error': 'Сохранённых правок у этого предмета нет'}
         # В работе была своя модель — в кадре должна стоять она, а не игровая.
         self._restore_custom_model(lang)
+        self._reshow_decor(was_decor, lang)
         # Вместе с правками вернулись и снимки соседних стилей — пометить.
         return {**self.view_state(), 'edited_styles': sorted(self._hat_styles)}
 
@@ -3271,6 +3284,8 @@ class AppSession:
             'decor_fit': self.preview.decor_fit.get(self._decor_kind),
             'decor_bends': self.preview.decor_bends.get(self._decor_kind) or [],
             'festive_edited': self._decor_edited_kinds(),
+            # Виды гирлянд со своей моделью: «Убрать свою модель» спросит, что.
+            'decor_models': sorted(self.preview.decor_models),
             # Есть ли что делить на части. Кнопка иначе висела бы доступной у
             # скайбокса, спрея и просто до того, как модель приехала, — и
             # обещала бы действие, которого нет.
@@ -3487,11 +3502,13 @@ class AppSession:
             t.active_team = Team.RED
         if not kind:
             return self.view_state()
+        own = self.preview.decor_models.get(kind) or ''
         cached = self._decors.get(kind)
-        if cached is not None and cached.weapon_key == key:
+        if cached is not None and cached.weapon_key == key and cached.source == own:
             self._show_decor_cards(cached)
             self._put('festive_decor', **cached.as_event())
             return self.view_state()
+        self._decors.pop(kind, None)
 
         paths = self.tf2_paths()
         if 'error' in paths:
@@ -3500,12 +3517,64 @@ class AppSession:
             return paths
         from src.services.festive_decor import FestiveDecorWorker
         w = FestiveDecorWorker(key, kind, paths['misc_vpk'],
-                               paths['textures_vpk'], paths['root'], lang=lang)
+                               paths['textures_vpk'], paths['root'], lang=lang,
+                               custom_smd=own)
         w.progress.connect(lambda text: self._put('progress', text=text))
         w.ready.connect(self._on_decor)
         w.failed.connect(lambda message: self._on_decor_failed(key, kind, message))
         self._decor_worker = w
         w.start()
+        return self.view_state()
+
+    def _reshow_decor(self, was: Dict[str, str], lang: str) -> None:
+        """Показанная гирлянда сменила модель (отмена, сброс, возврат работы) —
+        собрать её заново; `was` — decor_models до перемены."""
+        kind = self._decor_kind
+        if kind and was.get(kind) != self.preview.decor_models.get(kind):
+            self.set_festive(kind, lang)
+
+    def load_decor_model(self, kind: str, path: str, lang: str = 'ru') -> Dict[str, Any]:
+        """Своя модель гирлянды вида `kind` вместо стоковой.
+
+        Независима от своей модели оружия: заменить можно и то, и другое.
+        Скелет и QC остаются стоковыми (festive_decor.build), материалы —
+        свои; картинки из MTL/glTF сразу ложатся на их карточки. Гирлянда
+        включается — иначе замену не видно.
+        """
+        from src.services import festive_decor, mesh_import_service
+        from src.services.smd_service import SMDService
+
+        kind = str(kind or '')
+        if kind not in self.festive_options():
+            return {'error': 'У этого предмета такой версии нет'}
+        if not path or not os.path.isfile(path):
+            return {'error': 'Файл модели не найден'}
+        try:
+            smd, textures = _garland_smd(path)
+        except mesh_import_service.MeshImportError as exc:
+            return {'error': str(exc)}
+        with self._lock:
+            # Краска и части прежней гирлянды — по её треугольникам.
+            self.preview.forget_decor_look(kind)
+            self.preview.decor_models[kind] = smd
+            for material, image in textures.items():
+                name = SMDService._sanitize_material_name(material)
+                self.preview.textures.set_texture(festive_decor.card(kind, name), image)
+        self._autosave()
+        return {**self.set_festive(kind, lang), 'textures': len(textures)}
+
+    def drop_decor_model(self, kind: str, lang: str = 'ru') -> Dict[str, Any]:
+        """Возвращает стоковую модель гирлянды вида `kind`."""
+        kind = str(kind or '')
+        with self._lock:
+            dropped = self.preview.decor_models.pop(kind, None)
+            if dropped:
+                self.preview.forget_decor_look(kind)
+        if not dropped:
+            return self.view_state()
+        self._autosave()
+        if kind == self._decor_kind:
+            return self.set_festive(kind, lang)
         return self.view_state()
 
     def _decor_textures_for_viewer(self) -> Dict[str, Dict[str, List[str]]]:
@@ -3548,7 +3617,8 @@ class AppSession:
     def _decor_edited_kinds(self) -> List[str]:
         """Виды гирлянд, у которых есть правки: текстуры или подгонка."""
         from src.services import festive_decor
-        kinds = set(self.preview.decor_fit) | set(self.preview.decor_bends)
+        kinds = (set(self.preview.decor_fit) | set(self.preview.decor_bends)
+                 | set(self.preview.decor_models))
         kinds.update(festive_decor.parse_card(c)[0]
                      for c in self.preview.textures.decor_uploads())
         kinds.discard('')
@@ -3762,3 +3832,38 @@ def session() -> AppSession:
     if _session is None:
         _session = AppSession()
     return _session
+
+
+def _garland_smd(path: str):
+    """(SMD, {материал: картинка}) своей гирлянды. SMD — как есть, OBJ/GLB
+    переводятся в SMD с теми же лимитами и упрощением, что у своей модели.
+
+    Raises:
+        mesh_import_service.MeshImportError: модель не читается или не влезет.
+    """
+    import tempfile
+
+    from src.services import mesh_import_service
+
+    import shutil
+
+    out_dir = tempfile.mkdtemp(prefix='tf2sg_garland_')
+    if path.lower().endswith('.smd'):
+        # Копия: загрузки лежат под постоянным именем, и следующий файл с тем
+        # же именем подменил бы гирлянду в работе (и в кэше показа).
+        try:
+            with open(path, encoding='utf-8') as f:
+                ok = 'triangles' in f.read()
+        except (OSError, UnicodeDecodeError):
+            ok = False
+        if not ok:
+            raise mesh_import_service.MeshImportError('SMD не читается: нет треугольников')
+        return shutil.copy2(path, os.path.join(out_dir, os.path.basename(path))), {}
+    mesh = mesh_import_service.load_mesh(path)
+    if mesh_import_service.over_limits(mesh):
+        mesh = mesh_import_service.simplify(mesh)
+    problem = mesh_import_service.check_limits(mesh)
+    if problem:
+        raise mesh_import_service.MeshImportError(problem)
+    out = os.path.join(out_dir, os.path.splitext(os.path.basename(path))[0] + '.smd')
+    return mesh_import_service.write_smd(mesh, out), dict(mesh.textures or {})

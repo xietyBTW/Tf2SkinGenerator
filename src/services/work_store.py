@@ -158,6 +158,8 @@ def _own_paths(edits: Dict[str, object], files_dir: Path) -> Dict[str, object]:
         edits.get('australium_user_tex'), files_dir)
     out['custom_smd_path'] = _own_file(edits.get('custom_smd_path'), files_dir)
     out['custom_source_path'] = _own_file(edits.get('custom_source_path'), files_dir)
+    out['decor_models'] = {kind: own for kind, smd in (edits.get('decor_models') or {}).items()
+                           if (own := _own_file(smd, files_dir))}
 
     maps: Dict[str, dict] = {}
     for mat, by_id in (edits.get('texture_maps') or {}).items():
@@ -329,6 +331,9 @@ def _prune(edits: Dict[str, object]) -> Dict[str, object]:
         edits['custom_smd_path'] = None
     if edits.get('custom_source_path') and not os.path.isfile(edits['custom_source_path']):
         edits['custom_source_path'] = None
+    if 'decor_models' in edits:
+        edits['decor_models'] = {kind: smd for kind, smd in (edits['decor_models'] or {}).items()
+                                 if smd and os.path.isfile(smd)}
     return edits
 
 

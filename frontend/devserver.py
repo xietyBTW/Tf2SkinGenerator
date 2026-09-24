@@ -249,6 +249,8 @@ ALLOWED = {
     "set_ui_state": api.set_ui_state,
     "load_custom_model": api.load_custom_model,
     "drop_custom_model": api.drop_custom_model,
+    "load_decor_model": api.load_decor_model,
+    "drop_decor_model": api.drop_decor_model,
     "qc_text": api.qc_text,
     "save_qc": api.save_qc,
     "open_vmt": api.open_vmt,
@@ -577,7 +579,18 @@ def main() -> None:
     # ответы. Приложение (frontend/app.py) поднимает Handler само и сюда не
     # заходит, поэтому там остаётся закрыто.
     DEV_CORS = True
-    port = int(sys.argv[1]) if len(sys.argv) > 1 else 5173
+    args = sys.argv[1:]
+    # `--work-dir <папка>` — черновики и работы dev-сервера отдельно от
+    # приложения. В разработке оба пишут в work/ репозитория, и проверка на
+    # dev-сервере, пока открыто приложение, перезаписывала бы живой черновик
+    # человека своей правкой.
+    if '--work-dir' in args:
+        at = args.index('--work-dir')
+        from src.services import work_store
+        work_store.WORK_DIR = Path(args[at + 1]).resolve()
+        _FILE_ROOTS.append(work_store.WORK_DIR)
+        del args[at:at + 2]
+    port = int(args[0]) if args else 5173
     server = Server(("127.0.0.1", port), Handler)
     print(f"макет: http://127.0.0.1:{port}   (API: POST /api/<метод>)")
     api.warm_up()

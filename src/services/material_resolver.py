@@ -147,9 +147,16 @@ class MaterialResolver:
 
     def texture_map(self, mat_names: List[str],
                     cdmaterials: List[str]) -> Dict[str, str]:
-        """{имя материала: путь PNG} — то, что ждут превью и карточки."""
-        return {name: res.png_path
-                for name, res in self.resolve_many(mat_names, cdmaterials).items()}
+        """{имя материала: путь PNG} — то, что ждут превью и карточки.
+
+        Ключ — имя КАК ПЕРЕДАЛИ, а не в нижнем регистре: вьювер находит меш по
+        точному имени материала, и у `sniper_handL_red` ключ `sniper_handl_red`
+        не совпадал — левая кисть снайпера и инженера оставалась без текстуры.
+        """
+        found = self.resolve_many(mat_names, cdmaterials)
+        return {name: found[name.strip().lower()].png_path
+                for name in mat_names or []
+                if name.strip().lower() in found}
 
     def render_map(self, mat_names: List[str],
                    cdmaterials: List[str]) -> Dict[str, dict]:

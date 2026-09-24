@@ -478,7 +478,9 @@ class PartsEditor:
             if at is not None and not -len(stack) <= at < len(stack):
                 return {'error': 'Такой картинки на части нет'}
             if path:
-                entry = part_specs.image_spec({**(options or {}), 'path': path})
+                entry = part_specs.image_spec(
+                    {**self._absolute_size(options, path, model, obj_mat, card,
+                                           int(part)), 'path': path})
                 if at is None:
                     stack.append(entry)
                 else:
@@ -503,6 +505,44 @@ class PartsEditor:
                 chosen.pop(int(part), None)
             jobs = [self._plan(model, obj_mat, card)]
         return self._commit(jobs)
+
+    def _absolute_size(self, options: Optional[Dict[str, Any]], path: str,
+                       model: Any, obj_mat: str, card: str, part: int) -> Dict[str, Any]:
+        """
+        Посадка с размером В ДОЛЯХ ТЕКСТУРЫ (`size_uv`) — в масштабы части.
+
+        Так приходит вставка скопированной картинки: «того же размера» значит
+        того же на текстуре, а масштаб считается от габарита части — один и
+        тот же масштаб на другой детали дал бы другую картинку. Пересчёт здесь,
+        а не на странице: габарит части, размер текстуры и картинки знает
+        Python, и склейка вписывает ровно по этим числам (`place_image`).
+        """
+        opts = dict(options or {})
+        size = opts.pop('size_uv', None)
+        one = next((p for p in model.parts_of(obj_mat) if p.index == part), None)
+        shape = self._texture_shape(card)
+        if not size or one is None or not shape:
+            return opts
+        try:
+            from PIL import Image
+            with Image.open(path) as im:
+                iw, ih = max(1, im.width), max(1, im.height)
+        except (OSError, ValueError):
+            return opts
+        tex_w, tex_h = shape
+        u0, v0, u1, v1 = one.uv_bbox
+        bw = max(1e-6, (u1 - u0) * tex_w)
+        bh = max(1e-6, (v1 - v0) * tex_h)
+        fit = str(opts.get('fit') or 'contain')
+        if fit == 'stretch':
+            base_w, base_h = bw, bh
+        else:
+            k = (max if fit == 'cover' else min)(bw / iw, bh / ih)
+            base_w, base_h = iw * k, ih * k
+        opts['scale'] = float(size[0]) * tex_w / base_w
+        opts['scale_y'] = float(size[1]) * tex_h / base_h
+        opts['offset'] = [0.0, 0.0]            # на новой детали — по её центру
+        return opts
 
     def move_part_texture(self, material: str = '', part: int = 0,
                           layer: int = 0, to: int = 0) -> Dict[str, Any]:
@@ -875,6 +915,7 @@ class PartsEditor:
                     image_angle=spec['angle'], image_scale=spec['scale'],
                     image_scale_y=spec['scale_y'],
                     image_offset=tuple(spec['offset']),
+                    image_flip_x=spec['flip_x'], image_flip_y=spec['flip_y'],
                     anchor=tuple(spec['anchor']) if spec['anchor'] else None,
                     edge=spec['edge'], edge_color=spec['edge_color']))
         return layers

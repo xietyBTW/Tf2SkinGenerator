@@ -297,6 +297,8 @@ export const logFolder    = () => call('log_folder', {});
 export const loadCustomModel = (path, keep = null) =>
   call('load_custom_model', { path, keep });
 export const dropCustomModel = () => call('drop_custom_model');
+export const loadDecorModel = (kind, path) => call('load_decor_model', { kind, path });
+export const dropDecorModel = (kind) => call('drop_decor_model', { kind });
 export const setCustomFit = (fit) => call('set_custom_fit', { fit });
 export const qcText       = () => call('qc_text');
 export const saveQc       = (text) => call('save_qc', { text });
@@ -387,5 +389,7 @@ export const opaqueUrl = (path) => fileUrl(path) + '&opaque=1';
 
 /** URL иконки предмета из рюкзака. Ключ — icon из items_game, ключ оружия или
  *  путь к модели: что именно с ним делать, решает Python. Нет иконки — 404,
- *  и карточка каталога просто остаётся без картинки. */
-export const iconUrl = (key) => '/icon?key=' + encodeURIComponent(key);
+ *  и карточка каталога просто остаётся без картинки.
+ *  `v` — версия правила выбора иконки: ответ кэшируется браузером на сутки,
+ *  и без смены URL старая картинка переживала обновление. */
+export const iconUrl = (key) => '/icon?v=2&key=' + encodeURIComponent(key);
