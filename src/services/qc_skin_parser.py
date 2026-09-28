@@ -74,6 +74,18 @@ def variant_kind(texture_name: str) -> Optional[str]:
     return None
 
 
+def is_australium(texture_name: str) -> bool:
+    """
+    Золотой вариант (_gold/_australium, в том числе синий _blue_gold).
+
+    Только австралий, а не любой вариант: '_xmas' у праздничного оружия —
+    обычно РОДНОЕ имя модели (c_wrangler_xmas и его синяя пара), а не копия
+    базы. По таблицам всех моделей оружия игры у каждого австралиевого имени
+    база лежит в той же модели, у праздничных — лишь у 9 из 35.
+    """
+    return variant_kind(texture_name) == 'australium'
+
+
 def _team_form(texture_name: str) -> tuple:
     """
     (основа, синий?) — имя материала без командного суффикса.
@@ -736,6 +748,62 @@ def team_material_map(layout: SkinLayout) -> Dict[str, str]:
     blu = layout.second_row
     return {name: (blu[i] if i < len(blu) else name)
             for i, name in enumerate(red)}
+
+
+# ── «Сделать командным»: синяя строка у оружия без своей команды ───────── #
+
+def team_pairs_free(rows: List[List[str]]) -> bool:
+    """
+    Можно ли дописать команду, ничего не сломав.
+
+    Оружие выбирает скин ПАРОЙ: RED — чётный, BLU — следующий нечётный
+    (items_game: 0/1 у обычного, 2/3…6/7 у ботокиллеров, 8/9 у австралия;
+    иных пар у оружия нет). У некомандной модели синяя строка каждой пары
+    повторяет красную — её и можно сделать синей. Если же вторая строка —
+    стиль (кровь тесака, уровни перчатки, «Защитник» липучкомёта), игра берёт
+    её по стилю предмета, и синяя туда не встанет: такой модели команду не
+    дописать, не стерев стиль. Проверено по таблицам скинов всех 678 моделей
+    оружия игры.
+    """
+    low = [[(m or '').lower() for m in r] for r in rows or []]
+    return all(low[i] == low[i - 1] for i in range(1, len(low), 2))
+
+
+def force_team_rows(rows: List[List[str]],
+                    team_materials: List[str]) -> Optional[List[List[str]]]:
+    """
+    Строки $texturegroup с командой: синяя строка каждой пары получает
+    ``<материал>_blue`` у командных материалов.
+
+    Остальное не трогаем — поэтому австралий (8/9), ботокиллеры и padding
+    живут дальше, а не выкидываются заменой группы на две строки.
+
+    team_materials — материалы меша, которые человек красит. Австралий
+    (``_gold``) и уже синие имена сюда не входят: золото у обеих команд одно.
+    Праздничное имя (c_holymackerel_xmas) — родной материал, он входит.
+    Материалы меша, которых нет в группе, становятся столбцами — в игре они
+    одинаковы во всех строках, так что прочим скинам это ничего не меняет.
+
+    None — команду дописать нельзя (см. team_pairs_free) или нечего.
+    """
+    if not team_pairs_free(rows):
+        return None
+    team = [m for m in team_materials or []
+            if not is_australium(m) and not _team_form(m)[1]]
+    if not team:
+        return None
+    out = [list(r) for r in rows] or [[]]
+    present = {m.lower() for m in out[0]}
+    missing = [m for m in team if m.lower() not in present]
+    out = [r + missing for r in out]
+    # Непарная последняя строка (в том числе единственная): её синяя пара —
+    # следующий индекс, которого в модели нет. Без него игра взяла бы скин 0.
+    if len(out) % 2:
+        out.append(list(out[-1]))
+    wanted = {m.lower() for m in team}
+    for i in range(1, len(out), 2):
+        out[i] = [f'{m}_blue' if m.lower() in wanted else m for m in out[i - 1]]
+    return out
 
 
 # ── Ограничение раскладки списком разрешённых материалов (режимы рук) ───── #

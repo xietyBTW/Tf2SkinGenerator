@@ -375,6 +375,13 @@
   transition: color var(--dur), border-color var(--dur);
 }
 .frame__tool:hover { color: var(--accent); border-color: var(--accent); }
+/* Шестерёнка материала в правке: горит и не прячется, пока правка открыта. */
+.frame__tool.is-on { color: var(--accent); border-color: var(--accent); }
+.frame:has(.frame__tool.is-on) .frame__tools { opacity: 1; }
+/* Одна текстура — её настройки и есть общие: вторая дверь в то же место
+   только путает. Своя запись (значок) у неё бывает от прошлых правок —
+   тогда шестерёнка остаётся, иначе запись не сбросить. */
+.frame:only-child:not(:has(.frame__badge)) .frame__tool:not(.frame__off) { display: none; }
 
 /* Наверху, а не внизу: снизу справа стоит размер, и в узком кадре они
    наезжали друг на друга. */
@@ -928,6 +935,20 @@
 .ctx__sep { height: 1px; background: var(--hairline-strong); }
 .ctx .menu__item:disabled { color: var(--ink-mute); cursor: default; }
 .ctx .menu__item:disabled:hover { background: none; }
+/* Длинное меню (готовые эффекты VMT) не должно уходить за край окна. */
+.ctx { max-height: calc(100vh - 16px); overflow-y: auto; }
+.ctx__head { padding: 12px 14px 6px; color: var(--accent); }
+/* Пояснение под подписью пункта: мельче и тише, чтобы список читался по
+   подписям, а пояснение — когда глаз на пункте. */
+.ctx__hint {
+  display: block;
+  max-width: 360px;
+  margin-top: 3px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--ink-mute);
+  white-space: normal;
+}
 
 /* ── Дерево систем эффекта ─────────────────────────────────────────────
    Ребёнок под родителем с отступом, у родителя — знак свёртки. Плоским
@@ -1661,8 +1682,12 @@
 .cpmodel__grid { max-height: 56vh; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 14px 12px; }
 .ask__group:first-child { margin-top: 4px; }
 .ask__item:hover { color: var(--ink); background: var(--bg); }
+.ask__hint { display: block; margin-top: 3px; font-size: 11px; line-height: 1.45; color: var(--ink-mute); }
 .ask__item.is-active { color: var(--ink); border-bottom-color: var(--accent); }
 .ask__acts { display: flex; align-items: center; justify-content: flex-end; gap: 18px; }
+/* В узком окне кнопки переносятся, а не уезжают за край: у редактора VMT их
+   пять, и крайняя левая пряталась за границей окна. */
+.ask__acts { flex-wrap: wrap; row-gap: 10px; }
 
 /* Раздел частиц: командные цвета и стили к эффекту отношения не имеют.
    Панель сборки здесь НЕ прячем правилом: панелей две (#build и #pbuild),
@@ -2046,6 +2071,63 @@
 .vmt__text::selection { background: var(--hairline-strong); color: transparent; }
 .vmt__text:focus { outline: none; }
 .vmt__wrap:focus-within { border-color: var(--accent); }
+
+/* Текст и справочник рядом: справочник — колонка справа, текст не теряет
+   высоты. С открытым справочником окно шире, чтобы текст не сжимался. */
+.vmt.has-ref { width: min(1240px, 96vw); }
+.vmt__main { display: flex; gap: 16px; }
+.vmt__main .vmt__wrap { flex: 1; min-width: 0; }
+.vmt__ref {
+  flex: none;
+  width: 340px;
+  height: 52vh;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.vmt__refs { flex: 1; overflow-y: auto; border-top: 1px solid var(--hairline); }
+.vmt__refgroup { margin: 14px 0 4px; color: var(--accent); }
+.vmt__refrow {
+  display: block;
+  width: 100%;
+  padding: 7px 8px;
+  border: 0;
+  border-bottom: 1px solid var(--hairline);
+  background: none;
+  color: var(--ink-soft);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--dur);
+}
+.vmt__refrow:hover { background: var(--bg); }
+.vmt__refname { display: block; font-size: 12px; color: var(--ink); }
+.vmt__refdoc { display: block; margin: 2px 0 0; font-size: 11px; line-height: 1.45; color: var(--ink-mute); }
+#vmt-help.is-active { color: var(--accent); }
+/* Узкое окно: справочник под текстом, иначе колонка сплющила бы сам VMT. */
+@media (max-width: 900px) {
+  .vmt__main { flex-direction: column; }
+  .vmt__main .vmt__wrap { flex: none; height: 36vh; }
+  .vmt__ref { width: auto; height: 30vh; }
+}
+
+/* Подсказка у курсора: имя параметра и что он делает. */
+.vmt__tip {
+  position: fixed;
+  z-index: 40;
+  max-width: 340px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--hairline-strong);
+  background: var(--overlay);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, .3);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-soft);
+  pointer-events: none;
+}
+.vmt__tip b { color: var(--accent); font-weight: 500; }
 
 .vmt__foot { display: flex; align-items: baseline; gap: 14px; }
 .vmt__status { margin: 0; flex: 1; }
@@ -2779,7 +2861,7 @@
    выезжать, задаёт `--reveal-from` у элемента (по умолчанию — чуть сверху). */
 [data-panels="float"] .catalog,
 .viewport__hint,
-#fpbar, #tauntbar, #skinbar, #bodybar, #festivebar, #hatstyles, #hatclasses,
+#fpbar, #tauntbar, #wearbar, #skinbar, #bodybar, #festivebar, #hatstyles,
 #partsbar, #fitpanel, #partspaint,
 .build, .pbuild, .menu__list, .ctx, .console {
   --reveal-from: translateY(-4px);
@@ -2788,9 +2870,9 @@
 }
 [data-panels="float"] .catalog[hidden],
 .viewport__hint[hidden],
-#fpbar[hidden], #tauntbar[hidden], #skinbar[hidden], #bodybar[hidden], #festivebar[hidden],
+#fpbar[hidden], #tauntbar[hidden], #wearbar[hidden], #skinbar[hidden], #bodybar[hidden], #festivebar[hidden],
 #hatstyles[hidden],
-#hatclasses[hidden], #partsbar[hidden], #fitpanel[hidden], #partspaint[hidden],
+#partsbar[hidden], #fitpanel[hidden], #partspaint[hidden],
 .build[hidden], .pbuild[hidden], .menu__list[hidden], .ctx[hidden],
 .console[hidden] {
   opacity: 0;
@@ -2799,8 +2881,8 @@
 @starting-style {
   [data-panels="float"] .catalog:not([hidden]),
   .viewport__hint:not([hidden]),
-  #fpbar:not([hidden]), #tauntbar:not([hidden]), #skinbar:not([hidden]),
-  #bodybar:not([hidden]), #festivebar:not([hidden]), #hatstyles:not([hidden]), #hatclasses:not([hidden]),
+  #fpbar:not([hidden]), #tauntbar:not([hidden]), #wearbar:not([hidden]), #skinbar:not([hidden]),
+  #bodybar:not([hidden]), #festivebar:not([hidden]), #hatstyles:not([hidden]),
   #partsbar:not([hidden]), #fitpanel:not([hidden]), #partspaint:not([hidden]),
   .build:not([hidden]), .pbuild:not([hidden]), .menu__list:not([hidden]),
   .ctx:not([hidden]), .console:not([hidden]) {
@@ -3138,3 +3220,122 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+/* ═══ Обучение (tour.js) ═══════════════════════════════════════════════════
+   Пятно — рамка вокруг цели, а затемнение вокруг — его тень. Мышь пятно не
+   ловит: шаги просят сделать дело руками, и подсветка не должна мешать. */
+.tour__spot {
+  position: fixed;
+  z-index: 1000;
+  pointer-events: none;
+  border-radius: 6px;
+  box-shadow: 0 0 0 2px var(--accent), 0 0 0 200vmax rgba(6, 6, 5, .62);
+  transition: left var(--dur-panel), top var(--dur-panel),
+              width var(--dur-panel), height var(--dur-panel);
+}
+/* Шаг ждёт действия — кольцо расходится от цели: «нажми сюда». */
+.tour__spot.is-waiting::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: 0 0 0 0 var(--accent);
+  animation: tour-ping 1.6s ease-out infinite;
+}
+@keyframes tour-ping {
+  0%   { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 70%, transparent); }
+  100% { box-shadow: 0 0 0 14px color-mix(in srgb, var(--accent) 0%, transparent); }
+}
+
+.tour__card {
+  position: fixed;
+  z-index: 1001;
+  width: min(360px, calc(100vw - 24px));
+  border: 1px solid var(--hairline-strong);
+  background: var(--overlay);
+  color: var(--ink);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, .38), 0 2px 8px rgba(0, 0, 0, .18);
+  transition: left var(--dur-panel), top var(--dur-panel);
+}
+.tour__card.is-placing { transition: none; }
+
+/* Прогресс — тонкая полоса по верхнему краю вместо ещё одной строки. */
+.tour__bar { height: 3px; background: var(--hairline); overflow: hidden; }
+.tour__fill {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: var(--accent);
+  transition: width var(--dur-panel);
+}
+
+.tour__body { display: flex; flex-direction: column; gap: 8px; padding: 18px 22px 4px; }
+.tour__body.is-new { animation: tour-in var(--dur-panel) ease-out; }
+@keyframes tour-in { from { opacity: 0; transform: translateY(4px); } }
+.tour__count { font-size: 11px; color: var(--ink-mute); letter-spacing: .04em; }
+.tour__title { margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -.01em; line-height: 1.25; }
+.tour__text { margin: 0; font-size: 13px; line-height: 1.6; color: var(--ink-soft); }
+.tour__note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--accent);
+}
+.tour__pulse {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: tour-blink 1.6s ease-in-out infinite;
+}
+@keyframes tour-blink { 50% { opacity: .25; } }
+.tour__spin {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--hairline);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin .75s linear infinite;
+}
+
+.tour__acts { display: flex; align-items: center; gap: 12px; padding: 16px 22px 18px; }
+.tour__skip { margin-right: auto; color: var(--ink-mute); }
+
+/* Уголок на стороне, обращённой к цели (data-side ставит tour.js), напротив
+   её середины (--caret). Квадрат, повёрнутый на 45°, с рамкой карточки на
+   двух внешних гранях. */
+.tour__caret {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  background: var(--overlay);
+  border: 1px solid var(--hairline-strong);
+  display: none;
+  /* Под содержимым карточки: внутренняя половина квадрата прячется за
+     полосой прогресса и текстом, наружу торчит только остриё. */
+  z-index: -1;
+}
+.tour__card[data-side="left"] .tour__caret,
+.tour__card[data-side="right"] .tour__caret { display: block; top: calc(var(--caret) - 6px); }
+.tour__card[data-side="top"] .tour__caret,
+.tour__card[data-side="bottom"] .tour__caret { display: block; left: calc(var(--caret) - 6px); }
+.tour__card[data-side="left"] .tour__caret   { left: -7px;   border-width: 0 0 1px 1px; transform: rotate(45deg); }
+.tour__card[data-side="right"] .tour__caret  { right: -7px;  border-width: 1px 1px 0 0; transform: rotate(45deg); }
+.tour__card[data-side="top"] .tour__caret    { top: -7px;    border-width: 1px 0 0 1px; transform: rotate(45deg); }
+.tour__card[data-side="bottom"] .tour__caret { bottom: -7px; border-width: 0 1px 1px 0; transform: rotate(45deg); }
+
+[data-motion="off"] .tour__spot.is-waiting::after,
+[data-motion="off"] .tour__pulse,
+[data-motion="off"] .tour__spin { animation: none; }
+@media (prefers-reduced-motion: reduce) {
+  .tour__spot.is-waiting::after, .tour__pulse, .tour__spin { animation: none; }
+}
+
+/* Шестерёнка карточки видна только при наведении — на шаге про неё она
+   должна быть на виду и без мыши. */
+.frame:has([data-tour-target]) .frame__tools { opacity: 1; }
+

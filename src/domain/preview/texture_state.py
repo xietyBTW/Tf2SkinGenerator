@@ -235,8 +235,11 @@ class PreviewTextureState:
         # намеренно задаёт РАЗНЫЕ текстуры RED/BLU, поэтому дублирование запрещено
         # (иначе загрузка на BLU затирает RED). Дефолт «BLU как RED» до задания
         # своей синей обеспечивает симметричный fallback в resolve_base().
+        # Австралий командой не делится и под force_team: сборка красит его
+        # одной текстурой для обеих команд (игра так и показывает).
         teams = [self.active_team]
-        if self.is_neutral(mat) and not self.force_team:
+        if self.is_neutral(mat) and (not self.force_team
+                                     or self.is_variant_material(mat)):
             teams.append(Team.BLU if self.active_team == Team.RED else Team.RED)
         for team in teams:
             if path:
@@ -340,14 +343,17 @@ class PreviewTextureState:
 
         return self.game_base(mat)
 
-    def game_base(self, mat: str) -> Optional[str]:
+    def game_base(self, mat: str, team: Optional[str] = None) -> Optional[str]:
         """Игровой оригинал материала — БЕЗ пользовательских правок.
 
         Нужен склейке частей: картинки частей рисуются поверх игровой
         текстуры, а не поверх прошлой склейки. Иначе правки копились бы
         слоями, и «убрать картинку с части» ничего бы не возвращало.
+
+        `team` — чей оригинал; по умолчанию показанной команды. Сборке нужны
+        обе: у RED и BLU своя краска в VMT.
         """
-        active = self.active_team
+        active = team or self.active_team
         if is_decor(mat):
             return (_existing(self.decor_stock.get(active, {}).get(mat))
                     or _existing(self.decor_stock.get(Team.RED, {}).get(mat)))

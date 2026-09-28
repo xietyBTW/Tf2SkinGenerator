@@ -384,6 +384,9 @@ class ModelBuildService:
             'is_team': spec.team,
             'has_australium': bool(layout.variants),
             'rows': layout.all_rows,
+            # Можно ли «сделать командным», не стерев стиль второй строки
+            # (кровь тесака) — то же правило, по которому пишет сборка.
+            'team_pairs_free': qc_skin_parser.team_pairs_free(layout.all_rows),
             # Полный список скинов (база+команда+варианты) с сырыми индексами —
             # для кастомной модели (показ всех групп как переопределяемых стилей).
             'skins': layout.skins,

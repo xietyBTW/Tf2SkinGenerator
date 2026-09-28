@@ -389,6 +389,8 @@ def controls_for(mode: str, key: str = '') -> Dict[str, object]:
         # Краски из игры — только у шапок: они красятся командным цветом через
         # VMT, и у оружия такой краски нет.
         'hat_paints': mode == 'hat',
+        # Шапку смотрят на персонаже: сцена «На модели».
+        'wear': mode == 'hat',
         # ── Инструменты ─────────────────────────────────────────────────── #
         'extract_model': model_like,
         'extract_texture': model_like,
@@ -705,6 +707,14 @@ def remove_part_region(material: str = '', region: int = 0) -> Dict[str, object]
     """Вернуть область, выделенную ножницами, туда, откуда её вырезали."""
     from src.app.session import session
     return session().parts.remove_part_region(material, region)
+
+
+def load_wear(tf2_class: str = '', slot: str = '',
+              lang: str = '') -> Dict[str, object]:
+    """Сцена «На модели»: шапка на персонаже; класс и слот оружия — по выбору."""
+    from src.app.session import session
+
+    return session().load_wear(tf2_class, slot, lang=_lang(lang))
 
 
 def leave_first_person() -> Dict[str, object]:
@@ -1134,6 +1144,10 @@ _UI_STATE = {
     # Потолок размера своей картинки в редакторе частиц. Меньшие картинки
     # не растягиваются; не-степень двойки сервер округлит вниз сам.
     'particle_tex_size': (256, 1024, 512),
+    # Какие туры обучения пройдены — битовой маской. Биты заданы в одном
+    # месте, frontend/mockup/tour.js (TOURS[…].bit); 0 — не пройден ни один,
+    # и главный тур запустится при старте.
+    'tours_done': (0, 255, 0),
 }
 
 
@@ -1463,29 +1477,38 @@ def clear_model_cache() -> Dict[str, object]:
 
 
 def vmt_snippets(lang: str = '') -> Dict[str, object]:
-    """Что предлагает меню «Вставить» в редакторе VMT.
+    """Что предлагает меню «Готовые эффекты» в редакторе VMT.
 
-    Категории → пункты. `snippet` пустой означает ПОЛНЫЙ шаблон: он заменяет
-    весь документ, а не вставляется под курсор, и страница обязана спросить.
-    Тексты живут в `src/data/vmt_snippets.py` — общие с окном приложения.
+    Категории → пункты. `key` — русская подпись пункта: по ней ищутся шаблон
+    и список гасимых ключей, а `label`/`hint` — на языке интерфейса. Пустой
+    `snippet` означает ПОЛНЫЙ шаблон: он заменяет весь документ, и страница
+    обязана спросить. Тексты живут в `src/data/vmt_snippets.py`.
     """
     from src.data.vmt_snippets import (
-        VMT_FULL_TEMPLATES, VMT_MERGE_REMOVES, VMT_SNIPPETS,
+        VMT_FULL_TEMPLATES, VMT_MERGE_REMOVES, VMT_SNIPPETS, VMT_SNIPPETS_EN,
     )
+
+    en = _lang(lang) != 'ru'
+
+    def label(key, hint=''):
+        tr = VMT_SNIPPETS_EN.get(key) if en else None
+        if isinstance(tr, tuple):
+            return tr
+        return (tr or key), hint
 
     groups = []
     for category, items in VMT_SNIPPETS.items():
-        groups.append({
-            'name': category,
-            'items': [{'label': label, 'snippet': snippet or '',
-                       'hint': hint or '',
-                       'template': bool(snippet is None),
-                       # Слияние: значения перекрывают одноимённые ключи
-                       # документа, `remove` гасятся (см. VMT_MERGE_REMOVES).
-                       'merge': label in VMT_MERGE_REMOVES,
-                       'remove': list(VMT_MERGE_REMOVES.get(label, ()))}
-                      for label, snippet, hint in items],
-        })
+        entries = []
+        for key, snippet, hint in items:
+            shown, shown_hint = label(key, hint or '')
+            entries.append({'key': key, 'label': shown, 'hint': shown_hint,
+                            'snippet': snippet or '',
+                            'template': bool(snippet is None),
+                            # Слияние: значения перекрывают одноимённые ключи
+                            # документа, `remove` гасятся (VMT_MERGE_REMOVES).
+                            'merge': key in VMT_MERGE_REMOVES,
+                            'remove': list(VMT_MERGE_REMOVES.get(key, ()))})
+        groups.append({'name': label(category)[0], 'items': entries})
     return {'groups': groups, 'templates': dict(VMT_FULL_TEMPLATES)}
 
 
@@ -1629,17 +1652,15 @@ def save_qc(text: str = '') -> Dict[str, object]:
 
 def vmt_params(lang: str = '') -> List[dict]:
     """
-    Известные $-параметры VMT с описанием — для подсказок в редакторе.
+    Справочник $-параметров VMT по группам — для подсказок при наведении и
+    списка «Справочник» в редакторе: [{'group', 'params': [{'param','doc'}]}].
 
-    Тот же словарь, что показывает окно приложения при наведении на параметр
-    (``vmt_snippets.param_doc``): второго списка заводить нельзя, иначе
-    подсказки разойдутся с тем, что редактор действительно знает.
+    Словарь один (``vmt_snippets.VMT_PARAM_GROUPS``): второго списка заводить
+    нельзя, иначе подсказки разойдутся с тем, что редактор действительно знает.
     """
-    from src.data.vmt_snippets import all_param_names, param_doc
+    from src.data.vmt_snippets import param_reference
 
-    lang = _lang(lang)
-    return [{'param': name, 'doc': param_doc(name, lang)}
-            for name in all_param_names()]
+    return param_reference(_lang(lang))
 
 
 def open_vmt(material: str = '', lang: str = '') -> Dict[str, object]:

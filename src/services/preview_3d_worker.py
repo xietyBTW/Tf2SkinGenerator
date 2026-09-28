@@ -145,7 +145,9 @@ class Preview3DWorker(BaseWorker):
             self.progress.emit(self._p['searching'])
             smd_path = self._get_reference_smd()
             if not smd_path:
-                self.failed.emit(self._p['not_found'])
+                # Отменённая декомпиляция тоже отдаёт None — это не «нет в VPK».
+                if not self.isInterruptionRequested():
+                    self.failed.emit(self._p['not_found'])
                 return
             # Сохраняем папку декомпиляции: нужна для QC-парсинга BLU текстур
             self._decomp_dir = os.path.dirname(smd_path)

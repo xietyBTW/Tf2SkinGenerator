@@ -2,7 +2,9 @@
  * Контекстное меню по правой кнопке.
  *
  * Список пунктов даёт вызывающий — модуль решает только, где меню встанет и
- * как закроется. Пункт со значением null рисуется разделителем.
+ * как закроется. Пункт со значением null рисуется разделителем, пункт
+ * `{ heading }` — заголовком группы, `hint` у пункта — строкой пояснения под
+ * подписью (в длинном меню одной подписи мало, чтобы понять, что выбираешь).
  */
 
 // ── Контекстные меню ─────────────────────────────────────────────────────
@@ -44,10 +46,23 @@ export function contextMenu(e, items) {
         menuEl.append(hr);
         continue;
       }
+      if (item.heading) {
+        const h = document.createElement('div');
+        h.className = 'label ctx__head';
+        h.textContent = item.heading;
+        menuEl.append(h);
+        continue;
+      }
       const b = document.createElement('button');
       b.className = 'menu__item';
       b.type = 'button';
       b.textContent = item.label;
+      if (item.hint) {
+        const hint = document.createElement('span');
+        hint.className = 'ctx__hint';
+        hint.textContent = item.hint;
+        b.append(hint);
+      }
       b.disabled = Boolean(item.disabled);
       b.addEventListener('click', () => close(item.value));
       menuEl.append(b);

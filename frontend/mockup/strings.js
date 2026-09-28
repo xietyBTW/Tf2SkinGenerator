@@ -122,14 +122,11 @@ export const EN = {
   'glTF ссылается на буфер, которого нет в файле': 'glTF references a buffer that is not in the file',
   'Стиль': 'Style',
   'Стиль шапки': 'Cosmetic style',
-  'Классы для сборки': 'Classes to build',
   'Положить работу в раздел «Кастомный мод»':
     'Put this work into the “Custom mod” section',
   'У предмета остались отложенные правки': 'This item has edits set aside',
   'Удалить сохранённые правки этого предмета':
     'Delete the saved edits of this item',
-  'Для каких классов положить шапку в мод. У каждого своя модель — снятые классы в мод не попадут':
-    'Which classes to put into the mod. Each has its own model — unchecked classes are left out',
   'С красками шапка красится командным цветом, как стоковая':
     'With paints the cosmetic takes the team color, like a stock one',
   'Вернуть игровую модель вместо своей': 'Bring back the game model',
@@ -331,10 +328,7 @@ export const EN = {
   // ── Редактор VMT и QC ─────────────────────────────────────────────────
   'Материал': 'Material',
   'Ctrl+S — сохранить · Esc — закрыть': 'Ctrl+S — save · Esc — close',
-  'Вставить ▾': 'Insert ▾',
   'Как в игре': 'As in the game',
-  'Применить шаблон': 'Apply the template',
-  'Заменить весь VMT этим шаблоном?': 'Replace the whole VMT with this template?',
   '● Есть несохранённые изменения': '● Unsaved changes',
   '✓ Используется свой VMT': '✓ A custom VMT is in use',
   'Показывается оригинал из игры': 'Showing the game original',
@@ -1152,4 +1146,165 @@ export const EN = {
   // (error_classifier), здесь только подписи самого окна.
   'Технические детали': 'Technical details',
   'Открыть журнал': 'Open the log',
+
+  // ── Редактор VMT: справочник и готовые эффекты ─────────────────────────
+  'Готовые эффекты ▾': 'Presets ▾',
+  'Справочник': 'Reference',
+  'Найти параметр': 'Find a parameter',
+  'Наведите на параметр — подсказка · Ctrl+S — сохранить': 'Hover a parameter for help · Ctrl+S to save',
+  'Заменить весь материал': 'Replace the whole material',
+  'Текущий VMT заменится этим шаблоном.': 'The current VMT will be replaced with this template.',
+  'Ничего не нашлось': 'Nothing found',
+  'Уже есть в материале — курсор на нём': 'Already in the material, the cursor is on it',
+
+  // ── Сборка: краска игры по альфе ───────────────────────────────────────
+  'Игра перекрасит предмет в {}': 'The game will paint the item {}',
+  'Этот предмет игра красит там, где у текстуры белый альфа-канал. У вашей картинки альфы нет, поэтому в игре покрасится весь предмет.': "The game paints this item where the texture's alpha channel is white. Your image has no alpha, so the whole item will be painted in game.",
+  'Как на картинке': 'As in the image',
+  'Игра не будет его перекрашивать — как в превью': "The game won't paint it, just like the preview",
+  'Покраска как в игре': 'Paint like the game',
+  'Убрать покраску из VMT': 'Remove paint from the VMT',
+  'То же, но параметры покраски удаляются из материала': 'Same result, but the paint parameters are removed from the material',
+  'Цвет ляжет только туда, где его кладёт игра у оригинала': 'Color goes only where the game puts it on the original',
+  'Покрасится весь предмет': 'The whole item gets painted',
+  'Собрать': 'Build',
+
+  // ── Шапка на модели ───────────────────────────────────────────────────
+  'Основное': 'Primary',
+  'Вспомогательное': 'Secondary',
+  'Сапёр': 'Sapper',
+  'Ближний бой': 'Melee',
+  'Сборка сцены…': 'Building the scene…',
+  'Посмотрите шапку прямо на персонаже. Под кадром можно выбрать класс и оружие в руках.': 'See the hat right on the character. Below the view you can pick the class and the weapon in hand.',
+  'На модели показывается только косметика': 'Only cosmetics can be shown on the model',
+  'Не удалось понять, какой класс носит эту шапку': "Couldn't tell which class wears this hat",
+
+  // ── Обучение (tour.js) ────────────────────────────────────────────────
+  'Пройти обучение заново':
+    'Replay the tutorial',
+  'Пропустить обучение':
+    'Skip tutorial',
+  'Продолжу, когда сделаете':
+    'I\'ll continue once you do it',
+  'Добро пожаловать':
+    'Welcome',
+  'Покажу, как сделать скин: выбрать оружие, положить на него свою картинку и собрать мод. Это займёт минуту.':
+    'I\'ll show you how to make a skin: pick a weapon, put your image on it and build the mod. It takes a minute.',
+  'Разделы':
+    'Sections',
+  'Оружие, шапки, эффекты и звуки. Начнём с оружия.':
+    'Weapons, hats, effects and sounds. Let\'s start with weapons.',
+  'Выберите оружие':
+    'Pick a weapon',
+  'Нажмите сюда и выберите любое оружие.':
+    'Click here and pick any weapon.',
+  'Своя картинка':
+    'Your image',
+  'Перетащите картинку на текстуру или дважды щёлкните по ней, чтобы выбрать файл.':
+    'Drag an image onto the texture, or double-click it to choose a file.',
+  'Превью':
+    'Preview',
+  'Так скин будет выглядеть в игре. Модель можно крутить мышкой.':
+    'This is how the skin will look in game. Rotate the model with the mouse.',
+  'В руках':
+    'In hand',
+  'Можно посмотреть оружие от первого лица.':
+    'You can see the weapon in first person.',
+  'Вид':
+    'View',
+  'Показывать текстуру, модель или обе сразу.':
+    'Show the texture, the model, or both.',
+  'Своя настройка':
+    'Own settings',
+  'Шестерёнка задаёт отдельные настройки для этой текстуры. Нажмите её ещё раз, чтобы вернуться к общим.':
+    'The gear gives this texture its own settings. Click it again to go back to the common ones.',
+  'Правка материала и эффекты вроде свечения. Для обычного скина можно не трогать.':
+    'Material editing and effects like glow. You can skip these for a regular skin.',
+  'RED и BLU':
+    'RED and BLU',
+  'Отдельная текстура для RED и BLU.':
+    'A separate texture for RED and BLU.',
+  'Можно заменить модель на свою или раскрасить её по частям.':
+    'You can replace the model with your own or paint it part by part.',
+  'Нажмите «Параметры», чтобы открыть настройки сборки.':
+    'Click "Parameters" to open the build settings.',
+  'Настройки сборки':
+    'Build settings',
+  'Обычно хватает выбрать разрешение. Остальное можно оставить как есть. Закрывается той же кнопкой.':
+    'Usually picking a resolution is enough. Leave the rest as is. The same button closes it.',
+  'Сборка':
+    'Build',
+  'Соберите мод и положите файл в папку tf/custom игры.':
+    'Build the mod and put the file into the game\'s tf/custom folder.',
+  'Извлечь оригинальную текстуру, UV-шаблон и прочее.':
+    'Extract the original texture, a UV template and more.',
+  'Путь к игре, язык и тема. Здесь же можно пройти обучение ещё раз.':
+    'Game path, language and theme. You can replay the tutorial here too.',
+  'Остальное подскажу по ходу, когда дойдёте.':
+    'I\'ll point out the rest as you get to it.',
+  'Модель поделена на части. Наведите на номер, чтобы увидеть, где она.':
+    'The model is split into parts. Hover a number to see where it is.',
+  'Щёлкните по части, чтобы положить на неё картинку.':
+    'Click a part to put an image on it.',
+  'Красит часть в выбранный цвет.':
+    'Paints a part with the chosen color.',
+  'Цвет':
+    'Color',
+  'Выбор цвета. Там же градиент и пипетка.':
+    'Pick a color. Gradient and eyedropper are there too.',
+  'Ножницы':
+    'Scissors',
+  'Делят часть на части поменьше.':
+    'Split a part into smaller ones.',
+  'Обводит края покрашенных частей.':
+    'Outlines the edges of painted parts.',
+  'Кубик и ластик':
+    'Die and eraser',
+  'Случайная раскраска и сброс. Ctrl+Z отменяет.':
+    'Random colors and reset. Ctrl+Z undoes.',
+  'Выйти из режима частей.':
+    'Leave parts mode.',
+  'Подгоните свою модель под полупрозрачный оригинал. G — двигать, R — вращать, S — масштаб.':
+    'Line your model up with the translucent original. G moves, R rotates, S scales.',
+  'Числами':
+    'By numbers',
+  'То же самое, только точно.':
+    'The same, but exact.',
+  'Закончить подгонку.':
+    'Finish fitting.',
+  'Всё как с оружием. Если у шапки несколько стилей, каждый можно раскрасить отдельно.':
+    'Same as weapons. If the hat has several styles, each can be painted separately.',
+  'Показывает, как шапка будет выглядеть с краской из игры.':
+    'Shows how the hat will look with in-game paint.',
+  'Для каких классов собрать шапку?':
+    'Which classes should the hat be built for?',
+  'У каждого класса своя модель шапки. Неотмеченные классы в мод не попадут.':
+    'Each class has its own hat model. Unchecked classes are left out of the mod.',
+  'Не выбран ни один класс': 'No class selected',
+  'Эффекты':
+    'Effects',
+  'Выберите эффект, который хотите изменить.':
+    'Pick the effect you want to change.',
+  'Настройка':
+    'Tuning',
+  'Цвет, размер, скорость. Правая кнопка мыши — больше действий.':
+    'Color, size, speed. Right-click for more actions.',
+  'Просмотр':
+    'Playback',
+  'Перезапуск, пауза и замедление.':
+    'Restart, pause and slow motion.',
+  'Соберите эффект в мод.':
+    'Build the effect into a mod.',
+  'Выберите, что заменить: оружие, голоса или звуки мира.':
+    'Choose what to replace: weapons, voices or world sounds.',
+  'Фильтры':
+    'Filters',
+  'Помогают быстро найти нужный звук.':
+    'Help you find the sound quickly.',
+  'Замена':
+    'Replacing',
+  'Перетащите свой звук на строку или нажмите «Свой файл».':
+    'Drop your sound onto a row or click "Own file".',
+  'Все заменённые звуки соберутся в один мод.':
+    'All replaced sounds are built into one mod.',
 };

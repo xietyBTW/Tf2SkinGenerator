@@ -125,6 +125,29 @@ export async function loadParts() {
 }
 
 /**
+ * Готовит разбор для перетаскивания: вьюверу — карты частей, чтобы он
+ * подсвечивал деталь под курсором. Режим при этом НЕ открывается.
+ *
+ * Раньше перетаскивание звало `loadParts` целиком: картинку несли с рабочего
+ * стола к карточке текстуры, задевали по пути кадр модели — и открывались
+ * палитра со списком частей, о которых человек не просил. Откроется режим,
+ * только если картинку бросят на деталь (onPartDropped).
+ */
+let priming = false;
+async function primeParts() {
+  if (priming) return;
+  priming = true;
+  try {
+    const res = await api.parts();
+    if (res.error) return;
+    rememberMaps(res);
+    await loadOtherMaterials(res.material);
+  } finally {
+    priming = false;
+  }
+}
+
+/**
  * Карты треугольников ОСТАЛЬНЫХ материалов модели.
  *
  * У шпиона голова и тело — разные материалы, у каждого своя развёртка и свой
@@ -204,7 +227,7 @@ export function bindParts(w) {
   // Разбор относился к ПРОШЛОЙ модели: у новой под тем же номером другой кусок.
   closeParts();
   w.setModelParts(null);
-  w.onPartsNeeded = () => { if (partsMaterial === null) loadParts(); };
+  w.onPartsNeeded = () => { if (partsMaterial === null) primeParts(); };
   // Материал приходит со ВСЕМИ вызовами вьювера: у модели их бывает
   // несколько, и часть под курсором принадлежит своему, а не тому, что сейчас
   // показан полосой.
@@ -213,6 +236,9 @@ export function bindParts(w) {
     spotlightPart(part, material);
   };
   w.onPartDropped = async (material, part, file) => {
+    // Картинку бросили на деталь — вот теперь человек работает частями, и
+    // режим открывается (при перетаскивании он был только подготовлен).
+    if (partsMaterial === null && !(await loadParts())) return;
     await usePartsMaterial(material);
     paintPart(part, file);
   };

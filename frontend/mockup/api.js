@@ -315,6 +315,7 @@ export const resetVmt     = (material) => call('reset_vmt', { material });
 // Насмешка: персонаж играет тонт с реквизитом. Класс выбирают на странице —
 // одну и ту же насмешку умеют до девяти классов, и модель у каждого своя.
 export const loadTaunt    = (tf2_class = '') => call('load_taunt', { tf2_class });
+export const loadWear     = (tf2_class = '', slot = '') => call('load_wear', { tf2_class, slot });
 export const loadFirstPerson = (action = 'IDLE', full = false) =>
   call('load_first_person', { action, full });
 export const leaveFirstPerson = () => call('leave_first_person');

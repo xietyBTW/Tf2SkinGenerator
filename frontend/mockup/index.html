@@ -201,6 +201,8 @@
         <button class="mattab is-active" data-scene="item">Модель</button>
         <button class="mattab" data-scene="fp" data-cond="firstperson">От первого лица</button>
         <button class="mattab" data-scene="taunt" data-cond="taunt">Насмешка</button>
+        <!-- Шапка на персонаже в игровой стойке: так её и видят в игре. -->
+        <button class="mattab" data-scene="wear" data-cond="wear">На модели</button>
       </div>
 
       <div class="viewport">
@@ -254,8 +256,14 @@
               </button>
               <button class="ptools__btn" type="button" data-tool="brush"
                       title="Красить части выбранным цветом" aria-label="Кисть">
+                <!-- Ручка, обойма и пучок щетины. Прежний рисунок — черта с
+                     треугольником — читался пером или иглой, и кисть не
+                     находили. Только контуром: этот же рисунок стоит значком
+                     у курсора, а там заливки нет. -->
                 <svg viewBox="0 0 16 16" aria-hidden="true">
-                  <path d="M13.5 2.5 8 8"/><path d="M7 7 9 9 5.5 10.5Z"/>
+                  <path d="M9.6 6.4 14 2"/>
+                  <path d="M7.2 6.8 8.4 5.6 10.4 7.6 9.2 8.8"/>
+                  <path d="M7.2 6.8C5 7 3.8 8.4 3.8 10.4c0 1.4-.6 2.6-1.8 3.6 1.8.3 4.2-.1 5.6-1.4 1.3-1.2 1.8-2.6 1.6-3.8Z"/>
                 </svg>
               </button>
               <!-- Ножницы — сам режим: пока они выбраны, щелчок по модели
@@ -639,12 +647,6 @@
              title="Гирлянда, которую игра вешает на это оружие. Её правки уходят в мод отдельной моделью и не задевают другие оружия">
           <span class="label label--inline">Версия</span>
         </div>
-        <!-- Классы мультиклассовой шапки: у каждого своя модель, и собирать
-             все девять ради одного незачем. -->
-        <div class="styles" id="hatclasses" hidden
-             title="Для каких классов положить шапку в мод. У каждого своя модель — снятые классы в мод не попадут">
-          <span class="label label--inline">Классы для сборки</span>
-        </div>
         <!-- Модельные стили шапки: у каждого своя геометрия. Список приходит
              из каталога вместе с предметом. -->
         <div class="styles" id="hatstyles" hidden>
@@ -658,6 +660,11 @@
         <!-- Классы, которые играют эту насмешку. Список приходит из
              items_game: у каждого класса своя модель реквизита и своя
              последовательность. -->
+        <!-- Слот оружия в сцене «На модели»: от него зависит и стойка
+             персонажа, и что у него в руках. Кнопки строит код по классу. -->
+        <div class="styles" id="wearbar" hidden>
+          <span class="label label--inline">Оружие</span>
+        </div>
         <div class="styles" id="tauntbar" hidden>
           <span class="label label--inline">Класс</span>
         </div>
@@ -1108,17 +1115,31 @@
     <!-- Поле лежит ПОВЕРХ зеркала: сам textarea прозрачный, цвет и подсказки
          рисует зеркало. Так подсветка и наведение на $параметр появляются без
          своего редактора кода. -->
-    <div class="vmt__wrap">
-      <pre class="vmt__hl" id="vmt-hl" aria-hidden="true"></pre>
-      <textarea class="vmt__text" id="vmt-text" spellcheck="false"
-                autocomplete="off" autocapitalize="off"></textarea>
+    <div class="vmt__main">
+      <div class="vmt__wrap">
+        <pre class="vmt__hl" id="vmt-hl" aria-hidden="true"></pre>
+        <textarea class="vmt__text" id="vmt-text" spellcheck="false"
+                  autocomplete="off" autocapitalize="off"></textarea>
+      </div>
+      <!-- Справочник: все известные параметры по группам. Щелчок вставляет
+           параметр в текст — узнать, что есть, и добавить, не выходя из окна. -->
+      <aside class="vmt__ref" id="vmt-ref" hidden>
+        <input class="input vmt__find" id="vmt-find" type="search"
+               placeholder="Найти параметр">
+        <div class="vmt__refs" id="vmt-refs"></div>
+      </aside>
     </div>
+    <!-- Подсказка у курсора: что делает $параметр под мышью. -->
+    <div class="vmt__tip" id="vmt-tip" hidden></div>
     <div class="vmt__foot">
       <p class="label vmt__status" id="vmt-status"></p>
-      <span class="label vmt__keys">Ctrl+S — сохранить · Esc — закрыть</span>
+      <span class="label vmt__keys">Наведите на параметр — подсказка · Ctrl+S — сохранить</span>
     </div>
     <div class="ask__acts">
-      <button class="textbtn" type="button" id="vmt-insert">Вставить ▾</button>
+      <!-- Не «Вставить»: слово не говорило, что именно вставится. Здесь
+           готовые блоки — свечение, блики, прозрачность, анимация. -->
+      <button class="textbtn" type="button" id="vmt-insert">Готовые эффекты ▾</button>
+      <button class="textbtn" type="button" id="vmt-help">Справочник</button>
       <button class="textbtn" type="button" id="vmt-reset">Как в игре</button>
       <button class="textbtn" type="button" id="vmt-close">Закрыть</button>
       <button class="btn--primary" type="button" id="vmt-save">Сохранить</button>
@@ -1213,6 +1234,12 @@
     <!-- Версия и обновление. Не «действие над настройками», поэтому стоит
          рядом с обслуживанием, а не в ряду кнопок: человек сюда заходит
          посмотреть, а не сохранить. -->
+    <!-- Обучение: главный тур идёт сам только при первом старте, а вернуться к
+         нему хочется, например, показывая приложение другому человеку. -->
+    <div class="cfg__maint">
+      <button class="textbtn" id="cfg-tour" type="button">Пройти обучение заново</button>
+    </div>
+
     <div class="cfg__maint">
       <button class="textbtn" id="cfg-update" type="button">Проверить обновления</button>
       <span class="mono" id="cfg-version"></span>

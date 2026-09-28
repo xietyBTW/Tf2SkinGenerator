@@ -206,11 +206,18 @@ def _extract_from_qc(qc_path: str, tf2_root_dir: str,
     if not vmt_content:
         return None
 
-    temp_dir = os.path.join('tools', 'temp_vmt_extract')
+    # Папка данных, а не текущая: в собранном приложении они разные, и
+    # относительный путь писал бы туда, откуда запустили (или падал).
+    from src.shared.constants import DirectoryPaths
+    temp_dir = str(DirectoryPaths.TEMP_VMT_EXTRACT_DIR)
     os.makedirs(temp_dir, exist_ok=True)
     out_path = os.path.join(temp_dir, vmt_filename)
     try:
-        with open(out_path, 'w', encoding='utf-8') as f:
+        # newline='' - перевод строки как в игре (CRLF). В текстовом режиме
+        # Windows дописывал свой CR: выходило CR CR LF, и при чтении каждая
+        # строка VMT удваивалась - редактор показывал файл через строку, и
+        # так же сохранялась правка.
+        with open(out_path, 'w', encoding='utf-8', newline='') as f:
             f.write(vmt_content)
         return out_path
     except OSError:

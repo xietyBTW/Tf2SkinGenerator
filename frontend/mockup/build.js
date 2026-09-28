@@ -7,6 +7,7 @@
 
 import * as api from './api.js';
 import { ask } from './ask.js';
+import { t } from './i18n.js';
 import { chooseFile } from './util.js';
 import { root, setStatus } from './layout.js';
 import { buildParticles } from './particles/index.js';
@@ -33,19 +34,33 @@ export function checkName(label) {
   return (span.dataset.name || span.textContent).trim();
 }
 
+/**
+ * Показан ли контрол панели сборки — сам по себе, а не панель целиком.
+ *
+ * Скрытую галку не читаем: контролы, которых режим не показывает, и особые
+ * флаги VTF при выключенной настройке не должны уезжать в мод — иначе
+ * отмеченный когда-то SSBump остался бы в текстуре, а человек его не видит.
+ *
+ * Раньше проверкой был `offsetParent`, а он пуст и тогда, когда скрыта ВСЯ
+ * панель: в плавающем режиме человек ставил флаги, закрывал панель, жал
+ * «Собрать» — и в сборку не уходило ни одного флага и ни одной опции.
+ */
+function shownInPanel(el) {
+  // Ближайший из двух: скрытый предок внутри сетки или сама сетка.
+  if (el.closest('[hidden], .build__grid')?.hidden) return false;
+  // Особые флаги прячет не `hidden`, а CSS по признаку настройки.
+  const adv = el.closest('.build__col[data-col="flags-adv"]');
+  return !adv || root.dataset.advflags === '1';
+}
+
 export function buildParams({ live = false } = {}) {
   if (!live && texEdit !== null) return { ...texEdit.global };
 
   // Колонку ищем по data-col, а имя галки берём из data-name: подписи
   // переводятся, а в сборку уходит имя — искать по надписи нельзя.
   const col = (key) => document.querySelector(`.build__col[data-col="${key}"]`);
-  // Скрытую галку не читаем: невидимый контрол не должен влиять на сборку.
-  // Так спрятанные особые флаги VTF (галка в настройках) и контролы, которых
-  // режим не показывает, не уезжают в мод — иначе отмеченный когда-то SSBump
-  // остался бы в текстуре, а человек его уже не видит.
-  const visible = (l) => l.offsetParent !== null;
   const checked = (key) => [...col(key).querySelectorAll('.check')]
-    .filter((l) => visible(l) && l.querySelector('input').checked)
+    .filter((l) => shownInPanel(l) && l.querySelector('input').checked)
     .map((l) => checkName(l));
 
   const res = [...document.querySelectorAll('input[name="res"]')]
@@ -55,7 +70,7 @@ export function buildParams({ live = false } = {}) {
     format: document.getElementById('fmt').value,
     filename: document.getElementById('out').value,
     // Флаги лежат в двух колонках: обычные и особые (их показывает настройка,
-    // а скрытые здесь и не читаются — см. `visible`).
+    // а скрытые здесь и не читаются — см. `shownInPanel`).
     flags: [...checked('flags'), ...checked('flags-adv')],
     options: (() => {
       const on = Object.fromEntries(checked('options').map((n) => [n, true]));
@@ -76,10 +91,8 @@ export function buildParams({ live = false } = {}) {
       const box = document.getElementById('shoulders');
       // Плечи есть только у рук: в других режимах галки нет на экране, и
       // отмеченная когда-то она уезжала бы в каждую сборку.
-      return box.offsetParent !== null && box.checked;
+      return shownInPanel(box) && box.checked;
     })(),
-    // Классы мультиклассовой шапки: пусто — значит все.
-    hat_classes: hatClasses(),
     // Сборка подписывает шаги и пишет комментарии в VMT на языке настроек.
     lang: api.lang(),
   };
@@ -123,10 +136,77 @@ buildBtn.addEventListener('click', async () => {
   // У частиц своя сборка: PCF плюс заменённые текстуры, и перед ней —
   // проверка, потому что типовые ошибки эффекта видно только в игре.
   if (root.dataset.section === 'particles') { await buildParticles(); return; }
-  const res = await api.build(buildParams());
+  const hatClassesPicked = await askHatClasses();
+  if (!hatClassesPicked) return;
+  // Классы мультиклассовой шапки: пусто — значит все (и не шапка).
+  const params = { ...buildParams(), hat_classes: hatClassesPicked };
+  let res = await api.build(params);
+  if (res.confirm_tint) {
+    const tintMode = await askTint(res.confirm_tint);
+    if (!tintMode) return;
+    res = await api.build({ ...params, tint_mode: tintMode });
+  }
   if (res.error) { setStatus(res.error, false); return; }
   setStatus('Сборка…', true);
 });
+
+/**
+ * Вопрос перед сборкой: игра перекрасит предмет по альфе текстуры.
+ *
+ * У части оружия и двух третей шапок цвет лежит в VMT и ложится туда, где
+ * альфа текстуры белая. Своя картинка без альфы — это белая альфа ВЕЗДЕ, и
+ * в игре предмет целиком становится цвета краски, хотя превью показывает
+ * картинку как есть. Ответ «как на картинке» — первым: это то, что человек
+ * видел, собирая мод.
+ */
+//: Прошлый ответ «для каких классов»: следующая сборка той же шапки
+//: предлагает его же, а не снова все девять.
+let lastHatClasses = [];
+
+/**
+ * Для каких классов собрать мультиклассовую шапку.
+ *
+ * У каждого класса своя модель, и мод под все девять весит вдевятеро.
+ * Возвращает выбранные классы, [] — шапка не мультиклассовая, null — отмена
+ * (или ничего не отмечено: собирать нечего).
+ */
+async function askHatClasses() {
+  const classes = hatClasses();
+  if (!classes.length) return [];
+  const kept = classes.filter((c) => lastHatClasses.includes(c));
+  const picked = await ask({
+    title: 'Для каких классов собрать шапку?',
+    text: 'У каждого класса своя модель шапки. Неотмеченные классы в мод не попадут.',
+    list: classes,
+    multi: true,
+    chosen: kept.length ? kept : classes,
+    ok: 'Собрать',
+  });
+  if (!picked) return null;
+  if (!picked.length) { setStatus('Не выбран ни один класс', false); return null; }
+  lastHatClasses = picked;
+  // Порядок каталога, а не щелчков: первый выбранный — основная модель сборки.
+  return classes.filter((c) => picked.includes(c));
+}
+
+async function askTint(info) {
+  const answer = await ask({
+    title: t('Игра перекрасит предмет в {}').replace('{}', info.color),
+    text: 'Этот предмет игра красит там, где у текстуры белый альфа-канал. У вашей картинки альфы нет, поэтому в игре покрасится весь предмет.',
+    list: [
+      { label: 'Как на картинке', value: 'none', selected: true,
+        hint: 'Игра не будет его перекрашивать — как в превью' },
+      { label: 'Убрать покраску из VMT', value: 'strip',
+        hint: 'То же, но параметры покраски удаляются из материала' },
+      { label: 'Покраска как в игре', value: 'mask',
+        hint: 'Цвет ляжет только туда, где его кладёт игра у оригинала' },
+      { label: 'Собрать как есть', value: 'keep',
+        hint: 'Покрасится весь предмет' },
+    ],
+    ok: 'Собрать',
+  });
+  return answer || '';
+}
 
 /**
  * Вопрос сборки: какую геометрию положить в сменную часть модели.

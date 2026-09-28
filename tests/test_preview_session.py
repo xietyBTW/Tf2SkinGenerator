@@ -293,6 +293,39 @@ class MiscAndForceTeamTests(unittest.TestCase):
         self.assertEqual(s.textures.active_team, Team.RED)
         self.assertFalse(s.can_force_team())
 
+    def test_force_team_offered_with_australium(self):
+        """Австралий не мешает: сборка трогает только синие строки пар."""
+        s = PreviewSession()
+        s.weapon_key = "c_sniperrifle"
+        s.weapon_mode = "sniper_c_sniperrifle"
+        s.textures.australium_frame = "gold.png"
+        s.textures.skin_info = {"team_pairs_free": True}
+        self.assertTrue(s.can_force_team())
+
+    def test_force_team_gold_shared_by_both_teams(self):
+        """Под «сделать командным» золото одно на обе команды, как в игре:
+        загруженное на BLU видно и на RED, и в сборку уходит оно же."""
+        s = PreviewSession()
+        s.weapon_key = "c_sniperrifle"
+        s.weapon_mode = "sniper_c_sniperrifle"
+        t = s.textures
+        t.australium_mat_name = "c_sniperrifle_gold"
+        s.enable_force_team()
+        t.active_team = Team.BLU
+        t.set_texture("c_sniperrifle_gold", "gold.png")
+        self.assertEqual(t.textures[Team.RED].get("c_sniperrifle_gold"), "gold.png")
+        # А командный материал по-прежнему у каждой команды свой.
+        t.set_texture("c_sniperrifle", "blu.png")
+        self.assertNotIn("c_sniperrifle", t.textures.get(Team.RED, {}))
+
+    def test_force_team_not_offered_when_second_row_is_style(self):
+        """Кровь тесака во второй строке: синюю туда не вписать."""
+        s = PreviewSession()
+        s.weapon_key = "c_sd_cleaver"
+        s.weapon_mode = "scout_c_sd_cleaver"
+        s.textures.skin_info = {"team_pairs_free": False}
+        self.assertFalse(s.can_force_team())
+
     def test_force_team_not_offered_for_hats_and_hands(self):
         """Шапки, руки и тела персонажей синтез команды не получают."""
         from src.data.player_hands import HAND_MODE_KEYS

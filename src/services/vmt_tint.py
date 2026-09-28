@@ -144,6 +144,74 @@ def _tinted(src, spec: TintSpec):
     return out
 
 
+def lacks_alpha(image_path: str) -> bool:
+    """
+    Нет ли у картинки своей альфы: канала нет вовсе или он сплошь белый.
+
+    Для материала с `$blendtintbybasealpha` это значит «красить ВСЁ»: игра
+    кладёт цвет VMT туда, где альфа белая, а картинка без альфы становится
+    текстурой с белой альфой целиком. Так Cow Mangler с чужой текстурой
+    выходил в игре красным от ствола до приклада.
+    """
+    try:
+        from PIL import Image
+        with Image.open(image_path) as img:
+            if "A" not in img.getbands() and "transparency" not in img.info:
+                return True
+            low, _ = img.convert("RGBA").getchannel("A").getextrema()
+            return low >= 250
+    except Exception as exc:
+        logger.warning(f"[tint] не прочитать альфу {image_path}: {exc}")
+        return False
+
+
+def with_mask(image_path: str, out_path: str,
+              mask_png: Optional[str] = None) -> bool:
+    """
+    Копия картинки с альфой-маской краски: из `mask_png` (альфа игрового
+    оригинала, растянутая под размер) или пустой — тогда игра не красит ничего.
+
+    Развёртка у модели одна на всех, поэтому маска оригинала ложится на те же
+    места и своей текстуры.
+    """
+    try:
+        from PIL import Image
+        with Image.open(image_path) as img:
+            rgb = img.convert("RGB")
+        if mask_png:
+            with Image.open(mask_png) as m:
+                alpha = m.convert("RGBA").getchannel("A").resize(rgb.size, Image.LANCZOS)
+        else:
+            alpha = Image.new("L", rgb.size, 0)
+        rgb.putalpha(alpha)
+        rgb.save(out_path)
+        return True
+    except Exception as exc:
+        logger.warning(f"[tint] маска для {image_path} не наложена: {exc}")
+        return False
+
+
+#: Названия цвета краски для предупреждения: (верхняя граница тона, ru, en).
+_HUES = ((15, "красный", "red"), (40, "оранжевый", "orange"),
+         (70, "жёлтый", "yellow"), (165, "зелёный", "green"),
+         (200, "голубой", "light blue"), (255, "синий", "blue"),
+         (290, "фиолетовый", "purple"), (345, "розовый", "pink"),
+         (360, "красный", "red"))
+
+
+def color_name(rgb: Tuple[int, int, int], lang: str = "en") -> str:
+    """Словом, какой это цвет: «красный». Точный цвет человеку ничего не скажет."""
+    import colorsys
+    h, s, v = colorsys.rgb_to_hsv(*(c / 255 for c in rgb))
+    if s < 0.2 or v < 0.15:
+        return "серый" if lang == "ru" else "gray"
+    deg = h * 360
+    for top, ru, en in _HUES:
+        if deg < top:
+            return ru if lang == "ru" else en
+    return "красный" if lang == "ru" else "red"
+
+
 def raw_of(png_path: str) -> str:
     """Где лежит исходник с маской у окрашенной картинки."""
     return png_path + ".raw.png"

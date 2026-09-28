@@ -12,7 +12,7 @@
 
 import * as api from './api.js';
 import { root } from './layout.js';
-import { enterTextureEdit } from './controls.js';
+import { toggleTextureEdit, syncTextureEdit } from './controls.js';
 import { bindDrop, applyView, wearCard } from './preview.js';
 
 // ── Альбом текстур ───────────────────────────────────────────────────────
@@ -120,7 +120,11 @@ export function bindAlbum() {
     const gear = f.querySelector('.frame__tool');
     if (gear) gear.addEventListener('click', (e) => {
       e.stopPropagation();
-      enterTextureEdit(f.dataset.mat);
+      // Карточка становится текущей: VMT и карты материала открываются у
+      // ТЕКУЩЕЙ, и без этого плашка говорила бы про одну текстуру, а VMT
+      // правился бы у другой.
+      goTo(i);
+      toggleTextureEdit(f.dataset.mat);
     });
     // Материал, добавленный в стиль, из него же и убирается — иначе стиль
     // становится ловушкой: добавил лишнее и живи с этим.
@@ -130,6 +134,8 @@ export function bindAlbum() {
       applyView(await api.dropFromStyle(f.dataset.mat));
     });
   });
+  // Правка настроек пережила пересборку, только если её материал остался.
+  syncTextureEdit();
 
   if (!frames.length) {
     // Альбом опустел — сменился предмет (clearPreview). Прошлая карточка к
@@ -176,6 +182,12 @@ export //: Служебный ключ одноматериальной моде
 const SINGLE_TEX = '__single__';
 
 /** Материал, к которому относится правка: тот, что сейчас в альбоме. */
+/** Карточка материала; пустое имя — главный материал одноматериальной модели. */
+export function frameOf(material) {
+  return frames.find((f) => f.dataset.mat === material)
+      || frames.find((f) => f.dataset.mat === SINGLE_TEX && !material);
+}
+
 export function currentMaterial() {
   const frame = frames[currentIndex()];
   const mat = frame && frame.dataset.mat;

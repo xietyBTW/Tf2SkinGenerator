@@ -1026,11 +1026,13 @@ class VpkTextureBuilder:
         по новому пути — без него материал стал бы фиолетовым. Текстурные ссылки
         у таких VMT абсолютные, поэтому отдельный VTF чаще не нужен.
         """
-        _pet_keys = set((panel_extra_textures or {}).keys())
+        # Регистр: имена группы после правки QC в нижнем регистре, а ключи
+        # панели — как в превью.
+        _pet_keys = {k.lower() for k in (panel_extra_textures or {})}
         for _bl_mat in blacklisted_extra:
             # Пользователь заменил служебную текстуру через «Прочее» —
             # её запишет блок panel_extra_textures ниже (его правка важнее).
-            if _bl_mat in _pet_keys:
+            if _bl_mat.lower() in _pet_keys:
                 continue
             _bl_vmt = slots.vmt(_bl_mat)
             if _bl_vmt.exists():
@@ -1132,6 +1134,13 @@ class VpkTextureBuilder:
             # _write_blacklisted_materials. Пропускаем по col_idx, не удаляя
             # из списка, чтобы сохранить выравнивание с red_row.
             if not _is_edit(blu_tex_name) or _is_hidden(blu_tex_name):
+                continue
+            # Австралий командой не меняется: его пишет оригиналом
+            # _write_blacklisted_materials, а свою текстуру — panel-extra. Здесь
+            # он шёл «общим столбцом» с вопросом и VMT от главного, и терял
+            # золотой блеск. Праздничные имена (c_wrangler_xmas_blue) — родные
+            # командные материалы, их этот цикл и пишет.
+            if qc_skin_parser.is_australium(blu_tex_name):
                 continue
             # Находим соответствующее RED имя для этого столбца
             red_tex_name = red_row[col_idx] if col_idx < len(red_row) else None
@@ -1510,6 +1519,25 @@ class VpkTextureBuilder:
         if panel_extra_textures:
             # Собираем уже созданные имена (extra_materials + BLU)
             _processed = {_f.stem for _f in slots.vtf_output_path.glob("*.vtf")}
+
+            # Своя текстура австралия: VMT — игровой VMT золота, а не главного,
+            # иначе пропадают кубмапа и блеск. Кладём его заранее: рендер ниже
+            # VMT не перезаписывает, а $basetexture уже смотрит на наш VTF.
+            # Правленый в редакторе VMT важнее — его рендер возьмёт сам.
+            from src.services.edited_vmt_service import EditedVMTService
+            for _pet_name in panel_extra_textures:
+                if not qc_skin_parser.is_australium(_pet_name or ''):
+                    continue
+                _edited = EditedVMTService.get_edited_vmt(_pet_name.lower())
+                if _edited and os.path.exists(_edited):
+                    continue
+                _v_vmt = slots.vmt(_pet_name.lower())   # как у рендера ниже
+                _orig = VpkTextureBuilder._find_original_vmt(_pet_name, ctx, slots)
+                if _orig and not _v_vmt.exists():
+                    copy_file_safe(_orig, _v_vmt)
+                    VMTService.update_vmt_basetexture_path(
+                        str(_v_vmt), slots.patched_cdmaterials_path, _pet_name.lower())
+                    logger.info(f"Вариант '{_pet_name}': игровой VMT со своей текстурой")
 
             # Каждый panel-extra независим (своё имя → свои файлы, без callback и
             # без чтения игрового VPK) → рендерим параллельно. Скип-логику и

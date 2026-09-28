@@ -37,6 +37,10 @@ class BuildRequest:
     custom_vpk_source_path: Optional[str] = None
     hat_mdl_path: Optional[str] = None
     hat_apply_game_paints: bool = True
+    # Снять покраску игры ($blendtintbybasealpha и её прокси) со всех VMT
+    # мода, чья текстура лежит в самом моде: человек выбрал это перед
+    # сборкой, увидев, что игра перекрасит его картинку целиком.
+    strip_game_tint: bool = False
     hat_class_models: Optional[Dict[str, str]] = None
     # Доп. изменённые СТИЛИ-модели шапки: список словарей по каждому стилю
     # (кроме активного — он собирается основным пайплайном). Каждый со своей

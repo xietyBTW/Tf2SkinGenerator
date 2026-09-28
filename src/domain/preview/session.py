@@ -514,10 +514,9 @@ class PreviewSession:
         """
         Стоит ли ПРЕДЛАГАТЬ «сделать командным» (синтез BLU-строки в сборке).
 
-        Условия те же, что держала панель в ``_is_force_team_eligible`` и
-        ``_update_team_btn_visibility``: предложение имеет смысл, только пока
-        нативного командного варианта нет, режим ещё не включён и вариант
-        (Australium) не занял переключатель.
+        Предложение имеет смысл, только пока нативного командного варианта
+        нет, режим ещё не включён и вторая строка скинов — не стиль. Австралий
+        не помеха (раньше был: сборка стирала его строки).
 
         Ключ и режим можно передать явно — панель хранит их у себя и в сессию
         не пишет.
@@ -550,9 +549,14 @@ class PreviewSession:
             return False
 
         t = self.textures
+        # Австралию команда не мешает: сборка делает синей только синюю строку
+        # каждой пары скинов, золото (8/9) остаётся. Мешает стиль во второй
+        # строке (кровь тесака) — правило то же, что у сборки
+        # (qc_skin_parser.team_pairs_free, признак кладёт extract_skin_info).
+        if not (t.skin_info or {}).get('team_pairs_free', True):
+            return False
         # is_hands=False: руки отсеяны выше, до сюда они не доходят.
-        return not (t.force_team or t.australium_frame
-                    or self.has_team_variant(False))
+        return not (t.force_team or self.has_team_variant(False))
 
     def enable_force_team(self) -> None:
         """Включает «сделать командным»: показываются RED/BLU, активна RED."""

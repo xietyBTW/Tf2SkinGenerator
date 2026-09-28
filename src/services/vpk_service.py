@@ -561,33 +561,34 @@ class VPKService:
     @staticmethod
     def _apply_force_team(force_team, mode, qc_path, weapon_key, ctx) -> None:
         """
-        «Сделать командным»: для оружия БЕЗ нативной команды синтезирует BLU-строку
-        в $texturegroup (skin 1 = {material}_blue по материалам reference-SMD), чтобы
-        дальше весь командный путь отработал как у нативно-командного. Мутирует QC.
+        «Сделать командным»: для оружия БЕЗ нативной команды делает синей BLU-строку
+        каждой пары скинов $texturegroup ({material}_blue по материалам
+        reference-SMD), чтобы дальше весь командный путь отработал как у
+        нативно-командного. Остальные строки (австралий, ботокиллеры) остаются —
+        раньше группа заменялась двумя строками, и золото пропадало. Мутирует QC.
         """
         if force_team and mode not in HAND_MODE_KEYS:
             try:
-                _pre = ModelBuildService.extract_skin_info(qc_path)
-                if not _pre.get('is_team') and not _pre.get('has_australium'):
-                    from src.services.smd_service import SMDService as _SMDft
-                    from src.data.material_filter import is_editable_material as _ed
-                    _ref = _SMDft.find_reference_smd(str(ctx.decompile_dir), weapon_key)
-                    _mesh = _SMDft.ordered_unique_materials(_ref) if _ref else []
-                    _team_mats = [m for m in _mesh if _ed(m)]
-                    if _team_mats:
-                        _ov = {1: {m: f"{m}_blue" for m in _team_mats}}
-                        _tgb = ModelBuildService.generate_texturegroup_block(_team_mats, _ov)
-                        ModelBuildService.replace_texturegroup_in_qc(qc_path, _tgb)
-                        logger.info(
-                            f"[FORCE TEAM] добавлена BLU-строка: "
-                            f"{[m + '_blue' for m in _team_mats]}"
-                        )
-                    else:
-                        logger.info("[FORCE TEAM] нет редактируемых материалов меша — пропуск")
-                else:
-                    logger.info(
-                        "[FORCE TEAM] оружие уже командное или с австралием — пропуск"
-                    )
+                from src.services import qc_skin_parser as _qsp
+                if ModelBuildService.extract_skin_info(qc_path).get('is_team'):
+                    logger.info("[FORCE TEAM] оружие уже командное — пропуск")
+                    return
+                from src.services.smd_service import SMDService as _SMDft
+                from src.data.material_filter import is_editable_material as _ed
+                _ref = _SMDft.find_reference_smd(str(ctx.decompile_dir), weapon_key)
+                _mesh = _SMDft.ordered_unique_materials(_ref) if _ref else []
+                _rows = _qsp.parse_texturegroup_rows(qc_path)
+                _new = _qsp.force_team_rows(_rows, [m for m in _mesh if _ed(m)])
+                if _new is None:
+                    why = ("вторая строка скинов — стиль, а не пара команды"
+                           if not _qsp.team_pairs_free(_rows)
+                           else f"нет материалов меша для команды (меш={_mesh})")
+                    logger.warning(f"[FORCE TEAM] команду не дописать: {why} "
+                                   f"(строки={_rows}) — пропуск")
+                    return
+                ModelBuildService.replace_texturegroup_in_qc(
+                    qc_path, ModelBuildService.generate_renamed_texturegroup(_new, {}))
+                logger.info(f"[FORCE TEAM] синие строки пар: {_new[1::2]}")
             except Exception as _fte:
                 logger.warning(f"[FORCE TEAM] не удалось синтезировать команду: {_fte}")
 
@@ -685,9 +686,16 @@ class VPKService:
             if _ml in _tg_names and _ml not in _asked and not _is_hidden(_m):
                 _asked.add(_ml)
                 extra_materials.append(_tg_names[_ml])
+        # Австралий (_gold) тоже пишем оригиналом, если человек его не правил:
+        # у золота свой VMT (кубмапа, блеск, sheen), а производный от главного
+        # делал австралий матовым. Спрашивать о нём незачем — своя текстура
+        # приходит карточкой (panel-extra). Праздничные имена сюда НЕ входят:
+        # у праздничного оружия это родные материалы (см. is_australium).
+        from src.services.qc_skin_parser import is_australium as _is_aus
         blacklisted_extra = [m for m in _all_tg_mats
                               if m.lower() not in _asked
-                              and (_is_hidden(m) or not _is_edit(m))]
+                              and (_is_hidden(m) or not _is_edit(m)
+                                   or _is_aus(m))]
         if blacklisted_extra:
             logger.info(f"Служебные/ЧС материалы (без карточек, пишем оригиналом): {blacklisted_extra}")
         # blu_row НЕ фильтруем удалением — он индексируется по колонкам
@@ -1413,6 +1421,34 @@ class VPKService:
         return True, ''
 
     @staticmethod
+    def _strip_game_tint(vpkroot) -> None:
+        """
+        Снимает покраску игры с материалов мода, чья текстура — своя.
+
+        Одним проходом по готовому vpkroot, а не в каждом месте записи VMT:
+        главный, BLU, доп. и «вторичные» материалы пишутся разными путями, и
+        пропустить хоть один значило бы оставить, например, BLU красным.
+        Своя текстура — та, чей VTF лежит в моде: служебные материалы пишутся
+        оригиналом и ссылаются на игровой путь, их покраску не трогаем.
+        """
+        from src.services import vmt_parse, vmt_tint
+        from src.services.vmt_service import VMTService
+
+        root = Path(vpkroot)
+        for vmt in root.rglob('*.vmt'):
+            try:
+                text = vmt.read_text(encoding='utf-8', errors='replace')
+            except OSError:
+                continue
+            if vmt_tint.parse_tint(text) is None:
+                continue
+            base = vmt_parse.parse(text).path('basetexture')
+            if not base or not (root / 'materials' / f'{base}.vtf').exists():
+                continue
+            VMTService.remove_paint_proxies(str(vmt))
+            logger.info(f"[tint] покраска игры снята: {vmt.name}")
+
+    @staticmethod
     def build_vpk(
         request: Optional[BuildRequest] = None,
         *,
@@ -1564,6 +1600,9 @@ class VPKService:
                 vmt_to_delete = payload or None
 
             
+            if request.strip_game_tint:
+                VPKService._strip_game_tint(ctx.vpkroot_dir)
+
             # Собираем VPK файл (финальный этап - упаковываем все в один файл)
             if is_cancelled():
                 return cancelled_result(ctx)

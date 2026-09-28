@@ -5,6 +5,8 @@
 import os
 from typing import Optional
 
+from src.shared.constants import DirectoryPaths
+
 
 class EditedVMTService:
     """Сервис для сохранения и загрузки отредактированных VMT файлов.
@@ -16,7 +18,9 @@ class EditedVMTService:
     ранее сохранённую правку.
     """
 
-    EDITED_VMT_DIR = os.path.join("tools", "edited_vmt")
+    # Папка данных (DirectoryPaths): правки человека не должны жить там,
+    # откуда запустили приложение, — и пропадать с обновлением установки.
+    EDITED_VMT_DIR = str(DirectoryPaths.EDITED_VMT_DIR)
     
     @staticmethod
     def get_edited_vmt_path(edit_key: str) -> str:

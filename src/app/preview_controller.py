@@ -19,7 +19,7 @@
 
 from __future__ import annotations
 
-from typing import Optional, Tuple
+from typing import Callable, Optional, Tuple
 
 from src.domain.preview.session import PreviewSession
 from src.services.base_worker import Signal
@@ -78,6 +78,9 @@ class Preview3DController:
         #: лица, и выход оттуда их чистит — а у праздничного оружия подложка
         #: нужна и обычной модели. Помнит её тот, кто её и произвёл.
         self._scene_extra: Tuple[dict, list] = ({}, [])
+        #: Есть ли в кадре сцена (руки, насмешка, «На модели»). Ставит сеанс:
+        #: сцены живут в других контроллерах.
+        self.scene_up: Callable[[], bool] = lambda: False
 
     # ═══════════════════════════════════════════════════════════════════════ #
     # Управление
@@ -241,7 +244,10 @@ class Preview3DController:
         if not tex_map:
             return
         self._scene_extra = (dict(tex_map), list(own))
-        self.apply_scene_extra()
+        # Модель доехала, когда в кадре уже сцена (вид от первого лица): поля
+        # подложки сейчас её, и носитель затёр бы руки. Вернёт выход из сцены.
+        if not self.scene_up():
+            self.apply_scene_extra()
         self.scene_extra.emit(dict(tex_map), list(own))
 
     def apply_scene_extra(self) -> None:
@@ -513,6 +519,7 @@ class ViewmodelController:
     editable = Signal(object)       # какие меши разрешено перекрашивать
     actions = Signal(object)        # какие анимации есть у этого оружия
     classes = Signal(object)        # кто умеет эту насмешку (для сцены тонта)
+    slots = Signal(object)          # слоты оружия в сцене «На модели»
     clip = Signal(object)           # только дорожки: сцена на экране остаётся
     render_hints = Signal(object)
     failed = Signal(str)
@@ -533,6 +540,11 @@ class ViewmodelController:
         if self._worker is not None:
             self._worker.stop(3000)
             self._worker = None
+
+    @property
+    def active(self) -> bool:
+        """Сцена собрана или собирается."""
+        return self._shown is not None
 
     def shows(self, weapon_key: str, mode: str, decor_smd: str = '') -> bool:
         """Та же сцена уже в кадре — значит хватит одних дорожек."""
@@ -619,6 +631,40 @@ class ViewmodelController:
         w.failed.connect(self.failed.emit)
         self._worker = w
         self._shown = (prop_key, tf2_class, self._session.textures.active_team)
+        w.start()
+
+    def load_wear(self, hat_models: dict, misc_vpk: str, textures_vpk: str,
+                  tf2_root: str, tf2_class: str = '', slot: str = '',
+                  lang: str = 'en', hidden_bodygroups: dict = None) -> None:
+        """
+        Сцена «На модели»: персонаж в стойке со стоковым оружием, на нём шапка.
+
+        Тот же случай, что насмешка: свой воркер, общие сигналы. Шапка идёт
+        предметом сцены — правка её текстуры видна на персонаже.
+        """
+        self.stop()
+        from src.services.hat_scene_worker import HatScenePreviewWorker
+
+        w = HatScenePreviewWorker(
+            hat_models=hat_models,
+            misc_vpk_path=misc_vpk,
+            textures_vpk_path=textures_vpk,
+            tf2_root=tf2_root,
+            tf2_class=tf2_class,
+            slot=slot,
+            lang=lang,
+            hidden_bodygroups=hidden_bodygroups,
+        )
+        w.progress.connect(self.progress.emit)
+        w.animated_ready.connect(self.animated.emit)
+        w.multi_material.connect(self._on_materials)
+        w.editable_materials.connect(self._on_editable)
+        w.classes_available.connect(lambda c: self.classes.emit(list(c or [])))
+        w.slots_available.connect(lambda info: self.slots.emit(info or {}))
+        w.render_hints.connect(lambda h: self.render_hints.emit(h or {}))
+        w.failed.connect(self.failed.emit)
+        self._worker = w
+        self._shown = ('wear', tf2_class, slot, self._session.textures.active_team)
         w.start()
 
     def load_death(self, mode: str, misc_vpk: str, textures_vpk: str,

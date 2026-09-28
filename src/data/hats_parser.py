@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 # v12: collection — коллекция игры (фильтр каталога).
 # v13: убран event (сезон): фильтр прячет только хэллоуинские по ограничению.
 # Смена версии форсирует одноразовый перепарс старого кэша.
-_CACHE_VERSION = "v13"
+_CACHE_VERSION = "v14"  # v14: что шапка прячет у персонажа (hidden_bodygroups)
 _CACHE_DIR = data_dir() / "cache"
 
 #: Как называется файл локализации у языка приложения. Один словарь на модуль:
@@ -111,6 +111,11 @@ class HatItem:
     # hat, beard, glasses, shirt… — в игре их 67. Пусто = не объявлены (у
     # медалей и старых предметов их нет и в prefab).
     regions: List[str] = field(default_factory=list)
+    # Что шапка прячет у персонажа: "visuals" { "player_bodygroups" { … } }
+    # (с учётом prefab) — {бодигруппа: вариант}. Каска солдата — это его
+    # бодигруппа "hat", и шапка на голову переключает её в пустой вариант,
+    # иначе каска торчала бы сквозь шапку. Пусто = ничего не прячет.
+    hidden_bodygroups: Dict[str, int] = field(default_factory=dict)
 
     @property
     def region(self) -> str:
@@ -334,8 +339,30 @@ def _extract_style_models(block: str, classes: List[str],
         if token:
             key = token[1:] if token.startswith("#") else token
             name = localization.get(key) or localization.get(key.lower())
-        out.append({"name": name or f"Style {idx}", "per_class_models": pcm})
+        out.append({"name": name or f"Style {idx}", "per_class_models": pcm,
+                    # Стиль прячет у персонажа своё сверх самого предмета.
+                    "hidden_bodygroups": _bodygroup_pairs(
+                        _nested_block(styleblk, "additional_hidden_bodygroups"))})
     return out
+
+
+_PAIR = re.compile(r'"([^"]+)"\s*"(\d+)"')
+
+
+def _nested_block(block: str, key: str) -> str:
+    """Текст вложенного блока "key" { … } или пусто."""
+    start = block.find(f'"{key}"')
+    if start == -1:
+        return ""
+    brace = block.find('{', start)
+    if brace == -1:
+        return ""
+    return block[brace:_skip_to_close_brace(block, brace)]
+
+
+def _bodygroup_pairs(block: Optional[str]) -> Dict[str, int]:
+    """{бодигруппа: вариант} из блока пар "имя" "число"."""
+    return {name.lower(): int(value) for name, value in _PAIR.findall(block or "")}
 
 
 def _find_items_section(content: str) -> int:
@@ -580,6 +607,8 @@ def _parse_items_game(filepath: str,
             **_collection_fields(item_collections.get(internal_name.lower())),
             icon=icon,
             regions=_extract_regions(block, game),
+            hidden_bodygroups=_bodygroup_pairs(
+                game.inherited_block(block, "player_bodygroups")),
         ))
 
         if progress_cb and items_parsed % 500 == 0:

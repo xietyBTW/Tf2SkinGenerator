@@ -622,7 +622,8 @@ def _scene_materials(scene) -> tuple:
     return weapon, arms
 
 
-def _default_body_parts(decomp_dir: str, main_smd: str) -> list:
+def _default_body_parts(decomp_dir: str, main_smd: str,
+                        choice: Optional[dict] = None) -> list:
     """Части модели, которые видны по умолчанию, кроме основного меша.
 
     У пиро и инженера ПРАВАЯ РУКА объявлена отдельной бодигруппой
@@ -630,14 +631,20 @@ def _default_body_parts(decomp_dir: str, main_smd: str) -> list:
     оказывалась одна левая. У оружия так же лежат откидные части.
 
     Берётся вариант по умолчанию каждой бодигруппы — тот, что игра показывает,
-    пока ничего не переключали.
+    пока ничего не переключали. `choice` {группа: вариант} переключает группы,
+    как это делает надетый предмет: шапка на голову солдата прячет его каску
+    (`player_bodygroups` в items_game). Имена сравниваются без учёта регистра.
     """
     model = qc_skin_parser.load_model(decomp_dir)
     if model is None:
         return []
     try:
         from src.services.model_build_service import ModelBuildService
-        parts = ModelBuildService.extract_default_body_smds(model.qc_path)
+        groups = ModelBuildService.extract_bodygroups(model.qc_path)
+        wanted = {str(k).lower(): int(v) for k, v in (choice or {}).items()}
+        picked = {name: wanted[name.lower()] for name, _ in groups
+                  if name.lower() in wanted}
+        parts = ModelBuildService.chosen_body_smds(groups, picked)
     except Exception as exc:                            # noqa: BLE001
         logger.debug(f"[fp] бодигруппы не собрались ({decomp_dir}): {exc}")
         return []

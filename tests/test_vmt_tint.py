@@ -154,3 +154,49 @@ def test_same_material_look_compares_texture_and_paint():
     assert vmt_tint.same_material_look((tex, None), (tex, None))
     assert not vmt_tint.same_material_look(None, (tex, None))
     assert not vmt_tint.same_material_look((tex, None), None)
+
+
+def test_lacks_alpha(tmp_path):
+    """Нет канала или он сплошь белый — игра покрасит всю текстуру."""
+    from PIL import Image
+    rgb = tmp_path / "rgb.png"
+    Image.new("RGB", (4, 4), (10, 20, 30)).save(rgb)
+    opaque = tmp_path / "opaque.png"
+    Image.new("RGBA", (4, 4), (10, 20, 30, 255)).save(opaque)
+    masked = tmp_path / "masked.png"
+    img = Image.new("RGBA", (4, 4), (10, 20, 30, 255))
+    img.putpixel((0, 0), (10, 20, 30, 0))
+    img.save(masked)
+    assert vmt_tint.lacks_alpha(str(rgb))
+    assert vmt_tint.lacks_alpha(str(opaque))
+    assert not vmt_tint.lacks_alpha(str(masked))
+
+
+def test_with_mask_empty_and_from_original(tmp_path):
+    """Пустая маска — игра не красит; маска оригинала растягивается под размер."""
+    from PIL import Image
+    src = tmp_path / "mine.png"
+    Image.new("RGB", (8, 8), (200, 100, 50)).save(src)
+    game = tmp_path / "game.png"
+    g = Image.new("RGBA", (4, 4), (0, 0, 0, 0))
+    g.putpixel((0, 0), (0, 0, 0, 255))
+    g.save(game)
+
+    none = tmp_path / "none.png"
+    assert vmt_tint.with_mask(str(src), str(none))
+    out = Image.open(none)
+    assert out.getchannel("A").getextrema() == (0, 0)
+    assert out.getpixel((5, 5))[:3] == (200, 100, 50)
+
+    mask = tmp_path / "mask.png"
+    assert vmt_tint.with_mask(str(src), str(mask), str(game))
+    alpha = Image.open(mask).getchannel("A")
+    assert alpha.size == (8, 8)
+    assert alpha.getpixel((0, 0)) > 128 and alpha.getpixel((7, 7)) < 16
+
+
+def test_color_name():
+    # Цвет Коровьего Мангла из его VMT ({183 56 61}) — красный.
+    assert vmt_tint.color_name((183, 56, 61), "ru") == "красный"
+    assert vmt_tint.color_name((88, 133, 162), "en") == "blue"
+    assert vmt_tint.color_name((128, 128, 128), "ru") == "серый"

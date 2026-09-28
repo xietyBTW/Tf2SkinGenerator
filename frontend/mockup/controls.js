@@ -14,7 +14,7 @@
 import * as api from './api.js';
 import { say } from './stage.js';
 import { build, floating } from './layout.js';
-import { SINGLE_TEX } from './album.js';
+import { SINGLE_TEX, frameOf } from './album.js';
 import { sel, applyToolsMenu } from './catalog.js';
 import { buildParams, checkName } from './build.js';
 import { openMaterialMaps } from './maps.js';
@@ -38,6 +38,7 @@ const COND_KEY = {
   replace: 'replace_model',
   firstperson: 'first_person',
   taunt: 'taunt',
+  wear: 'wear',
   misc: 'misc',
   styles: 'styles',
   aus: 'teams',
@@ -63,7 +64,7 @@ const MODEL_DRIVEN = new Set(['misc', 'team', 'aus', 'qc', 'styles', 'parts']);
 //: Эти — действия над ПРЕДМЕТОМ, а режим у категории ставится раньше, чем
 //: выбран предмет (панель сборки должна знать форматы и флаги заранее).
 //: Пока предмета нет, подменять, извлекать и смотреть в руках нечего.
-const ITEM_ONLY = new Set(['replace', 'load', 'firstperson', 'taunt', 'maps', 'vmt']);
+const ITEM_ONLY = new Set(['replace', 'load', 'firstperson', 'taunt', 'wear', 'maps', 'vmt']);
 
 //: Последний ответ controls_for (плюс `has_item`): applyView и меню
 //: инструментов сверяются с ним, чтобы не показать то, что режим запретил.
@@ -214,13 +215,26 @@ export function applySettings(st) {
   }
 }
 
-export async function enterTextureEdit(material) {
+/**
+ * Шестерёнка карточки: вход в правку её материала, повторный щелчок — выход.
+ * Тот же жест, что у любой кнопки-переключателя: человек жмёт её ещё раз,
+ * чтобы закрыть, и раньше панель на это не отвечала.
+ */
+export function toggleTextureEdit(material) {
+  if (texEdit !== null && texEdit.mat === material) exitTextureEdit();
+  else enterTextureEdit(material);
+}
+
+async function enterTextureEdit(material) {
   // Служебный ключ наружу не отдаём — Python сам подставит главный материал.
   const key = material === SINGLE_TEX ? '' : material;
   if (texEdit === null) {
-    texEdit = { key, inputs: readInputs(), global: buildParams() };
+    texEdit = { key, mat: material, inputs: readInputs(), global: buildParams(),
+                // Плавающую панель открыла правка — правка её и закроет.
+                openedPanel: floating() && build.hidden };
   } else {
     texEdit.key = key;
+    texEdit.mat = material;
     writeInputs(texEdit.inputs);          // с чужого материала — на общие
   }
   // Показываем то же имя, что на вкладке: служебный ключ человеку ничего
@@ -229,22 +243,47 @@ export async function enterTextureEdit(material) {
     material === SINGLE_TEX ? 'текстура' : material;
   editbar.hidden = false;
   if (floating()) build.hidden = false;   // панель должна быть на виду
+  markGear();
 
   const res = await api.textureSettings(key);
-  applySettings(res.settings);
+  // Пока ответ шёл, правку могли закрыть (второй щелчок по шестерёнке) или
+  // перевести на другой материал: чужие настройки на общих контролах тихо
+  // испортили бы следующую сборку.
+  if (texEdit !== null && texEdit.key === key) applySettings(res.settings);
 }
 
 function exitTextureEdit() {
   if (texEdit === null) return;
   writeInputs(texEdit.inputs);
+  if (texEdit.openedPanel && floating()) build.hidden = true;
   texEdit = null;
   editbar.hidden = true;
+  markGear();
+}
+
+/** Шестерёнка материала в правке горит — видно, что и где открыто. */
+function markGear() {
+  const on = texEdit && frameOf(texEdit.mat);
+  document.querySelectorAll('.frame').forEach((f) => {
+    const gear = f.querySelector('.frame__tool');
+    if (gear) gear.classList.toggle('is-on', f === on);
+  });
+}
+
+/**
+ * Альбом пересобран (смена предмета, стиля, команды). Правка остаётся, только
+ * если её материал на месте: иначе плашка называла бы чужой материал, а
+ * изменения контролов писались бы в его запись у нового предмета.
+ */
+export function syncTextureEdit() {
+  if (texEdit === null) return;
+  if (frameOf(texEdit.mat)) markGear();
+  else exitTextureEdit();
 }
 
 /** Пометка на кадре: у этого материала настройки свои. */
 export function markBadge(material, badge) {
-  const frame = frames.find((f) => f.dataset.mat === material)
-             || frames.find((f) => f.dataset.mat === SINGLE_TEX && !material);
+  const frame = frameOf(material);
   if (!frame) return;
   let el = frame.querySelector('.frame__badge');
   if (!badge) { if (el) el.remove(); return; }

@@ -174,6 +174,10 @@ class AppSession:
         # Спец-режимы: крит и эффекты смерти показывают ту же анимированную
         # сцену, только вместо предмета в ней умирающий солдат.
         self.death = ViewmodelController(self.preview)
+        # Сцены больше не гасят загрузку превью (см. load_wear): доехавшая
+        # модель не должна трогать поля подложки, пока сцена в кадре.
+        self.controller.scene_up = lambda: any(
+            c.active for c in (self.viewmodel, self.taunt, self.death))
         #: Свои звуки: {путь файла в игре: файл человека}. Только по файлам,
         #: не по записям: игра подменяет файл, а один файл бывает у девяти
         #: записей (`bat_miss.wav` — промах у девяти оружий), и хранить
@@ -316,6 +320,9 @@ class AppSession:
         t.materials.connect(lambda m: self._put('materials', materials=dict(m or {})))
         t.editable.connect(lambda n: self._put('fp_editable', names=list(n)))
         t.classes.connect(lambda c: self._put('taunt_classes', classes=list(c)))
+        # Сцена «На модели» у шапки идёт этим же контроллером: две сцены сразу
+        # не бывают, а выход у них общий (leave_first_person).
+        t.slots.connect(lambda info: self._put('wear_slots', **dict(info or {})))
         t.render_hints.connect(lambda h: self._put('render_hints', hints=h or {}))
 
         # Спец-режим: сцена приходит своим событием — странице надо знать, что
@@ -596,8 +603,13 @@ class AppSession:
             self._hat_styles.pop(self._hat_style, None)
         self._hat_style = int(style)
 
-    def _hat_style_builds(self) -> Optional[List[Dict[str, Any]]]:
-        """Изменённые НЕактивные стили шапки — их сборка добавит в тот же мод."""
+    def _hat_style_builds(self, classes=None) -> Optional[List[Dict[str, Any]]]:
+        """Изменённые НЕактивные стили шапки — их сборка добавит в тот же мод.
+
+        Модели стиля — только выбранных классов: снятый класс не должен
+        приехать в мод через соседний стиль.
+        """
+        wanted = {str(c).lower() for c in (classes or [])}
         builds = []
         for index, snap in self._hat_styles.items():
             if index == self._hat_style:
@@ -607,8 +619,11 @@ class AppSession:
             if not (snap.get('image_path') or edits.get('custom_smd_path')
                     or any(textures.values())):
                 continue
+            models = snap.get('models') or {}
+            picked = [m for c, m in models.items() if str(c).lower() in wanted]
             builds.append({
-                'mdl_paths': list((snap.get('models') or {}).values()),
+                # Пустой выбор — «все», как у основной модели (_hat_models_for).
+                'mdl_paths': picked or list(models.values()),
                 'replace_smd': edits.get('custom_smd_path'),
                 'keep_materials': bool(edits.get('custom_keep_materials')),
                 'image_path': snap.get('image_path'),
@@ -765,7 +780,8 @@ class AppSession:
                                      action=action, lang=lang)
             return {'started': True, 'action': action, 'clip_only': True}
 
-        self.controller.stop()
+        # Превью предмета не гасим — см. load_wear: иначе вход в сцену до
+        # конца загрузки оставлял альбом пустым.
         # Корень ИГРЫ, а не папка `tf`: по нему воркер читает items_game
         # (`viewmodel_anims.anim_info`) — оттуда и слот анимаций, и подмена
         # активностей, и пушка-носитель праздничной гирлянды. С `tf_dir`
@@ -828,12 +844,82 @@ class AppSession:
         if 'error' in paths:
             return paths
 
-        self.controller.stop()
+        # Превью реквизита не гасим — см. load_wear.
         self.viewmodel.stop()
         self.taunt.load_taunt(prop_key, item['mdl_path'], paths['misc_vpk'],
                               paths['textures_vpk'], paths['root'],
                               tf2_class=tf2_class, lang=lang)
         return {'started': True, 'prop': prop_key, 'tf2_class': tf2_class}
+
+    def load_wear(self, tf2_class: str = '', slot: str = '',
+                  lang: str = 'ru') -> Dict[str, Any]:
+        """
+        Сцена «На модели»: шапка на персонаже в игровой стойке.
+
+        Класс — из тех, кто носит шапку; слот — какое стоковое оружие у него в
+        руках (от него зависит и стойка). Пусто — первый класс и первый слот.
+        """
+        if getattr(self, '_mode', '') != 'hat':
+            return {'error': 'На модели показывается только косметика'}
+        paths = self.tf2_paths()
+        if 'error' in paths:
+            return paths
+        item = self._hat_catalog_item(paths['root'], lang)
+        # У мультиклассовой шапки модели по классам уже известны; у
+        # одномодельной классы есть только в каталоге, модель у всех одна.
+        models = dict(self._hat_models) or (
+            {c: self.preview.weapon_key for c in item.classes} if item else {})
+        if not models:
+            return {'error': 'Не удалось понять, какой класс носит эту шапку'}
+
+        # Превью шапки НЕ гасим: смена стиля на этой сцене зовёт load_preview и
+        # сразу load_wear, и остановка обрывала загрузку нового стиля — альбом
+        # оставался пустым. Сцене оно не мешает: model_ready страница в сцене
+        # не показывает, а состояние превью и подложка сцены — разные поля.
+        self.viewmodel.stop()
+        self.taunt.load_wear(models, paths['misc_vpk'], paths['textures_vpk'],
+                             paths['root'], tf2_class=tf2_class, slot=slot,
+                             lang=lang, hidden_bodygroups=self._hat_hides(item))
+        return {'started': True}
+
+    def _hat_catalog_item(self, tf2_root: str, lang: str):
+        """
+        Строка каталога показанной шапки (HatItem) либо None.
+
+        Ищем по ключу шапки (модель из каталога), а если его нет — по любой её
+        модели: класса или стиля. Каталог держит разбор в памяти, повторный
+        проход дешёвый.
+        """
+        from src.data.hats_parser import parse_hats
+
+        def norm(p) -> str:
+            return str(p or '').replace('\\', '/').lower()
+
+        keys = {norm(self._hat_key), norm(self.preview.weapon_key)} - {''}
+        for h in parse_hats(tf2_root, lang):
+            own = {norm(h.mdl_path), *map(norm, (h.per_class_models or {}).values())}
+            for st in h.styles or ():
+                own.update(map(norm, (st.get('per_class_models') or {}).values()))
+            if keys & own:
+                return h
+        return None
+
+    def _hat_hides(self, item) -> Dict[str, int]:
+        """
+        Что шапка прячет у персонажа: сам предмет и его показанный стиль.
+
+        В игре это делает надетый предмет (`player_bodygroups`, у стиля —
+        `additional_hidden_bodygroups`): шапка на голову солдата убирает его
+        каску. Без этого каска в сцене торчала сквозь шапку.
+        """
+        if item is None:
+            return {}
+        hides = dict(getattr(item, 'hidden_bodygroups', None) or {})
+        styles = item.styles or []
+        index = self._hat_style
+        if isinstance(index, int) and 0 <= index < len(styles):
+            hides.update(styles[index].get('hidden_bodygroups') or {})
+        return hides
 
     # ── Звуки ─────────────────────────────────────────────────────────────── #
 
@@ -1635,6 +1721,29 @@ class AppSession:
         for d in decor:
             d['textures'] = {mat: {team: baked(p) for team, p in teams.items()}
                              for mat, teams in d['textures'].items()}
+        blu = {mat: baked(p) for mat, p in t.blu_uploaded_paths().items()}
+
+        # Краска игры по альфе ($blendtintbybasealpha): своя картинка без
+        # альфы в игре перекрасится ЦЕЛИКОМ, а превью показывает её как есть.
+        # Спрашиваем до сборки; ответ приходит тем же вызовом (`tint_mode`).
+        # У шапки со снятой галкой «Краски из игры» красить нечего.
+        tint_mode = str(params.get('tint_mode') or '')
+        if not (mode == 'hat' and not params.get('hat_paints', True)):
+            risks = self._tint_risks([image, *extra.values(), *blu.values()])
+            if risks and tint_mode not in ('none', 'mask', 'strip', 'keep'):
+                from src.services import vmt_tint
+                spec = next(iter(risks.values()))[0]
+                return {'confirm_tint': {
+                    'color': vmt_tint.color_name(spec.color, params.get('lang') or 'ru'),
+                    'hex': '#%02x%02x%02x' % spec.color}}
+            if tint_mode in ('none', 'mask'):
+                fixed = self._fix_tint(risks, tint_mode)
+                image = fixed.get(image, image)
+                extra = {mat: fixed.get(p, p) for mat, p in extra.items()}
+                blu = {mat: fixed.get(p, p) for mat, p in blu.items()}
+
+        hat_primary, hat_models = (self._hat_build_models(params.get('hat_classes'))
+                                   if mode == 'hat' else (None, None))
 
         size = int(params.get('size') or 512)
         request = BuildRequest(
@@ -1652,8 +1761,7 @@ class AppSession:
             # «Прочее» со страницы: сборка спрашивает про эти материалы так
             # же, как про доп. материалы геометрии.
             misc_materials=list(self.preview.misc_materials) or None,
-            panel_blu_textures={mat: baked(p) for mat, p
-                                in t.blu_uploaded_paths().items()} or None,
+            panel_blu_textures=blu or None,
             force_team=bool(t.force_team),
             isolate_shoulders=bool(params.get('isolate_shoulders')),
             # Карты материала (detail / самосвечение / phong): VTF по ним
@@ -1668,16 +1776,18 @@ class AppSession:
                                     if self.preview.custom_vpk_mode else None),
             # Шапка: путь к её MDL обязателен — по режиму «hat» модель не
             # найти, и сборка падала на поиске «оружия hat».
-            hat_mdl_path=(self.preview.weapon_key if mode == 'hat' else None),
-            hat_class_models=self._hat_models_for(params.get('hat_classes')),
+            hat_mdl_path=hat_primary,
+            hat_class_models=hat_models,
             # Правленые соседние стили: у каждого своя модель и своя текстура,
             # но мод один — иначе человек собирал бы их по одному и вручную
             # склеивал.
-            hat_style_builds=(self._hat_style_builds() if mode == 'hat' else None),
+            hat_style_builds=(self._hat_style_builds(params.get('hat_classes'))
+                              if mode == 'hat' else None),
             decor_builds=decor or None,
             # Краски из игры: с ними текстура красится командным цветом, как у
             # стоковой шапки. Спрашивает страница — умолчание «да», как в окне.
             hat_apply_game_paints=bool(params.get('hat_paints', True)),
+            strip_game_tint=(tint_mode == 'strip'),
             # Своя геометрия: включает замену сама фактом загрузки — отдельной
             # галочки на странице нет, как и в кнопке приложения.
             replace_model_enabled=bool(self.preview.custom_smd_path),
@@ -1774,6 +1884,23 @@ class AppSession:
         if hasattr(build, 'set_extra_texture_result'):
             build.set_extra_texture_result(None)
         return {'running': True, 'cancelling': True}
+
+    def _hat_build_models(self, classes):
+        """
+        (основная модель, модели всех выбранных классов) для сборки шапки.
+
+        Основной сборка собирает одну модель, остальные выбранные классы —
+        добавочно. Основной раньше всегда была модель ПРЕВЬЮ, то есть первого
+        класса в списке: снятая с него галка ничего не меняла (класс всё равно
+        попадал в мод), а при одном выбранном классе собирался только тот, что в
+        превью, — выбранный не собирался вовсе. Теперь основная — модель превью,
+        только если её класс выбран; иначе первая выбранная.
+        """
+        primary = self.preview.weapon_key
+        models = self._hat_models_for(classes)
+        if models and primary not in models.values():
+            primary = next(iter(models.values()))
+        return primary, models
 
     def _hat_models_for(self, classes) -> Optional[Dict[str, str]]:
         """
@@ -2819,6 +2946,48 @@ class AppSession:
         decor = self._decors.get(kind) if kind else None
         return decor if decor and decor.weapon_key == self._decor_key() else None
 
+
+    def _tint_risks(self, paths) -> Dict[str, Any]:
+        """
+        {путь: (краска, маска оригинала)} — свои картинки без альфы на
+        материалах, которые игра красит по альфе текстуры.
+
+        Краску знает игровой оригинал материала: при извлечении он покрашен
+        (vmt_tint.apply_to_png), рядом лежит краска и исходник с маской.
+        Команда своя у каждой картинки: у RED и BLU разные цвета в VMT.
+        """
+        from src.services import vmt_tint
+
+        t = self.preview.textures
+        owners = {p: (mat, team) for team, mats in t.textures.items()
+                  for mat, p in mats.items() if p}
+        out: Dict[str, Any] = {}
+        for path in paths:
+            if not path or path in out or path not in owners:
+                continue
+            stock = t.game_base(*owners[path])
+            spec = vmt_tint.paintable(stock)
+            if spec is None or spec.is_neutral or not vmt_tint.lacks_alpha(path):
+                continue
+            out[path] = (spec, vmt_tint.raw_of(stock))
+        return out
+
+    def _fix_tint(self, risks: Dict[str, Any], how: str) -> Dict[str, str]:
+        """
+        Копии картинок с маской краски: `none` — пустая (игра не красит, как в
+        превью), `mask` — маска игрового оригинала (красит те же места, что у
+        стокового предмета). Оригинал человека не трогаем.
+        """
+        from src.services import vmt_tint
+
+        out: Dict[str, str] = {}
+        for path, (_spec, raw) in risks.items():
+            stem = os.path.splitext(os.path.basename(path))[0]
+            dst = os.path.join(self._work_dir(), f'{stem}_tint_{how}.png')
+            mask = raw if how == 'mask' and os.path.isfile(raw) else None
+            if vmt_tint.with_mask(path, dst, mask):
+                out[path] = dst
+        return out
 
     def _work_dir(self) -> str:
         """Своя папка сеанса для склеек. Живёт до перезапуска, как и превью.

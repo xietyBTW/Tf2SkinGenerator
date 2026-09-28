@@ -49,7 +49,8 @@ import { boot, els } from './catalog.js';
 import { syncViewerTheme } from './log.js';
 // Диалог «не получилось»: подписывается на свои кнопки при загрузке.
 import './fail.js';
-import { say } from './stage.js';
+import { say, viewer } from './stage.js';
+import { startFirstRun } from './tour.js';
 
 /*
  * Последняя сеть под всеми обработчиками.
@@ -84,6 +85,14 @@ window.addEventListener('error', (e) => {
 addEventListener('dragover', (e) => e.preventDefault());
 addEventListener('drop', (e) => e.preventDefault());
 
+// Перетаскивание над СТРАНИЦЕЙ — значит, не над кадром модели (его события
+// идут в документ iframe). Вьювер не всегда слышит, что курсор ушёл, и его
+// подсказка «Отпустите…» оставалась висеть; говорим ему сами. Фаза захвата:
+// карточки альбома останавливают свои события, и до окна они не всплывают.
+const leaveViewer = () => viewer()?.endDrag?.();
+addEventListener('dragover', leaveViewer, true);
+addEventListener('drop', leaveViewer, true);
+
 // Взаимоисключающий выбор в рядах, где кнопка ничего не грузит: команда,
 // вариант оружия, анимация вида от первого лица.
 group('.title__side', '.tag');
@@ -92,7 +101,7 @@ group('#fpbar', '.tag');
 
 // Первый запуск: без пути к игре не работает ничего, поэтому сразу после
 // каталога предлагаем найти её самим (см. settings.js → offerTf2).
-boot().then(offerTf2).catch((err) => {
+boot().then(offerTf2).then(startFirstRun).catch((err) => {
   els.note.hidden = false;
   els.note.textContent = `Нет связи с Python: ${err.message}`;
   console.error(err);

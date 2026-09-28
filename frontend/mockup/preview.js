@@ -55,43 +55,17 @@ export function hatModels(item, index) {
   return (models && Object.keys(models).length) ? models : null;
 }
 
-/**
- * Классы мультиклассовой шапки.
- *
- * У каждого класса своя модель, и мод под все девять весит вдевятеро. По
- * умолчанию отмечены все — как в приложении; снятые в сборку не попадут.
- */
+//: Классы мультиклассовой шапки (у каждого своя модель). Для кого собирать,
+//: спрашивает сборка (build.js) — отдельная строка кнопок перегружала экран.
+let hatClassList = [];
+
 export function showHatClasses(item) {
-  const bar = document.getElementById('hatclasses');
-  const classes = Object.keys((item && item.per_class) || {});
-  // Смена стиля обычно не меняет набор классов — тогда кнопки не трогаем,
-  // иначе выбор человека сбрасывался бы при каждом переключении стиля.
-  const shown = [...bar.querySelectorAll('.tag')].map((b) => b.dataset.hatClass);
-  if (shown.length && shown.join() === classes.join()) return;
-
-  bar.querySelectorAll('.tag').forEach((b) => b.remove());
-  bar.hidden = classes.length < 2;
-  if (bar.hidden) return;
-
-  for (const cls of classes) {
-    const b = document.createElement('button');
-    b.className = 'tag is-active';
-    b.dataset.hatClass = cls;
-    b.textContent = cls;
-    b.addEventListener('click', () => {
-      b.classList.toggle('is-active');
-      // Снять все — значит не собрать ничего; такой выбор не принимаем.
-      if (!bar.querySelector('.tag.is-active')) b.classList.add('is-active');
-    });
-    bar.appendChild(b);
-  }
+  hatClassList = Object.keys((item && item.per_class) || {});
 }
 
-/** Какие классы шапки отмечены (пусто — предмет не мультиклассовый). */
+/** Классы показанной шапки; пусто — шапка не мультиклассовая. */
 export function hatClasses() {
-  const bar = document.getElementById('hatclasses');
-  if (bar.hidden) return [];
-  return [...bar.querySelectorAll('.tag.is-active')].map((b) => b.dataset.hatClass);
+  return hatClassList.length > 1 ? [...hatClassList] : [];
 }
 
 /**
@@ -124,8 +98,16 @@ export function showHatStyles(item, active = 0) {
       // что это стиль ТОЙ ЖЕ шапки, а не новый предмет.
       const res = await api.loadPreview('hat', null, first, models, index,
                                         false, item.key);
-      if (res.error) say(res.error);
-      else markEditedStyles(res.edited_styles);
+      if (res.error) { say(res.error); return; }
+      markEditedStyles(res.edited_styles);
+      // На «На модели» сцену надо собрать заново: загрузка стиля её погасила
+      // (session.load_preview → taunt.stop), а без пересборки на персонаже
+      // оставался последний кадр прежнего стиля. Модели нового стиля сеанс
+      // к этому моменту уже знает.
+      if (work.dataset.scene === 'wear') {
+        const again = await api.loadWear(tauntClass, wearSlot);
+        if (again.error) say(again.error);
+      }
     });
     bar.appendChild(b);
   });
@@ -169,6 +151,7 @@ export function resetView() {
   markScene('item');
   document.getElementById('fpbar').hidden = true;
   document.getElementById('tauntbar').hidden = true;
+  document.getElementById('wearbar').hidden = true;
   // Камера возвращается к свободной орбите: риг остался от вида от первого лица.
   withViewer((w) => w.setViewRig(null));
 }
@@ -180,7 +163,7 @@ export function clearPreview() {
   lastModel = null;       // и кадр превью: вернуться к чужой модели нельзя
   resetView();
   document.getElementById('hatstyles').hidden = true;
-  document.getElementById('hatclasses').hidden = true;
+  hatClassList = [];
   // Части считаны по ПРОШЛОЙ модели: у новой под тем же номером другой кусок.
   closeParts();
   dropFitSave();          // и подгонка: её отложенная запись — про прошлую
@@ -499,6 +482,8 @@ export function bindDrop(frame) {
     try {
       applyView(await api.setTexture(mat, await api.upload(file)));
       say('');
+      // Обучение ждёт именно этого: своя картинка легла на материал.
+      document.dispatchEvent(new Event('texture:set'));
     } catch (err) {
       say(`Не удалось загрузить: ${err.message}`);
     }
@@ -819,7 +804,10 @@ export function showTauntClasses(classes) {
   const bar = document.getElementById('tauntbar');
   bar.querySelectorAll('.tag').forEach((b) => b.remove());
   const list = classes || [];
-  bar.hidden = list.length < 2 || work.dataset.scene !== 'taunt';
+  // Ряд общий у двух сцен: насмешки и шапки на персонаже. Какую пересобрать
+  // по щелчку, решает сцена, открытая сейчас.
+  const scene = work.dataset.scene;
+  bar.hidden = list.length < 2 || (scene !== 'taunt' && scene !== 'wear');
   if (bar.hidden) return;
 
   if (!list.includes(tauntClass)) tauntClass = list[0];
@@ -832,7 +820,52 @@ export function showTauntClasses(classes) {
       bar.querySelectorAll('.tag').forEach(
         (x) => x.classList.toggle('is-active', x === b));
       sayBusy(`Сборка сцены: ${name}…`);
-      const res = await api.loadTaunt(name);
+      // У другого класса другое оружие: слот выбираем заново, первый.
+      if (scene === 'wear') wearSlot = '';
+      const res = scene === 'wear' ? await api.loadWear(name, '')
+                                   : await api.loadTaunt(name);
+      if (res.error) say(res.error);
+    });
+    bar.appendChild(b);
+  }
+}
+
+//: Какое оружие у персонажа в сцене «На модели». Пусто — первый слот класса.
+let wearSlot = '';
+
+//: Подписи слотов раскладки. У шпиона второй слот — сапёр, четвёртый —
+//: набор маскировки; у инженера четвёртый — КПК постройки.
+const SLOT_TITLES = {
+  primary: 'Основное', secondary: 'Вспомогательное', building: 'Сапёр',
+  melee: 'Ближний бой', pda: 'КПК',
+};
+
+/**
+ * Ряд слотов оружия в сцене «На модели».
+ *
+ * Слоты приходят от воркера: у каждого класса свой набор (у инженера и
+ * шпиона — четыре, у остальных три). Стойку персонажа задаёт слот, поэтому
+ * выбор пересобирает сцену целиком.
+ */
+export function showWearSlots(ev) {
+  const bar = document.getElementById('wearbar');
+  bar.querySelectorAll('.tag').forEach((b) => b.remove());
+  const slots = ev.slots || [];
+  bar.hidden = !slots.length || work.dataset.scene !== 'wear';
+  if (bar.hidden) return;
+  wearSlot = ev.slot || slots[0];
+  if (ev.tf2_class) tauntClass = ev.tf2_class;
+  for (const slot of slots) {
+    const b = document.createElement('button');
+    b.className = 'tag' + (slot === wearSlot ? ' is-active' : '');
+    b.textContent = t(SLOT_TITLES[slot] || slot);
+    b.addEventListener('click', async () => {
+      if (slot === wearSlot) return;
+      wearSlot = slot;
+      bar.querySelectorAll('.tag').forEach(
+        (x) => x.classList.toggle('is-active', x === b));
+      sayBusy('Сборка сцены…');
+      const res = await api.loadWear(tauntClass, slot);
       if (res.error) say(res.error);
     });
     bar.appendChild(b);
@@ -1148,6 +1181,13 @@ async function showScene(name) {
   // режим вернётся сам (см. resumeParts).
   if (name !== 'item') suspendParts();
 
+  if (name === 'wear') {
+    say('Сборка сцены…');
+    withViewer((w) => w.setViewRig(null));   // камера свободная, как у насмешки
+    const res = await api.loadWear(tauntClass, wearSlot);
+    if (res.error) say(res.error);
+    return;
+  }
   if (name === 'taunt') {
     say('Сборка насмешки…');
     withViewer((w) => w.setViewRig(null));   // у насмешки камера свободная
@@ -1172,6 +1212,7 @@ async function showScene(name) {
   withViewer((w) => w.setViewRig(null));
   document.getElementById('fpbar').hidden = true;
   document.getElementById('tauntbar').hidden = true;
+  document.getElementById('wearbar').hidden = true;
   if (root.dataset.section === 'particles') return;   // там вьювера моделей нет
   applyView(await api.leaveFirstPerson());
   if (lastModel) await showModel(lastModel);

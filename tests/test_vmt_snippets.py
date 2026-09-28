@@ -47,3 +47,32 @@ def test_australium_snippet_matches_valve_gold_vmts():
                 '"$lightwarptexture" "models/lightwarps/weapon_lightwarp"'):
         assert key in snippet
     assert "$phongexponenttexture" in VMT_MERGE_REMOVES[label]
+
+
+def test_reference_keys_are_lowercase_params():
+    """Ключи справочника — имена в нижнем регистре: так их ищут подсказки."""
+    from src.data.vmt_snippets import VMT_PARAM_DOCS
+    for name in VMT_PARAM_DOCS:
+        assert name.startswith("$") and name == name.lower(), name
+
+
+def test_param_doc_ignores_case():
+    """В VMT игры пишут и $cloakPassEnabled — подсказка не должна пропадать."""
+    from src.data.vmt_snippets import VMT_PARAM_DOCS, param_doc
+    assert param_doc("$cloakPassEnabled", "ru") == VMT_PARAM_DOCS["$cloakpassenabled"]
+
+
+def test_every_menu_entry_has_english():
+    """Меню «Готовые эффекты» на английском не должно остаться русским."""
+    from src.data.vmt_snippets import VMT_SNIPPETS, VMT_SNIPPETS_EN
+    for category, items in VMT_SNIPPETS.items():
+        assert category in VMT_SNIPPETS_EN, category
+        for label, _, _ in items:
+            assert isinstance(VMT_SNIPPETS_EN.get(label), tuple), label
+
+
+def test_param_reference_keeps_group_order():
+    from src.data.vmt_snippets import VMT_PARAM_GROUPS, param_reference
+    ref = param_reference("en")
+    assert [g["group"] for g in ref] == [g_en for _, g_en, _ in VMT_PARAM_GROUPS]
+    assert ref[0]["params"][0]["param"] == "$basetexture"

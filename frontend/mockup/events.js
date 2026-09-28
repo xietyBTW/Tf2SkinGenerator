@@ -22,7 +22,7 @@ import {
   showSkins,
   showFirstPerson,
   showFpActions,
-  showTauntClasses, applyFpClip,
+  showTauntClasses, showWearSlots, applyFpClip,
   showSpecialAnimated,
   specialSceneFailed,
   showSpecialScene,
@@ -56,6 +56,10 @@ api.subscribe((ev) => {
       // загруженная оттуда, показалась бы под ригом вида от первого лица.
       // Кадр запомнен — им вернут обычный вид по выходу.
       if ((work.dataset.scene || 'item') === 'item') showModel(ev);
+      // Модель готова, но в кадре сцена: подпись о её загрузке («Загрузка
+      // текстуры…») убирает только показ модели, и без этого она висела бы
+      // бесконечно — так было при смене стиля шапки на «На модели».
+      else say('');
       break;
 
     // Материалы, командные текстуры и вариант меняют то, ЧТО показывать.
@@ -141,6 +145,10 @@ api.subscribe((ev) => {
 
     case 'taunt_classes':
       showTauntClasses(ev.classes);
+      break;
+
+    case 'wear_slots':
+      showWearSlots(ev);
       break;
 
     case 'fp_actions':

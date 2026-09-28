@@ -120,9 +120,23 @@ export function ask({ title, text = '', value = null, list = null, multi = false
         b.type = 'button';
         b.className = 'ask__item';
         b.textContent = item.label ?? item;
-        b.title = item.hint || '';
+        // Пояснение — видимой строкой под подписью, а не всплывающим title:
+        // до всплывашки человек не дотягивается, и выбор делался вслепую.
+        if (item.hint) {
+          const hint = document.createElement('span');
+          hint.className = 'ask__hint';
+          hint.textContent = item.hint;
+          b.append(hint);
+        }
         const value = item.value ?? item;
         if (multi && marks.has(value)) b.classList.add('is-active');
+        // Рекомендуемый ответ отмечен сразу: «Собрать» доступна без лишнего
+        // щелчка, а выбор виден.
+        if (!multi && item.selected) {
+          b.classList.add('is-active');
+          picked = value;
+          okBtn.disabled = false;
+        }
         b.addEventListener('click', () => {
           if (multi) {
             // Отмеченных может быть сколько угодно: подсветку с других не

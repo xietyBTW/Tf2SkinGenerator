@@ -19,6 +19,7 @@ import { useDict, t } from './i18n.js';
 import { EN } from './strings.js';
 import { refreshView, stopPartsAnimation } from './preview.js';
 import { setTexSize } from './particles/materials.js';
+import { setToursDone, replayTours } from './tour.js';
 
 // ── Настройки ───────────────────────────────────────────────────────────
 // Конфиг общий с окном приложения, поэтому здесь только показ и запись: что
@@ -49,6 +50,7 @@ export function applyLook(values) {
   setConsoleWidth(values.console_width);
   setConsoleFilter(values.console_filter);
   setTexSize(values.particle_tex_size);
+  setToursDone(values.tours_done);
   // Язык: ответы Python берут его из общего конфига сами, а вьюверу сказать
   // некому — он живёт отдельным документом и до конфига не дотягивается.
   api.setLang(values.language);
@@ -427,4 +429,8 @@ export async function offerTf2() {
 document.getElementById('cfg-tf2').addEventListener('input', () => showFindTf2(true));
 
 document.getElementById('cfg-cancel').addEventListener('click', () => cfgDlg.close());
+document.getElementById('cfg-tour').addEventListener('click', () => {
+  cfgDlg.close();
+  replayTours();
+});
 document.getElementById('opencfg').addEventListener('click', openSettings);

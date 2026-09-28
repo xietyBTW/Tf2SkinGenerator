@@ -259,6 +259,7 @@ ALLOWED = {
     "set_skin": api.set_skin,
     "load_first_person": api.load_first_person,
     "load_taunt": api.load_taunt,
+    "load_wear": api.load_wear,
     "leave_first_person": api.leave_first_person,
     "set_part_detail": api.set_part_detail,
     "toggle_part_island": api.toggle_part_island,
