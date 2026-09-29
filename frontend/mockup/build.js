@@ -81,6 +81,8 @@ export function buildParams({ live = false } = {}) {
       delete on.hat_paints;
       // Сила гамма-коррекции имеет смысл только с самой коррекцией.
       if (on.gamma) on.gcorrection = document.getElementById('gammaval').value;
+      // Сила рельефа — с самой картой нормалей (ползунок в процентах).
+      if (on.normal) on.normal_strength = Number(document.getElementById('normal-strength').value) / 100;
       return on;
     })(),
     // Краски шапки — не флаг VTF: они решают, как красится материал, поэтому

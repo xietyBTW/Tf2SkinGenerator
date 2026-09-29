@@ -137,3 +137,25 @@ class VMTServiceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_bumpmap_skips_commented_line(tmp_path):
+    """У снайперской винтовки $bumpmap только в комментарии: нужна живая строка."""
+    from src.services.vmt_service import VMTService
+    vmt = tmp_path / 'c_sniperrifle.vmt'
+    vmt.write_text('"VertexLitGeneric"\n{\n\t"$basetexture"\t"models/weapons/c_items/c_sniperrifle"\n'
+                   '//\t"$bumpmap" "models/weapons/w_sniperrifle/w_sniperrifle_normal"\n}\n',
+                   encoding='utf-8')
+    VMTService.update_vmt_bumpmap_path(str(vmt), 'models/weapons/c_items', 'c_sniperrifle_normal')
+    VMTService.update_vmt_bumpmap_path(str(vmt), 'models/weapons/c_items', 'c_sniperrifle_normal')
+    lines = vmt.read_text(encoding='utf-8').splitlines()
+    live = [line for line in lines if '$bumpmap' in line and not line.startswith('//')]
+    assert live == ['\t"$bumpmap" "models/weapons/c_items/c_sniperrifle_normal"']
+    assert '//\t"$bumpmap" "models/weapons/w_sniperrifle/w_sniperrifle_normal"' in lines
+
+
+def test_has_live_param_ignores_comments():
+    from src.services.vmt_service import VMTService
+    text = '"VertexLitGeneric"\n{\n//\t"$bumpmap" "a"\n\t"$bumpmap2" "b"\n}\n'
+    assert not VMTService.has_live_param(text, '$bumpmap')
+    assert VMTService.has_live_param(text + '\t$BumpMap models/x\n', '$bumpmap')

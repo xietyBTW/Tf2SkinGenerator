@@ -1193,6 +1193,7 @@ class VPKService:
                 flags=flags,
                 vtf_options=vtf_options,
                 custom_vtf_path=custom_vtf_path,
+                stock_normal_ok=not (replace_model_smd_path or model_ready_path),
             )
 
             # Главная текстура: RED-резолв → VTF (custom/готовый/рендер) →

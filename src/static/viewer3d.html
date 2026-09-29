@@ -945,8 +945,70 @@ function makeMeshMaterial(opts) {
     m.name = opts.name;
     return m;
   }
-  return _makeMeshMaterial(THREE, opts, _matHints);
+  return _withNormal(_makeMeshMaterial(THREE, opts, _matHints));
 }
+
+// ── Карта нормалей (превью галки «Normal Map») ───────────────────────────── //
+//
+// Строит её Python (normal_map.py) — та же картинка, что уйдёт в мод. Здесь
+// только наложение. Материалы пересоздаются на каждую смену текстуры, поэтому
+// нормаль цепляется в makeMeshMaterial, а не один раз.
+let _normal = null;   // {tex, material}: material '' — все меши предмета
+let _normalWanted = null;   // последний запрошенный url: старые ответы не нужны
+
+function _normalFits(mat) {
+  if (!_normal || !mat || Array.isArray(mat)) return false;
+  const name = String(mat.name || '');
+  if (_isDecorName(name) || name.startsWith('ghost:')) return false;
+  return !_normal.material || name === _normal.material;
+}
+
+function _withNormal(mat) {
+  if (!mat || Array.isArray(mat) || !mat.isMeshLambertMaterial) return mat;
+  const fits = _normalFits(mat);
+  mat.normalMap = fits ? _normal.tex : null;
+  // Нормаль Source — «DirectX» (Y вниз), three.js ждёт «OpenGL»: зеленый
+  // канал переворачивается здесь, а не в картинке — она уходит в мод как есть.
+  mat.normalScale.set(1, -1);
+  mat.needsUpdate = true;
+  return mat;
+}
+
+function _applyNormals() {
+  if (!currentModel) return;
+  currentModel.traverse(child => {
+    if (child.isMesh) _withNormal(child.material);
+  });
+}
+
+/** Для автопроверки: на каких мешах сейчас лежит нормаль. */
+window.normalDebug = () => {
+  const out = [];
+  if (currentModel) currentModel.traverse(c => {
+    if (c.isMesh && c.material && !Array.isArray(c.material)) {
+      out.push({ name: c.material.name, normal: !!c.material.normalMap });
+    }
+  });
+  return out;
+};
+
+/** url PNG нормали и материал ('' — все меши предмета); null — убрать. */
+window.setNormalMap = function(url, material) {
+  _normalWanted = url || null;
+  if (!url) {
+    if (_normal) _normal.tex.dispose();
+    _normal = null;
+    _applyNormals();
+    return;
+  }
+  _loadTextureThen(url, tex => {
+    if (_normalWanted !== url) { tex.dispose(); return; }  // уже другая или убрана
+    tex.colorSpace = THREE.NoColorSpace;   // векторы, а не цвет
+    if (_normal) _normal.tex.dispose();
+    _normal = { tex, material: material || '' };
+    _applyNormals();
+  });
+};
 
 // ── Подгонка своей модели ───────────────────────────────────────────────────
 // Масштаб, поворот (вокруг X → Y → Z) и сдвиг в осях SMD оружия — те же

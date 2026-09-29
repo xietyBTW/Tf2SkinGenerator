@@ -349,6 +349,8 @@ export const paintkitLayout = (kit, item, layout = 0) =>
   call('paintkit_layout', { kit, item, layout });
 export const setPaintkitLayout = (kit, assign) =>
   call('set_paintkit_layout', { kit, assign });
+export const normalPreview = (screen, global_options, editing) =>
+  call('normal_preview', { screen, global_options, editing });
 
 /** Кладёт файл во временную папку и возвращает его путь на диске. */
 export async function upload(file) {

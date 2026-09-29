@@ -1748,6 +1748,14 @@ def export_uv(size: int = 1024) -> Dict[str, object]:
     return session().export_uv(size)
 
 
+def normal_preview(screen: Optional[Dict[str, object]] = None,
+                   global_options: Optional[Dict[str, object]] = None,
+                   editing: Optional[str] = None) -> Dict[str, object]:
+    """Карта нормалей главной текстуры для 3D-превью: {png, material, stock} или {off}."""
+    from src.app.session import session
+    return session().normal_preview(screen, global_options, editing)
+
+
 def class_icons() -> Dict[str, object]:
     """Значки классов из игры: {icons: {класс: путь PNG}}."""
     from src.app.session import session

@@ -2014,6 +2014,15 @@
 .input--tiny { width: 70px; margin-left: 23px; }
 .input--tiny:disabled { color: var(--ink-mute); border-bottom-style: dashed; }
 
+/* Карта нормалей: галка и её настройки под ней, с отступом галки. */
+.nmap { display: flex; flex-direction: column; gap: 9px; }
+.nmap[hidden], .nmap__body[hidden], .nmap .check[hidden] { display: none; }
+.nmap__body { display: flex; flex-direction: column; gap: 7px; padding-left: 23px; }
+.nmap__row { display: grid; grid-template-columns: 1fr 42px; align-items: center; gap: 2px 8px; }
+.nmap__row .field__note { grid-column: 1 / -1; }
+.nmap__range { width: 100%; min-width: 0; margin: 0; accent-color: var(--accent); }
+.nmap__val { font-size: 10.5px; color: var(--ink-soft); text-align: right; font-variant-numeric: tabular-nums; }
+
 /* Радио отличается от чекбокса формой точки: квадрат был бы враньём —
    выбор здесь одиночный. */
 .check input[type="radio"] { border-radius: 50%; }

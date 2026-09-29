@@ -283,6 +283,7 @@ ALLOWED = {
     "preview_paintkit": api.preview_paintkit,
     "paintkit_layout": api.paintkit_layout,
     "set_paintkit_layout": api.set_paintkit_layout,
+    "normal_preview": api.normal_preview,
 }
 
 

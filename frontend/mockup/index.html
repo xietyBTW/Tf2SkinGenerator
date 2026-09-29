@@ -923,7 +923,22 @@
              без красок она будет одного цвета у обеих команд. -->
         <label class="check" data-cond="hat_paints" title="С красками шапка красится командным цветом, как стоковая">
           <input type="checkbox" id="hat-paints" checked><span data-name="hat_paints">Краски из игры</span></label>
-        <label class="check" data-cond="normal"><input type="checkbox"><span data-name="normal">Normal Map</span></label>
+        <!-- Карта нормалей: строится из яркости текстуры и видна на модели
+             сразу (normals.js). Её настройки — там же, где сама галка: они
+             ездят в сборку опциями, как и она. -->
+        <div class="nmap" data-cond="normal">
+          <label class="check"><input type="checkbox" id="normal-on"><span data-name="normal">Normal Map</span></label>
+          <div class="nmap__body" hidden>
+            <div class="nmap__row" title="Насколько выпуклым выйдет рельеф из картинки">
+              <span class="field__note">Сила рельефа</span>
+              <input class="nmap__range" id="normal-strength" type="range" min="0" max="300" step="5" value="100">
+              <span class="mono nmap__val" id="normal-strength-val">100%</span>
+            </div>
+            <label class="check" title="Светлое станет вдавленным, тёмное — выпуклым"><input type="checkbox"><span data-name="normal_invert">Инвертировать</span></label>
+            <label class="check" id="normal-stock" hidden
+                   title="У этого предмета в игре своя карта нормалей. Обычно рельеф картинки ложится поверх неё"><input type="checkbox"><span data-name="normal_replace_stock">Заменить родной рельеф</span></label>
+          </div>
+        </div>
       </div>
 
       <!-- Особые флаги — ОТДЕЛЬНАЯ колонка, последняя в ряду: в общем столбце

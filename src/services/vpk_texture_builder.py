@@ -320,7 +320,7 @@ class VpkTextureBuilder:
                 _vmt_txt0 = ""
             real_normal = (is_normal_map
                            or (vtf_output_path / f"{mat}_normal.vtf").exists()
-                           or "$bumpmap" in _vmt_txt0)
+                           or VMTService.has_live_param(_vmt_txt0, "$bumpmap"))
             needs_bump = real_normal or rim_on or phong_on
             if needs_bump and not real_normal:
                 # Нормаль генерим мы → можем запечь маску в её альфу.
@@ -381,7 +381,9 @@ class VpkTextureBuilder:
                         _vmt_txt = Path(vmt_path).read_text(encoding="utf-8", errors="ignore").lower()
                     except OSError:
                         _vmt_txt = ""
-                    if "$bumpmap" not in _vmt_txt:
+                    # Живая строка, а не комментарий: у 240 материалов игры
+                    # $bumpmap есть только в «//».
+                    if not VMTService.has_live_param(_vmt_txt, "$bumpmap"):
                         VpkTextureBuilder._ensure_derived_normal(
                             base_image_path, vtf_output_path, mat, vmt_path,
                             patched_cdmaterials_path, size, is_normal_map,
@@ -503,7 +505,7 @@ class VpkTextureBuilder:
 
         Если normal уже сгенерирован (галочка Normal Map) или файл уже есть —
         ничего не делает. Иначе строит {texture}_normal.vtf из базовой текстуры
-        (VTFCmd -normal, формат DXT5) и прописывает $bumpmap в VMT.
+        (normal_map, формат DXT5) и прописывает $bumpmap в VMT.
         """
         normal_vtf = vtf_output_path / f"{texture_filename}_normal.vtf"
         if is_normal_map or normal_vtf.exists():
@@ -511,7 +513,8 @@ class VpkTextureBuilder:
         try:
             norm_png = vtf_output_path / f"{texture_filename}_normal.png"
             TextureService.process_image(base_image_path, str(norm_png), size)
-            TextureService.create_vtf(str(norm_png), str(vtf_output_path), "DXT5", [], {"normal": True})
+            TextureService.write_normal_png(norm_png, norm_png)
+            TextureService.create_vtf(str(norm_png), str(vtf_output_path), "DXT5", ["NORMAL"], {})
             if norm_png.exists():
                 norm_png.unlink()
             if normal_vtf.exists():
@@ -836,6 +839,61 @@ class VpkTextureBuilder:
                 # Бамп многокадровый (гифка + normal) — тот же fps, что у базы.
                 VMTService.enable_animated_bumpmap(str(vmt_path), animated_fps)
         return vmt_to_delete
+
+    @staticmethod
+    def _normal_from_game_vtf(vtf_bytes: bytes, texture_filename: str,
+                              original_cdmaterials_path, game_vmt_name,
+                              ctx, slots, tex, _eff) -> bool:
+        """Нормаль из игровой текстуры материала, если галка Normal Map стоит."""
+        from PIL import Image
+        from src.services import normal_map
+
+        size, fmt, _flags, options = _eff(texture_filename)
+        if not (options or {}).get('normal'):
+            return False
+        rgba = normal_map.rgba_from_vtf(vtf_bytes)
+        if rgba is None:
+            return False
+        png = slots.vtf_output_path / f"{texture_filename}_normal_src.png"
+        try:
+            Image.fromarray(rgba, 'RGBA').convert('RGB').resize(tuple(size), Image.LANCZOS).save(png)
+            vmt_file = VpkTextureBuilder._extract_original_vmt(
+                original_cdmaterials_path, game_vmt_name,
+                slots.tf2_textures_vpk, slots.tf2_misc_vpk, ctx.decompile_dir)
+            stock = (VpkTextureBuilder._stock_normal(texture_filename, vmt_file, slots)
+                     if tex.stock_normal_ok else None)
+            return TextureService.write_normal_vtf(
+                png, slots.vtf_output_path, texture_filename, fmt, options, stock) is not None
+        except Exception as exc:                          # noqa: BLE001
+            logger.warning(f"[{texture_filename}] нормаль из игровой текстуры не вышла: {exc}")
+            return False
+        finally:
+            if png.exists():
+                png.unlink()
+
+    @staticmethod
+    def _stock_normal(texture_filename: str, vmt_file, slots):
+        """Родная нормаль материала (RGBA) — по VMT, который уйдёт в мод.
+
+        VMT — тот же, что выберет _write_main_vmt: правка человека, иначе
+        игровой. Нет $bumpmap или файла — None.
+        """
+        from src.services import normal_map
+        from src.services.edited_vmt_service import EditedVMTService
+
+        source = EditedVMTService.get_edited_vmt(texture_filename)
+        if not (source and Path(source).exists()):
+            source = vmt_file
+        if not (source and Path(source).exists()):
+            return None
+        try:
+            text = Path(source).read_text(encoding='utf-8', errors='replace')
+        except OSError:
+            return None
+        stock = normal_map.stock_normal(text, [slots.tf2_textures_vpk, slots.tf2_misc_vpk])
+        if stock is not None:
+            logger.info(f"[{texture_filename}] рельеф ляжет поверх родной нормали")
+        return stock
 
     @staticmethod
     def _find_original_vmt(name, ctx, slots):
@@ -1361,6 +1419,11 @@ class VpkTextureBuilder:
                     with open(vtf_file_path, "wb") as _f:
                         _f.write(_orig_red)
                     logger.info(f"Оригинальная RED VTF из игры: {vtf_filename}")
+                    # Normal Map без своей текстуры — рельеф из игровой: превью
+                    # его показывает, и мод без него расходился бы с превью.
+                    is_normal_map = VpkTextureBuilder._normal_from_game_vtf(
+                        _orig_red, texture_filename, original_cdmaterials_path,
+                        _game_vmt_name, ctx, slots, tex, _eff)
                 else:
                     ctx.warn(
                         f"Не найдена игровая текстура '{texture_filename}' — "
@@ -1381,8 +1444,21 @@ class VpkTextureBuilder:
             ensure_directory_exists(slots.vtf_output_path)
             copy_file_safe(image_path, slots.vtf_output_path / vtf_filename)
             logger.info(f"Главная текстура: готовый VTF скопирован → {vtf_filename}")
-        elif image_path:
+        # Оригинальный VMT по пути из QC (до патчинга), по ИГРОВОМУ имени
+        # (c_sd_cleaver.vmt) — чтобы сохранить родной код материала
+        # (phong/прокси); _write_main_vmt переставит $basetexture на
+        # texture_filename. Берётся ДО рендера: по нему видно, есть ли у
+        # материала родная нормаль, поверх которой ляжет рельеф картинки.
+        vmt_file = VpkTextureBuilder._extract_original_vmt(
+            original_cdmaterials_path, _game_vmt_name,
+            slots.tf2_textures_vpk, slots.tf2_misc_vpk, ctx.decompile_dir,
+        )
+
+        if image_path and not tex.custom_vtf_path \
+                and not str(image_path).lower().endswith('.vtf'):
             _ms, _mf, _mfl, _mo = _eff(texture_filename)
+            stock = (VpkTextureBuilder._stock_normal(texture_filename, vmt_file, slots)
+                     if (_mo or {}).get('normal') and tex.stock_normal_ok else None)
             animated_fps, is_normal_map = TextureService.render_image_to_vtf(
                 image_path,
                 vtf_output_path=slots.vtf_output_path,
@@ -1393,18 +1469,8 @@ class VpkTextureBuilder:
                 format_type=_mf,
                 flags=_mfl,
                 vtf_options=_mo,
+                stock_normal=stock,
             )
-
-        # Извлекаем оригинальный VMT по пути из QC (до патчинга) — в VPK он
-        # лежит по оригинальному пути (slots.tf2_textures_vpk резолвлен выше).
-        # Оригинальный VMT берём по ИГРОВОМУ имени (c_sd_cleaver.vmt) —
-        # чтобы сохранить родной код материала (phong/прокси и т.п.).
-        # _write_main_vmt затем переставит $basetexture на texture_filename
-        # (имя материала меша).
-        vmt_file = VpkTextureBuilder._extract_original_vmt(
-            original_cdmaterials_path, _game_vmt_name,
-            slots.tf2_textures_vpk, slots.tf2_misc_vpk, ctx.decompile_dir,
-        )
 
         vmt_to_delete = VpkTextureBuilder._write_main_vmt(
             vmt_file, slots.vmt_path, texture_filename, slots.patched_cdmaterials_path,

@@ -30,6 +30,9 @@ class TextureBuildContext:
     flags: List[str]
     vtf_options: dict
     custom_vtf_path: Optional[str] = None
+    #: Можно ли класть рельеф поверх родной нормали материала: у своей
+    #: (заменённой) модели развёртка другая, и родная нормаль легла бы мимо.
+    stock_normal_ok: bool = True
 
     def render_user_image_vtf(
         self, image_path: str, target_vtf_path: Path, png_name: str

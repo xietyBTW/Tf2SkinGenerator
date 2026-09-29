@@ -1,9 +1,8 @@
 import os
-import shutil
 import subprocess
 from pathlib import Path
 from typing import List, Tuple, Optional
-from PIL import Image, ImageOps, ImageFilter
+from PIL import Image, ImageOps
 from src.shared.constants import ToolPaths, ToolTimeouts
 from src.shared.exceptions import VTFCreationError
 from src.shared.logging_config import get_logger
@@ -11,10 +10,11 @@ from src.services.vtflib_wrapper import VTFLib, VTFImageFormat, VTFImageFlags
 
 logger = get_logger(__name__)
 
-# Ядра Sobel для «нормали из яркости». Общие для статичной нормали с маской
-# в альфе (make_normal_with_alpha) и для покадровой нормали анимации.
-_SOBEL_X = ImageFilter.Kernel((3, 3), (-1, 0, 1, -2, 0, 2, -1, 0, 1), scale=2, offset=128)
-_SOBEL_Y = ImageFilter.Kernel((3, 3), (-1, -2, -1, 0, 0, 0, 1, 2, 1), scale=2, offset=128)
+
+
+def _normal_settings(options):
+    from src.services.normal_map import NormalSettings
+    return NormalSettings.from_options(options)
 
 
 class TextureService:
@@ -40,6 +40,8 @@ class TextureService:
         "TRILINEAR": VTFImageFlags.TRILINEAR,
         "ANISOTROPIC": VTFImageFlags.ANISOTROPIC,
         "SRGB": VTFImageFlags.SRGB,
+        # Нормаль: без флага VTFLib-путь (анимация) писал её как цвет.
+        "NORMAL": VTFImageFlags.NORMAL,
         "NODEBUGOVERRIDE": VTFImageFlags.NODEBUGOVERRIDE,
         "SINGLECOPY": VTFImageFlags.SINGLECOPY,
         "NODEPTHBUFFER": VTFImageFlags.NODEPTHBUFFER,
@@ -114,8 +116,8 @@ class TextureService:
         size: Tuple[int, int],
     ) -> str:
         """
-        Строит карту нормалей из базовой текстуры (Sobel по яркости) и кладёт
-        в её АЛЬФУ маску из mask_png_path.
+        Строит карту нормалей из базовой текстуры (normal_map) и кладёт в её
+        АЛЬФУ маску из mask_png_path.
 
         Нужно для сосуществования отражения и эффектов с нормалью: при наличии
         $bumpmap движок игнорирует отдельный $envmapmask и читает маску отражения
@@ -125,27 +127,53 @@ class TextureService:
         base = Image.open(base_image_path).convert("RGB")
         if size:
             base = base.resize(size, Image.LANCZOS)
-        gray = ImageOps.grayscale(base)
-        mask = Image.open(mask_png_path).convert("L").resize(gray.size, Image.LANCZOS)
-        normal = TextureService._normal_from_gray(gray)
-        normal.putalpha(mask)
-        normal.save(out_png_path)
+        import numpy as np
+        from src.services import normal_map
+
+        mask = Image.open(mask_png_path).convert("L").resize(base.size, Image.LANCZOS)
+        n = normal_map.from_image(np.asarray(base))
+        Image.fromarray(normal_map.encode(n, np.asarray(mask)), "RGBA").save(out_png_path)
         logger.info(f"Нормаль с маской отражения в альфе: {out_png_path}")
         return out_png_path
 
     @staticmethod
-    def _normal_from_gray(gray: "Image.Image") -> "Image.Image":
-        """Приближённая карта нормалей из яркости: R=наклон X, G=наклон Y, Z вверх.
+    def write_normal_vtf(image_path, vtf_output_path: Path, normal_base: str,
+                         format_type: str, options: Optional[dict] = None,
+                         stock_normal=None) -> Optional[Path]:
+        """{normal_base}_normal.vtf из картинки (normal_map) — путь или None.
 
-        Альфа = 255 (непрозрачная). Тот же приём, что в make_normal_with_alpha —
-        нормаль из диффуза, а не из настоящего хайтмапа.
+        Флаг NORMAL — как у нормалей Valve: движок не трактует её как цвет.
+        Формат свой (DXT5/без потерь), а не как у базы.
         """
-        return Image.merge("RGBA", (
-            gray.filter(_SOBEL_X),
-            gray.filter(_SOBEL_Y),
-            Image.new("L", gray.size, 255),
-            Image.new("L", gray.size, 255),
-        ))
+        from src.services import normal_map
+
+        png = Path(vtf_output_path) / f"{normal_base}_normal.png"
+        try:
+            TextureService.write_normal_png(image_path, png, _normal_settings(options),
+                                            stock_normal)
+            TextureService.create_vtf(str(png), str(vtf_output_path),
+                                      normal_map.vtf_format(format_type), ["NORMAL"], {})
+        finally:
+            if png.exists():
+                png.unlink()
+        out = Path(vtf_output_path) / f"{normal_base}_normal.vtf"
+        if out.exists():
+            logger.info(f"Создана normal VTF текстура: {out.name}")
+            return out
+        logger.warning(f"Normal VTF файл не был создан: {out}")
+        return None
+
+    @staticmethod
+    def write_normal_png(image_path, out_png_path, settings=None, stock_normal=None) -> str:
+        """Карта нормалей картинки в PNG (normal_map) — для сборки и авто-нормали."""
+        import numpy as np
+        from src.services import normal_map
+
+        with Image.open(image_path) as src:
+            rgb = np.asarray(src.convert("RGB"))
+        rgba = normal_map.make(rgb, settings or normal_map.NormalSettings(), stock_normal)
+        Image.fromarray(rgba, "RGBA").save(str(out_png_path))
+        return str(out_png_path)
 
     @staticmethod
     def process_image(input_path: str, output_path: str, size: Tuple[int, int]) -> None:
@@ -189,22 +217,33 @@ class TextureService:
         count: int,
         durations_out: list,
         as_normal: bool = False,
+        normal_settings=None,
+        stock_normal=None,
     ) -> "object":
         """Отдаёт кадры RGBA по одному (пик памяти — один кадр, не вся гифка).
 
         Задержки кадров дописываются в durations_out: в VTF частота одна на всю
         анимацию, поэтому fps считается по ним ПОСЛЕ обхода (см. _fps_from_durations).
 
-        as_normal=True — каждый кадр превращается в карту нормалей (Sobel по
-        яркости, уже после ресайза — как и в статичном пути через VTFCmd).
+        as_normal=True — каждый кадр превращается в карту нормалей (normal_map,
+        уже после ресайза — как и в статичном пути).
         """
+        import numpy as np
+        from src.services import normal_map
+
+        settings = normal_settings or normal_map.NormalSettings()
+        if as_normal and stock_normal is not None:
+            # Родная нормаль к размеру кадра — один раз, а не на каждом кадре.
+            stock_normal = np.asarray(Image.fromarray(stock_normal, "RGBA").resize(
+                tuple(size), Image.BILINEAR))
         with Image.open(input_path) as img:
             for i in range(count):
                 img.seek(i)
                 durations_out.append(int(img.info.get("duration", 0) or 0))
                 frame = img.convert("RGBA").resize(size, Image.LANCZOS)
                 if as_normal:
-                    frame = TextureService._normal_from_gray(ImageOps.grayscale(frame))
+                    frame = Image.fromarray(normal_map.make(
+                        np.asarray(frame), settings, stock_normal), "RGBA")
                 yield frame.tobytes()
 
     @staticmethod
@@ -249,6 +288,7 @@ class TextureService:
         format_type: str,
         flags: List[str],
         options: dict = None,
+        stock_normal=None,
     ) -> Optional[int]:
         if options is None:
             options = {}
@@ -261,7 +301,8 @@ class TextureService:
         if count < 1:
             raise RuntimeError("No frames extracted")
         if as_normal:
-            has_alpha = False   # нормаль строится непрозрачной
+            # Альфа нормали — маска блеска родной нормали, если она есть.
+            has_alpha = stock_normal is not None
 
         dest_format = TextureService._map_format_to_vtflib(format_type, has_alpha=has_alpha)
         vtf_flags = TextureService._map_flags_to_vtflib(flags, options)
@@ -273,7 +314,9 @@ class TextureService:
         durations: list = []
         VTFLib.create_animated_vtf(
             frames_rgba8888=TextureService._iter_animation_frames_rgba(
-                input_path, size, count, durations, as_normal=as_normal),
+                input_path, size, count, durations, as_normal=as_normal,
+                normal_settings=_normal_settings(options) if as_normal else None,
+                stock_normal=stock_normal),
             width=size[0],
             height=size[1],
             dest_format=dest_format,
@@ -330,9 +373,13 @@ class TextureService:
         format_type: str,
         flags: List[str],
         vtf_options: dict = None,
+        stock_normal=None,
     ) -> Tuple[Optional[float], bool]:
         """
         Рендерит изображение в VTF: анимированный / normal-map / обычный.
+
+        ``stock_normal`` — родная нормаль материала (RGBA): рельеф картинки
+        ляжет поверх неё, её альфа (маска блеска) сохранится.
 
         Единый рендер главной текстуры для обычной сборки и спец-режимов
         (раньше дублировался в двух местах).
@@ -361,9 +408,11 @@ class TextureService:
             # кадров и с тем же fps (VMT анимирует $bumpmap через $bumpframe).
             if is_normal_map:
                 normal_vtf_path = vtf_output_path / f"{normal_base}_normal.vtf"
+                from src.services import normal_map
                 TextureService.create_animated_vtf(
-                    image_path, str(normal_vtf_path), size, format_type, [],
-                    {**base_options, "normal": True}
+                    image_path, str(normal_vtf_path), size,
+                    normal_map.vtf_format(format_type), ["NORMAL"],
+                    {**merged, "normal": True}, stock_normal=stock_normal,
                 )
                 logger.info(f"Создана анимированная normal VTF: {normal_vtf_path.name}")
             return animated_fps, is_normal_map
@@ -373,18 +422,8 @@ class TextureService:
             normal_options = merged.copy()
             normal_options.pop("normal", None)
             TextureService.create_vtf(str(temp_png_path), str(vtf_output_path), format_type, vtf_flags, normal_options)
-            normal_temp_png = vtf_output_path / f"{normal_base}_normal.png"
-            shutil.copy2(temp_png_path, normal_temp_png)
-            TextureService.create_vtf(str(normal_temp_png), str(vtf_output_path), format_type, [], {"normal": True})
-            created_normal_vtf = vtf_output_path / f"{normal_temp_png.stem}.vtf"
-            normal_vtf_path = vtf_output_path / f"{normal_base}_normal.vtf"
-            if created_normal_vtf.exists():
-                created_normal_vtf.rename(normal_vtf_path)
-                logger.info(f"Создана normal VTF текстура: {normal_vtf_path.name}")
-            else:
-                logger.warning(f"Normal VTF файл не был создан: {created_normal_vtf}")
-            if normal_temp_png.exists():
-                normal_temp_png.unlink()
+            TextureService.write_normal_vtf(temp_png_path, vtf_output_path, normal_base,
+                                            format_type, merged, stock_normal)
         else:
             TextureService.create_vtf(str(temp_png_path), str(vtf_output_path), format_type, vtf_flags, merged)
 

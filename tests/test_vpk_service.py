@@ -317,7 +317,8 @@ class VPKServiceTests(unittest.TestCase):
             (mod_data / vmt_filename).write_text("vmt", encoding="utf-8")
 
             def fake_process_image(input_path, output_path, size):
-                Path(output_path).write_bytes(b"png")
+                # Настоящая картинка: из неё строится карта нормалей.
+                Image.new("RGB", size, "gray").save(output_path)
             
             def fake_create_vtf(png_path, output_path, format_type, flags, options=None):
                 output_dir = Path(output_path)

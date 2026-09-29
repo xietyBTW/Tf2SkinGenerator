@@ -20,6 +20,8 @@ import { buildParams, checkName } from './build.js';
 import { openMaterialMaps } from './maps.js';
 import { openVmtEditor } from './vmt.js';
 import { applyView, markEditedStyles } from './preview.js';
+import { syncNormal } from './normals.js';
+
 
 // ── Что показывать: решает Python ───────────────────────────────────────
 // Таблицы правил здесь нет намеренно. api.controls_for(mode) отдаёт готовый
@@ -82,6 +84,7 @@ export function applyControls(c, hasItem = true) {
       el.querySelectorAll('input[type="checkbox"]').forEach((i) => { i.checked = false; });
     }
   });
+  syncNormal();
 
   // Разрешения: спрей прибит к 256.
   document.querySelectorAll('input[name="res"]').forEach((r, i) => {
@@ -182,15 +185,19 @@ function buildInputs() {
   return [...document.querySelectorAll('.build__grid input')];
 }
 
+//: У этих полей значение, а не галка.
+const VALUE_INPUT = new Set(['text', 'range']);
+
 function readInputs() {
-  return buildInputs().map((i) => (i.type === 'text' ? i.value : i.checked));
+  return buildInputs().map((i) => (VALUE_INPUT.has(i.type) ? i.value : i.checked));
 }
 
 function writeInputs(values) {
   buildInputs().forEach((i, n) => {
-    if (i.type === 'text') i.value = values[n];
+    if (VALUE_INPUT.has(i.type)) i.value = values[n];
     else i.checked = values[n];
   });
+  syncNormal();
 }
 
 /** Ставит на контролы настройки материала (что не задано — остаётся общим). */
@@ -214,6 +221,9 @@ export function applySettings(st) {
       input.checked = isFlags ? flags.has(name) : Boolean(options[name]);
     });
   }
+  document.getElementById('normal-strength').value =
+    Math.round((options.normal_strength ?? 1) * 100);
+  syncNormal();
 }
 
 /**

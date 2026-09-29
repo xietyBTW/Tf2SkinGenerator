@@ -5,6 +5,17 @@ from typing import Tuple
 from src.data.weapons import SPECIAL_MODES
 
 
+def _live_param(name: str) -> "re.Pattern":
+    """Строка параметра ``name`` (группа 1 — всё до значения) в VMT.
+
+    С начала строки — закомментированная (`//	"$bumpmap" …`) не параметр.
+    Значение в кавычках или без них; ``$basetexture2`` и прочие соседи не
+    совпадают.
+    """
+    return re.compile(r'^([ \t]*"?' + re.escape(name) + r'"?[ \t]+)(?:"[^"\n]*"|[^\s"{}]+)',
+                      re.IGNORECASE | re.MULTILINE)
+
+
 class VMTService:
     """Сервис для работы с VMT файлами (материалы Source Engine: пути и шаблоны)"""
 
@@ -243,18 +254,20 @@ class VMTService:
         # Паттерн ищет "$basetexture" или "$baseTexture" с любым путем в кавычках
         # Учитываем разные форматы: "$basetexture" "path" или $basetexture "path" (VMT может быть в разном формате)
         # Используем re.IGNORECASE потому что Valve пишет по-разному (иногда с большой буквы, иногда нет)
-        pattern = r'(\t*"?\$basetexture"?\s+)"([^"]+)"'
-        
+        # С начала строки: закомментированная строка (//	"$basetexture" …) — не
+        # параметр, и правка её вместо живой молча оставляла игре старое.
+        pattern = _live_param('$basetexture')
+
         def replace_path(match):
             # Сохраняем формат первой части (с кавычками или без, с пробелами/табами, чтобы не сломать форматирование)
             first_part = match.group(1)
             return f'{first_part}"{new_texture_path}"'
-        
-        new_content = re.sub(pattern, replace_path, content, flags=re.IGNORECASE | re.MULTILINE)
-        
+
+        new_content, replaced = pattern.subn(replace_path, content)
+
         # Если не нашли существующий $basetexture - добавляем его в начало (после первой строки с шейдером)
         # (на случай если VMT файл не имеет $basetexture, хотя такое маловероятно)
-        if new_content == content:
+        if not replaced:
             # Ищем первую строку с шейдером (например, "VertexLitGeneric" или "UnlitGeneric")
             shader_pattern = r'^"([^"]+)"\s*$'
             lines = content.split('\n')
@@ -425,19 +438,22 @@ class VMTService:
         normal_texture_path = VMTService._get_texture_path_from_cdmaterials(cdmaterials_path, weapon_key)
         
         # Ищем и заменяем путь в $bumpmap или $bumpMap (регистронезависимо, потому что Valve пишет по-разному)
-        pattern = r'(\t*"?\$bumpmap"?\s+)"([^"]+)"'
-        
+        # Только живая строка: у 240 материалов игры $bumpmap есть лишь
+        # закомментированный (у снайперской винтовки в том числе), и правка
+        # комментария оставляла модель без нормали.
+        pattern = _live_param('$bumpmap')
+
         def replace_path(match):
             first_part = match.group(1)
             return f'{first_part}"{normal_texture_path}"'
-        
-        new_content = re.sub(pattern, replace_path, content, flags=re.IGNORECASE | re.MULTILINE)
-        
+
+        new_content, replaced = pattern.subn(replace_path, content)
+
         # Если не нашли существующий $bumpmap - добавляем его после $basetexture (это стандартное место)
-        if new_content == content:
+        if not replaced:
             # Ищем строку с $basetexture (обычно $bumpmap идет сразу после $basetexture)
-            basetexture_pattern = r'(\t*"?\$basetexture"?\s+"[^"]+"\s*\n)'
-            match = re.search(basetexture_pattern, content, re.IGNORECASE | re.MULTILINE)
+            match = re.search(_live_param('$basetexture').pattern + r'[ \t]*\r?\n',
+                              content, re.IGNORECASE | re.MULTILINE)
             
             if match:
                 # Добавляем $bumpmap сразу после $basetexture (с правильным отступом)
@@ -457,6 +473,11 @@ class VMTService:
         with open(vmt_path, 'w', encoding='utf-8') as f:
             f.write(new_content)
     
+    @staticmethod
+    def has_live_param(content: str, param: str) -> bool:
+        """Задан ли параметр живой строкой (закомментированная не в счёт)."""
+        return bool(_live_param(param).search(content or ''))
+
     @staticmethod
     def _set_vmt_param(content: str, param: str, value: str) -> str:
         """

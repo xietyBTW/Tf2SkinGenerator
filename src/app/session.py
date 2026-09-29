@@ -2057,6 +2057,96 @@ class AppSession:
         w.start()
         return {'started': True}
 
+    def normal_preview(self, screen: Optional[Dict[str, Any]] = None,
+                       global_options: Optional[Dict[str, Any]] = None,
+                       editing: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Карта нормалей главной текстуры для 3D-превью — та же, что соберётся
+        в мод (normal_map.make), только не больше 1024 px.
+
+        Настройки — как у сборки главного материала: свои настройки карточки
+        (texture_overrides) важнее общих. ``screen`` — опции на экране,
+        ``global_options`` — общие (при правке другой карточки на экране её
+        настройки, а не общие), ``editing`` — какую карточку правят (None —
+        никакую). ``{'off': True}`` — рельефа в сборке не будет.
+
+        ``stock`` в ответе — есть ли у материала родная нормаль игры: только
+        тогда странице есть что предлагать галкой «Заменить родной рельеф».
+        """
+        import hashlib
+
+        import numpy as np
+        from PIL import Image
+
+        from src.services import normal_map
+        from src.shared.constants import Team
+
+        main_key = self._card_key('')
+        if editing is not None and self._card_key(editing) == main_key:
+            options = dict(screen or {})
+        else:
+            own = self.preview.texture_overrides.get(main_key) or {}
+            options = dict(own.get('options') if own.get('options') is not None
+                           else (global_options if global_options is not None else screen) or {})
+        if not options.get('normal'):
+            return {'off': True}
+
+        t = self.preview.textures
+        material = t.stable_main()
+        # Нормаль строится из RED: BLU в сборке получает её копию.
+        src = None
+        if material:
+            red = t.textures.get(Team.RED, {}).get(material)
+            src = red if red and os.path.isfile(red) else t.game_base(material, Team.RED)
+        if not src or not os.path.isfile(src):
+            return {'error': 'Нет текстуры, из которой строить рельеф'}
+        stock = self._stock_normal_for(material)
+        settings = normal_map.NormalSettings.from_options(options)
+        stamp = repr((src, os.path.getmtime(src), settings, stock is not None))
+        out = os.path.join(self._work_dir(), 'normal_prev_'
+                           + hashlib.sha1(stamp.encode('utf-8')).hexdigest()[:12] + '.png')
+        if not os.path.isfile(out):
+            with Image.open(src) as img:
+                img = img.convert('RGB')          # у гифки — первый кадр
+                if max(img.size) > 1024:
+                    img.thumbnail((1024, 1024), Image.LANCZOS)
+                rgb = np.asarray(img)
+            Image.fromarray(normal_map.make(rgb, settings, stock), 'RGBA').save(out)
+        # Прошлые картинки превью не нужны: ползунок иначе оставлял по файлу
+        # в 2–3 МБ на каждое положение.
+        prev = self.__dict__.get('_normal_prev_file')
+        if prev and prev != out:
+            try:
+                os.remove(prev)
+            except OSError:
+                pass
+        self._normal_prev_file = out
+        # Меш назван по материалу OBJ (у одноматериальной модели карточка —
+        # служебный ключ): по этому имени вьювер и кладёт нормаль, не задевая
+        # руки и тело в сценах.
+        found = self.parts._parts_model(material)
+        mesh = found[1] if isinstance(found, tuple) else material
+        return {'png': out, 'material': mesh or '', 'stock': stock is not None}
+
+    def _stock_normal_for(self, material: str):
+        """Родная нормаль материала (RGBA) или None; кэш на VMT."""
+        from src.services import normal_map
+
+        # У своей геометрии развёртка другая: родная нормаль легла бы мимо.
+        if self.preview.custom_smd_path:
+            return None
+        vmt = self.open_vmt(material)
+        paths = self.tf2_paths()
+        if 'content' not in vmt or 'error' in paths:
+            return None
+        cache = self.__dict__.setdefault('_stock_normal_cache', {})
+        key = vmt['content']
+        if key not in cache:
+            cache.clear()                         # одна модель за раз
+            cache[key] = normal_map.stock_normal(
+                key, [paths['textures_vpk'], paths['misc_vpk']])
+        return cache[key]
+
     def class_icons(self) -> Dict[str, Any]:
         """Значки классов из игры для окон выбора классов."""
         from src.services.class_icons import class_icons

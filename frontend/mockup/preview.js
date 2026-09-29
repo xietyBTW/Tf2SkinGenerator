@@ -21,6 +21,7 @@ import { syncPaint } from './paint.js';
 import { hideWarpaint } from './warpaint.js';
 import { closeParts, bindParts, suspendParts, resumeParts, refreshParts } from './parts.js';
 import { updateDockSummary } from './build.js';
+import { refreshNormal } from './normals.js';
 import { showFit, showDecorFit, showDecorBends, toggleDecorFit, isDecorFitOn, leaveDecorFit,
          bindFitViewer, isFitOn, dropFitSave, flushFitSave } from './custom-model.js';
 
@@ -460,6 +461,8 @@ export function applyView(st) {
   restoreBadges();
   // Сводка внизу зависит от параметров предмета: у нового они свои.
   updateDockSummary();
+  // Рельеф строится из текстуры: сменилась она или предмет — и он.
+  refreshNormal();
 }
 
 /**
