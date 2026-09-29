@@ -75,6 +75,22 @@ def _vvd_vertices(vvd: bytes) -> List[tuple]:
     return out
 
 
+def materials(mdl: bytes) -> Tuple[List[str], List[str]]:
+    """(имена материалов как в MDL, пути $cdmaterials) — без Crowbar.
+
+    Имя бывает с путём (у мастерской — models/workshop/…/c_tomislav), путь
+    $cdmaterials — пустым: тогда материал ищется по своему полному имени.
+    """
+    num_textures, texture_index = struct.unpack_from('<ii', mdl, 204)
+    names = [_cstr(mdl, texture_index + i * 64
+                   + struct.unpack_from('<i', mdl, texture_index + i * 64)[0])
+             .replace(chr(92), '/') for i in range(num_textures)]
+    num_cd, cd_index = struct.unpack_from('<ii', mdl, 212)
+    cds = [_cstr(mdl, struct.unpack_from('<i', mdl, cd_index + i * 4)[0]).replace(chr(92), '/')
+           for i in range(num_cd)]
+    return names, cds
+
+
 def _mdl_meshes(mdl: bytes) -> Iterator[Tuple[int, int, str, int, List[Tuple[int, int]]]]:
     """(bodypart, model, имя модели, первый индекс VVD, [(смещение, материал)…])."""
     num_textures, texture_index = struct.unpack_from('<ii', mdl, 204)

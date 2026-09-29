@@ -416,6 +416,10 @@ def controls_for(mode: str, key: str = '') -> Dict[str, object]:
         # Насмешка: персонаж играет тонт с реквизитом. Есть только у самого
         # реквизита — у оружия своего тонта нет, а у шапки нет и реквизита.
         'taunt': category_of_mode(mode) == 'taunt',
+        # War Paint игры: игра кладёт их на оружие в руках. Есть ли они у
+        # этой пушки, страница узнаёт у каталога, когда модель приедет.
+        'warpaint': (is_normal and kind_of(mode).is_weapon
+                     and not category_of_mode(mode)),
         'misc': not (is_hands or is_spy_mask),
         # Редактор VMT — там, где материал модели: у спрея, крита, неба и
         # мода из VPK своего VMT нет (то же правило, что в `_vmt_target`).
@@ -1742,6 +1746,33 @@ def export_uv(size: int = 1024) -> Dict[str, object]:
     """Рисует UV-шаблон модели в папку экспорта. Путь придёт событием."""
     from src.app.session import session
     return session().export_uv(size)
+
+
+def class_icons() -> Dict[str, object]:
+    """Значки классов из игры: {icons: {класс: путь PNG}}."""
+    from src.app.session import session
+    return session().class_icons()
+
+
+def paintkits(lang: str = '') -> Dict[str, object]:
+    """War Paint игры для показанного оружия: [{id, name, item, wears, team}]."""
+    from src.app.session import session
+    return session().paintkits(_lang(lang))
+
+
+def apply_paintkit(kit: int, item: int, wear: int = 1, seed: int = 0,
+                   size: int = 1024, layout: int = 0) -> Dict[str, object]:
+    """Накладывает War Paint на главную текстуру. Готовность придёт событием."""
+    from src.app.session import session
+    return session().apply_paintkit(int(kit), int(item), int(wear), int(seed),
+                                    int(size), int(layout))
+
+
+def preview_paintkit(kit: int, item: int, wear: int = 1, seed: int = 0,
+                     layout: int = 0) -> Dict[str, object]:
+    """Предпросмотр War Paint (512 px): {png, materials} — на модель временно."""
+    from src.app.session import session
+    return session().preview_paintkit(int(kit), int(item), int(wear), int(seed), int(layout))
 
 
 # ═══════════════════════════════════════════════════════════════════════════ #

@@ -14,6 +14,8 @@ import { showReport } from './diagnostics.js';
 import { showFailure } from './fail.js';
 import { askForTexture, askForModel } from './build.js';
 import { showCpModel } from './particles/points.js';
+import { refreshWarpaint } from './warpaint.js';
+import { t } from './i18n.js';
 import {
   refreshView,
   showModel,
@@ -60,6 +62,21 @@ api.subscribe((ev) => {
       // текстуры…») убирает только показ модели, и без этого она висела бы
       // бесконечно — так было при смене стиля шапки на «На модели».
       else say('');
+      // War Paint есть не у каждого оружия: кнопка появляется, когда каталог
+      // ответит про эту модель.
+      refreshWarpaint(ev.obj);
+      break;
+
+    case 'paintkit_ready':
+      // Не собралось — убираем с модели предпросмотр, иначе казалось бы,
+      // что War Paint наложен.
+      if (!ev.ok) { say(ev.message || 'War Paint не собрался'); refreshView(); break; }
+      // Текстуру Python уже положил на карточку — перечитываем показ целиком.
+      refreshView();
+      say(ev.missing && ev.missing.length
+        ? t('В игре нет части текстур War Paint: {}').replace('{}', ev.missing.join(', '))
+        : '');
+      document.dispatchEvent(new Event('texture:set'));
       break;
 
     // Материалы, командные текстуры и вариант меняют то, ЧТО показывать.

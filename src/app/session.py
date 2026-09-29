@@ -2057,6 +2057,197 @@ class AppSession:
         w.start()
         return {'started': True}
 
+    def class_icons(self) -> Dict[str, Any]:
+        """Значки классов из игры для окон выбора классов."""
+        from src.services.class_icons import class_icons
+        paths = self.tf2_paths()
+        if 'error' in paths:
+            return {'icons': {}}
+        return {'icons': class_icons(paths['textures_vpk'], paths['misc_vpk'])}
+
+    # ── War Paint ─────────────────────────────────────────────────────── #
+
+    def _paintkit_model(self) -> str:
+        """Файл модели показанного оружия — по нему War Paint и ищутся."""
+        from src.data.weapons import WEAPON_MDL_PATHS
+        key = self.preview.weapon_key or ''
+        return WEAPON_MDL_PATHS.get(key) or f'{key}.mdl'
+
+    def paintkits(self, lang: str = 'ru') -> Dict[str, Any]:
+        """
+        War Paint для показанного оружия.
+
+        Есть свои в игре — отдаются они (``generic: False``). Нет — все War
+        Paint с шаблоном в универсальном режиме (``generic: True``): узор
+        раскладывается по частям модели, см. paintkit_generic.
+        """
+        from src.data import paintkit_defs
+
+        paths = self.tf2_paths()
+        if 'error' in paths:
+            return paths
+        if not self.preview.weapon_key:
+            return {'items': [], 'generic': False}
+        own = paintkit_defs.for_model(paths['root'], self._paintkit_model(), lang)
+        if own:
+            return {'items': own, 'generic': False}
+        return {'items': paintkit_defs.generic_kits(paths['root'], lang), 'generic': True}
+
+    def _paintkit_plan(self, kit: int, item: int, layout: int):
+        """
+        (универсальный режим или None, метка для имени файла) — или ошибка.
+
+        Метка — отпечаток всего, от чего зависит картинка, кроме аргументов в
+        имени: оружие, его OBJ, разрезы частей, базовая текстура. Без неё у
+        универсального режима (донор у всех пушек один) с тем же сидом
+        всплывала бы картинка с развёрткой прошлой пушки или прошлых разрезов.
+        """
+        import hashlib
+        import json
+
+        from src.data import paintkit_defs
+
+        paths = self.tf2_paths()
+        if 'error' in paths:
+            return paths
+        t = self.preview.textures
+        material = t.stable_main()
+        if not material or not self.preview.weapon_key:
+            return {'error': 'Сначала выберите оружие'}
+        own = paintkit_defs.for_model(paths['root'], self._paintkit_model())
+        generic = None
+        if not any(k['id'] == int(kit) and k['item'] == int(item) for k in own):
+            # Своих War Paint у пушки нет: узор ляжет по частям модели, поверх
+            # её игровой текстуры своей команды (не поверх прошлой правки —
+            # иначе War Paint накладывался бы на War Paint).
+            generic = {'obj_path': self._obj_path, 'cuts': self.preview.part_cuts,
+                       'regions': self.preview.part_regions, 'card': material,
+                       'base_png': (t.game_base(material, t.active_team)
+                                    or t.resolve_base(material) or ''),
+                       'layout_seed': int(layout)}
+        try:
+            obj_mtime = os.path.getmtime(self._obj_path) if self._obj_path else 0
+        except OSError:
+            obj_mtime = 0
+        stamp = json.dumps([self.preview.weapon_key, material, generic, obj_mtime],
+                           sort_keys=True, default=str)
+        return generic, hashlib.sha1(stamp.encode('utf-8')).hexdigest()[:10]
+
+    def _paintkit_job_for(self, kit: int, item: int, wear: int, seed: int, size: int,
+                          generic, out: str):
+        """Воркер War Paint под текущее оружие и команду."""
+        from src.services.paintkit_worker import PaintkitWorker
+        from src.shared.constants import Team
+
+        paths = self.tf2_paths()
+        t = self.preview.textures
+        team = 'blue' if t.active_team == Team.BLU else 'red'
+        return PaintkitWorker(paths['root'], paths['textures_vpk'], paths['misc_vpk'],
+                              kit, item, wear, team, seed, out, size=size,
+                              mdl_path=self._paintkit_model(), generic=generic)
+
+    def preview_paintkit(self, kit: int, item: int, wear: int = 1, seed: int = 0,
+                         layout: int = 0) -> Dict[str, Any]:
+        """
+        Быстрый предпросмотр War Paint (512 px): страница кладёт его на модель
+        временно, пока человек выбирает. В текстуры ничего не пишется.
+
+        Синхронно: при кэше текстур это доли секунды, а страница всё равно
+        ждёт картинку, чтобы показать. Одновременно считается один.
+        """
+        seed = int(seed) & ((1 << 64) - 1)
+        team = self.preview.textures.active_team
+        plan = self._paintkit_plan(kit, item, layout)
+        if isinstance(plan, dict):
+            return plan
+        generic, tag = plan
+        out = os.path.join(self._work_dir(), f'warpaint_prev_{int(kit)}_{int(item)}'
+                           f'_w{int(wear)}_{seed}_{int(layout)}_{team}_{tag}.png')
+        lock = self.__dict__.setdefault('_paintkit_preview_lock', threading.Lock())
+        targets_by_file = self.__dict__.setdefault('_paintkit_prev_targets', {})
+        with lock:
+            if not os.path.isfile(out) or out not in targets_by_file:
+                w = self._paintkit_job_for(kit, item, wear, seed, 512, generic, out)
+                ok, message = w.work()
+                if not ok:
+                    return {'error': message}
+                targets_by_file[out] = self._paintkit_targets(
+                    w.materials, self.preview.textures.stable_main())
+        return {'png': out, 'materials': targets_by_file[out]}
+
+    def apply_paintkit(self, kit: int, item: int, wear: int = 1, seed: int = 0,
+                       size: int = 1024, layout: int = 0) -> Dict[str, Any]:
+        """
+        Собирает War Paint в текстуру и кладёт её на карточки, куда игра
+        кладёт War Paint (материалы с прокси WeaponSkin; обычно это главная,
+        у Детонатора ещё и гильза). У оружия без War Paint в игре — на
+        главную карточку, узор раскладывается по частям модели (``layout``
+        перемешивает, какой узор на какой части).
+
+        Собирается под активную команду: у War Paint с командными узорами RED
+        и BLU разные, и человек накладывает второй, переключив команду. Дальше
+        это обычная своя текстура — её можно дорисовать и собрать в мод.
+        Результат приходит событием ``paintkit_ready``.
+        """
+        from src.shared.constants import Team
+
+        job = getattr(self, '_paintkit_job', None)
+        if job is not None and job.isRunning():
+            return {'error': 'War Paint уже накладывается'}
+        t = self.preview.textures
+        material = t.stable_main()
+        weapon_key = self.preview.weapon_key
+        team = 'blue' if t.active_team == Team.BLU else 'red'
+        seed = int(seed) & ((1 << 64) - 1)
+        size = min(max(int(size), 256), 2048)
+        plan = self._paintkit_plan(kit, item, layout)
+        if isinstance(plan, dict):
+            return plan
+        generic, tag = plan
+        out = os.path.join(self._work_dir(), f'warpaint_{int(kit)}_{int(item)}'
+                           f'_w{int(wear)}_{team}_{seed}_{int(layout)}_{size}_{tag}.png')
+        w = self._paintkit_job_for(kit, item, wear, seed, size, generic, out)
+        w.progress.connect(lambda _pct, text: self._put('progress', text=text))
+
+        def done(ok: bool, message: str) -> None:
+            # Пока собиралось, человек мог уйти на другое оружие: чужой War
+            # Paint на новую пушку не кладём.
+            same = (self.preview.weapon_key == weapon_key
+                    and ('blue' if self.preview.textures.active_team == Team.BLU
+                         else 'red') == team)
+            try:
+                if ok and same:
+                    for target in self._paintkit_targets(w.materials, material):
+                        res = self.set_texture(target, message) or {}
+                        if 'error' in res:
+                            ok, message = False, res['error']
+                            break
+            except Exception as exc:                      # noqa: BLE001
+                logger.error(f'[paintkit] {exc}', exc_info=True)
+                ok, message = False, str(exc)
+            self._put('paintkit_ready', ok=bool(ok and same),
+                      message='' if ok and same else (message or 'Оружие сменилось'),
+                      missing=list(w.missing))
+
+        w.finished.connect(done)
+        self._paintkit_job = w
+        w.start()
+        return {'started': True, 'team': team}
+
+    def _paintkit_targets(self, paintable: List[str], main: str) -> List[str]:
+        """Карточки под War Paint: материалы WeaponSkin среди карточек, иначе главная.
+
+        Синие пары (c_detonator_blue) карточек не имеют — их заполняет команда
+        BLU той же карточки, поэтому сравниваются только имена карточек.
+        """
+        wanted = {m.lower() for m in paintable or []}
+        cards = [c for c in (self.preview.textures.material_names or [])
+                 if c and c.lower() in wanted]
+        if main and main not in cards and (not wanted or main.lower() in wanted
+                                           or not cards):
+            cards.insert(0, main)
+        return cards
+
     def load_vpk_mod(self, path: str = '', lang: str = 'ru') -> Dict[str, Any]:
         """
         Показывает чужой мод из VPK: его модель и его текстуры.

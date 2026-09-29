@@ -1689,6 +1689,103 @@
    пять, и крайняя левая пряталась за границей окна. */
 .ask__acts { flex-wrap: wrap; row-gap: 10px; }
 
+/* Выбор классов: плитки 3×3 с эмблемой класса из игры. Не отмечен — эмблема
+   серая и приглушена, отмечен — цветная, с акцентной рамкой. */
+.ask.classpick { width: min(480px, 94vw); }
+.classpick__grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.classpick__tile {
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  padding: 14px 6px 12px;
+  border: 1px solid var(--hairline);
+  background: none;
+  color: var(--ink-mute);
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color var(--dur), color var(--dur), background var(--dur);
+}
+.classpick__tile img {
+  width: 40px; height: 40px;
+  filter: grayscale(1); opacity: .45;
+  transition: filter var(--dur), opacity var(--dur);
+}
+.classpick__tile:hover { border-color: var(--hairline-strong); color: var(--ink-soft); }
+.classpick__tile:hover img { opacity: .7; }
+.classpick__tile.is-active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  color: var(--ink);
+}
+.classpick__tile.is-active img { filter: none; opacity: 1; }
+.classpick__tile:focus-visible { outline: 1px solid var(--ink); outline-offset: 2px; }
+.classpick__bar { display: flex; align-items: center; gap: 16px; }
+.classpick__count { margin-left: auto; font-size: 11px; color: var(--ink-mute); font-variant-numeric: tabular-nums; }
+
+/* War Paint: панель на месте альбома. Модель справа остаётся на виду — на ней
+   идёт живой предпросмотр, поэтому это не модальное окно. */
+/* Панель встаёт на место содержимого альбома в общем потоке, а не поверх:
+   в узкой раскладке половины стоят друг под другом, и наложенная панель
+   наезжала бы на модель. */
+.half--flat.is-warpaint > :not(.wpanel) { display: none !important; }
+.half--flat.is-warpaint { overflow: hidden; }
+.wpanel {
+  flex: 1; min-height: 0;
+  display: flex; flex-direction: column; gap: 14px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+.wpanel[hidden] { display: none; }
+.wpanel__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.wpanel__head .label { margin: 0; }
+.wpanel__sub { margin: 4px 0 0; font-size: 12px; color: var(--ink-mute); }
+.wpanel__generic {
+  display: flex; align-items: center; gap: 14px;
+  padding: 10px 12px;
+  border-left: 2px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  font-size: 12px; line-height: 1.5; color: var(--ink-soft);
+}
+.wpanel__generic[hidden] { display: none; }
+.wpanel__generic p { margin: 0; flex: 1; }
+.wpanel__list {
+  flex: 1 0 160px; max-height: 60vh; overflow: auto;
+  display: flex; flex-direction: column;
+  border-top: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--hairline);
+}
+.wpanel__row {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 8px 10px;
+  border: 0; border-left: 2px solid transparent;
+  border-bottom: 1px solid var(--hairline);
+  background: none; color: var(--ink-soft);
+  font-size: 12.5px; text-align: left; cursor: pointer;
+  transition: color var(--dur), background var(--dur), border-color var(--dur);
+}
+.wpanel__row:hover { color: var(--ink); background: var(--surface); }
+.wpanel__row[aria-selected="true"] {
+  color: var(--ink); border-left-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.wpanel__tag { flex: none; font-family: var(--mono); font-size: 9.5px; letter-spacing: .06em; color: var(--ink-mute); }
+.wpanel__empty { margin: 18px 10px; font-size: 12px; color: var(--ink-mute); }
+.wpanel__controls { display: flex; flex-direction: column; gap: 10px; }
+.wpanel__field { display: flex; align-items: center; gap: 12px; }
+.wpanel__wearname { font-size: 12px; color: var(--ink); }
+.wpanel__wears { display: grid; grid-template-columns: repeat(5, 1fr); }
+.wpanel__wear {
+  padding: 7px 0;
+  border: 1px solid var(--hairline-strong); margin-left: -1px;
+  background: none; color: var(--ink-soft);
+  font-family: var(--mono); font-size: 11px; letter-spacing: .08em; cursor: pointer;
+  transition: background var(--dur), color var(--dur);
+}
+.wpanel__wear:first-child { margin-left: 0; }
+.wpanel__wear:hover { color: var(--ink); }
+.wpanel__wear.is-active { position: relative; background: var(--ink); border-color: var(--ink); color: var(--surface); }
+.wpanel__seed { width: 190px; font-variant-numeric: tabular-nums; }
+.wpanel__status { margin: 0; min-height: 1.4em; font-size: 11.5px; color: var(--ink-mute); }
+#warpaint.is-active { color: var(--ink); }
+
 /* Раздел частиц: командные цвета и стили к эффекту отношения не имеют.
    Панель сборки здесь НЕ прячем правилом: панелей две (#build и #pbuild),
    обе с классом .build, и селектор по классу убрал бы заодно крутилки

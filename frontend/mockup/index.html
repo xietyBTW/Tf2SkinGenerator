@@ -149,6 +149,43 @@
   <div class="work" data-view="both" data-scene="item">
 
     <section class="half half--flat">
+      <!-- War Paint: панель на месте альбома, а не окно поверх всего — модель
+           справа остаётся видна, и выбранная раскраска сразу ложится на неё
+           предпросмотром. Скрыта, пока её не открыли. -->
+      <aside class="wpanel" id="warpaintpanel" hidden aria-label="War Paint">
+        <header class="wpanel__head">
+          <div>
+            <p class="label">War Paint</p>
+            <p class="wpanel__sub"></p>
+          </div>
+          <button class="textbtn textbtn--sm wpanel__close" type="button" title="Закрыть без изменений">Закрыть</button>
+        </header>
+        <div class="wpanel__generic" hidden>
+          <p>У этого оружия в игре War Paint нет. Узоры разложены по деталям модели.</p>
+          <button class="textbtn textbtn--sm wpanel__shuffle" type="button"
+                  title="Раздать узоры деталям по-другому">Перемешать детали</button>
+        </div>
+        <input class="input wpanel__search" type="search" placeholder="Поиск раскраски">
+        <div class="wpanel__list" role="listbox" aria-label="Раскраски"></div>
+        <div class="wpanel__controls">
+          <div class="wpanel__field">
+            <span class="label label--inline">Износ</span>
+            <span class="wpanel__wearname"></span>
+          </div>
+          <div class="wpanel__wears" role="radiogroup" aria-label="Износ"></div>
+          <div class="wpanel__field">
+            <span class="label label--inline">Сид</span>
+            <input class="input input--tiny wpanel__seed" inputmode="numeric" value="0"
+                   title="От сида зависит, как узор ляжет на оружие: поворот, сдвиг, где износ">
+            <button class="textbtn textbtn--sm wpanel__dice" type="button">Случайный</button>
+          </div>
+          <p class="wpanel__status" aria-live="polite"></p>
+        </div>
+        <div class="ask__acts">
+          <button class="textbtn wpanel__cancel" type="button">Отмена</button>
+          <button class="btn--primary wpanel__apply" type="button" disabled>Нанести</button>
+        </div>
+      </aside>
       <div class="half__bar">
         <div class="mattabs"></div>
       </div>
@@ -176,6 +213,8 @@
                   title="У предмета остались отложенные правки">Вернуть правки</button>
           <button class="textbtn textbtn--sm" id="forget" hidden
                   title="Удалить сохранённые правки этого предмета">Забыть правки</button>
+          <button class="textbtn textbtn--sm" id="warpaint" data-cond="warpaint" hidden
+                  title="Раскраска из игры: собирается в текстуру, которую можно дорисовать">War Paint</button>
           <button class="textbtn textbtn--sm" data-cond="maps">Карты материала</button>
           <button class="textbtn textbtn--sm" id="vmt" data-cond="vmt">VMT</button>
           <button class="textbtn textbtn--sm" id="misc" data-cond="misc">Прочее</button>
@@ -922,6 +961,26 @@
     <div class="ask__acts">
       <button class="textbtn ask__cancel" type="button">Отмена</button>
       <button class="btn--primary ask__ok" type="button">Готово</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- ═══ Выбор классов ══════════════════════════════════════════════════════
+     Для каких классов собрать мультиклассовую шапку. Плитки со значками
+     классов из игры: список из девяти английских имён читался хуже. -->
+<dialog class="ask classpick" id="classdlg">
+  <form method="dialog" class="ask__body">
+    <p class="label ask__title">Для каких классов собрать шапку</p>
+    <p class="ask__text classpick__text">У каждого класса своя модель шапки. В мод попадут только отмеченные.</p>
+    <div class="classpick__grid" role="group" aria-label="Классы"></div>
+    <div class="classpick__bar">
+      <button class="textbtn textbtn--sm classpick__all" type="button">Все</button>
+      <button class="textbtn textbtn--sm classpick__none" type="button">Никого</button>
+      <span class="classpick__count"></span>
+    </div>
+    <div class="ask__acts">
+      <button class="textbtn ask__cancel" type="button">Отмена</button>
+      <button class="btn--primary ask__ok" type="button">Собрать</button>
     </div>
   </form>
 </dialog>

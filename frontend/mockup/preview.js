@@ -18,6 +18,7 @@ import { root, work } from './layout.js';
 import { bindAlbum, goTo, SINGLE_TEX } from './album.js';
 import { modeControls, restoreBadges } from './controls.js';
 import { syncPaint } from './paint.js';
+import { hideWarpaint } from './warpaint.js';
 import { closeParts, bindParts, suspendParts, resumeParts, refreshParts } from './parts.js';
 import { updateDockSummary } from './build.js';
 import { showFit, showDecorFit, showDecorBends, toggleDecorFit, isDecorFitOn, leaveDecorFit,
@@ -166,6 +167,7 @@ export function clearPreview() {
   hatClassList = [];
   // Части считаны по ПРОШЛОЙ модели: у новой под тем же номером другой кусок.
   closeParts();
+  hideWarpaint();         // War Paint — про прошлое оружие, у нового свой список
   dropFitSave();          // и подгонка: её отложенная запись — про прошлую
   showMaterials([]);
   // Кнопки работы — про предмет, которого больше нет: «Вернуть правки» над

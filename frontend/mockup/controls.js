@@ -39,6 +39,7 @@ const COND_KEY = {
   firstperson: 'first_person',
   taunt: 'taunt',
   wear: 'wear',
+  warpaint: 'warpaint',
   misc: 'misc',
   styles: 'styles',
   aus: 'teams',
@@ -59,7 +60,7 @@ const RESET_ON_HIDE = new Set(['shoulders', 'normal', 'maps']);
 //: вариант, вариантный кадр, служебные материалы. Режим их только разрешает —
 //: показывает applyView по ответу view_state. Иначе кнопка мелькала бы до
 //: загрузки и обещала то, чего у модели нет.
-const MODEL_DRIVEN = new Set(['misc', 'team', 'aus', 'qc', 'styles', 'parts']);
+const MODEL_DRIVEN = new Set(['misc', 'team', 'aus', 'qc', 'styles', 'parts', 'warpaint']);
 
 //: Эти — действия над ПРЕДМЕТОМ, а режим у категории ставится раньше, чем
 //: выбран предмет (панель сборки должна знать форматы и флаги заранее).

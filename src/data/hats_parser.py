@@ -660,15 +660,17 @@ def _clean_display(value: str) -> str:
 _LOC_CACHE: Dict[tuple, Dict[str, str]] = {}
 
 
-def parse_localization(tf2_root: str, lang: str = "english") -> Dict[str, str]:
+def parse_localization(tf2_root: str, lang: str = "english",
+                       stem: str = "tf") -> Dict[str, str]:
     """
-    Парсит tf_english.txt (или tf_{lang}.txt) и возвращает {token: display_name}.
+    Парсит tf_english.txt (или {stem}_{lang}.txt) и возвращает {token: display_name}.
 
+    stem — у названий War Paint свой файл, `tf_proto_obj_defs_{lang}.txt`.
     Словарь общий на всех, кто его попросил, — не менять на месте.
     """
-    lang_file = Path(tf2_root) / "tf" / "resource" / f"tf_{lang}.txt"
+    lang_file = Path(tf2_root) / "tf" / "resource" / f"{stem}_{lang}.txt"
     if not lang_file.exists():
-        lang_file = Path(tf2_root) / "tf" / "resource" / "tf_english.txt"
+        lang_file = Path(tf2_root) / "tf" / "resource" / f"{stem}_english.txt"
     if not lang_file.exists():
         logger.warning(f"Файл локализации не найден: {lang_file}")
         return {}
@@ -689,9 +691,9 @@ def parse_localization(tf2_root: str, lang: str = "english") -> Dict[str, str]:
 
     tokens: Dict[str, str] = {}
     for m in _LOC_LINE.finditer(content):
-        key, val = m.group(1), _clean_display(m.group(2))
-        tokens[key] = val
-        tokens[key.lower()] = val
+        token, val = m.group(1), _clean_display(m.group(2))
+        tokens[token] = val
+        tokens[token.lower()] = val
 
     logger.info(f"Загружено {len(tokens) // 2} токенов локализации")
     _LOC_CACHE[key] = tokens

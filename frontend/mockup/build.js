@@ -13,6 +13,7 @@ import { root, setStatus } from './layout.js';
 import { buildParticles } from './particles/index.js';
 import { texEdit } from './controls.js';
 import { hatClasses } from './preview.js';
+import { pickClasses } from './classpick.js';
 
 // ── Сборка ──────────────────────────────────────────────────────────────
 // Что собирать, знает Python: он смотрит, какие текстуры пользователь положил
@@ -174,16 +175,8 @@ async function askHatClasses() {
   const classes = hatClasses();
   if (!classes.length) return [];
   const kept = classes.filter((c) => lastHatClasses.includes(c));
-  const picked = await ask({
-    title: 'Для каких классов собрать шапку?',
-    text: 'У каждого класса своя модель шапки. Неотмеченные классы в мод не попадут.',
-    list: classes,
-    multi: true,
-    chosen: kept.length ? kept : classes,
-    ok: 'Собрать',
-  });
-  if (!picked) return null;
-  if (!picked.length) { setStatus('Не выбран ни один класс', false); return null; }
+  const picked = await pickClasses({ classes, chosen: kept.length ? kept : classes });
+  if (!picked || !picked.length) return null;
   lastHatClasses = picked;
   // Порядок каталога, а не щелчков: первый выбранный — основная модель сборки.
   return classes.filter((c) => picked.includes(c));

@@ -339,6 +339,12 @@ export const answerModel   = (path = '') => call('answer_model', { path });
 export const answerTexture = (choice, path = '', apply_all = false) =>
   call('answer_texture', { choice, path, apply_all });
 export const exportUv     = (size = 1024) => call('export_uv', { size });
+export const paintkits    = () => call('paintkits', { lang: lang() });
+export const classIcons   = () => call('class_icons');
+export const applyPaintkit = (kit, item, wear, seed, layout = 0) =>
+  call('apply_paintkit', { kit, item, wear, seed: String(seed), layout });
+export const previewPaintkit = (kit, item, wear, seed, layout = 0) =>
+  call('preview_paintkit', { kit, item, wear, seed: String(seed), layout });
 
 /** Кладёт файл во временную папку и возвращает его путь на диске. */
 export async function upload(file) {

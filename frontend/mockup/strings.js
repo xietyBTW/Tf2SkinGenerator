@@ -1276,11 +1276,6 @@ export const EN = {
     'Same as weapons. If the hat has several styles, each can be painted separately.',
   'Показывает, как шапка будет выглядеть с краской из игры.':
     'Shows how the hat will look with in-game paint.',
-  'Для каких классов собрать шапку?':
-    'Which classes should the hat be built for?',
-  'У каждого класса своя модель шапки. Неотмеченные классы в мод не попадут.':
-    'Each class has its own hat model. Unchecked classes are left out of the mod.',
-  'Не выбран ни один класс': 'No class selected',
   'Эффекты':
     'Effects',
   'Выберите эффект, который хотите изменить.':
@@ -1307,4 +1302,53 @@ export const EN = {
     'Drop your sound onto a row or click "Own file".',
   'Все заменённые звуки соберутся в один мод.':
     'All replaced sounds are built into one mod.',
+  // War Paint
+  'Раскраска из игры: собирается в текстуру, которую можно дорисовать':
+    'In-game paint: built into a texture you can keep painting on',
+  'Износ': 'Wear',
+  'Сид': 'Seed',
+  'Случайный': 'Random',
+  'От сида зависит, как узор ляжет на оружие: поворот, сдвиг, где износ':
+    'The seed decides how the pattern lands on the weapon: rotation, offset, where the wear is',
+  'Нанести': 'Apply',
+  'Прямо с завода': 'Factory New',
+  'Немного поношенное': 'Minimal Wear',
+  'После полевых испытаний': 'Field-Tested',
+  'Поношенное': 'Well-Worn',
+  'Закалённое в боях': 'Battle Scarred',
+  'У этого оружия нет War Paint': 'This weapon has no War Paints',
+  'War Paint не собрался': 'The War Paint could not be built',
+  'В игре нет части текстур War Paint: {}': 'Some War Paint textures are missing in the game: {}',
+  'War Paint «{}»: собираю…': 'War Paint "{}": building…',
+  'War Paint уже накладывается': 'A War Paint is already being applied',
+  'Сначала выберите оружие': 'Choose a weapon first',
+  'Оружие сменилось': 'The weapon was switched',
+  // Выбор классов
+  'Для каких классов собрать шапку': 'Which classes to build the hat for',
+  'У каждого класса своя модель шапки. В мод попадут только отмеченные.':
+    'Each class has its own hat model. Only the checked ones go into the mod.',
+  'Никого': 'None',
+  'Выбрано {} из {}': '{} of {} selected',
+  'Разведчик': 'Scout',
+  'Солдат': 'Soldier',
+  'Поджигатель': 'Pyro',
+  'Подрывник': 'Demoman',
+  'Пулемётчик': 'Heavy',
+  'Инженер': 'Engineer',
+  'Медик': 'Medic',
+  'Снайпер': 'Sniper',
+  'Шпион': 'Spy',
+  'У этого оружия в игре War Paint нет. Узоры разложены по деталям модели.':
+    "This weapon has no War Paints in the game. The patterns are laid out over the model's parts.",
+  'Перемешать детали': 'Shuffle parts',
+  'Закрыть без изменений': 'Close without changes',
+  'Раздать узоры деталям по-другому': 'Give the patterns to the parts differently',
+  'Поиск раскраски': 'Search paints',
+  'Раскраски': 'Paints',
+  'Универсальный режим': 'Universal mode',
+  'Раскрасок для этого оружия: {}': 'Paints for this weapon: {}',
+  'Выберите раскраску — она сразу покажется на модели.': 'Pick a paint — it shows up on the model right away.',
+  'Узор у команд разный — собирается под текущую команду': 'The pattern differs per team — built for the current team',
+  'Собираю предпросмотр…': 'Building the preview…',
+  'Предпросмотр на модели. «Нанести» соберёт в полном размере.': 'Preview on the model. "Apply" builds it at full size.',
 };

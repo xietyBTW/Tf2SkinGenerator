@@ -53,6 +53,8 @@ _FILE_ROOTS = [
     # Сохранённые правки человека: work/<ключ предмета>/files. Без этого корня
     # восстановленная текстура отдаётся 403 и карточка в альбоме битая.
     (data_dir() / "work").resolve(),
+    # Значки классов из игры (окно выбора классов) — только эта папка кэша.
+    (data_dir() / "cache" / "class_icons").resolve(),
 ]
 
 
@@ -275,6 +277,10 @@ ALLOWED = {
     "answer_texture": api.answer_texture,
     "answer_model": api.answer_model,
     "export_uv": api.export_uv,
+    "paintkits": api.paintkits,
+    "class_icons": api.class_icons,
+    "apply_paintkit": api.apply_paintkit,
+    "preview_paintkit": api.preview_paintkit,
 }
 
 
