@@ -1775,6 +1775,18 @@ def preview_paintkit(kit: int, item: int, wear: int = 1, seed: int = 0,
     return session().preview_paintkit(int(kit), int(item), int(wear), int(seed), int(layout))
 
 
+def paintkit_layout(kit: int, item: int, layout: int = 0) -> Dict[str, object]:
+    """Раскладка War Paint по деталям: слои, детали и карта треугольников."""
+    from src.app.session import session
+    return session().paintkit_layout(int(kit), int(item), int(layout))
+
+
+def set_paintkit_layout(kit: int, assign: Optional[Dict[str, int]] = None) -> Dict[str, object]:
+    """Раскладка человека {деталь: слой}; пусто — вернуть автомат."""
+    from src.app.session import session
+    return session().set_paintkit_layout(int(kit), assign)
+
+
 # ═══════════════════════════════════════════════════════════════════════════ #
 # Частицы
 # ═══════════════════════════════════════════════════════════════════════════ #

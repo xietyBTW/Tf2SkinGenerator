@@ -25,6 +25,8 @@ MOCKUP = ROOT / "frontend" / "mockup"
 PY_SOURCES = ("src/app/api.py", "src/app/session.py", "src/app/parts_editor.py",
               "src/app/particles_editor.py",
               "src/services/build_worker.py",
+              # Почему War Paint не раскладывается по деталям — экран раскладки.
+              "src/services/paintkit_layout.py",
               # Ошибки импорта OBJ/GLB приходят человеку текстом как есть.
               "src/services/mesh_import_service.py",
               # Подписи разделов и событий каталога звуков: их видит человек,

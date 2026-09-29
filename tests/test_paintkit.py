@@ -260,15 +260,15 @@ class GenericModeTests(unittest.TestCase):
     def test_single_part_model_splits_by_islands(self):
         """Цельная модель (бита) делится по островам развёртки, иначе узор один."""
         from types import SimpleNamespace
-        from src.services.paintkit_generic import _units
+        from src.services.paintkit_generic import units_for
         tri = lambda x: ((x, 0.0), (x + 0.2, 0.0), (x, 0.2))  # noqa: E731
-        part = SimpleNamespace(index=0, uv_area=0.06, paintable=True)
+        part = SimpleNamespace(index=0, uv_area=0.06, paintable=True, triangles=[0, 1, 2])
         model = SimpleNamespace(
             parts_of=lambda m: [part],
             polygons=lambda m, i: [tri(0.0), tri(0.3), tri(0.6)],
             tri_island={'bat': [0, 1, 2]},
             uv={'bat': [tri(0.0), tri(0.3), tri(0.6)]})
-        self.assertEqual(len(_units(model, 'bat', 4)), 3)
+        self.assertEqual(len(units_for(model, "bat", 4)), 3)
 
     def test_recipe_forced_values_and_stickers_removed(self):
         defs = make_defs()
@@ -280,3 +280,51 @@ class GenericModeTests(unittest.TestCase):
             {'type': 'apply_sticker', 'fields': {}, 'stickers': [], 'nodes': [
                 {'type': 'texture_lookup', 'fields': {'texture': 'a'}, 'nodes': []}]}]}
         self.assertEqual(_without_stickers(node)['nodes'][0]['type'], 'texture_lookup')
+
+
+class LayoutTests(unittest.TestCase):
+    """Раскладка по деталям человеком (paintkit_layout)."""
+
+    def test_manual_layer_wins_and_bad_layer_ignored(self):
+        from types import SimpleNamespace as NS
+        from src.services.paintkit_generic import layout_for
+        units = [NS(key='p0', area=0.5), NS(key='p1', area=0.2), NS(key='p2', area=0.1)]
+        auto = layout_for(units, [1, 2, 3], False, 0)
+        got = layout_for(units, [1, 2, 3], False, 0, {'p0': 3, 'p1': 9})
+        self.assertEqual(got[0], 3)
+        self.assertEqual(got[1:], auto[1:])            # слоя 9 нет — остаётся автомат
+
+    def test_own_groups_regrouped_by_selects(self):
+        from src.services.paintkit_layout import own_forced, own_groups
+        values = {'texture_layer_2_select_1': '64', 'texture_layer_3_select_1': '96',
+                  'texture_layer_3_select_2': '64'}
+        original = own_groups(values, [1, 2, 3], False)
+        self.assertEqual(original, {4: 3, 6: 3})       # поздний слой поверх
+        self.assertEqual(own_forced(original, {}, [1, 2, 3], False), {})
+        forced = own_forced(original, {'g6': 2, 'g4': 0}, [1, 2, 3], False)
+        self.assertEqual(forced['texture_layer_2_select_1'], '96')
+        self.assertEqual(forced['texture_layer_3_select_1'], '0')  # группа 4 — в основу
+        self.assertNotIn('texture_layer_1_select_1', forced)       # основа не выбирает
+
+    def test_valve_units_by_triangle_centre(self):
+        from types import SimpleNamespace as NS
+        from src.services.paintkit_generic import valve_units
+        mask = np.zeros((4, 4, 4), np.uint8)
+        mask[:, :2, 0] = 32                            # левая половина — группа 2
+        mask[:, 2:, 0] = 48                            # правая — группа 3
+        left = ((0.0, 0.0), (0.4, 0.0), (0.0, 0.4))
+        right = ((0.6, 0.0), (1.0, 0.0), (1.0, 0.4))
+        units = valve_units(NS(uv={'m': [left, right, left]}), 'm', mask)
+        self.assertEqual({u.key: u.tris for u in units}, {'g2': [0, 2], 'g3': [1]})
+
+    def test_cut_moves_manual_layout_with_triangles(self):
+        """Разрез сдвигает номера частей — ручная раскладка едет за треугольниками."""
+        from types import SimpleNamespace as NS
+        from src.app.parts_editor import PartsEditor
+        host = NS(preview=NS(paintkit_layouts={'7': {'p1': 3, 'p2': 0, 'i4': 2}}),
+                  _parts_model=lambda material='': (None, 'm', 'card'))
+        # Было: p1 = треугольники 0..3, p2 = 4..5. Разрезали p1 надвое — p2 стала p3.
+        model = NS(parts_of=lambda m: [NS(index=1, triangles=[0, 1]), NS(index=2, triangles=[2, 3]),
+                                       NS(index=3, triangles=[4, 5])])
+        PartsEditor._move_paintkit_layouts(host, model, 'm', {0: 1, 1: 1, 2: 1, 3: 1, 4: 2, 5: 2})
+        self.assertEqual(host.preview.paintkit_layouts['7'], {'p1': 3, 'p2': 3, 'p3': 0, 'i4': 2})

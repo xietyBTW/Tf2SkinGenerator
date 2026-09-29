@@ -8,8 +8,9 @@
  * (paintkit_compositor), страница только выбирает и показывает.
  *
  * У оружия без War Paint в игре список — все War Paint с шаблоном, а узоры
- * раскладываются по деталям модели (paintkit_generic); «Перемешать детали»
- * раздаёт их по-другому.
+ * раскладываются по деталям модели (paintkit_generic). «Перемешать детали»
+ * раздаёт узоры по-другому, «Настроить по деталям» открывает второй экран —
+ * раскладку вручную (warpaint-layout.js); она работает и у своих War Paint.
  */
 
 import * as api from './api.js';
@@ -18,6 +19,8 @@ import { modeControls } from './controls.js';
 import { t } from './i18n.js';
 import { SINGLE_TEX } from './album.js';
 import { refreshView } from './preview.js';
+import { openPartsCut, closeParts } from './parts.js';
+import { openLayout, closeLayout, flushLayout, shuffleLayout } from './warpaint-layout.js';
 
 const button = document.getElementById('warpaint');
 const panel = document.getElementById('warpaintpanel');
@@ -31,6 +34,8 @@ const wearName = q('.wpanel__wearname');
 const seedEl = q('.wpanel__seed');
 const statusEl = q('.wpanel__status');
 const applyBtn = q('.wpanel__apply');
+const partsField = q('.wpanel__parts');
+const returnBtn = document.getElementById('parts-return');
 
 //: Уровни износа War Paint по порядку игры (1…5): полное имя и сокращение.
 const WEARS = [['Прямо с завода', 'FN'], ['Немного поношенное', 'MW'],
@@ -45,7 +50,6 @@ let itemsFor = '';
 //: Выбор живёт между открытиями: перебирают обычно сид и износ.
 let chosen = null;
 let wear = 1;
-let layout = 0;
 //: Номер последнего запроса предпросмотра: ответы на прежние отбрасываются.
 let previewSeq = 0;
 let previewTimer = null;
@@ -60,6 +64,8 @@ export async function refreshWarpaint(weaponKey) {
   items = null;
   itemsFor = weaponKey || '';
   button.hidden = true;
+  // Модель перезагрузили: вьювер снова свой, карты деталей раскладки в нём нет.
+  closeLayout();
   if (!modeControls.warpaint || !weaponKey) return;
   let res;
   try {
@@ -74,12 +80,15 @@ export async function refreshWarpaint(weaponKey) {
   // НОВОГО списка, иначе ушёл бы рецепт прошлой пушки.
   chosen = chosen ? (items.find((k) => k.id === chosen.id) || null) : null;
   applyBtn.disabled = !chosen;
+  syncParts();
   // Пока ждали ответа, режим мог смениться (мод из VPK, другая категория).
   button.hidden = !(modeControls.warpaint && items.length);
 }
 
 /** Новый предмет: панель закрывается, предпросмотр прошлой пушки не нужен. */
 export function hideWarpaint() {
+  returnBtn.hidden = true;
+  closeLayout(true);
   close(false);
   items = null;
   itemsFor = '';
@@ -114,6 +123,7 @@ function close(restore = true) {
   clearTimeout(previewTimer);
   previewSeq++;
   if (panel.hidden) return;
+  closeLayout();
   panel.hidden = true;
   panel.parentElement.classList.remove('is-warpaint');
   button.classList.remove('is-active');
@@ -153,12 +163,19 @@ function renderList() {
     listEl.appendChild(empty);
   }
   applyBtn.disabled = !chosen;
+  syncParts();
+}
+
+/** Детали можно раскладывать, если War Paint разложен по группам шаблоном. */
+function syncParts() {
+  partsField.hidden = !(chosen && (generic || chosen.layered));
 }
 
 function select(kit) {
   chosen = kit;
   for (const r of rows()) r.setAttribute('aria-selected', String(Number(r.dataset.id) === kit.id));
   applyBtn.disabled = false;
+  syncParts();
   renderWears();
   schedulePreview();
 }
@@ -205,7 +222,7 @@ async function runPreview() {
   status('Собираю предпросмотр…');
   let res;
   try {
-    res = await api.previewPaintkit(chosen.id, chosen.item, wear, seedValue(), layout);
+    res = await api.previewPaintkit(chosen.id, chosen.item, wear, seedValue());
   } catch (err) {
     res = { error: err.message };
   }
@@ -229,13 +246,15 @@ async function apply() {
   const seed = seedValue();
   seedEl.value = seed;
   const kit = chosen;
+  // Раскладка по деталям могла ещё не уйти в Python — сборка её не увидела бы.
+  await flushLayout();
   // Предпросмотр остаётся на модели, пока не приедет полная сборка:
   // её покажет событие paintkit_ready.
   close(false);
   say(t('War Paint «{}»: собираю…').replace('{}', kit.name));
   let res;
   try {
-    res = await api.applyPaintkit(kit.id, kit.item, wear, seed, layout);
+    res = await api.applyPaintkit(kit.id, kit.item, wear, seed);
   } catch (err) {
     res = { error: err.message };
   }
@@ -251,9 +270,41 @@ q('.wpanel__close').addEventListener('click', () => close());
 q('.wpanel__cancel').addEventListener('click', () => close());
 applyBtn.addEventListener('click', apply);
 q('.wpanel__dice').addEventListener('click', () => { seedEl.value = randomSeed(); schedulePreview(0); });
-q('.wpanel__shuffle').addEventListener('click', () => {
-  layout = 1 + Math.floor(Math.random() * 1e9);
-  schedulePreview(0);
+//: Ответы экрана раскладки: пересобрать предпросмотр, вернуться, уйти резать.
+const layoutCallbacks = {
+  changed(kit) { if (chosen && kit.id === chosen.id) schedulePreview(0); },
+  back() {
+    closeLayout();
+    status('');
+    listEl.querySelector('[aria-selected="true"]')?.focus({ preventScroll: true });
+  },
+  // Резать уходят в «Части модели» с ножницами, а обратно — кнопкой в кадре
+  // на тот же экран раскладки: номера деталей после разреза уже новые.
+  async cut() {
+    close();
+    if (await openPartsCut()) returnBtn.hidden = false;
+  },
+};
+
+returnBtn.addEventListener('click', async () => {
+  returnBtn.hidden = true;
+  closeParts();
+  await open();
+  if (chosen && !panel.hidden) openLayout(chosen, layoutCallbacks);
+});
+// Части закрыли сами — возвращаться уже неоткуда.
+document.addEventListener('parts:changed', () => {
+  if (document.getElementById('partsbar').hidden) returnBtn.hidden = true;
+});
+
+q('.wpanel__shuffle').addEventListener('click', async () => {
+  if (!chosen) return;
+  status('Перемешиваю детали…');
+  const error = await shuffleLayout(chosen, layoutCallbacks);
+  if (error) status(error);
+});
+q('.wpanel__tune').addEventListener('click', () => {
+  if (chosen) openLayout(chosen, layoutCallbacks);
 });
 seedEl.addEventListener('input', () => schedulePreview(500));
 search.addEventListener('input', renderList);

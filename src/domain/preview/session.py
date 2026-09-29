@@ -187,6 +187,10 @@ class PreviewSession:
     #: групп считаются внутри него: у головы шпиона и у его тела есть своя
     #: «группа 1», и общий словарь резал обе разом.
     part_cuts: Dict[str, Dict[int, List[List[int]]]] = field(default_factory=dict)
+    #: Раскладка War Paint по деталям, заданная вручную: {War Paint: {деталь:
+    #: слой}}. Свойство предмета, как разрезы: номера деталей — его геометрии.
+    #: Деталей, которых здесь нет, раскладывает автомат.
+    paintkit_layouts: Dict[str, Dict[str, int]] = field(default_factory=dict)
 
     # ── Вариантные стили ──────────────────────────────────────────────────── #
     #: Материалы, ЯВНО добавленные пользователем в стиль через «+»: {skin: {mat}}.
@@ -611,6 +615,8 @@ class PreviewSession:
                           for mat, cuts in self.part_cuts.items()},
             'part_regions': {mat: [list(r) for r in regions]
                              for mat, regions in self.part_regions.items() if regions},
+            'paintkit_layouts': {str(kit): {str(k): int(v) for k, v in layout.items()}
+                                 for kit, layout in self.paintkit_layouts.items() if layout},
             'part_tint': float(self.part_tint),
             'part_exact': bool(self.part_exact),
             # Окантовка — настройка кисти на предмет, как сила: без неё
@@ -687,6 +693,9 @@ class PreviewSession:
         self.part_regions = {
             str(mat): [sorted({int(t) for t in r}) for r in (regions or ()) if r]
             for mat, regions in (edits.get('part_regions') or {}).items()}
+        self.paintkit_layouts = {
+            str(kit): {str(k): int(v) for k, v in (layout or {}).items()}
+            for kit, layout in (edits.get('paintkit_layouts') or {}).items()}
         self.part_tint = float(edits.get('part_tint') or 1.0)
         self.part_exact = bool(edits.get('part_exact'))
         self.part_edge = float(edits.get('part_edge') or 0.0)
@@ -719,6 +728,7 @@ class PreviewSession:
         self.part_bases = {}
         self.part_regions = {}
         self.part_cuts = {}
+        self.paintkit_layouts = {}
         self.part_edge = 0.0
         self.part_edge_color = PreviewSession.part_edge_color
         self.reset_custom_model()
@@ -833,6 +843,7 @@ class PreviewSession:
         self.part_bases = {}
         self.part_regions = {}
         self.part_cuts = {}
+        self.paintkit_layouts = {}
         self.part_edge = 0.0
         self.custom_qc_text = None
         # Гирлянда — у каждого оружия своя.
@@ -862,6 +873,7 @@ class PreviewSession:
         self.part_bases = {}
         self.part_regions = {}
         self.part_cuts = {}
+        self.paintkit_layouts = {}
 
     def begin_game_model(self) -> bool:
         """

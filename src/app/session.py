@@ -2115,26 +2115,42 @@ class AppSession:
         if not material or not self.preview.weapon_key:
             return {'error': 'Сначала выберите оружие'}
         own = paintkit_defs.for_model(paths['root'], self._paintkit_model())
-        generic = None
+        assign = self.preview.paintkit_layouts.get(str(int(kit))) or None
+        generic, forced = None, None
         if not any(k['id'] == int(kit) and k['item'] == int(item) for k in own):
             # Своих War Paint у пушки нет: узор ляжет по частям модели, поверх
             # её игровой текстуры своей команды (не поверх прошлой правки —
             # иначе War Paint накладывался бы на War Paint).
+            found = self.parts._parts_model(material)
             generic = {'obj_path': self._obj_path, 'cuts': self.preview.part_cuts,
                        'regions': self.preview.part_regions, 'card': material,
+                       'obj_material': found[1] if isinstance(found, tuple) else '',
                        'base_png': (t.game_base(material, t.active_team)
                                     or t.resolve_base(material) or ''),
-                       'layout_seed': int(layout)}
+                       'layout_seed': int(layout), 'assign': assign}
+        elif assign:
+            # Свой War Paint с раскладкой человека: группы Valve выбираются
+            # заново переменными select.
+            from src.services.paintkit_layout import own_forced, own_groups
+            defs = paintkit_defs.load(paths['root'])
+            kit_obj, item_obj = (paintkit_defs.find_item(defs, kit, item)
+                                 if defs else (None, None))
+            layers, over = (paintkit_defs.template_layers(defs, kit_obj)
+                            if kit_obj else ([], False))
+            found = defs.variables(kit_obj, item_obj, 1) if layers and item_obj else None
+            if found:
+                forced = own_forced(own_groups(found[1], layers, over), assign,
+                                    layers, over) or None
         try:
             obj_mtime = os.path.getmtime(self._obj_path) if self._obj_path else 0
         except OSError:
             obj_mtime = 0
-        stamp = json.dumps([self.preview.weapon_key, material, generic, obj_mtime],
+        stamp = json.dumps([self.preview.weapon_key, material, generic, forced, obj_mtime],
                            sort_keys=True, default=str)
-        return generic, hashlib.sha1(stamp.encode('utf-8')).hexdigest()[:10]
+        return generic, forced, hashlib.sha1(stamp.encode('utf-8')).hexdigest()[:10]
 
     def _paintkit_job_for(self, kit: int, item: int, wear: int, seed: int, size: int,
-                          generic, out: str):
+                          generic, forced, out: str):
         """Воркер War Paint под текущее оружие и команду."""
         from src.services.paintkit_worker import PaintkitWorker
         from src.shared.constants import Team
@@ -2144,7 +2160,8 @@ class AppSession:
         team = 'blue' if t.active_team == Team.BLU else 'red'
         return PaintkitWorker(paths['root'], paths['textures_vpk'], paths['misc_vpk'],
                               kit, item, wear, team, seed, out, size=size,
-                              mdl_path=self._paintkit_model(), generic=generic)
+                              mdl_path=self._paintkit_model(), generic=generic,
+                              forced=forced)
 
     def preview_paintkit(self, kit: int, item: int, wear: int = 1, seed: int = 0,
                          layout: int = 0) -> Dict[str, Any]:
@@ -2160,14 +2177,15 @@ class AppSession:
         plan = self._paintkit_plan(kit, item, layout)
         if isinstance(plan, dict):
             return plan
-        generic, tag = plan
+        generic, forced, tag = plan
         out = os.path.join(self._work_dir(), f'warpaint_prev_{int(kit)}_{int(item)}'
                            f'_w{int(wear)}_{seed}_{int(layout)}_{team}_{tag}.png')
         lock = self.__dict__.setdefault('_paintkit_preview_lock', threading.Lock())
         targets_by_file = self.__dict__.setdefault('_paintkit_prev_targets', {})
         with lock:
             if not os.path.isfile(out) or out not in targets_by_file:
-                w = self._paintkit_job_for(kit, item, wear, seed, 512, generic, out)
+                w = self._paintkit_job_for(kit, item, wear, seed, 512, generic, forced,
+                                           out)
                 ok, message = w.work()
                 if not ok:
                     return {'error': message}
@@ -2203,10 +2221,10 @@ class AppSession:
         plan = self._paintkit_plan(kit, item, layout)
         if isinstance(plan, dict):
             return plan
-        generic, tag = plan
+        generic, forced, tag = plan
         out = os.path.join(self._work_dir(), f'warpaint_{int(kit)}_{int(item)}'
                            f'_w{int(wear)}_{team}_{seed}_{int(layout)}_{size}_{tag}.png')
-        w = self._paintkit_job_for(kit, item, wear, seed, size, generic, out)
+        w = self._paintkit_job_for(kit, item, wear, seed, size, generic, forced, out)
         w.progress.connect(lambda _pct, text: self._put('progress', text=text))
 
         def done(ok: bool, message: str) -> None:
@@ -2233,6 +2251,65 @@ class AppSession:
         self._paintkit_job = w
         w.start()
         return {'started': True, 'team': team}
+
+    def paintkit_layout(self, kit: int, item: int, layout: int = 0) -> Dict[str, Any]:
+        """
+        Раскладка War Paint по деталям для углублённого режима: слои с
+        плитками узоров, детали с их слоем и карта треугольников для вьювера.
+        См. paintkit_layout.describe.
+        """
+        from src.data import paintkit_defs
+        from src.services import paintkit_layout
+        from src.services.game_vpk_reader import GameVpkReader
+        from src.services.paintkit_worker import make_loader
+
+        paths = self.tf2_paths()
+        if 'error' in paths:
+            return paths
+        material = self.preview.textures.stable_main()
+        if not material or not self.preview.weapon_key:
+            return {'error': 'Сначала выберите оружие'}
+        defs = paintkit_defs.load(paths['root'])
+        kit_obj, item_obj = paintkit_defs.find_item(defs, kit, item) if defs else (None, None)
+        if not (kit_obj and item_obj):
+            return {'error': 'Этот War Paint не ложится на это оружие'}
+        found = self.parts._parts_model(material)
+        if isinstance(found, dict):
+            return found
+        model, obj_mat, card = found
+        own = any(k['id'] == int(kit) and k['item'] == int(item)
+                  for k in paintkit_defs.for_model(paths['root'], self._paintkit_model()))
+        reader = GameVpkReader([paths['textures_vpk'], paths['misc_vpk']])
+        try:
+            res = paintkit_layout.describe(
+                defs, kit_obj, item_obj, model, obj_mat, own,
+                make_loader(reader, 512), make_loader(reader, 128),
+                os.path.join(self._work_dir(), 'warpaint_layers'),
+                self.preview.paintkit_layouts.get(str(int(kit))), int(layout))
+        finally:
+            reader.close()
+        if 'error' not in res:
+            res['material'] = card
+        return res
+
+    def set_paintkit_layout(self, kit: int, assign: Optional[Dict[str, int]] = None
+                            ) -> Dict[str, Any]:
+        """Раскладка человека для War Paint ``kit``: {деталь: слой}; пусто — автомат."""
+        clean = {}
+        for k, v in (assign or {}).items():
+            try:
+                layer = int(v)
+            except (TypeError, ValueError):
+                continue
+            if isinstance(k, str) and len(k) < 16 and 0 <= layer < 64:
+                clean[k] = layer
+        if clean:
+            self.preview.paintkit_layouts[str(int(kit))] = clean
+        else:
+            self.preview.paintkit_layouts.pop(str(int(kit)), None)
+        # Раскладка — черновик до «Применить»: шагом отмены она не считается.
+        self._autosave(step=False)
+        return {'ok': True}
 
     def _paintkit_targets(self, paintable: List[str], main: str) -> List[str]:
         """Карточки под War Paint: материалы WeaponSkin среди карточек, иначе главная.

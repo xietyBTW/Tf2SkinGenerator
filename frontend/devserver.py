@@ -281,6 +281,8 @@ ALLOWED = {
     "class_icons": api.class_icons,
     "apply_paintkit": api.apply_paintkit,
     "preview_paintkit": api.preview_paintkit,
+    "paintkit_layout": api.paintkit_layout,
+    "set_paintkit_layout": api.set_paintkit_layout,
 }
 
 

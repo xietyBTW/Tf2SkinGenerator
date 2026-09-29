@@ -816,9 +816,32 @@ class PartsEditor:
                      if part_specs.parse_slot(k)[0] == card]
             for slot in slots:
                 self._move_parts(model, obj_mat, slot, owner, boxes)
-            jobs = [self._plan(model, obj_mat, card, style, team)
+            self._move_paintkit_layouts(model, obj_mat, owner)
+            jobs =[self._plan(model, obj_mat, card, style, team)
                     for _, style, team in map(part_specs.parse_slot, slots)]
         return self._commit(jobs)
+
+    def _move_paintkit_layouts(self, model: Any, obj_mat: str, owner: Dict[int, int]) -> None:
+        """Раскладка War Paint держится за номера частей (``p3``) — переносим
+        её так же, по треугольникам. Только у главного материала: War Paint
+        раскладывается по нему, у соседнего номера частей свои."""
+        from collections import Counter
+
+        if not self.preview.paintkit_layouts:
+            return
+        main = self._parts_model('')
+        if not isinstance(main, tuple) or main[1] != obj_mat:
+            return
+        heir = {}
+        for part in model.parts_of(obj_mat):
+            votes = Counter(owner.get(tri) for tri in part.triangles)
+            votes.pop(None, None)
+            if votes:
+                heir[f'p{part.index}'] = f'p{votes.most_common(1)[0][0]}'
+        for kit, layout in list(self.preview.paintkit_layouts.items()):
+            moved = {k: v for k, v in layout.items() if not k.startswith('p')}
+            moved.update({new: layout[old] for new, old in heir.items() if old in layout})
+            self.preview.paintkit_layouts[kit] = moved
 
     def _move_parts(self, model: Any, obj_mat: str, slot: str,
                     owner: Dict[int, int], boxes: Dict[int, list]) -> None:

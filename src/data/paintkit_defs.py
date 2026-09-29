@@ -249,18 +249,10 @@ class PaintKitDefs:
         merged.update({k: v for k, (v, _inh) in item_def.header.variables.items()})
         return merged
 
-    def recipe(self, kit: PaintKit, item: KitItem, wear: int,
-               forced: Optional[Dict[str, str]] = None,
-               strip_stickers: bool = False) -> Optional[dict]:
-        """
-        Дерево операций War Paint на пушке при износе ``wear`` (1…5) с
-        подставленными значениями переменных. None — рецепта нет.
-
-        ``forced`` — значения поверх всего, без оглядки на inherit: так
-        универсальный режим подменяет входы пушки своими (альбедо, группы…).
-        ``strip_stickers`` — наклейки убираются (их место задано в развёртке
-        пушки-донора, на чужой модели оно ничего не значит).
-        """
+    def variables(self, kit: PaintKit, item: KitItem,
+                  wear: int) -> Optional[Tuple[int, Dict[str, str]]]:
+        """(операция, значения переменных) War Paint на пушке при износе
+        ``wear`` — то, что рецепт подставляет в узлы. None — рецепта нет."""
         item_def = self.item_defs.get(item.item_def)
         if item_def is None or not item_def.wears:
             return None
@@ -289,7 +281,24 @@ class PaintKitDefs:
         for name, value in wear_vars:
             override(name, value)
 
-        resolved = {k: v for k, (v, _inh) in values.items()}
+        return op_id, {k: v for k, (v, _inh) in values.items()}
+
+    def recipe(self, kit: PaintKit, item: KitItem, wear: int,
+               forced: Optional[Dict[str, str]] = None,
+               strip_stickers: bool = False) -> Optional[dict]:
+        """
+        Дерево операций War Paint на пушке при износе ``wear`` (1…5) с
+        подставленными значениями переменных. None — рецепта нет.
+
+        ``forced`` — значения поверх всего, без оглядки на inherit: так
+        универсальный режим подменяет входы пушки своими (альбедо, группы…).
+        ``strip_stickers`` — наклейки убираются (их место задано в развёртке
+        пушки-донора, на чужой модели оно ничего не значит).
+        """
+        found = self.variables(kit, item, wear)
+        if found is None:
+            return None
+        op_id, resolved = found
         resolved.update(forced or {})
         roots = self._nodes(self.operations[op_id], 2, resolved, depth=0)
         if strip_stickers:
@@ -513,7 +522,11 @@ def for_model(tf2_root: str, model: str, lang: str = 'ru') -> List[dict]:
                         'name': kit_name(tf2_root, kit, lang),
                         'item': item.item_def,
                         'wears': len(item_def.wears),
-                        'team': kit.has_team_textures})
+                        'team': kit.has_team_textures,
+                        # Шаблонный War Paint раскладывается по группам —
+                        # раскладку можно переделать; ручной (рецепт под одну
+                        # пушку) — нет.
+                        'layered': bool(template_layers(defs, kit)[0])})
             break
     out.sort(key=lambda k: k['name'].lower())
     return out

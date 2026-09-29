@@ -133,7 +133,8 @@ class PaintkitWorker(StandardWorker):
     def __init__(self, tf2_root: str, textures_vpk: str, misc_vpk: str,
                  kit_id: int, item_def: int, wear: int, team: str, seed: int,
                  out_path: str, size: int = 1024, mdl_path: str = '',
-                 generic: Optional[dict] = None, parent=None):
+                 generic: Optional[dict] = None, forced: Optional[dict] = None,
+                 parent=None):
         super().__init__(parent)
         self.tf2_root = tf2_root
         self.vpks = [textures_vpk, misc_vpk]
@@ -146,6 +147,8 @@ class PaintkitWorker(StandardWorker):
         #: Универсальный режим (у оружия нет War Paint в игре): {obj_path,
         #: cuts, regions, card, base_png, layout_seed} — см. paintkit_generic.
         self.generic = generic
+        #: Переменные рецепта поверх War Paint (раскладка групп человеком).
+        self.forced = forced or None
         #: Материалы, на которые игра кладёт War Paint (см. paintable_materials).
         self.materials: list = []
         #: Текстуры рецепта, которых в игре не нашлось (для подсказки человеку).
@@ -174,7 +177,7 @@ class PaintkitWorker(StandardWorker):
             recipe = defs.recipe(kit, item, self.wear, forced=inputs.forced,
                                  strip_stickers=True)
         else:
-            recipe = defs.recipe(kit, item, self.wear)
+            recipe = defs.recipe(kit, item, self.wear, forced=self.forced)
         if recipe is None:
             return False, 'Этот War Paint не ложится на это оружие'
 
@@ -219,7 +222,7 @@ class PaintkitWorker(StandardWorker):
         model = mesh_parts_service.load(g.get('obj_path', ''), g.get('cuts'), g.get('regions'))
         if model is None or not model.materials:
             return None
-        card = g.get('card', '')
+        card = g.get('obj_material') or g.get('card', '')
         # Карточка одноматериальной модели зовётся служебным ключом, а в OBJ
         # материал назван по SMD — берём единственный или самый большой.
         if card in model.materials:
@@ -233,4 +236,4 @@ class PaintkitWorker(StandardWorker):
             base = np.full((self.size, self.size, 4), 160, np.uint8)
         layers, over_albedo = paintkit_defs.template_layers(defs, kit)
         return build_inputs(model, material, base, self.size, layers, over_albedo,
-                            int(g.get('layout_seed') or 0))
+                            int(g.get('layout_seed') or 0), g.get('assign'))

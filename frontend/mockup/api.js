@@ -345,6 +345,10 @@ export const applyPaintkit = (kit, item, wear, seed, layout = 0) =>
   call('apply_paintkit', { kit, item, wear, seed: String(seed), layout });
 export const previewPaintkit = (kit, item, wear, seed, layout = 0) =>
   call('preview_paintkit', { kit, item, wear, seed: String(seed), layout });
+export const paintkitLayout = (kit, item, layout = 0) =>
+  call('paintkit_layout', { kit, item, layout });
+export const setPaintkitLayout = (kit, assign) =>
+  call('set_paintkit_layout', { kit, assign });
 
 /** Кладёт файл во временную папку и возвращает его путь на диске. */
 export async function upload(file) {

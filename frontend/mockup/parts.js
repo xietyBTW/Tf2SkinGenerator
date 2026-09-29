@@ -502,6 +502,13 @@ export function closeParts() {
   document.dispatchEvent(new Event('parts:changed'));
 }
 
+/** Открывает части сразу с ножницами — для «Разрезать деталь» в War Paint. */
+export async function openPartsCut() {
+  const res = await loadParts();
+  if (res) showToolGroup('cut');
+  return res;
+}
+
 /** Полоса частей: крупные первыми, покрашенные помечены. */
 export function showParts(res) {
   const bar = document.getElementById('partsbar');
