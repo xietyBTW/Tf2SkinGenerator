@@ -59,7 +59,9 @@ function lookup(text, map, rules) {
     const m = rx.exec(text);
     if (!m) continue;
     let i = 1;
-    return out.replace(/\{\}/g, () => m[i++] ?? '');
+    // Подстановка сама бывает сообщением: «Гирлянда x не собралась: {}» несёт
+    // причину из Python. Имя файла словарь не найдёт и вернёт как есть.
+    return out.replace(/\{\}/g, () => lookup(m[i++] ?? '', map, rules));
   }
   // Счётчики: «235 предметов», «12 систем». В словаре лежит слово — оно
   // склоняется по числу, и заводить шаблон на каждую форму незачем.
@@ -67,6 +69,17 @@ function lookup(text, map, rules) {
   if (counted) {
     const word = map.get(counted[2]);
     if (word !== undefined) return text.replace(trimmed, counted[1] + ' ' + word);
+  }
+  // Многострочное сообщение, собранное из строк (итог сборки со списком
+  // предупреждений, ошибка VPK с подробностями): целиком его в словаре нет и
+  // быть не может, зато есть каждая строка. Маркер списка остаётся на месте.
+  if (text.includes('\n')) {
+    const lines = text.split('\n').map((line) => {
+      const [, mark, rest] = /^(\s*(?:[-•]\s+)?)(.*)$/s.exec(line);
+      return rest.includes('\n') ? line : mark + lookup(rest, map, rules);
+    });
+    const joined = lines.join('\n');
+    if (joined !== text) return joined;
   }
   return text;
 }

@@ -1395,8 +1395,8 @@ class ParticlesEditor:
             'overflow': self.pcf.casual_size_overflow(),
         }
 
-    def particle_param_reference(self, path: str = '',
-                                 for_ai: bool = False) -> Dict[str, Any]:
+    def particle_param_reference(self, path: str = '', for_ai: bool = False,
+                                 lang: str = 'en') -> Dict[str, Any]:
         """
         Справочник параметров модулей в JSON.
 
@@ -1415,7 +1415,7 @@ class ParticlesEditor:
                      if self.pcf is not None else None)
         try:
             data = ParticleEditorService.param_reference(
-                root, with_prompt=bool(for_ai), materials=materials)
+                root, with_prompt=bool(for_ai), materials=materials, lang=lang)
             dest = Path(path or 'export/particle_params.json')
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_text(json.dumps(data, ensure_ascii=False, indent=2),

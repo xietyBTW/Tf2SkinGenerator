@@ -44,6 +44,24 @@ class DecompileCacheTests(unittest.TestCase):
         cached = dc.get_cached_decompile("c_test", str(vpk), "models/c_test.mdl")
         self.assertEqual(cached, saved)
 
+    def test_reader_during_save_does_not_break_it(self):
+        """Читатель без замка посреди копирования не должен стирать запись."""
+        vpk = _make_vpk(self.base)
+        decomp = _make_decompile_dir(self.base)
+        real_copytree = dc.shutil.copytree
+
+        def copy_then_read(src, dst, *a, **kw):
+            out = real_copytree(src, dst, *a, **kw)
+            # Сосед заглянул в кэш, пока метаданных ещё нет.
+            self.assertIsNone(dc.get_cached_decompile("c_test", str(vpk), "models/c_test.mdl"))
+            return out
+
+        with patch.object(dc.shutil, "copytree", copy_then_read):
+            saved = dc.save_to_cache("c_test", str(vpk), "models/c_test.mdl", str(decomp))
+        self.assertIsNotNone(saved)
+        self.assertEqual(dc.get_cached_decompile("c_test", str(vpk), "models/c_test.mdl"), saved)
+        self.assertEqual([p.name for p in self.cache_dir.iterdir()], [Path(saved).name])
+
     def test_miss_for_unknown_weapon(self):
         vpk = _make_vpk(self.base)
         self.assertIsNone(dc.get_cached_decompile("c_unknown", str(vpk), "models/c_unknown.mdl"))

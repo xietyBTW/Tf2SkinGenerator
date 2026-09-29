@@ -21,21 +21,22 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 MOCKUP = ROOT / "frontend" / "mockup"
 
-#: Сообщения Python, которые доходят до человека подписью на странице.
-PY_SOURCES = ("src/app/api.py", "src/app/session.py", "src/app/parts_editor.py",
-              "src/app/particles_editor.py",
-              "src/services/build_worker.py",
-              # Почему War Paint не раскладывается по деталям — экран раскладки.
-              "src/services/paintkit_layout.py",
-              # Ошибки импорта OBJ/GLB приходят человеку текстом как есть.
-              "src/services/mesh_import_service.py",
-              # Подписи разделов и событий каталога звуков: их видит человек,
-              # а живут они у данных — страница только раскладывает.
-              "src/data/sound_catalog.py",
-              # Категории необычных эффектов и виды источников — те же
-              # подписи каталога.
-              "src/data/unusual_effects.py",
-              "src/data/particle_sources.py")
+#: Сообщения Python, которые доходят до человека подписью на странице:
+#: ответы API, прогресс и ошибки воркеров, отказы сборки. Слой целиком, а не
+#: список файлов: список отставал — прогресс извлечения и ошибки VPK
+#: оставались русскими у выбравшего English.
+PY_DIRS = ("src/app", "src/services", "src/shared")
+PY_SOURCES = (
+    # Подписи разделов и событий каталога звуков: их видит человек,
+    # а живут они у данных — страница только раскладывает.
+    "src/data/sound_catalog.py",
+    # Категории необычных эффектов и виды источников — те же
+    # подписи каталога.
+    "src/data/unusual_effects.py",
+    "src/data/particle_sources.py")
+#: Модули, которые сами отвечают на двух языках (пары ru/en в кортежах):
+#: их русские строки до английского экрана не доходят.
+PY_LANG_AWARE = {"error_classifier.py", "vmt_tint.py"}
 
 CYRILLIC = re.compile("[А-яЁё]")
 LITERAL = re.compile(r"'([^'\n]*)'|\"([^\"\n]*)\"|`((?:[^`\\]|\\.)*)`", re.S)
@@ -51,45 +52,18 @@ NOT_SHOWN = {
     "е",
     # Имя языка пишется на нём самом.
     "Русский",
-    # Записи в лог-файл (logger), а не подписи на странице.
-    "api.items: категория {} ещё не подключена",
-    "не прочитать OBJ для габаритов: {}",
-    "анимация частей: {} — {}",
-    "каталог шапок для списка моделей не прочитан: {}",
-    "каталог оружия для списка моделей не прочитан: {}",
-    "режим без модели: {}",
-    "мод из VPK: {}",
-    "гирлянда не собралась: {}/{}: {}",
-    "своя модель: {} keep={} материалов={}",
-    "призрак оригинала не показан: модель ещё не разобрана",
-    "своя модель из работы не показана: {}",
-    "копия для отмены не сделана: {}",
-    "подгонка после отмены не запеклась: {}",
-    "у модели нет UV-развёртки: {}",
-    "импорт модели: {} треугольников, {} матер. → {}",
-    "упрощение: {} → {} треугольников",
-    "текстура glTF не извлечена ({}): {}",
-    "черновиков удалено: {}",
-    "работа сохранена: {}",
-    "работа предмета возвращена: {}",
-    "Получена доп. текстура: {}",
-    "Получена доп. модель: {}",
-    "Решение пользователя по несовпадению текстур: {} → continue={}",
-    "[звук] сборка не удалась: {}",
-    "[звук] собрано: {}",
-    "[звук] сохранено из игры: {} в {}",
-    "[звук] не достали {}",
-    "прогрев архивов не удался: {}",
-    "[звук] записей: {} {}, ",
-    "с предметом: {}",
-    "api.set_ui_state: неизвестный ключ {}",
-    "Автопоиск TF2: найдено {}",
     # Отказ `set_ui_state`: ключи в него подставляет наш же код, и чужой
     # означает ошибку в странице, а не действие человека — на экран он не
     # попадает, его читает разработчик в журнале обмена.
     "неизвестная настройка: {}",
     # Регулярное выражение, а не подпись.
     "[^0-9a-zA-Zа-яёА-ЯЁ]+",
+    # Метка и причины, которые уходят только в журнал (переменной, мимо
+    # прямого вызова logger — поэтому их не отсеять по вызову).
+    "[SKIN BUILD] вариант",
+    "вторая строка скинов — стиль, а не пара команды",
+    "нет материалов меша для команды (меш={})",
+    "(портативно, в {})",
 }
 
 #: Файлы, где русские строки — это сам словарь и его разбор.
@@ -155,14 +129,89 @@ def _visible_strings() -> dict:
             else:
                 add(literal)
 
-    for name in PY_SOURCES:
-        source = Path(name).name
-        src = io.open(ROOT / name, encoding="utf-8").read()
-        src = re.sub(r'"""(?:.|\n)*?"""', "", src)
-        src = re.sub(r"(?m)^\s*#.*$", "", src)
-        for one, two, three in LITERAL.findall(src):
-            add(one or two or three)
+    files = [ROOT / name for name in PY_SOURCES]
+    for folder in PY_DIRS:
+        files += sorted((ROOT / folder).rglob("*.py"))
+    for path in files:
+        if path.name in PY_LANG_AWARE:
+            continue
+        source = path.name
+        for text in _python_shown(path):
+            add(text)
     return found
+
+
+_LOG_LEVELS = {"debug", "info", "warning", "error", "critical", "exception"}
+
+
+def _py_text(node):
+    """Строка из литерала: у f-строки на месте подстановок `{}`."""
+    import ast
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.JoinedStr):
+        return "".join(str(v.value) if isinstance(v, ast.Constant) else "{}"
+                       for v in node.values)
+    return None
+
+
+def _ru_test(test):
+    """Русская ли ветка у условия: `x == 'ru'` → body (True), `x == 'en'` →
+    orelse (False); не про язык — None."""
+    import ast
+    if isinstance(test, ast.Name) and test.id in ("is_ru", "ru"):
+        return True
+    if isinstance(test, ast.Compare) and len(test.ops) == 1:
+        lang = _py_text(test.comparators[0])
+        if lang in ("ru", "en") and isinstance(test.ops[0], (ast.Eq, ast.NotEq)):
+            return (lang == "ru") == isinstance(test.ops[0], ast.Eq)
+    return None
+
+
+def _python_shown(path: Path) -> list:
+    """
+    Строки модуля, которые могут дойти до экрана.
+
+    Не в счёт: докстринги, записи в журнал (их политика — в
+    `_logger_messages`) и русская половина пар `{'ru': …, 'en': …}` —
+    английская у такой пары уже есть.
+    """
+    import ast
+    tree = ast.parse(path.read_text(encoding="utf-8-sig"))
+    skip = set()
+
+    def drop(node):
+        skip.update(id(n) for n in ast.walk(node))
+
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and node.func.attr in _LOG_LEVELS):
+            drop(node)
+        elif (isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef,
+                                ast.AsyncFunctionDef))
+              and node.body and isinstance(node.body[0], ast.Expr)
+              and isinstance(node.body[0].value, ast.Constant)):
+            drop(node.body[0])
+        elif isinstance(node, ast.Dict):
+            pairs = {_py_text(k): v for k, v in zip(node.keys, node.values) if k}
+            if "ru" in pairs and "en" in pairs:
+                drop(pairs["ru"])
+        elif isinstance(node, (ast.If, ast.IfExp)) and _ru_test(node.test) is not None:
+            # `… if lang == 'ru' else …`: русская ветка идёт только русским.
+            ru_branch = node.body if _ru_test(node.test) else node.orelse
+            for part in (ru_branch if isinstance(ru_branch, list) else [ru_branch]):
+                drop(part)
+    out = []
+    for node in ast.walk(tree):
+        if id(node) in skip:
+            continue
+        text = _py_text(node)
+        if text is None:
+            continue
+        if isinstance(node, ast.JoinedStr):
+            drop(node)                  # куски f-строки — не отдельные подписи
+        out.append(text)
+    return out
 
 
 def _dictionary_keys() -> set:

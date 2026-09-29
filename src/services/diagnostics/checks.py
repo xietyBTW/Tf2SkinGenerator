@@ -49,7 +49,7 @@ def check_vmt_syntax(mod: InspectedMod, lang: str = "en") -> List[Finding]:
 
     out: List[Finding] = []
     for vmt in mod.vmts:
-        ok, msg, line = VMTService.validate_vmt_syntax(vmt.content)
+        ok, msg, line = VMTService.validate_vmt_syntax(vmt.content, lang)
         if not ok:
             loc = (f" (строка {line})" if lang == "ru" else f" (line {line})") if line else ""
             out.append(_finding(Severity.ERROR, "vmt.syntax", lang,

@@ -16,6 +16,29 @@ def _live_param(name: str) -> "re.Pattern":
                       re.IGNORECASE | re.MULTILINE)
 
 
+#: Ошибки синтаксиса VMT. Текст встраивается в чужие фразы (находка
+#: диагностики, «… (строка N)» редактора), поэтому переводится здесь, а не на
+#: странице: целиком такую фразу словарь страницы не узнал бы.
+_SYNTAX_ERRORS = {
+    "ru": {
+        "quote": "Незакрытая кавычка",
+        "extra": "Лишняя закрывающая скобка }",
+        "open": "Незакрытая скобка {",
+        "empty": "Пустой VMT",
+        "block": "Нет блока { } — VMT должен содержать тело шейдера",
+        "shader": 'Не найдено имя шейдера (напр. "VertexLitGeneric")',
+    },
+    "en": {
+        "quote": "Unclosed quote",
+        "extra": "Extra closing brace }",
+        "open": "Unclosed brace {",
+        "empty": "Empty VMT",
+        "block": "No { } block: a VMT must contain a shader body",
+        "shader": 'Shader name not found (e.g. "VertexLitGeneric")',
+    },
+}
+
+
 class VMTService:
     """Сервис для работы с VMT файлами (материалы Source Engine: пути и шаблоны)"""
 
@@ -35,7 +58,7 @@ class VMTService:
     # ── Валидация синтаксиса ─────────────────────────────────────────────── #
 
     @staticmethod
-    def validate_vmt_syntax(content: str) -> Tuple[bool, str, int]:
+    def validate_vmt_syntax(content: str, lang: str = "ru") -> Tuple[bool, str, int]:
         """
         Проверяет базовый KeyValues-синтаксис VMT.
 
@@ -51,6 +74,7 @@ class VMTService:
             (is_valid, error_message, error_line)
             error_line — номер строки (1-based) или 0, если не привязано к строке.
         """
+        msg = _SYNTAX_ERRORS.get(lang, _SYNTAX_ERRORS["en"])
         depth = 0
         saw_shader = False
         saw_any_brace = False
@@ -75,7 +99,7 @@ class VMTService:
 
             # Нечётное число кавычек в строке → незакрытая строка
             if line.count('"') % 2 != 0:
-                return False, "Незакрытая кавычка", line_no
+                return False, msg["quote"], line_no
 
             # Убираем строковые значения, чтобы скобки внутри них не считались
             structural = re.sub(r'"[^"]*"', '', line)
@@ -91,16 +115,16 @@ class VMTService:
                 elif ch == '}':
                     depth -= 1
                     if depth < 0:
-                        return False, "Лишняя закрывающая скобка }", line_no
+                        return False, msg["extra"], line_no
 
         if depth > 0:
-            return False, "Незакрытая скобка {", 0
+            return False, msg["open"], 0
         if not content.strip():
-            return False, "Пустой VMT", 0
+            return False, msg["empty"], 0
         if not saw_any_brace:
-            return False, "Нет блока { } — VMT должен содержать тело шейдера", 0
+            return False, msg["block"], 0
         if not saw_shader:
-            return False, "Не найдено имя шейдера (напр. \"VertexLitGeneric\")", 0
+            return False, msg["shader"], 0
 
         return True, "", 0
 

@@ -16,6 +16,7 @@ import json
 import os
 import shutil
 import threading
+import uuid
 from pathlib import Path
 from typing import Optional
 
@@ -184,6 +185,7 @@ def save_to_cache(
 
 def _save_to_cache(weapon_key: str, vpk_path: str, mdl_rel_path: str,
                    decompile_dir: str) -> Optional[str]:
+    staging: Optional[Path] = None
     try:
         ready = get_cached_decompile(weapon_key, vpk_path, mdl_rel_path)
         if ready:
@@ -194,10 +196,12 @@ def _save_to_cache(weapon_key: str, vpk_path: str, mdl_rel_path: str,
 
         _purge_stale_entries(weapon_key, mdl_rel_path, keep_key=key)
 
-        if entry_dir.exists():
-            shutil.rmtree(entry_dir)
-
-        shutil.copytree(decompile_dir, entry_dir)
+        # Запись собирается рядом и встаёт под свой ключ одним переименованием.
+        # Читатель (get_cached_decompile) идёт без замка: застав папку посреди
+        # copytree ещё без метаданных, он считал её битой и стирал — копия
+        # падала с WinError 3.
+        staging = entry_dir.with_name(f"{key}.tmp-{uuid.uuid4().hex[:8]}")
+        shutil.copytree(decompile_dir, staging)
 
         # Имя QC
         qc_name = None
@@ -214,8 +218,11 @@ def _save_to_cache(weapon_key: str, vpk_path: str, mdl_rel_path: str,
             "vpk_mtime": _vpk_mtime(vpk_path),
             "qc_filename": qc_name,
         }
-        with open(_meta_path(entry_dir), "w", encoding="utf-8") as f:
+        with open(_meta_path(staging), "w", encoding="utf-8") as f:
             json.dump(meta, f, indent=2)
+        if entry_dir.exists():
+            shutil.rmtree(entry_dir)
+        os.rename(staging, entry_dir)
 
         logger.info(f"✓ Кэш декомпила сохранён: {weapon_key}")
 
@@ -225,6 +232,8 @@ def _save_to_cache(weapon_key: str, vpk_path: str, mdl_rel_path: str,
 
     except Exception as e:
         logger.warning(f"Не удалось сохранить кэш декомпила: {e}")
+        if staging is not None:
+            shutil.rmtree(staging, ignore_errors=True)
         return None
 
 

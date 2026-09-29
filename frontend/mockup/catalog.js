@@ -575,7 +575,12 @@ export async function pickSection(name) {
   sel.section = ['hats', 'particles', 'sounds'].includes(name)
     ? name : 'weapons';
   root.dataset.section = sel.section;
-  if (было !== sel.section) freshenStage();
+  if (было !== sel.section) {
+    freshenStage();
+    // Подпись прошлого предмета — сразу, до ожиданий ниже: по ней тур
+    // раздела решает «предмет уже выбран» и не ждал бы выбора.
+    document.querySelector('.title__meta').textContent = '';
+  }
 
   // Звуки — раздел без предмета: ни модели, ни текстур, ни каталога. Стол он
   // занимает целиком, поэтому остальную настройку разделов не проходит.

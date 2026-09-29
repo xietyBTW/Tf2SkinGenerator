@@ -225,7 +225,8 @@ def _extract_from_qc(qc_path: str, tf2_root_dir: str,
 
 
 def save_edit(edit_key: str, content: str,
-              original: Optional[str] = None) -> Tuple[bool, str, str]:
+              original: Optional[str] = None,
+              lang: str = 'ru') -> Tuple[bool, str, str]:
     """
     Сохраняет правку VMT.
 
@@ -241,9 +242,11 @@ def save_edit(edit_key: str, content: str,
     from src.services.edited_vmt_service import EditedVMTService
     from src.services.vmt_service import VMTService
 
-    valid, error, line = VMTService.validate_vmt_syntax(content)
+    valid, error, line = VMTService.validate_vmt_syntax(content, lang)
     if not valid:
-        return False, (f'{error} (строка {line})' if line else error), content
+        if line:
+            error += f' (строка {line})' if lang == 'ru' else f' (line {line})'
+        return False, error, content
 
     if WATERMARK.strip() not in content:
         content = content.rstrip() + '\n' + WATERMARK + '\n'

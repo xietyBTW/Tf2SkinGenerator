@@ -1529,22 +1529,25 @@ def set_settings(values: Optional[Dict[str, object]] = None,
     from src.data.material_filter import parse_blacklist
 
     lang = _lang(lang)
-    cfg = AppConfig.load_config()
-    for key, value in (values or {}).items():
-        if key not in _SETTINGS_KEYS:
-            continue
-        if key == 'material_blacklist':
-            cfg[key] = (parse_blacklist(value) if isinstance(value, str)
-                        else list(value or []))
-        elif key == 'export_folder':
-            cfg[key] = str(value or '').strip() or 'export'
-        elif key in ('particles_group_tree', 'keep_temp_files', 'debug_mode',
-                     'save_edits', 'panels_pinned', 'advanced_vtf_flags',
-                     'parts_animation', 'ui_animations'):
-            cfg[key] = bool(value)
-        else:
-            cfg[key] = str(value or '').strip()
-    AppConfig.save_config(cfg)
+    # Под замком конфига: set_ui_state из другого потока между чтением и
+    # записью потерялся бы.
+    with AppConfig.lock:
+        cfg = AppConfig.load_config()
+        for key, value in (values or {}).items():
+            if key not in _SETTINGS_KEYS:
+                continue
+            if key == 'material_blacklist':
+                cfg[key] = (parse_blacklist(value) if isinstance(value, str)
+                            else list(value or []))
+            elif key == 'export_folder':
+                cfg[key] = str(value or '').strip() or 'export'
+            elif key in ('particles_group_tree', 'keep_temp_files', 'debug_mode',
+                         'save_edits', 'panels_pinned', 'advanced_vtf_flags',
+                         'parts_animation', 'ui_animations'):
+                cfg[key] = bool(value)
+            else:
+                cfg[key] = str(value or '').strip()
+        AppConfig.save_config(cfg)
     # «Режим отладки» теперь и правда включает DEBUG. Раньше галка управляла
     # только сохранением временных папок сборки, а уровень был зашит в main.py
     # как INFO — все logger.debug молчали при любом её положении.
@@ -1679,7 +1682,7 @@ def save_vmt(material: str = '', content: str = '',
              original: str = '') -> Dict[str, object]:
     """Сохраняет правку VMT."""
     from src.app.session import session
-    return session().save_vmt(material, content, original)
+    return session().save_vmt(material, content, original, _lang())
 
 
 def reset_vmt(material: str = '') -> Dict[str, object]:
@@ -2065,7 +2068,7 @@ def export_particles_vpk(name: str = 'particles_mod.vpk',
 def particle_param_reference(path: str = '',
                              for_ai: bool = False) -> Dict[str, object]:
     from src.app.session import session
-    return session().particles.particle_param_reference(path, for_ai)
+    return session().particles.particle_param_reference(path, for_ai, _lang())
 
 
 def set_particle_param(system: str, key: str, value) -> Dict[str, object]:

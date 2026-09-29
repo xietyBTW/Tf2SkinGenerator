@@ -894,7 +894,6 @@ export const EN = {
     'Open the module in expert mode — the parameter is added to it',
   'Все известные параметры уже заданы': 'Every known parameter is already set',
   'Поиск': 'Search',
-  'руки': 'hands',
   'Игроки': 'Players',
   'корень': 'root',
   'Классы': 'Classes',
@@ -1272,24 +1271,72 @@ export const EN = {
     'The same, but exact.',
   'Закончить подгонку.':
     'Finish fitting.',
-  'Всё как с оружием. Если у шапки несколько стилей, каждый можно раскрасить отдельно.':
-    'Same as weapons. If the hat has several styles, each can be painted separately.',
+  'Выберите шапку. Фильтр «Куда» сужает список: голова, лицо, тело.':
+    'Pick a hat. The "Where" filter narrows the list: head, face, body.',
+  'Всё как с оружием: перетащите картинку на текстуру.':
+    'Same as weapons: drag an image onto the texture.',
+  'Стили':
+    'Styles',
+  'У шапки несколько стилей. Каждый можно раскрасить отдельно.':
+    'This hat has several styles. Each can be painted separately.',
   'Показывает, как шапка будет выглядеть с краской из игры.':
     'Shows how the hat will look with in-game paint.',
+  'Если шапку носят несколько классов, при сборке спрошу, для каких.':
+    "If several classes wear the hat, I'll ask which ones when you build.",
   'Эффекты':
     'Effects',
-  'Выберите эффект, который хотите изменить.':
-    'Pick the effect you want to change.',
-  'Настройка':
-    'Tuning',
-  'Цвет, размер, скорость. Правая кнопка мыши — больше действий.':
-    'Color, size, speed. Right-click for more actions.',
+  'Выберите эффект. Необычные эффекты подписаны именами из игры, поиск находит и по имени системы.':
+    'Pick an effect. Unusual effects carry their in-game names; search also finds system names.',
+  'Эффект играет так же, как в игре. Мышью можно крутить.':
+    'The effect plays just like in game. Rotate it with the mouse.',
+  'Обычный режим':
+    'Simple mode',
+  'Главное: цвет, размер, скорость, время жизни. Правки сразу видно в кадре.':
+    'The essentials: color, size, speed, lifetime. Changes show up right away.',
+  'Все модули и параметры файла как есть. Нажмите, чтобы посмотреть.':
+    'Every module and parameter of the file as is. Click to take a look.',
+  'Параметров бывает под две сотни. Наберите часть имени, например radius.':
+    'A system can have around two hundred parameters. Type part of a name, like radius.',
+  'Новый параметр':
+    'New parameter',
+  'Щёлкните правой кнопкой по названию модуля и выберите «Добавить параметр…». В списке только то, чего в модуле ещё нет, а значение подставится как в игре.':
+    'Right-click a module name and choose "Add a parameter…". The list only has what the module lacks, and the value comes in as the game uses it.',
+  'Новый модуль':
+    'New module',
+  'Модуль — это целое поведение: вращение, цвет по времени, сила. Правая кнопка по заголовку группы — «Добавить модуль…».':
+    'A module is a whole behavior: rotation, color over time, a force. Right-click a group header and choose "Add a module…".',
+  'Правка':
+    'Editing',
+  'Правая кнопка по параметру — удалить или вернуть как в игре. Изменённое подсвечено.':
+    'Right-click a parameter to delete it or revert to the game. Changes are highlighted.',
+  'Системы':
+    'Systems',
+  'Эффект собран из систем. Правая кнопка по системе — переименовать, дублировать, добавить дочернюю.':
+    'An effect is made of systems. Right-click a system to rename, duplicate or add a child.',
+  'Текстуры':
+    'Textures',
+  'Текстуры эффекта. Перетащите картинку, чтобы заменить.':
+    "The effect's textures. Drag an image onto one to replace it.",
   'Просмотр':
     'Playback',
-  'Перезапуск, пауза и замедление.':
-    'Restart, pause and slow motion.',
+  'Перезапуск, пауза и замедление. Ctrl+Z отменяет правку.':
+    'Restart, pause and slow motion. Ctrl+Z undoes an edit.',
+  'Контрольные точки: откуда эффект растёт и как движется. Можно повесить его на модель.':
+    'Control points: where the effect starts and how it moves. You can attach it to a model.',
   'Соберите эффект в мод.':
     'Build the effect into a mod.',
+  'Раскраска из игры, собранная в текстуру. Поверх можно дорисовать своё.':
+    'An in-game paint baked into a texture. You can paint over it.',
+  'Выберите раскраску, она сразу ляжет на модель.':
+    'Pick a paint and it goes straight onto the model.',
+  'Износ и сид':
+    'Wear and seed',
+  'Как в игре. Сид решает, как узор ляжет на оружие.':
+    'Same as in game. The seed decides how the pattern lands on the weapon.',
+  'Узоры разложены по деталям модели. Их можно перемешать или раздать вручную.':
+    "Patterns are spread over the model's parts. Shuffle them or assign by hand.",
+  'Раскраска станет обычной текстурой. Поверх неё можно дорисовать своё.':
+    'The paint becomes a regular texture. You can paint over it.',
   'Выберите, что заменить: оружие, голоса или звуки мира.':
     'Choose what to replace: weapons, voices or world sounds.',
   'Фильтры':
@@ -1401,4 +1448,93 @@ export const EN = {
   'Узор у команд разный — собирается под текущую команду': 'The pattern differs per team — built for the current team',
   'Собираю предпросмотр…': 'Building the preview…',
   'Предпросмотр на модели. «Нанести» соберёт в полном размере.': 'Preview on the model. "Apply" builds it at full size.',
+
+  // ── Сообщения сервисов и воркеров: прогресс, ошибки, предупреждения ────
+  // Приходят готовым текстом. Многострочные (итог сборки с предупреждениями,
+  // ошибка VPK с подробностями) i18n.js переводит построчно.
+  'Поиск модели...': 'Searching for the model...',
+  'Проверка файлов игры...': 'Checking game files...',
+  'Инициализация извлечения модели...': 'Starting model extraction...',
+  'Извлечение модели...': 'Extracting the model...',
+  'Извлечение модели: {}...': 'Extracting model: {}...',
+  'Декомпиляция модели...': 'Decompiling the model...',
+  'Извлечение завершено': 'Extraction complete',
+  'Извлечение отменено пользователем': 'Extraction cancelled by the user',
+  'Не удалось подобрать уникальное имя папки экспорта': "Couldn't find a free name for the export folder",
+  'Не удалось подобрать уникальное имя файла экспорта': "Couldn't find a free name for the export file",
+  'Извлечение файлов...': 'Extracting files...',
+  'Завершено': 'Done',
+  'Объединение отменено пользователем': 'Merge cancelled by the user',
+  'не подобрать имя в библиотеке модов': "couldn't find a free name in the mod library",
+  'Decompilation timed out after {}s: Crowbar завис на модели {}':
+    'Decompilation timed out after {}s: Crowbar hung on model {}',
+  'Compilation timed out after {}s: studiomdl завис на {}':
+    'Compilation timed out after {}s: studiomdl hung on {}',
+  'Читаю рецепт War Paint…': 'Reading the War Paint recipe…',
+  'Наношу War Paint…': 'Applying War Paint…',
+  'В игре нет файла War Paint (proto_defs.vpd)': 'The game has no War Paint file (proto_defs.vpd)',
+  'srctools не установлен (pip install srctools)': 'srctools is not installed (pip install srctools)',
+  '{} не найден в {}': '{} not found in {}',
+  'файла нет': 'the file is missing',
+  'внутри не MP3, а другой формат — игра его не прочитает':
+    "it's not MP3 inside but another format — the game won't read it",
+  'не WAV с обычным PCM: {}': 'not a plain PCM WAV: {}',
+  'не прочитать: {}': "can't read it: {}",
+  '{}-битный звук — игра играет только 16-битный': '{}-bit audio — the game only plays 16-bit',
+  'частота {} Гц — игре нужна одна из {}': 'sample rate {} Hz — the game needs one of {}',
+  'кадр APNG не того размера': 'an APNG frame has the wrong size',
+  'Изображение не найдено: {}': 'Image not found: {}',
+  'Не удалось извлечь ни одного кадра из VTF': "Couldn't extract a single frame from the VTF",
+  'SMD файл не найден: {}': 'SMD file not found: {}',
+  'Нет UV координат для отрисовки': 'No UV coordinates to draw',
+  'Файл не найден: {}': 'File not found: {}',
+  'Файл занят другим процессом: {}': 'The file is in use by another process: {}',
+  'Ошибка создания VPK файла': 'Error creating the VPK file',
+  'Ошибка создания VTF файла\nКоманда: {}': 'Error creating the VTF file\nCommand: {}',
+  'Имя файла не может быть пустым': 'The file name cannot be empty',
+  'Имя файла слишком короткое (минимум {} символ)': 'The file name is too short (at least {} character)',
+  'Имя файла слишком длинное (максимум {} символов)': 'The file name is too long (at most {} characters)',
+  'Имя файла должно заканчиваться на .vpk': 'The file name must end with .vpk',
+  'Недопустимый символ: {}': 'Invalid character: {}',
+  'Недопустимый путь: {}': 'Invalid path: {}',
+  'VPK файл не найден: {}': 'VPK file not found: {}',
+  'VPK файл: {}': 'VPK file: {}',
+  'MDL файл не найден в VPK: {}': 'MDL file not found in the VPK: {}',
+  'Не удалось открыть VPK файл {}': "Couldn't open VPK file {}",
+  'Не удалось открыть VPK файл {}: {}': "Couldn't open VPK file {}: {}",
+  'Не удалось извлечь .mdl файл: {}': "Couldn't extract the .mdl file: {}",
+  'Проверьте, что путь правильный и файл существует в VPK.':
+    'Check that the path is correct and the file exists in the VPK.',
+  'Ожидаемый путь в VPK: {}': 'Expected path in the VPK: {}',
+  'Директория извлечения: {}': 'Extraction folder: {}',
+  'Попробуйте проверить содержимое VPK через GCFScape.': 'Try checking the VPK contents with GCFScape.',
+  'Библиотека vpk не установлена. Установите её через: pip install vpk':
+    'The vpk library is not installed. Install it with: pip install vpk',
+  'Если библиотека vpk не установлена, установите её: pip install vpk':
+    'If the vpk library is not installed, install it: pip install vpk',
+  'отменено': 'cancelled',
+  'размер не совпал: {} вместо {}': 'size mismatch: {} instead of {}',
+  'контрольная сумма не совпала — файл повреждён': 'checksum mismatch — the file is corrupted',
+  'установщик не найден: {}': 'installer not found: {}',
+  'установка поддерживается только на Windows': 'installing is only supported on Windows',
+  // Гирлянды: причина подставляется в «Гирлянда {} не собралась: {}».
+  'Гирлянда {} не собралась: {}': "The {} garland didn't build: {}",
+  '{} нет в игре': '{} is not in the game',
+  'в разборе {} нет QC или меша': 'the decompiled {} has no QC or mesh',
+  'в QC нет $cdmaterials': 'the QC has no $cdmaterials',
+  'VTF для {} не создался': "the VTF for {} wasn't created",
+  // Предупреждения сборки: строками под «Внимание:» в итоге сборки.
+  'Не найдена игровая текстура \'{}\' — в игре материал может быть фиолетовым. Загрузите свою текстуру в главный слот.':
+    "Game texture '{}' not found — the material may be purple in game. Load your own texture into the main slot.",
+  'Не найдена оригинальная текстура плеч \'{}\' — плечи вьюмодели могут быть фиолетовыми.':
+    "Original shoulder texture '{}' not found — the viewmodel shoulders may be purple.",
+  'Стили шапки делят материал \'{}\': в игре они не могут выглядеть по-разному, в мод попадёт одна текстура.':
+    "Hat styles share material '{}': they can't look different in game, so one texture goes into the mod.",
+  'Замена модели не выполнена: не найден reference SMD для {}. В мод попадёт оригинальная геометрия.':
+    "Model replacement skipped: no reference SMD for {}. The original geometry goes into the mod.",
+  'Замена модели завершилась ошибкой — в мод попадёт оригинальная модель. ({})':
+    'Model replacement failed — the original model goes into the mod. ({})',
+  '\'{}\' — это навесное украшение (гирлянда), а не сам ствол: игра рисует его поверх базового оружия. Красится только украшение; чтобы изменить сам ствол, соберите базовое оружие.':
+    "'{}' is an attached decoration (a garland), not the weapon itself: the game draws it over the base weapon. Only the decoration gets painted; to change the weapon itself, build the base weapon.",
+  'Временные файлы сохранены в: {}': 'Temporary files kept in: {}',
 };

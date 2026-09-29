@@ -3431,7 +3431,7 @@ class AppSession:
                 'original': original, 'edited': False}
 
     def save_vmt(self, material: str = '', content: str = '',
-                 original: str = '') -> Dict[str, Any]:
+                 original: str = '', lang: str = 'ru') -> Dict[str, Any]:
         """Сохраняет правку VMT. Сломанный синтаксис не сохраняется."""
         from src.services import vmt_source_service
 
@@ -3441,7 +3441,7 @@ class AppSession:
         _weapon_key, edit_key = target
 
         ok, error, saved = vmt_source_service.save_edit(
-            edit_key, content, original or None)
+            edit_key, content, original or None, lang)
         if not ok:
             return {'error': error}
         return {'material': edit_key, 'content': saved, 'edited': True}

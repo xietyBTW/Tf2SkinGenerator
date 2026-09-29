@@ -5,6 +5,8 @@
 import copy
 import json
 import os
+import threading
+import time
 from pathlib import Path
 from typing import Optional, Dict, Any
 from src.shared.logging_config import get_logger
@@ -45,6 +47,12 @@ class AppConfig:
     # подменяется в тестах
     _cache_key: Optional[tuple] = None
 
+    #: Вызовы API идут из разных потоков. Без замка два set() подряд теряли
+    #: одно из значений (оба читали старый конфиг), а чтение файла посреди
+    #: os.replace на Windows давало WinError 32 — настройка не сохранялась.
+    #: RLock: set() зовёт load_config() и save_config() под тем же замком.
+    lock = threading.RLock()
+
     @staticmethod
     def _ensure_config_dir() -> None:
         """Создает директорию для конфига, если её нет"""
@@ -76,6 +84,11 @@ class AppConfig:
             Глубокая копия словаря с настройками — мутации результата
             не влияют ни на кэш, ни на DEFAULT_CONFIG.
         """
+        with AppConfig.lock:
+            return AppConfig._load_config()
+
+    @staticmethod
+    def _load_config() -> Dict[str, Any]:
         current_key = AppConfig._current_cache_key()
         if AppConfig._cache is not None and AppConfig._cache_key == current_key:
             return copy.deepcopy(AppConfig._cache)
@@ -114,13 +127,27 @@ class AppConfig:
         Returns:
             True если успешно, False если ошибка
         """
+        with AppConfig.lock:
+            return AppConfig._save_config(config)
+
+    @staticmethod
+    def _save_config(config: Dict[str, Any]) -> bool:
         AppConfig._ensure_config_dir()
 
         tmp_path = AppConfig.CONFIG_FILE.with_suffix('.json.tmp')
         try:
             with open(tmp_path, 'w', encoding='utf-8') as f:
                 json.dump(config, f, indent=4, ensure_ascii=False)
-            os.replace(tmp_path, AppConfig.CONFIG_FILE)
+            # Файл мог держать кто-то вне процесса (антивирус, редактор):
+            # несколько коротких попыток вместо потерянной настройки.
+            for attempt in range(5):
+                try:
+                    os.replace(tmp_path, AppConfig.CONFIG_FILE)
+                    break
+                except PermissionError:
+                    if attempt == 4:
+                        raise
+                    time.sleep(0.05)
             AppConfig._cache = copy.deepcopy(config)
             AppConfig._cache_key = AppConfig._current_cache_key()
             logger.debug("Конфигурация успешно сохранена")
@@ -161,10 +188,11 @@ class AppConfig:
         Returns:
             True если успешно, False если ошибка
         """
-        config = AppConfig.load_config()
-        config[key] = value
-        logger.debug(f"Установлено значение конфигурации: {key} = {value}")
-        return AppConfig.save_config(config)
+        with AppConfig.lock:
+            config = AppConfig.load_config()
+            config[key] = value
+            logger.debug(f"Установлено значение конфигурации: {key} = {value}")
+            return AppConfig.save_config(config)
 
     @staticmethod
     def get_tf2_game_folder() -> str:

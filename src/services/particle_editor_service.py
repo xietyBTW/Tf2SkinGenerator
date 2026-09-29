@@ -2268,6 +2268,74 @@ class ParticleEditorService:
     #: Инструкция для ИИ-ассистента, вкладывается в справочник по выбору
     #: пользователя. На английском: модели точнее следуют инструкциям на нём,
     #: а пользователь всё равно пишет свои требования отдельным сообщением.
+    #: Пояснения справочника: файл открывает и человек, поэтому на языке
+    #: интерфейса. Задание для ИИ (_AI_INSTRUCTIONS) — всегда английское.
+    _REFERENCE_TEXT = {
+        "ru": {
+            "about": "Справочник параметров частиц TF2. Соберите набор в "
+                     "поле clipboard_format.example и вставьте его в "
+                     "редактор через Ctrl+V (правый клик по дереву свойств "
+                     "→ Вставить параметры).",
+            "notes": [
+                "Имена параметров и модулей писать точно как здесь.",
+                "example — значение из реального эффекта игры, а не "
+                "умолчание движка: это ориентир по смыслу и порядку величин.",
+                "range — [минимум, максимум] этого параметра по всем "
+                "эффектам игры: значения вне него почти наверняка ошибка "
+                "порядка величины.",
+                "Отсутствующий параметр не ошибка: движок берёт своё "
+                "умолчание. Указывайте только то, что нужно менять.",
+                "previewed=false — модуль работает в игре, но 3D-превью "
+                "редактора его не симулирует.",
+            ],
+            "value_types": {
+                "float": "число, например 1.5",
+                "integer": "целое число",
+                "bool": "true / false",
+                "string": "строка, например \"effects\\\\crit.vmt\"",
+                "vec3": "[x, y, z]",
+                "color": "[r, g, b, a], каждое 0-255",
+            },
+            "clipboard": "Значение JSON, которое кладётся в буфер "
+                         "обмена. attrs — параметры самой системы, "
+                         "modules — модули по группам: список пар "
+                         "[имя модуля, {параметры}]. full=true "
+                         "означает полный набор — при вставке "
+                         "редактор спросит, заменять ли существующие.",
+        },
+        "en": {
+            "about": "TF2 particle parameter reference. Build a set in the "
+                     "shape of clipboard_format.example and paste it into "
+                     "the editor with Ctrl+V (right-click the property tree "
+                     "→ Paste parameters).",
+            "notes": [
+                "Write parameter and module names exactly as they are here.",
+                "example is a value from a real game effect, not the engine "
+                "default: a guide to meaning and order of magnitude.",
+                "range is [minimum, maximum] of this parameter across all "
+                "game effects: a value outside it is almost surely off by "
+                "an order of magnitude.",
+                "A missing parameter is not an error: the engine uses its "
+                "default. Only list what needs to change.",
+                "previewed=false means the module works in game, but the "
+                "editor's 3D preview does not simulate it.",
+            ],
+            "value_types": {
+                "float": "number, e.g. 1.5",
+                "integer": "whole number",
+                "bool": "true / false",
+                "string": "string, e.g. \"effects\\\\crit.vmt\"",
+                "vec3": "[x, y, z]",
+                "color": "[r, g, b, a], each 0-255",
+            },
+            "clipboard": "The JSON value put on the clipboard. attrs are "
+                         "the system's own parameters, modules are modules "
+                         "by group: a list of [module name, {parameters}] "
+                         "pairs. full=true means a complete set: on paste "
+                         "the editor asks whether to replace existing ones.",
+        },
+    }
+
     _AI_INSTRUCTIONS = [
         "You help build a Team Fortress 2 particle effect. The user sends "
         "you this file TOGETHER WITH their own description of the effect "
@@ -2381,7 +2449,8 @@ class ParticleEditorService:
     def param_reference(cls, tf2_root_dir: str = "",
                         supported: Optional[dict] = None,
                         with_prompt: bool = False,
-                        materials: Optional[List[str]] = None) -> dict:
+                        materials: Optional[List[str]] = None,
+                        lang: str = "en") -> dict:
         """
         Справочник параметров для генерации пресетов внешними средствами.
 
@@ -2412,39 +2481,14 @@ class ParticleEditorService:
                 cls._module_display.get((group, fn), fn)] = entry
 
         system_attrs = cls._attr_catalog.get((None, ""), {})
+        text = cls._REFERENCE_TEXT.get(lang, cls._REFERENCE_TEXT["en"])
         reference: Dict[str, Any] = {
             "format": 1,
-            "about": "Справочник параметров частиц TF2. Соберите набор в "
-                     "поле clipboard_format.example и вставьте его в "
-                     "редактор через Ctrl+V (правый клик по дереву свойств "
-                     "→ Вставить параметры).",
-            "notes": [
-                "Имена параметров и модулей писать точно как здесь.",
-                "example — значение из реального эффекта игры, а не "
-                "умолчание движка: это ориентир по смыслу и порядку величин.",
-                "range — [минимум, максимум] этого параметра по всем "
-                "эффектам игры: значения вне него почти наверняка ошибка "
-                "порядка величины.",
-                "Отсутствующий параметр не ошибка: движок берёт своё "
-                "умолчание. Указывайте только то, что нужно менять.",
-                "previewed=false — модуль работает в игре, но 3D-превью "
-                "редактора его не симулирует.",
-            ],
-            "value_types": {
-                "float": "число, например 1.5",
-                "integer": "целое число",
-                "bool": "true / false",
-                "string": "строка, например \"effects\\\\crit.vmt\"",
-                "vec3": "[x, y, z]",
-                "color": "[r, g, b, a], каждое 0-255",
-            },
+            "about": text["about"],
+            "notes": text["notes"],
+            "value_types": text["value_types"],
             "clipboard_format": {
-                "description": "Значение JSON, которое кладётся в буфер "
-                               "обмена. attrs — параметры самой системы, "
-                               "modules — модули по группам: список пар "
-                               "[имя модуля, {параметры}]. full=true "
-                               "означает полный набор — при вставке "
-                               "редактор спросит, заменять ли существующие.",
+                "description": text["clipboard"],
                 "example": {
                     "tf2sgParticleParams": {
                         "attrs": {"max_particles": {"t": "integer", "v": 50},

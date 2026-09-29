@@ -104,6 +104,26 @@ class AppConfigServiceTests(unittest.TestCase):
             leftovers = list(config_dir.glob("*.tmp"))
             self.assertEqual(leftovers, [])
 
+    def test_parallel_set_keeps_every_key(self):
+        """Потоки API пишут разные ключи разом — ни один не теряется."""
+        import threading
+        with tempfile.TemporaryDirectory() as tmp:
+            config_dir = Path(tmp) / "config"
+            config_file = config_dir / "app_config.json"
+            with patch.object(AppConfig, "CONFIG_DIR", config_dir):
+                with patch.object(AppConfig, "CONFIG_FILE", config_file):
+                    AppConfig.save_config({})
+                    threads = [threading.Thread(target=AppConfig.set, args=(f"k{i}", i))
+                               for i in range(16)]
+                    for t in threads:
+                        t.start()
+                    for t in threads:
+                        t.join()
+                    AppConfig.invalidate_cache()
+                    cfg = AppConfig.load_config()
+            self.assertEqual({k: cfg.get(k) for k in (f"k{i}" for i in range(16))},
+                             {f"k{i}": i for i in range(16)})
+
 
 if __name__ == "__main__":
     unittest.main()
