@@ -18,6 +18,11 @@ document.getElementById('tools').addEventListener('click', async (e) => {
   const item = e.target.closest('.menu__item');
   if (!item) return;
 
+  if (item.dataset.tool === 'folder') {
+    const res = await api.exportFolder();
+    if (res.error) say(res.error);
+    return;
+  }
   if (item.dataset.tool === 'open') {
     // Файл с диска кладём во временную папку и грузим оттуда: Python берёт
     // путь, а страница пути к выбранному файлу не знает и знать не должна.
@@ -32,8 +37,9 @@ document.getElementById('tools').addEventListener('click', async (e) => {
     return;
   }
   if (item.dataset.tool === 'save') {
+    // Имя без папки: относительный путь Python кладёт в папку экспорта.
     const path = await ask({ title: 'Куда сохранить PCF',
-                             value: 'export/' + (pSystem || 'effect') + '.pcf' });
+                             value: (pSystem || 'effect') + '.pcf' });
     if (!path) return;
     const res = await api.saveParticles(path);
     say(res.error || `Сохранено: ${res.path} (${res.size} Б)`);

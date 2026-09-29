@@ -84,6 +84,7 @@ _TEMP_ARTIFACT_PREFIXES = (
     "tf2_deatheff_", "tf2_model_tex_", "tf2_vtf_",
     "tf2_sky_",   # грани скайбокса: нарезка панорамы + стоковые превью
     "tf2_mesh_",  # импорт OBJ/GLB: SMD с подгонкой и вытащенные текстуры
+    "tf2_scene_",  # текстуры особых сцен (смерть, крит): VTF → PNG
 )
 
 

@@ -1181,6 +1181,43 @@ def set_ui_state(key: str = '', value: object = 0) -> Dict[str, object]:
     return {'saved': True}
 
 
+#: Системный диалог выбора папки: (начальная папка) → путь или ''. Ставит окно
+#: приложения (frontend/app.py); страница в обычном браузере его не получает.
+_folder_picker = None
+
+
+def set_folder_picker(picker) -> None:
+    """Подключает диалог выбора папки окна приложения."""
+    global _folder_picker
+    _folder_picker = picker
+
+
+def pick_folder(start: str = '') -> Dict[str, object]:
+    """
+    Выбор папки системным диалогом — для путей в настройках.
+
+    Путь из поля бывает относительным («export»): диалог открываем там, куда
+    он на самом деле ведёт, то есть от папки данных. Пустой `path` — отмена.
+    """
+    from pathlib import Path
+
+    from src.shared.paths import data_dir
+
+    if _folder_picker is None:
+        return {'error': 'Выбор папки доступен только в окне приложения'}
+    folder = Path(str(start or '').strip() or '.')
+    if not folder.is_absolute():
+        folder = data_dir() / folder
+    folder = folder.resolve()
+    while not folder.is_dir() and folder.parent != folder:
+        folder = folder.parent                 # диалог открывается у ближайшей
+    try:
+        return {'path': _folder_picker(str(folder)) or ''}
+    except Exception as exc:                    # noqa: BLE001 — граница с окном
+        logger.warning(f"диалог выбора папки: {exc}")
+        return {'error': str(exc)}
+
+
 def settings(lang: str = '') -> Dict[str, object]:
     """
     Текущие настройки приложения и варианты выбора для них.
@@ -1239,6 +1276,9 @@ def settings(lang: str = '') -> Dict[str, object]:
         # её копии на странице быть не должно. Нужно, чтобы не показывать
         # кнопку автопоиска там, где искать уже нечего.
         'tf2_ok': TF2Paths.is_valid(values['tf2_game_folder']),
+        # Есть ли системный выбор папки: он есть только в окне приложения, в
+        # обычном браузере путь вводят руками.
+        'folder_picker': _folder_picker is not None,
         'formats': ['VTF', 'PNG', 'TGA', 'JPG'],
         'languages': [{'value': 'ru', 'label': 'Русский'},
                       {'value': 'en', 'label': 'English'}],
@@ -1316,18 +1356,36 @@ def log_folder() -> Dict[str, object]:
     вот показать файл в проводнике предсказуемо. Полная история лежит там, в
     кольце — только последние записи.
     """
+    from src.shared.paths import ensure_data_dir
+
+    return _open_folder(ensure_data_dir())
+
+
+def export_folder() -> Dict[str, object]:
+    """
+    Открывает папку экспорта: там собранные моды и извлечённое.
+
+    Без этой кнопки человек искал мод наугад — путь из настроек («export»)
+    ничего не говорит о том, где эта папка на диске.
+    """
+    from src.shared.paths import export_dir
+
+    folder = export_dir()
+    folder.mkdir(parents=True, exist_ok=True)
+    return _open_folder(folder)
+
+
+def _open_folder(folder) -> Dict[str, object]:
+    """Показывает папку в проводнике."""
     import os
     import sys
 
-    from src.shared.paths import ensure_data_dir
-
-    folder = ensure_data_dir()
     if sys.platform != 'win32':
         return {'error': 'только Windows', 'path': str(folder)}
     try:
         os.startfile(str(folder))                     # noqa: S606
     except OSError as exc:
-        logger.warning(f"не открыть папку журнала: {exc}")
+        logger.warning(f"не открыть папку {folder}: {exc}")
         return {'error': str(exc), 'path': str(folder)}
     return {'opened': True, 'path': str(folder)}
 

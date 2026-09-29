@@ -26,6 +26,25 @@ class DevModeTest(unittest.TestCase):
                              Path("tools/VTF"))
 
 
+class ExportDirTest(unittest.TestCase):
+    """Папка экспорта из настроек: относительная — от папки данных."""
+
+    def _export(self, configured):
+        from src.config.app_config import AppConfig
+        with patch.object(paths, "data_dir", return_value=Path(r"C:\Data")), \
+                patch.object(AppConfig, "get", return_value=configured):
+            return paths.export_dir()
+
+    def test_default_lives_in_data_folder(self):
+        """Раньше «export» считался от текущей папки процесса: в собранном
+        приложении мод уходил мимо папки данных, и там было пусто."""
+        self.assertEqual(self._export("export"), Path(r"C:\Data\export"))
+        self.assertEqual(self._export(""), Path(r"C:\Data\export"))
+
+    def test_absolute_folder_is_taken_as_is(self):
+        self.assertEqual(self._export(r"D:\Mods"), Path(r"D:\Mods"))
+
+
 class FrozenModeTest(unittest.TestCase):
     def test_data_goes_to_localappdata(self):
         with patch.object(paths, "is_frozen", return_value=True):

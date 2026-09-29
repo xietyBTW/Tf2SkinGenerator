@@ -1755,7 +1755,9 @@ class AppSession:
             flags=list(params.get('flags') or []),
             vtf_options=dict(params.get('options') or {}),
             tf2_root_dir=paths['root'],
-            export_folder=params.get('export_folder') or 'export',
+            # Из настроек, а не из запроса: страница папку не шлёт, и мод
+            # всегда уходил в «export» от текущей папки процесса.
+            export_folder=self._export_settings()[0],
             language=params.get('lang') or 'ru',
             panel_extra_textures=extra or None,
             # «Прочее» со страницы: сборка спрашивает про эти материалы так
@@ -3465,9 +3467,9 @@ class AppSession:
     def _export_settings() -> tuple:
         """Куда и в каком формате писать результат инструментов."""
         from src.config.app_config import AppConfig
-        cfg = AppConfig.load_config()
-        return (cfg.get('export_folder') or 'export',
-                cfg.get('export_image_format') or 'PNG')
+        from src.shared.paths import export_dir
+        return (str(export_dir()),
+                AppConfig.load_config().get('export_image_format') or 'PNG')
 
     def _run_tool(self, worker, done: str = 'tool_done') -> Dict[str, Any]:
         """

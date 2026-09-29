@@ -88,6 +88,21 @@ def ensure_data_dir() -> Path:
     return path
 
 
+def export_dir() -> Path:
+    """
+    Куда класть результат: собранные моды, извлечённое, справочники.
+
+    Папка из настроек; относительная (по умолчанию «export») считается от
+    папки данных. Раньше её считали от текущей папки процесса: в собранном
+    приложении мод уходил в export рядом с .exe (или куда угодно, смотря как
+    запустили), а export в папке данных оставался пустым.
+    """
+    from src.config.app_config import AppConfig
+
+    folder = Path(AppConfig.get("export_folder") or "export")
+    return folder if folder.is_absolute() else data_dir() / folder
+
+
 def migrate_legacy_data() -> None:
     """
     Переносит данные из папки установки в папку данных — один раз.

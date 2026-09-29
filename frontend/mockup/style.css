@@ -2456,6 +2456,29 @@
   gap: var(--gap) var(--rhythm);
 }
 .cfg__checks { display: flex; flex-wrap: wrap; gap: 10px 24px; }
+/* Поле пути и значок выбора папки в одну строку: поле тянется, значок — в
+   том же весе, что инструменты палитры частей. */
+.pathpick { display: flex; align-items: center; gap: 6px; }
+.pathpick .input { flex: 1; min-width: 0; }
+.pathpick__btn {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink-soft);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: color var(--dur), background var(--dur);
+}
+.pathpick__btn svg {
+  width: 17px; height: 17px;
+  fill: none; stroke: currentColor; stroke-width: 1.15; stroke-linejoin: round;
+}
+.pathpick__btn:hover { color: var(--ink); background: var(--bg); }
+.pathpick__btn:disabled { opacity: .4; cursor: default; }
 .cfg__list {
   min-height: 62px;
   padding: 6px 0;

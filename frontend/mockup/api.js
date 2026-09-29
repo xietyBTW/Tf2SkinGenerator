@@ -292,6 +292,8 @@ export const setUiState   = (key, value) => call('set_ui_state', { key, value })
 export const logTail      = (since) => call('log_tail', { since });
 export const clearLog     = () => call('clear_log', {});
 export const logFolder    = () => call('log_folder', {});
+export const exportFolder = () => call('export_folder', {});
+export const pickFolder   = (start) => call('pick_folder', { start });
 
 // Своя модель: сначала спрашиваем тип (keep=null), потом грузим с ответом.
 export const loadCustomModel = (path, keep = null) =>

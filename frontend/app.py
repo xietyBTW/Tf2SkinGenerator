@@ -67,9 +67,43 @@ def _open_pywebview(url: str) -> bool:
         import webview
     except ImportError:
         return False
-    webview.create_window(TITLE, url, width=1440, height=900, min_size=(900, 600))
-    webview.start()
+    from src.shared.paths import data_dir
+
+    window = webview.create_window(TITLE, url, width=1440, height=900,
+                                   min_size=(900, 600))
+    api.set_folder_picker(lambda start: _pick_folder(window, start))
+    # Профиль WebView2 — в своей папке данных. Без storage_path pywebview
+    # заводит его в %TEMP%\tmpXXXXXXXX (сотни файлов) и удаляет только при
+    # штатном закрытии окна: после выхода на обновление, краша или занятых
+    # файлов папка оставалась, и каждый запуск добавлял новую. Здесь папка
+    # одна и та же: приватный режим её по-прежнему чистит, а остаток прошлого
+    # раза просто перезапишется.
+    webview.start(storage_path=str(data_dir() / 'cache' / 'webview'))
     return True
+
+
+def _pick_folder(window, start: str) -> str:
+    """
+    Системный выбор папки поверх окна. Отмена — пустая строка.
+
+    Вызов приходит из потока сервера, а диалог WinForms обязан открываться в
+    потоке окна: pywebview сам туда не переходит, и `create_file_dialog` из
+    чужого потока может намертво подвесить окно (pywebview #1823). Переходим
+    через Invoke — тем же путём, каким pywebview показывает и прячет окно.
+    """
+    from System import Action  # pythonnet: есть везде, где есть WinForms
+    from webview import FileDialog
+    from webview.platforms.winforms import BrowserView
+
+    window.events.shown.wait(20)         # форма регистрируется при показе
+    form = BrowserView.instances.get(window.uid)
+    if form is None:
+        return ''
+    box = {}
+    form.Invoke(Action(lambda: box.update(
+        path=window.create_file_dialog(FileDialog.FOLDER, directory=start))))
+    chosen = box.get('path')
+    return str(chosen[0]) if chosen else ''
 
 
 def _open_browser_app(url: str) -> bool:

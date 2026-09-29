@@ -79,6 +79,7 @@ export async function openSettings() {
   // которой работает всё приложение.
   showFindTf2(!cfg.tf2_ok);
   document.getElementById('cfg-export').value = v.export_folder || '';
+  document.querySelectorAll('[data-pick]').forEach((b) => { b.hidden = !cfg.folder_picker; });
   fillSelect('cfg-format', cfg.formats, v.export_image_format);
   fillSelect('cfg-lang', cfg.languages, v.language);
   // Тема страницы — она же тема приложения: другого интерфейса больше нет.
@@ -423,6 +424,28 @@ export async function offerTf2() {
   api.forgetCached();
   await relabel();
 }
+
+/**
+ * Значок папки у поля пути: системный выбор папки, открытый там, куда ведёт
+ * текущее значение. Отмена оставляет поле как было.
+ */
+document.querySelectorAll('[data-pick]').forEach((btn) => {
+  btn.addEventListener('click', async () => {
+    const input = document.getElementById(btn.dataset.pick);
+    btn.disabled = true;
+    try {
+      const res = await api.pickFolder(input.value);
+      if (res.error) { say(res.error); return; }
+      if (!res.path) return;
+      input.value = res.path;
+      // Правка руками и выбор — одно и то же для тех, кто слушает поле
+      // (кнопка автопоиска игры).
+      input.dispatchEvent(new Event('input'));
+    } finally {
+      btn.disabled = false;
+    }
+  });
+});
 
 // Путь начали править руками: годность прежнего пути ничего уже не значит, и
 // кнопка снова может понадобиться — проверять каждую букву в Python незачем.

@@ -811,7 +811,8 @@ const TOOL_KEY = { model: 'extract_model', uv: 'extract_model',
 export function applyToolsMenu(particlesSection = sel.section === 'particles') {
   document.querySelectorAll('#tools .menu__item').forEach((i) => {
     const key = TOOL_KEY[i.dataset.tool];
-    i.hidden = (i.dataset.for === 'particles') !== particlesSection
+    i.hidden = (i.dataset.for !== 'any'
+                && (i.dataset.for === 'particles') !== particlesSection)
       || (Boolean(key) && !(modeControls[key] && modeControls.has_item))
       // Сохранять можно только открытый файл: до него пункт вёл в ошибку.
       || (i.dataset.need === 'pcf' && !pcfNodes.length);

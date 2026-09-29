@@ -147,3 +147,34 @@ class UiStateTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class PickFolderTests(unittest.TestCase):
+    """«Обзор…» в настройках: куда открывается диалог и что без окна."""
+
+    def tearDown(self):
+        api.set_folder_picker(None)
+
+    def test_without_app_window_says_so(self):
+        """В обычном браузере диалога нет — ошибка, а не молчание."""
+        api.set_folder_picker(None)
+        self.assertIn('error', api.pick_folder('export'))
+
+    def test_relative_path_opens_in_data_folder(self):
+        """«export» из поля — это папка данных/export, а не текущая папка."""
+        seen = []
+        api.set_folder_picker(lambda start: seen.append(start) or r'D:\Mods')
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / 'export').mkdir()
+            with patch('src.shared.paths.data_dir', return_value=Path(tmp)):
+                res = api.pick_folder('export')
+            self.assertEqual(res, {'path': r'D:\Mods'})
+            self.assertEqual(Path(seen[0]), (Path(tmp) / 'export').resolve())
+
+    def test_missing_folder_opens_at_nearest_parent(self):
+        seen = []
+        api.set_folder_picker(lambda start: seen.append(start) or '')
+        with tempfile.TemporaryDirectory() as tmp:
+            res = api.pick_folder(str(Path(tmp) / 'нет' / 'такой'))
+            self.assertEqual(res, {'path': ''})
+            self.assertEqual(Path(seen[0]), Path(tmp).resolve())

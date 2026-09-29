@@ -56,6 +56,9 @@
         <button class="menu__item" data-for="particles" data-tool="save" data-need="pcf">Сохранить PCF…</button>
         <button class="menu__item" data-for="particles" data-tool="ref">Справочник параметров (JSON)…</button>
         <button class="menu__item" data-for="particles" data-tool="ref-ai">Справочник для ИИ (с заданием)…</button>
+        <!-- В любом разделе: мод собрался, а где он лежит на диске, путь из
+             настроек («export») не говорит. -->
+        <button class="menu__item" data-for="any" data-tool="folder">Открыть папку экспорта</button>
       </div>
     </div>
 
@@ -1273,8 +1276,18 @@
     <div class="cfg__grid">
       <div class="field">
         <label class="field__label" for="cfg-tf2">Папка игры</label>
-        <input class="input" id="cfg-tf2" type="text"
-               placeholder="…/steamapps/common/Team Fortress 2">
+        <!-- Значок папки — системный выбор папки. Есть только в окне приложения:
+             из браузера пути к папке не узнать, там поле вводят руками. -->
+        <div class="pathpick">
+          <input class="input" id="cfg-tf2" type="text"
+                 placeholder="…/steamapps/common/Team Fortress 2">
+          <button class="pathpick__btn" type="button" data-pick="cfg-tf2"
+                  title="Выбрать папку" aria-label="Выбрать папку">
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <path d="M1.5 12.5v-9h4.5l1.5 1.5h7v7.5z"/>
+            </svg>
+          </button>
+        </div>
         <!-- Путь к игре — первое, без чего не работает ничего, а вводится он
              руками: выбрать папку из браузера нельзя. Кнопка спрашивает
              Python (find_tf2): реестр Steam и его библиотеки. -->
@@ -1284,7 +1297,15 @@
       </div>
       <div class="field">
         <label class="field__label" for="cfg-export">Папка экспорта</label>
-        <input class="input" id="cfg-export" type="text" placeholder="export">
+        <div class="pathpick">
+          <input class="input" id="cfg-export" type="text" placeholder="export">
+          <button class="pathpick__btn" type="button" data-pick="cfg-export"
+                  title="Выбрать папку" aria-label="Выбрать папку">
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <path d="M1.5 12.5v-9h4.5l1.5 1.5h7v7.5z"/>
+            </svg>
+          </button>
+        </div>
       </div>
       <div class="field">
         <label class="field__label" for="cfg-format">Формат извлечения</label>

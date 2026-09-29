@@ -1126,7 +1126,7 @@ export const EN = {
   '(журнал не успевали читать; всё есть в файле)':
     '(the log was not read in time; the file has everything)',
   'только Windows': 'Windows only',
-  'не открыть папку журнала: {}': 'could not open the log folder: {}',
+  'не открыть папку {}: {}': 'could not open folder {}: {}',
 
   // Записи логгера Python переводятся тем же способом, что и остальные
   // подписи, — на границе показа. Начали с ошибок, где человеку сказано, что
@@ -1537,4 +1537,7 @@ export const EN = {
   '\'{}\' — это навесное украшение (гирлянда), а не сам ствол: игра рисует его поверх базового оружия. Красится только украшение; чтобы изменить сам ствол, соберите базовое оружие.':
     "'{}' is an attached decoration (a garland), not the weapon itself: the game draws it over the base weapon. Only the decoration gets painted; to change the weapon itself, build the base weapon.",
   'Временные файлы сохранены в: {}': 'Temporary files kept in: {}',
+  'Открыть папку экспорта': 'Open export folder',
+  'Выбрать папку': 'Choose folder',
+  'Выбор папки доступен только в окне приложения': 'Folder picking only works in the app window',
 };

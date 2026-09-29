@@ -245,6 +245,8 @@ ALLOWED = {
     "log_tail": api.log_tail,
     "clear_log": api.clear_log,
     "log_folder": api.log_folder,
+    "export_folder": api.export_folder,
+    "pick_folder": api.pick_folder,
     "clear_model_cache": api.clear_model_cache,
     "vmt_snippets": api.vmt_snippets,
     "set_settings": api.set_settings,

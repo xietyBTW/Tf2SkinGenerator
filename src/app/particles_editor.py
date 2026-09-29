@@ -17,13 +17,20 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 from src.shared.logging_config import get_logger
-from src.shared.paths import data_dir
+from src.shared.paths import export_dir
 from src.shared.text_search import plain
 
 if TYPE_CHECKING:
     from src.app.session import AppSession
 
 logger = get_logger(__name__)
+
+
+def _in_export(path: str) -> Path:
+    """Относительный путь со страницы — внутри папки экспорта, а не от
+    текущей папки процесса (её в собранном приложении никто не видит)."""
+    p = Path(str(path))
+    return p if p.is_absolute() else export_dir() / p
 
 
 def qc_is_y_up(qc_path: str) -> bool:
@@ -1360,11 +1367,13 @@ class ParticlesEditor:
         """Сохраняет правленый PCF отдельным файлом."""
         if (err := self._need_pcf()):
             return err
+        dest = _in_export(path)
         try:
-            self.pcf.save(path)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            self.pcf.save(str(dest))
         except Exception as exc:                     # noqa: BLE001 — граница
             return {'error': str(exc)}
-        return {'path': path, 'size': self.pcf.serialized_size()}
+        return {'path': str(dest), 'size': self.pcf.serialized_size()}
 
     def export_particles_vpk(self, name: str = 'particles_mod.vpk',
                              lang: str = 'ru') -> Dict[str, Any]:
@@ -1382,7 +1391,7 @@ class ParticlesEditor:
         safe = Path(str(name)).name or 'particles_mod.vpk'
         if not safe.lower().endswith('.vpk'):
             safe += '.vpk'
-        dest = data_dir() / 'export' / safe
+        dest = export_dir() / safe
         dest.parent.mkdir(parents=True, exist_ok=True)
         try:
             out = self.pcf.export_vpk(str(dest), language=lang)
@@ -1416,7 +1425,7 @@ class ParticlesEditor:
         try:
             data = ParticleEditorService.param_reference(
                 root, with_prompt=bool(for_ai), materials=materials, lang=lang)
-            dest = Path(path or 'export/particle_params.json')
+            dest = _in_export(path or 'particle_params.json')
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_text(json.dumps(data, ensure_ascii=False, indent=2),
                             encoding='utf-8')
