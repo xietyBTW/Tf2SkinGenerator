@@ -482,6 +482,31 @@ VMT_SNIPPETS = {
             "Предмет красится краской из инвентаря там, где альфа текстуры белая. Без краски — цвет $colortint_base.",
         ),
     ],
+    # Эффекты с настройками: текст собирает src/services/vmt_effects.py по
+    # выбранным значениям (сниппет здесь пустой). «Каркас» — обычный флаг:
+    # `$wireframe` есть в таблице флагов materialsystem.dll игры, между
+    # `$halflambert` и `$allowalphatocoverage`, как MATERIAL_VAR_WIREFRAME.
+    "Особые материалы": [
+        (
+            "Призрачная оболочка",
+            "",
+            "Оружие становится полупрозрачной светящейся оболочкой: видно "
+            "только отражение с яркими краями. Цвет и отражение — на выбор. "
+            "Нужны отражения в игре: при mat_specular 0 оружие не видно совсем.",
+        ),
+        (
+            "Стекло",
+            "",
+            "Середина или всё оружие становится стеклом, сквозь которое видно "
+            "мир с искажением — как плащ шпиона. Текстура материала остаётся.",
+        ),
+        (
+            "Каркас",
+            '"$wireframe" "1"',
+            "Модель рисуется сеткой рёбер. Текстура и цвет остаются. Как именно "
+            "выглядит в игре, стоит проверить: флаг редкий.",
+        ),
+    ],
     "Заменить весь материал": [
         (
             "VertexLitGeneric (базовый)",
@@ -508,6 +533,10 @@ VMT_SNIPPETS_EN = {
     "Анимация": "Animation",
     "Краска TF2": "TF2 paint",
     "Заменить весь материал": "Replace the whole material",
+    "Особые материалы": "Special materials",
+    "Призрачная оболочка": ("Ghost shell", "The weapon becomes a translucent glowing shell: only the reflection with bright edges is visible. Pick the color and reflection. Needs reflections in game: with mat_specular 0 the weapon is not visible at all."),
+    "Стекло": ("Glass", "The middle or the whole weapon turns into glass that distorts the world behind it, like the Spy's cloak. The material's texture stays."),
+    "Каркас": ("Wireframe", "The model is drawn as a mesh of edges. Texture and color stay. Worth checking in game: the flag is rare."),
     "Свечение": ("Glow", "Parts of the texture glow in the dark. The mask is a black-and-white texture: white glows."),
     "Блики как у металла": ("Metal highlights", "Shiny highlights. exponent is sharpness, boost is brightness."),
     "Подсветка контура": ("Rim light", "A light rim along the model's edge, like stock items. Needs highlights ($phong)."),
@@ -536,6 +565,8 @@ VMT_MERGE_REMOVES = {
     "Австралий — золотой металл": [
         "$phongexponenttexture", "$phongexponentfactor", "$phongalbedotint",
     ],
+    # Флаг — на место своего, если уже стоит (второй такой ключ только путал бы).
+    "Каркас": [],
 }
 
 # Полные шаблоны (категория «Заменить весь материал» — заменяют весь документ)

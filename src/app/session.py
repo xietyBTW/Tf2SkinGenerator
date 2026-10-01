@@ -1693,6 +1693,12 @@ class AppSession:
         main = t.stable_main()
         image = t.uploaded_for_mat(main) if main else None
         extra = t.uploaded_slot_paths()
+        if self.preview.custom_vpk_mode:
+            # Сборка мода кладёт `image` на ПЕРВЫЙ VTF архива, а главная
+            # карточка — материал модели (VpkModController._on_materials).
+            # Без `image` каждая текстура спрашивается по имени, и отвечает
+            # карточка с тем же именем (_on_build_needs_texture).
+            image = None
         # У неба главного материала нет вовсе: «своя текстура» — это панорама
         # (её сборка режет сама) или подменённые грани. Слоты в сборку неба не
         # идут: там свои поля, а грани уже лежат в overrides.
@@ -1705,7 +1711,20 @@ class AppSession:
             extra = {}
             if not image and not sky.get('face_overrides'):
                 return {'error': 'Загрузите панораму 360° или грани неба'}
-        elif not image and not extra and not decor:
+        # Своей главной текстуры нет — мод собирается с игровой, если есть что
+        # собирать: правленый VMT, карты, своя модель… Только там, где сборка
+        # идёт модельным конвейером (он умеет «главная из игры»); у спец-режимов,
+        # масок и мода из VPK текстура — единственное, что они собирают.
+        main_from_game = False
+        if mode != SKYBOX_MODE and not image and self._model_pipeline_mode(mode):
+            weapon_edits = bool(extra) or self._edits_besides_textures(mode, params)
+            if not weapon_edits and not decor and not params.get('allow_empty'):
+                # Страница спросит «изменений нет — всё равно собрать?».
+                return {'confirm_empty': True}
+            # Правлена одна гирлянда — оружие в мод не идёт вовсе (сборка
+            # «только гирлянды»), и главная из игры ему не нужна.
+            main_from_game = weapon_edits or not decor
+        elif mode != SKYBOX_MODE and not image and not extra and not decor:
             return {'error': 'Не загружено ни одной своей текстуры'}
 
         # Гифка на части: превью держит один кадр, сборке нужны все. Полные
@@ -1746,8 +1765,12 @@ class AppSession:
                                    if mode == 'hat' else (None, None))
 
         size = int(params.get('size') or 512)
+        if main_from_game:
+            from src.shared.constants import EXTRA_TEX_USE_GAME_ORIGINAL
+            image = EXTRA_TEX_USE_GAME_ORIGINAL
         request = BuildRequest(
             image_path=image,
+            main_from_game=main_from_game,
             mode=mode,
             filename=params.get('filename') or 'mod.vpk',
             size=(size, size),
@@ -1786,6 +1809,9 @@ class AppSession:
             hat_style_builds=(self._hat_style_builds(params.get('hat_classes'))
                               if mode == 'hat' else None),
             decor_builds=decor or None,
+            # Папка обхода sv_pure из настроек (console / vgui): без неё
+            # сборка молча оставалась на умолчании console.
+            bypass_method=self._bypass_method(),
             # Краски из игры: с ними текстура красится командным цветом, как у
             # стоковой шапки. Спрашивает страница — умолчание «да», как в окне.
             hat_apply_game_paints=bool(params.get('hat_paints', True)),
@@ -1839,6 +1865,45 @@ class AppSession:
         w.start()
         return {'started': True, 'filename': request.filename}
 
+    @staticmethod
+    def _model_pipeline_mode(mode: str) -> bool:
+        """Собирается ли режим модельным конвейером (он умеет «главная из
+        игры»): там же, где есть редактор VMT, кроме масок шпиона — у них своя
+        сборка из одних текстур."""
+        from src.app.api import controls_for
+        from src.data.player_characters import SPY_MASK_MODE_KEY
+        return bool(controls_for(mode).get('vmt_editor')) and mode != SPY_MASK_MODE_KEY
+
+    def _edits_besides_textures(self, mode: str, params: Dict[str, Any]) -> List[str]:
+        """Что правлено кроме своих текстур — то, ради чего стоит собирать мод
+        и без них. Пусто — мод вышел бы игровым.
+
+        Флаги и формат VTF сюда не входят: без своей картинки игровая текстура
+        кладётся как есть, и они ничего не меняют.
+        """
+        from src.services.edited_vmt_service import EditedVMTService
+
+        p, t = self.preview, self.preview.textures
+        found = []
+        for card in [''] + list(t.material_names or []):
+            target = self._vmt_target(card)
+            if isinstance(target, tuple):
+                edited = EditedVMTService.get_edited_vmt(target[1])
+                if edited and os.path.exists(edited):
+                    found.append('vmt')
+                    break
+        if p.texture_maps:
+            found.append('maps')
+        if p.custom_smd_path:
+            found.append('model')
+        if t.force_team:
+            found.append('team')
+        if (params.get('options') or {}).get('normal'):
+            found.append('normal')            # рельеф строится и из игровой
+        if params.get('isolate_shoulders'):
+            found.append('shoulders')
+        return found
+
     def _decor_builds(self, tf2_root: str) -> List[Dict[str, Any]]:
         """Правленые гирлянды предмета — для сборки, показаны они или нет.
 
@@ -1848,7 +1913,7 @@ class AppSession:
         """
         from src.services import festive_decor
 
-        key = self._decor_key()
+        key = self._shown_weapon()
         models = festive_decor.kinds(key, tf2_root) if key else {}
         uploads = self.preview.textures.decor_uploads()
         out = []
@@ -2162,25 +2227,39 @@ class AppSession:
     def _paintkit_model(self) -> str:
         """Файл модели показанного оружия — по нему War Paint и ищутся."""
         from src.data.weapons import WEAPON_MDL_PATHS
-        key = self.preview.weapon_key or ''
+        key = self._shown_weapon()
         return WEAPON_MDL_PATHS.get(key) or f'{key}.mdl'
+
+    def _own_paintkits(self, tf2_root: str, lang: str = 'ru') -> List[dict]:
+        """
+        War Paint игры для показанного оружия.
+
+        На своей геометрии их нет: рецепт Valve кладёт узор по маскам под
+        развёртку СТОКОВОЙ модели, и на чужой развёртке он лёг бы мимо. Там
+        работает универсальный режим — по частям самой модели.
+        """
+        from src.data import paintkit_defs
+        if self._custom_geometry():
+            return []
+        return paintkit_defs.for_model(tf2_root, self._paintkit_model(), lang)
 
     def paintkits(self, lang: str = 'ru') -> Dict[str, Any]:
         """
         War Paint для показанного оружия.
 
-        Есть свои в игре — отдаются они (``generic: False``). Нет — все War
-        Paint с шаблоном в универсальном режиме (``generic: True``): узор
-        раскладывается по частям модели, см. paintkit_generic.
+        Есть свои в игре — отдаются они (``generic: False``). Нет (или модель
+        своя) — все War Paint с шаблоном в универсальном режиме
+        (``generic: True``): узор раскладывается по частям модели, см.
+        paintkit_generic.
         """
         from src.data import paintkit_defs
 
         paths = self.tf2_paths()
         if 'error' in paths:
             return paths
-        if not self.preview.weapon_key:
+        if not self._shown_weapon():
             return {'items': [], 'generic': False}
-        own = paintkit_defs.for_model(paths['root'], self._paintkit_model(), lang)
+        own = self._own_paintkits(paths['root'], lang)
         if own:
             return {'items': own, 'generic': False}
         return {'items': paintkit_defs.generic_kits(paths['root'], lang), 'generic': True}
@@ -2204,9 +2283,9 @@ class AppSession:
             return paths
         t = self.preview.textures
         material = t.stable_main()
-        if not material or not self.preview.weapon_key:
+        if not material or not self._shown_weapon():
             return {'error': 'Сначала выберите оружие'}
-        own = paintkit_defs.for_model(paths['root'], self._paintkit_model())
+        own = self._own_paintkits(paths['root'])
         assign = self.preview.paintkit_layouts.get(str(int(kit))) or None
         generic, forced = None, None
         if not any(k['id'] == int(kit) and k['item'] == int(item) for k in own):
@@ -2237,7 +2316,7 @@ class AppSession:
             obj_mtime = os.path.getmtime(self._obj_path) if self._obj_path else 0
         except OSError:
             obj_mtime = 0
-        stamp = json.dumps([self.preview.weapon_key, material, generic, forced, obj_mtime],
+        stamp = json.dumps([self._shown_weapon(), material, generic, forced, obj_mtime],
                            sort_keys=True, default=str)
         return generic, forced, hashlib.sha1(stamp.encode('utf-8')).hexdigest()[:10]
 
@@ -2306,7 +2385,7 @@ class AppSession:
             return {'error': 'War Paint уже накладывается'}
         t = self.preview.textures
         material = t.stable_main()
-        weapon_key = self.preview.weapon_key
+        weapon_key = self._shown_weapon()
         team = 'blue' if t.active_team == Team.BLU else 'red'
         seed = int(seed) & ((1 << 64) - 1)
         size = min(max(int(size), 256), 2048)
@@ -2322,7 +2401,7 @@ class AppSession:
         def done(ok: bool, message: str) -> None:
             # Пока собиралось, человек мог уйти на другое оружие: чужой War
             # Paint на новую пушку не кладём.
-            same = (self.preview.weapon_key == weapon_key
+            same = (self._shown_weapon() == weapon_key
                     and ('blue' if self.preview.textures.active_team == Team.BLU
                          else 'red') == team)
             try:
@@ -2359,7 +2438,7 @@ class AppSession:
         if 'error' in paths:
             return paths
         material = self.preview.textures.stable_main()
-        if not material or not self.preview.weapon_key:
+        if not material or not self._shown_weapon():
             return {'error': 'Сначала выберите оружие'}
         defs = paintkit_defs.load(paths['root'])
         kit_obj, item_obj = paintkit_defs.find_item(defs, kit, item) if defs else (None, None)
@@ -2370,7 +2449,7 @@ class AppSession:
             return found
         model, obj_mat, card = found
         own = any(k['id'] == int(kit) and k['item'] == int(item)
-                  for k in paintkit_defs.for_model(paths['root'], self._paintkit_model()))
+                  for k in self._own_paintkits(paths['root']))
         reader = GameVpkReader([paths['textures_vpk'], paths['misc_vpk']])
         try:
             res = paintkit_layout.describe(
@@ -3304,7 +3383,7 @@ class AppSession:
         from src.services import festive_decor
         kind, _material = festive_decor.parse_card(card)
         decor = self._decors.get(kind) if kind else None
-        return decor if decor and decor.weapon_key == self._decor_key() else None
+        return decor if decor and decor.weapon_key == self._shown_weapon() else None
 
 
     def _tint_risks(self, paths) -> Dict[str, Any]:
@@ -3462,6 +3541,14 @@ class AppSession:
     # ═══════════════════════════════════════════════════════════════════════ #
     # Инструменты: извлечение оригиналов и объединение модов
     # ═══════════════════════════════════════════════════════════════════════ #
+
+    @staticmethod
+    def _bypass_method() -> str:
+        """Способ обхода sv_pure из настроек; неизвестный — умолчание."""
+        from src.config.app_config import AppConfig
+        from src.shared.constants import SVPURE_BYPASS_DEFAULT, SVPURE_BYPASS_PREFIXES
+        method = AppConfig.load_config().get('sv_pure_bypass')
+        return method if method in SVPURE_BYPASS_PREFIXES else SVPURE_BYPASS_DEFAULT
 
     @staticmethod
     def _export_settings() -> tuple:
@@ -3755,6 +3842,11 @@ class AppSession:
             # Меши красятся ПОЛНЫМ набором: карточки отфильтрованы, а служебная
             # геометрия без текстуры осталась бы серой.
             'scene': self._painted(self.preview.scene_textures()),
+            # Куда в этой сцене ложится каждая карточка: {карточка: [меши]}.
+            # Страница кладёт по нему временные картинки (предпросмотр War
+            # Paint) в ту же раздачу, что и настоящие.
+            'card_scene': {c: self.preview.scene_names(c)
+                           for c in self.preview.textures.material_names},
             'paint': self._paint,
             'materials': self.preview.card_materials(),
             # Меши, которые носят ВЫБРАННУЮ карточку (маски маскировки: девять
@@ -3782,6 +3874,9 @@ class AppSession:
                                 and self.preview.custom_keep_materials),
             # Своя геометрия в кадре — можно предложить вернуть игровую.
             'has_custom': bool(self.preview.custom_smd_path),
+            # Геометрия не стоковая — своя модель или модель из мода VPK:
+            # гирлянду на ней есть смысл подгонять.
+            'custom_geometry': self._custom_geometry(),
             # Подгонка есть только у импортированной модели (OBJ/GLB) и только
             # пока она в кадре (custom_obj_path): у SMD из Blender человек уже
             # всё выставил сам. Вернувшаяся с диска работа собирает OBJ заново
@@ -3802,7 +3897,7 @@ class AppSession:
             # Праздничная версия: какие гирлянды есть и какая включена.
             'festive_options': self.festive_options(),
             'festive': (self._decor_kind
-                        if self._decor_kind and self._decor_for == self._decor_key()
+                        if self._decor_kind and self._decor_for == self._shown_weapon()
                         else ''),
             # Свои текстуры гирлянды для вьювера ({меш: {команда: [кадры]}}):
             # её меши он красит своим слоем, мимо раздачи текстур предмета.
@@ -3972,8 +4067,9 @@ class AppSession:
     # Гирлянда поверх оружия
     # ═══════════════════════════════════════════════════════════════════════ #
 
-    def _decor_key(self) -> str:
-        """Модель, на которую вешается гирлянда; пусто — не оружие."""
+    def _shown_weapon(self) -> str:
+        """Игровое оружие в кадре (у мода из VPK — то, что он заменяет);
+        пусто — не оружие. По нему ищутся гирлянды и War Paint."""
         from src.data.item_kinds import kind_of
 
         p = self.preview
@@ -3983,6 +4079,11 @@ class AppSession:
             return ''
         return p.weapon_key or ''
 
+    def _custom_geometry(self) -> bool:
+        """В кадре не стоковая геометрия: своя модель или MDL из мода."""
+        p = self.preview
+        return bool(p.custom_smd_path or (p.custom_vpk_mode and p.custom_vpk_own_model))
+
     def festive_options(self) -> List[str]:
         """Какие гирлянды игра вешает на показанное оружие (по порядку показа).
 
@@ -3991,7 +4092,7 @@ class AppSession:
         """
         from src.services import festive_decor
 
-        key = self._decor_key()
+        key = self._shown_weapon()
         if self._decor_options[0] != key:
             paths = self.tf2_paths() if key else {'error': ''}
             found = ([] if 'error' in paths
@@ -4011,7 +4112,7 @@ class AppSession:
         гирлянды (около секунды), дальше из памяти.
         """
         kind = str(kind or '')
-        key = self._decor_key()
+        key = self._shown_weapon()
         if kind and kind not in self.festive_options():
             return {'error': 'У этого предмета такой версии нет'}
         with self._decor_lock:
@@ -4156,7 +4257,7 @@ class AppSession:
     def _decor_shown(self):
         """Готовая гирлянда, которая сейчас включена; None — выключена."""
         decor = self._decors.get(self._decor_kind) if self._decor_kind else None
-        if decor is None or decor.weapon_key != self._decor_key():
+        if decor is None or decor.weapon_key != self._shown_weapon():
             return None
         return decor
 
@@ -4165,7 +4266,7 @@ class AppSession:
         # к другому предмету.
         with self._decor_lock:
             if ((decor.weapon_key, decor.kind) != (self._decor_for, self._decor_kind)
-                    or decor.weapon_key != self._decor_key()):
+                    or decor.weapon_key != self._shown_weapon()):
                 return
             self._decors[decor.kind] = decor
             self._show_decor_cards(decor)

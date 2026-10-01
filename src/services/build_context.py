@@ -33,6 +33,8 @@ class TextureBuildContext:
     #: Можно ли класть рельеф поверх родной нормали материала: у своей
     #: (заменённой) модели развёртка другая, и родная нормаль легла бы мимо.
     stock_normal_ok: bool = True
+    #: Главная — игровая без вопроса (BuildRequest.main_from_game).
+    main_from_game: bool = False
 
     def render_user_image_vtf(
         self, image_path: str, target_vtf_path: Path, png_name: str

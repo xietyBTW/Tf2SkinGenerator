@@ -80,6 +80,10 @@ class BuildRequest:
     # Способ обхода sv_pure для казуала: 'console' (по умолчанию) или 'vgui'
     # (перенаправление $cdmaterials в whitelisted-папку). См. bypass_prefix().
     bypass_method: str = "console"
+    # Своей главной текстуры нет, собирают ради другой правки (VMT, карты,
+    # модель): главная берётся из игры БЕЗ вопроса. image_path при этом —
+    # EXTRA_TEX_USE_GAME_ORIGINAL.
+    main_from_game: bool = False
     # ── Режим «Скайбокс» (mode == SKYBOX_MODE) ──────────────────────────────
     # Имена стоковых небес, чьи материалы перекрываем (уже развёрнуто из
     # «Все карты»). Панорама едет в image_path (может быть None, если пользователь

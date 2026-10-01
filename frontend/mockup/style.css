@@ -219,6 +219,9 @@
   row-gap: 8px;
   min-width: 0;   /* иначе ряд не сжимается и уезжает за край вместо переноса */
 }
+/* Кнопка переносится целиком, а не по словам: «Вернуть правки» в две строки
+   при сжатой колонке читалось как две кнопки. */
+.acts > * { white-space: nowrap; }
 
 /* Условные контролы приходят от режима сборки (см. frontend/CONTROLS.md).
    Скрываем, а не гасим: недоступная кнопка — шум, который всё равно нельзя
@@ -486,7 +489,12 @@
   .album__step--next::before { content: "\203A"; }
 }
 
-.album__count { font-family: var(--mono); font-size: 10.5px; color: var(--ink-mute); }
+/* Счётчик не сжимается: при узкой колонке «01 / 01» ломался в столбик. Место
+   уступают кнопки — они переносятся (.acts). */
+/* Когда кнопки ушли в несколько строк, счётчик стоит у первой, а не
+   посередине столбика. */
+.album__count { flex: none; white-space: nowrap; align-self: flex-start;
+                font-family: var(--mono); font-size: 10.5px; color: var(--ink-mute); }
 .album__count b { color: var(--ink); font-weight: 600; }
 
 /* ── Вьюпорт ─────────────────────────────────────────────────────────── */
@@ -2408,6 +2416,89 @@
 }
 .vmt__tip b { color: var(--accent); font-weight: 500; }
 
+/* «Готовые эффекты»: категории слева, пункты или форма справа. Высота своя —
+   длинное меню с пояснениями тянулось через весь экран. Popover (верхний
+   слой над модальным окном), место задаёт vmt-effects.js. */
+.fxpick {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  padding: 0;
+  width: min(620px, calc(100vw - 16px));
+  height: min(430px, calc(100vh - 16px));   /* форма оболочки — целиком */
+  border: 1px solid var(--hairline-strong);
+  background: var(--overlay);
+  color: inherit;
+}
+.fxpick:popover-open { display: flex; }
+.fxpick[hidden] { display: none; }
+.fxpick__cats {
+  flex: none;
+  width: 170px;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--hairline);
+  overflow-y: auto;
+}
+.fxpick__cat {
+  padding: 10px 14px;
+  border: 0;
+  border-left: 2px solid transparent;
+  background: none;
+  color: var(--ink-soft);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: color var(--dur), background var(--dur);
+}
+.fxpick__cat:hover { color: var(--ink); background: var(--bg); }
+.fxpick__cat.is-active { color: var(--ink); border-left-color: var(--accent); background: var(--bg); }
+.fxpick__pane { flex: 1; min-width: 0; overflow-y: auto; }
+.fxpick__list { display: flex; flex-direction: column; }
+.fxpick__item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 14px;
+  border: 0;
+  border-bottom: 1px solid var(--hairline);
+  background: none;
+  color: var(--ink-soft);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: color var(--dur), background var(--dur);
+}
+.fxpick__item:hover { color: var(--ink); background: var(--bg); }
+.fxpick__more { color: var(--accent); }
+.fxpick__hint { font-size: 11px; line-height: 1.45; color: var(--ink-mute); margin: 0; }
+.fxpick__form { display: flex; flex-direction: column; gap: 14px; padding: 12px 16px 16px; }
+.fxpick__head { display: flex; align-items: baseline; gap: 14px; }
+.fxpick__title { margin: 0; color: var(--ink); }
+.fxpick__field { display: flex; flex-direction: column; gap: 7px; }
+.fxpick__label { color: var(--ink-mute); }
+.fxpick__ctl { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+/* Свой цвет — кнопка с подписью и кодом, отдельно от готовых плашек. */
+.fxpick__own {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-left: 8px;
+  padding: 3px 8px 3px 3px;
+  border: 1px solid var(--hairline-strong);
+  color: var(--ink-soft);
+  font-size: 12px;
+  cursor: pointer;
+  transition: color var(--dur), border-color var(--dur);
+}
+.fxpick__own:hover { color: var(--ink); border-color: var(--ink); }
+.fxpick__own.is-active { color: var(--ink); outline: 2px solid var(--accent); outline-offset: 1px; }
+.fxpick__own .parts__color { width: 20px; height: 20px; }
+.fxpick__hex { color: var(--ink-mute); font-size: 11px; }
+.fxpick__num { min-width: 28px; color: var(--ink-soft); }
+.fxpick__note { margin: 0; font-size: 11px; color: var(--accent); }
+.fxpick__apply { align-self: flex-start; }
+
 .vmt__foot { display: flex; align-items: baseline; gap: 14px; }
 .vmt__status { margin: 0; flex: 1; }
 .vmt__status.is-bad { color: var(--accent); }
@@ -2455,7 +2546,33 @@
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: var(--gap) var(--rhythm);
 }
-.cfg__checks { display: flex; flex-wrap: wrap; gap: 10px 24px; }
+/* Окно не выше экрана: прокручиваются секции, заголовок и «Сохранить» стоят. */
+.cfg .ask__body { max-height: calc(100vh - 48px); }
+.cfg__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  margin-right: calc(-1 * var(--rhythm));     /* полоса прокрутки — у края окна */
+  padding-right: var(--rhythm);
+}
+/* Секция: подзаголовок над волосяной линией, внутри — свой ритм. */
+.cfg__sec { display: flex; flex-direction: column; gap: 14px; }
+.cfg__head {
+  margin: 0;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--hairline-strong);
+  color: var(--ink);             /* не путать с подписями полей под ним */
+}
+/* Галочки и действия обслуживания — ровными колонками, а не вразнобой по
+   длине подписи: так их пробегают глазом сверху вниз. */
+.cfg__checks, .cfg__maintgrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 10px var(--rhythm);
+}
 /* Поле пути и значок выбора папки в одну строку: поле тянется, значок — в
    том же весе, что инструменты палитры частей. */
 .pathpick { display: flex; align-items: center; gap: 6px; }
@@ -2556,12 +2673,17 @@
    интерфейсе без скруглений, заливок и теней выглядит чужим. */
 .picker {
   position: fixed;
+  /* Popover (picker.js): у него свои поля и центровка от браузера — наши. */
+  inset: auto;
+  margin: 0;
+  color: inherit;
   z-index: 40;
   width: 184px;
   padding: 10px;
   border: 1px solid var(--hairline-strong);
   background: var(--overlay);
 }
+.picker[hidden] { display: none; }
 
 /* Насыщенность по горизонтали, яркость по вертикали — два градиента поверх
    тона. Канва тут не нужна: точку в цвет переводит арифметика, а не пиксель. */
@@ -2922,7 +3044,6 @@
   display: flex;
   align-items: baseline;
   gap: 12px;
-  margin-top: 4px;
 }
 .cfg__maint .mono { color: var(--ink-mute); }
 

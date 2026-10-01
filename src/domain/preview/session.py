@@ -119,6 +119,9 @@ class PreviewSession:
     #: оружие (шапка, эффект) или опознать не вышло.
     custom_vpk_weapon: Optional[str] = None
     custom_vpk_smd: Optional[str] = None
+    #: В моде своя модель (а не только текстуры на стоковой): развёртка у неё
+    #: своя, и всё, что привязано к UV стоковой (War Paint игры), мимо.
+    custom_vpk_own_model: bool = False
     #: Режим загруженного custom-VPK мода: карточки строятся из VTF мода и
     #: не должны перетираться обычной фильтрацией материалов модели.
     custom_vpk_mode: bool = False
@@ -472,6 +475,18 @@ class PreviewSession:
         mode = (self.current_object or ('', '', ''))[0]
         return list(self.scene_item_materials) if kind_of(mode).is_spy_mask else []
 
+    def scene_names(self, card: str) -> List[str]:
+        """Меши показанной сцены, на которые ложится карточка `card`.
+
+        Та же связь, что в scene_textures: у мода из VPK — по имени без учёта
+        регистра, у одноматериальной модели в сцене — настоящие имена мешей.
+        Нужна странице, чтобы временная картинка (предпросмотр War Paint)
+        легла туда же, куда легла бы настоящая, в любой сцене.
+        """
+        if self.custom_vpk_mode and self.custom_model_materials:
+            return [m for m in self.custom_model_materials if m.lower() == card.lower()]
+        return list(self._name_for_scene({card: ''}))
+
     def _name_for_scene(self, out: Dict[str, str]) -> Dict[str, str]:
         """
         Переводит служебный ключ одноматериальной модели в имена мешей сцены.
@@ -750,6 +765,7 @@ class PreviewSession:
         """Забывает, что заменял прошлый мод."""
         self.custom_vpk_weapon = None
         self.custom_vpk_smd = None
+        self.custom_vpk_own_model = False
 
     def forget_decor_look(self, kind: str) -> None:
         """Правки гирлянды вида `kind`, привязанные к её геометрии: краска,

@@ -226,6 +226,9 @@ class CustomVPKService:
         sub_progress_callback: Optional[Callable[[int, str], None]] = None,
         custom_vtf_path: Optional[str] = None,
         hat_mdl_path: Optional[str] = None,  # не используется в custom-режиме (для совместимости вызова)
+        decor_builds: Optional[list] = None,
+        tf2_root_dir: Optional[str] = None,
+        bypass_method: str = "console",
     ) -> Tuple[bool, str]:
         """
         Полный пайплайн редактирования кастомного мода:
@@ -234,7 +237,8 @@ class CustomVPKService:
         2. Сканировать VMT → найти все текстуры (RED + BLU)
         3. Первую RED текстуру → заменить из image_path (или custom_vtf_path)
         4. Остальные → запросить через extra_texture_callback; если отказ — оставить оригинал
-        5. Перепаковать в VPK и скопировать в export_folder
+        5. Правленые гирлянды (decor_builds) — своими моделями поверх
+        6. Перепаковать в VPK и скопировать в export_folder
         """
         from src.services.texture_service import TextureService
         from src.shared.file_utils import copy_file_safe
@@ -354,7 +358,17 @@ class CustomVPKService:
                     _replace(user_img, tex)
                 # Если пользователь не выбрал — оригинальный VTF остаётся без изменений
 
-            # ── 5. Перепаковка ─────────────────────────────────────────── #
+            # ── 5. Гирлянды ────────────────────────────────────────────── #
+            # Тем же сборщиком, что у обычного оружия: модель гирлянды
+            # поверх мода, материалы в своей папке (decor_build).
+            decor_note = ''
+            if decor_builds:
+                decor_note = CustomVPKService._build_decor(
+                    decor_builds, temp_root, vpkroot_dir, tf2_root_dir, size,
+                    format_type, flags or [], vtf_options or {}, bypass_method,
+                    emit, language)
+
+            # ── 6. Перепаковка ─────────────────────────────────────────── #
             emit(-1, "Packing VPK..." if language == "en" else "Упаковка VPK...")
             from src.services.packaging_service import PackagingService
             final = PackagingService.pack_directory(
@@ -366,10 +380,55 @@ class CustomVPKService:
 
             msg = t.get('vpk_success', 'VPK successfully created: {path}').format(path=str(final))
             logger.info(msg)
-            return True, msg
+            return True, f"{msg}\n{decor_note}" if decor_note else msg
 
         except Exception as e:
             logger.error(f"Критическая ошибка build_custom_mod: {e}", exc_info=True)
             return False, str(e)
         finally:
             shutil.rmtree(str(temp_root), ignore_errors=True)
+
+    @staticmethod
+    def _build_decor(entries: list, temp_root: Path, vpkroot_dir: Path,
+                     tf2_root_dir: Optional[str], size, format_type: str,
+                     flags: List[str], vtf_options: Dict, bypass_method: str,
+                     emit: Callable[[int, str], None], language: str) -> str:
+        """Гирлянды в распакованный мод. Возвращает пометку для отчёта, если
+        собрались не все: мод при этом собирается — со стоковыми гирляндами,
+        как и у обычного оружия (decor_build)."""
+        from types import SimpleNamespace
+
+        from src.services.decor_build import build_decor_models
+        from src.services.tf2_paths import TF2Paths
+        from src.shared.constants import bypass_prefix
+
+        failed = ("Edited lights were not built — see the log"
+                  if language == "en" else
+                  "Правленые гирлянды не собрались — подробности в журнале")
+        try:
+            studiomdl_exe, misc_vpk, tf_dir = TF2Paths.resolve(tf2_root_dir or '')
+        except FileNotFoundError as exc:
+            logger.warning(f"[гирлянда] custom-мод: нет инструментов игры: {exc}")
+            return failed
+        # Гирлянда из самого мода заменится игровой с правками превью: превью
+        # показывает игровую, и собирается то, что видно, — но работу автора
+        # мода молча терять нельзя.
+        replaced = [Path(e['mdl']).stem for e in entries
+                    if (vpkroot_dir / e['mdl']).is_file()]
+        if replaced:
+            logger.warning(f"[гирлянда] custom-мод: своя гирлянда мода заменена "
+                           f"игровой: {replaced}")
+        ctx = SimpleNamespace(temp_dir=str(temp_root), vpkroot_dir=vpkroot_dir)
+        built = build_decor_models(
+            ctx, entries, misc_vpk=misc_vpk,
+            textures_vpk=TF2Paths.resolve_textures_vpk(tf2_root_dir) or '',
+            studiomdl_exe=studiomdl_exe, tf_dir=tf_dir, size=size,
+            format_type=format_type, flags=flags, vtf_options=vtf_options,
+            bypass_prefix=bypass_prefix(bypass_method), emit_sub=emit,
+            language=language)
+        notes = [] if built == len(entries) else [failed]
+        if replaced:
+            notes.append(("The mod's own lights were replaced with the game ones: "
+                          if language == "en" else
+                          "Своя гирлянда мода заменена игровой: ") + ", ".join(replaced))
+        return "\n".join(notes)

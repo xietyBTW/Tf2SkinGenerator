@@ -142,8 +142,21 @@ buildBtn.addEventListener('click', async () => {
   const hatClassesPicked = await askHatClasses();
   if (!hatClassesPicked) return;
   // Классы мультиклассовой шапки: пусто — значит все (и не шапка).
-  const params = { ...buildParams(), hat_classes: hatClassesPicked };
+  let params = { ...buildParams(), hat_classes: hatClassesPicked };
   let res = await api.build(params);
+  // Ни своей текстуры, ни другой правки (VMT, карты, модель…): мод вышел бы
+  // игровым. Не запрещаем — иногда это и нужно (проверить путь, сброс), —
+  // но спрашиваем, чтобы пустой мод не собрался по ошибке.
+  if (res.confirm_empty) {
+    const go = await ask({
+      title: 'Изменений нет',
+      text: 'Ни своих текстур, ни правок материала или модели. Мод соберётся с игровыми текстурами и материалами — в игре предмет будет выглядеть как обычно.',
+      ok: 'Всё равно собрать',
+    });
+    if (!go) return;
+    params = { ...params, allow_empty: true };
+    res = await api.build(params);
+  }
   if (res.confirm_tint) {
     const tintMode = await askTint(res.confirm_tint);
     if (!tintMode) return;

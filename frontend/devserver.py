@@ -249,6 +249,8 @@ ALLOWED = {
     "pick_folder": api.pick_folder,
     "clear_model_cache": api.clear_model_cache,
     "vmt_snippets": api.vmt_snippets,
+    "vmt_effect_values": api.vmt_effect_values,
+    "vmt_apply_effect": api.vmt_apply_effect,
     "set_settings": api.set_settings,
     "set_ui_state": api.set_ui_state,
     "load_custom_model": api.load_custom_model,

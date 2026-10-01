@@ -14,7 +14,7 @@ import { showReport } from './diagnostics.js';
 import { showFailure } from './fail.js';
 import { askForTexture, askForModel } from './build.js';
 import { showCpModel } from './particles/points.js';
-import { refreshWarpaint } from './warpaint.js';
+import { refreshWarpaint, recheckWarpaint } from './warpaint.js';
 import { t } from './i18n.js';
 import {
   refreshView,
@@ -198,6 +198,10 @@ api.subscribe((ev) => {
       const tab = document.querySelector('.half__bar--scenes [data-scene="fp"]');
       if (tab) tab.hidden = !ev.ready;
       if (ev.ready) say(`Мод заменяет ${ev.key} — можно посмотреть в руках`);
+      // По оружию ищутся War Paint и гирлянды: спрошенные при показе модели
+      // ответы были ещё без него.
+      recheckWarpaint();
+      refreshView();
       break;
     }
 

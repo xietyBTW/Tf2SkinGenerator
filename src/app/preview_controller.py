@@ -389,10 +389,11 @@ class VpkModController:
         self._worker = w
         w.start()
 
-    def _on_weapon(self, key: str, ref_smd: str) -> None:
-        """Мод опознан: чьё это оружие и где его меш."""
+    def _on_weapon(self, key: str, ref_smd: str, own_model: bool = True) -> None:
+        """Мод опознан: чьё это оружие, где его меш и свой ли он."""
         self._session.custom_vpk_weapon = key or None
         self._session.custom_vpk_smd = ref_smd or None
+        self._session.custom_vpk_own_model = bool(own_model)
         self.weapon.emit(key or '', ref_smd or '')
 
     # ── Сигналы воркера: сначала сессия, потом событие ───────────────────── #
@@ -438,7 +439,17 @@ class VpkModController:
     def _on_materials(self, materials: list) -> None:
         if not materials:
             return
-        self._session.custom_model_materials = list(materials)
+        s = self._session
+        s.custom_model_materials = list(materials)
+        # Карточки шли по путям VTF в архиве, и первой бывала чужая текстура
+        # (огоньки гирлянды из того же мода). Главная — материал самой модели:
+        # на неё ложатся War Paint и части одноматериальной модели.
+        own = {m.lower() for m in materials}
+        names = s.textures.material_names
+        first = [n for n in names if n.lower() in own]
+        if first:
+            s.textures.material_names = first + [n for n in names if n not in first]
+            s.textures.main_material = first[0]
         self.materials.emit(materials)
 
     def _on_skins(self, info: dict) -> None:

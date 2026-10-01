@@ -18,7 +18,7 @@ import { root, work } from './layout.js';
 import { bindAlbum, goTo, SINGLE_TEX } from './album.js';
 import { modeControls, restoreBadges } from './controls.js';
 import { syncPaint } from './paint.js';
-import { hideWarpaint } from './warpaint.js';
+import { hideWarpaint, warpaintPreview } from './warpaint.js';
 import { closeParts, bindParts, suspendParts, resumeParts, refreshParts } from './parts.js';
 import { updateDockSummary } from './build.js';
 import { refreshNormal } from './normals.js';
@@ -348,7 +348,12 @@ export function applyView(st) {
   // редактируемое — как и панель приложения.
   // Выбранная карточка накрывает то, что Python положил на её меш: он о
   // положении альбома не знает и кладёт первую попавшуюся (см. wearCard).
-  const entries = Object.entries({ ...(st.scene || st.textures), ...wornCard() });
+  // Предпросмотр War Paint — поверх всего, в меши ЭТОЙ сцены (card_scene):
+  // у одноматериальной модели в руках это настоящее имя меша, не служебный ключ.
+  const trial = Object.entries(warpaintPreview() || {}).flatMap(
+    ([card, png]) => (st.card_scene?.[card] || [card]).map((mesh) => [mesh, png]));
+  const entries = Object.entries({ ...(st.scene || st.textures), ...wornCard(),
+                                   ...Object.fromEntries(trial) });
   const single = entries.length === 1 && entries[0][0] === SINGLE_TEX;
 
   if (applySpecialTexture(st.textures)) {
@@ -549,8 +554,9 @@ function showBodygroups(groups) {
 }
 
 //: Подписи видов гирлянды. Ключи задаёт Python (festive_decor / items_game).
-/** Гирлянду есть что подгонять: своя модель (оружия или её самой) или уже правлена. */
-const decorFittable = (st) => Boolean(st.has_custom || st.decor_fit
+/** Гирлянду есть что подгонять: своя модель (оружия, мода из VPK или её
+ *  самой) или уже правлена. */
+const decorFittable = (st) => Boolean(st.custom_geometry || st.decor_fit
   || (st.decor_bends || []).length || (st.decor_models || []).includes(st.festive));
 
 const FESTIVE_LABELS = { '': 'Обычная', xmas: 'Праздничная', festivizer: 'Фестивайзер' };
@@ -615,7 +621,7 @@ function showFestive(st) {
   }
   // На своей модели гирлянда стоит по стоковой, пока её не подогнали: так её
   // и повесит игра, и огоньки будут висеть мимо.
-  if (st.festive && st.has_custom && !st.decor_fit && !(st.decor_bends || []).length) {
+  if (st.festive && st.custom_geometry && !st.decor_fit && !(st.decor_bends || []).length) {
     const note = document.createElement('span');
     note.className = 'label label--inline festive__note';
     note.textContent = 'Висит как на стоковой модели — подгоните под свою';

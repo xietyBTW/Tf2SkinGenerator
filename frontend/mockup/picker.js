@@ -70,6 +70,10 @@ function pickerBox() {
   const box = document.createElement('div');
   box.className = 'picker';
   box.hidden = true;
+  // Popover — ради верхнего слоя: цвет выбирают и в модальных окнах (особые
+  // материалы в редакторе VMT), а модальный <dialog> лежит выше любого
+  // z-index. Как у контекстного меню (menu.js).
+  box.setAttribute('popover', 'manual');
   box.innerHTML = '<div class="picker__sv"><i class="picker__dot"></i></div>'
     + '<div class="picker__hue"><i class="picker__bar"></i></div>'
     + '<div class="picker__foot"><span class="picker__now"></span>'
@@ -152,7 +156,12 @@ function openPicker(input, opts) {
   const box = pickerBox();
   PICKER.input = input;
   Object.assign(PICKER, hexToHsv(input.value));
+  // Вне модального окна всё инертно: поповер на время показа переезжает
+  // внутрь открытого окна, иначе он висел бы под ним и по нему не щёлкнуть.
+  const host = document.querySelector('dialog:modal') || document.body;
+  if (box.parentNode !== host) host.appendChild(box);
   box.hidden = false;
+  if (box.showPopover && !box.matches(':popover-open')) box.showPopover();
   setExtra((opts && opts.extra) || null);
   pushPicker();
 
@@ -175,6 +184,7 @@ function openPicker(input, opts) {
 function closePicker() {
   if (PICKER.box) {
     setExtra(null);          // блок уезжает домой, иначе он пропал бы со страницы
+    if (PICKER.box.matches(':popover-open')) PICKER.box.hidePopover();
     PICKER.box.hidden = true;
   }
   PICKER.input = null;
@@ -236,7 +246,9 @@ document.addEventListener('keydown', (e) => {
     return;
   }
   // Пока открыт поповер, Escape закрывает его, а не диалог за ним.
-  if (e.key === 'Escape' && PICKER.input) { e.stopPropagation(); closePicker(); }
+  // stopImmediate: иначе тот же Esc поймали бы и другие слушатели документа
+  // (панель эффектов редактора VMT закрылась бы вместе с палитрой).
+  if (e.key === 'Escape' && PICKER.input) { e.stopImmediatePropagation(); closePicker(); }
 }, true);
 
 // Поповер прибит к месту поля: при прокрутке и смене размера он уезжает.

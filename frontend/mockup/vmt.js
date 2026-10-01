@@ -10,7 +10,7 @@ import * as api from './api.js';
 import { escapeHtml } from './util.js';
 import { say } from './stage.js';
 import { ask } from './ask.js';
-import { contextMenu } from './menu.js';
+import { pickEffect, closeEffects } from './vmt-effects.js';
 import { currentMaterial } from './album.js';
 
 // ── Редактор VMT ────────────────────────────────────────────────────────
@@ -131,24 +131,31 @@ vmtText.addEventListener('mouseleave', hideTip);
 vmtText.addEventListener('keydown', hideTip);
 
 /**
- * Меню «Готовые эффекты»: свечение, блики, прозрачность, анимация, шаблоны.
+ * «Готовые эффекты»: свечение, блики, прозрачность, анимация, особые
+ * материалы, шаблоны.
  *
  * Набор общий с данными Python (`src/data/vmt_snippets.py`) — держать второй
- * список в JS значило бы его разъезд. Группы идут с заголовками, у пунктов —
- * пояснение: одной подписи «$phong» новичку мало, чтобы понять, что он
- * вставляет. Пункт-ШАБЛОН заменяет весь документ, поэтому о нём спрашивают.
+ * список в JS значило бы его разъезд. Выбор — в панели категорий
+ * (vmt-effects.js). Пункт-ШАБЛОН заменяет весь документ, поэтому о нём
+ * спрашивают; эффект с формой приходит готовым текстом — о замене он
+ * предупредил в самой форме.
  */
 async function insertMenu(e) {
+  if (closeEffects()) return;             // повторный щелчок — закрыть
+  const anchor = e.currentTarget;         // после await его у события уже нет
   const data = await api.vmtSnippets();
-  const items = [];
-  for (const group of data.groups || []) {
-    items.push({ heading: group.name });
-    for (const it of group.items) {
-      items.push({ label: it.label, hint: it.hint, value: it });
-    }
+  const res = await pickEffect(anchor, data, () => vmtText.value, vmtState.game);
+  if (!res) return;
+  if (res.text !== undefined) {
+    vmtText.value = res.text;
+    paintVmt();
+    vmtText.focus();
+    vmtText.setSelectionRange(0, 0);
+    vmtText.scrollTop = 0;
+    markVmtState();
+    return;
   }
-  const picked = await contextMenu(e, items);
-  if (!picked) return;
+  const picked = res.item;
 
   if (picked.template) {
     const body = (data.templates || {})[picked.key] || '';
@@ -317,8 +324,10 @@ export async function openVmtEditor() {
     .map((p) => [p.param.toLowerCase(), p.doc]));
   renderRef();
 
+  // `game` — игровой оригинал на всё время окна: `original` после сохранения
+  // становится сохранённым текстом, а эффекту нужна родная текстура.
   vmtState = { material: res.material, original: res.original,
-               custom: Boolean(res.edited) };
+               custom: Boolean(res.edited), game: res.original };
   document.getElementById('vmt-mat').textContent = res.material;
   vmtText.value = res.content;
   paintVmt();
@@ -357,6 +366,8 @@ document.getElementById('vmt-reset').addEventListener('click', async () => {
 });
 
 document.getElementById('vmt-insert').addEventListener('click', insertMenu);
+// Окно закрыли с открытой панелью — она не должна пережить его.
+vmtDlg.addEventListener('close', closeEffects);
 
 // ── Справочник ──────────────────────────────────────────────────────────
 // Все известные параметры по группам: узнать, что вообще бывает, и добавить

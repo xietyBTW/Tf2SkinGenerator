@@ -36,7 +36,7 @@ PY_SOURCES = (
     "src/data/particle_sources.py")
 #: Модули, которые сами отвечают на двух языках (пары ru/en в кортежах):
 #: их русские строки до английского экрана не доходят.
-PY_LANG_AWARE = {"error_classifier.py", "vmt_tint.py"}
+PY_LANG_AWARE = {"error_classifier.py", "vmt_tint.py", "vmt_effects.py"}
 
 CYRILLIC = re.compile("[А-яЁё]")
 LITERAL = re.compile(r"'([^'\n]*)'|\"([^\"\n]*)\"|`((?:[^`\\]|\\.)*)`", re.S)

@@ -268,6 +268,9 @@ export const EN = {
   'неизвестная ошибка': 'unknown error',
 
   // ── Настройки ─────────────────────────────────────────────────────────
+  'Игра и файлы': 'Game and files',
+  'Работа и сборка': 'Work and build',
+  'Обслуживание': 'Maintenance',
   'Папка игры': 'Game folder',
   'Папка экспорта': 'Export folder',
   'Формат извлечения': 'Extraction format',
@@ -1148,6 +1151,14 @@ export const EN = {
 
   // ── Редактор VMT: справочник и готовые эффекты ─────────────────────────
   'Готовые эффекты ▾': 'Presets ▾',
+  '← Назад': '← Back',
+  'Изменений нет': 'No changes',
+  'Ни своих текстур, ни правок материала или модели. Мод соберётся с игровыми текстурами и материалами — в игре предмет будет выглядеть как обычно.':
+    'No custom textures and no material or model edits. The mod will be built with the game textures and materials, so the item will look as usual in game.',
+  'Всё равно собрать': 'Build anyway',
+  'Такого эффекта нет': 'No such effect',
+  'Заменит весь материал. Вернуть игровой — «Как в игре».':
+    'Replaces the whole material. To get the game one back, use “As in the game”.',
   'Справочник': 'Reference',
   'Найти параметр': 'Find a parameter',
   'Наведите на параметр — подсказка · Ctrl+S — сохранить': 'Hover a parameter for help · Ctrl+S to save',

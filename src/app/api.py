@@ -1549,6 +1549,7 @@ def vmt_snippets(lang: str = '') -> Dict[str, object]:
     from src.data.vmt_snippets import (
         VMT_FULL_TEMPLATES, VMT_MERGE_REMOVES, VMT_SNIPPETS, VMT_SNIPPETS_EN,
     )
+    from src.services import vmt_effects
 
     en = _lang(lang) != 'ru'
 
@@ -1569,9 +1570,31 @@ def vmt_snippets(lang: str = '') -> Dict[str, object]:
                             # Слияние: значения перекрывают одноимённые ключи
                             # документа, `remove` гасятся (VMT_MERGE_REMOVES).
                             'merge': key in VMT_MERGE_REMOVES,
-                            'remove': list(VMT_MERGE_REMOVES.get(key, ()))})
+                            'remove': list(VMT_MERGE_REMOVES.get(key, ())),
+                            # Эффект с настройками: страница показывает форму,
+                            # текст собирает vmt_apply_effect.
+                            'fields': vmt_effects.fields(key, en),
+                            'replace': bool(vmt_effects.EFFECTS.get(key, {})
+                                            .get('replace'))})
         groups.append({'name': label(category)[0], 'items': entries})
     return {'groups': groups, 'templates': dict(VMT_FULL_TEMPLATES)}
+
+
+def vmt_effect_values(key: str = '', text: str = '') -> Dict[str, object]:
+    """Значения формы эффекта: из материала, если эффект уже стоит."""
+    from src.services import vmt_effects
+    if key not in vmt_effects.EFFECTS:
+        return {'error': 'Такого эффекта нет'}
+    return {'values': vmt_effects.values(key, text or '')}
+
+
+def vmt_apply_effect(key: str = '', values: Optional[Dict[str, object]] = None,
+                     text: str = '', game: str = '') -> Dict[str, object]:
+    """Материал с эффектом по выбранным значениям: {text, replace}. Не
+    сохраняет — текст ложится в редактор, сохраняет человек. `game` —
+    игровой оригинал материала (родная текстура для эффекта)."""
+    from src.services import vmt_effects
+    return vmt_effects.apply(key, dict(values or {}), text or '', game or '')
 
 
 def set_settings(values: Optional[Dict[str, object]] = None,

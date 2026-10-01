@@ -282,6 +282,8 @@ export const findTf2      = () => call('find_tf2');
 export const clearModelCache = () => call('clear_model_cache');
 //: Меню «Вставить» в редакторе VMT: набор не меняется за сеанс.
 export const vmtSnippets  = () => cached('vmt_snippets', {});
+export const vmtEffectValues = (key, text) => call('vmt_effect_values', { key, text });
+export const vmtApplyEffect  = (key, values, text, game) => call('vmt_apply_effect', { key, values, text, game });
 export const setSettings  = (values) => call('set_settings', { values });
 //: Мелочь раскладки (ширина панели, громкость): её правят прямо на экране, и
 //: сохраняется она по одной, а не всем окном настроек разом.

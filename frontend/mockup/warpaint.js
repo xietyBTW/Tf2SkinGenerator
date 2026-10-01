@@ -14,11 +14,11 @@
  */
 
 import * as api from './api.js';
-import { say, withViewer } from './stage.js';
+import { say } from './stage.js';
 import { modeControls } from './controls.js';
 import { t } from './i18n.js';
 import { SINGLE_TEX } from './album.js';
-import { refreshView } from './preview.js';
+import { applyView, lastView, refreshView } from './preview.js';
 import { openPartsCut, closeParts } from './parts.js';
 import { openLayout, closeLayout, flushLayout, shuffleLayout } from './warpaint-layout.js';
 
@@ -53,8 +53,22 @@ let wear = 1;
 //: Номер последнего запроса предпросмотра: ответы на прежние отбрасываются.
 let previewSeq = 0;
 let previewTimer = null;
-//: На модели сейчас предпросмотр, а не настоящая текстура.
-let previewShown = false;
+//: Предпросмотр на модели: {png, materials} — картинка и карточки, на которые
+//: она легла бы. null — на модели настоящие текстуры.
+let preview = null;
+
+/**
+ * Предпросмотр для раздачи текстур: {карточка: png} или null.
+ *
+ * Кладётся не отдельным вызовом во вьювер, а в ту же раздачу, что и настоящие
+ * текстуры (applyView): сцена пересобирается при смене вида (модель, руки), и
+ * отдельно положенная картинка пропадала бы — или проигрывала гонку загрузки
+ * настоящей текстуре. Панель при этом продолжала бы обещать предпросмотр.
+ */
+export function warpaintPreview() {
+  if (!preview) return null;
+  return Object.fromEntries(preview.materials.map((m) => [m, preview.png]));
+}
 
 /**
  * Узнаёт, какие War Paint есть у показанного оружия, и показывает кнопку.
@@ -83,6 +97,14 @@ export async function refreshWarpaint(weaponKey) {
   syncParts();
   // Пока ждали ответа, режим мог смениться (мод из VPK, другая категория).
   button.hidden = !(modeControls.warpaint && items.length);
+}
+
+/**
+ * Модель та же, но стало известно, чья она: мод из VPK опознаётся после
+ * показа, и первый ответ каталога мог прийти ещё без оружия.
+ */
+export function recheckWarpaint() {
+  if (itemsFor && panel.hidden) refreshWarpaint(itemsFor);
 }
 
 /** Новый предмет: панель закрывается, предпросмотр прошлой пушки не нужен. */
@@ -127,8 +149,11 @@ function close(restore = true) {
   panel.hidden = true;
   panel.parentElement.classList.remove('is-warpaint');
   button.classList.remove('is-active');
-  if (restore && previewShown) refreshView();
-  previewShown = false;
+  const shown = Boolean(preview);
+  // Без перерисовки: при «Нанести» предпросмотр стоит на модели, пока не
+  // приедет полная сборка (paintkit_ready перечитает показ сам).
+  preview = null;
+  if (restore && shown) refreshView();
 }
 
 function rows() { return [...listEl.querySelectorAll('.wpanel__row')]; }
@@ -228,16 +253,8 @@ async function runPreview() {
   }
   if (seq !== previewSeq || panel.hidden) return;    // выбор уже другой
   if (res.error) { status(res.error); return; }
-  const url = api.fileUrl(res.png);
-  const mats = res.materials || [];
-  withViewer((w) => {
-    if (!mats.length || (mats.length === 1 && mats[0] === SINGLE_TEX)) {
-      w.updateTextureFromDataUrl(url);
-    } else {
-      w.applyMaterialMap(Object.fromEntries(mats.map((m) => [m, url])));
-    }
-  });
-  previewShown = true;
+  preview = { png: res.png, materials: res.materials?.length ? res.materials : [SINGLE_TEX] };
+  if (lastView) applyView(lastView);
   status('Предпросмотр на модели. «Нанести» соберёт в полном размере.');
 }
 

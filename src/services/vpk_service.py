@@ -142,6 +142,9 @@ class VPKService:
                     sub_progress_callback=emit_sub,
                     custom_vtf_path=custom_vtf_path,
                     hat_mdl_path=hat_mdl_path,
+                    decor_builds=r.decor_builds,
+                    tf2_root_dir=r.tf2_root_dir,
+                    bypass_method=r.bypass_method,
                 )
                 emit_progress(100 if success else 0,
                               t.get('build_completed', 'Build completed') if success
@@ -330,10 +333,12 @@ class VPKService:
         чистит временные папки редактора, удаляет temp-директорию сборки и собирает
         итоговое сообщение (с накопленными предупреждениями ctx.warnings).
         """
+        # Правленый VMT после сборки НЕ удаляется: правка — часть работы, как
+        # своя текстура. Раньше он стирался, и вторая сборка того же предмета
+        # молча выходила с игровым материалом (эффект из редактора VMT —
+        # только на одну сборку). Откат — кнопка «Как в игре» в редакторе.
         if vmt_to_delete:
-            from src.services.edited_vmt_service import EditedVMTService
-            if EditedVMTService.delete_edited_vmt(vmt_to_delete):
-                logger.info(f"Удален отредактированный VMT файл: {vmt_to_delete}")
+            logger.info(f"Правленый VMT использован и оставлен: {vmt_to_delete}")
 
         # Чистим временные папки редактора VMT (мусор от достанных из игры VMT).
         VPKService._purge_dir_contents(DirectoryPaths.TEMP_VMT_EXTRACT_DIR, "temp_vmt_extract")
@@ -976,7 +981,7 @@ class VPKService:
         blu_mode = r.blu_mode
         # Папка обхода sv_pure для $cdmaterials (console\ или vgui\replay\thumbnails\).
         from src.shared.constants import bypass_prefix as _resolve_bypass_prefix
-        _bypass_prefix = _resolve_bypass_prefix(getattr(r, 'bypass_method', 'console'))
+        _bypass_prefix = _resolve_bypass_prefix(r.bypass_method)
         blu_image_path = r.blu_image_path
         panel_extra_textures = r.panel_extra_textures or {}
         misc_materials = r.misc_materials or []
@@ -1194,6 +1199,7 @@ class VPKService:
                 vtf_options=vtf_options,
                 custom_vtf_path=custom_vtf_path,
                 stock_normal_ok=not (replace_model_smd_path or model_ready_path),
+                main_from_game=r.main_from_game,
             )
 
             # Главная текстура: RED-резолв → VTF (custom/готовый/рендер) →
@@ -1411,7 +1417,7 @@ class VPKService:
             studiomdl_exe=studiomdl_exe, tf_dir=tf_dir, size=r.size,
             format_type=r.format_type, flags=r.flags or [],
             vtf_options=r.vtf_options or {},
-            bypass_prefix=_resolve_bypass_prefix(getattr(r, 'bypass_method', 'console')),
+            bypass_prefix=_resolve_bypass_prefix(r.bypass_method),
             emit_sub=emit_sub, language=r.language)
         if not built:
             ctx.cleanup(on_error=True, keep_on_error=r.keep_temp_on_error,

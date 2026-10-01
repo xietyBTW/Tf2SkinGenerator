@@ -805,9 +805,15 @@ class VpkTextureBuilder:
         if edited_vmt_path and Path(edited_vmt_path).exists():
             # Используем отредактированный VMT файл (юзер его правил через редактор)
             copy_file_safe(edited_vmt_path, vmt_path)
-            # Обновляем путь $baseTexture в отредактированном VMT файле на основе пути из QC
-            # (потому что путь может измениться, а юзер редактировал старый)
-            VMTService.update_vmt_basetexture_path(str(vmt_path), patched_cdmaterials_path, texture_filename)
+            # Путь $baseTexture переводится на текстуру мода (правили по
+            # игровому пути). Но если человек САМ указал другую текстуру
+            # (белая основа эффекта, чужая текстура игры), это выбор, а не
+            # устаревший путь: переписанный, он молча терялся.
+            if VpkTextureBuilder._basetexture_chosen(edited_vmt_path, vmt_file):
+                logger.info(f"[{texture_filename}] $basetexture выбран в правке — оставлен")
+            else:
+                VMTService.update_vmt_basetexture_path(
+                    str(vmt_path), patched_cdmaterials_path, texture_filename)
             logger.info(f"Использован отредактированный VMT файл: {edited_vmt_path} -> {vmt_path}")
             vmt_to_delete = texture_filename
         elif vmt_file and Path(vmt_file).exists():
@@ -870,6 +876,26 @@ class VpkTextureBuilder:
         finally:
             if png.exists():
                 png.unlink()
+
+    @staticmethod
+    def _basetexture_chosen(edited_vmt, game_vmt) -> bool:
+        """В правке $basetexture другой, чем в игровом VMT материала.
+
+        Без игрового VMT сравнить не с чем — считаем, что правили старый путь
+        (как было до этой проверки).
+        """
+        def norm(path):
+            base = VpkTextureBuilder._read_vmt_basetexture(str(path)) if path else None
+            if not base:
+                return None
+            base = base.replace('\\', '/').lower().strip('/')
+            base = base[len('materials/'):] if base.startswith('materials/') else base
+            return base[:-4] if base.endswith('.vtf') else base
+
+        if not (game_vmt and Path(game_vmt).exists()):
+            return False
+        edited, game = norm(edited_vmt), norm(game_vmt)
+        return bool(edited and game and edited != game)
 
     @staticmethod
     def _stock_normal(texture_filename: str, vmt_file, slots):
@@ -1403,7 +1429,9 @@ class VpkTextureBuilder:
         # Если callback вернул EXTRA_TEX_USE_GAME_ORIGINAL или None —
         # извлекаем оригинал из игрового VPK.
         if image_path == EXTRA_TEX_USE_GAME_ORIGINAL:
-            if extra_texture_callback:
+            # Без своей главной собирают ради другой правки — спрашивать,
+            # чем красить главную, незачем: она остаётся игровой.
+            if extra_texture_callback and not tex.main_from_game:
                 image_path = extra_texture_callback(texture_filename, weapon_key)
                 logger.info(f"Callback для основной RED текстуры: {image_path!r}")
 
