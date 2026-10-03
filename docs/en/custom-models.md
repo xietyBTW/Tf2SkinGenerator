@@ -1,122 +1,144 @@
 # Custom models
 
-[← Docs index](../README.md)
+[Documentation](../README.md) · [Русская версия](../ru/custom-models.md)
 
-A reskin only changes the texture. A **custom model** replaces the weapon's geometry itself,
-which is a bigger job: it needs a working TF2 install, because the app recompiles the model
-with `studiomdl` from `<TF2>\bin\`.
+A reskin changes the texture. A custom model changes the shape: your geometry takes the place of the game's model, keeps the item's slot and file paths, and gets compiled into a real TF2 model. The app takes care of the compiling, so you don't need to write a QC or run `studiomdl` yourself.
 
-> You should already be comfortable exporting an **SMD** (or a finished compiled `.mdl`) from
-> Blender or whatever tool you model in. This app packages and compiles models. It doesn't
-> model them for you. The exception is downloaded models in **OBJ / GLB / glTF**: the app
-> reads those itself and lets you fit them to the weapon without Blender, see
-> [below](#a-model-from-the-internet-obj--glb).
+You can bring a model in two kinds of formats:
+
+- **SMD**, exported from Blender (with the Source Tools add-on) or another 3D editor. This is the format TF2 models are built from, and it gives you full control over bones and materials.
+- **OBJ, GLB or glTF**, the formats you usually get from model sites. The app reads them itself and turns them into an SMD, so you don't need a 3D editor at all.
 
 ## How it works
 
-When you hand the app a custom model, it:
+1. The app decompiles the original item with Crowbar to get its QC and its reference mesh.
+2. Your geometry replaces the reference mesh.
+3. The QC is adjusted to your model, and `studiomdl.exe` from your TF2 installation compiles it into an MDL.
+4. The model, the textures and the materials are packed into the VPK.
 
-1. **Decompiles** the original weapon with the bundled Crowbar, to get its QC and reference SMD.
-2. **Swaps in your geometry.** Your SMD replaces the reference mesh.
-3. **Recompiles** the QC into a `.mdl` using `studiomdl.exe` from your TF2 install.
-4. **Packs** the model, materials, and VMTs into the `.vpk`.
+The decompiled original is kept in a cache, so the next builds of the same item are faster. When the game updates its model archives, the cache entry is rebuilt by itself.
 
-The decompiled original is cached so repeat builds are faster. If a TF2 update ever breaks
-compilation, clear it from **Settings → Clear Model Cache** and try again.
+## Loading a model
 
-## Steps
+1. Pick the item you want to replace. Your model takes over its slot and its paths, so in game it appears wherever this item would.
+2. Press **Replace model** under the 3D view.
+3. In the file dialog, select the model **together with** the files it needs: the `.mtl` of an OBJ, the `.bin` of a glTF, the texture images. Hold <kbd>Ctrl</kbd> to select several files. They are stored side by side, so the references inside the model resolve.
+4. The app asks **How to use the model?** and lists the materials it found in the file. The answer decides everything after this point, see the next section.
 
-1. **Select the weapon** you're replacing (Weapons tab → Class → Slot → Weapon). Your model
-   takes over this weapon's slot and file paths.
+When the weapon has festive lights, the app first asks **What to replace?**: **The weapon itself** or one of its lights. See [Festive weapons](#festive-weapons-and-their-lights).
 
-2. **Load your model.** Click **Replace model** in the preview toolbar and pick your `.smd`. The
-   app then asks how to treat its materials:
+The status line reports what the app did on its own, for example how many textures it found in the file or how much it had to simplify the mesh.
 
-   | Choice | Use when |
-   |--------|----------|
-   | **Shape only — the weapon's materials** | Your model is just a mesh with **every vertex bound to a single `root` bone**. Its materials collapse into the original weapon's one material, so your single texture gets mapped onto the new geometry. The simple case. |
-   | **With its own materials and bones** | Your model has **its own skeleton and its own set of materials**. Separate parts stay rigged to their bones, and each material becomes its own texture slot. |
+## Two ways to use a model
 
-   **The cost of "shape only":** because every vertex is welded to `root`, the weapon becomes
-   one rigid lump. Anything that used to move on its own bone stops behaving like a separate
-   part. A magazine won't drop out during the reload animation anymore, for instance, because
-   it's now fused to the body. If parts need to keep animating, rig your model to the weapon's
-   skeleton and build it with **With its own materials and bones** instead.
+| Choice | What happens | When to use |
+|---|---|---|
+| **With its own materials and bones** | Every material of your model gets its own texture card. Bones named like the game's bones keep moving in the weapon's animations. The QC can be edited. | Models made for this item: rigged to its skeleton, with your own material setup. |
+| **Shape only — weapon materials** | All materials of your model collapse into the weapon's own material: one texture for everything, and the game's texture cards. The whole model is bound to a single bone. | Downloaded models and quick swaps, when you only need the shape. |
 
-3. **Load textures** into the resulting slot(s), same as a [reskin](reskin.md). If your model
-   came in with more than one skin family baked in, a row of skin/style pills appears in the
-   toolbar so you can assign a different texture to each one.
+The price of **Shape only** is that the model moves as one solid piece. A magazine that used to drop out during the reload animation now stays fused to the gun, because it no longer has a bone of its own. If parts need to keep moving, rig your model to the weapon's skeleton and load it **With its own materials and bones**.
 
-4. *Optional:* click **QC** to hand-edit the compile script: `$scale`, extra `$bodygroup`s, a
-   custom `$cdmaterials`, whatever you need. This button only shows up for "own materials"
-   models; a "shape only" replacement has no model-specific QC left to touch. The editor
-   locks the directives the build depends on (`$modelname`, `$cdmaterials`, `$bodygroup`, bone
-   and LOD definitions, and so on) behind a small padlock icon next to each block. Click the
-   lock to unprotect a block before editing it, so you don't accidentally break something the
-   packaging step relies on.
+## Fitting the model
 
-5. **Build.** You may be asked whether to also replace any **extra model parts** (shells,
-   scopes…) during the build. Answer **No** to keep the original game part.
+Downloaded models rarely come at the right size and angle. Once a custom model is on screen, **Scale & fit** appears under the 3D view. It turns on fitting mode:
 
-## A model from the internet (OBJ / GLB)
+- A translucent **ghost of the original item** appears as a reference.
+- A toolbar on the right edge of the view offers **Move**, **Rotate** and **Scale**, plus **Reset fitting** and **Done**.
+- A small panel shows the same values as numbers.
 
-If the model was downloaded rather than made for TF2, the same **Replace model** button
-accepts `.obj`, `.glb` and `.gltf`. In the file dialog pick the model **together with** its
-companion files: `.mtl`, `.bin`, images (Ctrl+click) — they land in one folder so the model's
-references resolve. The app converts the model into a geometry-only SMD itself (every vertex
-on one bone, then step 2 as usual).
+The controls follow Blender:
 
-Once a custom model is in the frame (any, SMD included), a **Scale & fit** button appears
-next to it. It turns on fit mode: a **translucent ghost of the original weapon** as a
-reference and Blender-style controls: **G** move, **R** rotate, **S** scale — after the
-key the model follows the mouse with no button held, **X / Y / Z** constrain the axis
-(again to clear), left click confirms, **Esc** or right click cancels. A draggable gizmo is
-there too (the icons on the right pick its tool). **Esc** with no operation running, or
-**Enter**, finishes. The numbers in the panel mirror the same values and can be typed:
+| Keys | What they do |
+|---|---|
+| <kbd>G</kbd>, <kbd>R</kbd>, <kbd>S</kbd> | Start moving, rotating or scaling. The model follows the mouse with no button held. |
+| <kbd>X</kbd>, <kbd>Y</kbd>, <kbd>Z</kbd> | Lock the operation to an axis. Press the same key again to unlock. |
+| Left click | Confirm the operation. |
+| <kbd>Esc</kbd> or right click | Cancel the operation. |
+| <kbd>Esc</kbd> with no operation running, or <kbd>Enter</kbd> | Finish fitting. |
 
-| Field | What it does |
-|-------|--------------|
-| **Scale** | One factor for all axes. |
-| **Rotation** | Degrees around X, Y (up) and Z (along the barrel), in weapon axes. |
+You can also drag the gizmo in the view; the toolbar icons switch its tool. The numeric panel is there for exact values:
+
+| Field | Meaning |
+|---|---|
+| **Scale** | One factor for all three axes. |
+| **Rotation, °** | Degrees around X, Y (up) and Z (along the barrel), in the weapon's axes. |
 | **Offset** | Game units along the same axes. |
 
-The fit is baked into the SMD vertices, not written as `$scale` in the QC: `$scale` would
-stretch the skeleton and attachments (muzzle flash, shell ejection) too and the weapon
-would drift out of the hands. The SMD is rebuilt after a pause in editing; first-person view
-and the build use the fitted model. For your own SMD the bones and weights stay as they
-were; only the vertices move.
+The fit is baked into the vertices of the SMD instead of being written into the QC as `$scale`. A `$scale` would stretch the skeleton and the attachment points too (muzzle flash, shell ejection, the spot where an unusual effect hangs), and the weapon would drift out of the hands. The app rebuilds the SMD shortly after you stop changing the fit. The **First person** view and the build both use the fitted model. For an SMD of your own, bones and weights stay as they were; only the vertices move.
 
-Things to know:
+## Game limits
 
-- **Game limits** (`studio.h`): 65,536 triangles, 65,536 vertices and 32 materials per model.
-  Vertices are counted *after* splitting by UV seams and hard edges. Anything above the limit
-  the app **simplifies itself** (meshoptimizer, UVs preserved; normals are recomputed, edges
-  sharper than 60° stay hard) to about 60,000 triangles and reports "simplified: N → M" in
-  the status line. A million-triangle sculpt takes seconds. Too many materials can't be fixed
-  this way — merge them in an editor.
-- **Bones.** OBJ carries no bones — the model is one rigid piece, magazine and bolt won't
-  animate. GLB/glTF does (a skin from Blender): name the bones as the game does
-  (`weapon_bone`, `weapon_bone_1`… — see the original's QC via **Tools → Extract model**),
-  model in the original's pose, pick **With its own materials and bones** — bones match by
-  name and part animations work. Bones with unknown names fall onto the grip bone. A mesh
-  without a skin but "parented to bone" in Blender rides that bone entirely.
-- **Base colour** from `map_Kd` in the MTL or `baseColorTexture` in glTF lands in the slots
-  automatically (per material for a "finished" model, on the main material for
-  geometry-only). Other PBR maps (metallic, roughness, normal) mean nothing to the game.
-  Without a UV map no texture will land.
-- FBX is not supported — save as GLB or OBJ.
+The engine has hard limits per model (from `studio.h` in the Source SDK):
+
+| Limit | Value | What the app does |
+|---|---|---|
+| Triangles | 65,536 | Simplifies the mesh automatically. |
+| Vertices | 65,536, counted after splitting along UV seams and hard edges | Simplifies the mesh automatically. |
+| Materials | 32 | Can't be fixed automatically. Merge materials in a 3D editor. |
+
+Automatic simplification uses meshoptimizer and keeps the UV layout. It brings the model down to about 60,000 triangles, recalculates the normals and keeps edges sharper than 60 degrees hard. A sculpt with a million triangles takes a few seconds, and the status line reports the result as `simplified: N → M triangles`.
+
+## Bones and animation
+
+- **OBJ** has no bones. The model is one rigid piece, and moving parts such as a magazine or a bolt won't animate.
+- **GLB and glTF** can carry a skin from Blender. Name the bones the way the game does (`weapon_bone`, `weapon_bone_1` and so on; look at the original's QC via **Tools → Extract model (SMD)**), model the weapon in the original's pose, and load it **With its own materials and bones**. Bones are matched by name, and part animations work.
+- Bones with names the game doesn't know are attached to the grip bone.
+- A mesh without a skin that is parented to a bone in Blender follows that bone as a whole.
+
+## Textures from the file
+
+The base color of the model lands in the album by itself: `map_Kd` from an OBJ's MTL file, or `baseColorTexture` from a glTF. With **With its own materials and bones** each material gets its own texture; with **Shape only** the texture goes onto the main material. Other PBR maps (metallic, roughness, normal) mean nothing to TF2's shaders and are ignored.
+
+A model without a UV layout can't carry a texture. Unwrap it in a 3D editor first.
+
+## Editing the QC
+
+**Edit QC** appears for models loaded **With its own materials and bones**. It opens the compile script the app prepared for your model: the game's QC adapted to your mesh. You can change it, for example add a `$bodygroup`, adjust an attachment or a material folder.
+
+The title of the window says whether you're looking at the **auto QC** or at your **custom edit**. <kbd>Ctrl</kbd>+<kbd>S</kbd> saves, **Back to auto QC** throws your edit away. The app keeps the `$texturegroup` line in sync with the model's styles itself, and your other edits stay as they are. The QC edit is part of the item's work and can be undone like any other edit.
+
+For **Shape only** models the QC isn't editable: the build assembles it from the game's QC every time.
+
+## Model states during the build
+
+Some weapons switch geometry by themselves in game: the bottle breaks, the Caber loses its head after the explosion. These are separate parts of the model. When your model replaced the main part, the build asks what to use for each of these states:
+
+- **Keep the game one** leaves the state as it is in the game.
+- **Choose an SMD file…** uses your own geometry for it, with bones and materials taken from the game's part.
+
+Closing this question keeps the game's part and the build goes on.
+
+## Festive weapons and their lights
+
+Many weapons get festive lights in game: the festive version of the weapon or the Festivizer hangs a garland on top of the regular model. The **Version** row under the 3D view shows them: **Regular**, **Festive**, **Festivized**.
+
+The lights are a separate model, and you can work on them separately:
+
+- **Repaint them**: switch the version on and drop an image on the lights' card.
+- **Replace them**: **Replace model** asks whether to replace **The weapon itself** or the lights. A custom garland keeps the bones of the stock one, so the game can hang it the usual way, and uses its own materials.
+- **Fit them to your model**: with a custom weapon model, the lights still hang where they would on the stock weapon, and the row says so. **Fit the lights** opens the same fitting tools as for the model, plus **Bend**: drag the wire and the bulbs with the mouse, and change the grab radius with the wheel or the **Radius** field. **Straighten** removes all bends.
+
+Edits of the lights go into the mod as a separate model and don't affect other weapons. A dot next to the version name means its lights were changed.
+
+## Removing a custom model
+
+**Remove custom model** brings back the game model. If you replaced both the weapon and its lights, the app asks which one to restore. **Discard edits** under the album removes the custom model too, together with all other edits of the item.
 
 ## Troubleshooting
 
-- **Build fails at compile.** Usually a QC/SMD problem `studiomdl` rejects: a bad flex, a
-  missing material, a malformed bone. Turn on **Debug mode** and **Keep temp files** in
-  Settings and check `tf2sg.log`.
-- **`studiomdl.exe not found`.** Your **TF2 Game Folder** is wrong, or TF2 isn't fully
-  installed. The file needs to exist at `<TF2>\bin\studiomdl.exe`.
-- **Model is invisible, or the wrong size.** A scale/origin mismatch. Adjust `$scale` /
-  `$origin` through the **QC** editor.
-- **Everything broke after a TF2 update.** **Settings → Clear Model Cache**, then rebuild.
+| Problem | What to check |
+|---|---|
+| The build fails at compiling | `studiomdl` rejected the model: often a broken bone hierarchy, a missing material or a flex it can't read. The error window shows its message under **Technical details**, and the log has the full output. |
+| `studiomdl.exe` not found | The game folder in the settings is wrong or the game isn't fully installed. The file must exist at `<TF2>\bin\studiomdl.exe`. |
+| The model is invisible or huge in game | Fit it with **Scale & fit**, comparing with the ghost of the original. |
+| Parts that should move are frozen | The model was loaded as **Shape only**, or its bones aren't named like the game's. |
+| Purple and black checkerboard in game | A material of the model has no texture in the mod. Check that every card has an image, or answer the build's question about it. |
+| The model became too simple | It was over the triangle or vertex limit and got simplified. Reduce it yourself in a 3D editor to keep control over the result. |
+| FBX doesn't load | FBX isn't supported. Export to GLB or OBJ. |
+| A glTF doesn't load | Its `.bin` file must be selected together with it. Saving the model as GLB (a single file) avoids the problem. |
 
 ## See also
 
-- [Simple reskins](reskin.md) · [Using the app](usage.md)
+- [War Paint](war-paint.md): War Paints on a custom model work in universal mode.
+- [Painting by parts](model-parts.md): parts are rebuilt for your model's geometry.
+- [Your first skin](reskin.md): textures, teams and building.

@@ -1,171 +1,295 @@
-# Using the app
+# Interface tour
 
-[← Docs index](../README.md)
+[Documentation](../README.md) · [Русская версия](../ru/usage.md)
 
-A full tour of the interface, option by option. If you just want to get a texture into the
-game as fast as possible, [Simple reskins](reskin.md) is the shorter path.
+This page goes through the window part by part and lists what every control does. If you only want to make a skin, [Your first skin](reskin.md) is the shorter way in. Come back here when you want to know what a particular button is for.
 
-## Layout
+Most buttons appear only when they make sense for the selected item. A weapon with no team variant has no **RED** and **BLU**, a skybox has no **Replace model**, and so on. If something from this page is missing on your screen, the selected item simply doesn't support it.
 
-Three columns:
+## The window at a glance
 
-1. **Left: what you're modding** (Step 1). A tab bar at the top switches between **Weapons**,
-   **Hats**, and **Diagnostics**.
-2. **Middle: preview.** 2D texture slots, plus a 3D view you load on demand.
-3. **Right: export options** (Step 2): resolution, format, file name, **Build**, and an
-   **Advanced** section.
+```
+ ┌─ 1 ───────────────────────────────────────────────────────────────────┐
+ │ Weapons  Cosmetics  Particles  Sounds  Diagnostics          Settings │
+ ├─ 2 ───────────────────────────────────────────────────────────────────┤
+ │ Scattergun                Tools   Together Texture Model   RED  BLU   │
+ ├─ 3 ─────────────────────────┬─ 4 ─────────────────────────────────────┤
+ │ album of textures           │ Model  First person                     │
+ │                             │                                         │
+ │                             │            3D view                      │
+ │                             │                                         │
+ │ 01 / 02   Save work  VMT ...│ Style ...   Replace model  Split ...    │
+ ├─ 5 ─────────────────────────┴─────────────────────────────────────────┤
+ │ Ready   512 × 512 · DXT5 · ≈ 341 KB · scattergun_mod.vpk  Parameters  │
+ │         TF2 found · D:\Steam\...                       [ Build VPK ]  │
+ └───────────────────────────────────────────────────────────────────────┘
+```
 
-The **gear icon** in the top-right corner opens [Settings](#settings). Switching to the
-**Diagnostics** tab replaces the middle and right columns entirely with the diagnostics list.
-That's expected, not a bug; Step 2 has nothing to do while you're just inspecting a `.vpk`.
+1. [Header](#header): sections and settings.
+2. [Title row](#title-row): the selected item, tools, layout and team buttons.
+3. [Album](#album): the textures of the model.
+4. [Model view](#model-view): the 3D preview, scenes and model actions.
+5. [Bottom bar](#bottom-bar): status, build summary and the build button.
 
-## Step 1: pick your target
+The catalog and the build settings don't take room until you call them. With **Settings → Pin the panels** they stay on screen instead: the catalog on the left, the build settings on the right. See [Panels](#panels-and-layout).
 
-### Weapons tab
+## Header
 
-Pick a **Category** and the fields below it change to match:
+The links at the top switch between sections of the app.
 
-| Category | What it builds |
-|----------|----------------|
-| **Weapon** | A stock weapon: pick Class → Slot → Weapon |
-| **Character** | Player body parts and viewmodel hands (per class), plus Spy disguise masks |
-| **Special** | Crit effect, spray, or a death effect (ice / gold / fire) |
-| **Projectile / Pickup / Taunt** | Rockets/arrows, health/ammo pickups, taunt props |
-| **Skybox** | Replace the sky, either every map at once or one specific named sky |
-| **Custom** | A `.vpk` mod you've loaded into the 3D view, for inspecting or extending it |
+| Section | What it's for |
+|---|---|
+| **Weapons** | Everything that isn't a cosmetic: weapons, class bodies and hands, special effects, projectiles, pickups, taunt props, skyboxes and opened VPK mods. Each has its own category in the catalog. |
+| **Cosmetics** | Hats, misc items and medals, with their own search and filters. See [Cosmetics](cosmetics.md). |
+| **Particles** | The particle effect editor. See [Particle editor](particles.md). |
+| **Sounds** | Replacing game sounds. See [Sounds](sounds.md). |
+| **Diagnostics** | Opens a window that checks a built VPK. It doesn't leave the current section. See [troubleshooting](troubleshooting.md#checking-a-mod-with-diagnostics). |
 
-Pick **Character → Spy disguise mask** and a row of small class buttons appears above the
-toolbar. Each one loads that class's disguise mask so you can retexture it separately.
+**Settings** on the right opens the settings window, described in [Settings and data folders](settings.md).
 
-### Hats tab
+## Title row
 
-There's more here than "browse and pick." Along the top: a **search box** that filters as you
-type, a **refresh** button (↺) that re-reads `items_game.txt` from scratch (useful if you just
-changed something in your TF2 install and the list looks stale), and a **filter** button
-(funnel icon) with three toggles: **hide medals**, **hide Halloween items**, **hide seasonal
-items** (Christmas etc.). Those choices are remembered between sessions. Below that is a row of
-class chips to narrow the list to one class at a time.
+**Item name.** The large label on the left names the selected item, with its model file and class next to it. Clicking it opens the catalog. Before anything is selected it reads **Select an item**.
 
-Pick a hat and, if it has multiple **styles** or applies to multiple **classes**, a panel opens
-below the list: a **"Build for styles"** row (pick one to edit; a dot marks styles you've
-already customized) and a **"Build for classes"** row (checkboxes, at least one has to stay on).
-During the build you'll be asked whether **game paints** should apply to your texture. Default
-is yes.
+**Tools** opens a menu of operations on the selected item. Its content depends on the section:
 
-### Diagnostics tab
+| Item | What it does |
+|---|---|
+| **Extract model (SMD)** | Decompiles the item's model and lists every file Crowbar produced: the reference mesh, LODs, physics, animations, the QC. The reference SMD is ticked by default because that's the geometry itself. The ticked files are copied into the export folder. Useful as a base for a [custom model](custom-models.md). |
+| **Export UV template (PNG)** | Draws the model's UV layout into a 1024 × 1024 PNG in the export folder so you can paint over it. Each material has its own layout and gets its own file. |
+| **Extract original texture** | Saves the game's texture of the selected item into the export folder. For class bodies, which have a couple dozen textures, it first asks which ones to extract. The file format is set in **Settings → Extraction format**. |
+| **Merge several VPKs into one** | Combines mods from the export folder into a single VPK. See [merging mods](works-and-mods.md#merging-several-mods-into-one). |
+| **Open export folder** | Opens the export folder in Explorer. Available in every section. |
+| **Open PCF from disk…**, **Save PCF…**, **Parameter reference (JSON)…**, **Reference for AI (with a task)…** | Particle section only. See [Particle editor](particles.md#tools-menu). |
 
-Drop a `.vpk` on the tab (or use the **Choose VPK** button, which becomes **Re-check** once
-something's loaded) and the app scans it for the usual reasons a mod fails to show up: missing
-`$basetexture`, wrong paths, broken VTFs. Results show as colour-coded cards, red for errors,
-amber for warnings, green for informational, each with a location and a suggested fix.
+The extraction and UV items appear for anything with a model. Skyboxes, sprays, the crit text and death effects have no model, so the menu doesn't offer them there.
 
-## Step 2: preview toolbar
+**Together, Texture, Model** change the layout of the working area: both halves, only the album or only the 3D view. In the particle section the last button reads **Effect**.
 
-Buttons appear or hide depending on what's selected, so don't worry if your toolbar looks
-sparser than this list. Most of these only show up when they're relevant.
+**Team buttons** sit on the right of the title row:
+
+| Button | When it appears | What it does |
+|---|---|---|
+| **RED**, **BLU** | The model has separate team textures, or you pressed **Make team-colored**. | Switches the album and the preview to that team. Images you drop go to the active team. |
+| **Australium** | The weapon has a gold version. | Shows the gold version in the album and the preview. |
+| **Paint** | Cosmetics only. | Opens the list of in-game paints to preview the item painted. A colored dot on the button shows the active paint. The paint is only a preview, it doesn't go into the mod. See [Cosmetics](cosmetics.md#previewing-game-paints). |
+
+## Catalog
+
+The catalog is where you pick what to work on. In the default layout it opens over the window when you click the item name, and closes after you pick something. <kbd>Esc</kbd> or **Close** hides it without picking.
+
+**Search.** The box at the top (**Name or file**) searches as you type. Every word has to appear somewhere in the item name, model file or class, in any order. In the cosmetics section the search is smarter: it ranks results, also matches the English name when the interface is in Russian, and suggests similar names when nothing is found.
+
+**Category** (Weapons section only):
+
+| Category | What's inside | Filters |
+|---|---|---|
+| **Weapon** | Weapons of every class, one card per model, including all-class melee weapons and the festive weapons that have a model of their own | **Class**, **Type** |
+| **Character** | Each class's body (**Player Skin**) and first-person hands. The Spy also has **Disguise Masks**, the Engineer the MvM **Robot Hand** | **Class** |
+| **Special** | **Crit**, **Spray**, **Death effect: Ice**, **Death effect: Gold**, **Death effect: Fire** | none |
+| **Projectiles** | Rockets, grenades, arrows, flares and other projectiles | none |
+| **Health & Ammo** | Health kits and ammo boxes | none |
+| **Taunt Props** | Items that appear in taunts | none |
+| **Skybox** | **All maps (all stock skies)** and every sky found in your game | none |
+| **Custom Mod** | Your saved works and VPK mods you opened | none |
+
+Details on characters, special effects and skyboxes are in [their own guide](special-items.md), and the **Custom Mod** library is in [Works, drafts and the mod library](works-and-mods.md).
+
+**Filters** are rows of buttons under the category. **All** removes the filter. Under the filters you see how many items are shown, so it's clear whether a filter narrowed the list.
+
+**Cards** show the item's backpack icon where the game has one, and the model's texture otherwise. The line under the name is the model file, or the class for cosmetics. A cosmetic with several model styles gets a small "3 styles" mark.
+
+## Album
+
+The left half of the working area lists the textures of the model, one card per material.
+
+**Moving between cards**: the tabs above the album, the arrows on its sides, the mouse wheel, or a click on a card. The counter in the bottom left corner shows your position, for example `02 / 03`. The 3D view wears the card the album stops on, which matters for models where several textures share one mesh, like the Spy's masks.
+
+**Putting an image on a card**: drag it onto the card, or double-click the card to pick a file. Images and VTF files are accepted. GIF and animated PNG become animated textures.
+
+**Card buttons** appear in the card's corner:
+
+| Button | What it does |
+|---|---|
+| Settings (two sliders) | Gives this material its own resolution, format and flags. See [per-texture settings](#per-texture-settings). |
+| **×** | Only on a style's card: removes the material from the style, so it inherits the base texture again. |
+
+**Buttons under the album:**
+
+| Button | When it appears | What it does |
+|---|---|---|
+| **Save work** | The item has edits that aren't saved as a work yet. | Puts the work into the **Custom Mod** section, where you can reopen it later. |
+| **Restore edits** | The item has a draft from earlier, and nothing is changed yet in this session. | Brings the draft back. |
+| **Discard edits** / **Delete work** | The item has edits or a saved work. | Returns the item to its game look and deletes the draft or the work from disk. |
+| **War Paint** | A weapon held in hand. | Opens the War Paint panel. See [War Paint](war-paint.md). |
+| **Material maps** | Models: weapons, cosmetics, characters. | Gloss, glow, reflection mask and other maps for the current material. See [Materials and effects](materials.md#material-maps). |
+| **VMT** | Models, except opened VPK mods. | Opens the VMT editor for the current material. See [Materials and effects](materials.md#the-vmt-editor). |
+| **Other** | The model has service materials. | Shows them as cards: eyes, teeth, über overlays and the like. |
+
+How saving and drafts work is explained in [Works, drafts and the mod library](works-and-mods.md).
+
+**Style bar.** When a model style other than the base one is selected, a line under the album explains what you see. A style overrides the base selectively: the album lists only the materials the style changes, and the rest come from the base. **Add material** adds one more material to the style so you can give it its own texture.
+
+## Model view
+
+The right half shows the item in 3D.
+
+| Action | Mouse |
+|---|---|
+| Rotate | Left button, drag |
+| Zoom | Wheel |
+| Pan | Right button, drag |
+
+<kbd>F11</kbd> expands the view to the whole window. <kbd>F11</kbd> or <kbd>Esc</kbd> brings the interface back.
+
+### Scenes
+
+The buttons above the 3D view choose what it shows.
+
+| Scene | Available for | What you see |
+|---|---|---|
+| **Model** | everything | The item alone with a free camera. |
+| **First person** | weapons held in hand | The weapon in the hands of its class from the player's eyes, with the weapon's own animations. |
+| **Taunt** | taunt props | A class performing the taunt with the prop. |
+| **On the model** | cosmetics | The cosmetic on a class standing in the pose of the chosen weapon slot. |
+
+Scenes take a few seconds to assemble the first time. Switching animations afterwards is fast because the app reuses the mesh and textures.
+
+### Rows under the view
+
+These rows appear when the item has something to choose:
+
+| Row | What it does |
+|---|---|
+| **Style** | Skins baked into the model (clean and bloody versions and similar). **Default** is the base skin. |
+| **Model state** | States the game switches by itself, such as an intact and a broken bottle. Preview only, every state goes into the mod. |
+| **Version** | **Regular**, **Festive**, **Festivized**: shows the festive lights the game hangs on the weapon. With a custom model, **Fit the lights** appears so you can move them onto your geometry. See [festive lights](custom-models.md#festive-weapons-and-their-lights). |
+| **Cosmetic style** | Model styles of a cosmetic. Each style has its own geometry, and a dot marks the styles you edited. |
+| **Animation** | In **First person**: the animations of this weapon. |
+| **Weapon** | In **On the model**: which slot the class holds, which also sets the pose. |
+| **Class** | In **Taunt** and **On the model**: which class to show when several can use the item. |
+
+### Model actions
+
+The buttons on the bottom right of the model view work on the model itself:
+
+| Button | When it appears | What it does |
+|---|---|---|
+| **Replace model** | Anything with a model except class bodies | Loads your own SMD, OBJ, GLB or glTF instead of the game model. See [Custom models](custom-models.md). |
+| **Scale & fit** | A custom model is loaded | Shows a translucent copy of the original and lets you move, rotate and scale your model to match it. |
+| **Edit QC** | A custom model loaded with its own materials and bones | Opens the model's compile script. |
+| **Make team-colored** | The item has no team variant and can get one | Adds RED and BLU versions. |
+| **Split into parts** | Models that came from decompiling: weapons, cosmetics, bodies, hands | Opens painting by parts. See [Painting by parts](model-parts.md). |
+| **Remove custom model** | Your model, or your festive lights, are in place | Brings back the game model. If both are replaced, it asks which one. |
+
+## Bottom bar
+
+| Element | What it does |
+|---|---|
+| Status | The current state: **Ready**, loading messages, build steps, results. Clicking it opens the [log](#log). |
+| Summary | What the build will produce: resolution, VTF format, the estimated size of one texture, the file name. It updates as you change settings. |
+| **Parameters** | Opens and closes the build settings. With pinned panels they are always on screen. |
+| Game path | Where TF2 was found and whether Crowbar is in place. If the game isn't found, set it in the settings first. |
+| **Build VPK** | Builds the mod. During a build it turns into **Cancel**. |
+
+## Build settings
+
+The build settings apply to the whole mod. Some of them are locked or hidden for items where they make no sense. The build ignores hidden settings, so a value you can't see never ends up in the mod.
+
+### Resolution and format
+
+| Setting | Notes |
+|---|---|
+| **Resolution** | 256, 512, 1024 or 2048 pixels per side. Sprays are fixed at 256. |
+| **VTF format** | The texture format. `DXT1` (no alpha) and `DXT5` (with alpha) are compressed and cover almost every case. `RGBA8888` and `BGRA8888` are uncompressed. The crit text accepts only formats with alpha (`DXT5`, `RGBA8888`, `DXT3`), skyboxes only formats without it (`DXT1`, `BGR888`), and sprays don't let you change the format. |
+| **VPK name** | The mod's file name, 50 characters at most, without `\ / : * ? " < > \|`. The app suggests a name from the item until you type your own. |
+
+### VTF flags
+
+| Flag | What it does |
+|---|---|
+| **Clamp S**, **Clamp T** | The texture doesn't repeat past its edge horizontally (S) or vertically (T). Useful for decals and images that shouldn't tile. |
+| **No LOD** | The game's texture quality setting won't lower this texture's resolution. |
+| **No minimum Mipmap** | Keeps the smallest mip levels that the game would otherwise drop. |
+| **Point Sample** | No smoothing between pixels, which keeps pixel art crisp. For skyboxes this is the only flag offered: the app sets the rest itself. |
+
+**Settings → Advanced VTF flags** adds a separate **Advanced flags** column with flags a color texture either doesn't need or shouldn't have: Clamp U, Border, Trilinear, Anisotropic, SSBump, Vertex Texture, No Debug Override, Single Copy, No Depth Buffer. SSBump, for instance, tells the shader the texture is a bump map. Leave them off unless you know exactly why you need one. When the column is hidden, its flags don't go into the build.
+
+### Options
+
+| Option | What it does |
+|---|---|
+| **No Mipmap** | Builds the texture without mip levels. It saves a little space, but distant surfaces start to shimmer. |
+| **No Thumbnail** | Leaves out the small preview image inside the VTF. |
+| **No Reflectivity** | Doesn't compute the reflectivity value stored in the VTF header. |
+| **Gamma correction** | Applies gamma correction with the value in the field next to it (2.2 by default). |
+| **Isolate shoulders** | First-person hands only. See [Characters](special-items.md#isolating-the-shoulders). |
+| **Game paints** | Cosmetics only. Keeps the in-game team colors and paints working on your texture. See [Cosmetics](cosmetics.md#team-colors-and-game-paints). |
+| **Normal Map** | Builds surface relief from the texture's brightness. See [Materials and effects](materials.md#normal-map). |
+
+Spray, crit and death effect builds lock the VTF flags. For skyboxes the only flag on offer is **Point Sample**, because the app sets the others itself.
+
+### Per-texture settings
+
+The settings button in the corner of an album card switches the panel to that one material. A bar with **Texture: name** appears at the top, and any change you make now is stored for this material only. A badge on the card marks materials with their own settings.
+
+**Done** (or another click on the same card button) returns the panel to the common settings. **Reset** removes the material's own settings. While you edit one material, the build still uses the common settings for everything else.
+
+## Panels and layout
+
+**Floating panels** are the default. The catalog and the build settings appear over the window when you call them and get out of the way afterwards.
+
+**Pinned panels** (**Settings → Pin the panels**) keep the catalog on the left and the build settings on the right at all times. They need a window wider than 1100 pixels; in a narrower window the app switches back to floating panels on its own and restores your choice when the window is wide enough again.
+
+You can drag the inner edge of a pinned panel to change its width, and drag the gap between the album and the 3D view to give one half more room. The app remembers these sizes between launches.
+
+**Settings → Interface animations** turns off the transitions: panels fading in, the camera flying to a new model, the halves sliding apart. Everything then switches instantly.
+
+## Dialog windows
+
+Most questions use the same small window: a title, an explanation, a list of choices with a hint under each one, and **Cancel**. Closing a question about a build cancels the build.
+
+**When something fails**, the app opens a window with a plain explanation and what to do about it. **Technical details** holds the original error message. **Open the log** opens the folder with the log file, **Copy** copies the explanation together with the details.
+
+## Log
+
+The log shows what the page asked the app and what the app was doing meanwhile: which files it found, what Crowbar and studiomdl said, why something failed. Open it with <kbd>`</kbd> (the key left of <kbd>1</kbd>) or by clicking the status in the bottom bar.
 
 | Control | What it does |
-|---------|--------------|
-| **3D / 2D** | Switch between the 3D model and the flat texture view |
-| **Cube icon** *(Load 3D model)* | Renders the current selection in 3D. **The 3D view never loads by itself, you have to press this after picking something.** |
-| **VPK** | Load an existing `.vpk` mod into the 3D view, e.g. to inspect it or build on top of it |
-| **Replace model** | Swap in your own model, see [Custom models](custom-models.md) for the full flow |
-| **QC** | Opens the model's compile script for editing. Only shows up for custom models loaded with "keep materials" (rigged models); a "geometry only" replacement has no QC button because there's nothing model-specific left to edit |
-| **RED / BLU** | Shows up when the item has separate team skins. Switch teams and load a texture for each |
-| **`+`** | Shows up instead of RED/BLU when the weapon has no team variant in the base game. Click it to turn on team mode: RED/BLU toggles appear, and the app builds the blue material for you. Leave BLU empty and both teams get the RED texture |
-| **Skin/style pills** | For custom or replaced models that come with multiple skin families baked in, one pill per skin, letting you assign a different texture per style |
-| **Australium button** (gold icon) | Shows up when the app finds a gold/Australium variant of the current weapon. Toggle it to preview and retexture that variant separately from the normal one |
-| **Eye icon** *(service textures)* | A separate button from Australium, shows up when the model has hidden "misc" materials (eyes, übercharge glow, etc.) worth exposing. Click it to reveal them for optional replacement |
+|---|---|
+| **Calls**, **Errors**, **Warnings**, **Info**, **Debug** | Show or hide each kind of entry. Calls, errors and warnings are on by default. Your choice is remembered. |
+| **Search the log** | Filters the entries by text. |
+| **Full width** | Expands the log across the window. |
+| **Copy** | Copies the visible entries. |
+| **Log folder** | Opens the folder with `tf2sg.log`, the complete log. |
+| **Clear** | Clears the panel. The log file stays as it is. |
 
-Drop images onto the **main slot** or any of the extra-material cards in the row below the
-toolbar. Clicking the card itself just opens a file picker for that material. To give one
-material its *own* resolution, format, or flags, click the small **gear icon** in the card's
-corner instead. That switches Step 2 into per-texture edit mode (a yellow banner appears);
-click **Done** to go back to the global settings.
+The left edge of the log can be dragged to change its width. Debug entries appear only with **Settings → Debug mode** turned on.
 
-## Step 2: export options
+## Tutorials
 
-| Option | Notes |
-|--------|-------|
-| **Resolution** | 256 (Spray) / 512 (Normal) / 1024 (High) / 2048 (Ultra) |
-| **Format** | VTF format (`DXT1`, `DXT5`, `RGBA8888`, …). The list narrows itself to whatever the current material actually supports |
-| **File name** | The output `.vpk` name: 50 characters max, and none of `\ / : * ? " < > \|` |
-| **Build** | Runs the build and drops the result in your export folder |
+The main tutorial starts by itself on the first launch. Smaller ones start the first time you open the **Cosmetics**, **Particles** and **Sounds** sections, painting by parts, model fitting and the War Paint panel. Some steps wait for you to do something, for example to pick a weapon. They say **I'll continue once you do it**.
 
-### Advanced section
+**Skip tutorial** closes the current one. **Settings → Replay the tutorial** shows all of them again.
 
-- **VTF flags**: `Clamp S`, `Clamp T`, `No Mipmaps`, `No LOD`, `No minimum Mipmap`, plus
-  `Normal Map`, `No Thumbnail`, `No Reflectivity`, and `Gamma Correction` (with its own value
-  field).
-- **Material Maps…** *(models only)*: feed the app a plain image and it generates a properly
-  formatted VTF and wires up the VMT for you, which saves you from hand-guessing formats and
-  paths. Seven map types are available: **detail layer**, **self-illumination** (a glow mask),
-  **Phong map** (gloss/shine), **reflection mask** (chrome vs. matte), **rim light** (a soft
-  edge glow), **Phong warp** (tints the highlights instead of leaving them white), and
-  **lightwarp** (restyles how light and shadow fall, the classic TF2 cartoon look).
-- **Edit VMT…**: hand-edit the VMT of the selected material directly, with syntax highlighting
-  and autocomplete for `$params`. The **Insert** menu drops in common parameters, proxies, or
-  whole templates; **Reset to game original** throws away your edits and restores the game's
-  VMT. Each material keeps its edits independently of the others.
-- **Isolate shoulders**: hands only. Renames the arm/shoulder material so your edit doesn't
-  bleed onto the world-model character.
-- **Tools**: four buttons, not a menu.
-  - *Extract Original Model (SMD)* decompiles the current weapon and opens a checklist of
-    every extracted file (reference SMD, LODs, etc.) so you can pick which ones to save.
-  - *Export UV Template (PNG)* gives you a flat UV layout to paint over.
-  - *Extract Original Texture*: for character skins this opens a thumbnail picker over every
-    VTF in that character's folder; for everything else it just grabs the current material.
-  - *Merge into One* combines several built mods into a single `.vpk`. Pick the mods, name
-    the result, and if the same weapon shows up in more than one of them you'll get a warning
-    before it overwrites anything.
+## Keyboard shortcuts
 
-## Building & installing
+| Keys | Where | What they do |
+|---|---|---|
+| <kbd>F11</kbd> | everywhere | Expand the 3D view to the whole window and back |
+| <kbd>Esc</kbd> | everywhere | Close a menu, a floating panel or the catalog; leave the expanded view |
+| <kbd>`</kbd> | everywhere | Open or close the log |
+| <kbd>Ctrl</kbd>+<kbd>Z</kbd> | Weapons, Cosmetics | Undo the last edit of the item |
+| <kbd>Ctrl</kbd>+<kbd>Y</kbd> or <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> | Weapons, Cosmetics | Redo |
+| <kbd>Ctrl</kbd>+<kbd>C</kbd>, <kbd>Ctrl</kbd>+<kbd>V</kbd> | image placement | Copy an image with its placement, paste it on the part under the cursor |
+| <kbd>Alt</kbd>+click | painting by parts, brush | Pick a color from the model or the texture |
+| <kbd>Enter</kbd>, <kbd>Esc</kbd> | painting by parts, scissors | Separate the selection, clear the selection |
+| <kbd>G</kbd>, <kbd>R</kbd>, <kbd>S</kbd> | model fitting | Move, rotate, scale |
+| <kbd>X</kbd>, <kbd>Y</kbd>, <kbd>Z</kbd> | model fitting, during an operation | Lock to an axis; press again to unlock |
+| <kbd>Ctrl</kbd>+<kbd>S</kbd> | VMT and QC editors | Save |
+| <kbd>Space</kbd>, <kbd>R</kbd>, <kbd>S</kbd> | particle preview | Pause, restart, switch time speed (1×, 0.5×, 0.25×) |
+| <kbd>Ctrl</kbd>+<kbd>Z</kbd>, <kbd>Ctrl</kbd>+<kbd>Y</kbd> | Particles | Undo and redo edits of the effect |
+| <kbd>Ctrl</kbd>+<kbd>C</kbd>, <kbd>Ctrl</kbd>+<kbd>V</kbd> | Particles | Copy all parameters of the selected system, paste a copied parameter set |
+| <kbd>↑</kbd> <kbd>↓</kbd>, <kbd>Space</kbd>, <kbd>Enter</kbd>, <kbd>Delete</kbd> | sound list | Move, play, choose your own file, remove your file |
 
-1. Click **Build**. You'll see progress, and the app may ask a question or two along the way.
-   See below.
-2. The finished `<name>.vpk` lands in your **export folder** (`export/` by default).
-3. Copy it into `…\Team Fortress 2\tf\custom\` and restart TF2.
-4. To remove a mod, delete its `.vpk` from `tf\custom\` and restart.
-
-Things the app might ask you during a build:
-
-- **A material has no texture yet**: pick *Keep game original*, *Copy main texture*, or *Choose
-  a file*. Tick *same for the rest* if you want the same answer for every material left. Closing
-  the prompt cancels the build. You're asked only about what you see in the app (main cards and
-  *Other*); everything else, blacklisted materials and the spy's disguise masks (they have their
-  own page) included, is written silently with the game original. If you already loaded something for that
-  slot via its card, you won't see this prompt at all, the app just uses what you gave it.
-- **The weapon has an extra model part** (a shell, a scope lens…): you're asked whether to
-  replace it too. Answering *No* keeps the original game part, which is what most people want.
-- **Keep-materials builds only:** if the texture count doesn't match what the app expected, it
-  warns you before packing anything, so you can cancel and check your model instead of shipping
-  a broken mod.
-
-> **`sv_pure`:** a lot of servers block client-side skins outright. Test locally or on a server
-> that allows them before assuming something's wrong with your mod. The **sv_pure bypass**
-> setting only changes which folder *model* materials get written to. It's not a guarantee
-> against every server's rules.
-
-## Settings
-
-Open with the gear icon, top-right. It's one scrollable dialog with a few labeled sections
-rather than real tabs:
-
-- **Paths**: **TF2 Game Folder** (must contain `tf/` and `bin/`) and **Export Folder**.
-  The **Detect automatically** button below the field finds the game on its own - through
-  the Steam registry keys and its library list, including drives the game was moved to.
-- **Preferences**: **Language** (English / Русский), **Export Format** (the image format used
-  when *extracting* a texture, separate from the VTF build format in Step 2), **Theme** (Dark /
-  Blue), and **sv_pure bypass** (`console\` by default, or `vgui\replay\thumbnails\`).
-- **Developer**: **Keep temp files** and **Debug mode** (turn these on before filing a bug
-  report), **Clear Model Cache** (deletes cached decompiled models, asks for confirmation and
-  shows you how much space it'll free; use this after a TF2 update if builds start failing), and
-  a **Material blacklist** (patterns of materials to hide everywhere, one per line; prefix a
-  line with `=` to match the name exactly instead of as a substring).
-- **Support**: a link to the developer's Steam trade page, if you'd like to say thanks.
-
-## See also
-
-- [Simple reskins](reskin.md)
-- [Custom models](custom-models.md)
-- [Building from source](building-from-source.md)
+Shortcuts with <kbd>Ctrl</kbd> work in any keyboard layout. They don't fire while you're typing in a text field or while a dialog is open.

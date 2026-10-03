@@ -55,12 +55,39 @@ No Valve game assets or proprietary Valve binaries are distributed with this pro
 
 ## Python dependencies
 
+Direct runtime dependencies (`requirements.txt`):
+
+| Package | Purpose | License |
+|---------|---------|---------|
+| pywebview | The application window (Edge WebView2 on Windows) | BSD-3-Clause |
+| Pillow | Image reading and conversion | MIT-CMU (HPND) |
+| vpk | Reading VPK archives | MIT |
+| srctools | Source engine file formats (KeyValues, PCF and others) | MIT |
+| NumPy | Image and mesh processing | BSD-3-Clause (bundled parts under 0BSD, MIT, Zlib, CC0-1.0) |
+
+Packages that pywebview pulls in on Windows and that end up in the built app:
+
 | Package | License |
 |---------|---------|
-| PySide6 (Qt for Python) | LGPLv3 / commercial |
-| Pillow | MIT-CMU (HPND) |
-| vpk | MIT |
-| srctools | MIT |
+| pythonnet | MIT |
+| clr_loader | MIT |
+| cffi | MIT |
+| pycparser | BSD-3-Clause |
+| proxy_tools | MIT |
+| bottle | MIT |
+| typing_extensions | PSF-2.0 |
 
-Qt (via PySide6) is used under the **LGPLv3**. Qt libraries are shipped as separate
-dynamic libraries and can be replaced by the user; no modifications are made to Qt.
+Optional: `vtf2img` (MIT) converts extracted textures to PNG, TGA or JPG when it is
+installed.
+
+The interface no longer uses Qt; PySide6 is not a dependency of the project.
+
+## JavaScript libraries
+
+| Library | Where | Author | License |
+|---------|-------|--------|---------|
+| three.js r160 (`three.module.js`, `OrbitControls`, `TransformControls`, `OBJLoader`) | `src/static/js/` | three.js authors | MIT |
+| Particle simulation logic ported from noclip.website (`ParticleSystem.ts`) | `src/static/js/particles/engine.js` | Copyright (c) 2018 Jasper St. Pierre | MIT |
+
+The MIT license texts are available at https://github.com/mrdoob/three.js/blob/dev/LICENSE
+and https://github.com/magcius/noclip.website/blob/main/LICENSE.
