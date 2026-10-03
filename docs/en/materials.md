@@ -12,7 +12,9 @@ All three are available for items with a model: weapons, cosmetics, class bodies
 
 ## Material maps
 
-**Material maps** under the album opens a list of the extra maps a material can have. The name of the current material is shown in the window's title. Turn a map on with its checkbox, give it an image, and press **Apply**. The app converts the image to a VTF in the format that map needs (shown on the right of its title) and adds the right lines to the VMT during the build. You don't need to know the paths or the parameter names.
+**Material maps** under the album opens a list of the extra maps a material can have. The name of the current material is shown next to the window's title. Turn a map on with its checkbox, give it an image, and press **Apply**. The app converts the image to a VTF in the format that map needs (shown on the right of its title) and adds the right lines to the VMT during the build. You don't need to know the paths or the parameter names.
+
+![The Material maps window with the Phong map turned on and its options open](../img/en/material-maps.webp)
 
 | Map | What it gives | Auto from texture |
 |---|---|---|
@@ -49,6 +51,8 @@ Without your own image the relief is built from the game texture, so you can add
 **VMT** under the album opens the material of the current card as text. If you saved an edit before, you see it; otherwise you see the original from the game.
 
 The editor highlights the syntax, and hovering a `$parameter` shows what it does. <kbd>Ctrl</kbd>+<kbd>S</kbd> saves, <kbd>Esc</kbd> closes. The status line tells you whether there are unsaved changes and whether a custom VMT is in use.
+
+![The VMT editor with the Presets list open on the Effects group](../img/en/vmt-editor.webp)
 
 | Button | What it does |
 |---|---|

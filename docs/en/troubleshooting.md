@@ -29,7 +29,7 @@ A server with `sv_pure` enabled makes players use the game's own files instead o
 | Skyboxes | works | not covered: the game's paths are protected |
 | Sounds | works | not covered: sound files are protected |
 | Particle effects | works | not covered; see [particle mods and casual](particles.md#particle-mods-and-casual) |
-| Crit text, spray, death effects | works | not covered by the workaround |
+| Spy disguise masks, crit text, spray, death effects | works | not covered by the workaround |
 
 Keep in mind:
 
@@ -41,17 +41,19 @@ Keep in mind:
 
 **Diagnostics** in the header opens a window that inspects a built VPK, yours or anyone else's. Press **Pick a VPK…** and choose the file. The report starts with a summary (**No problems found**, or the number of errors and warnings) and lists the findings by importance. Errors are the reasons a mod breaks in game, warnings are things that may cause trouble, and information entries describe what was checked. Each finding names the file it's about and says what to do.
 
+![The Mod diagnostics window after checking a freshly built mod: no problems found](../img/en/diagnostics.webp)
+
 | Check | What it catches |
 |---|---|
-| Structure | An empty VPK. An extra wrapper folder: `materials/` and `models/` must sit at the root of the VPK, not inside another folder. A VPK with neither of them, which overrides nothing. |
+| Structure | An empty VPK. An extra wrapper folder: `materials/` and `models/` must sit at the root of the VPK, not inside another folder. A VPK without any of the folders the game reads mods from (`materials`, `models`, `particles`, `sound`, `scripts`), which overrides nothing. |
 | VMT syntax | An unclosed brace or quote, a missing shader name. Such a material doesn't load and shows up purple. |
-| Missing textures | A VMT points to a VTF that isn't in the mod. If the game doesn't have that file either, you get the purple and black checkerboard. |
+| Missing textures | A VMT points to a VTF that is neither in the mod nor in the game, which shows up as the purple and black checkerboard. Textures the game provides itself are fine and aren't reported. Without a game folder in the settings the app can't look into the game and lists every texture the mod doesn't carry. |
 | VTF size | A texture whose sides aren't powers of two (512, 1024 and so on). That can cause artifacts or a failed load. |
 | Broken VTF | A file whose header can't be read: it's damaged or empty. |
 | Incomplete model | An `.mdl` without its `.vvd` and `.vtx` files next to it. The model would be invisible. |
 | Model version | A model compiled for another game or engine version. TF2 may refuse to load it. |
 | Model materials | Materials the model asks for that have no VMT in the mod's material folders. If the game doesn't provide them either, they turn purple. |
-| Conflicts | Paths of this mod that other mods in your `tf/custom` also contain. The result then depends on the load order. |
+| Conflicts | Files under `materials/` and `models/` that other mods in your `tf/custom` also contain. Only one version of each file can win, so the result depends on the load order. |
 
 ## Common problems
 
@@ -100,6 +102,7 @@ The error window explains what went wrong and keeps the original message under *
 - `studiomdl` rejected a custom model: see [custom models](custom-models.md#troubleshooting).
 - A file was locked by another program, for example the game or an antivirus scanning the export folder. Try again.
 - The game was updated while the app was running. Restart the app.
+- The path is too long. `vpk.exe` can't open a file whose full path is longer than 260 characters, and the technical details then show `error opening required file` with a cut-off name. It happens when the portable copy sits in a deeply nested folder. Move it closer to the drive root, for example to `D:\Tf2SkinGenerator`.
 
 ### The first load of an item is slow
 

@@ -3762,3 +3762,103 @@
    должна быть на виду и без мыши. */
 .frame:has([data-tour-target]) .frame__tools { opacity: 1; }
 
+
+/* ═══ Заставка (splash.js) ═══════════════════════════════════════════════
+   Закрывает старт целиком: пустую страницу без модулей, светлую тему до
+   настроек, недособранный каталог. Знак набран как в шапке (.chrome__mark),
+   только крупнее: на выходе он улетает туда и должен совпасть буква в букву. */
+.splash {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 40px;
+  background: var(--bg);
+}
+/* Знак в шапке прячется, пока заставка на экране: в конце полёта на его
+   месте окажется знак заставки, и двух сразу быть не должно. */
+.is-splash .chrome__mark { visibility: hidden; }
+
+.splash__mark { position: relative; }
+.splash__word {
+  display: block;
+  font-size: 30px;
+  font-weight: 600;
+  letter-spacing: .22em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--ink);
+  transform-origin: 0 0;
+}
+.splash__word > span {
+  display: inline-block;
+  opacity: 0;
+  animation: splash-letter 420ms cubic-bezier(.2, .7, .2, 1) forwards;
+  animation-delay: calc(160ms + var(--i) * 22ms);
+}
+@keyframes splash-letter {
+  from { opacity: 0; transform: translateY(.45em); filter: blur(5px); }
+  to   { opacity: 1; transform: none; filter: none; }
+}
+
+/* Две полосы командных цветов сходятся под знаком из краёв к середине.
+   Правый край знака — без хвоста letter-spacing после последней буквы. */
+.splash__swash {
+  position: absolute;
+  bottom: -16px;
+  height: 4px;
+  transform: scaleX(0) skewX(-28deg);
+  animation: splash-swash 520ms cubic-bezier(.7, 0, .2, 1) 100ms forwards;
+}
+.splash__swash--red { left: 0;   right: calc(50% + 4px); background: #b8383b; transform-origin: 0 50%; }
+.splash__swash--blu { left: calc(50% + 4px); right: .22em; background: #5885a2; transform-origin: 100% 50%; }
+@keyframes splash-swash {
+  to { transform: scaleX(1) skewX(-28deg); }
+}
+
+/* Линия загрузки: шаги настоящие (splash.js), а пока следующего нет, по ней
+   бежит блик — видно, что приложение не зависло. */
+.splash__bar {
+  position: relative;
+  width: 120px;
+  height: 2px;
+  overflow: hidden;
+  background: var(--hairline);
+  opacity: 0;
+  animation: splash-fade 300ms ease 600ms forwards;
+}
+.splash__bar > i {
+  position: absolute;
+  inset: 0;
+  background: var(--accent);
+  transform: scaleX(var(--p, .12));
+  transform-origin: 0 50%;
+  transition: transform 420ms cubic-bezier(.2, .7, .2, 1);
+}
+.splash__bar::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .55), transparent);
+  transform: translateX(-100%);
+  animation: splash-shine 1100ms ease-in-out 1500ms infinite;
+}
+@keyframes splash-fade  { to { opacity: 1; } }
+@keyframes splash-shine { to { transform: translateX(100%); } }
+
+/* После смены языка — только занавес цвета фона, без знака и входа. */
+[data-splash="quick"] .splash > * { display: none; }
+
+/* Без анимаций знак просто стоит на месте, а заставка уходит сразу. */
+[data-motion="off"] .splash *,
+[data-motion="off"] .splash *::after { animation: none !important; }
+[data-motion="off"] .splash__word > span,
+[data-motion="off"] .splash__bar { opacity: 1; }
+[data-motion="off"] .splash__swash { transform: skewX(-28deg); }
+@media (prefers-reduced-motion: reduce) {
+  .splash *, .splash *::after { animation: none !important; }
+  .splash__word > span, .splash__bar { opacity: 1; }
+  .splash__swash { transform: skewX(-28deg); }
+}

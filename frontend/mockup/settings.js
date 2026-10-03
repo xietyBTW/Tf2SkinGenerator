@@ -66,6 +66,8 @@ export function applyLook(values) {
   // вызовом: перелёт камеры и проявление модели считает он сам.
   const motion = values.ui_animations !== false;
   document.documentElement.dataset.motion = motion ? '' : 'off';
+  // Для первого кадра после перезагрузки страницы, как и тема (index.html).
+  try { sessionStorage.setItem('motion', motion ? '' : 'off'); } catch {}
   withViewer((w) => w.setMotion && w.setMotion(motion));
 }
 
@@ -340,7 +342,7 @@ document.getElementById('cfg-save').addEventListener('click', async () => {
   // страницу заново. Python остаётся жить, правки и кэши — с ним.
   const before = api.lang();
   api.setLang((res.values || {}).language);
-  if (api.lang() !== before) { restart(); return; }
+  if (api.lang() !== before) { restart(res.values || {}); return; }
   say('Настройки сохранены');
   // Гифки на модели: выключили — сцена перекрашивается неподвижной склейкой;
   // включили — кадры приедут событием parts_animated.
@@ -353,9 +355,17 @@ document.getElementById('cfg-save').addEventListener('click', async () => {
 });
 
 /** Занавес и перезагрузка страницы: гаснет в цвет фона, поднимается на том
- *  же разделе (см. boot в catalog.js). Без анимаций — сразу. */
-function restart() {
-  try { sessionStorage.setItem('section', sel.section); } catch {}
+ *  же разделе (см. boot в catalog.js). Без анимаций — сразу.
+ *  Первый кадр новой страницы берёт тему и анимации из сессии (index.html),
+ *  а applyLook с новыми значениями до перезагрузки уже не дойдёт — пишем их
+ *  сами. Заставку там показываем только занавесом (splash.js). */
+function restart(values) {
+  try {
+    sessionStorage.setItem('section', sel.section);
+    sessionStorage.setItem('theme', values.theme === 'dark' ? 'dark' : 'light');
+    sessionStorage.setItem('motion', values.ui_animations === false ? 'off' : '');
+    sessionStorage.setItem('splash', 'quick');
+  } catch {}
   document.documentElement.classList.add('is-leaving');
   const ms = parseFloat(getComputedStyle(document.documentElement)
                         .getPropertyValue('--dur-panel')) || 0;

@@ -464,8 +464,9 @@ document.getElementById('vmt-close').addEventListener('click', () => vmtDlg.clos
 
 // Ctrl+S — привычка любого, кто правит текст. Браузерное «сохранить страницу»
 // здесь ни к чему.
+// По коду клавиши, а не по символу: в русской раскладке S — это «ы».
 vmtText.addEventListener('keydown', (e) => {
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+  if ((e.ctrlKey || e.metaKey) && e.code === 'KeyS') {
     e.preventDefault();
     document.getElementById('vmt-save').click();
   }

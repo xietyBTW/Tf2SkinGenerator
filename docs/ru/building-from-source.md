@@ -117,7 +117,7 @@ build-release.ps1         скрипт выпуска релиза
 |---|---|
 | `python -m ruff check src main.py tests` | Неопределённые имена, неиспользуемые импорты, переопределения (набор правил `F`, см. `ruff.toml`). |
 | `python -m pytest tests -q` | Тесты, с фикстурами из `conftest.py`. |
-| `coverage run -m unittest discover -s tests` | Те же тесты так, как их гоняет CI. |
+| `coverage run -m unittest discover -s tests` | Те же тесты так, как их гоняет CI. Учтите, что `unittest` не загружает `tests/conftest.py`, и перенаправление временных файлов и черновиков здесь не действует: тест, который забыл подменить папку работ, пишет в настоящую `work/`. Локально лучше гонять через pytest. |
 | `python scripts/check_coverage.py coverage.json 40 28` | Порог покрытия: 40 % строк и 28 % ветвлений. Сначала выполните `coverage json -o coverage.json`. |
 | `python -m vulture src main.py --min-confidence 80` | Мёртвый код. Для более глубокого просмотра локально понизьте порог до 60. |
 | `python scripts/check_frontend.py` | Страницу саму с собой: каждый id, который ищет код, есть в `index.html`, каждый метод API экспортирован из `api.js`, разрешён сервером и определён в `api.py`, у каждого события из Python есть обработчик. |

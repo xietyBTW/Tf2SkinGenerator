@@ -119,6 +119,31 @@ class ChecksTests(unittest.TestCase):
                         vtf_rel={"materials/m/gun"})
         self.assertEqual(checks.check_vmt_textures_exist(mod), [])
 
+    def test_game_texture_not_flagged(self):
+        # VMT ссылается на текстуру, которую даёт сама игра: фиолета не будет.
+        mod = self._mod(vmts=[parse_vmt("materials/m/gun.vmt", self._VMT)],
+                        game_has=lambda rel: rel == "materials/m/gun.vtf")
+        self.assertEqual(checks.check_vmt_textures_exist(mod), [])
+
+    def test_texture_extension_stripped_like_engine(self):
+        # Игровые VMT праздничного оружия пишут `$baseTexture "….psd"`.
+        from src.services.diagnostics.context import normalize_material_path
+        self.assertEqual(normalize_material_path("Models\\W\\Saw_XMAS.psd"), "models/w/saw_xmas")
+        self.assertEqual(normalize_material_path("models/w/saw.vtf"), "models/w/saw")
+        self.assertEqual(normalize_material_path("models/v1.2/saw"), "models/v1.2/saw")
+
+    def test_model_material_from_game_not_flagged(self):
+        from src.services.diagnostics.context import MdlInfo
+        from src.services.diagnostics.mdl_reader import MdlHeader
+        hdr = MdlHeader(version=48, material_names=["gun"],
+                        cdmaterials=["models/weapons/"], valid=True)
+        mdl = MdlInfo("models/weapons/gun.mdl", hdr, has_vvd=True, has_vtx=True)
+        codes = _codes(checks.check_models(self._mod(mdls=[mdl])))
+        self.assertIn("model.missing_material", codes)          # ни в моде, ни в игре
+        game = self._mod(mdls=[mdl],
+                         game_has=lambda rel: rel == "materials/models/weapons/gun.vmt")
+        self.assertNotIn("model.missing_material", _codes(checks.check_models(game)))
+
     def test_missing_texture_deduped(self):
         # Одна и та же недостающая текстура в двух VMT → одна находка.
         a = parse_vmt("materials/a.vmt", self._VMT)
@@ -171,7 +196,7 @@ class LocalizationTests(unittest.TestCase):
         from src.services.diagnostics.messages import render, MESSAGES
         t_en, _, _ = render("summary", "en", nv=2, nt=3, nm=1)
         t_ru, _, _ = render("summary", "ru", nv=2, nt=3, nm=1)
-        self.assertIn("Inspected: 2 VMT, 3 VTF, 1 models", t_en)
+        self.assertIn("Inspected: 2 VMT, 3 VTF, 1 MDL", t_en)
         self.assertNotEqual(t_en, t_ru)             # реально переведено
         # неизвестный язык → фолбэк на en, неизвестный код → пусто
         self.assertEqual(render("summary", "xx", nv=0, nt=0, nm=0)[0],

@@ -117,7 +117,7 @@ Code comments are in Russian as well.
 |---|---|
 | `python -m ruff check src main.py tests` | Undefined names, unused imports, redefinitions (the `F` rule set, see `ruff.toml`). |
 | `python -m pytest tests -q` | The test suite, with the fixtures from `conftest.py`. |
-| `coverage run -m unittest discover -s tests` | The same suite as CI runs it. |
+| `coverage run -m unittest discover -s tests` | The same suite as CI runs it. Note that `unittest` doesn't load `tests/conftest.py`, so its redirection of temporary files and drafts doesn't apply here: a test that forgets to patch the work folder writes into the real `work/`. Prefer pytest locally. |
 | `python scripts/check_coverage.py coverage.json 40 28` | The coverage gate: 40 % of lines and 28 % of branches. Run `coverage json -o coverage.json` first. |
 | `python -m vulture src main.py --min-confidence 80` | Dead code. Lower the confidence to 60 locally for a deeper look. |
 | `python scripts/check_frontend.py` | The page against itself: every element id the code looks up exists in `index.html`, every API method is exported by `api.js`, allowed by the dev server and defined in `api.py`, every event Python sends has a handler. |

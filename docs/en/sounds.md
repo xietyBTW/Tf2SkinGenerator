@@ -17,7 +17,9 @@ Voice lines with numbered takes (`Scout.Go01` to `Scout.Go08`) are folded into o
 
 ## Finding the right entry
 
-**Sections** at the top split the sounds into **Weapons**, **Voice**, **Player** and **World**. Switching the section resets the other filters, because each section has its own events and speakers.
+**Sections** at the top split the sounds into **Weapons**, **Voice**, **Player** and **World**. Switching the section resets the filters on the left, because each section has its own events and speakers. The search text and the **Replaced** filter stay.
+
+![The Weapons section of Sounds filtered by Scout and Fire, with the player at the bottom](../img/en/sounds.webp)
 
 **Search** (**Name, item or file**) matches item names in both languages, model names, classes, events, entry names and file paths. Every word has to match somewhere. Results are sorted by relevance: a match on a whole name ranks higher than a match inside a file path. When a section has nothing for your search, the app tells you which other section does.
 

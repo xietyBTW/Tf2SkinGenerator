@@ -8,22 +8,7 @@ Most buttons appear only when they make sense for the selected item. A weapon wi
 
 ## The window at a glance
 
-```
- ┌─ 1 ───────────────────────────────────────────────────────────────────┐
- │ Weapons  Cosmetics  Particles  Sounds  Diagnostics          Settings │
- ├─ 2 ───────────────────────────────────────────────────────────────────┤
- │ Scattergun                Tools   Together Texture Model   RED  BLU   │
- ├─ 3 ─────────────────────────┬─ 4 ─────────────────────────────────────┤
- │ album of textures           │ Model  First person                     │
- │                             │                                         │
- │                             │            3D view                      │
- │                             │                                         │
- │ 01 / 02   Save work  VMT ...│ Style ...   Replace model  Split ...    │
- ├─ 5 ─────────────────────────┴─────────────────────────────────────────┤
- │ Ready   512 × 512 · DXT5 · ≈ 341 KB · scattergun_mod.vpk  Parameters  │
- │         TF2 found · D:\Steam\...                       [ Build VPK ]  │
- └───────────────────────────────────────────────────────────────────────┘
-```
+![The app window with five numbered areas](../img/en/window-annotated.webp)
 
 1. [Header](#header): sections and settings.
 2. [Title row](#title-row): the selected item, tools, layout and team buttons.
@@ -56,10 +41,10 @@ The links at the top switch between sections of the app.
 | Item | What it does |
 |---|---|
 | **Extract model (SMD)** | Decompiles the item's model and lists every file Crowbar produced: the reference mesh, LODs, physics, animations, the QC. The reference SMD is ticked by default because that's the geometry itself. The ticked files are copied into the export folder. Useful as a base for a [custom model](custom-models.md). |
-| **Export UV template (PNG)** | Draws the model's UV layout into a 1024 × 1024 PNG in the export folder so you can paint over it. Each material has its own layout and gets its own file. |
+| **Export UV template (PNG)** | Draws the model's UV layout into a 1024 × 1024 PNG in the export folder so you can paint over it. Each material has its own layout and gets its own file. The templates also appear as extra cards in the album, next to the textures they belong to. |
 | **Extract original texture** | Saves the game's texture of the selected item into the export folder. For class bodies, which have a couple dozen textures, it first asks which ones to extract. The file format is set in **Settings → Extraction format**. |
 | **Merge several VPKs into one** | Combines mods from the export folder into a single VPK. See [merging mods](works-and-mods.md#merging-several-mods-into-one). |
-| **Open export folder** | Opens the export folder in Explorer. Available in every section. |
+| **Open export folder** | Opens the export folder in Explorer. Available in every section that has a title row, which is all of them except **Sounds**. |
 | **Open PCF from disk…**, **Save PCF…**, **Parameter reference (JSON)…**, **Reference for AI (with a task)…** | Particle section only. See [Particle editor](particles.md#tools-menu). |
 
 The extraction and UV items appear for anything with a model. Skyboxes, sprays, the crit text and death effects have no model, so the menu doesn't offer them there.
@@ -87,8 +72,8 @@ The catalog is where you pick what to work on. In the default layout it opens ov
 | **Weapon** | Weapons of every class, one card per model, including all-class melee weapons and the festive weapons that have a model of their own | **Class**, **Type** |
 | **Character** | Each class's body (**Player Skin**) and first-person hands. The Spy also has **Disguise Masks**, the Engineer the MvM **Robot Hand** | **Class** |
 | **Special** | **Crit**, **Spray**, **Death effect: Ice**, **Death effect: Gold**, **Death effect: Fire** | none |
-| **Projectiles** | Rockets, grenades, arrows, flares and other projectiles | none |
-| **Health & Ammo** | Health kits and ammo boxes | none |
+| **Projectiles** | Rockets, grenades, stickybombs, arrows, flares and other projectiles | none |
+| **Health & Ammo** | Health kits and ammo packs, including the Halloween and birthday versions | none |
 | **Taunt Props** | Items that appear in taunts | none |
 | **Skybox** | **All maps (all stock skies)** and every sky found in your game | none |
 | **Custom Mod** | Your saved works and VPK mods you opened | none |
@@ -103,7 +88,7 @@ Details on characters, special effects and skyboxes are in [their own guide](spe
 
 The left half of the working area lists the textures of the model, one card per material.
 
-**Moving between cards**: the tabs above the album, the arrows on its sides, the mouse wheel, or a click on a card. The counter in the bottom left corner shows your position, for example `02 / 03`. The 3D view wears the card the album stops on, which matters for models where several textures share one mesh, like the Spy's masks.
+**Moving between cards**: the tabs above the album, the arrows on its sides, the mouse wheel, or a click on a card. The counter in the bottom left corner shows your position, for example `02 / 03`. The 3D view shows the texture of the card the album stops on, which matters for models where several textures share one mesh, like the Spy's masks.
 
 **Putting an image on a card**: drag it onto the card, or double-click the card to pick a file. Images and VTF files are accepted. GIF and animated PNG become animated textures.
 
@@ -122,13 +107,13 @@ The left half of the working area lists the textures of the model, one card per 
 | **Restore edits** | The item has a draft from earlier, and nothing is changed yet in this session. | Brings the draft back. |
 | **Discard edits** / **Delete work** | The item has edits or a saved work. | Returns the item to its game look and deletes the draft or the work from disk. |
 | **War Paint** | A weapon held in hand. | Opens the War Paint panel. See [War Paint](war-paint.md). |
-| **Material maps** | Models: weapons, cosmetics, characters. | Gloss, glow, reflection mask and other maps for the current material. See [Materials and effects](materials.md#material-maps). |
+| **Material maps** | Anything with a model. | Gloss, glow, reflection mask and other maps for the current material. See [Materials and effects](materials.md#material-maps). |
 | **VMT** | Models, except opened VPK mods. | Opens the VMT editor for the current material. See [Materials and effects](materials.md#the-vmt-editor). |
 | **Other** | The model has service materials. | Shows them as cards: eyes, teeth, über overlays and the like. |
 
 How saving and drafts work is explained in [Works, drafts and the mod library](works-and-mods.md).
 
-**Style bar.** When a model style other than the base one is selected, a line under the album explains what you see. A style overrides the base selectively: the album lists only the materials the style changes, and the rest come from the base. **Add material** adds one more material to the style so you can give it its own texture.
+**Style bar.** When a texture style other than the base one is selected in the **Style** row, a line under the album explains what you see. A style overrides the base selectively: the album lists only the materials the style changes, and the rest come from the base. **Add material** adds one more material to the style so you can give it its own texture.
 
 ## Model view
 
@@ -166,7 +151,7 @@ These rows appear when the item has something to choose:
 | **Version** | **Regular**, **Festive**, **Festivized**: shows the festive lights the game hangs on the weapon. With a custom model, **Fit the lights** appears so you can move them onto your geometry. See [festive lights](custom-models.md#festive-weapons-and-their-lights). |
 | **Cosmetic style** | Model styles of a cosmetic. Each style has its own geometry, and a dot marks the styles you edited. |
 | **Animation** | In **First person**: the animations of this weapon. |
-| **Weapon** | In **On the model**: which slot the class holds, which also sets the pose. |
+| **Weapons** | In **On the model**: which slot the class holds, which also sets the pose. |
 | **Class** | In **Taunt** and **On the model**: which class to show when several can use the item. |
 
 ### Model actions
@@ -186,11 +171,11 @@ The buttons on the bottom right of the model view work on the model itself:
 
 | Element | What it does |
 |---|---|
-| Status | The current state: **Ready**, loading messages, build steps, results. Clicking it opens the [log](#log). |
+| Status | The current state: **Done** when nothing is running, loading messages, build steps, results. Clicking it opens the [log](#log). |
 | Summary | What the build will produce: resolution, VTF format, the estimated size of one texture, the file name. It updates as you change settings. |
 | **Parameters** | Opens and closes the build settings. With pinned panels they are always on screen. |
 | Game path | Where TF2 was found and whether Crowbar is in place. If the game isn't found, set it in the settings first. |
-| **Build VPK** | Builds the mod. During a build it turns into **Cancel**. |
+| **Build VPK** | Builds the mod. During a build it turns into **Stop**. |
 
 ## Build settings
 

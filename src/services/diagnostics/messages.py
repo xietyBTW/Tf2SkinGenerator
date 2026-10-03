@@ -109,8 +109,8 @@ MESSAGES: Dict[str, Dict[str, Dict[str, str]]] = {
                       "on VPK load order."},
     },
     "summary": {
-        "ru": {"title": "Осмотрено: {nv} VMT, {nt} VTF, {nm} моделей"},
-        "en": {"title": "Inspected: {nv} VMT, {nt} VTF, {nm} models"},
+        "ru": {"title": "Осмотрено: {nv} VMT, {nt} VTF, {nm} MDL"},
+        "en": {"title": "Inspected: {nv} VMT, {nt} VTF, {nm} MDL"},
     },
 }
 

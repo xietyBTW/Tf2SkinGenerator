@@ -53,7 +53,7 @@ The **Custom Mod** category also holds VPK mods you've opened: your older builds
 
 The library keeps a copy, so the mod stays available even if you delete or move the original file. Cards show the mod's size and, where the app can find one, its texture as a cover. The **×** on a card removes the copy from the library. The file you originally opened stays where it was.
 
-Some tools aren't available for opened mods. The VMT editor can't edit a mod's materials. There's no first-person view, because the mod contains an already compiled model and the app can't tell what weapon is inside. When the mod brings a model of its own, War Paints work in universal mode only.
+A few things work differently for opened mods. The VMT editor can't edit a mod's materials. The first-person view and War Paints rely on knowing which weapon the mod replaces: the app recognizes it after showing the mod, and until then they aren't available. When the mod brings a model of its own, War Paints work in universal mode only.
 
 ## Merging several mods into one
 

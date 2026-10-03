@@ -4,6 +4,8 @@
 
 **Settings** in the top right corner opens one window with four groups. Changes apply when you press **Save**; **Cancel** closes the window without them. This page goes through every setting and then explains where the app keeps your files.
 
+![The Settings window](../img/en/settings.webp)
+
 ## Game and files
 
 | Setting | What it does |

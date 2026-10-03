@@ -10,6 +10,13 @@ The **War Paint** button under the album appears for weapons that a class holds 
 
 The panel takes the album's place while the model stays visible on the right, so every choice you make shows up on the model right away. The line under the title tells you which mode you're in: **Paints for this weapon: N** when the game has War Paints for it, or **Universal mode** when it doesn't (see [below](#universal-mode)).
 
+![The War Paint panel with Hypergon selected and its preview on the Scattergun](../img/en/war-paint.webp)
+
+1. **Search paints** and the list of paints for this weapon.
+2. **Wear** and **Seed**.
+3. **Shuffle parts** and **Arrange by part**.
+4. **Cancel** and **Apply**.
+
 **Close** and **Cancel** both leave the panel without changes and put the real textures back on the model.
 
 ## Picking a paint
@@ -55,9 +62,9 @@ At the top are the pattern tiles. They work as a brush and as drop targets:
 
 | Tile | Meaning |
 |---|---|
-| **Base** | The template's first pattern. It lies wherever no other pattern was chosen. |
+| **Base** | The first tile of most templates: their first pattern, which lies wherever no other pattern was chosen. |
+| **No pattern** | The first tile of templates that paint over the weapon's own texture. It leaves the weapon's texture as it is. |
 | **Pattern 1**, **Pattern 2**, ... | The other patterns of the template. |
-| **No pattern** | The weapon's own texture, without the War Paint. |
 
 Below them is the list of parts. For the weapon's own War Paints these are the groups as Valve's artists marked them. In universal mode they are the model's parts, the same ones you see in [painting by parts](model-parts.md).
 

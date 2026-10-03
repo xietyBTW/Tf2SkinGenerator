@@ -52,6 +52,7 @@ import { syncViewerTheme } from './log.js';
 import './fail.js';
 import { say, viewer } from './stage.js';
 import { startFirstRun } from './tour.js';
+import { hideSplash, splashStep } from './splash.js';
 
 /*
  * Последняя сеть под всеми обработчиками.
@@ -100,9 +101,15 @@ group('.title__side', '.tag');
 group('#skinbar', '.tag');
 group('#fpbar', '.tag');
 
+// Модули на месте — половина пути заставки. Вторая половина — настройки и
+// каталог: заставка уходит, когда boot() их собрал.
+splashStep(.5);
+
 // Первый запуск: без пути к игре не работает ничего, поэтому сразу после
-// каталога предлагаем найти её самим (см. settings.js → offerTf2).
-boot().then(offerTf2).then(startFirstRun).catch((err) => {
+// каталога предлагаем найти её самим (см. settings.js → offerTf2). Вопрос и
+// тур ждут, пока заставка уйдёт: иначе они открылись бы под ней.
+boot().then(hideSplash).then(offerTf2).then(startFirstRun).catch((err) => {
+  hideSplash();
   els.note.hidden = false;
   els.note.textContent = `Нет связи с Python: ${err.message}`;
   console.error(err);

@@ -280,7 +280,7 @@ TRANSLATIONS = {
         'subtype_pickup': 'Пикап:',
         'subtype_taunt': 'Реквизит:',
         'subtype_sky': 'Небо:',
-        'sky_all_maps': 'Все карты (все стоковые неба)',
+        'sky_all_maps': 'Все карты (все стоковые скайбоксы)',
         'skybox_pano': 'Панорама',
         'skybox_splitting': 'Нарезка панорамы...',
         'skybox_split_error': 'Не удалось нарезать панораму',

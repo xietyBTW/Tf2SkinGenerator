@@ -10,7 +10,9 @@ Open **Cosmetics** in the header and click the item name to bring up the catalog
 
 **Search** is the fastest way in. Results are ranked: a full name match comes first, then names that start with your text, then names where a word starts with it, then everything else that contains it. With the Russian interface the search also matches English names, so `Team Captain` finds the item even when the list shows its Russian title. If nothing is found, the app suggests similar names under the empty list; clicking one runs the search again.
 
-**Filters** narrow the list. Each button shows how many items it leaves, and the numbers follow your search and the other filters.
+**Filters** narrow the list. The **Where** buttons and the **Collection** list show how many items each choice leaves, and those numbers follow your search and the other filters. The **Hide** buttons show how many items each of them hides in total.
+
+![The cosmetics catalog with the Class, Where, Collection and Hide filters](../img/en/cosmetics-catalog.webp)
 
 | Filter | What it does |
 |---|---|
@@ -69,13 +71,15 @@ Sometimes two styles use the same material. In game they can't look different th
 The **On the model** scene puts the cosmetic on a class standing in the game's pose for the chosen weapon slot:
 
 - **Class** picks who wears it, when several classes can.
-- **Weapon** picks the slot: **Primary**, **Secondary**, **Melee**, plus **Sapper** and **PDA** for the classes that have them. The class holds the stock weapon of that slot, and the pose changes with it.
+- **Weapons** picks the slot: **Primary**, **Secondary**, **Melee**, plus **Sapper** and **PDA** for the classes that have them. The class holds the stock weapon of that slot, and the pose changes with it.
+
+![The Team Captain on the Soldier in the On the model scene, with the Weapons and Class rows below](../img/en/cosmetic-on-model.webp)
 
 This is the quickest way to check that a texture sits right on the head, and how the item looks next to the class's own colors.
 
 ## Choosing classes when building
 
-When the cosmetic has separate models for several classes, **Build VPK** first asks **Which classes to build the hat for**. Each class has its own model, so a mod for all nine classes carries nine models. Click the class tiles you need (**All** and **None** help with long lists), and only those classes go into the mod. **Build** stays disabled until at least one class is ticked. The next build of the same item in this session offers your last choice again.
+When the cosmetic has separate models for several classes, **Build VPK** first asks **Which classes to build the hat for**. Each class has its own model, so a mod for all nine classes carries nine models. Click the class tiles you need (**All** and **None** help with long lists), and only those classes go into the mod. **Build** stays disabled until at least one class is ticked. The next build of a multi-class cosmetic in this session starts from your last choice.
 
 ## See also
 

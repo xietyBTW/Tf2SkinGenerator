@@ -24,13 +24,15 @@ A body can't be replaced with your own model. Class models have a complex skelet
 
 ### Isolating the shoulders
 
-On several classes the sleeve and shoulder in first person use the same material as the class's body in third person. Paint it, and the change shows up on the whole character model as well.
+On several classes the sleeve and shoulder in first person use the same material as the class's body in third person. Without care, a repainted sleeve would show up on the whole character model as well.
 
-**Isolate shoulders** in the build options fixes this. The app gives that material a separate name for the first-person model only (for example `vm_engineer_red` instead of `engineer_red`), so your edit stays on the hands. The option appears only for hands. If you don't touch the shoulder card, the shoulders keep the game's texture.
+The app prevents this by itself. As soon as you give the shoulder material an image, the build gives that material a separate name for the first-person model only (for example `vm_engineer_red` instead of `engineer_red`), and your edit stays on the hands. **Isolate shoulders** in the build options forces the same separation even when you didn't paint the shoulders; the option appears only for hands. Shoulders you didn't paint keep the game's texture.
 
 ### Spy disguise masks
 
 **Disguise Masks** contains the masks the Spy wears when disguised, one card per class. All of them sit on the same head model, so the 3D view shows the mask of the card you're on: scroll through the album to see each one.
+
+Masks are built at the game's own material paths, without the sv_pure workaround, so casual servers show the stock masks (see [troubleshooting](troubleshooting.md#casual-servers-and-sv_pure)).
 
 ## Special
 

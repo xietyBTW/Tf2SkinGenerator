@@ -122,6 +122,26 @@ def _gather_other_mod_paths(inspected_vpk: str) -> set:
     return paths
 
 
+def _game_file_lookup():
+    """Проверка «файл есть в самой игре» по её VPK (TF2 и смонтированный HL2).
+
+    Best-effort, как и поиск конфликтов: без пути к игре отвечает «нет»,
+    архив, который не открылся, пропускается. Каталоги берутся из общего
+    кэша — повторная проверка их не разбирает заново."""
+    try:
+        from src.config.app_config import AppConfig
+        from src.services.tf2_paths import TF2Paths
+        from src.services.vtf_preview_service import open_vpks
+
+        # Те же четыре архива контента игры, что читают небеса.
+        paks = open_vpks(TF2Paths.skybox_vpks(AppConfig.get_tf2_game_folder() or ""))
+    except Exception:                             # noqa: BLE001 — путь задаёт пользователь
+        paks = []
+    # По словарю каталога: у VPK нет __contains__, и `in` по нему самому
+    # перебирал бы все сто с лишним тысяч путей на каждую проверку.
+    return lambda rel: any(rel in pak.tree for pak in paks)
+
+
 def inspect_vpk(vpk_path: str, language: str = "en") -> DiagnosticReport:
     """Полный осмотр VPK-файла. Возвращает DiagnosticReport (никогда не бросает —
     ошибку распаковки оформляет как ERROR-находку)."""
@@ -156,6 +176,7 @@ def inspect_vpk(vpk_path: str, language: str = "en") -> DiagnosticReport:
 
         mod = build_inspected_mod(extract_dir)
         mod.external_paths = _gather_other_mod_paths(vpk_path)
+        mod.game_has = _game_file_lookup()
         report.extend(run_all_checks(mod, language))
         return report
     except Exception as e:                       # noqa: BLE001 — диагностика не должна падать

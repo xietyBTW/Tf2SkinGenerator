@@ -5,12 +5,28 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>TF2 Skin Generator</title>
 <link rel="stylesheet" href="base.css">
-<!-- Тема до первого кадра: после перезагрузки страницы (смена языка) тёмная
-     тема иначе мигает светлым, пока настройки едут из Python. -->
-<script>try{var t=sessionStorage.getItem('theme');if(t)document.documentElement.dataset.theme=t}catch(e){}</script>
+<!-- Тема и анимации до первого кадра, иначе тёмная тема мигает светлым, пока
+     настройки едут из Python. Свежее всего — эта же сессия (страницу подняли
+     заново после смены языка), затем адрес: его собирает app.py из конфига.
+     После смены языка заставка — только занавес (splash: quick, settings.js). -->
+<script>(function(){var d=document.documentElement,q=new URLSearchParams(location.search);function pick(k){try{var v=sessionStorage.getItem(k);if(v!==null)return v}catch(e){}return q.get(k)}var t=pick('theme');if(t)d.dataset.theme=t;if(pick('motion')==='off')d.dataset.motion='off';try{if(sessionStorage.getItem('splash')==='quick'){d.dataset.splash='quick';sessionStorage.removeItem('splash')}}catch(e){}d.classList.add('is-splash')})()</script>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
+
+<!-- ═══ Заставка ═════════════════════════════════════════════════════════
+     Первый кадр запуска, пока грузятся модули, настройки и каталог. Буквы
+     встают по одной, под ними сходятся полосы командных цветов, линия ниже
+     идёт по настоящим шагам загрузки. На выходе знак улетает на своё место в
+     шапке (splash.js). Буквы — отдельными span ради задержки по --i. -->
+<div class="splash" id="splash" aria-hidden="true">
+  <div class="splash__mark">
+    <span class="splash__word" id="splash-word"><span style="--i:0">T</span><span style="--i:1">F</span><span style="--i:2">2</span><span style="--i:3">&nbsp;</span><span style="--i:4">S</span><span style="--i:5">k</span><span style="--i:6">i</span><span style="--i:7">n</span><span style="--i:8">&nbsp;</span><span style="--i:9">G</span><span style="--i:10">e</span><span style="--i:11">n</span><span style="--i:12">e</span><span style="--i:13">r</span><span style="--i:14">a</span><span style="--i:15">t</span><span style="--i:16">o</span><span style="--i:17">r</span></span>
+    <i class="splash__swash splash__swash--red"></i>
+    <i class="splash__swash splash__swash--blu"></i>
+  </div>
+  <div class="splash__bar"><i id="splash-fill"></i></div>
+</div>
 
 <!-- ═══ Шапка ═══════════════════════════════════════════════════════════ -->
 <header class="chrome">
@@ -995,7 +1011,9 @@
   <button class="btn--primary" id="buildvpk">Собрать VPK</button>
   <!-- Занимает место «Собрать VPK», пока идёт сборка: две кнопки
        рядом спорили бы, а собрать второй раз всё равно нельзя. -->
-  <button class="btn--primary btn--stop" id="buildstop" hidden>Отменить</button>
+  <!-- «Остановить», а не «Отменить»: словарь переводит по русскому тексту, и
+       «Отменить» уже занято кнопками отмены правки (Undo). -->
+  <button class="btn--primary btn--stop" id="buildstop" hidden>Остановить</button>
 </footer>
 
 <!-- ═══ Диалог ══════════════════════════════════════════════════════════════
@@ -1523,8 +1541,10 @@
 
 <!-- Не догрузился модуль — не работает ВСЁ: пустой каталог без единого вызова
      в Python. Сервер локальный, сбой разовый (обрыв соединения на старте),
-     поэтому пробуем ещё пару раз, а упавший код хотя бы называем. -->
-<script>addEventListener('error',function(e){var n=document.getElementById('cat-note');if(n&&!window.__booted){n.hidden=false;n.textContent='JS: '+e.message}})</script>
-<script type="module" src="app.js" onerror="try{var n=+sessionStorage.getItem('bootTries')||0;if(n<3){sessionStorage.setItem('bootTries',n+1);location.reload()}}catch(e){}"></script>
+     поэтому пробуем ещё пару раз, а упавший код хотя бы называем. Заставку
+     тогда убираем сами: splash.js мог и не загрузиться, а под ней ошибки не
+     видно. -->
+<script>(function(){function drop(msg){var s=document.getElementById('splash');if(s)s.remove();document.documentElement.classList.remove('is-splash');var n=document.getElementById('cat-note');if(n&&msg){n.hidden=false;n.textContent=msg}}window.__dropSplash=drop;addEventListener('error',function(e){if(!window.__booted)drop('JS: '+e.message)});setTimeout(function(){if(!window.__booted)drop()},15000)})()</script>
+<script type="module" src="app.js" onerror="try{var n=+sessionStorage.getItem('bootTries')||0;if(n<3){sessionStorage.setItem('bootTries',n+1);location.reload()}else{__dropSplash('JS: app.js')}}catch(e){}"></script>
 </body>
 </html>

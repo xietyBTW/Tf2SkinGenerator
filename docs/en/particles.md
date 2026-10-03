@@ -4,6 +4,8 @@
 
 The **Particles** section edits the game's particle effects: unusual effects, explosions, muzzle flashes, building effects, map ambience. Effects live in PCF files inside the game, and each file holds many systems. The editor opens a PCF, shows its systems as a tree, plays the selected effect in the preview the way the game would, and builds a mod with your changed file.
 
+![The particle editor with Burning Flames: the effect's texture on the left, the preview in the middle, the Simple parameters on the right](../img/en/particles.webp)
+
 ## Finding an effect
 
 The catalog of this section works in two modes, switched by the **Show** list at its top:
@@ -44,7 +46,7 @@ The panel on the right shows the selected system in one of two modes.
 
 The essentials as sliders, each with a short explanation: **Particles per second**, **Particles per burst**, **Start delay**, **Duration**, **Max particles**, **Spawn area**, **Fly-out speed**, **Gravity**, **Drag**, **Base size**, **Size spread**, **Size over life**, **Lifetime**, **Opacity**, **Fade in**, **Fade out**, **Particle colors**, **Spin**. Changes show up in the preview right away.
 
-Some sliders need a module the system doesn't have yet. Where that's safe, the editor adds the module itself. An emitter it won't add, because a second emitter would double the burst; if you really need one, add it in expert mode.
+Some sliders need a module the system doesn't have yet. Where that's safe, the editor adds the module itself. It won't add an emitter, though: a second one would double the burst. If you really need one, add it in expert mode.
 
 ### Expert
 
@@ -73,7 +75,7 @@ Changed values are highlighted, so you can see what differs from the game at a g
 
 ### Copying and pasting parameters
 
-Any part of a system (a parameter, a module, a group or the whole system) can be copied as JSON. **Paste parameters** asks how to apply a pasted set:
+Any part of a system (a parameter, a module, a group or the whole system) can be copied as JSON. A parameter, a module or a group is pasted over the matching parameters right away. When you paste a whole system, **Paste parameters** asks how to apply it:
 
 - **Over**: replace the matching parameters.
 - **Without replacing**: add only what's missing.
@@ -143,7 +145,7 @@ Then the app asks for the file name. The result lands in the export folder:
 - `name.vpk` holds the changed PCF and your textures.
 - `name_textures.vpk` appears when you replaced textures. It holds only the textures, see the next section.
 
-A particle mod replaces the whole PCF file of the game. Two mods that change the same file don't combine: the one that loads last wins.
+A particle mod replaces the whole PCF file of the game. Two mods that change the same file don't combine: the one whose name comes first alphabetically wins (see [installing mods](troubleshooting.md#installing-a-mod)).
 
 ## Particle mods and casual
 

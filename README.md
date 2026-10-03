@@ -6,6 +6,8 @@ TF2 Skin Generator is a Windows app for making Team Fortress 2 mods without jugg
 
 The app does the tedious part on its own. It finds the model and textures in the game files, decompiles the model with Crowbar, converts your images to VTF, writes the VMT materials, recompiles the model with the game's own `studiomdl` and packs the result into a VPK.
 
+![TF2 Skin Generator: the Scattergun's texture with a War Paint on the left, the weapon in the Scout's hands on the right](docs/img/en/window.webp)
+
 ## What you can make
 
 | Task | Where in the app | Guide |
@@ -80,7 +82,7 @@ The full guide set is in [`docs/`](docs/README.md).
 
 ## Casual servers and sv_pure
 
-Valve's casual servers run with `sv_pure`, which makes the game ignore most custom files. For skins that live on a model (weapons, cosmetics, characters, projectiles, pickups, taunt props) the app uses a known workaround: it moves the model's materials into a folder that `sv_pure` lets through. Skyboxes, sounds, particle effects and the crit, spray and death effect skins don't go through it. Details and caveats are in [troubleshooting](docs/en/troubleshooting.md#casual-servers-and-sv_pure).
+Valve's casual servers run with `sv_pure`, which makes the game ignore most custom files. For skins that live on a model (weapons, cosmetics, class bodies and hands, projectiles, pickups, taunt props) the app uses a known workaround: it moves the model's materials into a folder that `sv_pure` lets through. Skyboxes, sounds, particle effects, Spy disguise masks and the crit, spray and death effect skins don't go through it. Details and caveats are in [troubleshooting](docs/en/troubleshooting.md#casual-servers-and-sv_pure).
 
 ## Building from source
 
@@ -94,6 +96,6 @@ Python 3.12 or newer is required. The development setup, project layout, tests a
 
 ## License
 
-The source code is released under the [MIT license](LICENSE). Crowbar, VTFLib and meshoptimizer are bundled under their own licenses, listed in [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
+The source code is released under the [MIT license](LICENSE). Crowbar, the VTFLib tools (VTFCmd, VTFLib, HLLib, DevIL), meshoptimizer and three.js come bundled under their own licenses, listed in [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
 
 TF2 Skin Generator is a fan-made tool. It isn't affiliated with or endorsed by Valve. Team Fortress 2 and its assets belong to Valve Corporation, and no game files are distributed with the app.

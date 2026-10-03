@@ -58,13 +58,18 @@ def check_vmt_syntax(mod: InspectedMod, lang: str = "en") -> List[Finding]:
 
 
 def check_vmt_textures_exist(mod: InspectedMod, lang: str = "en") -> List[Finding]:
-    """$basetexture/$bumpmap/… ссылаются на VTF, которого нет в моде → фиолет.
-    Одну и ту же недостающую текстуру сообщаем один раз."""
+    """$basetexture/$bumpmap/… ссылаются на VTF, которого нет ни в моде, ни в
+    игре → фиолет. Одну и ту же недостающую текстуру сообщаем один раз.
+
+    Ссылка на игровую текстуру — норма: так устроены копии материалов для обхода
+    sv_pure (австралиевая версия оружия) и правка VMT без своей картинки."""
     out: List[Finding] = []
     seen: set = set()
     for vmt in mod.vmts:
         for param, tex_rel in vmt.texture_refs().items():
             if mod.has_vtf(tex_rel) or tex_rel in seen:
+                continue
+            if mod.game_has(tex_rel + ".vtf"):
                 continue
             seen.add(tex_rel)
             out.append(_finding(Severity.WARNING, "vmt.missing_texture", lang,
@@ -110,7 +115,8 @@ def check_models(mod: InspectedMod, lang: str = "en") -> List[Finding]:
                                 versions=versions))
 
         for mat in m.header.material_names:
-            if _material_resolved(mat, m.header.cdmaterials, vmt_paths):
+            if _material_resolved(mat, m.header.cdmaterials,
+                                  lambda p: p in vmt_paths or mod.game_has(p)):
                 continue
             cds = ", ".join(m.header.cdmaterials) if m.header.cdmaterials else "—"
             out.append(_finding(Severity.WARNING, "model.missing_material", lang,
@@ -145,12 +151,13 @@ def check_summary(mod: InspectedMod, lang: str = "en") -> List[Finding]:
 
 # ── Внутреннее ──────────────────────────────────────────────────────────── #
 
-def _material_resolved(mat: str, cdmaterials: List[str], vmt_paths) -> bool:
-    """True, если для материала `mat` есть VMT по одному из путей $cdmaterials."""
+def _material_resolved(mat: str, cdmaterials: List[str], has) -> bool:
+    """True, если для материала `mat` есть VMT по одному из путей $cdmaterials.
+    `has(path)` отвечает, есть ли файл: в моде или в самой игре."""
     mat_l = mat.replace("\\", "/").lower().strip("/")
     for cd in (cdmaterials or []):
         cd_l = cd.replace("\\", "/").lower().strip("/")
         expected = f"materials/{cd_l}/{mat_l}.vmt" if cd_l else f"materials/{mat_l}.vmt"
-        if expected in vmt_paths:
+        if has(expected):
             return True
-    return f"materials/{mat_l}.vmt" in vmt_paths
+    return has(f"materials/{mat_l}.vmt")

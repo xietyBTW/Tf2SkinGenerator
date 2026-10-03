@@ -18,15 +18,17 @@ If you don't know how the texture is laid out yet, pick the weapon first and use
 
 Click the item name at the top of the window. Until you pick something it reads **Select an item**. The catalog opens with a search box, a category list and filters.
 
+![The catalog with the Scout filter on: weapon cards with their model file names](../img/en/catalog.webp)
+
 1. Leave **Category** on **Weapon**.
 2. Narrow the list with **Class** and **Type** (primary, secondary, melee, and the watch and PDA slots for the classes that have them). Both filters work on their own: **Type → Melee** with no class selected shows every melee weapon in the game.
-3. Or type in the search box. Every word you type has to appear in the weapon name, the model file name or the class, in any order, so `scatter scout` and `c_scattergun` both find the Scattergun.
+3. Or type in the search box. Every word you type has to appear in the weapon name, the model file name or the class (by its English name), in any order, so `scatter scout` and `c_scattergun` both find the Scattergun.
 4. Click the weapon card.
 
 The catalog closes and the model starts loading. The first time you open a weapon, the app extracts the model from the game archives and decompiles it with Crowbar, which takes a few seconds. After that it comes from the cache almost instantly.
 
 > [!TIP]
-> If the catalog keeps getting in the way, turn on **Settings → Pin the panels**. The catalog then stays on the left and the build settings on the right. This needs a window wider than 1100 pixels.
+> If the catalog keeps getting in the way, turn on **Settings → Pin the panels**. The catalog then stays on the left and the build settings on the right, so you don't have to call them up. This needs a window wider than 1100 pixels.
 
 ## 2. Find your way around the album
 
@@ -34,7 +36,7 @@ With the default **Together** view, the window is split in two. The textures are
 
 The left half is the album: one card per material of the model. Most weapons have one or two materials, some have more (a separate scope, shells, a strap). You can move between cards with the tabs above the album, the arrows at its sides or the mouse wheel. The counter under the album shows which card you're on, for example `02 / 03`.
 
-The card the album stops on is the one the model wears in the preview. This matters for items that share one mesh between several textures, like the Spy's disguise masks.
+The 3D view always shows the texture of the card the album stops on. This matters for items where several textures share one mesh, like the Spy's disguise masks.
 
 ## 3. Put your image on the model
 
@@ -79,16 +81,20 @@ The buttons above the model switch the scene:
 - **Model** is the item on its own, with a free camera.
 - **First person** puts the weapon in the hands of its class, the way you'll see it in game. An **Animation** row appears under the view with the animations this weapon has in game, such as idle, draw, fire and inspect. The festive lights, if you turned them on, are shown here too.
 
+![The First person scene: the Scattergun in the Scout's hands during the inspect animation, with the Animation row below](../img/en/first-person.webp)
+
 Press <kbd>F11</kbd> to expand the 3D view to the whole window, and <kbd>F11</kbd> or <kbd>Esc</kbd> to get back.
 
 ## 6. Build settings
 
 The bottom bar shows a summary of what will be built: size, VTF format, the estimated size of one texture and the file name. Click **Parameters** to open the build settings.
 
+![The build settings: resolution, VTF format, VPK name, VTF flags and options, with the summary in the bottom bar](../img/en/build-settings.webp)
+
 | Setting | What to choose |
 |---|---|
 | **Resolution** | 256, 512, 1024 or 2048 pixels per side. 512 is the default. 1024 looks noticeably sharper up close, 2048 is worth it for large, detailed items. The summary shows the cost: one DXT5 texture is about 1.3 MB at 1024 and about 5.3 MB at 2048. |
-| **VTF format** | `DXT1` is compressed and has no transparency. `DXT5` is compressed and keeps the alpha channel. `RGBA8888` is uncompressed, the best quality at four times the size. The list contains only the formats that make sense for the selected item. |
+| **VTF format** | `DXT1` is compressed and has no transparency. `DXT5` is compressed and keeps the alpha channel. `RGBA8888` is uncompressed, the best quality at four times the size. Most items get the full list of VTF formats; for the crit text and skyboxes it's narrowed to the formats that work there. |
 | **VPK name** | The file name of the mod. The app suggests one based on the item, for example `scattergun_mod.vpk`, and stops suggesting once you type your own. Up to 50 characters, and none of `\ / : * ? " < > \|`. |
 | **VTF flags** and **Options** | Leave them as they are unless you know you need them. They are explained in the [interface tour](usage.md#build-settings). |
 
@@ -96,7 +102,7 @@ The bottom bar shows a summary of what will be built: size, VTF format, the esti
 
 ## 7. Build
 
-Click **Build VPK** in the bottom right corner. While the build runs, the button turns into **Cancel**, and the bottom bar shows each step. The app may ask a few questions on the way:
+Click **Build VPK** in the bottom right corner. While the build runs, the button turns into **Stop**, and the bottom bar shows each step. The app may ask a few questions on the way:
 
 | Question | When it appears | Answers |
 |---|---|---|
@@ -105,7 +111,7 @@ Click **Build VPK** in the bottom right corner. While the build runs, the button
 | **No changes** | There's no image of yours, no VMT edit, no material maps, no custom model. | **Build anyway** builds a mod with the game's own look, which is useful for testing paths. |
 | **Custom model for the "part" part** | Only with a [custom model](custom-models.md) when the weapon has extra model states. | Keep the game part or choose an SMD for it. |
 
-When the build is done, the bottom bar shows **Built: name.vpk**. The file is in the export folder, which you can open with **Tools → Open export folder**. In the installed app it is `%LOCALAPPDATA%\Tf2SkinGenerator\export` unless you chose another folder in the settings.
+When the build is done, the bottom bar shows **VPK successfully created** with the full path to the file. If something needs your attention, the warnings are listed under it. The file is in the export folder, which you can open with **Tools → Open export folder**. In the installed app it is `%LOCALAPPDATA%\Tf2SkinGenerator\export` unless you chose another folder in the settings.
 
 If the build fails, a window explains what went wrong in plain words. **Technical details** shows the original error message, **Open the log** opens the folder with `tf2sg.log`, and **Copy** puts the whole thing on the clipboard for a bug report.
 

@@ -4,7 +4,7 @@
 
 A reskin changes the texture. A custom model changes the shape: your geometry takes the place of the game's model, keeps the item's slot and file paths, and gets compiled into a real TF2 model. The app takes care of the compiling, so you don't need to write a QC or run `studiomdl` yourself.
 
-You can bring a model in two kinds of formats:
+The app accepts two kinds of model files:
 
 - **SMD**, exported from Blender (with the Source Tools add-on) or another 3D editor. This is the format TF2 models are built from, and it gives you full control over bones and materials.
 - **OBJ, GLB or glTF**, the formats you usually get from model sites. The app reads them itself and turns them into an SMD, so you don't need a 3D editor at all.

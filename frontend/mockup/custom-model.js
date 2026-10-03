@@ -444,8 +444,9 @@ document.getElementById('qc-reset').addEventListener('click', async () => {
 
 document.getElementById('qc-close').addEventListener('click', () => qcDlg.close());
 
+// По коду клавиши, а не по символу: в русской раскладке S — это «ы».
 qcText.addEventListener('keydown', (e) => {
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+  if ((e.ctrlKey || e.metaKey) && e.code === 'KeyS') {
     e.preventDefault();
     document.getElementById('qc-save').click();
   }

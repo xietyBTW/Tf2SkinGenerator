@@ -18,6 +18,13 @@ Three things appear over the 3D view:
 - **The parts list** on the left: one numbered chip per part. Hovering a chip lights up its piece on the model. You can drag the list by its title, resize it from the bottom right corner, and double-click the title to put it back.
 - **A hint** at the bottom of the view that says what the current tool will do.
 
+![Painting by parts on the Scattergun: the parts are painted in random colors](../img/en/model-parts.webp)
+
+1. The tool column.
+2. The options of the selected tool, here the brush.
+3. The parts list.
+4. The hint.
+
 ## What counts as a part
 
 A part is a connected piece of geometry: the revolver's cylinder, its frame, its barrel. That's how people see a model, and it keeps the list short. A revolver has 29 such pieces against 106 UV islands.

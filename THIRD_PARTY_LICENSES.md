@@ -11,14 +11,14 @@ Each retains its own license, listed below.
 Distribution of these tools:
 
 - **Crowbar** (`tools/crowbar/`) **is included** in this repository under CC BY-SA 3.0
-  with attribution (see below) — its license permits redistribution.
-- **VPK** (`vpk.exe`): **not** shipped. At runtime the app uses Valve's official
-  `vpk.exe` from the user's own installed *Team Fortress 2* (`<TF2>/bin/vpk.exe`),
-  falling back to an optional local `tools/VPK/` bundle if present. No proprietary
-  Valve binaries are redistributed.
+  with attribution (see below); its license permits redistribution.
+- **VPK** (`vpk.exe`): **not** shipped. If a copy is placed in `tools/VPK/`, the app
+  uses it; otherwise it runs Valve's official `vpk.exe` from the user's own installed
+  *Team Fortress 2* (`<TF2>/bin/vpk.exe`). No proprietary Valve binaries are
+  redistributed.
 - **VTF tools** (`tools/VTF/`: VTFCmd/VTFLib/HLLib/DevIL) **are included** in this
   repository. Their licenses permit redistribution: VTFLib/HLLib/DevIL are LGPL and
-  VTFCmd is GPL — both are shipped **unmodified** as separate programs, with their
+  VTFCmd is GPL. All of them are shipped **unmodified** as separate programs, with their
   corresponding source available at the official links in the table below.
 
 This project is an **unofficial** fan tool. It is **not affiliated with, endorsed

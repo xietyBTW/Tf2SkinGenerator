@@ -61,7 +61,29 @@ def _serve(port: int) -> Server:
     return server
 
 
-def _open_pywebview(url: str) -> bool:
+def _look() -> dict:
+    """
+    Тема и анимации из конфига — для первого кадра окна.
+
+    Страница узнаёт настройки только запросом в Python, а до ответа рисуется
+    светлой. Тема в адресе (index.html читает её до первого кадра) и цвет фона
+    окна убирают и это мигание, и белый кадр WebView2 до загрузки страницы.
+    """
+    try:
+        from src.config.app_config import AppConfig
+        cfg = AppConfig.load_config()
+    except Exception:  # noqa: BLE001 — без конфига окно просто светлое
+        cfg = {}
+    dark = cfg.get('theme') == 'dark'
+    return {
+        'theme': 'dark' if dark else 'light',
+        'motion': 'off' if cfg.get('ui_animations') is False else '',
+        # --bg тем из base.css: фон окна до первого кадра страницы.
+        'background': '#0f0f0e' if dark else '#f2f1ee',
+    }
+
+
+def _open_pywebview(url: str, background: str) -> bool:
     """Настоящее окно приложения. False — pywebview не установлен."""
     try:
         import webview
@@ -70,7 +92,8 @@ def _open_pywebview(url: str) -> bool:
     from src.shared.paths import data_dir
 
     window = webview.create_window(TITLE, url, width=1440, height=900,
-                                   min_size=(900, 600))
+                                   min_size=(900, 600),
+                                   background_color=background)
     api.set_folder_picker(lambda start: _pick_folder(window, start))
     # Профиль WebView2 — в своей папке данных. Без storage_path pywebview
     # заводит его в %TEMP%\tmpXXXXXXXX (сотни файлов) и удаляет только при
@@ -130,10 +153,11 @@ def main() -> None:
     _serve(port)
     # Индексы архивов игры греются, пока открывается окно.
     api.warm_up()
-    url = f"http://127.0.0.1:{port}"
+    look = _look()
+    url = f"http://127.0.0.1:{port}/?theme={look['theme']}&motion={look['motion']}"
     print(f"{TITLE}: {url}")
 
-    if _open_pywebview(url):
+    if _open_pywebview(url, look['background']):
         return
     if _open_browser_app(url):
         return

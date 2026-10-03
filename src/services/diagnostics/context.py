@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Set, Tuple
+from typing import Callable, Dict, List, Set, Tuple
 
 from src.services.diagnostics.mdl_reader import MdlHeader
 
@@ -34,11 +34,12 @@ _KV_RE = re.compile(r'(?im)^\s*"?\$(\w+)"?\s+(?:"([^"]*)"|(\S+))')
 
 def normalize_material_path(value: str) -> str:
     """Приводит путь материала/текстуры к каноничному виду: прямые слеши,
-    нижний регистр, без крайних слешей и расширения."""
+    нижний регистр, без крайних слешей и расширения. Расширение срезается
+    любое, как это делает движок: в игровых VMT встречается и `….psd`."""
     v = value.strip().replace("\\", "/").lower().strip("/")
-    for ext in (".vtf", ".vmt"):
-        if v.endswith(ext):
-            v = v[: -len(ext)]
+    stem, dot, ext = v.rpartition(".")
+    if dot and "/" not in ext:
+        v = stem
     return v
 
 
@@ -97,6 +98,9 @@ class InspectedMod:
     #: Пути (rel, lowercase) из ДРУГИХ включённых модов в tf/custom — для поиска
     #: конфликтов. Пусто, если путь к TF2 не задан.
     external_paths: Set[str] = field(default_factory=set)
+    #: Есть ли файл ("materials/…/x.vtf") в самой игре. Без пути к TF2 — всегда
+    #: «нет», и недостающая текстура предупреждает, как раньше.
+    game_has: Callable[[str], bool] = lambda rel: False
 
     def has_vtf(self, materials_rel_no_ext: str) -> bool:
         """Есть ли VTF по каноничному пути 'materials/…/name' (без .vtf)."""
