@@ -573,6 +573,12 @@ class VpkModelPipeline:
             replace_smd = entry.get('replace_smd')
             keep_mat = bool(entry.get('keep_materials'))
             img = entry.get('vtf_path') or entry.get('image_path')
+            # Стиль-черновик собирается одной своей текстурой: материалы
+            # частей переносит только сборка открытого стиля. Молча терять их
+            # нельзя — человек их делал.
+            if entry.get('part_materials'):
+                ctx.warn("Свои материалы частей неоткрытого стиля в мод не попали: "
+                         "их собирает только открытый стиль")
             for mdl_rel in (entry.get('mdl_paths') or []):
                 mdl_norm = (mdl_rel or '').replace('\\', '/').lower()
                 if not mdl_norm:

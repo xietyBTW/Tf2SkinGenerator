@@ -37,6 +37,10 @@ from src.app import api  # noqa: E402
 
 TITLE = "TF2 Skin Generator"
 
+#: Фон страницы по темам (--bg из base.css): им красится окно до первого
+#: кадра страницы и полоска над ней у своего заголовка (titlebar.py).
+BACKGROUND = {'dark': '#0f0f0e', 'light': '#f2f1ee'}
+
 #: Где искать браузер для режима «окно приложения». Edge есть в Windows 11
 #: всегда, Chrome — как повезёт.
 _BROWSERS = (
@@ -74,16 +78,15 @@ def _look() -> dict:
         cfg = AppConfig.load_config()
     except Exception:  # noqa: BLE001 — без конфига окно просто светлое
         cfg = {}
-    dark = cfg.get('theme') == 'dark'
     return {
-        'theme': 'dark' if dark else 'light',
+        # Без темы в конфиге страница берёт тёмную (api.settings) — и первый
+        # кадр тоже, иначе свежий запуск мигнул бы светлым.
+        'theme': 'light' if cfg.get('theme') == 'light' else 'dark',
         'motion': 'off' if cfg.get('ui_animations') is False else '',
-        # --bg тем из base.css: фон окна до первого кадра страницы.
-        'background': '#0f0f0e' if dark else '#f2f1ee',
     }
 
 
-def _open_pywebview(url: str, background: str) -> bool:
+def _open_pywebview(url: str, look: dict) -> bool:
     """Настоящее окно приложения. False — pywebview не установлен."""
     try:
         import webview
@@ -91,10 +94,26 @@ def _open_pywebview(url: str, background: str) -> bool:
         return False
     from src.shared.paths import data_dir
 
+    # Свой заголовок окна вместо системного (frontend/titlebar.py). Не
+    # загрузился (старая Windows без нужных функций) — окно просто остаётся
+    # с системным: это не повод не открыться вовсе.
+    try:
+        from frontend import titlebar
+    except Exception as exc:  # noqa: BLE001
+        print(f"Свой заголовок окна недоступен: {exc}")
+        titlebar = None
+    if titlebar is not None:
+        # Признак для первого кадра страницы: шапка таскает окно ещё до модулей.
+        url += '&frame=custom'
+
     window = webview.create_window(TITLE, url, width=1440, height=900,
                                    min_size=(900, 600),
-                                   background_color=background)
+                                   background_color=BACKGROUND[look['theme']])
     api.set_folder_picker(lambda start: _pick_folder(window, start))
+    if titlebar is not None:
+        # Кнопки окна страница зовёт через api.window_control.
+        titlebar.attach(window, look['theme'], BACKGROUND)
+        api.set_window_control(titlebar.control)
     # Профиль WebView2 — в своей папке данных. Без storage_path pywebview
     # заводит его в %TEMP%\tmpXXXXXXXX (сотни файлов) и удаляет только при
     # штатном закрытии окна: после выхода на обновление, краша или занятых
@@ -157,7 +176,7 @@ def main() -> None:
     url = f"http://127.0.0.1:{port}/?theme={look['theme']}&motion={look['motion']}"
     print(f"{TITLE}: {url}")
 
-    if _open_pywebview(url, look['background']):
+    if _open_pywebview(url, look):
         return
     if _open_browser_app(url):
         return

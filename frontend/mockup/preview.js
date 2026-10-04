@@ -356,6 +356,9 @@ export function applyView(st) {
                                    ...Object.fromEntries(trial) });
   const single = entries.length === 1 && entries[0][0] === SINGLE_TEX;
 
+  // Куски своих материалов частей — до раздачи: текстуры ищут меши по имени.
+  withViewer((w) => w.setPartMaterials(st.part_materials || {}));
+
   if (applySpecialTexture(st.textures)) {
     // Сцена сама решила, куда положить картинку: обычная раздача по
     // материалам здесь только испортила бы её.
@@ -1127,6 +1130,12 @@ export function cardTitle(name) {
   // Карточка варианта встаёт на место главной, пока он включён: подпись
   // называет вариант, а не материал — имя материала есть в подсказке.
   if (/_(gold|australium)$/i.test(name)) return 'Australium';
+  // Материал части: номер тот же, что метка на её чипах в списке частей;
+  // имя материала (оно нужно для VMT) — в подсказке.
+  for (const spec of Object.values(lastView?.part_materials || {})) {
+    const at = (spec.parts || []).findIndex((p) => p.name === name);
+    if (at >= 0) return t('Материал части {}').replace('{}', at + 1);
+  }
   return cardTitles[name] || name;
 }
 
@@ -1175,8 +1184,16 @@ document.querySelector('.modes').addEventListener('click', (e) => {
   // `::view-transition-*`). Без поддержки — просто переключение.
   const apply = () => { work.dataset.view = btn.dataset.view; };
   const motion = document.documentElement.dataset.motion !== 'off';
-  if (motion && document.startViewTransition) document.startViewTransition(apply);
-  else apply();
+  if (motion && document.startViewTransition) {
+    const shift = document.startViewTransition(apply);
+    // Переход бросается, когда кадры не рисуются (окно свёрнуто или за
+    // другими): смена вида при этом уже применена, а отказ без обработчика
+    // уходил на экран сырым «Transition was aborted…».
+    shift.ready.catch(() => {});
+    shift.finished.catch(() => {});
+  } else {
+    apply();
+  }
 });
 
 // ── Сцена: сам предмет, руки или насмешка ───────────────────────────────

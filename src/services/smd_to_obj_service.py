@@ -215,8 +215,25 @@ class SmdToObjService:
                 faces_by_mat[mat] = faces
 
             sources = ", ".join(os.path.basename(p.smd_path) for p in parts)
+            # Все SMD по порядку, с бодигруппами: номер треугольника в OBJ ведёт
+            # к треугольнику в них — по нему сборка делает часть своим
+            # материалом (part_materials.SOURCES_PREFIX).
+            from src.services.part_materials import SOURCES_PREFIX
+            files = []
+            for p in parts:
+                home = os.path.dirname(os.path.abspath(p.smd_path))
+                for path in (p.smd_path, *p.extra_smd_paths):
+                    if path != p.smd_path and not os.path.exists(path):
+                        continue
+                    # SMD чужой модели — пушка-носитель праздничного оружия:
+                    # она в конце OBJ и в сборку этой модели не входит. Номера
+                    # своих треугольников она не сдвигает, источником не числим.
+                    if os.path.dirname(os.path.abspath(path)) != home:
+                        break
+                    files.append(os.path.basename(path))
             with open(obj_path, "w", encoding="utf-8") as f:
                 f.write(f"# Converted from {sources}\n")
+                f.write(f"{SOURCES_PREFIX} {'|'.join(files)}\n")
                 f.write(f"mtllib {mtl_name}\n\n")
 
                 for p in positions:

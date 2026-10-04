@@ -32,6 +32,8 @@ The links at the top switch between sections of the app.
 
 **Settings** on the right opens the settings window, described in [Settings and data folders](settings.md).
 
+Next to it are the window buttons: minimize, maximize and close. The header also serves as the window's title bar: drag the window by any empty part of it, double-click it to maximize the window or bring back its previous size, and right-click it for the system window menu.
+
 ## Title row
 
 **Item name.** The large label on the left names the selected item, with its model file and class next to it. Clicking it opens the catalog. Before anything is selected it reads **Select an item**.

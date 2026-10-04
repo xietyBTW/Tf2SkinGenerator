@@ -7,7 +7,6 @@ import shutil
 from pathlib import Path
 from typing import List, Tuple, Dict, Optional, Callable
 from src.shared.logging_config import get_logger
-from src.shared.constants import DirectoryPaths
 from src.shared.file_utils import ensure_directory_exists, copy_file_safe
 from src.shared.validators import sanitize_path
 
@@ -149,9 +148,10 @@ class MergeVPKService:
             if not vpk_file.exists():
                 return False, t.get('vpk_file_not_found', 'VPK file not found: {path}').format(path=vpk_file)
         
-        # Создаем временную директорию для объединения
-        import time
-        temp_dir = DirectoryPaths.BASE_TEMP_DIR / f"merge_{int(time.time())}"
+        # Временная папка — в системном %TEMP%, как у сборки (BuildContext):
+        # пути внутри модов длинные, а vpk.exe не открывает длиннее 260 символов.
+        import tempfile
+        temp_dir = Path(tempfile.mkdtemp(prefix="tf2sg_merge_"))
         merged_root = temp_dir / "vpkroot"
         
         try:

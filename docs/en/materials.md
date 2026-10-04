@@ -98,5 +98,5 @@ You can hide more materials yourself in **Settings → Hidden materials**. See [
 ## See also
 
 - [Your first skin](reskin.md): the basics of textures and building.
-- [Painting by parts](model-parts.md): different colors on different pieces of one material.
+- [Painting by parts](model-parts.md): different colors on different pieces of one material, and [a material of its own](model-parts.md#own-material-for-a-part) for a piece that needs its own VMT.
 - [Settings](settings.md): advanced VTF flags and hidden materials.

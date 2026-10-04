@@ -1101,6 +1101,84 @@ class VpkTextureBuilder:
         return extra_materials_vtf_paths
 
     @staticmethod
+    def _write_part_materials(variants: dict, specs, ctx, slots,
+                              blu_of: Optional[dict] = None,
+                              strip_paints: bool = False) -> dict:
+        """
+        VMT материалов частей (src/services/part_materials.py).
+
+        Материал части — отдельный материал модели. В каждой строке скина его
+        VMT начинается с ИГРОВОГО VMT материала, стоящего на его месте
+        (главный, BLU, золото, стиль), и поверх ложится правка VMT части.
+        $basetexture — своя картинка части для её команды (`image` в строках
+        исходного, `image_blu` в строках его синего, `blu_of`), иначе игровая
+        текстура строки; выбранный человеком в правке — он. Картинку, правку и
+        карты исходного материал части получил копией при создании
+        (PartsEditor._fork_card): то, что лежит на исходном сейчас, его не
+        касается.
+
+        Returns:
+            {имя строки: (картинка, материал части)} — что отрендерить в
+            `<имя строки>.vtf`; VMT уже лежит, рендер его не перезапишет.
+        """
+        from src.services import part_materials as pm
+        from src.services.edited_vmt_service import EditedVMTService
+
+        by_name = {str(s['name']).lower(): s for s in specs}
+        names = sorted(by_name, key=len, reverse=True)
+        blu_of = {str(k).lower(): str(v).lower() for k, v in (blu_of or {}).items()}
+        written = {p.stem.lower(): p for p in slots.vtf_output_path.glob('*.vmt')}
+        renders = {}
+
+        def read(path) -> str:
+            with open(path, 'r', encoding='utf-8', errors='replace') as f:
+                return f.read()
+
+        for name, source in variants.items():
+            name, source = name.lower(), str(source)
+            owner = next((n for n in names if name == n or name.startswith(n + '_')), name)
+            spec = by_name.get(owner, {})
+            origin = str(spec.get('base') or source)
+            # Своего VMT у синего «сделать командным» в игре нет — тогда VMT
+            # исходного; мод сам его не пишет — тот, что записан для строки.
+            template = (VpkTextureBuilder._find_original_vmt(source, ctx, slots)
+                        or VpkTextureBuilder._find_original_vmt(origin, ctx, slots)
+                        or written.get(source.lower()))
+            if not template or not os.path.exists(template):
+                logger.warning(f"[ЧАСТИ] {name}: нет VMT материала {source} — часть пропущена")
+                ctx.warn(f"Материал части «{name}» не записан: нет VMT «{source}»")
+                continue
+            text = read(template)
+            chosen = False
+            edited = EditedVMTService.get_edited_vmt(owner)
+            if edited and os.path.exists(edited):
+                start = EditedVMTService.read_original_backup(owner)
+                if start is None:
+                    # Правка без сохранённого оригинала: сравниваем с игровым
+                    # VMT исходного — с него правка и начиналась.
+                    first = VpkTextureBuilder._find_original_vmt(origin, ctx, slots)
+                    start = read(first) if first else text
+                mine = read(edited)
+                text = pm.overlay_vmt(text, start, mine)
+                chosen = pm.basetexture_changed(start, mine)
+            target = slots.vmt(name)
+            with open(target, 'w', encoding='utf-8') as f:
+                f.write(text)
+            if strip_paints:
+                VMTService.remove_paint_proxies(str(target))
+            low = source.lower()
+            image = (spec.get('image') if low == origin.lower()
+                     else spec.get('image_blu') if low == blu_of.get(origin.lower())
+                     else None)
+            if image and not chosen:
+                VMTService.update_vmt_basetexture_path(
+                    str(target), slots.patched_cdmaterials_path, name)
+                renders[name] = (image, owner)
+            logger.info(f"[ЧАСТИ] VMT {name} по образцу {source}"
+                        f"{' + правка' if edited else ''}{' + своя картинка' if name in renders else ''}")
+        return renders
+
+    @staticmethod
     def _write_blacklisted_materials(
         blacklisted_extra, panel_extra_textures, ctx, slots,
     ) -> None:
@@ -1594,12 +1672,18 @@ class VpkTextureBuilder:
         weapon_key, panel_extra_textures, ctx, slots, tex,
         material_maps, texture_filename, image_path, is_normal_map,
         has_skins, skin_build_data, _eff,
+        part_variants=None, part_specs=None, blu_of=None, strip_paints=False,
     ) -> None:
         """
         Вторичные текстуры после главной+BLU: фиксированные доп. текстуры/файлы,
         текстуры из 2D-панели (материалы SMD вне skinfamilies), пер-текстурные
         файловые карты (detail/selfillum/phong) и VTF/VMT вариантов стилей. Порядок
         важен: карты ложатся в VMT после того, как все VMT материалов созданы.
+
+        Материалы частей (`part_variants`, src/services/part_materials.py) —
+        последними: их VMT (с игровых VMT строк скина), затем их свои картинки
+        по командам и их карты (`blu_of` — синий материал для исходного,
+        `strip_paints` — снять краски шапки, как у главного VMT).
         """
         _fixed_handled = VpkTextureBuilder._build_fixed_extra_textures(
             weapon_key, panel_extra_textures, ctx, tex.size,
@@ -1610,59 +1694,30 @@ class VpkTextureBuilder:
         # кастомного циферблата Dead Ringer. Пишутся всегда (активируют мод).
         VpkTextureBuilder._write_fixed_extra_files(weapon_key, ctx)
 
-        if panel_extra_textures:
-            # Собираем уже созданные имена (extra_materials + BLU)
-            _processed = {_f.stem for _f in slots.vtf_output_path.glob("*.vtf")}
+        # Картинки и карты частей, чей материал сборка пропустила (модель не
+        # та), в мод не идут вовсе: их VMT некому показать.
+        parts = {str(s['name']).lower() for s in part_specs or ()}
 
-            # Своя текстура австралия: VMT — игровой VMT золота, а не главного,
-            # иначе пропадают кубмапа и блеск. Кладём его заранее: рендер ниже
-            # VMT не перезаписывает, а $basetexture уже смотрит на наш VTF.
-            # Правленый в редакторе VMT важнее — его рендер возьмёт сам.
-            from src.services.edited_vmt_service import EditedVMTService
-            for _pet_name in panel_extra_textures:
-                if not qc_skin_parser.is_australium(_pet_name or ''):
-                    continue
-                _edited = EditedVMTService.get_edited_vmt(_pet_name.lower())
-                if _edited and os.path.exists(_edited):
-                    continue
-                _v_vmt = slots.vmt(_pet_name.lower())   # как у рендера ниже
-                _orig = VpkTextureBuilder._find_original_vmt(_pet_name, ctx, slots)
-                if _orig and not _v_vmt.exists():
-                    copy_file_safe(_orig, _v_vmt)
-                    VMTService.update_vmt_basetexture_path(
-                        str(_v_vmt), slots.patched_cdmaterials_path, _pet_name.lower())
-                    logger.info(f"Вариант '{_pet_name}': игровой VMT со своей текстурой")
+        def split(store):
+            store = store or {}
+            return ({k: v for k, v in store.items() if k.lower() not in parts},
+                    {k: v for k, v in store.items() if k.lower() in parts})
 
-            # Каждый panel-extra независим (своё имя → свои файлы, без callback и
-            # без чтения игрового VPK) → рендерим параллельно. Скип-логику и
-            # пер-текстурные настройки (_eff) считаем серийно при сборе задач.
-            _pet_jobs = []
-            for _pet_name, _pet_img in panel_extra_textures.items():
-                if _pet_name in _fixed_handled:
-                    continue   # уже записан по фиксированному пути
-                # Защита от UI-sentinel: '__single__' — главная текстура,
-                # а не имя материала. Если протёк — пропускаем, иначе
-                # в VPK появятся мусорные __single__.vmt / __single__.vtf.
-                if not _pet_name or _pet_name.startswith('__'):
-                    continue
-                if _pet_name in _processed:
-                    continue   # уже создан через skinfamilies
-                _es, _ef, _efl, _eo = _eff(_pet_name)
-                _pet_jobs.append((_pet_name, _pet_img, _es, _ef, _efl, _eo))
+        # Картинки частей сюда не приходят (едут в спеках частей), карты —
+        # приходят: им нужен VMT части, а он пишется ниже.
+        extras, _ = split(panel_extra_textures)
+        maps, part_maps = split(material_maps)
 
-            VpkTextureBuilder._run_extra_render_jobs(
-                _pet_jobs, slots.vtf_output_path, slots.vmt_path, slots.patched_cdmaterials_path,
-                "Panel extra texture",
-            )
+        VpkTextureBuilder._render_panel_extras(extras, _fixed_handled, ctx, slots, _eff)
 
         # ── Пер-текстурные файловые карты (detail/selfillum/phong/warp) ──────
         # Теперь VMT всех материалов (главный + доп. + BLU) созданы, поэтому
         # карты каждого материала ложатся в его собственный VMT.
         VpkTextureBuilder._build_material_maps(
-            material_maps, slots.vtf_output_path, texture_filename, slots.vmt_path,
+            maps, slots.vtf_output_path, texture_filename, slots.vmt_path,
             slots.patched_cdmaterials_path, tex.size,
             base_image_path=image_path, is_normal_map=is_normal_map,
-            panel_extra_textures=panel_extra_textures,
+            panel_extra_textures=extras,
         )
 
         # ── VTF/VMT вариантов стилей (skinfamilies) ─────────────────
@@ -1680,6 +1735,82 @@ class VpkTextureBuilder:
                 _var_jobs, slots.vtf_output_path, slots.vmt_path, slots.patched_cdmaterials_path,
                 "[SKIN BUILD] вариант",
             )
+
+        if part_variants:
+            applied = {str(n).lower() for n in part_variants}
+            part_maps = {k: v for k, v in part_maps.items() if k.lower() in applied}
+            renders = VpkTextureBuilder._write_part_materials(
+                part_variants, part_specs, ctx, slots, blu_of, strip_paints)
+            # Настройки VTF — материала части, а не имени строки (`_blue`).
+            owner = {row: who for row, (_, who) in renders.items()}
+            VpkTextureBuilder._render_panel_extras(
+                {row: image for row, (image, _) in renders.items()}, _fixed_handled,
+                ctx, slots, lambda name: _eff(owner.get(name, name)))
+            # VMT уже смотрит на эту VTF: не вышла (длинный путь у VTFCmd,
+            # битая картинка) — в игре материал фиолетовый, молчать нельзя.
+            for row in renders:
+                if not slots.vtf(row).exists():
+                    ctx.warn(f"Текстура материала части «{row}» не создана: в игре он будет без неё")
+            # Основа карт «из текстуры» — своя картинка части или игровая
+            # текстура исходного (`map_base`).
+            bases = {str(s['name']).lower(): s['map_base']
+                     for s in part_specs if s.get('map_base')}
+            VpkTextureBuilder._build_material_maps(
+                part_maps, slots.vtf_output_path, texture_filename, slots.vmt_path,
+                slots.patched_cdmaterials_path, tex.size,
+                base_image_path=image_path, is_normal_map=is_normal_map,
+                panel_extra_textures=bases,
+            )
+
+    @staticmethod
+    def _render_panel_extras(extras: dict, fixed_handled, ctx, slots, _eff) -> None:
+        """Свои картинки материалов из альбома: {имя}.vtf и, если VMT ещё
+        нет, {имя}.vmt рядом с главным."""
+        if not extras:
+            return
+        # Собираем уже созданные имена (extra_materials + BLU)
+        _processed = {_f.stem for _f in slots.vtf_output_path.glob("*.vtf")}
+
+        # Своя текстура австралия: VMT — игровой VMT золота, а не главного,
+        # иначе пропадают кубмапа и блеск. Кладём его заранее: рендер ниже
+        # VMT не перезаписывает, а $basetexture уже смотрит на наш VTF.
+        # Правленый в редакторе VMT важнее — его рендер возьмёт сам.
+        from src.services.edited_vmt_service import EditedVMTService
+        for _pet_name in extras:
+            if not qc_skin_parser.is_australium(_pet_name or ''):
+                continue
+            _edited = EditedVMTService.get_edited_vmt(_pet_name.lower())
+            if _edited and os.path.exists(_edited):
+                continue
+            _v_vmt = slots.vmt(_pet_name.lower())   # как у рендера ниже
+            _orig = VpkTextureBuilder._find_original_vmt(_pet_name, ctx, slots)
+            if _orig and not _v_vmt.exists():
+                copy_file_safe(_orig, _v_vmt)
+                VMTService.update_vmt_basetexture_path(
+                    str(_v_vmt), slots.patched_cdmaterials_path, _pet_name.lower())
+                logger.info(f"Вариант '{_pet_name}': игровой VMT со своей текстурой")
+
+        # Каждый panel-extra независим (своё имя → свои файлы, без callback и
+        # без чтения игрового VPK) → рендерим параллельно. Скип-логику и
+        # пер-текстурные настройки (_eff) считаем серийно при сборе задач.
+        _pet_jobs = []
+        for _pet_name, _pet_img in extras.items():
+            if _pet_name in fixed_handled:
+                continue   # уже записан по фиксированному пути
+            # Защита от UI-sentinel: '__single__' — главная текстура,
+            # а не имя материала. Если протёк — пропускаем, иначе
+            # в VPK появятся мусорные __single__.vmt / __single__.vtf.
+            if not _pet_name or _pet_name.startswith('__'):
+                continue
+            if _pet_name in _processed:
+                continue   # уже создан через skinfamilies
+            _es, _ef, _efl, _eo = _eff(_pet_name)
+            _pet_jobs.append((_pet_name, _pet_img, _es, _ef, _efl, _eo))
+
+        VpkTextureBuilder._run_extra_render_jobs(
+            _pet_jobs, slots.vtf_output_path, slots.vmt_path, slots.patched_cdmaterials_path,
+            "Panel extra texture",
+        )
 
     @staticmethod
     def _get_original_vtf_bytes(

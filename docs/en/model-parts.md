@@ -2,7 +2,7 @@
 
 [Documentation](../README.md) · [Русская версия](../ru/model-parts.md)
 
-Most TF2 weapons have a single material, which means a single texture for the whole model. You can't give the barrel one material and the stock another, but you can paint the area of the texture that the barrel uses. Painting by parts does exactly that: it splits the model into pieces you can click on, and everything you do to a piece lands in its area of the texture.
+Most TF2 weapons have a single material, which means a single texture for the whole model. Painting by parts lets you paint the barrel without touching the stock: it splits the model into pieces you can click on, and everything you do to a piece lands in its area of the texture. If a piece needs its own shine, transparency or glow, you can also [give it a material of its own](#own-material-for-a-part).
 
 The result is an ordinary texture, so a mod painted by parts installs and works like any other skin.
 
@@ -43,6 +43,7 @@ If the model is one solid piece, there's nothing to split, and the hint tells yo
 | Brush | Paints the part with the current color or gradient. |
 | Scissors | Selects pieces of the surface to cut the part finer. See [Cutting parts](#cutting-parts-finer). |
 | Outline | Draws an outline along the edges of the parts you paint. |
+| Material (ball icon) | Moves the part into a material of its own, or back. See [Own material for a part](#own-material-for-a-part). |
 | Color square | Opens the color picker. The second square appears when a gradient is on. |
 | Die | Paints every part in random colors. Click parts afterwards to fix what you don't like. |
 | Eraser | **Clear all**: removes every color, image and outline from the parts. <kbd>Ctrl</kbd>+<kbd>Z</kbd> brings it back. |
@@ -114,6 +115,22 @@ A part you cut off gets a **−** button on its chip that grows it back into the
 
 The outline tool draws a line along the edges of the parts you paint. Press **Outline** to turn it on, pick its color, and set the **Width**. From then on, every part you paint gets an outline. It's a quick way to get a cartoon look or to separate parts painted in similar colors.
 
+## Own material for a part
+
+Painting changes pixels, and pixels can't make the barrel shiny and the stock matte. Shine, transparency and glow come from the material's VMT, and the whole model shares one. The **Material** tool (the ball icon) moves parts into a separate material of the model, with its own VMT, material maps and texture settings.
+
+Take the tool and click parts on the model or chips in the list. The panel next to the column shows where they go. With **New material** selected, the first click creates a material and the following clicks add parts to it. To add parts to a material you made earlier, select it in the list. A click on a part that already belongs to the selected material returns it to the shared one, and the **×** next to a material returns all of its parts. Chips of such parts carry the material's number in the corner.
+
+You can do the same without switching tools: right-click a chip and choose **To a new material**, **To material "…"** or **Back to the shared material**.
+
+The new material appears in the album as a card next to its source, with a name like `c_scattergun_part1`. It's a separate material, like the head and the body of a class: an image you put on the source card doesn't reach it. At the moment you create it, it gets a copy of what the source has: its own image (or the game texture if it has none), VMT edits, material maps and texture settings, so the part looks the same as before. After that the two live apart. Use the part's card to give it an image of its own, edit its VMT, add [material maps](materials.md) or change texture settings. Colors and images that the other tools put on parts show on a part whichever material it's in. The 3D view draws every material with its own texture, in the parts mode as well.
+
+When you build, the part's triangles get the new material name in the model, and the material is added to every skin of the model. In each skin its VMT starts from the game VMT of the material that stands in the same place, and your VMT edits go on top. Its own image goes into the skins of its team: the RED image into the red skins, the BLU image into the blue ones. In other skins, such as Australium and styles, the part shows the game texture of that skin.
+
+Own materials work on game models only. A custom model, a mod loaded from a VPK and the festive garland don't have them, and neither does the Dead Ringer, whose preview shows a different model from the one that goes into the mod. On a cosmetic with a separate model for each class, the material is built only for the model you picked the parts on, and the build tells you so. On a cosmetic with styles, it's built for the style that is open when you build.
+
+If the game updates the model and its triangles change, the build skips the part's material and says so in the result instead of moving the wrong triangles.
+
 ## Teams, styles and model states
 
 Parts paint whatever card the preview shows. With **BLU** active, you paint the blue texture; with **Australium** on, the gold one; with a style selected, that style's texture. Each of them keeps its own strokes.
@@ -124,7 +141,7 @@ Parts work on the main state of the model. If you switched **Model state** to th
 
 Everything in the parts mode goes into the same history as the rest of the item: <kbd>Ctrl</kbd>+<kbd>Z</kbd> undoes the last step, <kbd>Ctrl</kbd>+<kbd>Y</kbd> redoes it. The work is saved in the item's draft along with everything else, and the next build bakes it into the texture at the resolution you chose.
 
-Loading a custom model resets the parts: its triangles are different, so the old parts don't apply to it.
+Loading a custom model resets the parts and their own materials: its triangles are different, so the old parts don't apply to it.
 
 ## See also
 

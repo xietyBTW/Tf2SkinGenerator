@@ -12,6 +12,15 @@ logger = get_logger(__name__)
 
 class PackagingService:
 
+    #: Предел длины пути у vpk.exe и VTFCmd (Win32 MAX_PATH, с нулём в конце).
+    MAX_PATH = 260
+
+    @staticmethod
+    def longest_path(folder: Path) -> str:
+        """Самый длинный абсолютный путь среди файлов папки ('' — пусто)."""
+        root = Path(os.path.abspath(folder))
+        return max((str(p) for p in root.rglob('*') if p.is_file()), key=len, default='')
+
     @staticmethod
     def create_vpk_file(ctx, filename: str, export_folder: str = "export", language: str = "en") -> str:
         """Создаёт VPK из ctx.vpkroot_dir и перемещает в export_folder/filename."""
@@ -81,6 +90,14 @@ class PackagingService:
             ).format(path=path)
             logger.error(f"{msg} ({exc})")
             return FileLockedError(str(path), msg)
+
+        # vpk.exe не умеет путей длиннее 260 символов: на таком он падает с
+        # «error opening required file …» и обрезанным именем, из которого
+        # причину не понять. Говорим её сами, до запуска.
+        longest = PackagingService.longest_path(vpkroot_dir)
+        if len(longest) >= PackagingService.MAX_PATH:
+            raise VPKCreationError("", f"path too long: {len(longest)} > "
+                                       f"{PackagingService.MAX_PATH - 1}: {longest}")
 
         vpkroot_parent = vpkroot_dir.parent
         # vpk.exe называет результат по имени упакованной папки (<dir>.vpk),

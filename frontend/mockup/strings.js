@@ -829,6 +829,31 @@ export const EN = {
   'Вернуть': 'Restore',
   'Свернуть': 'Collapse',
   'Развернуть': 'Expand',
+  // Части — своими материалами (parts_editor.py).
+  'Свои материалы частей — только у игровой модели': 'Own materials for parts work only on the game model',
+  'Выберите части': 'Select parts',
+  'Откройте предмет заново': 'Open the item again',
+  'Нет такого материала': 'No such material',
+  'Материал части «{}» не записан: нет VMT «{}»': 'Part material “{}” was not written: no VMT “{}”',
+  'Материал части «{}» не собран: модель не та, на которой выбирали части': 'Part material “{}” was not built: this is not the model the parts were picked on',
+  'Свои материалы частей собраны только для модели {}': 'Own part materials were built only for the {} model',
+  'Свои материалы частей неоткрытого стиля в мод не попали: их собирает только открытый стиль': 'Own part materials of a style that is not open did not go into the mod: only the open style builds them',
+  'Текстура материала части «{}» не создана: в игре он будет без неё': 'The texture of part material “{}” was not created: it will be missing in game',
+  'Отдать части в свой материал: свой VMT, карты и флаги': 'Give parts their own material: own VMT, maps and flags',
+  'Свой VMT, карты и флаги материала — на его карточке в альбоме': 'The material’s own VMT, maps and flags are on its card in the album',
+  'Новый материал': 'New material',
+  'Вернуть все части материала в общий': 'Return all parts of this material to the shared one',
+  'Свой материал': 'Own material',
+  'Свой материал: {}': 'Own material: {}',
+  'Материал части {}': 'Part material {}',
+  'В новый материал': 'To a new material',
+  'В материал «{}»': 'To material “{}”',
+  'Вернуть в общий': 'Back to the shared material',
+  'Щёлкай по частям: они уйдут в выбранный материал, повторный щелчок вернёт часть в общий': 'Click parts to move them into the selected material; click a part again to return it to the shared one',
+  // Кнопки окна (titlebar.js): свои ключи, «Свернуть» выше — про консоль.
+  'Свернуть окно': 'Minimize',
+  'Развернуть окно': 'Maximize',
+  'Свернуть в окно': 'Restore down',
   '{} · дочерних: {}': '{} · children: {}',
   ' систем, корней ': ' systems, roots ',
   'В этом файле систем нет.': 'This file has no systems.',
@@ -1273,6 +1298,8 @@ export const EN = {
     'Split a part into smaller ones.',
   'Обводит края покрашенных частей.':
     'Outlines the edges of painted parts.',
+  'Отдаёт части в свой материал: свой VMT, карты и флаги.':
+    'Moves parts into a material of their own: own VMT, maps and flags.',
   'Кубик и ластик':
     'Die and eraser',
   'Случайная раскраска и сброс. Ctrl+Z отменяет.':

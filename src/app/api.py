@@ -1093,6 +1093,19 @@ def clear_parts(material: str = '') -> Dict[str, object]:
     return session().parts.clear_parts(material)
 
 
+def set_part_material(material: str = '', parts: Optional[list] = None,
+                      target: str = '') -> Dict[str, object]:
+    """Части — в свой материал ('' — новый, имя — в этот, '-' — обратно в общий)."""
+    from src.app.session import session
+    return session().parts.set_part_material(material, parts, target)
+
+
+def drop_part_material(name: str = '') -> Dict[str, object]:
+    """Возвращает все части материала в общий; его карточка исчезает."""
+    from src.app.session import session
+    return session().parts.drop_part_material(name)
+
+
 def undo_edits(delta: int = -1, lang: str = '') -> Dict[str, object]:
     """Шаг по истории правок предмета: -1 — отменить, 1 — вернуть.
     В ответе — состояние показа плюс `undo`/`redo`: есть ли куда ещё."""
@@ -1215,6 +1228,33 @@ def pick_folder(start: str = '') -> Dict[str, object]:
         return {'path': _folder_picker(str(folder)) or ''}
     except Exception as exc:                    # noqa: BLE001 — граница с окном
         logger.warning(f"диалог выбора папки: {exc}")
+        return {'error': str(exc)}
+
+
+#: Кнопки окна в шапке страницы: (действие, тема) → состояние окна. Ставит
+#: окно приложения со своим заголовком (frontend/titlebar.py).
+_window_control = None
+
+
+def set_window_control(control) -> None:
+    """Подключает кнопки окна приложения."""
+    global _window_control
+    _window_control = control
+
+
+def window_control(action: str = '', theme: str = '') -> Dict[str, object]:
+    """
+    Свернуть, развернуть или закрыть окно; без действия — только его состояние.
+
+    `custom: False` — заголовок у окна системный (или это браузер), и своих
+    кнопок странице не нужно.
+    """
+    if _window_control is None:
+        return {'custom': False}
+    try:
+        return _window_control(action, theme)
+    except Exception as exc:                    # noqa: BLE001 — граница с окном
+        logger.warning(f"кнопка окна: {exc}")
         return {'error': str(exc)}
 
 

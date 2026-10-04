@@ -72,6 +72,19 @@ class BuildContextTests(unittest.TestCase):
             ctx.cleanup(on_error=True, keep_on_error=True, debug_mode=False)
             self.assertTrue(ctx.temp_dir.exists())
 
+    def test_default_folder_is_short_and_swept_at_start(self):
+        # Короткая папка прямо в %TEMP%: в прежней <данные>\tools\temp\build_…
+        # пути материалов шапок упирались в 260 символов (vpk.exe, VTFCmd).
+        # Префикс tf2sg_ — брошенную папку снимет уборка %TEMP% при старте.
+        ctx = BuildContext.create("hat", "some_hat", debug_mode=False)
+        try:
+            self.assertEqual(ctx.temp_dir.parent, Path(tempfile.gettempdir()))
+            self.assertTrue(ctx.temp_dir.name.startswith("tf2sg_"))
+            self.assertLessEqual(len(ctx.temp_dir.name), 16)
+        finally:
+            ctx.cleanup()
+        self.assertFalse(ctx.temp_dir.exists())
+
     def test_cleanup_safe_remove_failure(self):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)

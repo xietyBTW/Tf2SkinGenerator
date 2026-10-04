@@ -20,6 +20,7 @@ import { editPartLayers, imageClip, pasteImageTo } from './place.js';
 import { pickColor, pickInto, picking, closeColor, hsvToHex, armDrop }
   from './picker.js';
 import { colorAt } from './sample.js';
+import { contextMenu } from './menu.js';
 
 // ── Части модели ────────────────────────────────────────────────────────
 // Материал у оружия почти всегда один: «покрасить только ствол» — это кусок
@@ -88,6 +89,10 @@ let gradientEnd = 1;             // какой конец перехода пр�
 let gradStart = 0;
 let gradEnd = 1;
 let gradMid = 0.5;
+//: Свои материалы частей (из ответа `parts`) и куда щелчок инструментом
+//: «Материал» отдаёт часть: '' — в новый.
+let partMats = [];
+let matTarget = '';
 
 /** Включает и выключает режим частей. */
 export async function togglePartsMode() {
@@ -269,6 +274,13 @@ export function bindParts(w) {
 /** Что делает щелчок по части: кисть красит, курсор спрашивает картинку. */
 function pickPart(part) {
   if (tool === 'image') { paintPart(part); return; }
+  if (tool === 'material') {
+    // Часть выбранного материала возвращается в общий: так ошибочный щелчок
+    // исправляется тем же движением.
+    const own = (partsList.find((x) => x.id === part) || {}).own || '';
+    movePartsTo([part], own && own === matTarget ? '-' : matTarget);
+    return;
+  }
   // Всё остальное по части не работает: окантовка идёт по всей работе, цвет
   // берут с самой картинки, а без инструмента щелчку нечего делать. Раньше
   // здесь стоял `paintPart` на любой инструмент — и окантовка, выбранная
@@ -287,6 +299,74 @@ function pickPart(part) {
   if (known && (known.images || []).length) {
     hintParts('У этой части своя картинка — цвет лёг под неё');
   }
+}
+
+/** Части — в материал: '' — новый, имя — этот, '-' — обратно в общий. */
+async function movePartsTo(ids, target) {
+  const res = await api.setPartMaterial(partsMaterial, ids, target);
+  if (res.error) { hintParts(res.error); return; }
+  // Новый становится целью: следующие щелчки добавляют части в него же.
+  if (res.created) matTarget = res.created;
+  applyView(res);
+  await refreshParts();
+}
+
+/** Свои материалы в настройках инструмента: куда пойдёт следующая часть. */
+function showPartMaterials(list) {
+  partMats = list || [];
+  if (!partMats.some((m) => m.name === matTarget)) matTarget = '';
+  const box = document.getElementById('pmat-list');
+  box.replaceChildren();
+  const row = (name, label) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'pmat__item' + (name === matTarget ? ' is-active' : '');
+    b.append(label);
+    b.addEventListener('click', (e) => {
+      if (e.target.closest('.parts__x')) return;
+      matTarget = name;
+      showPartMaterials(partMats);
+    });
+    return b;
+  };
+  box.append(row('', t('Новый материал')));
+  partMats.forEach((m, i) => {
+    const num = document.createElement('span');
+    num.className = 'pmat__num';
+    num.textContent = String(i + 1);
+    const name = document.createElement('span');
+    name.className = 'pmat__name';
+    name.textContent = m.name;
+    name.title = m.name;
+    const x = document.createElement('button');
+    x.type = 'button';
+    x.className = 'parts__x';
+    x.textContent = '×';
+    x.title = t('Вернуть все части материала в общий');
+    x.addEventListener('click', async () => {
+      const res = await api.dropPartMaterial(m.name);
+      if (res.error) { hintParts(res.error); return; }
+      applyView(res);
+      await refreshParts();
+    });
+    const b = row(m.name, num);
+    b.append(name, x);
+    box.append(b);
+  });
+}
+
+/** Правая кнопка по чипу — свой материал без смены инструмента. */
+async function partMenu(e, part) {
+  const items = [{ heading: t('Свой материал') },
+                 { label: t('В новый материал'), value: '' }];
+  for (const m of partMats) {
+    if (m.name !== part.own) {
+      items.push({ label: t('В материал «{}»').replace('{}', m.name), value: m.name });
+    }
+  }
+  if (part.own) items.push(null, { label: t('Вернуть в общий'), value: '-' });
+  const value = await contextMenu(e, items);
+  if (value !== null) await movePartsTo([part.id], value);
 }
 
 /**
@@ -533,6 +613,10 @@ export function showParts(res) {
   // Карты приходят только при смене разбиения: нет их в ответе — у вьювера
   // уже лежат нужные, и слать undefined значило бы стереть их.
   rememberMaps(res);
+  showPartMaterials(res.materials);
+  // Гирлянде и своей модели своих материалов не дать: значок не обещает.
+  document.querySelector('#partspaint [data-tool="material"]').hidden = !res.can_own;
+  if (!res.can_own && tool === 'material') showToolGroup(null);
 
   res.parts.forEach((part) => {
     const images = part.images || [];
@@ -565,6 +649,15 @@ export function showParts(res) {
         ? '\n' + t('Делит развёртку с другими: в игре они покрасятся вместе, '
           + 'разными их сделать нельзя')
         : '');
+    // Метка своего материала — его номер из списка инструмента «Материал».
+    if (part.own) {
+      const mark = document.createElement('span');
+      mark.className = 'part__mat';
+      mark.textContent = String(partMats.findIndex((m) => m.name === part.own) + 1);
+      b.append(mark);
+      b.title += '\n' + t('Свой материал: {}').replace('{}', part.own);
+    }
+    if (res.can_own) b.addEventListener('contextmenu', (e) => partMenu(e, part));
     // Наведение на пункт списка подсвечивает кусок на модели: иначе «Часть 3»
     // — это просто номер, и какой именно кусок за ним, узнать неоткуда.
     b.addEventListener('mouseenter', () => {
@@ -1048,12 +1141,12 @@ function setCutMode(on) {
 //: Как называется выбранный значок. Значок без слова запоминается со второго
 //: раза, а не с первого, поэтому имя стоит над его настройками.
 const TOOL_NAMES = { image: 'Картинка', brush: 'Кисть', pick: 'Пипетка',
-                     cut: 'Нарезка', edge: 'Окантовка' };
+                     cut: 'Нарезка', edge: 'Окантовка', material: 'Материал' };
 
 //: У кого есть значок-приставка к курсору. Курсору («положить картинку») и
 //: ножницам она не нужна: у первого дело и есть «показать», у вторых
 //: перекрестие само говорит про разрез.
-const TOOL_BADGE = new Set(['brush', 'pick', 'edge']);
+const TOOL_BADGE = new Set(['brush', 'pick', 'edge', 'material']);
 
 /**
  * Значок инструмента из разметки: одна копия рисунка на всё приложение.
@@ -1155,6 +1248,10 @@ function showToolGroup(name) {
   if (name === 'brush') {
     hintParts('Щёлкай по частям — покрасятся. Alt при щелчке берёт цвет '
             + 'с модели или с текстуры');
+  }
+  if (name === 'material') {
+    hintParts('Щёлкай по частям: они уйдут в выбранный материал, повторный '
+            + 'щелчок вернёт часть в общий');
   }
 }
 

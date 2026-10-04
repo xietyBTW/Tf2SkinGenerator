@@ -39,7 +39,12 @@ async function leave() {
       return;
     }
     await introDone();
+    // Пока доигрывал вход, заставку могла снять страховка (index.html).
+    if (!splash.isConnected) return;
     await flyHome();
+  } catch {
+    // Уход — украшение: оборванная анимация не ошибка страницы, и человеку
+    // её показывать нечего — окно откроется в любом случае (finally).
   } finally {
     // Что бы ни случилось с анимацией, окно не должно остаться за заставкой.
     splash.remove();

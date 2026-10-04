@@ -102,7 +102,7 @@ The error window explains what went wrong and keeps the original message under *
 - `studiomdl` rejected a custom model: see [custom models](custom-models.md#troubleshooting).
 - A file was locked by another program, for example the game or an antivirus scanning the export folder. Try again.
 - The game was updated while the app was running. Restart the app.
-- The path is too long. `vpk.exe` can't open a file whose full path is longer than 260 characters, and the technical details then show `error opening required file` with a cut-off name. It happens when the portable copy sits in a deeply nested folder. Move it closer to the drive root, for example to `D:\Tf2SkinGenerator`.
+- The path is too long. `vpk.exe` and the other Source tools can't open a file whose full path is longer than 260 characters. The mod is built in the Windows temporary folder, and the error tells how long the longest path came out. Set the `TEMP` environment variable to a short folder, for example `C:\Temp`, and restart the app.
 
 ### The first load of an item is slow
 

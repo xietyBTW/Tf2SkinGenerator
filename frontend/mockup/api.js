@@ -24,7 +24,7 @@ function log(dir, text, kind) { if (sink) sink(dir, text, kind); }
 //: Что НЕ пишем в журнал. Это опросы: страница дёргает их раз в секунду, и в
 //: ленте обмена они вытесняют всё остальное. Отдельно смешно с log_tail —
 //: открытая консоль засоряла бы сама себя.
-const QUIET = new Set(['log_tail', 'update_progress']);
+const QUIET = new Set(['log_tail', 'update_progress', 'window_control']);
 
 /** Вызывает метод прикладного API. Бросает Error с текстом от Python. */
 export async function call(method, params = {}) {
@@ -234,6 +234,10 @@ export const setPartColors  = (material, colors, strength = null,
                                exact = null) =>
   call('set_part_colors', { material, colors, strength, exact });
 export const clearParts     = (material = '') => call('clear_parts', { material });
+//: Части — своим материалом: target '' — новый, имя — в этот, '-' — в общий.
+export const setPartMaterial  = (material, parts, target = '') =>
+  call('set_part_material', { material, parts, target });
+export const dropPartMaterial = (name) => call('drop_part_material', { name });
 export const setPartEdge    = (material, width, color) =>
   call('set_part_edge', { material, width, color });
 // История правок предмета — одна на текстуры, части и свою модель.
@@ -296,6 +300,9 @@ export const clearLog     = () => call('clear_log', {});
 export const logFolder    = () => call('log_folder', {});
 export const exportFolder = () => call('export_folder', {});
 export const pickFolder   = (start) => call('pick_folder', { start });
+//: Кнопки окна: minimize / maximize / close / theme; без действия — состояние.
+export const windowControl = (action = '', theme = '') =>
+  call('window_control', { action, theme });
 
 // Своя модель: сначала спрашиваем тип (keep=null), потом грузим с ответом.
 export const loadCustomModel = (path, keep = null) =>

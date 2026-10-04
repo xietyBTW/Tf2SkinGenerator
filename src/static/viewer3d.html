@@ -1274,6 +1274,7 @@ function _dropModel() {
   _fitTween = null;
   if (currentModel) { scene.remove(currentModel); currentModel = null; }
   if (_critSprite)  { scene.remove(_critSprite);  _critSprite  = null; }
+  _texByName = {};
   // Выделение ножниц — номера треугольников УШЕДШЕЙ модели.
   if (window.clearCutSelection) window.clearCutSelection();
 }
@@ -1404,8 +1405,11 @@ function _refreshMaterials(object) {
   });
 }
 
+let _rawHints = {};   // как пришли из Python, без унаследованных частями
+
 window.setMaterialHints = function(hints) {
-  _matHints = hints || {};
+  _rawHints = hints || {};
+  _matHints = _withPartHints(_rawHints);
   _refreshMaterials(currentModel);
 };
 
@@ -1865,6 +1869,8 @@ window.loadModelFromContent = function(objContent, texDataUrl, cx, cy, cz, scale
       // Сначала показываем модель без текстуры (нейтральный цвет)
       applyTexture(object, null);
       applyTransform(object, cx, cy, cz, scale);
+      // До раздачи текстур: куски своих материалов получают их по имени.
+      _splitParts();
       hideStatus();
 
       // Диагностика: логируем все меши и имена материалов
@@ -2093,6 +2099,9 @@ window.applyMaterialMap = function(texMapJson) {
     _loadTextureThen(dataUrl, tex => {
       if (currentModel !== target)  return;
       if (_animGeneration !== gen)  return;   // анимация перезапустилась — не перезаписываем
+      // Кусок своего материала пересоздаётся при каждом выходе из режима
+      // частей — свою картинку он берёт отсюда (см. _splitMesh).
+      _texByName[matName] = tex;
       let matched = false;
       target.traverse(child => {
         if (!child.isMesh) return;
@@ -2344,20 +2353,24 @@ function _cutTopo(mesh) {
 // Что возьмёт инструмент в этой точке экрана: {mesh, material, tris} или null.
 function _cutTarget(ndc) {
   const hit = _hitsAt(ndc)[0];
-  if (!hit || hit.faceIndex == null || !_partListFor(hit.object)) return null;
-  const mesh = hit.object;
+  if (!hit || hit.faceIndex == null) return null;
+  // Кусок своего материала: режут исходный меш — в его номерах и его связях.
+  const split = hit.object.userData.partSplit;
+  const mesh = split ? split.from : hit.object;
+  const face = split ? split.faces[hit.faceIndex] : hit.faceIndex;
+  if (!_partListFor(mesh)) return null;
   const { topo, labels } = _cutTopo(mesh);
   let tris;
   if (_cutTool === 'island') {
-    tris = topo.islands[hit.faceIndex] === -1
-      ? [hit.faceIndex] : _select.withLabel(topo.islands, hit.faceIndex);
+    tris = topo.islands[face] === -1
+      ? [face] : _select.withLabel(topo.islands, face);
   } else if (_cutTool === 'brush') {
     const local = mesh.worldToLocal(hit.point.clone());
     const scale = mesh.matrixWorld.getMaxScaleOnAxis() || 1;
-    tris = _select.brushTriangles(topo, hit.faceIndex, [local.x, local.y, local.z],
+    tris = _select.brushTriangles(topo, face, [local.x, local.y, local.z],
                                   (_cutRadius * _modelSpan()) / scale);
   } else {
-    tris = _select.withLabel(labels, hit.faceIndex);
+    tris = _select.withLabel(labels, face);
   }
   return { mesh, tris, material: (mesh.material || {}).name || '' };
 }
@@ -3063,6 +3076,107 @@ window.setPartsMode = function(on) {
   if (!_partsMode) { _clearPartHover(); window.setPartsTool(''); }
 };
 
+// ── Свои материалы частей ────────────────────────────────────────────────── //
+//
+// Часть, отданная в свой материал, в игре — отдельный материал модели. Здесь
+// меш делится так же: остаток под прежним именем и по куску на материал под
+// его именем. Дальше раздача текстур, подсказки и выбор мешем работают по
+// имени, как с любым другим материалом. Номера треугольников у кусков свои:
+// всё, что работает по номерам (части, ножницы), переводит попадание по
+// куску на исходный меш (`split.from`, `split.faces`) — он спрятан, но цел.
+let _partMats = {};   // {материал: {total, parts: [{name, runs: [[начало, сколько]…]}]}}
+let _texByName = {};  // последняя текстура, положенная по имени материала (applyMaterialMap)
+
+window.setPartMaterials = function(map) {
+  const next = map || {};
+  if (JSON.stringify(next) === JSON.stringify(_partMats)) return;
+  _partMats = next;
+  _matHints = _withPartHints(_rawHints);
+  _splitParts();
+};
+
+// Материал части рисуется как исходный: подсказки приходят по именам игровых
+// материалов, а у части имени в игре нет, VMT же она наследует.
+function _withPartHints(hints) {
+  const out = { ...hints };
+  for (const [base, spec] of Object.entries(_partMats)) {
+    for (const p of spec.parts) if (!out[p.name] && out[base]) out[p.name] = out[base];
+  }
+  return out;
+}
+
+/** Для автопроверки: меши предмета — имя, материал, виден ли, откуда
+ *  текстура (адрес картинки), треугольников. */
+window.partMaterialsDebug = () => {
+  const out = [];
+  if (currentModel) currentModel.traverse(c => {
+    const map = (c.material || {}).map;
+    if (c.isMesh) out.push({ name: c.name, material: (c.material || {}).name || '',
+                             visible: c.visible, map: map ? ((map.image || {}).src || '?') : '',
+                             tris: c.geometry.attributes.position.count / 3 });
+  });
+  return out;
+};
+
+function _unsplitParts() {
+  if (!currentModel) return;
+  const pieces = [];
+  currentModel.traverse(c => {
+    if (c.userData.partSplit) pieces.push(c);
+    else if (c.userData.splitHidden) { c.visible = true; delete c.userData.splitHidden; }
+  });
+  pieces.forEach(c => { c.removeFromParent(); c.geometry.dispose(); });
+}
+
+function _splitParts() {
+  _unsplitParts();
+  if (!currentModel || !Object.keys(_partMats).length) return;
+  const meshes = [];
+  currentModel.traverse(c => {
+    if (!c.isMesh || c.isSkinnedMesh || !c.material || Array.isArray(c.material)) return;
+    if (_partMats[c.material.name || c.name]) meshes.push(c);
+  });
+  meshes.forEach(_splitMesh);
+}
+
+function _splitMesh(mesh) {
+  const name = mesh.material.name || mesh.name;
+  const spec = _partMats[name];
+  const geo = mesh.geometry.index ? mesh.geometry.toNonIndexed() : mesh.geometry;
+  const attrs = Object.entries(geo.attributes);
+  const total = geo.attributes.position.count / 3;
+  // Другая сцена (руки, персонаж на шапке) — номера не про этот меш.
+  if (total !== spec.total || attrs.some(([, a]) => a.isInterleavedBufferAttribute)) return;
+  const owner = new Int32Array(total);   // 0 — остаток, k — k-й материал
+  spec.parts.forEach((p, k) => p.runs.forEach(([a, n]) => owner.fill(k + 1, a, a + n)));
+  [name, ...spec.parts.map(p => p.name)].forEach((pieceName, slot) => {
+    const faces = [];
+    for (let t = 0; t < total; t++) if (owner[t] === slot) faces.push(t);
+    if (!faces.length) return;
+    const g = new THREE.BufferGeometry();
+    for (const [key, a] of attrs) {
+      const step = 3 * a.itemSize;
+      const out = new a.array.constructor(faces.length * step);
+      faces.forEach((t, i) => out.set(a.array.subarray(t * step, (t + 1) * step), i * step));
+      g.setAttribute(key, new THREE.BufferAttribute(out, a.itemSize, a.normalized));
+    }
+    // Кусок пересоздаётся при каждой смене материалов: своя текстура у него
+    // — последняя, положенная на его имя.
+    const map = (slot && _texByName[pieceName]) || mesh.material.map;
+    const piece = new THREE.Mesh(g, makeMeshMaterial({ map, name: pieceName }));
+    piece.name = slot ? pieceName : mesh.name;
+    piece.position.copy(mesh.position);
+    piece.quaternion.copy(mesh.quaternion);
+    piece.scale.copy(mesh.scale);
+    piece.renderOrder = mesh.renderOrder;
+    piece.userData.partSplit = { from: mesh, faces: Int32Array.from(faces) };
+    mesh.parent.add(piece);
+  });
+  if (geo !== mesh.geometry) geo.dispose();
+  mesh.visible = false;
+  mesh.userData.splitHidden = true;
+}
+
 // ── Инструмент частей: курсор и пипетка ─────────────────────────────────────
 //
 // Вьювер про инструменты ничего не решает — он получает готовое значение CSS
@@ -3145,14 +3259,18 @@ function _partAt(ndc) {
   if (!_partsMode && _dragDepth <= 0) return null;
   const hit = _hitsAt(ndc)[0];
   if (!hit || hit.faceIndex == null) return null;
-  const list = _listFrom(_partsMap, hit.object);
+  // Кусок своего материала: номера частей — от исходного меша (см. _splitMesh).
+  const split = hit.object.userData.partSplit;
+  const mesh = split ? split.from : hit.object;
+  const face = split ? split.faces[hit.faceIndex] : hit.faceIndex;
+  const list = _listFrom(_partsMap, mesh);
   if (!list) return null;
-  const part = list[hit.faceIndex];
+  const part = list[face];
   if (part == null) return null;
-  const parts = _partListFor(hit.object);
-  return { mesh: hit.object, part, list,
-           owner: parts ? parts[hit.faceIndex] : null,
-           material: (hit.object.material || {}).name || '' };
+  const parts = _partListFor(mesh);
+  return { mesh, part, list,
+           owner: parts ? parts[face] : null,
+           material: (mesh.material || {}).name || '' };
 }
 
 // Подсветка — отдельный полупрозрачный меш из треугольников части, а не
@@ -3203,7 +3321,15 @@ function _trisOverlay(mesh, tris, color, opacity) {
   // faceIndex — номер в её собственной геометрии, и часть по нему выходила бы
   // чужая. Заодно это снимает половину работы луча в режиме частей.
   overlay.raycast = () => {};
-  mesh.add(overlay);            // геометрия в локальных координатах меша
+  if (mesh.userData.splitHidden) {
+    // Меш спрятан за кусками своих материалов: в нём подсветку не видно.
+    overlay.position.copy(mesh.position);
+    overlay.quaternion.copy(mesh.quaternion);
+    overlay.scale.copy(mesh.scale);
+    mesh.parent.add(overlay);
+  } else {
+    mesh.add(overlay);          // геометрия в локальных координатах меша
+  }
   return overlay;
 }
 
@@ -3218,7 +3344,9 @@ function _meshWithParts(material) {
   let any = null;
   if (currentModel) {
     currentModel.traverse(obj => {
-      if (!obj.isMesh || !_partListFor(obj)) return;
+      // Куски своих материалов — не по номерам частей: подсветка строится по
+      // исходному мешу (он спрятан, но цел).
+      if (!obj.isMesh || obj.userData.partSplit || !_partListFor(obj)) return;
       const name = (obj.material || {}).name || '';
       // «Любой» — только меш предмета: карта одноматериальной модели лежит
       // под служебным ключом и гирлянде не подходит.

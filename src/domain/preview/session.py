@@ -20,12 +20,12 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 from src.domain.preview import part_specs
 from src.domain.preview.mode import PreviewState
 from src.domain.preview.texture_state import (
-    DECOR_PREFIX, SINGLE_TEX_KEY, PreviewTextureState, is_decor,
+    DECOR_PREFIX, SINGLE_TEX_KEY, PreviewTextureState, _existing, is_decor,
 )
 from src.shared.constants import Team
 
@@ -46,7 +46,7 @@ from src.shared.constants import Team
 #:     показать уже выбранное, и сами по себе не меняют ничего.
 EDIT_FIELDS = (
     'textures', 'skin_overrides', 'australium_user_tex', 'force_team',
-    'texture_maps', 'part_textures', 'part_colors',
+    'texture_maps', 'part_textures', 'part_colors', 'part_materials',
     'custom_smd_path', 'custom_qc_text', 'custom_source_path',
     # Подгонка и изгибы гирлянды под свою модель: своя форма гирлянды —
     # такая же правка, как своя геометрия предмета.
@@ -159,6 +159,10 @@ class PreviewSession:
     #: Номера — порядок треугольников в OBJ, тот же, что у вьювера. Как и
     #: разрезы, это не правка сама по себе, а то, на что ложатся мазки.
     part_regions: Dict[str, List[List[int]]] = field(default_factory=dict)
+    #: Части, ставшие своими материалами: {материал OBJ: [{name, card, tris,
+    #: sources}]}. Номера треугольников — в OBJ превью внутри материала, по ним
+    #: сборка переносит часть в SMD (src/services/part_materials.py).
+    part_materials: Dict[str, List[dict]] = field(default_factory=dict)
     #: Эпоха правок: растёт, когда состояние правок подменяют ЦЕЛИКОМ (другой
     #: предмет, возврат работы, отмена, «забыть»). Склейка частей считается
     #: вне замка сеанса, и досчитавшаяся после такой подмены легла бы уже на
@@ -309,6 +313,11 @@ class PreviewSession:
             chosen = self.skin_chosen.get(self.active_style) or set()
             return [m for m in self.textures.material_names if m in chosen] + decor
         cards = list(self.textures.material_names)
+        # Часть-материал — сразу за своим исходным: так видно, откуда она.
+        parts = self.textures.part_cards
+        if parts:
+            cards = [name for card in cards
+                     for name in [card, *(p for p, base in parts.items() if base == card)]]
         # Австралий — своя карточка со своей текстурой, но показывается она
         # НА МЕСТЕ главной, пока вариант включён: как у RED/BLU, карточка
         # одна, а что на ней — решает переключатель. Две карточки рядом
@@ -403,7 +412,23 @@ class PreviewSession:
                 out[mat] = path
         # Вариант альбом не накладывает: у него своя карточка, а главная
         # показывает главное. Что на модели — решает сцена (scene_textures).
-        return out
+        # Своей карточки варианта у части нет — её карточка и меняется.
+        return self._parts_in_variant(out)
+
+    def _parts_in_variant(self, textures: Dict[str, str]) -> Dict[str, str]:
+        """Материал части главного материала при включённом варианте
+        (Australium) показывает его игровой кадр: в игре строка варианта ведёт
+        часть в свой `_gold` VMT — игровой VMT золота с игровой текстурой
+        (vpk_texture_builder._write_part_materials). Своя картинка части
+        стоит только в строках её команды."""
+        t = self.textures
+        gold = _existing(t.australium_frame) if t.australium_active else None
+        if gold:
+            mains = {t.stable_main(), t.storage_main_key()}
+            for part, base in t.part_cards.items():
+                if base in mains and part in textures:
+                    textures[part] = gold
+        return textures
 
     def _with_variant(self, textures: Dict[str, str]) -> Dict[str, str]:
         """
@@ -419,7 +444,7 @@ class PreviewSession:
         main = self.textures.stable_main()
         if main:
             textures[main] = variant
-        return textures
+        return self._parts_in_variant(textures)
 
     def scene_textures(self) -> Dict[str, str]:
         """
@@ -447,10 +472,14 @@ class PreviewSession:
         # Иначе выбор стиля раздевал модель догола (и вернуться было нечем).
         style = self.active_style
 
-        for mat in list(t.material_names) + list(self.misc_materials):
+        for mat in list(t.material_names) + list(self.misc_materials) + list(t.part_cards):
             if mat in out:
                 continue
             path = t.style_texture(style, mat) if style else None
+            if not path and style and mat in t.part_cards:
+                # Материал части в стиле, который заменяет исходный: строка
+                # стиля ведёт его в игровой VMT материала стиля.
+                path = _existing(t.style_game_tex.get(style, {}).get(t.part_cards[mat]))
             if not path:
                 path = t.resolve_base(mat) if style else t.resolve_card(mat)
             if path:
@@ -498,7 +527,17 @@ class PreviewSession:
         именем вьювер меш не находит и оставляет оружие СТОКОВЫМ. Имена
         приходят от воркера сцены, поэтому здесь они уже есть.
         """
-        if not self.scene_item_materials or SINGLE_TEX_KEY not in out:
+        if SINGLE_TEX_KEY not in out:
+            return out
+        if not self.scene_item_materials:
+            # Часть-материал — свой меш рядом с остальной моделью: глобально
+            # текстуру уже не положить, иначе она легла бы и на часть.
+            if not self.part_materials:
+                return out
+            out = dict(out)
+            own = out.pop(SINGLE_TEX_KEY)
+            for base in self.part_materials:
+                out[base] = own
             return out
         out = dict(out)
         own = out.pop(SINGLE_TEX_KEY)
@@ -630,6 +669,8 @@ class PreviewSession:
                           for mat, cuts in self.part_cuts.items()},
             'part_regions': {mat: [list(r) for r in regions]
                              for mat, regions in self.part_regions.items() if regions},
+            'part_materials': {base: [dict(e) for e in entries]
+                               for base, entries in self.part_materials.items() if entries},
             'paintkit_layouts': {str(kit): {str(k): int(v) for k, v in layout.items()}
                                  for kit, layout in self.paintkit_layouts.items() if layout},
             'part_tint': float(self.part_tint),
@@ -648,6 +689,31 @@ class PreviewSession:
                             for kind, bends in self.decor_bends.items() if bends},
             'decor_models': dict(self.decor_models),
         }
+
+    def part_material_names(self) -> List[str]:
+        """Имена всех частей, ставших своими материалами."""
+        return [e['name'] for entries in self.part_materials.values() for e in entries]
+
+    def drop_part_cards(self, names: Iterable[str]) -> None:
+        """Снимает всё, что лежало на карточках материалов частей: картинки,
+        карты, настройки. Материала в модели больше нет, а в сборку они ушли
+        бы им."""
+        for name in names:
+            for slots in self.textures.textures.values():
+                slots.pop(name, None)
+            for slots in self.textures.skin_overrides.values():
+                slots.pop(name, None)
+            self.texture_maps.pop(name, None)
+            self.texture_overrides.pop(name, None)
+            # Основа под склейкой материала части — по его слотам команд.
+            for slot in [k for k in self.part_bases if part_specs.parse_slot(k)[0] == name]:
+                del self.part_bases[slot]
+
+    def sync_part_cards(self) -> None:
+        """Передаёт текстурам, какая часть чью картинку наследует."""
+        self.textures.part_cards = {e['name']: e.get('card') or base
+                                    for base, entries in self.part_materials.items()
+                                    for e in entries}
 
     def has_user_edits(self) -> bool:
         """Есть ли что сохранять. Пустую работу на диск не пишем."""
@@ -711,6 +777,16 @@ class PreviewSession:
         self.paintkit_layouts = {
             str(kit): {str(k): int(v) for k, v in (layout or {}).items()}
             for kit, layout in (edits.get('paintkit_layouts') or {}).items()}
+        self.part_materials = {
+            str(base): [{'name': str(e['name']), 'card': str(e.get('card') or base),
+                         'tris': sorted({int(t) for t in e.get('tris') or ()}),
+                         'sources': [str(x) for x in e.get('sources') or ()],
+                         # Сколько треугольников было у материала при выборе:
+                         # по нему сборка и вьювер узнают «модель не та».
+                         **({'total': int(e['total'])} if e.get('total') else {})}
+                        for e in (entries or ()) if e and e.get('name')]
+            for base, entries in (edits.get('part_materials') or {}).items()}
+        self.sync_part_cards()
         self.part_tint = float(edits.get('part_tint') or 1.0)
         self.part_exact = bool(edits.get('part_exact'))
         self.part_edge = float(edits.get('part_edge') or 0.0)
@@ -744,6 +820,8 @@ class PreviewSession:
         self.part_regions = {}
         self.part_cuts = {}
         self.paintkit_layouts = {}
+        self.part_materials = {}
+        self.sync_part_cards()
         self.part_edge = 0.0
         self.part_edge_color = PreviewSession.part_edge_color
         self.reset_custom_model()
@@ -860,6 +938,8 @@ class PreviewSession:
         self.part_regions = {}
         self.part_cuts = {}
         self.paintkit_layouts = {}
+        self.part_materials = {}
+        self.sync_part_cards()
         self.part_edge = 0.0
         self.custom_qc_text = None
         # Гирлянда — у каждого оружия своя.
@@ -890,6 +970,9 @@ class PreviewSession:
         self.part_regions = {}
         self.part_cuts = {}
         self.paintkit_layouts = {}
+        self.drop_part_cards(self.part_material_names())
+        self.part_materials = {}
+        self.sync_part_cards()
 
     def begin_game_model(self) -> bool:
         """

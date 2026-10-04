@@ -136,6 +136,12 @@ class PreviewTextureState:
     #: когда гирлянда разобрана; свои правки гирлянды живут в `textures`.
     decor_stock: Dict[str, Dict[str, str]] = field(default_factory=dict)
 
+    # ── Части, ставшие своими материалами ─────────────────────────────────── #
+    #: {материал части: карточка исходного}. Материал части — отдельная
+    #: карточка: своя картинка по командам, без неё — игровая текстура
+    #: исходного (см. src/services/part_materials.py). Ведёт PreviewSession.
+    part_cards: Dict[str, str] = field(default_factory=dict)
+
     # ═══════════════════════════════════════════════════════════════════════ #
     # Ключи / классификация материалов
     # ═══════════════════════════════════════════════════════════════════════ #
@@ -163,6 +169,11 @@ class PreviewTextureState:
         """
         if is_decor(mat):
             return self._decor_team(mat)
+        # Материал части командный, если командный его исходный: в сборке у
+        # него строки скина исходного (`_blue` на месте синего).
+        base = self.part_cards.get(mat)
+        if base and base != mat:
+            return self.is_team_material(base)
         if self.blu_name_map:
             bn = self.blu_name_map.get(mat, mat)
             return bn.lower() != mat.lower()
@@ -201,6 +212,8 @@ class PreviewTextureState:
         """
         if is_decor(mat):
             return not self._decor_team(mat)
+        if mat in self.part_cards:
+            return not self.is_team_material(mat)
         if self.blu_name_map:
             blu = self.blu_name_map.get(mat)
             if blu is not None:
@@ -341,6 +354,10 @@ class PreviewTextureState:
             if p:
                 return p
 
+        # Материал части без своей картинки — игровая текстура исходного
+        # (game_base): картинка на исходном его не касается, это отдельный
+        # материал. Копию картинки исходного он получает при создании
+        # (PartsEditor._fork_card), покраску частей — своей склейкой.
         return self.game_base(mat)
 
     def game_base(self, mat: str, team: Optional[str] = None) -> Optional[str]:
@@ -354,6 +371,9 @@ class PreviewTextureState:
         обе: у RED и BLU своя краска в VMT.
         """
         active = team or self.active_team
+        base = self.part_cards.get(mat)
+        if base and base != mat:
+            return self.game_base(base, team)
         if is_decor(mat):
             return (_existing(self.decor_stock.get(active, {}).get(mat))
                     or _existing(self.decor_stock.get(Team.RED, {}).get(mat)))
@@ -410,8 +430,10 @@ class PreviewTextureState:
         if p:
             return p
         for mat, candidate in blu.items():
-            if is_decor(mat):
-                continue            # огоньки не станут синим скином оружия
+            # Огоньки гирлянды и материалы частей — свои карточки: синим
+            # скином всего оружия они не станут.
+            if is_decor(mat) or mat in self.part_cards:
+                continue
             p = _existing(candidate)
             if p:
                 return p

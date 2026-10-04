@@ -30,6 +30,7 @@ import { group } from './util.js';
 import './picker.js';
 import './dropdown.js';
 import './layout.js';
+import './titlebar.js';
 import './album.js';
 import './controls.js';
 import './preview.js';

@@ -37,6 +37,69 @@
 .chrome__nav { display: flex; gap: 26px; }
 .chrome__actions { display: flex; justify-content: flex-end; gap: 22px; }
 
+/* Шапка — она же полоса заголовка окна, когда системной нет (titlebar.js):
+   за пустые места шапки окно таскают, двойной щелчок его разворачивает.
+   app-region исполняет WebView2 окна приложения. Признак data-frame ставит
+   ранний скрипт index.html по адресу от app.py — ещё до модулей, так что окно
+   можно сдвинуть, даже если страница не поднялась. */
+[data-frame="custom"] .chrome { app-region: drag; }
+[data-frame="custom"] .chrome :is(button, a, input, select) { app-region: no-drag; }
+/* Зону перетаскивания движок считает по прямоугольникам, не глядя на слои:
+   всё, что ложится поверх шапки (меню, палитры, диалоги, тур), иначе само
+   стало бы заголовком, и щелчок по полю тащил бы окно. */
+[data-frame="custom"] :is(dialog, [popover], .catalog, .menu__list, .ctx,
+                          .dropdown, .picker, .tour__card) { app-region: no-drag; }
+[data-frame="custom"] .chrome__actions { align-self: stretch; align-items: center; }
+/* Плавающий каталог встаёт под шапку, а не поверх неё: кнопки окна и
+   перетаскивание остаются под рукой. */
+[data-frame="custom"][data-panels="float"] .catalog { top: 46px; }
+
+/* Кнопки окна: во всю высоту шапки и вплотную к правому краю, как системные,
+   чтобы «закрыть» ловился броском мыши в угол экрана. */
+.winctl {
+  display: flex;
+  align-self: stretch;
+  margin-right: calc(-1 * var(--rhythm));
+}
+.winctl[hidden] { display: none; }
+/* Черта отделяет кнопки окна от кнопок приложения: без неё «Настройки» и три
+   значка читались одним рядом из четырёх одинаковых кнопок. */
+.winctl::before {
+  content: "";
+  align-self: center;
+  width: 1px;
+  height: 16px;
+  margin-right: 8px;
+  background: var(--hairline-strong);
+}
+.winctl__btn {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink-soft);
+  transition: background-color var(--dur), color var(--dur);
+}
+.winctl__btn:hover  { background: var(--hairline); color: var(--ink); }
+.winctl__btn:active { background: var(--hairline-strong); }
+/* Красный «закрыть» — общий язык всех окон Windows, его узнают без подписи. */
+.winctl__btn--close:hover  { background: #c42b1c; color: #fff; }
+.winctl__btn--close:active { background: #a8241a; color: #fff; }
+.winctl svg {
+  width: 10px;
+  height: 10px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1;
+  shape-rendering: crispEdges;
+}
+.winctl__btn--close svg { shape-rendering: geometricPrecision; }
+.winctl__restore,
+.winctl.is-max .winctl__max { display: none; }
+.winctl.is-max .winctl__restore { display: inline; }
+
 /* ── Заголовок-предмет ───────────────────────────────────────────────────
    Имя набрано как название вещи и само служит входом в каталог, когда тот
    не прибит. Отдельной кнопки «выбрать» нет — лишний элемент. */
@@ -1496,6 +1559,54 @@
   cursor: pointer;
 }
 .parts__cut:hover { color: var(--accent); }
+/* Номер своего материала части — в углу чипа, мелко: это принадлежность, а
+   не действие. */
+.part__mat {
+  position: absolute;
+  top: 1px;
+  right: 3px;
+  font-size: 8px;
+  line-height: 1;
+  color: var(--ink-mute);
+}
+
+/* Инструмент «Материал»: куда уйдёт следующая часть. Выбранная строка
+   инвертирована, как всё выбранное в этом интерфейсе. */
+.pmat__list {
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.pmat__item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--hairline-strong);
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+.pmat__item:hover { border-color: var(--ink); }
+.pmat__item.is-active {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--surface);
+}
+.pmat__num { flex: none; font-size: 9px; opacity: .7; font-variant-numeric: tabular-nums; }
+.pmat__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pmat__note { margin: 0; font-size: 10.5px; line-height: 1.4; color: var(--ink-mute); }
 
 /* Поле цвета — мелкий квадрат в такой же волосяной рамке, как всё остальное:
    нативный input иначе рисует рамку и подложку от системы. */

@@ -280,17 +280,23 @@ _RULES: List[Tuple[Callable, str, str, str, str]] = [
         lambda m: any(x in m for x in [
             "путь слишком длинный", "path too long", "error_path_too_long",
         ]),
+        # Сборка идёт во временной папке системы (BuildContext.create), а не
+        # рядом с программой: переносить саму программу бесполезно.
         "Слишком длинный путь к файлам",
         (
-            "Windows не поддерживает пути длиннее 260 символов.\n\n"
-            "Решение: переместите программу ближе к корню диска, "
-            "например в C:\\TF2Skin или D:\\Mods, и попробуйте снова."
+            "Утилиты Source не открывают файлы, путь к которым длиннее 260 "
+            "символов. Мод собирается во временной папке Windows, а у "
+            "некоторых предметов пути внутри мода очень длинные.\n\n"
+            "Решение: задайте короткую временную папку. Укажите в переменной "
+            "среды TEMP, например, C:\\Temp и перезапустите программу."
         ),
         "File path is too long",
         (
-            "Windows doesn't support file paths longer than 260 characters.\n\n"
-            "Solution: move the program closer to the root of the drive, "
-            "e.g. C:\\TF2Skin or D:\\Mods, and try again."
+            "The Source tools can't open files whose path is longer than 260 "
+            "characters. The mod is built in the Windows temporary folder, and "
+            "some items have very long paths inside the mod.\n\n"
+            "Solution: use a short temporary folder. Set the TEMP environment "
+            "variable to, for example, C:\\Temp and restart the program."
         ),
     ),
 

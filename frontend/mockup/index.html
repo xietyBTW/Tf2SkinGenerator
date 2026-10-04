@@ -9,7 +9,7 @@
      настройки едут из Python. Свежее всего — эта же сессия (страницу подняли
      заново после смены языка), затем адрес: его собирает app.py из конфига.
      После смены языка заставка — только занавес (splash: quick, settings.js). -->
-<script>(function(){var d=document.documentElement,q=new URLSearchParams(location.search);function pick(k){try{var v=sessionStorage.getItem(k);if(v!==null)return v}catch(e){}return q.get(k)}var t=pick('theme');if(t)d.dataset.theme=t;if(pick('motion')==='off')d.dataset.motion='off';try{if(sessionStorage.getItem('splash')==='quick'){d.dataset.splash='quick';sessionStorage.removeItem('splash')}}catch(e){}d.classList.add('is-splash')})()</script>
+<script>(function(){var d=document.documentElement,q=new URLSearchParams(location.search);function pick(k){try{var v=sessionStorage.getItem(k);if(v!==null)return v}catch(e){}return q.get(k)}var t=pick('theme');if(t)d.dataset.theme=t;if(pick('motion')==='off')d.dataset.motion='off';if(q.get('frame')==='custom')d.dataset.frame='custom';try{if(sessionStorage.getItem('splash')==='quick'){d.dataset.splash='quick';sessionStorage.removeItem('splash')}}catch(e){}d.classList.add('is-splash')})()</script>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -42,6 +42,13 @@
   </nav>
   <div class="chrome__actions">
     <button class="iconbtn" id="opencfg">Настройки</button>
+    <!-- Кнопки окна — только в окне приложения со своим заголовком
+         (titlebar.js). В браузере окном управляет браузер. -->
+    <div class="winctl" id="winctl" hidden>
+      <button class="winctl__btn" data-win="minimize" title="Свернуть окно" aria-label="Свернуть окно"><svg viewBox="0 0 10 10" aria-hidden="true"><path d="M0 5.5h10"/></svg></button>
+      <button class="winctl__btn" data-win="maximize" title="Развернуть окно" aria-label="Развернуть окно"><svg viewBox="0 0 10 10" aria-hidden="true"><rect class="winctl__max" x=".5" y=".5" width="9" height="9"/><path class="winctl__restore" d="M2.5 2.5v-2h7v7h-2M.5 2.5h7v7h-7z"/></svg></button>
+      <button class="winctl__btn winctl__btn--close" data-win="close" title="Закрыть" aria-label="Закрыть"><svg viewBox="0 0 10 10" aria-hidden="true"><path d="M.5.5l9 9M9.5.5l-9 9"/></svg></button>
+    </div>
   </div>
 </header>
 
@@ -377,6 +384,17 @@
                   <path d="M2.5 2.5h11v11h-11z"/><path d="M5.5 5.5h5v5h-5z"/>
                 </svg>
               </button>
+              <!-- Свой материал части: в игре это отдельный материал модели со
+                   своим VMT. Значок — шар с бликом, как образец материала в
+                   редакторах. -->
+              <button class="ptools__btn" type="button" data-tool="material"
+                      title="Отдать части в свой материал: свой VMT, карты и флаги"
+                      aria-label="Материал">
+                <svg viewBox="0 0 16 16" aria-hidden="true">
+                  <circle cx="8" cy="8" r="5.5"/>
+                  <path d="M5.2 7.2A3 3 0 0 1 7.6 5"/>
+                </svg>
+              </button>
 
               <span class="ptools__sep"></span>
 
@@ -508,6 +526,14 @@
                 Толщина
                 <input type="range" id="part-edge-width" min="1" max="30" value="6">
               </label>
+            </div>
+
+            <!-- ── Материал ──────────────────────────────────────────────── -->
+            <!-- Куда уходит часть по щелчку: в новый материал или в один из
+                 уже заведённых. Номер у материала тот же, что метка на чипах. -->
+            <div class="parts__group pmat" data-group="material" hidden>
+              <div class="pmat__list" id="pmat-list"></div>
+              <p class="pmat__note">Свой VMT, карты и флаги материала — на его карточке в альбоме</p>
             </div>
           </div>
 

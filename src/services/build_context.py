@@ -6,9 +6,7 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Tuple, List
-import time
 from src.shared.logging_config import get_logger
-from src.shared.constants import DirectoryPaths
 from src.shared.file_utils import ensure_directory_exists, safe_remove, copy_file_safe
 
 logger = get_logger(__name__)
@@ -242,13 +240,19 @@ class BuildContext:
         Returns:
             BuildContext: Новый контекст сборки
         """
+        # Папка сборки — прямо в системном %TEMP% и с коротким именем: внутри
+        # неё лежат пути вида vpkroot\materials\vgui\replay\thumbnails\models\
+        # workshop\…, а vpk.exe, VTFCmd и studiomdl не умеют путей длиннее 260
+        # символов. Прежняя `<данные>\tools\temp\build_<время>_<id>_<режим>`
+        # съедала на ~50 символов больше, и сборка шапок падала. Префикс
+        # `tf2sg_` — уборка %TEMP% при старте снимает брошенные папки сама
+        # (file_utils.cleanup_stale_temp_artifacts), каждую по своему возрасту.
         if base_temp_dir is None:
-            base_temp_dir = DirectoryPaths.BASE_TEMP_DIR
-        
-        # Суффикс из urandom исключает коллизию двух сборок в одну секунду
-        timestamp = int(time.time())
-        unique = os.urandom(3).hex()
-        build_id = f"build_{timestamp}_{unique}_{mode}"
+            import tempfile
+            base_temp_dir = Path(tempfile.gettempdir())
+
+        # Случайный суффикс исключает коллизию двух сборок разом; режим — в лог.
+        build_id = f"tf2sg_b_{os.urandom(3).hex()}"
         temp_dir = base_temp_dir / build_id
         
         ctx = BuildContext(

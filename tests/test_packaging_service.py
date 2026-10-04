@@ -62,5 +62,38 @@ class PackDirectoryLockedTests(unittest.TestCase):
             self.assertEqual(Path(result).read_bytes(), b"vpk")
 
 
+class PackDirectoryLongPathTests(unittest.TestCase):
+    """vpk.exe падает на пути длиннее 260 символов с обрезанным именем файла,
+    из которого причину не понять, — говорим её до запуска."""
+
+    def test_too_long_path_is_named_before_vpk_runs(self):
+        from src.shared.error_classifier import classify
+        from src.shared.exceptions import VPKCreationError
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            (base / "vpkroot").mkdir()
+            deep = "C:\\" + "x" * 300 + ".vtf"
+            with patch.object(PackagingService, "longest_path", return_value=deep), \
+                 patch("src.services.packaging_service.subprocess.run") as run, \
+                 patch("src.services.packaging_service.ToolPaths.get_vpk_tool",
+                       return_value=_fake_tool(base)):
+                with self.assertRaises(VPKCreationError) as caught:
+                    PackagingService.pack_directory(base / "vpkroot", "out.vpk",
+                                                    export_folder=str(base), language="en")
+            run.assert_not_called()
+            title, _ = classify(str(caught.exception), "en")
+            self.assertEqual(title, "File path is too long")
+
+    def test_longest_path_reads_real_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            (base / "a" / "bb").mkdir(parents=True)
+            (base / "a" / "bb" / "ccc.vtf").write_bytes(b"x")
+            (base / "d.vmt").write_bytes(b"x")
+            self.assertTrue(PackagingService.longest_path(base).endswith("ccc.vtf"))
+            self.assertEqual(PackagingService.longest_path(base / "a" / "none"), "")
+
+
 if __name__ == "__main__":
     unittest.main()

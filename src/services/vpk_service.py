@@ -1154,6 +1154,19 @@ class VPKService:
                     "Build cancelled: texture mismatch in SMD file."
                 )
 
+            # Части модели — своими материалами: их треугольники в SMD под новым
+            # именем и столбец в $texturegroup (src/services/part_materials.py).
+            # После плана материалов — иначе сборка спросила бы, чем красить
+            # новый материал; до компиляции — он должен попасть в модель.
+            _part_variants = {}
+            if r.part_materials and not (replace_model_smd_path or model_ready_path):
+                from src.services import part_materials as _pm
+                _part_variants = _pm.apply_to_model(qc_path, r.part_materials, ctx.warn)
+                # Части выбирали на модели одного класса — у моделей остальных
+                # классов шапки треугольники другие.
+                if _part_variants and hat_class_models and len(hat_class_models) > 1:
+                    ctx.warn(f"Свои материалы частей собраны только для модели {Path(qc_path).stem}")
+
             if is_cancelled():
                 return cancelled_result(ctx)
             emit_progress(60, t.get('build_compiling', 'Compiling model...'))
@@ -1281,6 +1294,13 @@ class VPKService:
                 weapon_key, panel_extra_textures, ctx, slots, tex_ctx,
                 material_maps, texture_filename, image_path, is_normal_map,
                 _has_skins, skin_build_data, _eff,
+                part_variants=_part_variants, part_specs=r.part_materials,
+                # Синий у исходного материала части: в его строках у части
+                # своя синяя картинка.
+                blu_of=(dict(zip(tg_structure.get('red_row') or [],
+                                 tg_structure.get('blu_row') or []))
+                        if _blu_is_team else None),
+                strip_paints=(mode == "hat" and not hat_apply_game_paints),
             )
 
             # Ждём завершения компиляции (шла параллельно с текстурами)

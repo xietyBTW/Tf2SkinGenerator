@@ -56,6 +56,10 @@ class BuildRequest:
     # decor_build). Элемент: {'kind', 'mdl', 'fit', 'textures': {материал:
     # {'red': png, 'blu': png}}}.
     decor_builds: Optional[list] = None
+    # Части модели, ставшие своими материалами (src/services/part_materials.py):
+    # [{name, base, tris, sources}] — сборка переносит их треугольники в SMD
+    # под новым именем и пишет им VMT по образцу исходного материала.
+    part_materials: Optional[list] = None
     panel_extra_textures: Optional[Dict[str, Any]] = None
     # Материалы «Прочего» на странице: убер/зомби-варианты из $texturegroup, у
     # которых нашлась игровая текстура. Что человек видел карточкой — про то

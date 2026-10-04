@@ -628,6 +628,8 @@ class AppSession:
                 'keep_materials': bool(edits.get('custom_keep_materials')),
                 'image_path': snap.get('image_path'),
                 'textures': textures,
+                # Материалы частей черновик не переносит — сборка скажет об этом.
+                'part_materials': bool(edits.get('part_materials')),
             })
         return builds or None
 
@@ -1692,7 +1694,10 @@ class AppSession:
         # Главная текстура — то, что лежит на главном материале модели.
         main = t.stable_main()
         image = t.uploaded_for_mat(main) if main else None
-        extra = t.uploaded_slot_paths()
+        # Картинки материалов частей едут своим полем (спеки частей): у них
+        # своя картинка на каждую команду, а не одна доп. текстура на все.
+        own_parts = set(self.preview.part_material_names())
+        extra = {m: p for m, p in t.uploaded_slot_paths().items() if m not in own_parts}
         if self.preview.custom_vpk_mode:
             # Сборка мода кладёт `image` на ПЕРВЫЙ VTF архива, а главная
             # карточка — материал модели (VpkModController._on_materials).
@@ -1732,15 +1737,21 @@ class AppSession:
         # их будущие пути.
         decor_paths = [p for d in decor for teams in d['textures'].values()
                        for p in teams.values()]
+        part_specs = self._part_material_specs() or []
+        part_paths = [s[k] for s in part_specs for k in ('image', 'image_blu') if s[k]]
         plan = self.parts.bake_plan([image, *extra.values(),
-                                     *t.blu_uploaded_paths().values(), *decor_paths])
+                                     *t.blu_uploaded_paths().values(), *decor_paths,
+                                     *part_paths])
         baked = self.parts.baked_path
         image = baked(image)
         extra = {mat: baked(p) for mat, p in extra.items()}
         for d in decor:
             d['textures'] = {mat: {team: baked(p) for team, p in teams.items()}
                              for mat, teams in d['textures'].items()}
-        blu = {mat: baked(p) for mat, p in t.blu_uploaded_paths().items()}
+        blu = {mat: baked(p) for mat, p in t.blu_uploaded_paths().items()
+               if mat not in own_parts}
+        for s in part_specs:
+            s['image'], s['image_blu'] = baked(s['image']), baked(s['image_blu'])
 
         # Краска игры по альфе ($blendtintbybasealpha): своя картинка без
         # альфы в игре перекрасится ЦЕЛИКОМ, а превью показывает её как есть.
@@ -1748,7 +1759,9 @@ class AppSession:
         # У шапки со снятой галкой «Краски из игры» красить нечего.
         tint_mode = str(params.get('tint_mode') or '')
         if not (mode == 'hat' and not params.get('hat_paints', True)):
-            risks = self._tint_risks([image, *extra.values(), *blu.values()])
+            risks = self._tint_risks([image, *extra.values(), *blu.values(),
+                                      *(s[k] for s in part_specs
+                                        for k in ('image', 'image_blu') if s[k])])
             if risks and tint_mode not in ('none', 'mask', 'strip', 'keep'):
                 from src.services import vmt_tint
                 spec = next(iter(risks.values()))[0]
@@ -1760,6 +1773,9 @@ class AppSession:
                 image = fixed.get(image, image)
                 extra = {mat: fixed.get(p, p) for mat, p in extra.items()}
                 blu = {mat: fixed.get(p, p) for mat, p in blu.items()}
+                for s in part_specs:
+                    for k in ('image', 'image_blu'):
+                        s[k] = fixed.get(s[k], s[k])
 
         hat_primary, hat_models = (self._hat_build_models(params.get('hat_classes'))
                                    if mode == 'hat' else (None, None))
@@ -1809,6 +1825,11 @@ class AppSession:
             hat_style_builds=(self._hat_style_builds(params.get('hat_classes'))
                               if mode == 'hat' else None),
             decor_builds=decor or None,
+            # Части-материалы: только у игровой модели (у своей геометрии и у
+            # мода из VPK номера треугольников превью — чужие).
+            part_materials=(part_specs or None
+                            if not (self.preview.custom_smd_path
+                                    or self.preview.custom_vpk_mode) else None),
             # Папка обхода sv_pure из настроек (console / vgui): без неё
             # сборка молча оставалась на умолчании console.
             bypass_method=self._bypass_method(),
@@ -1874,6 +1895,43 @@ class AppSession:
         from src.data.player_characters import SPY_MASK_MODE_KEY
         return bool(controls_for(mode).get('vmt_editor')) and mode != SPY_MASK_MODE_KEY
 
+    def _part_material_specs(self) -> Optional[list]:
+        """Части-материалы для сборки:
+        [{name, base, tris, total, sources, image, image_blu, map_base}].
+
+        `image`/`image_blu` — своя картинка материала части на RED и на BLU
+        (у нейтрального исходного это одна и та же): сборка ставит её только в
+        строки скина своей команды, в остальных — игровая текстура строки.
+        `map_base` — основа карт «из текстуры»: своя картинка RED, иначе
+        игровая текстура исходного.
+        """
+        from src.domain.preview.texture_state import _existing
+        from src.shared.constants import Team
+
+        t = self.preview.textures
+        specs = []
+        for base, entries in self.preview.part_materials.items():
+            for e in entries:
+                if not e.get('tris'):
+                    continue
+                name = e['name']
+                image = _existing(t.textures.get(Team.RED, {}).get(name))
+                blu = _existing(t.textures.get(Team.BLU, {}).get(name))
+                # «Сделать командным» без своей синей: синий берёт красную —
+                # так же, как превью (resolve_base) и главная (uploaded_for_mat).
+                if not blu and t.force_team and not t.is_team_material(name):
+                    blu = image
+                maps = self.preview.texture_maps.get(name) or {}
+                derive = any((m or {}).get('derive') for m in maps.values())
+                specs.append({'name': name, 'base': base, 'tris': list(e['tris']),
+                              'total': e.get('total'),
+                              'sources': list(e.get('sources') or []),
+                              'image': image,
+                              'image_blu': blu,
+                              'map_base': (image or t.game_base(name, Team.RED))
+                              if derive else None})
+        return specs or None
+
     def _edits_besides_textures(self, mode: str, params: Dict[str, Any]) -> List[str]:
         """Что правлено кроме своих текстур — то, ради чего стоит собирать мод
         и без них. Пусто — мод вышел бы игровым.
@@ -1896,6 +1954,8 @@ class AppSession:
             found.append('maps')
         if p.custom_smd_path:
             found.append('model')
+        if p.part_materials:
+            found.append('part_materials')
         if t.force_team:
             found.append('team')
         if (params.get('options') or {}).get('normal'):
@@ -1946,10 +2006,13 @@ class AppSession:
         if build is None or not build.isRunning():
             return {'running': False}
         build.requestInterruption()
-        # Ждущий вопрос о текстуре держит воркер на паузе: без ответа он не
-        # дойдёт до проверки отмены и висел бы до таймаута в 300 секунд.
+        # Ждущий вопрос (текстура или сменная часть модели) держит воркер на
+        # паузе: без ответа он не дойдёт до проверки отмены и висел бы до
+        # таймаута в 300 секунд.
         if hasattr(build, 'set_extra_texture_result'):
             build.set_extra_texture_result(None)
+        if hasattr(build, 'set_extra_model_result'):
+            build.set_extra_model_result(None)
         return {'running': True, 'cancelling': True}
 
     def _hat_build_models(self, classes):
@@ -3491,8 +3554,7 @@ class AppSession:
         if edited_path and os.path.exists(edited_path):
             original = EditedVMTService.read_original_backup(edit_key)
             if original is None and tf2_root:
-                original = vmt_source_service.original_content(
-                    mode, weapon_key, tf2_root, edit_key, lang)
+                original = self._vmt_original(mode, weapon_key, tf2_root, edit_key, lang)
             try:
                 with open(edited_path, 'r', encoding='utf-8', errors='replace') as f:
                     content = f.read()
@@ -3504,12 +3566,31 @@ class AppSession:
 
         if not tf2_root:
             return paths
-        original = vmt_source_service.original_content(
-            mode, weapon_key, tf2_root, edit_key, lang)
+        original = self._vmt_original(mode, weapon_key, tf2_root, edit_key, lang)
         if original is None:
             return {'error': f'Оригинальный VMT для «{edit_key}» не найден'}
         return {'material': edit_key, 'content': original,
                 'original': original, 'edited': False}
+
+    def _vmt_original(self, mode: str, weapon_key: str, tf2_root: str,
+                      edit_key: str, lang: str) -> Optional[str]:
+        """
+        С чего начинается правка VMT материала.
+
+        У части, ставшей своим материалом, в игре VMT нет: она начинается с
+        игрового VMT исходного. Правку исходного, какой та была при создании,
+        материал части получил копией (PartsEditor._fork_vmt); поздние правки
+        исходного его не касаются (src/services/part_materials.py).
+        """
+        from src.services import vmt_source_service
+
+        base = self.preview.textures.part_cards.get(edit_key)
+        if base is not None:
+            edit_key = self._card_key(base) or weapon_key
+        if not tf2_root:
+            return None
+        return vmt_source_service.original_content(
+            mode, weapon_key, tf2_root, edit_key, lang)
 
     def save_vmt(self, material: str = '', content: str = '',
                  original: str = '', lang: str = 'ru') -> Dict[str, Any]:
@@ -3914,6 +3995,9 @@ class AppSession:
             # скайбокса, спрея и просто до того, как модель приехала, — и
             # обещала бы действие, которого нет.
             'can_split': bool(self._obj_path and os.path.isfile(self._obj_path)),
+            # Части, ставшие своими материалами: какие треугольники каких мешей
+            # вьювер рисует отдельно (src/services/part_materials.py).
+            'part_materials': self.parts.part_material_view(),
         }
 
     def toggle_misc(self, on: Optional[bool] = None) -> Dict[str, Any]:
@@ -3974,9 +4058,13 @@ class AppSession:
         t = self.preview.textures
         color = tuple(int((paint['blu'] if t.active_team == Team.BLU
                            else paint['red'])[i:i + 2], 16) for i in (1, 3, 5))
+        # С материалами частей сцена зовёт исходный меш по имени из OBJ
+        # (`_name_for_scene`), а его игровой оригинал лежит под ключом карточки.
+        cards = {base: entries[0].get('card') or base
+                 for base, entries in self.preview.part_materials.items() if entries}
         out: Dict[str, str] = {}
         for mat, path in textures.items():
-            stock = t.game_base(mat) or ''
+            stock = t.game_base(cards.get(mat, mat)) or ''
             spec = vmt_tint.paintable(stock)
             if spec is None:
                 out[mat] = path

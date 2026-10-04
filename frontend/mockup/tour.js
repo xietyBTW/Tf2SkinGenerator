@@ -151,6 +151,8 @@ const TOURS = {
         text: 'Делят часть на части поменьше.' },
       { at: '#partspaint [data-tool="edge"]', title: 'Окантовка',
         text: 'Обводит края покрашенных частей.' },
+      { at: '#partspaint [data-tool="material"]', title: 'Материал',
+        text: 'Отдаёт части в свой материал: свой VMT, карты и флаги.' },
       { at: '#parts-random', title: 'Кубик и ластик',
         text: 'Случайная раскраска и сброс. Ctrl+Z отменяет.' },
       { at: '#parts-done', title: 'Готово',
