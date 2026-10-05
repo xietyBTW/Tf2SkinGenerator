@@ -148,8 +148,12 @@ document.addEventListener('keydown', (e) => {
 
 export function setStatus(text, busy) {
   document.querySelector('.dock__state').textContent = text;
-  // Пока идёт сборка, кнопка сборки уступает место отмене: собрать второй раз
-  // всё равно нельзя, а бросить начатое — надо.
+  setBusy(busy);
+}
+
+/** Пока идёт сборка, кнопка сборки уступает место отмене: собрать второй раз
+ *  всё равно нельзя, а бросить начатое — надо. */
+export function setBusy(busy) {
   const build = document.getElementById('buildvpk');
   const stop = document.getElementById('buildstop');
   build.disabled = Boolean(busy);

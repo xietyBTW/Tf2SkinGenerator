@@ -1130,7 +1130,23 @@ _SETTINGS_KEYS = (
     'parts_animation',
     # Анимации интерфейса (панели, камера, разъезд половин). Включены.
     'ui_animations',
+    # Как выглядит сборка в нижней полосе: вариант на каждую группу.
+    'build_fx',
 )
+
+#: Группы выбора в разделе «Кастомизация» (frontend/mockup/buildfx.js).
+#: Сами варианты знает страница, и чужое значение она заменит умолчанием;
+#: здесь только форма — в конфиг не должно лечь что попало.
+_BUILD_FX_GROUPS = ('text', 'line', 'pct', 'btn', 'fx', 'end', 'err', 'sound')
+
+
+def _build_fx(value: object) -> Dict[str, str]:
+    """Выбор анимации сборки в том виде, в каком его можно хранить."""
+    if not isinstance(value, dict):
+        return {}
+    return {key: value[key] for key in _BUILD_FX_GROUPS
+            if isinstance(value.get(key), str)
+            and re.fullmatch(r'[a-z]{1,16}', value[key])}
 
 #: Мелочи раскладки, которые правят НЕ в окне настроек, а прямо на экране:
 #: край панели тянут мышью, громкость двигают ползунком. Читаются вместе с
@@ -1306,6 +1322,7 @@ def settings(lang: str = '') -> Dict[str, object]:
     # чтение отдавало None, запись — False, и настройки «менялись» сами.
     if values.get('panels_pinned') is None:
         values['panels_pinned'] = False
+    values['build_fx'] = _build_fx(values.get('build_fx'))
     # Мелочи раскладки правят на экране, а не здесь, но читает их страница
     # тем же запросом: настройки внешнего вида она спрашивает один раз.
     for key in _UI_STATE:
@@ -1664,6 +1681,8 @@ def set_settings(values: Optional[Dict[str, object]] = None,
                             else list(value or []))
             elif key == 'export_folder':
                 cfg[key] = str(value or '').strip() or 'export'
+            elif key == 'build_fx':
+                cfg[key] = _build_fx(value)
             elif key in ('particles_group_tree', 'keep_temp_files', 'debug_mode',
                          'save_edits', 'panels_pinned', 'advanced_vtf_flags',
                          'parts_animation', 'ui_animations'):

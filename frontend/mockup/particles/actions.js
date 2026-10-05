@@ -9,7 +9,8 @@ import * as api from '../api.js';
 import { ask } from '../ask.js';
 import { contextMenu } from '../menu.js';
 import { say, withParticles } from '../stage.js';
-import { setStatus } from '../layout.js';
+import { setBusy, setStatus } from '../layout.js';
+import { dockFx } from '../buildfx.js';
 import { pcfNodes, pcfTree, pSystem, setTree, setSystem, pcfDiff, setDiff } from './state.js';
 import { fillTree, setTitle } from './tree.js';
 import { syncHistory } from './playback.js';
@@ -416,14 +417,20 @@ export async function buildParticles() {
                            value: (pSystem || 'particles') + '.vpk' });
   if (!name) { setStatus('Готово', false); return; }
 
-  setStatus('Сборка VPK…', true);
-  const res = await api.exportParticlesVpk(name);
-  if (res.error) { setStatus(res.error, false); return; }
+  // Этапов у этой сборки нет: линия ждёт ответа и сразу идёт к финалу.
+  setBusy(true);
+  dockFx.start('Сборка VPK…');
+  // Отказ Python приходит исключением: без перехвата полоса так и осталась
+  // бы «в сборке».
+  const res = await api.exportParticlesVpk(name)
+    .catch((e) => ({ error: e.message || String(e) }));
+  setBusy(false);
+  if (res.error) { dockFx.finish(false, res.error); return; }
 
   // Обход sv_pure в казуале не грузит PCF больше оригинального: выросший
   // файл просто не заработает, и знать об этом надо до похода в игру.
   const over = res.overflow;
-  setStatus(over && over > 0
+  dockFx.finish(true, over && over > 0
     ? `Собрано, но PCF на ${over} Б больше оригинала — в казуале не загрузится`
-    : `Собрано: ${res.path}`, false);
+    : `Собрано: ${res.path}`);
 }

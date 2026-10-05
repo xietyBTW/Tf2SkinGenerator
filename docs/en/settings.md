@@ -26,6 +26,23 @@
 | **Group the particle tree** | Shows the systems of a particle file as a tree with children under their parents. Off gives a flat list. On by default. |
 | **Play GIFs on the model** | A GIF placed on a model part also plays in the 3D view. Off by default: every stroke recalculates the frames, which takes seconds, and keeps them in video memory, which can take hundreds of megabytes. The mod gets the animation either way. |
 
+## Customization
+
+This is where you choose how a build looks in the bottom bar of the window. Above the lists there is a small sample bar. **Play a build** shows your choice from start to finish, and **Play with an error** shows a failed build. Any new choice in a list plays on the sample right away.
+
+| Setting | What you choose | Default |
+|---|---|---|
+| **Step text** | How the step name appears: letter scramble, typing with a caret, a letter wave, a split-flap board and more. | Letter scramble |
+| **Line** | The progress line along the top edge of the bar. Some options only come alive on long steps, so you can see the build has not frozen. | Breathing edge |
+| **Counter** | The percentage next to the step name: rolling digits, a count-up, the step number or a hexadecimal value. You can also turn it off. | Rolling digits |
+| **Stop button** | Regular, fills up as the build goes, or with a progress ring. | Regular |
+| **Bar** | What the bar itself does: nothing, a scanner beam runs across it, it flashes on every step, or its background fills along with the line. | Calm |
+| **Finale** | How a successful build ends: team colors meet, a stamp, confetti and more. | Colors meet |
+| **Error** | How the line shows a failure: it shakes, shatters or flickers. | Line shakes |
+| **Sound** | Clicks on steps, a chime at the end, both, or silence. | Clicks and chime |
+
+With **Interface animations** off, the bar stays simple: the text appears at once, and the finale and error play without motion. Sound does not depend on that option.
+
 ## Work and build
 
 | Setting | What it does |

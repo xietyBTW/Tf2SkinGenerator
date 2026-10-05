@@ -20,6 +20,7 @@ import { EN } from './strings.js';
 import { refreshView, stopPartsAnimation } from './preview.js';
 import { setTexSize } from './particles/materials.js';
 import { setToursDone, replayTours } from './tour.js';
+import { FX_GROUPS, createFx, dockFx, fxChoice } from './buildfx.js';
 
 // ── Настройки ───────────────────────────────────────────────────────────
 // Конфиг общий с окном приложения, поэтому здесь только показ и запись: что
@@ -69,6 +70,7 @@ export function applyLook(values) {
   // Для первого кадра после перезагрузки страницы, как и тема (index.html).
   try { sessionStorage.setItem('motion', motion ? '' : 'off'); } catch {}
   withViewer((w) => w.setMotion && w.setMotion(motion));
+  dockFx.set(values.build_fx);
 }
 
 export async function openSettings() {
@@ -101,6 +103,9 @@ export async function openSettings() {
     (v.material_blacklist || []).join('\n');
   document.getElementById('cfg-note').textContent =
     pinnedFits() ? '' : 'для закреплённых панелей нужно окно шире 1100 px';
+  const fx = fxChoice(v.build_fx);
+  for (const [key] of FX_GROUPS) document.getElementById('cfg-fx-' + key).value = fx[key];
+  prevFx.set(fx);
 
   showDrafts();
   const supp = document.getElementById('cfg-support');
@@ -316,6 +321,55 @@ document.getElementById('cfg-drafts').addEventListener('click', async () => {
   showDrafts();
 });
 
+// ── Кастомизация: как выглядит сборка ───────────────────────────────────
+// Списки строятся из вариантов движка (buildfx.js): новый вариант появится
+// здесь сам. Пример играет тот же движок на своей маленькой полосе — что
+// видно здесь, то будет и при настоящей сборке.
+
+const fxGrid = document.getElementById('cfg-fx');
+const fxPrev = document.getElementById('cfg-fxprev');
+const prevFx = createFx({
+  host: fxPrev,
+  line: fxPrev.querySelector('.fxprev__line'),
+  state: fxPrev.querySelector('.fxprev__state'),
+  pct: fxPrev.querySelector('.fxprev__pct'),
+  time: fxPrev.querySelector('.fxprev__time'),
+  button: fxPrev.querySelector('.fxprev__btn'),
+  idleLabel: 'Собрать VPK',
+});
+for (const [key, title, values] of FX_GROUPS) {
+  const field = document.createElement('div');
+  field.className = 'field';
+  const label = document.createElement('label');
+  label.className = 'field__label';
+  label.htmlFor = 'cfg-fx-' + key;
+  label.textContent = title;
+  const box = document.createElement('div');
+  box.className = 'select';
+  const select = document.createElement('select');
+  select.id = 'cfg-fx-' + key;
+  for (const [value, name] of values) select.append(new Option(name, value));
+  box.append(select);
+  field.append(label, box);
+  fxGrid.append(field);
+}
+
+const readFx = () => Object.fromEntries(
+  FX_GROUPS.map(([key]) => [key, document.getElementById('cfg-fx-' + key).value]));
+function playFx(failing = false) {
+  prevFx.set(readFx());
+  prevFx.demo(failing);
+}
+// Выбрал вариант — сразу видишь его в деле.
+fxGrid.addEventListener('change', () => playFx());
+document.getElementById('cfg-fxplay').addEventListener('click', () => playFx());
+document.getElementById('cfg-fxfail').addEventListener('click', () => playFx(true));
+// Закрытое окно не играет: таймеры и звук примера гаснут вместе с ним.
+cfgDlg.addEventListener('close', () => {
+  prevFx.clear();
+  fxPrev.querySelector('.fxprev__state').textContent = t('Готово');
+});
+
 document.getElementById('cfg-save').addEventListener('click', async () => {
   const res = await api.setSettings({
     tf2_game_folder: document.getElementById('cfg-tf2').value,
@@ -333,6 +387,7 @@ document.getElementById('cfg-save').addEventListener('click', async () => {
     debug_mode: document.getElementById('cfg-debug').checked,
     material_blacklist: document.getElementById('cfg-blacklist').value,
     panels_pinned: document.getElementById('cfg-panels').checked,
+    build_fx: readFx(),
   });
   if (res.error) { say(res.error); return; }
   cfgDlg.close();

@@ -91,6 +91,20 @@ class SettingsRoundTripTests(unittest.TestCase):
                     {'material_blacklist': 'eyeball\nteeth, eyeball'}, 'ru')['values']
             self.assertEqual(values['material_blacklist'], ['eyeball', 'teeth'])
 
+    def test_build_fx_keeps_only_known_groups_and_plain_words(self):
+        """Выбор анимации сборки: варианты знает страница, конфиг — только форму."""
+        with tempfile.TemporaryDirectory() as tmp:
+            config_file = self._isolated(tmp)
+            with patch.object(AppConfig, 'CONFIG_FILE', config_file):
+                self.assertEqual(api.settings('ru')['values']['build_fx'], {})
+                values = api.set_settings({'build_fx': {
+                    'text': 'decode', 'end': 'meet', 'sound': 'none',
+                    'line': '<script>', 'evil': 'x', 'pct': 5}}, 'ru')['values']
+                self.assertEqual(values['build_fx'],
+                                 {'text': 'decode', 'end': 'meet', 'sound': 'none'})
+                values = api.set_settings({'build_fx': 'decode'}, 'ru')['values']
+            self.assertEqual(values['build_fx'], {})
+
 
 class UiStateTests(unittest.TestCase):
     """Ширина панели и громкость: их правят на экране, а хранит тот же конфиг."""

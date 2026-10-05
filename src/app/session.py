@@ -1885,17 +1885,29 @@ class AppSession:
         # никто не слушал: сборка молча ждала ответа пять минут на каждую
         # часть и шла дальше с игровой геометрией.
         w.request_extra_model.connect(self._on_build_needs_model)
-        w.texture_mismatch_warning.connect(
-            lambda msg: w._texture_mismatch_req.answer(True))
+        # Свой SMD с другими именами материалов. В окне Qt тут спрашивали;
+        # здесь сборка идёт дальше, а предупреждение остаётся в журнале.
+        # Ответ строкой: True воркер считал отказом и отменял сборку.
+        def _on_mismatch(msg: str) -> None:
+            logger.warning(msg)
+            w.set_texture_mismatch_result('continue')
+        w.texture_mismatch_warning.connect(_on_mismatch)
 
         w.progress.connect(lambda pct, text: self._put('build_progress',
                                                        percent=pct, text=text))
+        # Подшаг: проценты у него свои, внутри этапа, — линию сборки он не
+        # двигает, только подписывает.
         w.sub_progress.connect(lambda pct, text: self._put('build_progress',
-                                                           percent=pct, text=text))
-        w.finished.connect(lambda ok, msg: self._put('build_done',
-                                                     ok=bool(ok), message=msg))
+                                                           percent=pct, text=text,
+                                                           sub=True))
+        # Отмена кончается тем же «не собрано», но это не ошибка: интерфейсу
+        # незачем вздрагивать красным.
+        w.finished.connect(lambda ok, msg: self._put(
+            'build_done', ok=bool(ok), message=msg,
+            cancelled=not ok and w.isInterruptionRequested()))
         w.finished.connect(lambda ok, msg: self.parts.drop_baked())
-        w.error.connect(lambda msg: self._put('build_done', ok=False, message=msg))
+        # `error` не слушаем: за ним всегда идёт `finished` (BaseWorker.run),
+        # и одна ошибка приходила странице дважды.
         self._build = w
         self._texture_choice = _NO_CHOICE   # «ко всем» — на одну сборку
         w.start()

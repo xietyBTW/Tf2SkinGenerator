@@ -8,7 +8,8 @@
 
 import * as api from './api.js';
 import { say, sayBusy, withViewer } from './stage.js';
-import { setStatus, work } from './layout.js';
+import { setBusy, work } from './layout.js';
+import { dockFx } from './buildfx.js';
 import { ask } from './ask.js';
 import { showReport } from './diagnostics.js';
 import { showFailure } from './fail.js';
@@ -210,8 +211,12 @@ api.subscribe((ev) => {
       showSkybox(ev);
       break;
 
+    // Этап двигает линию; подшаг (упаковка, замена модели) только
+    // подписывает, что внутри этапа: проценты у него свои.
     case 'build_progress':
-      setStatus(ev.text || 'Сборка…', true);
+      setBusy(true);
+      if (ev.sub) dockFx.detail(ev.text);
+      else dockFx.step(ev.percent, ev.text);
       break;
 
     // Сборке не хватило текстуры для материала: она СТОИТ и ждёт ответа.
@@ -228,7 +233,8 @@ api.subscribe((ev) => {
       break;
 
     case 'build_done':
-      setStatus(ev.message || (ev.ok ? 'Готово' : 'Ошибка сборки'), false);
+      setBusy(false);
+      dockFx.finish(ev.ok, ev.message || (ev.ok ? 'Готово' : 'Ошибка сборки'), ev.cancelled);
       break;
 
     case 'uv_ready':

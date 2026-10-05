@@ -1028,8 +1028,12 @@
 
 <!-- ═══ Нижняя полоса: состояние и сборка — всегда на месте ═══════════ -->
 <footer class="dock">
+  <!-- Линия сборки по верхнему краю полосы и её счётчик (buildfx.js). На время
+       сборки счётчик встаёт на место сводки параметров. -->
+  <div class="dock__line" id="dockline" aria-hidden="true"></div>
   <button class="dock__summary" id="opensettings">
     <span class="dock__state">Готово</span>
+    <span class="mono dock__prog" id="dockprog" hidden><span id="dockpct"></span><span id="docktime"></span></span>
     <!-- Сводка того, что соберётся. Заполняется из настоящих параметров
          (см. build.js): захардкоженные значения показывали одно и то же
          независимо от выбора. -->
@@ -1042,7 +1046,7 @@
        рядом спорили бы, а собрать второй раз всё равно нельзя. -->
   <!-- «Остановить», а не «Отменить»: словарь переводит по русскому тексту, и
        «Отменить» уже занято кнопками отмены правки (Undo). -->
-  <button class="btn--primary btn--stop" id="buildstop" hidden>Остановить</button>
+  <button class="btn--primary btn--stop" id="buildstop" hidden><span class="btn__fill"></span><span class="btn__label">Остановить</span></button>
 </footer>
 
 <!-- ═══ Диалог ══════════════════════════════════════════════════════════════
@@ -1401,6 +1405,23 @@
       <label class="check" title="Гифка, положенная на часть модели, крутится и в 3D. Каждый мазок пересчитывает кадры (секунды) и держит их на видеокарте (до сотен МБ)">
         <input type="checkbox" id="cfg-parts-anim"><span>Крутить гифки на модели</span></label>
     </div>
+    </section>
+
+    <!-- Как выглядит сборка в нижней полосе (buildfx.js). Пример играет тот же
+         движок, что и настоящая сборка, — что видно здесь, то и будет. -->
+    <section class="cfg__sec">
+    <p class="label cfg__head">Кастомизация</p>
+    <div class="fxprev" id="cfg-fxprev">
+      <div class="fxprev__line" aria-hidden="true"></div>
+      <span class="fxprev__state">Готово</span>
+      <span class="mono fxprev__prog"><span class="fxprev__pct"></span><span class="fxprev__time"></span></span>
+      <span class="btn--primary fxprev__btn" aria-hidden="true"><span class="btn__fill"></span><span class="btn__label">Собрать VPK</span></span>
+    </div>
+    <div class="cfg__fxacts">
+      <button class="textbtn" id="cfg-fxplay" type="button">Проиграть сборку</button>
+      <button class="textbtn" id="cfg-fxfail" type="button">Проиграть с ошибкой</button>
+    </div>
+    <div class="cfg__grid" id="cfg-fx"></div>
     </section>
 
     <section class="cfg__sec">

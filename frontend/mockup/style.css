@@ -2230,6 +2230,101 @@
 .dock__summary:hover .dock__more { color: var(--ink); border-bottom-color: var(--ink); }
 .dock__tf2 { margin-left: auto; }
 
+/* ── Сборка в полосе (buildfx.js) ─────────────────────────────────────────
+   Линия по верхнему краю полосы, счётчик на месте сводки, кнопка
+   «Остановить» с заливкой или кольцом. Тот же набор — у примера в настройках. */
+.dock { position: relative; }
+:root { --bfx-error: #b8383b; }
+[data-theme="dark"] { --bfx-error: #e06c6c; }
+.dock__line,
+.fxprev__line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -1px;
+  height: 2px;
+  overflow: hidden;
+  pointer-events: none;
+}
+.bfx__fill,
+.bfx__seg,
+.bfx__head { position: absolute; top: 0; left: 0; width: 0; height: 2px; }
+.bfx__fill { background: var(--accent); }
+.bfx__fill.is-error { background: #b8383b; }
+.bfx__head {
+  left: -28px;
+  width: 28px;
+  background: var(--ink);
+  opacity: 0;
+  transition: left .45s cubic-bezier(.3, 0, .2, 1);
+}
+.bfx__ants line { stroke: var(--accent); stroke-width: 2; stroke-dasharray: 8 6; }
+/* Искры, луч, конфетти: поверх соседей, мимо мыши. */
+.bfx__over { position: absolute; z-index: 30; pointer-events: none; }
+/* Текст этапа: старая и новая строка в одной клетке — смена строкой
+   вверх или вбок уезжает внутри неё. */
+.bfx__text { display: inline-grid; overflow: hidden; vertical-align: bottom; }
+.bfx__text > span { grid-area: 1 / 1; white-space: nowrap; }
+.bfx__ch { display: inline-block; white-space: pre; }
+.bfx__caret { color: var(--accent); }
+.bfx__ghost { position: absolute; left: 0; top: 0; opacity: .85; }
+.dock__prog { display: inline-flex; gap: 12px; }
+.dock__prog[hidden] { display: none; }
+.is-roll { display: inline-flex; height: 1.25em; line-height: 1.25em; overflow: hidden; vertical-align: bottom; }
+.bfx__digit { display: inline-flex; flex-direction: column; transition: transform .45s cubic-bezier(.3, 0, .2, 1); }
+.bfx__digit > span { height: 1.25em; line-height: 1.25em; }
+.btn--stop,
+.fxprev__btn { position: relative; overflow: hidden; }
+.btn__label { position: relative; }
+.btn__fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  background: var(--accent);
+  opacity: .25;
+  /* Через --dur-panel: без анимаций интерфейса он ноль, и заливка встаёт сразу. */
+  transition: width calc(var(--dur-panel) * 2) cubic-bezier(.3, 0, .2, 1);
+}
+.bfx__ring { position: relative; width: 12px; height: 12px; margin-right: 8px; vertical-align: -2px; }
+.bfx__ring circle { fill: none; stroke: var(--hairline-strong); stroke-width: 2; }
+.bfx__ring .bfx__arc {
+  stroke: var(--accent);
+  stroke-dasharray: 34.6;
+  stroke-dashoffset: 34.6;
+  transition: stroke-dashoffset calc(var(--dur-panel) * 2);
+}
+
+/* Пример в настройках: та же полоса в миниатюре. */
+.fxprev {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: 52px;
+  margin: 4px 0 10px;
+  padding: 0 16px;
+  border: 1px solid var(--hairline);
+  background: var(--surface);
+}
+.fxprev__state {
+  font-size: 10px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.fxprev__prog { display: inline-flex; gap: 12px; font-size: 10.5px; color: var(--ink-mute); }
+.fxprev__btn { margin-left: auto; padding: 9px 18px; cursor: default; }
+.fxprev__btn:hover { background: var(--ink); border-color: var(--ink); }
+.fxprev__btn.is-busy,
+.fxprev__btn.is-busy:hover {
+  background: var(--surface);
+  border-color: var(--hairline-strong);
+  color: var(--ink-soft);
+}
+.cfg__fxacts { display: flex; gap: 22px; margin-bottom: 14px; }
+
 /* ── Узкое окно ──────────────────────────────────────────────────────────
    Прибитые панели съедают ширину, которой и так нет: каталог, две половины
    работы и параметры в одну строку не встают. Ниже порога режим принудительно

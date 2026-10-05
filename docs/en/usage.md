@@ -177,7 +177,7 @@ The buttons on the bottom right of the model view work on the model itself:
 | Summary | What the build will produce: resolution, VTF format, the estimated size of one texture, the file name. It updates as you change settings. |
 | **Parameters** | Opens and closes the build settings. With pinned panels they are always on screen. |
 | Game path | Where TF2 was found and whether Crowbar is in place. If the game isn't found, set it in the settings first. |
-| **Build VPK** | Builds the mod. During a build it turns into **Stop**. |
+| **Build VPK** | Builds the mod. During a build it turns into **Stop**, and the floating build settings panel closes by itself so you can see the model and the progress. How the build looks is chosen in [settings](settings.md#customization). |
 
 ## Build settings
 

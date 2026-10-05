@@ -9,7 +9,8 @@ import * as api from './api.js';
 import { ask } from './ask.js';
 import { t } from './i18n.js';
 import { chooseFile } from './util.js';
-import { root, setStatus } from './layout.js';
+import { build as buildPanel, floating, root, setBusy, setStatus } from './layout.js';
+import { dockFx } from './buildfx.js';
 import { buildParticles } from './particles/index.js';
 import { texEdit } from './controls.js';
 import { hatClasses } from './preview.js';
@@ -139,6 +140,7 @@ buildBtn.addEventListener('click', async () => {
   // У частиц своя сборка: PCF плюс заменённые текстуры, и перед ней —
   // проверка, потому что типовые ошибки эффекта видно только в игре.
   if (root.dataset.section === 'particles') { await buildParticles(); return; }
+  const heard = dockFx.heard();
   const hatClassesPicked = await askHatClasses();
   if (!hatClassesPicked) return;
   // Классы мультиклассовой шапки: пусто — значит все (и не шапка).
@@ -163,7 +165,15 @@ buildBtn.addEventListener('click', async () => {
     res = await api.build({ ...params, tint_mode: tintMode });
   }
   if (res.error) { setStatus(res.error, false); return; }
-  setStatus('Сборка…', true);
+  // Параметры уже не нужны, а ход сборки и кадр нужны: плавающая панель
+  // уходит сама.
+  if (floating()) buildPanel.hidden = true;
+  // События сборки могли обогнать этот ответ. Этапы полосу уже завели, а
+  // быстрая ошибка уже показана: заводить заново значило бы повиснуть на
+  // «Сборка…» с кнопкой, которой нечего останавливать.
+  if (dockFx.heard() !== heard) return;
+  setBusy(true);
+  dockFx.start();
 });
 
 /**
