@@ -140,7 +140,7 @@ The buttons above the 3D view choose what it shows.
 | **Taunt** | taunt props | A class performing the taunt with the prop. |
 | **On the model** | cosmetics | The cosmetic on a class standing in the pose of the chosen weapon slot. |
 
-Scenes take a few seconds to assemble the first time. Switching animations afterwards is fast because the app reuses the mesh and textures.
+Scenes take a few seconds to assemble the first time. **Taunt** and **On the model** with a new class can take up to half a minute, because the app unpacks that class's animations. It keeps the animations it used separately, so after that these scenes open in a couple of seconds, after a restart too. Switching animations within a scene is fast because the app reuses the mesh and textures.
 
 ### Rows under the view
 

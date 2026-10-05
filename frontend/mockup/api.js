@@ -309,6 +309,8 @@ export const loadCustomModel = (path, keep = null) =>
   call('load_custom_model', { path, keep });
 export const dropCustomModel = () => call('drop_custom_model');
 export const loadDecorModel = (kind, path) => call('load_decor_model', { kind, path });
+export const loadPartModel = (group, path) => call('load_part_model', { group, path });
+export const dropPartModel = (group) => call('drop_part_model', { group });
 export const dropDecorModel = (kind) => call('drop_decor_model', { kind });
 export const setCustomFit = (fit) => call('set_custom_fit', { fit });
 export const qcText       = () => call('qc_text');

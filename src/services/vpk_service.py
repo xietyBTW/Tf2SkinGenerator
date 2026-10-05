@@ -290,10 +290,7 @@ class VPKService:
         if not ((mode in _HAND_MODE_KEYS or weapon_key in _MIRROR_KEYS)
                 and original_cdmaterials_path):
             return
-        orig_mat_rel = "materials/" + original_cdmaterials_path.replace('\\', '/').strip().rstrip('/')
-        orig_vtf_dir = ctx.vpkroot_dir
-        for _part in orig_mat_rel.rstrip('/').split('/'):
-            orig_vtf_dir = orig_vtf_dir / _part
+        orig_vtf_dir = VPKService._mirror_dir(ctx, original_cdmaterials_path)
         if orig_vtf_dir == vtf_output_path:
             logger.debug("Оригинальный и пропатченный пути совпадают, зеркало не нужно")
             return
@@ -303,6 +300,12 @@ class VPKService:
             if not _vmt_mirror.exists():
                 copy_file_safe(_vmt_src, _vmt_mirror)
                 logger.info(f"Зеркальный VMT по оригинальному пути: {_vmt_mirror.name}")
+
+    @staticmethod
+    def _mirror_dir(ctx, original_cdmaterials_path: str) -> Path:
+        """Папка зеркальных VMT в моде: оригинальный путь $cdmaterials."""
+        rel = original_cdmaterials_path.replace('\\', '/').strip().strip('/')
+        return ctx.vpkroot_dir.joinpath("materials", *rel.split('/'))
 
     @staticmethod
     def _purge_dir_contents(directory: Path, label: str) -> None:
@@ -1034,6 +1037,7 @@ class VPKService:
                 ctx, qc_path, weapon_key, replace_model_smd_path,
                 extra_model_callback, language, emit_sub,
                 keep_user_materials=replace_keep_materials,
+                part_models=r.part_models,
             )
 
             # Извлекаем путь из $cdmaterials в QC файле (до патчинга, потому что потом мы его изменим)
@@ -1159,13 +1163,18 @@ class VPKService:
             # После плана материалов — иначе сборка спросила бы, чем красить
             # новый материал; до компиляции — он должен попасть в модель.
             _part_variants = {}
-            if r.part_materials and not (replace_model_smd_path or model_ready_path):
+            _part_specs = r.part_materials
+            if r.part_materials and not model_ready_path:
                 from src.services import part_materials as _pm
-                _part_variants = _pm.apply_to_model(qc_path, r.part_materials, ctx.warn)
-                # Части выбирали на модели одного класса — у моделей остальных
-                # классов шапки треугольники другие.
-                if _part_variants and hat_class_models and len(hat_class_models) > 1:
-                    ctx.warn(f"Свои материалы частей собраны только для модели {Path(qc_path).stem}")
+                if replace_model_smd_path:
+                    # Своя модель: её треугольники уже в reference-SMD разобранной
+                    # модели (_apply_model_replacement) — под именами модели.
+                    _ref_smd = VpkModelPipeline._find_decompiled_reference_smd(
+                        qc_path, weapon_key, ctx.decompile_dir)
+                    _part_specs = (_pm.specs_for_custom_model(
+                        r.part_materials, _ref_smd, replace_keep_materials)
+                        if _ref_smd else [])
+                _part_variants = _pm.apply_to_model(qc_path, _part_specs, ctx.warn)
 
             if is_cancelled():
                 return cancelled_result(ctx)
@@ -1185,8 +1194,14 @@ class VPKService:
             _global_tex = {'size': size, 'format': format_type,
                            'flags': flags or [], 'options': vtf_options or {}}
 
+            from src.data.texture_overrides import own_settings as _own_settings
+
             def _eff(_mat):
-                e = _eff_settings(_global_tex, (material_settings or {}).get(_mat))
+                # Имя карточки и материала модели расходятся (Material.001,
+                # пустой ключ главного у одноматериальной модели) — раньше
+                # такие настройки до сборки молча не доходили.
+                own = _own_settings(material_settings, _mat, texture_filename)
+                e = _eff_settings(_global_tex, own)
                 return e['size'], e['format'], e['flags'], e['options']
 
             # Игровой tf2_textures_dir.vpk — резолвим один раз (RED-оригинал
@@ -1213,6 +1228,7 @@ class VPKService:
                 custom_vtf_path=custom_vtf_path,
                 stock_normal_ok=not (replace_model_smd_path or model_ready_path),
                 main_from_game=r.main_from_game,
+                settings_for=_eff,
             )
 
             # Главная текстура: RED-резолв → VTF (custom/готовый/рендер) →
@@ -1236,16 +1252,20 @@ class VPKService:
             # лишний {texture}_blue.vtf/vmt.
             VpkTextureBuilder._maybe_build_blu_team_texture(
                 weapon_key, blu_row, _blu_is_team, blu_mode, blu_image_path,
-                vtf_filename, texture_filename, slots, tex_ctx,
+                vtf_filename, texture_filename, slots,
+                tex_ctx.for_material(texture_filename),   # синий главной — её карточка
                 red_row=tg_structure.get('red_row') or [],
             )
 
             # === Создаем текстуры для дополнительных материалов модели (shell, scope и т.д.) ===
             # Это столбцы 1+ из RED строки $texturegroup
             # Словарь для хранения путей к VTF дополнительных материалов (нужно для BLU копий)
+            _variant_copies: list = []
             extra_materials_vtf_paths = VpkTextureBuilder._build_extra_material_textures(
                 extra_materials, weapon_key, ctx, slots, tex_ctx,
                 extra_texture_callback, animated_fps,
+                tg_rows=tg_structure.get('all_rows') or [], deferred=_variant_copies,
+                strip_paints=(mode == "hat" and not hat_apply_game_paints),
             )
 
             # === Блэклист/служебные материалы: запись ОРИГИНАЛЬНОГО VMT ===
@@ -1275,6 +1295,9 @@ class VPKService:
                 slots, tex_ctx, extra_texture_callback, weapon_key,
                 animated_fps, is_normal_map, extra_materials_vtf_paths,
             )
+            # Синие убер/зомби с «Скопировать главную»: их пара появилась только сейчас.
+            VpkTextureBuilder._finish_variant_copies(
+                _variant_copies, ctx, slots, strip_paints=(mode == "hat" and not hat_apply_game_paints))
 
             # Зеркальные VMT по оригинальному пути (руки / spy-watch и т.п.).
             # Для all-class %s-шапок зеркало НЕ создаём (его заменила пер-классовая
@@ -1294,7 +1317,7 @@ class VPKService:
                 weapon_key, panel_extra_textures, ctx, slots, tex_ctx,
                 material_maps, texture_filename, image_path, is_normal_map,
                 _has_skins, skin_build_data, _eff,
-                part_variants=_part_variants, part_specs=r.part_materials,
+                part_variants=_part_variants, part_specs=_part_specs,
                 # Синий у исходного материала части: в его строках у части
                 # своя синяя картинка.
                 blu_of=(dict(zip(tg_structure.get('red_row') or [],
@@ -1302,6 +1325,9 @@ class VPKService:
                         if _blu_is_team else None),
                 strip_paints=(mode == "hat" and not hat_apply_game_paints),
             )
+            # Служебные материалы, которые в игре делят текстуру с собранным
+            # (руки хэви — с телом), смотрят на текстуру мода.
+            VpkTextureBuilder._follow_shared_textures(ctx, slots)
 
             # Ждём завершения компиляции (шла параллельно с текстурами)
             _compile_thread.join()
@@ -1342,6 +1368,11 @@ class VPKService:
                         crowbar_exe, tf_dir, language, emit_sub,
                         target_mdl_paths=_extra_targets,
                         bypass_prefix=_bypass_prefix,
+                        # Части выбирали на модели этого класса: остальным их
+                        # переносят по участкам текстуры.
+                        part_specs=_part_specs if _part_variants else None,
+                        part_source_qc=qc_path,
+                        part_names=_part_variants,
                     )
 
             # Этап 3: доп. ИЗМЕНЁННЫЕ стили-модели шапки — каждый своей
@@ -1378,7 +1409,14 @@ class VPKService:
             # (одиночная текстура ИЛИ вариант-онли без c_xxx_blue в группе).
             from src.data.weapons import NO_BLU_WEAPON_KEYS as _NO_BLU2
             if weapon_key in _NO_BLU2 or not _blu_is_team:
-                for _blue in vtf_output_path.glob(f"{texture_filename}_blue.*"):
+                # С зеркальными копиями VMT (руки, часы): иначе копия по
+                # оригинальному пути осталась бы ссылкой на удалённый VTF.
+                _dirs = [vtf_output_path]
+                if original_cdmaterials_path:
+                    _mirror = VPKService._mirror_dir(ctx, original_cdmaterials_path)
+                    if _mirror != vtf_output_path:
+                        _dirs.append(_mirror)
+                for _blue in (b for d in _dirs for b in d.glob(f"{texture_filename}_blue.*")):
                     try:
                         _blue.unlink()
                         logger.info(f"[{weapon_key}] Удалён лишний BLU-файл: {_blue.name}")
@@ -1415,7 +1453,7 @@ class VPKService:
             or r.panel_blu_textures or r.replace_model_enabled
             or r.model_ready_path or r.custom_vpk_source_path
             or weapon_maps or r.skin_build_data or r.force_team
-            or r.hat_style_builds)
+            or r.hat_style_builds or r.part_models)
 
     @staticmethod
     def _build_decor_only_vpk(ctx, r: BuildRequest, weapon_key: str, t: dict,

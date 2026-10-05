@@ -112,11 +112,16 @@
   padding: 22px var(--rhythm) 16px;
 }
 
+/* Подсказка «Сменить предмет» — в строке имени, справа: поднятая над ним,
+   она залезала в шапку окна и читалась второй строкой логотипа. Место под
+   неё занято всегда (прозрачностью), и наведение ничего не сдвигает. */
 .title__item {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 3px;
+  display: grid;
+  grid-template-columns: auto auto;
+  justify-content: start;
+  align-items: baseline;
+  column-gap: 14px;
+  row-gap: 3px;
   padding: 0;
   border: 0;
   background: none;
@@ -134,11 +139,11 @@
 }
 .title__item:hover .title__name { border-bottom-color: var(--accent); }
 
-.title__meta { font-family: var(--mono); font-size: 10.5px; color: var(--ink-mute); }
+.title__meta { grid-column: 1 / -1; font-family: var(--mono); font-size: 10.5px; color: var(--ink-mute); }
 
 .title__hint {
-  position: absolute;
-  margin-top: -34px;
+  grid-area: 1 / 2;
+  white-space: nowrap;
   font-size: 9px;
   letter-spacing: .14em;
   text-transform: uppercase;

@@ -3,9 +3,9 @@
 """
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Optional, Tuple, List
+from typing import Callable, List, Optional, Tuple
 from src.shared.logging_config import get_logger
 from src.shared.file_utils import ensure_directory_exists, safe_remove, copy_file_safe
 
@@ -33,6 +33,20 @@ class TextureBuildContext:
     stock_normal_ok: bool = True
     #: Главная — игровая без вопроса (BuildRequest.main_from_game).
     main_from_game: bool = False
+    #: Свои настройки карточки поверх общих: имя → (size, format, flags,
+    #: options), как `_eff` сборки. Нет — у всех материалов общие.
+    settings_for: Optional[Callable[[str], tuple]] = None
+
+    def for_material(self, name: str) -> "TextureBuildContext":
+        """Контекст с настройками карточки `name`: ими собирается её VTF.
+        Доп. материалы (голова тела, «Прочее») раньше шли общими."""
+        if not self.settings_for:
+            return self
+        size, fmt, flags, options = self.settings_for(name)
+        if isinstance(size, int):
+            size = (size, size)
+        return replace(self, size=tuple(size), format_type=fmt,
+                       flags=list(flags or []), vtf_options=dict(options or {}))
 
     def render_user_image_vtf(
         self, image_path: str, target_vtf_path: Path, png_name: str
@@ -94,10 +108,19 @@ class MaterialSlots:
     original_cdmaterials_paths: List[str] = field(default_factory=list)
     tf2_textures_vpk: Optional[str] = None
     tf2_misc_vpk: Optional[str] = None
+    #: Материалы, чей VTF в моде — копия игрового, а не работа человека
+    #: (ответ «из игры»). «Скопировать главную» у убер/зомби-варианта такую
+    #: пару не копирует: вариант остаётся игровым.
+    game_copies: set = field(default_factory=set)
 
     def vtf(self, name: str) -> Path:
         """Путь VTF материала внутри мода."""
         return self.vtf_output_path / f"{name}.vtf"
+
+    def own_vtf(self, name: str) -> Optional[Path]:
+        """VTF материала со своей картинкой человека (не копия игровой) или None."""
+        path = self.vtf(name)
+        return path if path.exists() and name.lower() not in self.game_copies else None
 
     def vmt(self, name: str) -> Path:
         """Путь VMT материала внутри мода."""

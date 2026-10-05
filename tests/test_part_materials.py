@@ -27,6 +27,14 @@ class NamesTests(unittest.TestCase):
         self.assertEqual(pm.next_name("c_gun", [], lambda n: n == "c_gun_part1"),
                          "c_gun_part2")
 
+    def test_names_of_a_custom_model_lose_dots(self):
+        # studiomdl обрезает имя на первой точке: `material.001_part1` стал бы
+        # `material` — имя части строится так же, как его чистит подмена.
+        self.assertEqual(pm.model_name("Material.001"), "material_001")
+        self.assertEqual(pm.next_name("Material.001", []), "material_001_part1")
+        self.assertEqual(pm.next_name("Material.001", ["material_001_part1"]),
+                         "material_001_part2")
+
     def test_variant_names(self):
         self.assertEqual(pm.variant_name("c_x_part1", "c_x", "c_x_blue", 1), "c_x_part1_blue")
         self.assertEqual(pm.variant_name("hat_red_part1", "hat_red", "hat_blue", 1),
@@ -145,6 +153,29 @@ class ApplyToModelTests(unittest.TestCase):
             with open(os.path.join(d, "ref.smd")) as f:
                 self.assertEqual(names_in(f.read()), ["c_x_part1", "c_x", "c_x_part2", "end"])
 
+    def test_custom_model_specs_follow_the_built_names(self):
+        # Своя модель: треугольники уже в reference-SMD разобранной модели —
+        # с «сохранить материалы» под очищенными своими именами, без него —
+        # под материалом оригинала.
+        with tempfile.TemporaryDirectory() as d:
+            ref = os.path.join(d, "c_x_reference.smd")
+            with open(ref, "w") as f:
+                f.write(smd(tri("c_x"), tri("c_x"), tri("c_x")))
+            spec = {"name": "material_001_part1", "base": "Material.001", "tris": [1],
+                    "total": 3, "sources": ["mine.smd", "ghost_ref.smd"]}
+            kept = pm.specs_for_custom_model([spec], ref, keep_materials=True)
+            self.assertEqual((kept[0]["base"], kept[0]["sources"]),
+                             ("material_001", ["c_x_reference.smd"]))
+            mapped = pm.specs_for_custom_model([spec], ref, keep_materials=False)
+            self.assertEqual(mapped[0]["base"], "c_x")
+            # И перенос по ним — ровно второй треугольник.
+            qc = os.path.join(d, "m.qc")
+            with open(qc, "w") as f:
+                f.write('$modelname "x.mdl"\n')
+            self.assertEqual(pm.apply_to_model(qc, mapped), {"material_001_part1": "c_x"})
+            with open(ref) as f:
+                self.assertEqual(names_in(f.read()), ["c_x", "material_001_part1", "c_x", "end"])
+
     def test_other_model_is_left_alone_and_reported(self):
         # Модель не та, на которой выбирали части: не хватает файла или
         # треугольников другое число — по чужим номерам переносить нельзя.
@@ -259,6 +290,9 @@ class EditorTests(unittest.TestCase):
             def _decor_for_card(host, card):
                 return None
 
+            def _shape_changed(host):
+                return bool(host._bodygroups)
+
             def _put(host, *args, **kwargs):
                 pass
 
@@ -305,12 +339,20 @@ class EditorTests(unittest.TestCase):
         self.t.set_texture(self.single, self.png("blue", (0, 0, 255)))
         self.assertEqual(self.t.resolve_card(name), red)
 
-    def test_strokes_land_in_every_material_over_its_own_base(self):
+    def test_strokes_land_only_on_their_own_material(self):
+        # Мазок красит склейку того материала, чьи это треугольники: развёртки
+        # материалов могут накрывать одно место текстуры (зеркальные половины,
+        # своя модель снаряда со своей развёрткой), и краска потекла бы.
         name = self.editor.set_part_material('', [self.parts[0]], '')['created']
-        self.editor.set_part_colors('', {self.parts[0]: '#00ff00'})
+        self.editor.set_part_colors('', {self.parts[0]: '#00ff00', self.parts[1]: '#ff00ff'})
         main, mine = self.t.resolve_card(self.single), self.t.resolve_card(name)
         self.assertNotEqual(main, mine)
-        self.assertTrue(self.has(main, (0, 255, 0)) and self.has(mine, (0, 255, 0)))
+        self.assertTrue(self.has(mine, (0, 255, 0)) and not self.has(mine, (255, 0, 255)))
+        self.assertTrue(self.has(main, (255, 0, 255)) and not self.has(main, (0, 255, 0)))
+        # Часть вернулась в общий — её мазок снова в склейке исходного.
+        self.editor.set_part_material('', [self.parts[0]], '-')
+        self.assertTrue(self.has(self.t.resolve_card(self.single), (0, 255, 0)))
+        name = self.editor.set_part_material('', [self.parts[0]], '')['created']
         # Своя картинка исходного ложится под мазки только у исходного.
         self.editor.set_base(self.single, self.png("blue", (0, 0, 255)))
         self.assertTrue(self.has(self.t.resolve_card(self.single), (0, 0, 255)))
@@ -340,6 +382,117 @@ class EditorTests(unittest.TestCase):
         mine = self.t.resolve_card(name)
         self.assertTrue(self.has(mine, (255, 0, 0)) and self.has(mine, (0, 255, 0)))
         self.assertFalse(self.has(self.t.resolve_card(self.single), (255, 0, 0)))
+
+
+def uvtri(mat, *uvs):
+    return mat + "\n" + "".join(f"  0 0 0 0 0 0 1 {u} {v} 1 0 1\n" for u, v in uvs)
+
+
+# Квадрат текстуры из двух половин: левая (u < 0.5) и правая.
+LEFT = (((0, 0), (0.5, 0), (0, 1)), ((0.5, 0), (0.5, 1), (0, 1)))
+RIGHT = (((0.5, 0), (1, 0), (0.5, 1)), ((1, 0), (1, 1), (0.5, 1)))
+
+
+class OtherModelTests(unittest.TestCase):
+    """Части с модели одного класса шапки — на модель другого класса."""
+
+    SPEC = {"name": "hat_part1", "base": "hat", "tris": [0, 1], "total": 4,
+            "sources": ["a_ref.smd"]}
+
+    def models(self, d, source, other):
+        src, cls = os.path.join(d, "src"), os.path.join(d, "cls")
+        os.makedirs(src)
+        os.makedirs(cls)
+        for path, tris in ((os.path.join(src, "a_ref.smd"), source),
+                           (os.path.join(cls, "b_ref.smd"), other),
+                           (os.path.join(cls, "b_physics.smd"), [uvtri("phy", *LEFT[0])])):
+            with open(path, "w") as f:
+                f.write(smd(*tris))
+        qc = os.path.join(cls, "b.qc")
+        with open(qc, "w") as f:
+            f.write('$modelname "b.mdl"\n$body "Body" "b_ref.smd"\n')
+        return src, qc
+
+    def test_parts_follow_the_texture_area_on_another_mesh(self):
+        # На модели скаута левая половина текстуры уже стала частью. У солдата
+        # текстура та же, а сетка своя: левая половина из трёх треугольников,
+        # и порядок другой.
+        with tempfile.TemporaryDirectory() as d:
+            src, qc = self.models(
+                d,
+                [uvtri("hat_part1", *LEFT[0]), uvtri("hat_part1", *LEFT[1]),
+                 uvtri("hat", *RIGHT[0]), uvtri("hat", *RIGHT[1])],
+                [uvtri("hat", *RIGHT[1]), uvtri("hat", (0, 0), (0.25, 0), (0, 0.5)),
+                 uvtri("hat", *RIGHT[0]), uvtri("hat", (0.25, 0), (0.5, 0), (0.5, 1)),
+                 uvtri("hat", (0, 0.5), (0.25, 0), (0, 1))])
+            specs, missed = pm.specs_for_other_model([self.SPEC], src, qc)
+            self.assertEqual(missed, [])
+            self.assertEqual(specs, [{**self.SPEC, "tris": [1, 3, 4], "total": 5,
+                                      "sources": ["b_ref.smd"]}])
+            self.assertEqual(pm.apply_to_model(qc, specs), {"hat_part1": "hat"})
+            with open(os.path.join(os.path.dirname(qc), "b_ref.smd")) as f:
+                self.assertEqual(names_in(f.read()),
+                                 ["hat", "hat_part1", "hat", "hat_part1", "hat_part1", "end"])
+
+    def test_overlapping_uv_cannot_tell_the_part(self):
+        # Зеркальные половины на одном участке текстуры, и часть только одна
+        # из них: по текстуре не понять, какая.
+        with tempfile.TemporaryDirectory() as d:
+            src, qc = self.models(d, [uvtri("hat_part1", *LEFT[0]), uvtri("hat", *LEFT[0])],
+                                  [uvtri("hat", *LEFT[0])])
+            self.assertEqual(pm.specs_for_other_model([self.SPEC], src, qc),
+                             ([], ["hat_part1"]))
+
+    def test_edge_between_part_and_rest_is_not_an_overlap(self):
+        # Квадрат текстуры: на исходной модели разрезан по диагонали (0,0)-(1,1),
+        # и часть — треугольник под ней. У другой модели квадрат разрезан по
+        # другой диагонали: центры её треугольников лежат ровно на ребре части.
+        with tempfile.TemporaryDirectory() as d:
+            src, qc = self.models(
+                d,
+                [uvtri("hat_part1", (0, 0), (1, 0), (1, 1)), uvtri("hat", (0, 0), (1, 1), (0, 1))],
+                [uvtri("hat", (0, 0), (1, 0), (0, 1)), uvtri("hat", (1, 0), (1, 1), (0, 1))])
+            specs, missed = pm.specs_for_other_model([self.SPEC], src, qc)
+            self.assertEqual(missed, [])
+            self.assertEqual(len(specs), 1)
+
+    def test_degenerate_uv_is_not_guessed(self):
+        # Развёртки нет (все UV в нуле): ближайшим оказался бы любой
+        # треугольник, и вся модель ушла бы в часть.
+        zero = ((0, 0), (0, 0), (0, 0))
+        with tempfile.TemporaryDirectory() as d:
+            src, qc = self.models(d, [uvtri("hat_part1", *zero), uvtri("hat", *zero)],
+                                  [uvtri("hat", *zero), uvtri("hat", *zero)])
+            self.assertEqual(pm.specs_for_other_model([self.SPEC], src, qc),
+                             ([], ["hat_part1"]))
+
+    def test_nan_uv_stays_in_the_material(self):
+        nan = float("nan")
+        with tempfile.TemporaryDirectory() as d:
+            src, qc = self.models(d, [uvtri("hat_part1", *LEFT[0]), uvtri("hat", *RIGHT[0])],
+                                  [uvtri("hat", *LEFT[0]), uvtri("hat", (nan, 0), (1, 0), (1, 1))])
+            specs, missed = pm.specs_for_other_model([self.SPEC], src, qc)
+            self.assertEqual((missed, specs[0]["tris"]), ([], [0]))
+
+    def test_lod_meshes_are_not_part_of_the_model(self):
+        # LOD сборка вырезает (patch_qc_file): их треугольники только сбивали
+        # бы перенос.
+        with tempfile.TemporaryDirectory() as d:
+            src, qc = self.models(d, [uvtri("hat_part1", *LEFT[0]), uvtri("hat", *RIGHT[0])],
+                                  [uvtri("hat", *LEFT[0]), uvtri("hat", *RIGHT[0])])
+            with open(os.path.join(os.path.dirname(qc), "b_ref_lod1.smd"), "w") as f:
+                f.write(smd(uvtri("hat", *LEFT[0])))
+            with open(qc, "a") as f:
+                f.write('$lod 10\n{\n\treplacemodel "b_ref.smd" "b_ref_lod1.smd"\n}\n')
+            specs, missed = pm.specs_for_other_model([self.SPEC], src, qc)
+            self.assertEqual((missed, specs[0]["sources"], specs[0]["total"]),
+                             ([], ["b_ref.smd"], 2))
+
+    def test_model_without_the_material(self):
+        with tempfile.TemporaryDirectory() as d:
+            src, qc = self.models(d, [uvtri("hat_part1", *LEFT[0])], [uvtri("cap", *LEFT[0])])
+            self.assertEqual(pm.specs_for_other_model([self.SPEC], src, qc),
+                             ([], ["hat_part1"]))
 
 
 class SourcesTests(unittest.TestCase):

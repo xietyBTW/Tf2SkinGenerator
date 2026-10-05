@@ -1,6 +1,6 @@
 import unittest
 
-from src.data.texture_overrides import effective_settings, override_badge
+from src.data.texture_overrides import effective_settings, override_badge, own_settings
 
 
 class EffectiveSettingsTests(unittest.TestCase):
@@ -47,6 +47,26 @@ class OverrideBadgeTests(unittest.TestCase):
     def test_shows_size_and_format(self):
         ov = {'size': (1024, 1024), 'format': 'DXT5'}
         self.assertEqual(override_badge(ov, self.GLOBAL), '1024 · DXT5')
+
+
+class OwnSettingsTests(unittest.TestCase):
+    """Карточка и материал модели называются не всегда одинаково — свои
+    настройки карточки до сборки при этом молча не доходили."""
+
+    def test_by_card_name(self):
+        self.assertEqual(own_settings({'scout_head_red': {'format': 'DXT1'}}, 'scout_head_red'),
+                         {'format': 'DXT1'})
+        self.assertIsNone(own_settings({'scout_head_red': {'format': 'DXT1'}}, 'scout_red'))
+
+    def test_dotted_card_of_a_custom_model(self):
+        self.assertEqual(own_settings({'Material.001': {'size': [128, 128]}}, 'material_001'),
+                         {'size': [128, 128]})
+
+    def test_single_material_main_is_stored_without_a_name(self):
+        settings = {'': {'size': [128, 128]}}
+        self.assertEqual(own_settings(settings, 'c_scattergun', main='c_scattergun'),
+                         {'size': [128, 128]})
+        self.assertIsNone(own_settings(settings, 'c_scattergun_blue', main='c_scattergun'))
 
 
 if __name__ == "__main__":

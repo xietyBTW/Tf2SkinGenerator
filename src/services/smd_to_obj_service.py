@@ -53,6 +53,15 @@ class MeshPart:
     #: Приставка к именам материалов части: так вьювер отличает призрак
     #: оригинала (`ghost:`) от самой модели, даже если имена совпали.
     material_prefix: str = ''
+    #: Какие из extra_smd_paths — «поздние» детали (снаряд в оружии): их
+    #: треугольники помечаются в OBJ строкой LATE_PREFIX, и части модели
+    #: нумеруют их куски после кусков основной модели (mesh_parts_service).
+    late_smd_paths: Sequence[str] = ()
+
+
+#: Строка шапки OBJ: с какого номера треугольника материала начинаются
+#: «поздние» детали (`мат=номер|…`).
+LATE_PREFIX = '# Late:'
 
 
 class SmdToObjService:
@@ -68,6 +77,7 @@ class SmdToObjService:
         keep_source_axes: bool = False,
         pose_smd_path: Optional[str] = None,
         on_player: bool = False,
+        late_smd_paths: Optional[list] = None,
     ) -> Tuple[bool, List[str]]:
         """
         Конвертирует SMD → OBJ + MTL с поддержкой нескольких материалов.
@@ -97,6 +107,8 @@ class SmdToObjService:
             on_player:    Косметика: перенести в позу игрока, как делает
                           bonemerge (см. cosmetic_pose). В MDL шапка лежит как
                           автору было удобно, и без переноса стоит боком.
+            late_smd_paths: Какие из extra_smd_paths — снаряд в оружии: части
+                          модели нумеруют его куски после основной (LATE_PREFIX).
 
         Returns:
             (success, material_names) где material_names — список уникальных
@@ -108,6 +120,7 @@ class SmdToObjService:
                 extra_smd_paths=tuple(extra_smd_paths or ()),
                 skinning=SmdToObjService._skinning(smd_path, pose_smd_path, on_player),
                 include_mats=include_mats,
+                late_smd_paths=tuple(late_smd_paths or ()),
             )],
             obj_path,
             source_zup=source_zup,
@@ -141,14 +154,17 @@ class SmdToObjService:
         """
         try:
             triangles_by_mat: Dict[str, List[List[dict]]] = {}
+            late_at: Dict[str, int] = {}
             for part in parts:
-                part_tris = SmdToObjService._part_triangles(part)
+                part_tris, part_late = SmdToObjService._part_triangles(part)
                 for mat, tris in part_tris.items():
                     if mat in triangles_by_mat:
                         logger.warning(
                             f"SMD→OBJ: материал '{mat}' есть у нескольких частей "
                             f"сцены — они получат одну текстуру"
                         )
+                    if mat in part_late and mat not in late_at:
+                        late_at[mat] = len(triangles_by_mat.get(mat, [])) + part_late[mat]
                     triangles_by_mat.setdefault(mat, []).extend(tris)
 
             if not triangles_by_mat:
@@ -234,6 +250,9 @@ class SmdToObjService:
             with open(obj_path, "w", encoding="utf-8") as f:
                 f.write(f"# Converted from {sources}\n")
                 f.write(f"{SOURCES_PREFIX} {'|'.join(files)}\n")
+                if late_at:
+                    f.write(f"{LATE_PREFIX} "
+                            f"{'|'.join(f'{m}={n}' for m, n in late_at.items())}\n")
                 f.write(f"mtllib {mtl_name}\n\n")
 
                 for p in positions:
@@ -300,9 +319,12 @@ class SmdToObjService:
         return result
 
     @staticmethod
-    def _part_triangles(part: "MeshPart") -> Dict[str, List[List[dict]]]:
-        """Треугольники одной части сцены: меш + бодигруппы, уже в своей позе."""
+    def _part_triangles(part: "MeshPart") -> Tuple[Dict[str, List[List[dict]]], Dict[str, int]]:
+        """Треугольники одной части сцены: меш + бодигруппы, уже в своей позе,
+        и {материал: номер первого треугольника «поздних» деталей}."""
         triangles_by_mat = SmdToObjService._parse_triangles_by_mat(part.smd_path)
+        late = {os.path.normcase(os.path.abspath(p)) for p in part.late_smd_paths}
+        late_from: Dict[str, int] = {}
 
         # Бодигруппы (доп. геометрия из отдельных SMD) делят скелет с основным
         # мешем, поэтому доливаются ДО применения позы.
@@ -311,7 +333,10 @@ class SmdToObjService:
                 logger.warning(f"SMD→OBJ: extra SMD не найден: {extra}")
                 continue
             extra_tris = SmdToObjService._parse_triangles_by_mat(extra)
+            is_late = os.path.normcase(os.path.abspath(extra)) in late
             for mat, tris in extra_tris.items():
+                if is_late and mat not in late_from:
+                    late_from[mat] = len(triangles_by_mat.get(mat, []))
                 triangles_by_mat.setdefault(mat, []).extend(tris)
             logger.info(
                 f"SMD→OBJ: merged bodygroup '{os.path.basename(extra)}' "
@@ -329,7 +354,9 @@ class SmdToObjService:
         if part.material_prefix:
             triangles_by_mat = {part.material_prefix + k: v
                                 for k, v in triangles_by_mat.items()}
-        return triangles_by_mat
+        late_from = {part.material_prefix + k: v for k, v in late_from.items()
+                     if part.material_prefix + k in triangles_by_mat}
+        return triangles_by_mat, late_from
 
     @staticmethod
     def _skinning(ref_smd: str, pose_smd: Optional[str],

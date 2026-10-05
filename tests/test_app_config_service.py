@@ -35,6 +35,52 @@ class AppConfigServiceTests(unittest.TestCase):
                     config = AppConfig.load_config()
             self.assertEqual(config["export_folder"], "export")
 
+    def test_load_config_with_bom_keeps_settings(self):
+        # Блокнот и PowerShell сохраняют с BOM — настройки не должны слетать.
+        with tempfile.TemporaryDirectory() as tmp:
+            config_dir = Path(tmp) / "config"
+            config_file = config_dir / "app_config.json"
+            config_dir.mkdir(parents=True, exist_ok=True)
+            config_file.write_bytes(b"\xef\xbb\xbf" + json.dumps(
+                {"tf2_game_folder": "D:/TF2", "language": "ru"}).encode("utf-8"))
+            with patch.object(AppConfig, "CONFIG_DIR", config_dir):
+                with patch.object(AppConfig, "CONFIG_FILE", config_file):
+                    config = AppConfig.load_config()
+            self.assertEqual(config["tf2_game_folder"], "D:/TF2")
+
+    def test_broken_config_is_kept_before_it_gets_overwritten(self):
+        # Первая же запись настроек положит на место нечитаемого файла
+        # умолчания — путь к игре и прочее остаются только в копии.
+        with tempfile.TemporaryDirectory() as tmp:
+            config_dir = Path(tmp) / "config"
+            config_file = config_dir / "app_config.json"
+            config_dir.mkdir(parents=True, exist_ok=True)
+            config_file.write_text('{"tf2_game_folder": "D:/TF2",', encoding="utf-8")
+            with patch.object(AppConfig, "CONFIG_DIR", config_dir):
+                with patch.object(AppConfig, "CONFIG_FILE", config_file):
+                    AppConfig.load_config()
+                    AppConfig.set("language", "en")
+            broken = config_dir / "app_config.broken.json"
+            self.assertIn("D:/TF2", broken.read_text(encoding="utf-8"))
+
+    def test_locked_config_is_not_overwritten_with_defaults(self):
+        # Файл держит антивирус: чтение не удалось, и запись настройки
+        # положила бы на его место умолчания. Отпустили — всё как было.
+        with tempfile.TemporaryDirectory() as tmp:
+            config_dir = Path(tmp) / "config"
+            config_file = config_dir / "app_config.json"
+            config_dir.mkdir(parents=True, exist_ok=True)
+            config_file.write_text(json.dumps({"tf2_game_folder": "D:/TF2"}), encoding="utf-8")
+            AppConfig.invalidate_cache()
+            with patch.object(AppConfig, "CONFIG_DIR", config_dir),                     patch.object(AppConfig, "CONFIG_FILE", config_file):
+                with patch("builtins.open", side_effect=PermissionError("locked")),                         patch("time.sleep"):
+                    self.assertFalse(AppConfig.set("language", "en"))
+                self.assertEqual(AppConfig.get("tf2_game_folder"), "D:/TF2")
+                self.assertTrue(AppConfig.set("language", "en"))
+            data = json.loads(config_file.read_text(encoding="utf-8"))
+            self.assertEqual(data, {**AppConfig.DEFAULT_CONFIG, "tf2_game_folder": "D:/TF2",
+                                    "language": "en"})
+
     def test_save_and_get_set(self):
         with tempfile.TemporaryDirectory() as tmp:
             config_dir = Path(tmp) / "config"

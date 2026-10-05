@@ -492,7 +492,11 @@ class SMDService:
 
             out.write(mat)
             out.write('\n')
-            if bone_mapping:
+            # И без единого совпадения по имени: у модели из OBJ/GLB кость
+            # одна, `root`, и раньше её вершины оставались на кости с номером
+            # 0 — у медигана это weapon_bone_L, у снаряда в оружии — корень
+            # ружья вместо кости, которую двигает рука.
+            if bone_mapping or fallback_bone >= 0:
                 out.writelines(
                     SMDService._remap_vertex_line(line, bone_mapping, fallback_bone)
                     for line in tri_lines

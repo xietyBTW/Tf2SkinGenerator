@@ -524,9 +524,11 @@ class OwnGarlandTests(unittest.TestCase):
         self.assertIn('"lights"', text)                 # кости стоковые
         self.assertIn("my_wire", text)                  # материал свой, как в studiomdl
         self.assertNotIn("festive_lights_red", text)    # треугольники только свои
-        # Кость `root` в стоковой не нашлась — вершины на главной кости.
-        rows = [ln.split() for ln in text.splitlines() if ln.startswith("  0 5")]
-        self.assertTrue(rows and all(r[0] == "0" for r in rows))
+        # Кость `root` в стоковой не нашлась — вершины на кости, которую несёт
+        # стоковая гирлянда (SMDService._grip_bone), а не на кости с номером 0.
+        rows = [ln.split() for ln in text.split("triangles", 1)[1].splitlines()
+                if len(ln.split()) >= 9]
+        self.assertTrue(rows and all(r[0] == "1" for r in rows))
 
     def test_kept_in_edits_and_work_files(self):
         from src.domain.preview.session import PreviewSession

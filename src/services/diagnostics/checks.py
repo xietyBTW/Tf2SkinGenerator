@@ -114,7 +114,10 @@ def check_models(mod: InspectedMod, lang: str = "en") -> List[Finding]:
                                 location=m.rel_path, version=m.header.version,
                                 versions=versions))
 
-        for mat in m.header.material_names:
+        # Материал из столбца скинов, который не рисует ни одна сетка, игра
+        # ищет, но не показывает: фиолетового от него не будет.
+        drawn = m.header.drawn_materials
+        for mat in (m.header.material_names if drawn is None else drawn):
             if _material_resolved(mat, m.header.cdmaterials,
                                   lambda p: p in vmt_paths or mod.game_has(p)):
                 continue

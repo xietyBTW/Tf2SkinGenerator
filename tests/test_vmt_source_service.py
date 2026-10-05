@@ -32,6 +32,14 @@ class ResolveTargetTests(unittest.TestCase):
         self.assertEqual(vmt.resolve_target(mode)[0],
                          HAND_MODES[mode]['arm_model'])
 
+    def test_class_body_points_at_its_model(self):
+        """Тело класса правится по своей модели: ключ `mdl_key` из данных
+        убрали, и редактор VMT у всех тел молча стал недоступен."""
+        from src.data.player_characters import PLAYER_BODY_MODE_KEYS, PLAYER_CHARACTERS
+        for mode in PLAYER_BODY_MODE_KEYS:
+            self.assertEqual(vmt.resolve_target(mode)[0],
+                             PLAYER_CHARACTERS[mode]['mdl_path'], mode)
+
     def test_no_mode_no_target(self):
         self.assertIsNone(vmt.resolve_target(''))
 

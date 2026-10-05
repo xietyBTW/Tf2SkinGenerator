@@ -468,8 +468,9 @@ def item_model_paths(tf2_root: str) -> Dict[int, str]:
     cached = _MODELS.get(key)
     if cached is None:
         from src.data import items_game_kv as kv
-        with open(path, encoding='utf-8', errors='replace') as f:
-            game = kv.ItemsGame.parse(f.read())
+        game = kv.ItemsGame.load(path)
+        if game is None:
+            return {}
         cached = {}
         for idx, block in game.items:
             model = game.inherited(block, 'model_player')

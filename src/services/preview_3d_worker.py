@@ -32,6 +32,38 @@ from src.shared.logging_config import get_logger
 logger = get_logger(__name__)
 
 
+def with_part_models(decomp_dir: str, part_models: dict, out_dir: str) -> str:
+    """
+    Копия разобранной модели, где детали заменены своей геометрией человека.
+
+    Кэш разборки общий — превью трогает копию. Файл детали остаётся под своим
+    именем: по именам SMD сборка находит треугольники частей (`# Sources:` в
+    OBJ, part_materials), и в моде деталь лежит под тем же именем. Сшивка та
+    же, что у сборки (SMDService.replace_model_sections): скелет и материал
+    игровой детали, кости человека — на её кость (у гранаты Loch-n-Load это
+    weapon_bone_4, её двигает рука на перезарядке).
+
+    Returns: папка копии.
+    """
+    import shutil
+
+    from src.services.smd_service import SMDService
+
+    shutil.copytree(decomp_dir, out_dir, dirs_exist_ok=True)
+    on_disk = {os.path.splitext(f)[0].lower(): f for f in os.listdir(out_dir)
+               if f.lower().endswith('.smd')}
+    for base, user_smd in part_models.items():
+        name = on_disk.get(str(base).lower())
+        if not name or not (user_smd and os.path.isfile(user_smd)):
+            continue
+        target = os.path.join(out_dir, name)
+        try:
+            SMDService.replace_model_sections(user_smd, target, target)
+        except Exception as exc:   # noqa: BLE001 — в кадре останется игровая деталь
+            logger.warning(f"[3D] своя модель детали {name} не встала: {exc}")
+    return out_dir
+
+
 class Preview3DWorker(BaseWorker):
     """Готовит OBJ + текстуру для 3D Preview."""
 
@@ -105,6 +137,7 @@ class Preview3DWorker(BaseWorker):
         lang: str = 'en',
         parent=None,
         bodygroups: Optional[dict] = None,
+        part_models: Optional[dict] = None,
     ):
         super().__init__(parent)
         self.weapon_key        = weapon_key
@@ -112,6 +145,9 @@ class Preview3DWorker(BaseWorker):
         #: Выбранные варианты бодигрупп {имя группы: номер}: переключатель
         #: состояния в превью (разбитая бутылка). Пусто — как в игре по умолчанию.
         self.bodygroups: dict  = dict(bodygroups or {})
+        #: Своя геометрия деталей {имя SMD детали без .smd: SMD человека}:
+        #: снаряд в оружии своей модели (см. with_part_models).
+        self.part_models: dict = dict(part_models or {})
         #: Вид предмета: вместо разбросанных проверок «mode == 'hat'» и
         #: «mode in HAND_MODE_KEYS» (см. src/data/item_kinds.py)
         self.kind              = kind_of(mode)
@@ -149,6 +185,10 @@ class Preview3DWorker(BaseWorker):
                 if not self.isInterruptionRequested():
                     self.failed.emit(self._p['not_found'])
                 return
+            if self.part_models:
+                copy = with_part_models(os.path.dirname(smd_path), self.part_models,
+                                        os.path.join(self._preview_dir, 'model'))
+                smd_path = os.path.join(copy, os.path.basename(smd_path))
             # Сохраняем папку декомпиляции: нужна для QC-парсинга BLU текстур
             self._decomp_dir = os.path.dirname(smd_path)
             if self.kind.is_hat:
@@ -220,6 +260,7 @@ class Preview3DWorker(BaseWorker):
                 # Косметика в MDL лежит как автору было удобно; игра ставит её
                 # bonemerge на голову игрока — и превью так же.
                 on_player=self.kind.worn_on_player,
+                late_smd_paths=getattr(self, '_late_smds', None),
             )
             if not ok:
                 self.failed.emit(self._p['conv_error'])
@@ -759,6 +800,9 @@ class Preview3DWorker(BaseWorker):
         """
         directory = os.path.dirname(reference_smd_path)
         found = set(glob.glob(os.path.join(directory, "*_bodygroup.smd")))
+        #: Снаряд в оружии — в конце, «поздней» деталью (см. SmdToObjService
+        #: LATE_PREFIX): его куски нумеруются после кусков самой модели.
+        late: list = []
 
         # Части модели из QC. Берём вариант ПО УМОЛЧАНИЮ каждой бодигруппы
         # (либо выбранный переключателем): переключаемая группа (broken у
@@ -777,7 +821,13 @@ class Preview3DWorker(BaseWorker):
                          for _, variants in groups for v in variants if v}
                 found = {p for p in found
                          if os.path.normcase(os.path.abspath(p)) not in every}
-                found.update(ModelBuildService.chosen_body_smds(groups, self.bodygroups))
+                choice = ModelBuildService.preview_choice(groups, self.bodygroups)
+                found.update(ModelBuildService.chosen_body_smds(groups, choice))
+                for name, variants in groups:
+                    shown = ModelBuildService.projectile_variant(name, variants)
+                    if shown is not None and choice.get(name) == shown and variants[shown] in found:
+                        found.discard(variants[shown])
+                        late.append(variants[shown])
         except Exception as exc:
             logger.debug(f"[3D] Не удалось собрать part-SMD из QC: {exc}")
 
@@ -793,7 +843,8 @@ class Preview3DWorker(BaseWorker):
         # Тело шпиона: маска маскировки объявлена в QC как $bodygroup и иначе
         # попала бы в превью тела. Но у маски своя секция (режим spy_masks /
         # SPY_MASK_MODE_KEY), поэтому из тела её исключаем.
-        return sorted(self._strip_spy_disguise_mask(found, self.mode))
+        self._late_smds = late
+        return sorted(self._strip_spy_disguise_mask(found, self.mode)) + late
 
     def _swap_reference_for_choice(self, smd_path: str, bodygroup_smds: list) -> str:
         """

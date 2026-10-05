@@ -218,6 +218,10 @@ class AppSession:
         #: Пусто — как в игре по умолчанию (целая бутылка). Только показ: в
         #: мод уходят все варианты, игра переключает их сама.
         self._bodygroups: Dict[str, int] = {}
+        #: Что ждёт OBJ, который сейчас собирается (`_on_model_ready`): свой
+        #: материал своего снаряда, склейки частей после отмены. Номера
+        #: треугольников нового снаряда знает только новый OBJ.
+        self._after_model: List[Any] = []
         #: Гирлянда поверх оружия (праздничная версия / фестивайзер) — только
         #: показ, в сборку не идёт. Вид и предмет, для которого её включили;
         #: готовые гирлянды предмета, чтобы повторное включение было мгновенным;
@@ -383,6 +387,14 @@ class AppSession:
         # OBJ нужен и после показа: по нему считаются части модели, и номера
         # треугольников в нём те же, что вернёт вьювер по клику.
         self._obj_path = obj_path
+        # До события: страница по нему перечитывает показ, и материал своего
+        # снаряда должен в него уже попасть.
+        pending, self._after_model = self._after_model, []
+        for job in pending:
+            try:
+                job()
+            except Exception:      # noqa: BLE001 — кадр важнее доделки
+                logger.exception("доделка после загрузки модели не удалась")
         self._put('model_ready', obj=obj_path, texture=texture,
                   bounds={'cx': cx, 'cy': cy, 'cz': cz, 'scale': scale})
 
@@ -530,6 +542,7 @@ class AppSession:
         self.vpk_mod.stop()
         self._vpk_mod_path = None
         self._bodygroups = {}          # состояние — свойство показанной модели
+        self._after_model = []         # ждали модель прошлого предмета
         self._forget_decor()           # и гирлянда: у нового предмета своя
         # Собранные сцены принадлежали ПРОШЛОМУ предмету: и вид от первого
         # лица, и насмешка. Не погасив их, мы получили бы кадр чужого
@@ -1825,11 +1838,13 @@ class AppSession:
             hat_style_builds=(self._hat_style_builds(params.get('hat_classes'))
                               if mode == 'hat' else None),
             decor_builds=decor or None,
-            # Части-материалы: только у игровой модели (у своей геометрии и у
-            # мода из VPK номера треугольников превью — чужие).
+            # Своя модель снаряда в оружии: на игровой модели и на своей.
+            part_models=(dict(self.preview.part_models) or None
+                         if not self.preview.custom_vpk_mode else None),
+            # Части-материалы: у игровой и у своей модели (у мода из VPK
+            # номера треугольников превью — чужие).
             part_materials=(part_specs or None
-                            if not (self.preview.custom_smd_path
-                                    or self.preview.custom_vpk_mode) else None),
+                            if not self.preview.custom_vpk_mode else None),
             # Папка обхода sv_pure из настроек (console / vgui): без неё
             # сборка молча оставалась на умолчании console.
             bypass_method=self._bypass_method(),
@@ -1924,7 +1939,7 @@ class AppSession:
                 maps = self.preview.texture_maps.get(name) or {}
                 derive = any((m or {}).get('derive') for m in maps.values())
                 specs.append({'name': name, 'base': base, 'tris': list(e['tris']),
-                              'total': e.get('total'),
+                              'total': e.get('total'), 'late': e.get('late'),
                               'sources': list(e.get('sources') or []),
                               'image': image,
                               'image_blu': blu,
@@ -1954,6 +1969,8 @@ class AppSession:
             found.append('maps')
         if p.custom_smd_path:
             found.append('model')
+        if p.part_models:
+            found.append('part_models')       # своя модель снаряда в оружии
         if p.part_materials:
             found.append('part_materials')
         if t.force_team:
@@ -3133,6 +3150,7 @@ class AppSession:
             was_smd, obj, was_fit = p.custom_smd_path, p.custom_obj_path, p.custom_fit
             was_pano = p.textures.skybox_pano()
             was_decor = dict(p.decor_models)
+            was_parts = dict(p.part_models)
             painted = set(p.part_textures) | set(p.part_colors)
             p.forget_user_edits()
             # Своя модель уходит — кадр возвращается к игровой: с её кадрами
@@ -3167,10 +3185,20 @@ class AppSession:
             except mesh_import_service.MeshImportError as exc:
                 logger.warning(f"подгонка после отмены не запеклась: {exc}")
 
+        # Своя модель снаряда сменилась — кадр игровой модели заново (своя
+        # модель оружия и переход к игровой собирают его сами, ниже).
+        shell_moved = p.part_models != was_parts and not to_game and not p.custom_smd_path
         # Склейки частей: старые файлы уже могли уйти с диска (см.
         # `_drop_old_composites`), а без части — вернуть материалу основу.
-        self.parts.recompose_slots(painted)
+        # Сменился снаряд — мазки снимка лежат на треугольниках ЕГО снаряда, а
+        # в кадре пока прежний: собираем, когда приедет модель.
+        if shell_moved:
+            self._after_model.append(lambda: self._recompose_after_undo(painted, pos))
+        else:
+            self.parts.recompose_slots(painted)
         self._reshow_decor(was_decor, lang)
+        if shell_moved:
+            self._reload_item(lang)
 
         if mode == SKYBOX_MODE:
             pano = p.textures.skybox_pano()
@@ -3185,6 +3213,15 @@ class AppSession:
             self._edit_history[pos] = self._edit_snapshot()
         self._autosave()
         return {**self.view_state(), **self.edit_history()}
+
+    def _recompose_after_undo(self, slots, pos: int) -> None:
+        """Склейки частей шага `pos` по приехавшей модели его снаряда; снимок
+        этого шага узнаёт их новые имена (как в `undo_edits`)."""
+        self.parts.recompose_slots(slots)
+        with self._lock:
+            if self._edit_pos == pos and pos < len(self._edit_history):
+                self._edit_history[pos] = self._edit_snapshot()
+        self._autosave(step=False)
 
     def _item_id(self) -> Dict[str, Any]:
         """
@@ -4026,8 +4063,12 @@ class AppSession:
         items = get_items_game_path(paths['root']) if 'error' not in paths else None
         if not items:
             return []
+        from src.data.items_game_kv import ItemsGame
+        game = ItemsGame.load(items)
+        if game is None:
+            return []
         loc = parse_localization(paths['root'], 'russian' if lang == 'ru' else 'english')
-        rows = paints.parse(items.read_text(encoding='utf-8', errors='replace'), loc)
+        rows = paints.parse(game, loc)
         hexed = [{**p, 'red': '#%02x%02x%02x' % p['red'], 'blu': '#%02x%02x%02x' % p['blu']}
                  for p in rows]
         self._paints_cache = (lang, hexed)
@@ -4107,14 +4148,25 @@ class AppSession:
         qc = decompile_cache.find_cached_qc_for_weapon(key)
         if not qc:
             return []
+        own = {part.lower() for part in self.preview.part_models}
         out = []
         for name, variants in ModelBuildService.extract_bodygroups(qc):
             if len(variants) < 2:
                 continue
+            # Снаряд в оружии (граната, ракета, стрела): в кадре он виден,
+            # пока его не скрыли, — его правят; своя модель меняет его.
+            shown = ModelBuildService.projectile_variant(name, variants)
+            part = (os.path.splitext(os.path.basename(variants[shown]))[0].lower()
+                    if shown is not None else '')
             out.append({
                 'name': name,
-                'chosen': int(self._bodygroups.get(name, 0)),
-                'variants': [_variant_label(v, key) for v in variants],
+                'chosen': int(self._bodygroups.get(name, shown or 0)),
+                'variants': ([('виден' if v else 'скрыт') for v in variants]
+                             if shown is not None
+                             else [_variant_label(v, key) for v in variants]),
+                'default': shown or 0,
+                'projectile': shown is not None,
+                'custom': bool(part and part in own),
             })
         return out
 
@@ -4122,22 +4174,151 @@ class AppSession:
                       lang: str = 'ru') -> Dict[str, Any]:
         """Показывает вариант бодигруппы: модель собирается заново тем же
         воркером (декомпиляция в кэше — это секунда), правки остаются."""
-        paths = self.tf2_paths()
-        if 'error' in paths:
-            return paths
-        known = {g['name']: len(g['variants']) for g in self.bodygroups()}
-        if name not in known or not 0 <= int(variant) < known[name]:
+        known = {g['name']: g for g in self.bodygroups()}
+        if name not in known or not 0 <= int(variant) < len(known[name]['variants']):
             return {'error': 'Такого состояния у модели нет'}
-        if int(variant):
+        # Записан только выбор, отличный от показа по умолчанию: у снаряда
+        # это «скрыт», у остальных — любой вариант, кроме нулевого.
+        if int(variant) != known[name]['default']:
             self._bodygroups[name] = int(variant)
         else:
             self._bodygroups.pop(name, None)
+        return self._reload_item(lang)
+
+    def _reload_item(self, lang: str = 'ru') -> Dict[str, Any]:
+        """Игровая модель предмета заново, с выбранными состояниями и своими
+        деталями: декомпиляция в кэше — секунда, правки остаются."""
+        paths = self.tf2_paths()
+        if 'error' in paths:
+            return paths
         key, mode = self.preview.weapon_key, getattr(self, '_mode', '')
         self.viewmodel.stop()             # сцена в руках собрана под прежний вид
         self.controller.load_game_model(
             key, mode, paths['misc_vpk'], paths['textures_vpk'], lang=lang,
             bodygroups=self._bodygroups)
         return self.view_state()
+
+    # ── Снаряд в оружии: своя модель ──────────────────────────────────────── #
+
+    def _projectile_smd(self, group: str) -> Optional[str]:
+        """SMD снаряда группы `group` показанной игровой модели (или None)."""
+        from src.services import decompile_cache
+        from src.services.model_build_service import ModelBuildService
+
+        key = self.preview.weapon_key
+        qc = decompile_cache.find_cached_qc_for_weapon(key) if key else None
+        for name, variants in (ModelBuildService.extract_bodygroups(qc) if qc else ()):
+            shown = ModelBuildService.projectile_variant(name, variants)
+            if name == group and shown is not None:
+                return variants[shown]
+        return None
+
+    def load_part_model(self, group: str = '', path: str = '',
+                        lang: str = 'ru') -> Dict[str, Any]:
+        """
+        Своя модель снаряда, заряженного в оружие (граната Loch-n-Load,
+        ракета сигнальной, стрела лука).
+
+        Снаряд — деталь той же модели, на своей кости: игра двигает её рукой
+        при перезарядке. Скелет и материал остаются игровыми, треугольники —
+        свои (with_part_models в превью, _apply_model_replacement в сборке).
+        SMD встаёт как его выставили в редакторе, по развёртке оружия. OBJ/GLB
+        встают по габаритам игрового снаряда (fit_into), а развёртка у них
+        своя — им свой материал с картинкой из файла, когда приедет модель
+        (PartsEditor.own_projectile). Покраска прежнего снаряда уходит.
+        """
+        from src.services import mesh_import_service
+
+        if self.preview.custom_smd_path or self.preview.custom_vpk_mode:
+            return {'error': 'Снаряд меняется на игровой модели оружия'}
+        part = self._projectile_smd(group)
+        if not part or not os.path.isfile(part):
+            return {'error': 'У этого предмета нет такого снаряда'}
+        if not path or not os.path.isfile(path):
+            return {'error': 'Файл модели не найден'}
+        import tempfile
+        try:
+            # Своя папка на загрузку: шаг отмены держит путь прежней модели.
+            smd, texture, simplified = _part_smd(
+                path, part, tempfile.mkdtemp(prefix='part_', dir=self._work_dir()))
+        except mesh_import_service.MeshImportError as exc:
+            return {'error': str(exc)}
+        base = os.path.splitext(os.path.basename(part))[0]
+        self.parts.forget_projectile(part)
+        with self._lock:
+            self.preview.part_models[base] = smd
+            self._bodygroups.pop(group, None)      # своя модель — сразу в кадр
+            if not path.lower().endswith('.smd'):
+                self._after_model.append(
+                    lambda: self._own_projectile(group, base, smd, texture, lang))
+        self._autosave()
+        logger.info(f"своя модель снаряда {group}: {smd}")
+        # Что приложение сделало само — странице для строки состояния.
+        done = {'simplified': simplified, 'texture': bool(texture)}
+        return {**self._reload_item(lang), **{k: v for k, v in done.items() if v}}
+
+    def drop_part_model(self, group: str = '', lang: str = 'ru') -> Dict[str, Any]:
+        """Возвращает снаряду группы `group` игровую модель (и его покраску —
+        к нулю: она была по треугольникам своей)."""
+        part = self._projectile_smd(group)
+        base = os.path.splitext(os.path.basename(part))[0].lower() if part else ''
+        if not any(k.lower() == base for k in self.preview.part_models):
+            return self.view_state()
+        self.parts.forget_projectile(part)
+        with self._lock:
+            for k in [k for k in self.preview.part_models if k.lower() == base]:
+                self.preview.part_models.pop(k)
+        self._autosave()
+        return self._reload_item(lang)
+
+    def _own_projectile(self, group: str, base: str, smd: str,
+                        texture: Optional[str], lang: str) -> None:
+        """Приехал OBJ со своим снарядом из OBJ/GLB: свой материал ему (тем же
+        шагом отмены, что и загрузка) и VMT без карт развёртки оружия."""
+        if self.preview.part_models.get(base) != smd:
+            return                  # снаряд уже другой (отмена, новая загрузка)
+        if group in self._bodygroups:
+            # Снаряд скрыли, пока ехала модель: его треугольников в кадре нет.
+            # Материал — когда его покажут снова.
+            self._after_model.append(
+                lambda: self._own_projectile(group, base, smd, texture, lang))
+            return
+        name = self.parts.own_projectile(texture)
+        if not name:
+            return
+        self._strip_uv_maps(name, lang)
+        with self._lock:
+            # ponytail: обычно это шаг загрузки. Если пока ехал кадр, успели
+            # что-то поправить, — шаг той правки, а снимок загрузки остаётся без
+            # материала, и Ctrl+Z к нему вернёт снаряд без него. Чинить —
+            # дописывать материал во все снимки от загрузки до текущего.
+            if self._edit_history:
+                self._edit_history[self._edit_pos] = self._edit_snapshot()
+        self._autosave(step=False)
+
+    def _strip_uv_maps(self, name: str, lang: str) -> None:
+        """Убирает из VMT материала `name` текстуры, лежащие по развёртке
+        исходного (карта нормалей Пушки и Детонатора): у своей модели снаряда
+        развёртка другая, и они легли бы на неё пятнами."""
+        from src.services import part_materials as pm
+
+        got = self.open_vmt(name, lang)
+        if 'error' in got:
+            return
+        clean = pm.without_uv_maps(got['content'])
+        if clean != got['content']:
+            saved = self.save_vmt(name, clean, got.get('original') or got['content'], lang)
+            if 'error' in saved:
+                logger.warning(f"VMT своего снаряда {name} не поправлен: {saved['error']}")
+
+    def _shape_changed(self) -> bool:
+        """Выбран вариант, меняющий саму модель (разбитая бутылка), а не
+        только снаряд в оружии: он идёт в конце материала, и номера
+        треугольников оружия от него не зависят."""
+        if not self._bodygroups:
+            return False
+        shells = {g['name'] for g in self.bodygroups() if g['projectile']}
+        return any(name not in shells for name in self._bodygroups)
 
     def set_australium(self, active: bool) -> Dict[str, Any]:
         """Включает или гасит вариант Australium."""
@@ -4550,6 +4731,48 @@ def session() -> AppSession:
     if _session is None:
         _session = AppSession()
     return _session
+
+
+def _part_smd(path: str, part_smd: str, out_dir: str):
+    """(SMD в `out_dir`, картинка или None, (было, стало) треугольников или
+    None) своей модели снаряда. SMD — копией как есть: загрузки лежат под
+    постоянным именем, и следующий файл с тем же именем подменил бы снаряд в
+    работе. OBJ/GLB — по габаритам игрового снаряда `part_smd`, с лимитами и
+    упрощением своей модели; картинка — у материала, где больше всего
+    треугольников (все материалы файла сливаются в один).
+
+    Raises:
+        mesh_import_service.MeshImportError: модель не читается или не влезет.
+    """
+    import shutil
+
+    from src.services import mesh_import_service
+
+    if path.lower().endswith('.smd'):
+        try:
+            with open(path, encoding='utf-8') as f:
+                ok = 'triangles' in f.read()
+        except (OSError, UnicodeDecodeError):
+            ok = False
+        if not ok:
+            raise mesh_import_service.MeshImportError('SMD не читается: нет треугольников')
+        return shutil.copy2(path, os.path.join(out_dir, os.path.basename(path))), None, None
+    mesh = mesh_import_service.load_mesh(path)
+    simplified = None
+    if mesh_import_service.over_limits(mesh):
+        before = mesh.triangle_count
+        mesh = mesh_import_service.simplify(mesh)
+        simplified = (before, mesh.triangle_count)
+    problem = mesh_import_service.check_limits(mesh)
+    if problem:
+        raise mesh_import_service.MeshImportError(problem)
+    fit = mesh_import_service.fit_into(mesh.corners[:, :3],
+                                       mesh_import_service.smd_points(part_smd))
+    out = os.path.join(out_dir, os.path.splitext(os.path.basename(path))[0] + '.smd')
+    textured = [(count, mesh.textures[name]) for name, _, count in mesh.groups
+                if mesh.textures.get(name)]
+    texture = max(textured)[1] if textured else None
+    return mesh_import_service.write_smd(mesh, out, fit), texture, simplified
 
 
 def _garland_smd(path: str):

@@ -60,6 +60,10 @@ class BuildRequest:
     # [{name, base, tris, sources}] — сборка переносит их треугольники в SMD
     # под новым именем и пишет им VMT по образцу исходного материала.
     part_materials: Optional[list] = None
+    # Своя геометрия деталей модели (снаряд в оружии): {имя SMD детали
+    # без .smd: SMD человека}. Сборка подставляет её без вопроса, и
+    # без своей модели оружия тоже (VpkModelPipeline._apply_model_replacement).
+    part_models: Optional[Dict[str, str]] = None
     panel_extra_textures: Optional[Dict[str, Any]] = None
     # Материалы «Прочего» на странице: убер/зомби-варианты из $texturegroup, у
     # которых нашлась игровая текстура. Что человек видел карточкой — про то

@@ -19,6 +19,27 @@
 _OVERRIDABLE_KEYS = ('size', 'format', 'flags', 'options')
 
 
+def own_settings(settings: dict, name: str, main: str = ''):
+    """
+    Свои настройки материала `name` из записанных по карточкам (или None).
+
+    Карточка и материал модели называются не всегда одинаково: у своей
+    модели карточка `Material.001`, а studiomdl собирает её как
+    `material_001`; у модели с одним материалом имени главного страница не
+    знает и хранит его настройки под пустым ключом (`main` — имя главного).
+    """
+    from src.services.part_materials import model_name
+
+    settings = settings or {}
+    own = settings.get(name)
+    if own is None:
+        own = next((v for k, v in settings.items()
+                    if k and model_name(k) == model_name(name)), None)
+    if own is None and name and name == main:
+        own = settings.get('')
+    return own
+
+
 def effective_settings(global_settings: dict, override: dict = None) -> dict:
     """
     Возвращает эффективные настройки материала: глобальные, переопределённые

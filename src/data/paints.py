@@ -21,12 +21,14 @@ def _rgb(value: str) -> Tuple[int, int, int]:
     return (n >> 16) & 255, (n >> 8) & 255, n & 255
 
 
-def parse(items_game_text: str, loc: Dict[str, str]) -> List[dict]:
+def parse(items_game, loc: Dict[str, str]) -> List[dict]:
     """
     Краски: [{key, name, red, blu}], цвета — (r, g, b); у обычной краски
-    red == blu. Порядок — как в файле (порядок выпуска).
+    red == blu. Порядок — как в файле (порядок выпуска). `items_game` —
+    текст файла или готовый разбор (ItemsGame.load).
     """
-    game = kv.ItemsGame.parse(items_game_text)
+    game = (items_game if isinstance(items_game, kv.ItemsGame)
+            else kv.ItemsGame.parse(items_game))
     out: List[dict] = []
     for defindex, block in game.items:
         if 'paint_can' not in (kv.flat_value(block, 'prefab') or ''):

@@ -34,6 +34,18 @@ class TextureBuildContextTests(unittest.TestCase):
         m_anim.assert_called_once()
         m_vtf.assert_not_called()
 
+    def test_material_gets_its_card_settings(self):
+        # Голова тела и «Прочее» собирались общими настройками, хотя у
+        # карточки стояли свои.
+        ctx = self._ctx()
+        ctx.settings_for = lambda name: (
+            ([128, 128], "DXT1", ["NOMIP"], {}) if name == "head" else ((512, 512), "DXT5", [], {}))
+        head = ctx.for_material("head")
+        self.assertEqual((head.size, head.format_type, head.flags), ((128, 128), "DXT1", ["NOMIP"]))
+        self.assertEqual(ctx.for_material("body").format_type, "DXT5")
+        plain = self._ctx()                  # своих настроек нет — общие
+        self.assertIs(plain.for_material("head"), plain)
+
     def test_plain_creates_vtf(self):
         ctx = self._ctx()
         with patch("src.services.texture_service.TextureService.is_animated_image", return_value=False), \

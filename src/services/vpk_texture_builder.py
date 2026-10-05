@@ -255,18 +255,21 @@ class VpkTextureBuilder:
         """
         if not material_maps:
             return
+        from src.services.part_materials import model_name
         panel_extra_textures = panel_extra_textures or {}
         for mat, maps in material_maps.items():
             if not maps:
                 continue
             # Пустой ключ '' = главный материал (UI не всегда знает texture_filename).
-            if mat in ('', texture_filename):
+            # Имя карточки — к имени в модели (`model_name`): у своей модели
+            # «Material.001» собран как material_001, и VMT лежит под ним.
+            if mat == '' or model_name(mat) == model_name(texture_filename):
                 real_mat = texture_filename
                 mat_vmt = vmt_path
                 mat_base = base_image_path
             else:
-                real_mat = mat
-                mat_vmt = vtf_output_path / f"{mat}.vmt"
+                real_mat = model_name(mat)
+                mat_vmt = vtf_output_path / f"{real_mat}.vmt"
                 mat_base = panel_extra_textures.get(mat)
                 if not mat_vmt.exists():
                     logger.warning(f"Карты материала '{mat}': VMT не найден ({mat_vmt.name}), пропуск")
@@ -923,8 +926,14 @@ class VpkTextureBuilder:
 
     @staticmethod
     def _find_original_vmt(name, ctx, slots):
-        """Родной VMT материала по путям $cdmaterials модели (или None)."""
-        for _cd in (slots.original_cdmaterials_paths or []):
+        """Родной VMT материала по путям $cdmaterials модели (или None).
+
+        Пути разрешённые, как у поиска VTF (_get_original_vtf_bytes): у тела
+        шпиона убер-эффект invulnfx лежит по `..\\..\\effects` рядом с
+        `models\\player\\spy`, и по сырому пути его VMT не находился.
+        """
+        for _cd in qc_skin_parser.resolve_cdmaterials(
+                list(slots.original_cdmaterials_paths or [])):
             found = VpkTextureBuilder._extract_original_vmt(
                 _cd, name, slots.tf2_textures_vpk, slots.tf2_misc_vpk,
                 ctx.decompile_dir)
@@ -933,14 +942,165 @@ class VpkTextureBuilder:
         return None
 
     @staticmethod
+    def _game_texture(name, ctx, slots) -> Optional[str]:
+        """$basetexture родного VMT материала, если такая текстура есть в игре
+        (путь без materials/ и .vtf); иначе None."""
+        from src.services.tf2_vpk_extract_service import _open_vpk_cached
+
+        found = VpkTextureBuilder._find_original_vmt(name, ctx, slots)
+        bt = VpkTextureBuilder._read_vmt_basetexture(found) if found else None
+        if not bt:
+            return None
+        bt = bt.replace('\\', '/').strip().strip('/')
+        want = f"materials/{bt.lower()}.vtf"
+        for vpk_path in filter(None, (slots.tf2_textures_vpk, slots.tf2_misc_vpk)):
+            try:
+                pak = _open_vpk_cached(vpk_path) if os.path.exists(vpk_path) else None
+            except Exception:   # noqa: BLE001 — нет архива: проверим следующий
+                pak = None
+            if pak is not None and want in pak:
+                return bt
+        return None
+
+    @staticmethod
+    def _basetexture_fps(vmt_path) -> Optional[float]:
+        """Частота прокси AnimatedTexture, который листает $basetexture (или
+        None). Только он: у тел есть и прокси огня по $detail."""
+        from src.services import vmt_parse
+
+        try:
+            text = Path(vmt_path).read_text(encoding='utf-8', errors='replace')
+        except OSError:
+            return None
+        for node in vmt_parse.blocks_named(vmt_parse.parse(text).root, "animatedtexture"):
+            var = str(node.get("animatedtexturevar") or "").strip().lstrip("$").lower()
+            if var == "basetexture":
+                try:
+                    return float(node.get("animatedtextureframerate"))
+                except (TypeError, ValueError):
+                    return None
+        return None
+
+    @staticmethod
+    def _apply_edited_vmt(name, vmt_path, orig_vmt, slots, own_texture: bool,
+                          strip_paints: bool = False) -> None:
+        """
+        Правка VMT из редактора поверх того, что записала сборка.
+
+        Доп. материалы (голова тела, «Прочее», второй материал шапки) правку
+        не брали вовсе: редактор её сохранял, а в мод шёл игровой VMT. Правило
+        то же, что у главного (_write_main_vmt): own_texture — VTF материала
+        лежит в моде, и $basetexture правки переводится на него, если человек
+        не выбрал в правке свой. strip_paints — шапка без «Красок из игры»:
+        прокси краски снимаются и здесь, как у главного, иначе второй материал
+        красился бы, а главный нет.
+        """
+        from src.services.edited_vmt_service import EditedVMTService
+
+        edited = EditedVMTService.get_edited_vmt(name)
+        if edited and os.path.exists(edited):
+            copy_file_safe(edited, vmt_path)
+            if own_texture and not VpkTextureBuilder._basetexture_chosen(edited, orig_vmt):
+                VMTService.update_vmt_basetexture_path(
+                    str(vmt_path), slots.patched_cdmaterials_path, name)
+            logger.info(f"Доп. материал '{name}': отредактированный VMT")
+        if strip_paints and Path(vmt_path).exists():
+            VMTService.remove_paint_proxies(str(vmt_path))
+
+    @staticmethod
+    def _write_variant_original(vmt_path, orig_vmt, name, slots=None, ctx=None,
+                                strip_paints: bool = False) -> None:
+        """Служебный вариант (убер/зомби) игровым: его родной VMT смотрит на
+        игровую текстуру, и своей копии VTF не нужно. Родного VMT нет —
+        пишем, как служебные без карточек (_write_blacklisted_materials):
+        материал под console-путём обязан быть, иначе он фиолетовый."""
+        if orig_vmt:
+            copy_file_safe(orig_vmt, vmt_path)
+            logger.info(f"Оригинал из игры (только VMT): {name}")
+        elif slots is not None and ctx is not None:
+            VpkTextureBuilder._write_blacklisted_materials([name], {}, ctx, slots)
+        if slots is not None:
+            VpkTextureBuilder._apply_edited_vmt(
+                name, vmt_path, orig_vmt, slots, False, strip_paints)
+
+    @staticmethod
+    def _follow_shared_textures(ctx, slots) -> None:
+        """
+        Служебный материал, который в игре рисуется ТОЙ ЖЕ текстурой, что и
+        собранный материал мода, следует за ней.
+
+        У хэви руки (hvyweapon_red_sheen) в игре смотрят на текстуру тела
+        (hvyweapon_red). Служебный материал уходил в мод игровым VMT, и со
+        своей текстурой тела руки оставались стоковыми. Сравниваем $basetexture
+        родных VMT: смотрящий в игру VMT служебного материала переводим на VTF
+        материала, собранного из картинки человека. Только служебные: у
+        материала части синяя строка без своей картинки игровая нарочно.
+        """
+        from src.data.material_filter import is_editable_material
+
+        def norm(path):
+            path = (path or '').replace('\\', '/').strip().strip('/').lower()
+            path = path[len('materials/'):] if path.startswith('materials/') else path
+            return path[:-4] if path.endswith('.vtf') else path
+
+        own = {}
+        for vtf in sorted(slots.vtf_output_path.glob('*.vtf')):
+            if slots.own_vtf(vtf.stem) is None:
+                continue
+            orig = VpkTextureBuilder._find_original_vmt(vtf.stem, ctx, slots)
+            game = norm(VpkTextureBuilder._read_vmt_basetexture(orig)) if orig else ''
+            if game:
+                own.setdefault(game, vtf.stem)
+        if not own:
+            return
+        for vmt in sorted(slots.vtf_output_path.glob('*.vmt')):
+            if is_editable_material(vmt.stem) or slots.vtf(vmt.stem).exists():
+                continue
+            target = own.get(norm(VpkTextureBuilder._read_vmt_basetexture(str(vmt))))
+            if target:
+                VMTService.update_vmt_basetexture_path(
+                    str(vmt), slots.patched_cdmaterials_path, target)
+                logger.info(f"{vmt.stem}: общая с {target} текстура — своя из мода")
+
+    @staticmethod
+    def _finish_variant_copies(deferred, ctx, slots, strip_paints: bool = False) -> None:
+        """«Скопировать главную» у вариантов, чья пара собирается позже их
+        (синяя — в BLU-цикле): копия её VTF под родным VMT варианта. Пара
+        осталась игровой (нет своей картинки) — вариант тоже игровой."""
+        for name, pair in deferred or ():
+            orig = VpkTextureBuilder._find_original_vmt(name, ctx, slots)
+            source = slots.own_vtf(pair)
+            if source is None:
+                VpkTextureBuilder._write_variant_original(
+                    slots.vmt(name), orig, name, slots, ctx, strip_paints)
+                continue
+            copy_file_safe(source, slots.vtf(name))
+            VpkTextureBuilder._write_material_vmt(
+                slots.vmt(name), Path(orig) if orig else slots.vmt_path,
+                slots.patched_cdmaterials_path, name)
+            VpkTextureBuilder._apply_edited_vmt(
+                name, slots.vmt(name), orig, slots, True, strip_paints)
+            # Анимированная пара (гифка) листается и в убере.
+            fps = VpkTextureBuilder._basetexture_fps(slots.vmt(pair))
+            if fps:
+                VMTService.enable_animated_basetexture(str(slots.vmt(name)), fps)
+            logger.info(f"Копия текстуры пары: {name}.vtf ← {source.name}")
+
+    @staticmethod
     def _build_extra_material_textures(
         extra_materials, weapon_key, ctx, slots, tex,
         extra_texture_callback, animated_fps,
+        tg_rows=None, deferred: Optional[list] = None, strip_paints: bool = False,
     ) -> dict:
         """
         Создаёт VTF+VMT для доп. материалов модели (столбцы 1+ RED-строки
         $texturegroup: shell, scope и т.п.). На каждый материал спрашивает
         текстуру через callback, либо берёт оригинал из игры, либо пропускает.
+
+        tg_rows — строки $texturegroup: по ним «Скопировать главную» у
+        варианта из «Прочего» находит его пару (qc_skin_parser.variant_base).
+        Пару, которой ещё нет, вариант ждёт в `deferred` (_finish_variant_copies).
+        strip_paints — шапка без «Красок из игры» (см. _apply_edited_vmt).
 
         Returns:
             {material_name: vtf_path} — для последующего копирования в BLU.
@@ -956,6 +1116,7 @@ class VpkTextureBuilder:
 
             extra_vtf_path = slots.vtf(extra_mat_name)
             extra_vmt_path = slots.vmt(extra_mat_name)
+            _from_pair, _pair_fps = False, None
 
             # Спрашиваем пользователя — нужна ли отдельная текстура для этого материала
             extra_image_path = extra_texture_callback(
@@ -979,8 +1140,8 @@ class VpkTextureBuilder:
                 # была бы мёртвым весом (у зомби-кожи это по 700 КБ на штуку).
                 # Обычным доп. материалам VTF нужен: с него BLU-цикл снимает
                 # RED-вариант, когда синего в игре нет.
-                copy_file_safe(_orig_vmt, extra_vmt_path)
-                logger.info(f"Оригинал из игры (только VMT): {extra_mat_name}")
+                VpkTextureBuilder._write_variant_original(
+                    extra_vmt_path, _orig_vmt, extra_mat_name, slots, ctx, strip_paints)
                 continue
             if extra_image_path == EXTRA_TEX_USE_GAME_ORIGINAL:
                 logger.info(f"Извлекаем оригинал из игры для: {extra_mat_name}")
@@ -1012,29 +1173,52 @@ class VpkTextureBuilder:
                 if _game_vtf:
                     with open(extra_vtf_path, "wb") as _f:
                         _f.write(_game_vtf)
+                    slots.game_copies.add(extra_mat_name.lower())
                     # VMT: родной (сохраняет шейдер/детейл) с $basetexture,
                     # перенаправленным на наш console-VTF.
                     _base = Path(_orig_vmt) if _orig_vmt else slots.vmt_path
                     VpkTextureBuilder._write_material_vmt(
                         extra_vmt_path, _base, slots.patched_cdmaterials_path,
                         extra_mat_name)
+                    VpkTextureBuilder._apply_edited_vmt(
+                        extra_mat_name, extra_vmt_path, _orig_vmt, slots, True, strip_paints)
                     extra_materials_vtf_paths[extra_mat_name] = extra_vtf_path
                     logger.info(f"Оригинал из игры: {extra_mat_name} (VTF+VMT)")
                     continue
                 if _orig_vmt:
                     # Текстуру не нашли (глаза/зомби — абсолютные shared
                     # пути): копируем VMT как есть, ссылки сами найдут.
-                    copy_file_safe(_orig_vmt, extra_vmt_path)
-                    logger.info(f"Оригинал из игры (VMT абс.): {extra_mat_name}")
+                    VpkTextureBuilder._write_variant_original(
+                        extra_vmt_path, _orig_vmt, extra_mat_name, slots, ctx, strip_paints)
                     continue
                 # Совсем ничего — НЕ подменяем текстурой тела.
                 extra_image_path = None
             elif extra_image_path == EXTRA_TEX_USE_MAIN:
                 # «Скопировать главную»: тот же VTF, что у основного материала.
                 _main_vtf = slots.vmt_path.with_suffix('.vtf')
+                if not _is_edit_x(extra_mat_name):
+                    # Убер/зомби из «Прочего»: «главная» для него — материал,
+                    # чьё место он занимает в скине (у головы — голова, у
+                    # синего — синий). Текстура тела на голове в убере была
+                    # кашей, а глазам копировать нечего: они игровые. Пара
+                    # осталась игровой — вариант тоже игровой.
+                    _pair = qc_skin_parser.variant_base(tg_rows or [], extra_mat_name)
+                    if _pair and deferred is not None and not slots.vtf(_pair).exists():
+                        # Пару ещё не собрали (синюю пишет BLU-цикл позже).
+                        deferred.append((extra_mat_name, _pair))
+                        continue
+                    _main_vtf = slots.own_vtf(_pair) if _pair else None
+                    if _main_vtf is None:
+                        VpkTextureBuilder._write_variant_original(
+                            extra_vmt_path, _orig_vmt, extra_mat_name, slots, ctx,
+                            strip_paints)
+                        continue
+                    # Анимированная пара листается и в варианте — со своей частотой.
+                    _from_pair = True
+                    _pair_fps = VpkTextureBuilder._basetexture_fps(slots.vmt(_pair))
                 if _main_vtf.exists():
                     copy_file_safe(_main_vtf, extra_vtf_path)
-                    logger.info(f"Копия главной текстуры: {extra_mat_name}.vtf")
+                    logger.info(f"Копия главной текстуры: {extra_mat_name}.vtf ← {_main_vtf.name}")
                 extra_image_path = None
 
             if extra_image_path and not os.path.isfile(extra_image_path):
@@ -1045,8 +1229,10 @@ class VpkTextureBuilder:
             if extra_image_path and os.path.isfile(extra_image_path):
                 # Пользователь предоставил отдельное изображение для этого материала
                 logger.info(f"Используем отдельное изображение для {extra_mat_name}: {extra_image_path}")
+                # Настройки VTF — своей карточки (разрешение, формат, флаги).
+                mtex = tex.for_material(extra_mat_name)
 
-                if tex.custom_vtf_path or extra_image_path.lower().endswith('.vtf'):
+                if mtex.custom_vtf_path or extra_image_path.lower().endswith('.vtf'):
                     # Пользователь загрузил готовый VTF (глобально или в эту
                     # карточку) — копируем как есть, без переконвертации.
                     copy_file_safe(extra_image_path, extra_vtf_path)
@@ -1054,19 +1240,19 @@ class VpkTextureBuilder:
                     # drop_normal — как и в статичной ветке ниже: доп. материалы
                     # normal map не получают (иначе бамп уехал бы в базовую текстуру).
                     vtf_flags_extra, merged_extra = TextureService.resolve_vtf_flags_and_options(
-                        tex.flags, tex.vtf_options, drop_normal=True)
+                        mtex.flags, mtex.vtf_options, drop_normal=True)
                     extra_animated_fps = TextureService.create_animated_vtf(
                         extra_image_path, str(extra_vtf_path),
-                        tex.size, tex.format_type, vtf_flags_extra, merged_extra
+                        mtex.size, mtex.format_type, vtf_flags_extra, merged_extra
                     )
                 else:
                     extra_temp_png = slots.vtf_output_path / f"{extra_mat_name}.png"
-                    TextureService.process_image(extra_image_path, extra_temp_png, tex.size)
+                    TextureService.process_image(extra_image_path, extra_temp_png, mtex.size)
                     vtf_flags_extra, merged_extra = TextureService.resolve_vtf_flags_and_options(
-                        tex.flags, tex.vtf_options, drop_normal=True)
+                        mtex.flags, mtex.vtf_options, drop_normal=True)
                     TextureService.create_vtf(
                         str(extra_temp_png), str(slots.vtf_output_path),
-                        tex.format_type, vtf_flags_extra, merged_extra)
+                        mtex.format_type, vtf_flags_extra, merged_extra)
                     if extra_temp_png.exists():
                         extra_temp_png.unlink()
             else:
@@ -1088,12 +1274,17 @@ class VpkTextureBuilder:
             VpkTextureBuilder._write_material_vmt(
                 extra_vmt_path, _base, slots.patched_cdmaterials_path,
                 extra_mat_name)
+            VpkTextureBuilder._apply_edited_vmt(
+                extra_mat_name, extra_vmt_path, _orig_vmt, slots, True, strip_paints)
 
             # Если пользователь загрузил свою extra-текстуру — используем её FPS.
-            # Если extra_image не было (скопирована основная VTF) — используем FPS основной.
+            # Если extra_image не было (скопирована основная VTF) — используем FPS основной,
+            # у варианта из «Прочего» — FPS его пары (её VTF и скопирован).
             # Если extra_image статична — не анимируем extra VMT вообще.
             if extra_image_path and os.path.isfile(extra_image_path):
                 _extra_fps = extra_animated_fps
+            elif _from_pair:
+                _extra_fps = _pair_fps
             else:
                 _extra_fps = animated_fps
             if _extra_fps:
@@ -1243,9 +1434,10 @@ class VpkTextureBuilder:
                         copy_file_safe(_sh_src, _sh_vtf)
                     else:
                         _sh_png = slots.vtf_output_path / f"{_new_name}.png"
-                        TextureService.process_image(_sh_src, _sh_png, tex.size)
-                        _vf, _vo = TextureService.resolve_vtf_flags_and_options(tex.flags, tex.vtf_options, drop_normal=True)
-                        TextureService.create_vtf(str(_sh_png), str(slots.vtf_output_path), tex.format_type, _vf, _vo)
+                        _mt = tex.for_material(_orig_name)   # настройки карточки плеч
+                        TextureService.process_image(_sh_src, _sh_png, _mt.size)
+                        _vf, _vo = TextureService.resolve_vtf_flags_and_options(_mt.flags, _mt.vtf_options, drop_normal=True)
+                        TextureService.create_vtf(str(_sh_png), str(slots.vtf_output_path), _mt.format_type, _vf, _vo)
                         if _sh_png.exists():
                             _sh_png.unlink()
                 else:
@@ -1329,16 +1521,20 @@ class VpkTextureBuilder:
                         if _game_vtf:
                             with open(_variant_vtf_path, "wb") as _f:
                                 _f.write(_game_vtf)
+                            slots.game_copies.add(blu_tex_name.lower())
                         else:
                             _main_vtf = slots.vtf_output_path / vtf_filename
                             if _main_vtf.exists():
                                 copy_file_safe(_main_vtf, _variant_vtf_path)
+                                if texture_filename.lower() in slots.game_copies:
+                                    slots.game_copies.add(blu_tex_name.lower())
                         _variant_img = None  # VTF на месте, пропускаем блок ниже
                     if _variant_img == EXTRA_TEX_USE_MAIN or (
                             _variant_img and not os.path.isfile(_variant_img)):
                         _variant_img = None   # ниже — копия основной
                     if _variant_img:
-                        tex.render_user_image_vtf(_variant_img, _variant_vtf_path, f"{blu_tex_name}.png")
+                        tex.for_material(blu_tex_name).render_user_image_vtf(
+                            _variant_img, _variant_vtf_path, f"{blu_tex_name}.png")
                         logger.info(f"Создан VTF варианта (отд. изображение): {blu_tex_name}.vtf")
                     elif not _variant_vtf_path.exists():
                         # Пользователь отказался или нет callback — копируем основную
@@ -1371,7 +1567,9 @@ class VpkTextureBuilder:
                 _is_system_tex = not _is_edit_shared(blu_tex_name)
 
                 shared_vtf_path = slots.vtf(blu_tex_name)
-                if not shared_vtf_path.exists():
+                # VMT уже записан (тем же именем в соседнем столбце, у синего
+                # «из игры» — ссылкой без VTF): второй раз не спрашиваем.
+                if not shared_vtf_path.exists() and not slots.vmt(blu_tex_name).exists():
                     if _is_system_tex:
                         # Системная — тихо пропускаем, движок обработает
                         logger.debug(f"Системная shared texture пропускается: {blu_tex_name}")
@@ -1387,6 +1585,7 @@ class VpkTextureBuilder:
                         if _game_vtf:
                             with open(shared_vtf_path, "wb") as _f:
                                 _f.write(_game_vtf)
+                            slots.game_copies.add(blu_tex_name.lower())
                             logger.info(f"Shared VTF из игры: {blu_tex_name}.vtf")
                         else:
                             logger.debug(f"Shared VTF не найден в игре, пропуск: {blu_tex_name}")
@@ -1402,10 +1601,11 @@ class VpkTextureBuilder:
                         copy_file_safe(_shared_img, shared_vtf_path)
                         logger.info(f"Shared: готовый VTF скопирован → {blu_tex_name}.vtf")
                     elif _shared_img and os.path.isfile(_shared_img):
-                        _sh_flags, _sh_merged = TextureService.resolve_vtf_flags_and_options(tex.flags, tex.vtf_options, drop_normal=True)
+                        _mt = tex.for_material(blu_tex_name)
+                        _sh_flags, _sh_merged = TextureService.resolve_vtf_flags_and_options(_mt.flags, _mt.vtf_options, drop_normal=True)
                         _sh_png = slots.vtf_output_path / f"{blu_tex_name}.png"
-                        TextureService.process_image(_shared_img, _sh_png, tex.size)
-                        TextureService.create_vtf(str(_sh_png), str(slots.vtf_output_path), tex.format_type, _sh_flags, _sh_merged)
+                        TextureService.process_image(_shared_img, _sh_png, _mt.size)
+                        TextureService.create_vtf(str(_sh_png), str(slots.vtf_output_path), _mt.format_type, _sh_flags, _sh_merged)
                         if _sh_png.exists():
                             _sh_png.unlink()
                         logger.info(f"Создан shared VTF: {blu_tex_name}.vtf")
@@ -1431,6 +1631,19 @@ class VpkTextureBuilder:
 
             # Спрашиваем у пользователя отдельное изображение для BLU материала
             _blu_mat_img = extra_texture_callback(blu_tex_name, weapon_key) if extra_texture_callback else None
+            # «Из игры»: синяя текстура и так лежит в игре, и VMT смотрит на
+            # неё её путём, как у золота. Копия VTF в моде была мёртвым весом
+            # (у медигана 5,5 МБ при своей текстуре в 87 КБ). Только когда
+            # родной VMT смотрит на текстуру с именем материала — ту самую,
+            # что раньше копировалась; иначе (синий цвет задан в VMT, а
+            # текстура общая с красным) всё по-старому.
+            _game_tex = (VpkTextureBuilder._game_texture(blu_tex_name, ctx, slots)
+                         if _blu_mat_img == EXTRA_TEX_USE_GAME_ORIGINAL else None)
+            if _game_tex and _game_tex.rsplit('/', 1)[-1].lower() != blu_tex_name.lower():
+                _game_tex = None
+            if _game_tex:
+                logger.info(f"BLU {blu_tex_name}: текстура из игры по ссылке {_game_tex}")
+                _blu_mat_img = None
             if _blu_mat_img in (EXTRA_TEX_USE_GAME_ORIGINAL, EXTRA_TEX_USE_MAIN):
                 _game_vtf = (VpkTextureBuilder._get_original_vtf_bytes(
                     blu_tex_name, slots.original_cdmaterials_paths, slots.tf2_textures_vpk, slots.tf2_misc_vpk
@@ -1438,6 +1651,7 @@ class VpkTextureBuilder:
                 if _game_vtf:
                     with open(blu_vtf_path, "wb") as _f:
                         _f.write(_game_vtf)
+                    slots.game_copies.add(blu_tex_name.lower())
                     logger.info(f"Извлечён VTF из игры для BLU текстуры: {blu_tex_name}.vtf")
                 else:
                     # «Скопировать главную» у BLU — это его RED-пара; сюда же
@@ -1450,6 +1664,8 @@ class VpkTextureBuilder:
                         )
                     if _red_src.exists():
                         copy_file_safe(_red_src, blu_vtf_path)
+                        if red_tex_name.lower() in slots.game_copies:
+                            slots.game_copies.add(blu_tex_name.lower())
                 _blu_mat_img = None
             if _blu_mat_img and not os.path.isfile(_blu_mat_img):
                 _blu_mat_img = None
@@ -1457,8 +1673,10 @@ class VpkTextureBuilder:
             if _blu_mat_img and os.path.isfile(_blu_mat_img):
                 # Пользователь дал отдельное изображение для этого BLU материала
                 logger.info(f"Используем отдельное изображение для BLU {blu_tex_name}: {_blu_mat_img}")
-                tex.render_user_image_vtf(_blu_mat_img, blu_vtf_path, f"{blu_tex_name}.png")
-            elif not blu_vtf_path.exists():
+                # Синий — та же карточка, что и красная пара: её настройки.
+                tex.for_material(red_tex_name).render_user_image_vtf(
+                    _blu_mat_img, blu_vtf_path, f"{blu_tex_name}.png")
+            elif not blu_vtf_path.exists() and not _game_tex:
                 # Пользователь не предоставил изображение для BLU —
                 # не включаем в мод, движок найдёт оригинал сам.
                 logger.debug(f"BLU текстура пропускается (нет изображения): {blu_tex_name}")
@@ -1467,6 +1685,9 @@ class VpkTextureBuilder:
             # Создаем VMT для BLU (копируем RED VMT и обновляем $basetexture)
             red_vmt_src = slots.vmt(red_tex_name)
             VpkTextureBuilder._write_material_vmt(blu_vmt_path, red_vmt_src, slots.patched_cdmaterials_path, blu_tex_name)
+            if _game_tex:
+                _dir, _, _file = _game_tex.rpartition('/')
+                VMTService.update_vmt_basetexture_path(str(blu_vmt_path), _dir, _file)
 
             if animated_fps:
                 VMTService.enable_animated_basetexture(str(blu_vmt_path), animated_fps)
@@ -1524,6 +1745,7 @@ class VpkTextureBuilder:
                 if _orig_red:
                     with open(vtf_file_path, "wb") as _f:
                         _f.write(_orig_red)
+                    slots.game_copies.add(texture_filename.lower())
                     logger.info(f"Оригинальная RED VTF из игры: {vtf_filename}")
                     # Normal Map без своей текстуры — рельеф из игровой: превью
                     # его показывает, и мод без него расходился бы с превью.
@@ -1793,6 +2015,7 @@ class VpkTextureBuilder:
         # Каждый panel-extra независим (своё имя → свои файлы, без callback и
         # без чтения игрового VPK) → рендерим параллельно. Скип-логику и
         # пер-текстурные настройки (_eff) считаем серийно при сборе задач.
+        from src.services.part_materials import model_name
         _pet_jobs = []
         for _pet_name, _pet_img in extras.items():
             if _pet_name in fixed_handled:
@@ -1802,10 +2025,17 @@ class VpkTextureBuilder:
             # в VPK появятся мусорные __single__.vmt / __single__.vtf.
             if not _pet_name or _pet_name.startswith('__'):
                 continue
-            if _pet_name in _processed:
+            # Имя — как в модели: studiomdl собирает материал в нижнем
+            # регистре и без точек («Material.001» из Blender → material_001).
+            # Под сырым именем файлы ложились мимо модели: у главного —
+            # лишним дублем текстуры, у второго материала — фиолетовой шашкой.
+            _file = model_name(_pet_name)
+            if _file in _processed:
                 continue   # уже создан через skinfamilies
+            _processed.add(_file)
+            # Настройки VTF — по карточке, как их задали.
             _es, _ef, _efl, _eo = _eff(_pet_name)
-            _pet_jobs.append((_pet_name, _pet_img, _es, _ef, _efl, _eo))
+            _pet_jobs.append((_file, _pet_img, _es, _ef, _efl, _eo))
 
         VpkTextureBuilder._run_extra_render_jobs(
             _pet_jobs, slots.vtf_output_path, slots.vmt_path, slots.patched_cdmaterials_path,

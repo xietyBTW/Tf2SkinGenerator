@@ -26,6 +26,7 @@ from typing import Dict, Optional
 
 from src.data import stock_loadout
 from src.data.viewmodel_anims import CLASS_MODEL_STEM
+from src.services import anim_store
 from src.services import model_decompile_service as mds
 from src.services import smd_service, viewmodel_animation
 from src.services import weapon_anim_catalog as anim_catalog
@@ -57,7 +58,8 @@ class HatScenePreviewWorker(BaseWorker):
         'ru': {
             'hat': 'Загрузка шапки…',
             'player': 'Загрузка модели класса…',
-            'anims': 'Загрузка анимаций класса (первый раз — дольше)…',
+            'anims': 'Загрузка анимаций класса…',
+            'anims_slow': 'Распаковка анимаций класса (первый раз — до полуминуты)…',
             'weapon': 'Загрузка оружия…',
             'scene': 'Сборка сцены…',
             'texture': 'Загрузка текстур…',
@@ -68,7 +70,8 @@ class HatScenePreviewWorker(BaseWorker):
         'en': {
             'hat': 'Loading the hat…',
             'player': 'Loading the class model…',
-            'anims': 'Loading class animations (slower the first time)…',
+            'anims': 'Loading class animations…',
+            'anims_slow': 'Unpacking class animations (first time, up to half a minute)…',
             'weapon': 'Loading the weapon…',
             'scene': 'Building the scene…',
             'texture': 'Loading textures…',
@@ -137,9 +140,7 @@ class HatScenePreviewWorker(BaseWorker):
                 return
 
             self.progress.emit(self._p['anims'])
-            anims_dir = self._decompile(f'__anims_full_{cls}',
-                                        f'models/player/{stem}_animations.mdl')
-            sequence = self._stance(anims_dir, weapon.anim if weapon else 'MELEE')
+            sequence, anim_rotation = self._stance_of(cls, stem, weapon, weapons)
             if sequence is None:
                 self.failed.emit(self._p['no_stance'])
                 return
@@ -171,7 +172,7 @@ class HatScenePreviewWorker(BaseWorker):
                 # Шапку игра надевает целиком, по именам костей.
                 merge_by_name=True,
                 root_rotation_x=root_rotation(player_dir),
-                anim_rotation_x=root_rotation(anims_dir) - root_rotation(player_dir),
+                anim_rotation_x=anim_rotation - root_rotation(player_dir),
             )
             if not scene:
                 self.failed.emit(self._p['scene_error'])
@@ -195,16 +196,49 @@ class HatScenePreviewWorker(BaseWorker):
 
     # ── Шаги ──────────────────────────────────────────────────────────────── #
 
-    def _decompile(self, cache_key: str, mdl: str) -> Optional[str]:
+    def _decompile(self, cache_key: str, mdl: str, slow: str = '') -> Optional[str]:
+        """Папка распакованной модели; `slow` — подпись на случай, когда
+        Crowbar и правда пошёл (из кэша это мгновенно)."""
+        def stage(step) -> None:
+            if slow and step is mds.Stage.DECOMPILING:
+                self.progress.emit(self._p[slow])
+
         result = mds.ensure_decompiled(
             cache_key, self.misc_vpk_path, [mdl],
-            cancelled=self.isInterruptionRequested,
+            cancelled=self.isInterruptionRequested, on_progress=stage,
         )
         if result is None:
             logger.warning(f"[wear] не достали модель {mdl}")
             self.failed.emit(self._p['no_models'])
             return None
         return result.directory
+
+    def _stance_of(self, cls: str, stem: str, weapon, weapons):
+        """
+        (стойка слота, поворот модели её анимаций) или (None, 0.0).
+
+        Из своей копии (anim_store), иначе из распаковки модели анимаций
+        класса — тогда в копию ложатся стойки ВСЕХ слотов класса: смена
+        оружия на сцене дальше обходится без Crowbar, даже когда 150 МБ
+        распаковки вытеснит кэш декомпиляции.
+        """
+        want = (weapon.anim if weapon else 'MELEE').upper()
+        stored = anim_store.get(f'stand/{cls}/{want}', self.misc_vpk_path)
+        if stored:
+            return stored
+        anims_dir = self._decompile(f'__anims_full_{cls}',
+                                    f'models/player/{stem}_animations.mdl', slow='anims_slow')
+        if not anims_dir:
+            return None, 0.0
+        rotation = root_rotation(anims_dir)
+        found = None
+        for anim in dict.fromkeys([want, *((w.anim or 'MELEE').upper() for w in weapons)]):
+            sequence = self._stance(anims_dir, anim)
+            if sequence is not None:
+                kept = anim_store.put(f'stand/{cls}/{anim}', self.misc_vpk_path,
+                                      sequence, rotation)
+                found = found or (kept if anim == want else None)
+        return found, rotation
 
     @staticmethod
     def _stance(anims_dir: Optional[str], anim: str):

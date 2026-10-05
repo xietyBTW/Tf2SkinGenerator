@@ -739,6 +739,68 @@ def simplify(mesh: Mesh, target_triangles: int = SIMPLIFY_TARGET_TRIANGLES) -> M
 
 # ── Запись ───────────────────────────────────────────────────────────────── #
 
+def smd_points(path: str) -> np.ndarray:
+    """Позиции вершин треугольников SMD (N×3); пусто, если не прочиталось."""
+    rows = []
+    section = ''
+    try:
+        with open(path, encoding='utf-8', errors='replace') as f:
+            for raw in f:
+                low = raw.strip().lower()
+                if low in ('nodes', 'skeleton', 'triangles', 'vertexanimation'):
+                    section = low
+                elif low == 'end':
+                    section = ''
+                elif section == 'triangles':
+                    parts = raw.split()
+                    if len(parts) >= 9 and parts[0].isdigit():
+                        try:
+                            rows.append([float(v) for v in parts[1:4]])
+                        except ValueError:
+                            pass
+    except OSError:
+        pass
+    return np.array(rows, np.float64).reshape(-1, 3)
+
+
+def _euler_xyz(rot: np.ndarray) -> Vec3:
+    """Углы (градусы) для Fit.matrix(): Rz · Ry · Rx == rot."""
+    b = math.asin(max(-1.0, min(1.0, -rot[2][0])))
+    if abs(math.cos(b)) > 1e-6:
+        a = math.atan2(rot[2][1], rot[2][2])
+        c = math.atan2(rot[1][0], rot[0][0])
+    else:
+        a = 0.0
+        c = math.atan2(-rot[0][1], rot[1][1])
+    return tuple(round(math.degrees(v), 6) for v in (a, b, c))
+
+
+def fit_into(points: np.ndarray, target: np.ndarray) -> Fit:
+    """
+    Подгонка меша в габариты другой детали: длинная ось меша ложится на
+    длинную ось детали (повороты на 90°), масштаб — по длине, центр — в центр.
+
+    Так своя модель снаряда из интернета сразу встаёт на место игрового:
+    граната в стволе Loch-n-Load мала и стоит на своей кости, и вручную её
+    туда не поставить.
+    """
+    if not len(points) or not len(target):
+        return Fit()
+    lo, hi = points.min(0), points.max(0)
+    tlo, thi = target.min(0), target.max(0)
+    size, tsize = hi - lo, thi - tlo
+    rot = np.zeros((3, 3))
+    for src, dst in zip(np.argsort(-size, kind='stable'), np.argsort(-tsize, kind='stable')):
+        rot[dst][src] = 1.0
+    if np.linalg.det(rot) < 0:      # зеркало — не поворот: короткую ось обратно
+        shortest = np.argsort(-tsize, kind='stable')[2]
+        rot[shortest] *= -1.0
+    longest = float(np.abs(rot @ size).max())
+    scale = float(tsize.max()) / longest if longest > 1e-9 else 1.0
+    offset = (tlo + thi) / 2 - (rot @ ((lo + hi) / 2)) * scale
+    return Fit(scale=scale, rotate=_euler_xyz(rot), offset=tuple(float(v) for v in offset))
+
+
 def transform_smd(src_path: str, out_path: str, fit: Fit) -> str:
     """Тот же SMD с подгонкой, запечённой в вершины: кости, веса, материалы и
     всё остальное остаются как есть — двигаются только позиции и нормали."""

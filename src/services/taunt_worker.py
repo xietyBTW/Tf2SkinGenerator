@@ -31,6 +31,7 @@ from typing import Optional
 
 from src.data import taunt_scenes
 from src.data.viewmodel_anims import CLASS_MODEL_STEM
+from src.services import anim_store
 from src.services import model_decompile_service as mds
 from src.services import smd_service, viewmodel_animation, viewmodel_pose
 from src.services import weapon_anim_catalog as anim_catalog
@@ -180,6 +181,7 @@ class TauntPreviewWorker(BaseWorker):
             'prop': 'Загрузка реквизита…',
             'player': 'Загрузка модели класса…',
             'anims': 'Загрузка анимаций класса…',
+            'anims_slow': 'Распаковка анимаций класса (первый раз — до полуминуты)…',
             'scene': 'Сборка сцены…',
             'texture': 'Загрузка текстур…',
             'no_taunt': 'Для этого реквизита насмешка не найдена',
@@ -190,6 +192,7 @@ class TauntPreviewWorker(BaseWorker):
             'prop': 'Loading the prop…',
             'player': 'Loading the class model…',
             'anims': 'Loading class animations…',
+            'anims_slow': 'Unpacking class animations (first time, up to half a minute)…',
             'scene': 'Building the scene…',
             'texture': 'Loading textures…',
             'no_taunt': 'No taunt found for this prop',
@@ -211,9 +214,9 @@ class TauntPreviewWorker(BaseWorker):
         self.tf2_class = (tf2_class or '').lower()
         self._p = self._PROGRESS.get(lang, self._PROGRESS['en'])
         self._preview_dir: Optional[str] = None
-        #: Папка декомпиляции модели анимаций — из неё взята выбранная
-        #: последовательность. Нужна, чтобы узнать её оси.
-        self._anims_dir: str = ''
+        #: Поворот модели анимаций, откуда взята выбранная последовательность
+        #: (её оси); None — играет своя анимация реквизита.
+        self._anims_rotation: Optional[float] = None
 
     # ── Точка входа ───────────────────────────────────────────────────────── #
 
@@ -266,7 +269,7 @@ class TauntPreviewWorker(BaseWorker):
             self.progress.emit(self._p['scene'])
             try:
                 scene = self._build(player_ref, prop_ref, prop_dir, sequence,
-                                    tf2_class, self._anims_dir)
+                                    tf2_class, self._anims_rotation)
             except viewmodel_pose.NotHeldInHands:
                 # Реквизит не держат в руках: стенд, стул и машинка стоят в
                 # мире, и с костями персонажа у них общего ничего. Зато у
@@ -304,7 +307,7 @@ class TauntPreviewWorker(BaseWorker):
     # ── Шаги ──────────────────────────────────────────────────────────────── #
 
     def _build(self, player_ref, prop_ref: str, prop_dir: str, sequence,
-               tf2_class: str, anims_dir: str = ''):
+               tf2_class: str, anim_rotation: Optional[float] = None):
         """Сцена: персонаж с реквизитом либо один реквизит.
 
         Оси задаёт та модель, что ведёт сцену: у персонажа `$upaxis Y`, у
@@ -333,8 +336,8 @@ class TauntPreviewWorker(BaseWorker):
             # Кадры и меш бывают в разных осях: модель класса экспортирована
             # `$upaxis Y`, модель её анимаций — обычной Z-вверх. Разница их
             # поворотов и есть та поправка, которую надо внести в корень.
-            anim_rotation_x=(root_rotation(anims_dir) - root_rotation(driver_dir)
-                             if anims_dir else 0.0),
+            anim_rotation_x=(anim_rotation - root_rotation(driver_dir)
+                             if anim_rotation is not None else 0.0),
         )
 
     def _decompile(self, cache_key: str, mdl: str) -> Optional[str]:
@@ -370,6 +373,23 @@ class TauntPreviewWorker(BaseWorker):
             return None, None
 
         self.progress.emit(self._p['anims'])
+        # Однажды найденная насмешка лежит своей копией (anim_store): модели
+        # анимаций класса распаковываются до полуминуты, а кэш декомпиляции
+        # их вытесняет.
+        stored_key = f'taunt/{tf2_class}/{self.prop_key}/{scene_stem}'
+        stored = anim_store.get(stored_key, self.misc_vpk_path)
+        if stored:
+            sequence, self._anims_rotation = stored
+            return player_ref, sequence
+
+        def stage(step) -> None:
+            if step is mds.Stage.DECOMPILING:
+                self.progress.emit(self._p['anims_slow'])
+
+        def keep(sequence):
+            return anim_store.put(stored_key, self.misc_vpk_path, sequence,
+                                  self._anims_rotation or 0.0)
+
         # Сперва модель анимаций мастерской: в ней лежат современные насмешки,
         # и она вдесятеро меньше общей (95 анимаций против тысячи).
         known = {}
@@ -382,7 +402,7 @@ class TauntPreviewWorker(BaseWorker):
                 return None, None
             result = mds.ensure_decompiled(
                 cache_key, self.misc_vpk_path, [mdl],
-                cancelled=self.isInterruptionRequested,
+                cancelled=self.isInterruptionRequested, on_progress=stage,
             )
             if result is None:
                 continue
@@ -396,9 +416,9 @@ class TauntPreviewWorker(BaseWorker):
             # в модели мастерской нашлось бы созвучное «…_trick2».
             found = self._pick(known, scene_stem, tf2_class, fuzzy=False)
             if found is not None:
-                return player_ref, found
+                return player_ref, keep(found)
         found = self._pick(known, scene_stem, tf2_class, fuzzy=True)
-        return (player_ref, found) if found is not None else (None, None)
+        return (player_ref, keep(found)) if found is not None else (None, None)
 
     def _pick(self, known: dict, scene_stem: str, tf2_class: str, fuzzy: bool):
         """
@@ -427,7 +447,7 @@ class TauntPreviewWorker(BaseWorker):
         sequence, where = max(posed,
                               key=lambda pair: os.path.getsize(pair[0].smd_path))
         # Оси кадров берутся у ТОЙ модели, откуда последовательность.
-        self._anims_dir = where
+        self._anims_rotation = root_rotation(where)
         # События показа реквизита Valve пишет в БАЗОВУЮ последовательность, а
         # играем мы слой поверх неё: у `layer_taunt_xray` их нет, у
         # `taunt_xray` — три. Кадры у обеих частей общие, так что переносим.

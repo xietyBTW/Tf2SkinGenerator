@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 import time
 import logging
 from dataclasses import dataclass, asdict, field
@@ -658,6 +659,9 @@ def _clean_display(value: str) -> str:
 #: насмешки, и звуки — каждый на своём языке и каждый заново. Ключ с mtime:
 #: обновление игры подменяет файл, и старый разбор не переживёт его.
 _LOC_CACHE: Dict[tuple, Dict[str, str]] = {}
+#: Первые запросы приходят разом (прогрев красок, каталог, насмешки): без
+#: замка каждый разбирал файл сам.
+_LOC_LOCK = threading.Lock()
 
 
 def parse_localization(tf2_root: str, lang: str = "english",
@@ -676,10 +680,16 @@ def parse_localization(tf2_root: str, lang: str = "english",
         return {}
 
     key = (str(lang_file), lang_file.stat().st_mtime_ns)
-    cached = _LOC_CACHE.get(key)
-    if cached is not None:
+    with _LOC_LOCK:
+        cached = _LOC_CACHE.get(key)
+        if cached is None:
+            cached = _read_localization(lang_file)
+            if cached:                  # не прочитался — попробуем в другой раз
+                _LOC_CACHE[key] = cached
         return cached
 
+
+def _read_localization(lang_file: Path) -> Dict[str, str]:
     logger.info(f"Парсинг локализации: {lang_file}")
     try:
         content = lang_file.read_text(encoding="utf-16", errors="replace")
@@ -696,7 +706,6 @@ def parse_localization(tf2_root: str, lang: str = "english",
         tokens[token.lower()] = val
 
     logger.info(f"Загружено {len(tokens) // 2} токенов локализации")
-    _LOC_CACHE[key] = tokens
     return tokens
 
 

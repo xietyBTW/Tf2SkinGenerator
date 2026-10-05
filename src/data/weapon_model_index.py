@@ -13,6 +13,7 @@
 import json
 import os
 import re
+import threading
 from functools import lru_cache
 from pathlib import Path
 from typing import Dict, Optional
@@ -175,6 +176,11 @@ def _mdl_stems(game, block: str, depth: int = 0) -> list:
     return stems
 
 
+#: Иконки каталога приходят параллельно, а lru_cache не мешает потокам
+#: считать один и тот же индекс разом — каждый со своим проходом по items_game.
+_icon_lock = threading.Lock()
+
+
 @lru_cache(maxsize=4)
 def _icon_index(tf2_root: str) -> Dict[str, str]:
     """{стебель модели: image_inventory}. Первый предмет выигрывает: items_game
@@ -182,12 +188,8 @@ def _icon_index(tf2_root: str) -> Dict[str, str]:
     from src.data.items_game_kv import ItemsGame
 
     items = get_items_game_path(tf2_root)
-    if not items:
-        return {}
-    try:
-        game = ItemsGame.parse(items.read_text(encoding="utf-8", errors="replace"))
-    except Exception as e:
-        logger.warning(f"weapon icons: не прочитать {items}: {e}")
+    game = ItemsGame.load(items) if items else None
+    if game is None:
         return {}
     idx: Dict[str, str] = {}
     for _key, block in game.items:
@@ -217,7 +219,8 @@ def weapon_icon(weapon_key: str, tf2_root: str) -> Optional[str]:
     candidates = (key, _ICON_ALIASES.get(key),
                   os.path.splitext(os.path.basename(mdl.lower()))[0] if mdl else None,
                   "c_" + key[2:] if key.startswith("w_") else None)
-    idx = _icon_index(tf2_root)
+    with _icon_lock:
+        idx = _icon_index(tf2_root)
     for c in candidates:
         if c and c in idx:
             return idx[c]

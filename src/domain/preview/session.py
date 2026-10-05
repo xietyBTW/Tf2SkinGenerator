@@ -51,6 +51,8 @@ EDIT_FIELDS = (
     # Подгонка и изгибы гирлянды под свою модель: своя форма гирлянды —
     # такая же правка, как своя геометрия предмета.
     'decor_fit', 'decor_bends', 'decor_models',
+    # Своя модель снаряда в оружии — та же правка геометрии.
+    'part_models',
 )
 
 
@@ -108,6 +110,10 @@ class PreviewSession:
     #: Свои модели гирлянд: {вид: SMD}. Кости и QC остаются стоковые (см.
     #: festive_decor.build), материалы — свои.
     decor_models: Dict[str, str] = field(default_factory=dict)
+    #: Своя геометрия деталей модели: {имя SMD детали без .smd: SMD человека}.
+    #: Снаряд, заряженный в оружие (граната Loch-n-Load, ракета сигнальной):
+    #: скелет и материал игровые, треугольники свои (with_part_models).
+    part_models: Dict[str, str] = field(default_factory=dict)
     #: Карточки показанной гирлянды (`deco:<вид>/<материал>`). Пусто — гирлянда
     #: выключена: её правки остаются в работе, но в альбоме их не видно.
     decor_cards: List[str] = field(default_factory=list)
@@ -487,13 +493,14 @@ class PreviewSession:
         return {**self.scene_extra_textures,
                 **self._name_for_scene(self._with_variant(out))}
 
-    def card_mesh(self) -> List[str]:
+    def card_mesh(self) -> Any:
         """
         Меши, которые носят ВЫБРАННУЮ карточку — если карточек больше, чем мешей.
 
         Маски маскировки шпиона: девять текстур на одну голову. Обычное
         правило «карточка = материал» здесь не работает, и модель показывала
-        бы одну и ту же маску, какую бы человек ни листал.
+        бы одну и ту же маску, какую бы человек ни листал. Список — общий для
+        всех карточек; словарь {карточка: меши} — у «Прочего» (misc_meshes).
 
         Какая карточка выбрана, знает только альбом — положение прокрутки в
         Python не живёт. Поэтому здесь называются МЕШИ, а надевает на них
@@ -502,7 +509,34 @@ class PreviewSession:
         from src.data.item_kinds import kind_of
 
         mode = (self.current_object or ('', '', ''))[0]
-        return list(self.scene_item_materials) if kind_of(mode).is_spy_mask else []
+        if kind_of(mode).is_spy_mask:
+            return list(self.scene_item_materials)
+        return self.misc_meshes() if self.misc_mode else []
+
+    def misc_meshes(self) -> Dict[str, List[str]]:
+        """
+        {карточка «Прочего»: меши, которые она носит в своём скине}.
+
+        Убер и зомби своей геометрии не имеют: в строке скина они стоят на
+        месте тела, головы, глаз, а меши названы по первой строке. Без этого
+        человек листал «Прочее», а модель показывала обычное тело. Только меши
+        со своей текстурой в сцене: её же сцена и вернёт, когда карточку
+        сменят. У глаз её нет, и уберовские глаза оставались бы на модели.
+        """
+        rows = (self.textures.skin_info or {}).get('rows') or []
+        if not rows:
+            return {}
+        head = rows[0]
+        scene = self.scene_textures()
+        out: Dict[str, List[str]] = {}
+        for mat in self.misc_materials:
+            low = mat.lower()
+            meshes = [head[col] for row in rows[1:] for col, name in enumerate(row)
+                      if name.lower() == low and col < len(head)
+                      and head[col].lower() != low and head[col] in scene]
+            if meshes:
+                out[mat] = list(dict.fromkeys(meshes))
+        return out
 
     def scene_names(self, card: str) -> List[str]:
         """Меши показанной сцены, на которые ложится карточка `card`.
@@ -688,6 +722,7 @@ class PreviewSession:
             'decor_bends': {kind: [dict(b) for b in bends]
                             for kind, bends in self.decor_bends.items() if bends},
             'decor_models': dict(self.decor_models),
+            'part_models': dict(self.part_models),
         }
 
     def part_material_names(self) -> List[str]:
@@ -783,7 +818,11 @@ class PreviewSession:
                          'sources': [str(x) for x in e.get('sources') or ()],
                          # Сколько треугольников было у материала при выборе:
                          # по нему сборка и вьювер узнают «модель не та».
-                         **({'total': int(e['total'])} if e.get('total') else {})}
+                         **({'total': int(e['total'])} if e.get('total') else {}),
+                         # Сколько из них — само оружие, до снаряда в оружии
+                         # (part_materials.fits): смена снаряда номера оружия
+                         # не трогает.
+                         **({'late': int(e['late'])} if e.get('late') is not None else {})}
                         for e in (entries or ()) if e and e.get('name')]
             for base, entries in (edits.get('part_materials') or {}).items()}
         self.sync_part_cards()
@@ -803,6 +842,8 @@ class PreviewSession:
                             in (edits.get('decor_bends') or {}).items() if bends}
         self.decor_models = {str(kind): str(smd) for kind, smd
                              in (edits.get('decor_models') or {}).items() if smd}
+        self.part_models = {str(part): str(smd) for part, smd
+                            in (edits.get('part_models') or {}).items() if smd}
 
     def forget_user_edits(self) -> None:
         """Сброс правок предмета — «начать с чистого» без смены предмета."""
@@ -829,6 +870,7 @@ class PreviewSession:
         self.decor_fit = {}
         self.decor_bends = {}
         self.decor_models = {}
+        self.part_models = {}
 
     # ═══════════════════════════════════════════════════════════════════════ #
     # Частичные сбросы (у каждого есть своя половина в виджетах панели)
@@ -942,10 +984,12 @@ class PreviewSession:
         self.sync_part_cards()
         self.part_edge = 0.0
         self.custom_qc_text = None
-        # Гирлянда — у каждого оружия своя.
+        # Гирлянда и снаряд в оружии — у каждого оружия свои: оставшись, снаряд
+        # прошлого предмета уехал бы в работу и сборку следующего.
         self.decor_fit = {}
         self.decor_bends = {}
         self.decor_models = {}
+        self.part_models = {}
         self.decor_cards = []
         self.textures.decor_stock = {}
         self.per_mesh_active = False
@@ -963,6 +1007,10 @@ class PreviewSession:
         треугольников ПРЕЖНЕЙ модели; на другой они легли бы на случайные
         куски. Сама текстура остаётся как есть: склейка становится обычной
         своей текстурой (записи основы больше нет).
+
+        Своя модель снаряда в оружии уходит тоже: она деталь игровой модели,
+        её материал части стёрт вместе с остальными, а у своей модели оружия
+        снаряд спрашивает сборка.
         """
         self.part_textures = {}
         self.part_colors = {}
@@ -973,6 +1021,7 @@ class PreviewSession:
         self.drop_part_cards(self.part_material_names())
         self.part_materials = {}
         self.sync_part_cards()
+        self.part_models = {}
 
     def begin_game_model(self) -> bool:
         """

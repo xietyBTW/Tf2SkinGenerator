@@ -5,6 +5,7 @@
 import copy
 import json
 import os
+import shutil
 import threading
 import time
 from pathlib import Path
@@ -46,6 +47,9 @@ class AppConfig:
     # Ключ кэша: (путь файла, mtime) — путь нужен, потому что CONFIG_FILE
     # подменяется в тестах
     _cache_key: Optional[tuple] = None
+    #: Файл есть, но последнее чтение не удалось (его держат антивирус или
+    #: редактор). Писать поверх нельзя: на его месте окажутся умолчания.
+    _unreadable = False
 
     #: Вызовы API идут из разных потоков. Без замка два set() подряд теряли
     #: одно из значений (оба читали старый конфиг), а чтение файла посреди
@@ -74,6 +78,7 @@ class AppConfig:
         """Сбрасывает кэш (для тестов и при внешнем изменении файла)."""
         AppConfig._cache = None
         AppConfig._cache_key = None
+        AppConfig._unreadable = False
 
     @staticmethod
     def load_config() -> Dict[str, Any]:
@@ -102,19 +107,65 @@ class AppConfig:
             return copy.deepcopy(AppConfig.DEFAULT_CONFIG)
 
         try:
-            with open(AppConfig.CONFIG_FILE, 'r', encoding='utf-8') as f:
-                config = json.load(f)
-
-            # Объединяем с настройками по умолчанию (на случай, если в файле нет каких-то ключей)
-            merged_config = copy.deepcopy(AppConfig.DEFAULT_CONFIG)
-            merged_config.update(config)
-            AppConfig._cache = copy.deepcopy(merged_config)
-            AppConfig._cache_key = current_key
-            logger.debug("Конфигурация успешно загружена")
-            return merged_config
-        except (json.JSONDecodeError, IOError) as e:
-            logger.error(f"Ошибка при загрузке конфига: {e}. Используются настройки по умолчанию.", exc_info=True)
+            config = AppConfig._read_file()
+        except OSError as e:
+            # Сбой разовый: умолчания не кэшируем, и запись их поверх файла
+            # запрещена (_save_config), пока он снова не прочитается.
+            logger.error(f"Конфиг сейчас не читается: {e}. Настройки по умолчанию, файл не трогаем.",
+                         exc_info=True)
+            AppConfig._unreadable = True
             return copy.deepcopy(AppConfig.DEFAULT_CONFIG)
+        except ValueError as e:     # JSONDecodeError, UnicodeDecodeError, не словарь
+            logger.error(f"Ошибка при загрузке конфига: {e}. Используются настройки по умолчанию.", exc_info=True)
+            AppConfig._unreadable = False
+            AppConfig._keep_broken_copy()
+            # Умолчания — до правки файла: иначе каждый вызов читал бы его
+            # заново и сыпал в лог ту же ошибку.
+            AppConfig._cache = copy.deepcopy(AppConfig.DEFAULT_CONFIG)
+            AppConfig._cache_key = current_key
+            return copy.deepcopy(AppConfig.DEFAULT_CONFIG)
+
+        AppConfig._unreadable = False
+        # Объединяем с настройками по умолчанию (на случай, если в файле нет каких-то ключей)
+        merged_config = copy.deepcopy(AppConfig.DEFAULT_CONFIG)
+        merged_config.update(config)
+        AppConfig._cache = copy.deepcopy(merged_config)
+        AppConfig._cache_key = current_key
+        logger.debug("Конфигурация успешно загружена")
+        return merged_config
+
+    @staticmethod
+    def _read_file() -> Dict[str, Any]:
+        """Содержимое файла конфига. OSError: файл держат дольше нескольких
+        попыток (как у записи); ValueError: файл битый."""
+        for attempt in range(5):
+            try:
+                # utf-8-sig: файл, сохранённый Блокнотом или PowerShell,
+                # начинается с BOM, и на нём обычный utf-8 падал — все
+                # настройки (папка TF2, язык, тема) молча сбрасывались.
+                with open(AppConfig.CONFIG_FILE, 'r', encoding='utf-8-sig') as f:
+                    config = json.load(f)
+                break
+            except OSError:
+                if attempt == 4:
+                    raise
+                time.sleep(0.05)
+        if not isinstance(config, dict):
+            raise ValueError("в конфиге не словарь")
+        return config
+
+    @staticmethod
+    def _keep_broken_copy() -> None:
+        """Нечитаемый конфиг — копией рядом (`app_config.broken.json`): первая
+        же запись настроек положит на его место умолчания, а в нём путь к игре
+        и всё, что человек настраивал, — восстановить можно только из копии."""
+        broken = AppConfig.CONFIG_FILE.with_name(
+            AppConfig.CONFIG_FILE.stem + '.broken' + AppConfig.CONFIG_FILE.suffix)
+        try:
+            shutil.copy2(AppConfig.CONFIG_FILE, broken)
+            logger.warning(f"Копия нечитаемого конфига: {broken}")
+        except OSError as exc:
+            logger.warning(f"Копию нечитаемого конфига сделать не вышло: {exc}")
 
     @staticmethod
     def save_config(config: Dict[str, Any]) -> bool:
@@ -132,6 +183,11 @@ class AppConfig:
 
     @staticmethod
     def _save_config(config: Dict[str, Any]) -> bool:
+        if AppConfig._unreadable and AppConfig.CONFIG_FILE.exists():
+            # В `config` умолчания вместо непрочитанного файла: запись
+            # стёрла бы путь к игре и всё, что человек настраивал.
+            logger.error("Конфиг не записан: прежний файл не прочитался")
+            return False
         AppConfig._ensure_config_dir()
 
         tmp_path = AppConfig.CONFIG_FILE.with_suffix('.json.tmp')

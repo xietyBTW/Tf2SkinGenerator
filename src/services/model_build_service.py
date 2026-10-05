@@ -567,6 +567,33 @@ class ModelBuildService:
                 groups.append((name, variants))
         return groups
 
+    #: Бодигруппы-снаряды: заряженный в оружие снаряд (граната у гранатомётов
+    #: демомана, ракета у сигнальных, стрела у луков). Пусто | снаряд; игра
+    #: включает снаряд сама и только в первом лице, на перезарядке
+    #: (c_demo_animations: loch_reload_* → "reload 1" … "reload 0").
+    PROJECTILE_BODYGROUPS = frozenset({'reload', 'shell', 'arrow'})
+
+    @staticmethod
+    def projectile_variant(name: str, variants: List[Optional[str]]) -> Optional[int]:
+        """Номер варианта со снарядом у группы-снаряда (пусто | снаряд), иначе None."""
+        if (name or '').lower() not in ModelBuildService.PROJECTILE_BODYGROUPS:
+            return None
+        filled = [i for i, v in enumerate(variants) if v]
+        return filled[0] if len(variants) == 2 and len(filled) == 1 else None
+
+    @staticmethod
+    def preview_choice(groups: List[Tuple[str, List[Optional[str]]]],
+                       choice: Optional[Dict[str, int]] = None) -> Dict[str, int]:
+        """Выбор вариантов для кадра предмета: снаряд виден, пока его не
+        скрыли, — его правят, а в игре он мелькает только при перезарядке.
+        Вид от первого лица этим не пользуется: там всё как в игре."""
+        out = dict(choice or {})
+        for name, variants in groups:
+            shown = ModelBuildService.projectile_variant(name, variants)
+            if shown is not None and name not in out:
+                out[name] = shown
+        return out
+
     @staticmethod
     def chosen_body_smds(groups: List[Tuple[str, List[Optional[str]]]],
                          choice: Optional[Dict[str, int]] = None) -> List[str]:

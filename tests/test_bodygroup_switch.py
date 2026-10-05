@@ -120,7 +120,8 @@ class SessionSwitchTests(unittest.TestCase):
 
     def test_states_are_listed_with_readable_labels(self):
         self.assertEqual(self.s.bodygroups(), [
-            {'name': 'broken', 'chosen': 0, 'variants': ['основной', 'разбитая']}])
+            {'name': 'broken', 'chosen': 0, 'variants': ['основной', 'разбитая'],
+             'default': 0, 'projectile': False, 'custom': False}])
 
     def test_switching_reloads_the_model_with_the_choice(self):
         res = self.s.set_bodygroup('broken', 1)

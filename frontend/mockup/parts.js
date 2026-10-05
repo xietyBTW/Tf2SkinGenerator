@@ -856,8 +856,14 @@ document.getElementById('cut-angle').addEventListener('input', (e) => {
   cutOpts.angle = Number(e.target.value);
   withViewer((w) => w.setCutOptions && w.setCutOptions(cutOpts));
 });
+/**
+ * Радиус кисти ножниц в долях размера модели по положению ползунка 0..100:
+ * от 0,1% до 30%, логарифмически. Линейная шкала от 1% отдавала мелким
+ * размерам крохотный ход, и на плотной сетке кисть всё равно брала много.
+ */
+const brushRadius = (v) => 0.001 * 300 ** (Number(v) / 100);
 document.getElementById('cut-radius').addEventListener('input', (e) => {
-  cutOpts.radius = Number(e.target.value) / 100;
+  cutOpts.radius = brushRadius(e.target.value);
   withViewer((w) => w.setCutOptions && w.setCutOptions(cutOpts));
 });
 document.getElementById('cut-erase').addEventListener('change', (e) => {

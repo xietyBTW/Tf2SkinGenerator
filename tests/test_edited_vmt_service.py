@@ -20,6 +20,15 @@ class EditedVMTServiceTests(unittest.TestCase):
                 self.assertTrue(EditedVMTService.delete_edited_vmt(key))
                 self.assertFalse(EditedVMTService.has_edited_vmt(key))
 
+    def test_build_finds_the_edit_of_a_dotted_card(self):
+        # Карточка своей модели `Material.001`, а сборка знает материал так,
+        # как его собирает studiomdl: `material_001`.
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(EditedVMTService, "EDITED_VMT_DIR", tmp):
+                saved = EditedVMTService.save_edited_vmt("Material.001", '"VertexLitGeneric" {}')
+                self.assertEqual(EditedVMTService.get_edited_vmt("material_001"), saved)
+                self.assertIsNone(EditedVMTService.get_edited_vmt("material_002"))
+
     def test_get_edited_vmt_missing(self):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)

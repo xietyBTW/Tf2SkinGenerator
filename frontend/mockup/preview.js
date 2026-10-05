@@ -276,11 +276,14 @@ let cardTex = {};
 //: Материал карточки, надетой сейчас. Пусто — обычная модель.
 let cardWorn = '';
 
-/** {меш: png} для карточки, на которой стоит альбом. Пусто — красить нечего. */
+/** {меш: png} для карточки, на которой стоит альбом. Пусто — красить нечего.
+ *  Меши — общий список (маски шпиона) или свои у каждой карточки («Прочее»:
+ *  убер и зомби стоят на месте тела, головы, глаз). */
 function wornCard() {
   const png = cardTex[cardWorn];
-  if (!cardMesh.length || !png) return {};
-  return Object.fromEntries(cardMesh.map((m) => [m, png]));
+  const meshes = Array.isArray(cardMesh) ? cardMesh : (cardMesh[cardWorn] || []);
+  if (!meshes.length || !png) return {};
+  return Object.fromEntries(meshes.map((m) => [m, png]));
 }
 
 //: Последняя анимация частей от Python: {mesh, still, frames, fps}. Нужна
@@ -310,13 +313,23 @@ function replayPartsAnimation(w, entries) {
   w.loadAnimatedTexture(partsAnim.frames.map(api.fileUrl), partsAnim.fps, partsAnim.mesh);
 }
 
+//: Меши, на которых сейчас надетая карточка. У «Прочего» карточки носят
+//: разные меши (тело, голова), и мешам прежней возвращают текстуру сцены —
+//: иначе тело оставалось в убере, пока смотрят голову.
+let wornMeshes = [];
+
 /** Одевает модель в карточку, на которой остановился альбом. */
 export function wearCard(name) {
   cardWorn = name || '';
   const map = wornCard();
-  if (!Object.keys(map).length) return;
+  const scene = (lastView && (lastView.scene || lastView.textures)) || {};
+  const back = Object.fromEntries(wornMeshes
+    .filter((m) => !(m in map) && scene[m]).map((m) => [m, scene[m]]));
+  wornMeshes = Object.keys(map);
+  const all = { ...back, ...map };
+  if (!Object.keys(all).length) return;
   withViewer((w) => w.applyMaterialMap(Object.fromEntries(
-    Object.entries(map).map(([mat, png]) => [mat, api.fileUrl(png)]))));
+    Object.entries(all).map(([mat, png]) => [mat, api.fileUrl(png)]))));
 }
 
 /**
@@ -352,7 +365,9 @@ export function applyView(st) {
   // у одноматериальной модели в руках это настоящее имя меша, не служебный ключ.
   const trial = Object.entries(warpaintPreview() || {}).flatMap(
     ([card, png]) => (st.card_scene?.[card] || [card]).map((mesh) => [mesh, png]));
-  const entries = Object.entries({ ...(st.scene || st.textures), ...wornCard(),
+  const worn = wornCard();
+  wornMeshes = Object.keys(worn);
+  const entries = Object.entries({ ...(st.scene || st.textures), ...worn,
                                    ...Object.fromEntries(trial) });
   const single = entries.length === 1 && entries[0][0] === SINGLE_TEX;
 
@@ -450,7 +465,8 @@ export function applyView(st) {
   // «Убрать свою модель» — только когда своя геометрия (оружия или
   // гирлянды) и правда стоит. Без неё замена была билетом в один конец.
   document.getElementById('dropmodel').hidden =
-    !(st.has_custom || (st.decor_models || []).length);
+    !(st.has_custom || (st.decor_models || []).length
+      || (st.bodygroups || []).some((g) => g.custom));
   // Подгонка — только у импортированной модели и только в кадре предмета:
   // на руках и в насмешке призрака нет.
   showFit(work.dataset.scene === 'item' ? st.custom_fit : null);
@@ -537,7 +553,10 @@ function showBodygroups(groups) {
   for (const g of groups) {
     const label = document.createElement('span');
     label.className = 'label label--inline';
-    label.textContent = groups.length > 1 ? `Состояние · ${g.name}` : 'Состояние модели';
+    // Снаряд в оружии — не состояние, а деталь: виден, пока его правят.
+    label.textContent = g.projectile
+      ? (g.custom ? 'Свой снаряд в оружии' : 'Снаряд в оружии')
+      : groups.length > 1 ? `Состояние · ${g.name}` : 'Состояние модели';
     bar.appendChild(label);
     g.variants.forEach((name, i) => {
       const b = document.createElement('button');

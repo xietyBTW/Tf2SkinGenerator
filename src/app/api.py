@@ -400,8 +400,10 @@ def controls_for(mode: str, key: str = '') -> Dict[str, object]:
         # Пустой режим — предмет ещё не выбран: страница спрашивает правила
         # на старте, и без этого «Заменить модель» висела над пустым кадром.
         'load_model': bool(mode) and not (is_crit or is_skybox or is_spray),
+        # Руки сборка своей моделью не собирает (VPKService.build_vpk), и
+        # кнопка обещала бы подмену, которой в моде не будет.
         'replace_model': bool(mode) and not (is_crit or is_skybox or is_spray
-                                             or is_body),
+                                             or is_body or is_hands),
         # Деление на части — про ГЕОМЕТРИЮ, а не про подмену модели: делить
         # можно всё, что приехало декомпиляцией, включая тела классов и руки
         # (у них своя геометрия и своя развёртка). Раньше кнопка ходила за
@@ -1764,6 +1766,18 @@ def drop_decor_model(kind: str = '', lang: str = '') -> Dict[str, object]:
     """Возвращает стоковую модель гирлянды вида `kind`."""
     from src.app.session import session
     return session().drop_decor_model(kind, lang=_lang(lang))
+
+
+def load_part_model(group: str = '', path: str = '', lang: str = '') -> Dict[str, object]:
+    """Своя модель снаряда, заряженного в оружие (группа-снаряд `group`)."""
+    from src.app.session import session
+    return session().load_part_model(group, path, lang=_lang(lang))
+
+
+def drop_part_model(group: str = '', lang: str = '') -> Dict[str, object]:
+    """Возвращает снаряду группы `group` игровую модель."""
+    from src.app.session import session
+    return session().drop_part_model(group, lang=_lang(lang))
 
 
 def qc_text() -> Dict[str, object]:

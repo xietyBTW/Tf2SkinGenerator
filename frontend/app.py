@@ -167,7 +167,29 @@ def _open_browser_app(url: str) -> bool:
     return True
 
 
+def _snappy_gil() -> None:
+    """
+    Окно отзывчиво, пока фоновые потоки считают.
+
+    Обработчики сообщений окна — Python (свой заголовок, titlebar.py, и
+    события pywebview), и каждому сообщению нужен GIL. Пока фон разбирает
+    архивы игры и items_game, ждущий поток на Windows получает GIL только на
+    тике системного таймера, раз в 15,6 мс, а при нескольких занятых потоках
+    через сотни мс: окно дёргалось, если его таскали во время загрузки. Таймер
+    в 1 мс (только для этого процесса, Windows 10 2004+) и передача GIL раз в
+    1 мс сводят задержку к 2-3 мс; замер: 422 мс → 3 мс в худшем случае.
+    """
+    sys.setswitchinterval(0.001)
+    if sys.platform == 'win32':
+        try:
+            import ctypes
+            ctypes.WinDLL('winmm').timeBeginPeriod(1)
+        except (AttributeError, OSError):
+            pass
+
+
 def main() -> None:
+    _snappy_gil()
     port = _free_port()
     _serve(port)
     # Индексы архивов игры греются, пока открывается окно.

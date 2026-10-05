@@ -325,6 +325,13 @@ class BuildOutputsTests(TextureStateBase):
                                          "gone": str(self.dir / "gone.png")}
         self.assertEqual(self.state.blu_uploaded_paths(), {"mat": blu})
 
+    def test_neutral_texture_in_both_teams_is_not_an_own_blue(self):
+        # Руки скаута нейтральны: картинка ложится в обе команды, и сборка
+        # не должна делать их командными.
+        self.state.set_texture("scout_hands", self.png("hands"))
+        self.assertIn("scout_hands", self.state.textures[Team.BLU])
+        self.assertEqual(self.state.blu_uploaded_paths(), {})
+
 
 class VariantTests(TextureStateBase):
     def test_inactive_variant_returns_none(self):

@@ -33,7 +33,7 @@ def resolve_target(mode: str, hat_mdl: Optional[str] = None,
     (ключ, отображаемое имя) для правки VMT — либо None, если режим не годится.
 
     Ключ у каждого вида предмета свой: у шапки — нормализованный путь MDL, у
-    рук — модель предплечья, у персонажа — mdl_key, у оружия — ключ из режима.
+    рук — модель предплечья, у персонажа — путь MDL, у оружия — ключ из режима.
     По нему же ищется сохранённая правка, поэтому ошибка тут означает «правка
     потерялась».
     """
@@ -55,8 +55,12 @@ def resolve_target(mode: str, hat_mdl: Optional[str] = None,
         return (arm, arm) if arm else None
 
     if mode in PLAYER_BODY_MODE_KEYS:
-        mdl_key = PLAYER_CHARACTERS.get(mode, {}).get('mdl_key', '')
-        return (mdl_key, mdl_key) if mdl_key else None
+        # Путь MDL: под ним превью кладёт разобранную модель в кэш
+        # (model_key_for), и по нему же редактор находит $cdmaterials. Поле
+        # `mdl_key`, которое тут читалось, из данных персонажей давно убрали —
+        # и у тел классов редактор VMT молча был недоступен.
+        mdl = PLAYER_CHARACTERS.get(mode, {}).get('mdl_path', '')
+        return (mdl, mdl) if mdl else None
 
     key = weapon_key_from_mode(mode)
     return (key, key) if key else None

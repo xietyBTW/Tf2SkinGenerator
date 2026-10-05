@@ -501,11 +501,18 @@ class PreviewTextureState:
         return result
 
     def blu_uploaded_paths(self) -> Dict[str, str]:
-        """{mat: path} только BLU-слотов (для командности рук при сборке)."""
+        """{mat: path} своих синих текстур (для командности рук при сборке).
+
+        Нейтральная текстура лежит в обеих командах одной картинкой
+        (set_texture), и такая копия — не своя синяя: по ней сборка делала
+        нейтральные руки командными и писала лишний `_blue`-материал.
+        """
+        red = self.textures.get(Team.RED, {})
         return {
             mat: path
             for mat, path in self.textures.get(Team.BLU, {}).items()
             if mat != SINGLE_TEX_KEY and not is_decor(mat) and _existing(path)
+            and path != red.get(mat)
         }
 
     def decor_uploads(self) -> Dict[str, Dict[str, str]]:

@@ -100,7 +100,7 @@ Take the scissors and choose how to select:
 | Mode | How it selects |
 |---|---|
 | **Piece** | A click takes a smooth surface up to its sharp edges. **Edge sharpness** sets the threshold: lower values break a detail into separate faces, higher values take larger areas. |
-| **Brush** | Drag over the model and everything under the brush is selected. **Brush size** sets the radius, **Erase** removes from the selection instead. Dragging off the model still rotates the camera. |
+| **Brush** | Drag over the model and everything under the brush is selected. **Brush size** sets the radius, down to the triangles right under the cursor: the brush always takes whole triangles of the model, so on a coarse mesh even the smallest size takes a large piece. **Erase** removes from the selection instead. Dragging off the model still rotates the camera. |
 | **Island** | A click takes a whole UV island. |
 
 The panel shows how many triangles are selected. **Separate** (or <kbd>Enter</kbd>) turns the selection into a new part, **Reset** (or <kbd>Esc</kbd>) clears it.
@@ -123,11 +123,11 @@ Take the tool and click parts on the model or chips in the list. The panel next 
 
 You can do the same without switching tools: right-click a chip and choose **To a new material**, **To material "…"** or **Back to the shared material**.
 
-The new material appears in the album as a card next to its source, with a name like `c_scattergun_part1`. It's a separate material, like the head and the body of a class: an image you put on the source card doesn't reach it. At the moment you create it, it gets a copy of what the source has: its own image (or the game texture if it has none), VMT edits, material maps and texture settings, so the part looks the same as before. After that the two live apart. Use the part's card to give it an image of its own, edit its VMT, add [material maps](materials.md) or change texture settings. Colors and images that the other tools put on parts show on a part whichever material it's in. The 3D view draws every material with its own texture, in the parts mode as well.
+The new material appears in the album as a card next to its source, with a name like `c_scattergun_part1`. It's a separate material, like the head and the body of a class: an image you put on the source card doesn't reach it. At the moment you create it, it gets a copy of what the source has: its own image (or the game texture if it has none), VMT edits, material maps and texture settings, so the part looks the same as before. After that the two live apart. Use the part's card to give it an image of its own, edit its VMT, add [material maps](materials.md) or change texture settings. Colors and images that the other tools put on parts show on a part whichever material it's in. Paint goes only into the texture of the part's own material: if the UV layouts of parts in different materials cover the same spot of the texture (mirrored halves, for example), paint on one doesn't reach the other. The 3D view draws every material with its own texture, in the parts mode as well.
 
-When you build, the part's triangles get the new material name in the model, and the material is added to every skin of the model. In each skin its VMT starts from the game VMT of the material that stands in the same place, and your VMT edits go on top. Its own image goes into the skins of its team: the RED image into the red skins, the BLU image into the blue ones. In other skins, such as Australium and styles, the part shows the game texture of that skin.
+When you build, the part's triangles get the new material name in the model, and the material is added to every skin of the model. In each skin its VMT starts from the game VMT of the material that stands in the same place, and your VMT edits go on top. Its own image goes into the skins of its team: the RED image into the red skins, the BLU image into the blue ones. In other skins, such as Australium and styles, the part shows the game texture of that skin. A part without an image of its own gets only a VMT in the mod: it points to the game texture, which the game already has.
 
-Own materials work on game models only. A custom model, a mod loaded from a VPK and the festive garland don't have them, and neither does the Dead Ringer, whose preview shows a different model from the one that goes into the mod. On a cosmetic with a separate model for each class, the material is built only for the model you picked the parts on, and the build tells you so. On a cosmetic with styles, it's built for the style that is open when you build.
+Own materials work on game models and on your own model. A mod loaded from a VPK and the festive garland don't have them, and neither does the Dead Ringer, whose preview shows a different model from the one that goes into the mod. On a cosmetic with a separate model for each class, the parts carry over to the other classes by the area of the texture they cover, since all classes share one texture. If a class model maps the texture so that the part can't be told apart (mirrored halves sharing one area), that class keeps the material whole, and the build tells you so. On a cosmetic with styles, it's built for the style that is open when you build.
 
 If the game updates the model and its triangles change, the build skips the part's material and says so in the result instead of moving the wrong triangles.
 
@@ -135,7 +135,7 @@ If the game updates the model and its triangles change, the build skips the part
 
 Parts paint whatever card the preview shows. With **BLU** active, you paint the blue texture; with **Australium** on, the gold one; with a style selected, that style's texture. Each of them keeps its own strokes.
 
-Parts work on the main state of the model. If you switched **Model state** to the broken bottle or the exploded Caber, switch it back before painting.
+Parts work on the main state of the model. If you switched **Model state** to the broken bottle or the exploded Caber, switch it back before painting. The [projectile in the weapon](custom-models.md#projectile-in-the-weapon) has to be shown for painting as well: its parts come in the list after the parts of the weapon itself.
 
 ## Undo and saving
 

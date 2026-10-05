@@ -134,6 +134,32 @@ def get_cached_decompile(
         return None
 
 
+def find_same_model(vpk_path: str, mdl_rel_path: str) -> Optional[str]:
+    """
+    Готовая запись ТОЙ ЖЕ модели под другим ключом, либо None.
+
+    Ключ записи — логический (оружие, `__player_heavy`, путь шапки), и одну
+    модель разные части приложения называли по-своему: модель класса лежала
+    в кэше трижды (`heavy`, `models/player/heavy.mdl`, `__player_heavy`) —
+    три запуска Crowbar. Годность та же, что у `get_cached_decompile`.
+    """
+    want = mdl_rel_path.replace("\\", "/").lower()
+    stamp = _vpk_mtime(vpk_path)
+    for meta_file in get_cache_dir().glob(f"*/{_META_FILENAME}"):
+        try:
+            with open(meta_file, "r", encoding="utf-8") as f:
+                meta = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if (meta.get("version") == _CACHE_VERSION
+                and meta.get("vpk_mtime") == stamp
+                and os.path.normcase(str(meta.get("vpk_path") or "")) == os.path.normcase(vpk_path)
+                and str(meta.get("mdl_rel_path") or "").replace("\\", "/").lower() == want
+                and (meta_file.parent / str(meta.get("qc_filename") or "")).is_file()):
+            return str(meta_file.parent)
+    return None
+
+
 def _purge_stale_entries(weapon_key: str, mdl_rel_path: str, keep_key: str) -> None:
     """
     Удаляет записи того же оружия с устаревшим mtime VPK.

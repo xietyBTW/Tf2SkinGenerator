@@ -724,6 +724,42 @@ def is_shared_column(red_name: str, blu_name: str) -> bool:
     return (red_name or "").strip().lower() == (blu_name or "").strip().lower()
 
 
+def variant_base(rows: List[List[str]], name: str) -> Optional[str]:
+    """
+    Основной материал, место которого `name` занимает в каком-нибудь скине.
+
+    Убер- и зомби-варианты тела стоят в строках скинов на месте тела, головы
+    и глаз (scout_head_red_invun — в столбце головы). Кандидаты — редактируемые
+    материалы того же столбца, из них той же команды и ближайший по имени: у
+    scout_blue_invun это scout_blue, а у heavy_blue_zombie_alphatest —
+    hvyweapon_blue, хотя начало имени у него с телом не общее. None — вариант
+    заменяет только служебное (глаза) или то, что сборка не собирает (маски
+    шпиона: у них своя страница), либо в группе его нет.
+    """
+    from src.data.material_filter import is_editable_material, is_hidden_at_build
+
+    def team(text: str) -> str:
+        words = set(text.split("_"))
+        return "blu" if words & {"blu", "blue"} else "red" if "red" in words else ""
+
+    low = (name or "").lower()
+    best, best_score = None, None
+    for row in rows:
+        for col, mat in enumerate(row):
+            if mat.lower() != low:
+                continue
+            for other in rows:
+                cand = other[col] if col < len(other) else ""
+                if (not cand or cand.lower() == low or not is_editable_material(cand)
+                        or is_hidden_at_build(cand)):
+                    continue
+                score = (bool(team(low)) and team(cand.lower()) == team(low),
+                         len(os.path.commonprefix([cand.lower(), low])))
+                if best_score is None or score > best_score:
+                    best, best_score = cand, score
+    return best
+
+
 def team_material_map(layout: SkinLayout) -> Dict[str, str]:
     """
     {материал RED: материал BLU} — ПО СТОЛБЦАМ $texturegroup.

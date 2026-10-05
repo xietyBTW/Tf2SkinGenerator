@@ -12,7 +12,7 @@ extract-class из ``VPKService``; методы статические, внут
 import os
 import threading
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Iterable, List, Optional, Tuple
 
 from src.services.debug_service import DebugService
 from src.services.decompile_cache import get_cached_decompile, restore_from_cache, save_to_cache
@@ -275,14 +275,16 @@ class VpkModelPipeline:
         language: str,
         emit_sub,
         keep_user_materials: bool = False,
+        part_models: Optional[dict] = None,
     ) -> None:
         """
         Применяет пользовательскую замену модели поверх декомпилированных SMD.
 
         1. Главный reference-SMD: nodes/skeleton/материалы — из оригинала,
            данные треугольников — из пользовательского файла.
-        2. Доп. части (shell, scope и т.п.): спрашивает каждую через
-           extra_model_callback и заменяет по тому же принципу.
+        2. Доп. части (shell, scope и т.п.): своя модель из сеанса
+           (part_models — снаряд в оружии, он и без своей модели оружия),
+           иначе вопрос через extra_model_callback; замена по тому же принципу.
 
         Ошибки замены не прерывают сборку — логируются, сборка продолжается
         с оригинальной моделью.
@@ -339,14 +341,17 @@ class VpkModelPipeline:
             extra_smd_names = [os.path.basename(s) for s in extra_body_smds]
             logger.info(f"Найдены дополнительные части модели: {extra_smd_names}")
                         
-            if extra_model_callback:
+            own_parts = {str(k).lower(): v for k, v in (part_models or {}).items()}
+            if extra_model_callback or own_parts:
                 for extra_smd_path in extra_body_smds:
                     extra_smd_name = os.path.basename(extra_smd_path)
                     extra_smd_base = os.path.splitext(extra_smd_name)[0]
                                 
                     try:
-                        # Спрашиваем пользователя через callback
-                        user_extra_smd = extra_model_callback(extra_smd_base, weapon_key)
+                        # Своя деталь из сеанса, иначе спрашиваем через callback
+                        user_extra_smd = own_parts.get(extra_smd_base.lower())
+                        if not user_extra_smd and extra_model_callback:
+                            user_extra_smd = extra_model_callback(extra_smd_base, weapon_key)
                                     
                         if user_extra_smd and os.path.exists(user_extra_smd):
                             logger.info(f"Заменяем доп. часть модели: {user_extra_smd} -> {extra_smd_path}")
@@ -380,6 +385,9 @@ class VpkModelPipeline:
         emit_sub,
         target_mdl_paths: Optional[list] = None,
         bypass_prefix: str = "console",
+        part_specs: Optional[list] = None,
+        part_source_qc: str = "",
+        part_names: Iterable[str] = (),
     ) -> None:
         """
         Собирает модель для остальных классов мультиклассовой шапки при замене модели.
@@ -398,6 +406,12 @@ class VpkModelPipeline:
 
         Ошибки одного класса не валят сборку — этот класс просто останется с
         оригинальной игровой моделью.
+
+        Свои материалы частей (part_specs) выбирали на модели основного класса
+        (part_source_qc, уже с ними): на модель класса они переносятся по
+        участкам текстуры (part_materials.specs_for_other_model). VMT частей
+        общие и уже записаны, поэтому имя, которого у основной модели нет
+        (part_names), значит другую раскладку скинов — о нём предупреждаем.
         """
         # Модель класса пересобирается ВСЕГДА, даже когда пользователь менял
         # только текстуру: путь к материалам в модели переписывается на папку
@@ -514,6 +528,16 @@ class VpkModelPipeline:
                         keep_user_materials=keep_user_materials,
                     )
 
+                if part_specs and part_source_qc:
+                    try:
+                        VpkModelPipeline._class_part_materials(
+                            ctx, part_specs, part_source_qc, qc_p, part_names, cls or wk,
+                            own_mesh=ref_smd if has_geometry else None)
+                    except Exception as exc:   # noqa: BLE001 — модель класса важнее частей
+                        logger.warning(f"[HAT MULTI] {cls or wk}: части не перенесены: {exc}",
+                                       exc_info=True)
+                        ctx.warn(f"Свои материалы частей не перенесены на модель класса {cls or wk}")
+
                 # Патчим cdmaterials в ту же папку обхода, что и основная модель —
                 # чтобы модель класса нашла нашу текстуру по тому же пути.
                 ModelBuildService.patch_qc_file(qc_p, bypass_prefix)
@@ -523,12 +547,37 @@ class VpkModelPipeline:
                 # Копируем скомпилированные файлы в VPK по $modelname этого класса.
                 _sub = type('SubCtx', (), {'compile_dir': comp_d, 'vpkroot_dir': ctx.vpkroot_dir})()
                 ModelService.copy_compiled_models_to_vpkroot(_sub, qc_p)
-                logger.info(f"[HAT MULTI] модель класса {cls} собрана и добавлена в мод")
+                logger.info(f"[HAT MULTI] модель класса {cls or wk} собрана и добавлена в мод")
             except Exception as exc:
                 logger.warning(
                     f"[HAT MULTI] класс {cls}: ошибка сборки модели — класс останется "
                     f"с оригинальной моделью: {exc}", exc_info=True
                 )
+
+    @staticmethod
+    def _class_part_materials(ctx, part_specs, source_qc, qc_p, known, label,
+                              own_mesh: Optional[str] = None) -> None:
+        """Свои материалы частей — на модель класса мультиклассовой шапки.
+
+        own_mesh — reference-SMD класса со своей моделью человека: она легла
+        в каждый класс та же и тем же порядком, и номера частей переносятся
+        как есть (сверку `total` делает apply_to_model). Без своей модели
+        сетки классов разные — переносим по UV (specs_for_other_model).
+        """
+        from src.services import part_materials as _pm
+
+        if own_mesh:
+            specs, missed = [{**s, 'sources': [os.path.basename(own_mesh)]}
+                             for s in part_specs], []
+        else:
+            specs, missed = _pm.specs_for_other_model(
+                part_specs, os.path.dirname(source_qc), qc_p)
+        variants = _pm.apply_to_model(qc_p, specs, missed.append) if specs else {}
+        stray = sorted(set(variants) - {n.lower() for n in known})
+        if stray:
+            logger.warning(f"[HAT MULTI] {label}: у частей имена без VMT: {stray}")
+        if missed or stray:
+            ctx.warn(f"Свои материалы частей не перенесены на модель класса {label}")
 
     @staticmethod
     def _build_extra_style_models(

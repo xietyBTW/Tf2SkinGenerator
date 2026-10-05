@@ -12,18 +12,25 @@
 и с несколькими prefab через пробел, поэтому его разрешает `ItemsGame.inherited`,
 а не вызывающий код.
 
-Модуль без Qt и без зависимости от путей: на вход — текст файла.
+Модуль без Qt: на вход — текст файла (`ItemsGame.parse`) или его путь
+(`load` — один разбор на процесс, его делят все потребители).
 """
 
 from __future__ import annotations
 
+import os
 import re
+import threading
 from dataclasses import dataclass
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from src.shared.logging_config import get_logger
 
 logger = get_logger(__name__)
+
+#: {путь: ((mtime, размер), разбор)} — см. `load`.
+_loaded: Dict[str, Tuple[tuple, "ItemsGame"]] = {}
+_load_lock = threading.Lock()
 
 #: Ограничитель глубины наследования prefab — защита от циклов в чужом файле.
 MAX_PREFAB_DEPTH = 8
@@ -174,6 +181,39 @@ class ItemsGame:
         items = list(iter_blocks(content, find_section(content, "items")))
         logger.info(f"items_game: {len(items)} предметов, {len(prefabs)} prefab")
         return cls(items=items, prefabs=prefabs)
+
+    @classmethod
+    def load(cls, path) -> Optional["ItemsGame"]:
+        """
+        Разбор items_game.txt по пути — один на процесс, пока файл тот же.
+
+        Его читают краски, иконки каталога, анимации вьюмодели, стоковое
+        оружие и модели War Paint. При старте каждый разбирал 8 МБ сам, а
+        иконки каталога — ещё и по нескольку раз разом: они приходят
+        параллельно. Это секунды процессора под GIL, и окно замирало (его
+        обработчик сообщений — на Python, см. frontend/titlebar.py). Под
+        замком второй поток дожидается первого, а не разбирает заново.
+        Разбор только читают — делить его можно.
+        """
+        path = str(path)
+        try:
+            st = os.stat(path)
+        except OSError:
+            return None
+        stamp = (st.st_mtime_ns, st.st_size)
+        with _load_lock:
+            got = _loaded.get(path)
+            if got and got[0] == stamp:
+                return got[1]
+            try:
+                with open(path, encoding="utf-8", errors="replace") as f:
+                    game = cls.parse(f.read())
+            except OSError as exc:
+                logger.warning(f"items_game не прочитан ({path}): {exc}")
+                return None
+            _loaded.clear()                 # игра одна: прежний разбор не нужен
+            _loaded[path] = (stamp, game)
+            return game
 
     def inherited(self, block: str, key: str) -> Optional[str]:
         """Плоское значение с учётом цепочки prefab. Своё значение сильнее."""

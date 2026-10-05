@@ -65,6 +65,31 @@ class MdlReaderTests(unittest.TestCase):
         self.assertEqual(hdr.material_names, ["redgun"])
         self.assertEqual(hdr.cdmaterials, ["models/weapons/c_models"])
 
+    def test_drawn_materials_skip_columns_without_meshes(self):
+        # Руки инженера: в таблице скинов есть рука Ганслингера, но сетки с
+        # ней в модели нет. Игра её не рисует, и фиолетового от неё не будет.
+        # Материал вне таблицы (замена у LOD) проверяется как раньше, а имя,
+        # которое не прочиталось, не сдвигает остальные.
+        names = ["arm_red", "hand", "", "arm_blue", "mech_blue", "lod_arm"]
+        buf = bytearray(0x800)
+        buf[0:4] = b"IDST"
+        struct.pack_into("<iiii", buf, 0xCC, len(names), 0x100, 0, 0)
+        for i, name in enumerate(names):
+            struct.pack_into("<i", buf, 0x100 + i * 64, 0x300 + i * 16 - (0x100 + i * 64))
+            buf[0x300 + i * 16:0x300 + i * 16 + len(name)] = name.encode()
+        # Два скина по три столбца: {arm, hand, mech} RED и BLU.
+        struct.pack_into("<iii", buf, 0xDC, 3, 2, 0x400)
+        struct.pack_into("<6h", buf, 0x400, 0, 1, 2, 3, 1, 4)
+        # Одна часть тела, одна модель, две сетки: столбцы 0 и 1.
+        struct.pack_into("<ii", buf, 0xE8, 1, 0x500)
+        struct.pack_into("<iiii", buf, 0x500, 0, 1, 0, 0x10)          # модели @0x510
+        struct.pack_into("<ii", buf, 0x510 + 72, 2, 0x100)            # сетки @0x610
+        struct.pack_into("<i", buf, 0x610, 0)
+        struct.pack_into("<i", buf, 0x610 + 116, 1)
+        hdr = parse_mdl(bytes(buf))
+        self.assertEqual(hdr.material_names, [n for n in names if n])
+        self.assertEqual(hdr.drawn_materials, ["arm_red", "hand", "arm_blue", "lod_arm"])
+
     def test_parse_garbage_no_crash(self):
         hdr = parse_mdl(b"not a model at all")
         self.assertFalse(hdr.valid)

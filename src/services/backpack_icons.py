@@ -13,6 +13,7 @@ backpack имена уникальны (ни одного совпадения �
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -26,6 +27,8 @@ logger = get_logger(__name__)
 _CACHE_DIR = data_dir() / "cache" / "icons"
 
 _index: Optional[Dict[str, str]] = None
+#: Иконки каталога приходят пачкой параллельно — индекс строит один.
+_index_lock = threading.Lock()
 
 
 def _build_index(textures_vpk: str) -> Dict[str, str]:
@@ -66,7 +69,9 @@ def vpk_path_for(key: str, textures_vpk: str) -> Optional[str]:
     if not key:
         return None
     if _index is None:
-        _index = _build_index(textures_vpk)
+        with _index_lock:
+            if _index is None:
+                _index = _build_index(textures_vpk)
 
     key = key.replace("\\", "/").strip().lower()
     if key.startswith("backpack/"):

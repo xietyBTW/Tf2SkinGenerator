@@ -6,6 +6,7 @@
 """
 
 import unittest
+from unittest.mock import patch
 
 from src.domain.preview.mode import PreviewMode
 from src.domain.preview.session import PreviewSession
@@ -384,6 +385,27 @@ class CardMeshTests(unittest.TestCase):
 
         self.assertEqual(self._session(SPY_MASK_MODE_KEY).card_mesh(),
                          ["mask_spy"])
+
+    def test_misc_cards_wear_the_place_of_their_skin(self):
+        """Убер и зомби своей геометрии не имеют: в скине они стоят на месте
+        тела, головы и глаз, и модель должна показать их там."""
+        s = self._session("scout_body")
+        s.textures.skin_info = {"rows": [
+            ["scout_red", "scout_head_red", "eyeball_l", "eyeball_r", "scout_red_invun"],
+            ["scout_blue", "scout_head_blue", "eyeball_l", "eyeball_r", "scout_red_invun"],
+            ["scout_red_invun", "scout_head_red_invun", "eyeball_invun", "eyeball_invun",
+             "scout_red_invun"],
+        ]}
+        s.misc_materials = ["scout_red_invun", "scout_head_red_invun", "eyeball_invun"]
+        s.textures.material_names = ["scout_red", "scout_head_red"]
+        with patch.object(PreviewSession, "scene_textures",
+                          return_value={"scout_red": "b.png", "scout_head_red": "h.png"}):
+            self.assertEqual(s.card_mesh(), [])          # пока «Прочее» не открыто
+            s.misc_mode = True
+            # Глаза своей текстуры в сцене не имеют: уберовские остались бы
+            # на них и после выхода из «Прочего».
+            self.assertEqual(s.card_mesh(), {"scout_red_invun": ["scout_red"],
+                                             "scout_head_red_invun": ["scout_head_red"]})
 
     def test_ordinary_item_wears_nothing_extra(self):
         """У всех остальных карточка — это материал, надевать нечего."""

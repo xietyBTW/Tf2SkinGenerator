@@ -91,7 +91,9 @@ Many weapons and about two thirds of cosmetics are painted by the material: wher
 
 ## Service and hidden materials
 
-Some materials are hidden from the album on purpose: eyes, teeth, tongues, über (invulnerability) overlays, zombie skins, sheen and fresnel overlays. They go into the mod with their game textures. **Other** under the album shows them as cards when you do want to replace one.
+Some materials are hidden from the album on purpose: eyes, teeth, tongues, über (invulnerability) overlays, zombie skins, sheen and fresnel overlays. They go into the mod with their game textures. **Other** under the album shows them as cards when you do want to replace one. While it's on, the model wears the card you stop at in the place that card takes in its skin: the über body on the body, the zombie head on the head.
+
+An über or zombie variant of a class body has no image of yours unless you give it one, and the build asks about it. **Copy the main one** then takes the texture of the part the variant replaces: the body for the body, the head for the head, the BLU body for the BLU variant. If that part kept its game texture, or it's the eyes, the variant keeps its own game texture too: there is nothing of yours to copy.
 
 You can hide more materials yourself in **Settings → Hidden materials**. See [Settings](settings.md#hidden-materials).
 

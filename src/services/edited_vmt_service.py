@@ -63,6 +63,18 @@ class EditedVMTService:
         """
         if EditedVMTService.has_edited_vmt(edit_key):
             return EditedVMTService.get_edited_vmt_path(edit_key)
+        # Сборка спрашивает по имени в модели (`material_001`), а правка лежит
+        # под именем карточки (`Material.001` из Blender): studiomdl собирает
+        # их в один материал (part_materials.model_name).
+        from src.services.part_materials import model_name
+        if edit_key and edit_key == model_name(edit_key):
+            try:
+                files = os.listdir(EditedVMTService.EDITED_VMT_DIR)
+            except OSError:
+                return None
+            for f in files:
+                if f.lower().endswith('.vmt') and model_name(f[:-4]) == edit_key:
+                    return os.path.join(EditedVMTService.EDITED_VMT_DIR, f)
         return None
     
     @staticmethod

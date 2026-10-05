@@ -332,13 +332,10 @@ def anim_index(tf2_root: str) -> Dict[str, WeaponAnimInfo]:
 # ── Разбор и кэш ──────────────────────────────────────────────────────────── #
 
 def _build_index(items_path: Path) -> Dict[str, WeaponAnimInfo]:
-    try:
-        content = items_path.read_text(encoding="utf-8", errors="replace")
-    except OSError as exc:
-        logger.warning(f"[vm] не прочитать items_game: {exc}")
+    game = items_game_kv.ItemsGame.load(items_path)
+    if game is None:
+        logger.warning(f"[vm] не прочитать items_game: {items_path}")
         return {}
-
-    game = items_game_kv.ItemsGame.parse(content)
     index: Dict[str, WeaponAnimInfo] = {}
     decor: Dict[str, Dict[str, list]] = {}
     for _defindex, block in game.items:

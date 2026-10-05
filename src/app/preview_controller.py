@@ -136,6 +136,9 @@ class Preview3DController:
             textures_vpk_path=textures_vpk,
             lang=lang,
             bodygroups=bodygroups,
+            # Своя модель снаряда — правка предмета: в кадре она при любом
+            # пути загрузки (выбор, состояние, отмена).
+            part_models=dict(getattr(self._session, 'part_models', None) or {}),
         )
         self._bind(w, mode, geometry)
         self._worker = w

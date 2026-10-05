@@ -63,7 +63,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from src.shared.logging_config import get_logger
 
@@ -129,17 +129,28 @@ class ModelParts:
     #: {материал: {номер группы: сколько в ней островов}} — чтобы сказать, что
     #: резать больше нечего.
     group_islands: Dict[str, Dict[int, int]] = field(default_factory=dict)
+    #: {материал: первый треугольник снаряда в оружии} (`# Late:` OBJ); нет
+    #: материала — снаряда в нём нет. До этого номера идёт само оружие.
+    late: Dict[str, int] = field(default_factory=dict)
 
     def parts_of(self, material: str) -> List[Part]:
         return self.materials.get(material, [])
 
-    def polygons(self, material: str, part_index: int) -> List[UvTri]:
-        """UV-треугольники одной части — маска для наложения картинки."""
+    def polygons(self, material: str, part_index: int,
+                 keep: Optional[Callable[[int], bool]] = None) -> List[UvTri]:
+        """UV-треугольники одной части — маска для наложения картинки.
+        `keep` — только треугольники, которые он пропустит (свой материал)."""
         uv = self.uv.get(material) or []
         for part in self.materials.get(material, []):
             if part.index == part_index:
-                return [uv[t] for t in part.triangles if t < len(uv)]
+                return [uv[t] for t in part.triangles
+                        if t < len(uv) and (keep is None or keep(t))]
         return []
+
+    def weapon_end(self, material: str) -> int:
+        """Сколько треугольников материала принадлежат самому оружию — до
+        снаряда в оружии, а без снаряда в кадре все."""
+        return self.late.get(material, len(self.uv.get(material) or []))
 
 
 class _Union:
@@ -227,16 +238,43 @@ def _weigh(items: Sequence[object], triangles: Sequence[Tuple[tuple, UvTri]],
 
 
 def _chunk_order(keys: Sequence[tuple],
-                 triangles: Sequence[Tuple[tuple, UvTri]]) -> Dict[object, int]:
+                 triangles: Sequence[Tuple[tuple, UvTri]],
+                 late: Optional[int] = None) -> Dict[object, int]:
     """Номера кусков по площади — нумерация НУЛЕВОГО дробления.
 
     Настройка живёт под номером группы, а он выводится из этого порядка,
     поэтому номер куска обязан не зависеть от разбиения: номер части меняется
     вместе с ним, номер куска — нет.
+
+    `late` — с какого треугольника идут «поздние» детали (снаряд в оружии,
+    smd_to_obj_service.LATE_PREFIX): их куски нумеруются после кусков
+    основной модели. Снаряд в кадре появился позже покраски по частям, и по
+    площади он встал бы между кусками ружья — краска старых работ уехала бы.
     """
     area, first = _weigh(keys, triangles, lambda key: key[0])
-    ordered = sorted(area, key=lambda c: (-area[c], first[c]))
+    ordered = sorted(area, key=lambda c: (late is not None and first[c] >= late,
+                                          -area[c], first[c]))
     return {chunk: index for index, chunk in enumerate(ordered)}
+
+
+def _late_of(obj_path: str) -> Dict[str, int]:
+    """{материал: первый треугольник снаряда} из шапки OBJ (пусто — нет)."""
+    from src.services.smd_to_obj_service import LATE_PREFIX
+
+    try:
+        with open(obj_path, encoding='utf-8', errors='replace') as f:
+            for _ in range(8):
+                line = f.readline()
+                if line.startswith(LATE_PREFIX):
+                    out = {}
+                    for item in line[len(LATE_PREFIX):].strip().split('|'):
+                        mat, _, at = item.rpartition('=')
+                        if mat and at.isdigit():
+                            out[mat] = int(at)
+                    return out
+    except OSError:
+        pass
+    return {}
 
 
 def _groups_of(keys: Sequence[tuple], order: Dict[object, int]) -> Dict[object, int]:
@@ -381,7 +419,8 @@ def _is_region(key) -> bool:
 
 def _split(triangles: Sequence[Tuple[tuple, UvTri]],
            cuts: Optional[Dict[int, set]] = None,
-           regions: Optional[Sequence[Sequence[int]]] = None):
+           regions: Optional[Sequence[Sequence[int]]] = None,
+           late: Optional[int] = None):
     """Части одного материала плюс карта «треугольник → остров».
 
     Возвращает (части, номер острова каждого треугольника, островов в группе).
@@ -398,7 +437,7 @@ def _split(triangles: Sequence[Tuple[tuple, UvTri]],
 
     keys = [(geometry.find(positions[0]), layout.find(uv[0]))
             for positions, uv in triangles]
-    order = _chunk_order(keys, triangles)
+    order = _chunk_order(keys, triangles, late)
     group_of = _groups_of(keys, order)
     numbers = _island_numbers(keys, triangles, group_of)
     groups, belongs, islands_of = _regroup(keys, bundles_of(cuts), order,
@@ -549,13 +588,15 @@ def load(obj_path: str,
         return None
 
     shared = per_mat.get('')
-    done = {mat: _split(tris, per_mat.get(mat, shared), areas.get(mat))
+    late = _late_of(obj_path)
+    done = {mat: _split(tris, per_mat.get(mat, shared), areas.get(mat), late.get(mat))
             for mat, tris in by_mat.items()}
     parts = ModelParts(
         materials={mat: got[0] for mat, got in done.items()},
         uv={mat: [uv for _, uv in tris] for mat, tris in by_mat.items()},
         tri_island={mat: got[1] for mat, got in done.items()},
         group_islands={mat: got[2] for mat, got in done.items()},
+        late={mat: at for mat, at in late.items() if mat in by_mat},
     )
     _CACHE.clear() if len(_CACHE) > 8 else None
     _CACHE[key] = parts

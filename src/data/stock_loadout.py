@@ -49,11 +49,9 @@ _cache: Dict[str, Dict[str, List[StockWeapon]]] = {}
 
 
 def _parse(path: str) -> Dict[str, List[StockWeapon]]:
-    try:
-        with open(path, encoding="utf-8", errors="replace") as f:
-            game = kv.ItemsGame.parse(f.read())
-    except OSError as exc:
-        logger.warning(f"[loadout] items_game не прочитан: {exc}")
+    game = kv.ItemsGame.load(path)
+    if game is None:
+        logger.warning(f"[loadout] items_game не прочитан: {path}")
         return {}
     found: Dict[str, Dict[str, StockWeapon]] = {}
     for _idx, block in game.items:

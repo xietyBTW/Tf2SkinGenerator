@@ -222,7 +222,7 @@ class DeriveEffectMapTests(unittest.TestCase):
         try:
             TextureService.derive_effect_map(base, out, "selfillum", (64, 64), threshold=128)
             with Image.open(out) as im:
-                colors = {p for p in im.getdata()}
+                colors = {c for _, c in im.getcolors(64 * 64)}
                 self.assertTrue(colors <= {0, 255})  # только чёрное/белое
         finally:
             for p in (base, out):

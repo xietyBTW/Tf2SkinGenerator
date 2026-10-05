@@ -486,9 +486,12 @@
                 Острота рёбер
                 <input type="range" id="cut-angle" min="5" max="80" value="30">
               </label>
-              <label class="parts__strength" id="cut-radius-box" hidden>
+              <!-- Шкала логарифмическая (parts.js, brushRadius): у мелких
+                   размеров, где и нужна точность, ход ползунка длинный. -->
+              <label class="parts__strength" id="cut-radius-box" hidden
+                     title="Кисть берёт целые треугольники модели: мельче одного треугольника она не выделит">
                 Размер кисти
-                <input type="range" id="cut-radius" min="1" max="30" value="5">
+                <input type="range" id="cut-radius" min="0" max="100" value="69">
               </label>
               <label class="check" id="cut-erase-box" hidden>
                 <input type="checkbox" id="cut-erase"><span>Стирать</span>

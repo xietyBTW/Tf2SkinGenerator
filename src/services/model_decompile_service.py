@@ -22,6 +22,7 @@ from __future__ import annotations
 import os
 import shutil
 import tempfile
+import threading
 from dataclasses import dataclass
 from enum import Enum
 from typing import Callable, Optional, Sequence
@@ -125,9 +126,40 @@ def ensure_decompiled(
         )
         return None
 
-    return _extract_and_decompile(
-        weapon_key, misc_vpk_path, found_rel, crowbar, stop, progress
-    )
+    # Одна распаковка на модель. Превью и поиск стилей открывают её разом —
+    # было два Crowbar на одну модель одновременно; второй ждёт первого и
+    # берёт готовое. Та же модель под другим ключом (модель класса у тела,
+    # у насмешки и у шапки «На модели») копируется, а не распаковывается.
+    lock = _model_lock(misc_vpk_path, found_rel)
+    while not lock.acquire(timeout=0.25):
+        if stop():
+            return None
+    try:
+        hit = decompile_cache.get_cached_decompile(weapon_key, misc_vpk_path, found_rel)
+        if hit:
+            return Decompiled(directory=hit, mdl_rel=found_rel, cached=True)
+        same = decompile_cache.find_same_model(misc_vpk_path, found_rel)
+        copied = (decompile_cache.save_to_cache(weapon_key, misc_vpk_path, found_rel, same)
+                  if same else None)
+        if copied:
+            logger.info(f"[decomp] {weapon_key}: та же модель уже распакована — копия")
+            return Decompiled(directory=copied, mdl_rel=found_rel, cached=True)
+        return _extract_and_decompile(
+            weapon_key, misc_vpk_path, found_rel, crowbar, stop, progress
+        )
+    finally:
+        lock.release()
+
+
+#: {(VPK, модель): замок} — см. ensure_decompiled.
+_MODEL_LOCKS: dict = {}
+_MODEL_LOCKS_GUARD = threading.Lock()
+
+
+def _model_lock(vpk_path: str, mdl_rel: str) -> threading.Lock:
+    key = (os.path.normcase(vpk_path), mdl_rel.replace("\\", "/").lower())
+    with _MODEL_LOCKS_GUARD:
+        return _MODEL_LOCKS.setdefault(key, threading.Lock())
 
 
 def _first_existing(

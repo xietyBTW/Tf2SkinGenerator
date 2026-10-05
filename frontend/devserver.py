@@ -259,6 +259,8 @@ ALLOWED = {
     "load_custom_model": api.load_custom_model,
     "drop_custom_model": api.drop_custom_model,
     "load_decor_model": api.load_decor_model,
+    "load_part_model": api.load_part_model,
+    "drop_part_model": api.drop_part_model,
     "drop_decor_model": api.drop_decor_model,
     "qc_text": api.qc_text,
     "save_qc": api.save_qc,

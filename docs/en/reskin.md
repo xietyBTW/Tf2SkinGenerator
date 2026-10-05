@@ -63,6 +63,7 @@ Many items look different for RED and BLU, and some have extra versions. The app
 | **Style** | under the model | Extra skins baked into the model, such as the clean and bloody versions of some melee weapons. **Default** is the base skin. A style takes the base textures until you give it its own. |
 | **Version** | under the model | **Regular**, **Festive** and **Festivized**: shows the festive lights the game hangs on this weapon. Lights you repaint or fit go into the mod as a separate model and don't affect other weapons. |
 | **Model state** | under the model | Some models change on their own in game: a bottle breaks, the Caber loses its head after the explosion. These buttons let you look at each state. They only change the preview, every state goes into the mod. |
+| **Projectile in the weapon** | under the model | On weapons that load a projectile (the Loch-n-Load grenade, the Flare Gun flare): **shown** or **hidden**. Only changes the preview. **Replace model** gives the projectile a model of your own, see [Custom models](custom-models.md#projectile-in-the-weapon). |
 
 When a material has separate RED and BLU versions and you give only one of them an image, the build asks what to do with the other. That question is described in [step 7](#7-build).
 

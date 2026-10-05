@@ -108,6 +108,18 @@ Some weapons switch geometry by themselves in game: the bottle breaks, the Caber
 
 Closing this question keeps the game's part and the build goes on.
 
+## Projectile in the weapon
+
+Some weapon models carry the projectile that gets loaded during the reload: the Loch-n-Load's grenade, the Flare Gun's flare. The game shows it only in first person, in the hand during the reload. The app shows it in the item view right away, so you can see it and edit it. The **Projectile in the weapon** row under the 3D view hides it (**hidden** / **shown**), but that only changes the preview.
+
+- **Paint it.** On the Loch-n-Load the projectile is drawn on the weapon's texture, so the image on the weapon's card paints it too. The Flare Gun and the bow have a separate card for the projectile. In [painting by parts](model-parts.md) the projectile comes as separate parts after the parts of the weapon itself, and you can give them [their own material](model-parts.md#own-material-for-a-part).
+- **Replace it.** **Replace model** asks what to replace: pick **Projectile in the weapon**. The custom model sits on the bone of the game's projectile, so the hand moves it during the reload as usual. An SMD stays where you placed it in your editor against the game model and is drawn with the game projectile's texture through your UV layout. An OBJ or GLB is fitted into the size of the game's projectile and gets a material of its own: its card appears in the album with the picture from the file, or plain grey if the file has none. This way paint on the projectile doesn't land on the weapon, and its texture doesn't break other models that share the game projectile's texture. The VMT of this material comes from the game's projectile, minus the maps laid out for its UV layout, such as the normal map. After the replacement the row is called **Custom projectile in the weapon**.
+- **Restore it.** **Remove custom model** brings back the game's projectile. If something else is replaced too, the app asks which one to restore.
+
+When the projectile's model changes, its paint by parts and the materials of its parts are reset: they were tied to the triangles of the previous model. Paint and part materials of the weapon itself stay. <kbd>Ctrl</kbd>+<kbd>Z</kbd> brings everything back along with the previous model.
+
+This works on the game model of the weapon only. When the weapon itself is replaced with your model, the build asks about the projectile separately, like about the other model states (see above). The projectile in flight, the one everyone sees, is a different model: it's in the **Projectiles** category (see [Special items](special-items.md#projectiles-health-and-ammo-taunt-props)).
+
 ## Festive weapons and their lights
 
 Many weapons get festive lights in game: the festive version of the weapon or the Festivizer hangs a garland on top of the regular model. The **Version** row under the 3D view shows them: **Regular**, **Festive**, **Festivized**.
@@ -122,7 +134,7 @@ Edits of the lights go into the mod as a separate model and don't affect other w
 
 ## Removing a custom model
 
-**Remove custom model** brings back the game model. If you replaced both the weapon and its lights, the app asks which one to restore. **Discard edits** under the album removes the custom model too, together with all other edits of the item.
+**Remove custom model** brings back the game model. If you replaced more than one model (the weapon, its lights, the projectile in the weapon), the app asks which one to restore. **Discard edits** under the album removes the custom model too, together with all other edits of the item.
 
 ## Troubleshooting
 
@@ -140,5 +152,5 @@ Edits of the lights go into the mod as a separate model and don't affect other w
 ## See also
 
 - [War Paint](war-paint.md): War Paints on a custom model work in universal mode.
-- [Painting by parts](model-parts.md): parts are rebuilt for your model's geometry.
+- [Painting by parts](model-parts.md): parts are rebuilt for your model's geometry, and they can get [a material of their own](model-parts.md#own-material-for-a-part) as on a game model.
 - [Your first skin](reskin.md): textures, teams and building.

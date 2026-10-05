@@ -282,6 +282,8 @@ class ControlsTests(unittest.TestCase):
         """Сложный скелет и bodygroups — подмена почти всегда даёт битый результат."""
         self.assertTrue(api.controls_for('c_scattergun')['replace_model'])
         self.assertFalse(api.controls_for('scout_body')['replace_model'])
+        # Руки сборка своей моделью не собирает: подмена в превью была бы обманом.
+        self.assertFalse(api.controls_for('scout_hands')['replace_model'])
 
     def test_parts_offered_wherever_there_is_geometry(self):
         """Деление на части — про геометрию, а не про подмену модели.
