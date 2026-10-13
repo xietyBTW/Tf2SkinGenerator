@@ -162,7 +162,8 @@ async function openForm(item, back, done, getText) {
   // цветов» - только у радуги, плашки - только у одного цвета).
   const rows = [];
   const sync = () => rows.forEach(({ f, row }) => {
-    row.hidden = !Object.entries(f.show_if || {}).every(([k, v]) => values[k] === v);
+    row.hidden = !Object.entries(f.show_if || {}).every(([k, v]) => (Array.isArray(v)
+      ? v.includes(values[k]) : values[k] === v));
   });
   for (const f of item.fields) {
     const row = field(f, values, sync);

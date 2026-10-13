@@ -99,6 +99,23 @@ def _color_fields(label: Tuple[str, str]) -> List[dict]:
     ]
 
 
+#: Подписи своих узоров блеска (src/services/sheen_patterns.py).
+_SHEEN_PATTERN_LABELS = {
+    "double": ("Две полосы", "Two stripes"),
+    "pulse": ("Вспышка", "Flash"),
+    "pulse2": ("Двойная вспышка", "Double flash"),
+    "stripes": ("Бегущие полосы", "Running stripes"),
+    "sparkle": ("Искры", "Sparkles"),
+    "mist": ("Дымка", "Mist"),
+    "calib": ("Калибровка (тест)", "Calibration (test)"),
+}
+
+
+def _sheen_patterns() -> Dict[str, Tuple[str, str]]:
+    from src.services.sheen_patterns import PATTERNS
+    return {k: _SHEEN_PATTERN_LABELS[k] for k in PATTERNS}
+
+
 # Поля форм. Подписи парами (ru, en): переводит Python, как и сами сниппеты.
 EFFECTS: Dict[str, dict] = {
     GHOST: {
@@ -139,6 +156,14 @@ EFFECTS: Dict[str, dict] = {
              "default": "normal",
              "choices": [("normal", "Обычный", "Normal"),
                          ("bright", "Ярче, как у австралия", "Brighter, like Australium")]},
+            {"key": "pattern", "type": "choice", "label": ("Узор", "Pattern"),
+             "default": "game",
+             "choices": [("game", "Как в игре", "As in game"),
+                         *[(k, ru, en) for k, (ru, en) in _sheen_patterns().items()]]},
+            {"key": "length", "type": "range",
+             "label": ("Длина прохода, сек", "Sweep length, s"),
+             "min": 1, "max": 8, "step": 0.5, "default": 2.5,
+             "show_if": {"pattern": list(_sheen_patterns())}},
             {"key": "when", "type": "choice", "label": ("Когда", "When"),
              "default": "game",
              "choices": [("game", "С киллстриком, как в игре", "With a killstreak, as in game"),
@@ -272,6 +297,11 @@ def values(key: str, text: str) -> Dict[str, object]:
             out["color_mode"] = "rainbow"
             out["speed"] = _num(rainbow[0], 0.5, 10, 3)
         out["look"] = "bright" if _value(text, MARK + "sheenidx") is not None else "normal"
+        from src.services import sheen_patterns
+        own = sheen_patterns.parse(_value(text, "$sheenmapmask") or "")
+        if own:
+            out["pattern"] = own[0]
+            out["length"] = round((own[1] - 1) / sheen_patterns.FPS * 2) / 2
         pause = _value(text, MARK + "sheenpause")
         if pause is not None:
             out["when"] = "always"
@@ -302,7 +332,7 @@ def apply(key: str, vals: Dict[str, object], text: str,
     if key == GLASS:
         return {"text": _glass(vals, text), "replace": False}
     if key == SHEEN:
-        return _sheen(vals, text, bounds)
+        return _sheen(vals, text, bounds, game)
     if key == CRIT:
         return _crit(vals, text)
     return {"error": "Такого эффекта нет"}
@@ -319,6 +349,7 @@ _CRIT_SCALE = 80.0
 #: которой их крутит игра (tf_sheen_framerate 25).
 _SHEEN_FRAMES = 60
 _SHEEN_FPS = 25
+_STOCK_MASK = "effects/animatedsheen/animatedsheen0"
 
 
 def _to_linear(c: float) -> float:
@@ -413,7 +444,8 @@ def sheen_mask_params(mdl: bytes) -> Optional[dict]:
     return {"scale_x": sx, "scale_y": sy, "offset_x": ox, "offset_y": oy, "direction": d}
 
 
-def _sheen(vals: Dict[str, object], text: str, bounds: Optional[dict]) -> Dict[str, object]:
+def _sheen(vals: Dict[str, object], text: str, bounds: Optional[dict],
+           game: str = '') -> Dict[str, object]:
     """Свой цвет блеска: наш Equals ниже AnimatedWeaponSheen перезаписывает
     цвет, который игра ставит каждый кадр."""
     always = vals.get("when") == "always"
@@ -429,8 +461,24 @@ def _sheen(vals: Dict[str, object], text: str, bounds: Optional[dict]) -> Dict[s
     tint = ((bright,) * 3 if rainbow
             else tuple(_to_linear(c) * bright for c in _from_hex(vals.get("color"))))
 
+    from src.services import sheen_patterns
+
     out = _drop_keys(_strip_marked_proxies(text, _SHEEN_MARK), MARK + "sheen")
     keys = [(MARK + "sheen", _fmt_vec(tint, 6)), (MARK + "sheenbright", f"{bright:g}")]
+    # Свой узор — своя маска у ЭТОГО материала (моды подменяют общую маску
+    # всего оружия). Кадры крутит тот же прокси игры: пауза между проходами
+    # по-прежнему сокращается с серией убийств. Файл маски достроит сборка
+    # по имени (sheen_patterns.materialize).
+    frames = _SHEEN_FRAMES
+    pattern = str(vals.get("pattern") or "game")
+    if pattern in sheen_patterns.PATTERNS:
+        frames = sheen_patterns.frames_for(_num(vals.get("length"), 1, 8, 2.5))
+        keys.append(("$sheenmapmask", sheen_patterns.texture_name(pattern, frames)))
+    elif sheen_patterns.parse(_value(out, "$sheenmapmask") or ""):
+        # Назад к маске материала (у мода она могла быть своя), иначе стоковая.
+        native = _value(game, "$sheenmapmask") or ""
+        keys.append(("$sheenmapmask", native if native and not sheen_patterns.parse(native)
+                     else _STOCK_MASK))
     tail = ""
     if rainbow:
         tail += _rainbow(MARK + "sheen", _num(vals.get("speed"), 0.5, 10, 3), bright,
@@ -446,11 +494,11 @@ def _sheen(vals: Dict[str, object], text: str, bounds: Optional[dict]) -> Dict[s
         # Блеск без киллстрика: параметры прохода, если материала их нет.
         for key, value in (("$sheenpassenabled", "1"),
                            ("$sheenmap", "cubemaps/cubemap_sheen001"),
-                           ("$sheenmapmask", "effects/animatedsheen/animatedsheen0"),
+                           ("$sheenmapmask", _STOCK_MASK),
                            ("$sheenmaptint", "[1 1 1]"),
                            ("$sheenmapmaskframe", "0"),
                            ("$sheenindex", "0")):
-            if _value(out, key) is None:
+            if _value(out, key) is None and key not in dict(keys):
                 keys.append((key, value))
         keys += [("$sheenmapmaskscaleX", f'{bounds["scale_x"]:.4g}'),
                  ("$sheenmapmaskscaleY", f'{bounds["scale_y"]:.4g}'),
@@ -459,10 +507,10 @@ def _sheen(vals: Dict[str, object], text: str, bounds: Optional[dict]) -> Dict[s
                  ("$sheenmapmaskdirection", str(bounds["direction"])),
                  (MARK + "sheenpause", f"{pause:g}"),
                  (MARK + "sheent", "0.0"),
-                 (MARK + "sheenlast", f"{_SHEEN_FRAMES - 1}.0"),
+                 (MARK + "sheenlast", f"{frames - 1}.0"),
                  (MARK + "sheenzero", "0.0")]
         # Кадр маски: 1…59 — полоса идёт, 0 — проход не рисуется (пауза).
-        cycle = _SHEEN_FRAMES + pause * _SHEEN_FPS
+        cycle = frames + pause * _SHEEN_FPS
         t = MARK + "sheent"
         tail += (_proxy("LinearRamp", [("rate", str(_SHEEN_FPS)), ("initialValue", "0"),
                                        ("resultVar", t)], _SHEEN_MARK)

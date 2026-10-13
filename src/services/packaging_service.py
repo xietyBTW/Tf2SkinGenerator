@@ -77,6 +77,12 @@ class PackagingService:
 
         t = TRANSLATIONS.get(language, TRANSLATIONS['en'])
 
+        # Маски своих узоров блеска, на которые ссылаются VMT мода: файл
+        # задаётся именем и строится здесь — через это место идут все сборки.
+        # Не вышло — сборка падает: без маски на оружии была бы «шахматка».
+        from src.services import sheen_patterns
+        sheen_patterns.materialize(Path(vpkroot_dir))
+
         def _locked(path: Path, exc: OSError) -> FileLockedError:
             """Понятная ошибка вместо сырого WinError 32.
 
