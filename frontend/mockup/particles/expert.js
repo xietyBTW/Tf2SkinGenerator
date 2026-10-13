@@ -1,7 +1,7 @@
 /*
  * Экспертное дерево: группы → модули → все атрибуты, как они лежат в PCF.
  *
- * Обычный режим показывает крутилки, этот — файл как есть. Поиск сужает
+ * Обычный режим показывает крутилки, этот - файл как есть. Поиск сужает
  * показанное, а не запрашивает заново: дерево уже целиком на странице.
  */
 
@@ -28,7 +28,7 @@ export function filterExpert(query) {
     let hits = 0;
     mod.querySelectorAll('.params__row').forEach((row) => {
       const name = row.querySelector('.params__name').textContent.toLowerCase();
-      // Совпало имя модуля — показываем его целиком, иначе только строки.
+      // Совпало имя модуля - показываем его целиком, иначе только строки.
       const ok = !q || modName.includes(q) || name.includes(q);
       row.hidden = !ok;
       if (ok) hits += 1;
@@ -36,7 +36,7 @@ export function filterExpert(query) {
     mod.hidden = Boolean(q) && hits === 0;
     mod.open = Boolean(q) && hits > 0;
   });
-  // Заголовок группы без единого модуля — висящая подпись; прячем вместе с ней.
+  // Заголовок группы без единого модуля - висящая подпись; прячем вместе с ней.
   document.querySelectorAll('.expert__block').forEach((block) => {
     block.hidden = ![...block.querySelectorAll('.expert__mod')]
       .some((m) => !m.hidden);
@@ -57,7 +57,7 @@ function attrChanged(group, index, attr) {
 }
 
 /**
- * Перекрашивает метки после правки — без перестройки дерева, иначе
+ * Перекрашивает метки после правки - без перестройки дерева, иначе
  * раскрытые модули сворачивались бы на каждый ввод.
  */
 export function markExpert(systemDiff) {
@@ -83,14 +83,14 @@ export async function showExpert(system) {
   const box = document.getElementById('pexpert');
   box.innerHTML = '';
   for (const g of data.groups || []) {
-    // Группа — заголовком над своими модулями, а не подписью на каждом:
+    // Группа - заголовком над своими модулями, а не подписью на каждом:
     // «OPERATORS» пять раз подряд ничего не добавляло, только шумело.
     const block = document.createElement('section');
     block.className = 'expert__block';
     const head = document.createElement('p');
     head.className = 'label expert__head';
     head.textContent = g.group || 'система';
-    // Правая кнопка на заголовке группы — добавить в неё модуль.
+    // Правая кнопка на заголовке группы - добавить в неё модуль.
     head.addEventListener('contextmenu', (e) => expertMenu(e, {
       group: g.group, index: null, attr: null,
     }));
@@ -106,7 +106,7 @@ export async function showExpert(system) {
     }
 
     if (g.group === 'children') {
-      // Дети — ссылки, а не модули: у них нет параметров, только имя.
+      // Дети - ссылки, а не модули: у них нет параметров, только имя.
       for (const kid of g.modules) {
         const row = document.createElement('div');
         row.className = 'expert__kid';
@@ -122,8 +122,8 @@ export async function showExpert(system) {
     for (const mod of g.modules) {
       const d = document.createElement('details');
       d.className = 'expert__mod';
-      // Свёрнуто всё: 16 названий модулей — это карта системы, а 181 строка
-      // подряд — стена, в которой ничего не найти.
+      // Свёрнуто всё: 16 названий модулей - это карта системы, а 181 строка
+      // подряд - стена, в которой ничего не найти.
       d.open = false;
       // Адрес модуля нужен кнопкам «Параметр +» и удалению.
       d.dataset.group = g.group || '';
@@ -138,7 +138,7 @@ export async function showExpert(system) {
         group: g.group, index: mod.index, attr: null,
       }));
       sum.title = mod.help || '';
-      // Модуль, который движок не симулирует: в игре он работает, в кадре —
+      // Модуль, который движок не симулирует: в игре он работает, в кадре -
       // нет. Промолчать нельзя, правка выглядела бы сломанной.
       if (g.group && supported && !supported(g.group, mod.title)) {
         sum.querySelector('.expert__warn').textContent = 'не в превью';
@@ -148,7 +148,7 @@ export async function showExpert(system) {
       for (const attr of mod.attrs) {
         const row = document.createElement('div');
         // Строке и вектору поле рядом с подписью не годится: подпись сжималась
-        // до нуля, а третья компонента уезжала за край. Им — своя строка.
+        // до нуля, а третья компонента уезжала за край. Им - своя строка.
         // Цвет тоже массив, но образец с альфой рядом с подписью помещается.
         const wide = attr.t === 'string'
                   || (Array.isArray(attr.v) && attr.t !== 'color');
@@ -156,7 +156,7 @@ export async function showExpert(system) {
         row.innerHTML = '<span class="params__name"></span>';
         row.querySelector('.params__name').textContent = attr.name;
         row.title = attr.help || '';
-        // Адрес строки — для меток «отличается от игры».
+        // Адрес строки - для меток «отличается от игры».
         row.dataset.group = g.group || '';
         row.dataset.index = mod.index;
         row.dataset.attr = attr.name;

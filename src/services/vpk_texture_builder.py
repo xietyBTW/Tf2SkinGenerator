@@ -15,7 +15,7 @@ import hashlib
 import os
 import shutil
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple
 
 from src.services import qc_skin_parser
 from src.services.texture_service import TextureService
@@ -26,6 +26,19 @@ from src.services.tf2_vpk_extract_service import TF2VPKExtractService
 from src.shared.constants import EXTRA_TEX_USE_GAME_ORIGINAL, EXTRA_TEX_USE_MAIN
 
 logger = get_logger(__name__)
+
+#: Метка наших прокси свечения: по ней их снимает повторная сборка.
+_GLOW_MARK = "// tf2sg glow"
+
+
+def _vmt_io_read(path: str):
+    from src.services.vmt_service import _read_vmt
+    return _read_vmt(path)
+
+
+def _vmt_io_write(path: str, text: str, encoding: str) -> None:
+    from src.services.vmt_service import _write_vmt
+    _write_vmt(path, text, encoding)
 
 
 class VpkTextureBuilder:
@@ -241,9 +254,13 @@ class VpkTextureBuilder:
         base_image_path: Optional[str] = None,
         is_normal_map: bool = False,
         panel_extra_textures: Optional[dict] = None,
+        read_texture: Optional[Callable[[str], Optional[bytes]]] = None,
     ) -> None:
         """
         Генерит файловые карты материала ПЕР-ТЕКСТУРНО.
+
+        read_texture: путь текстуры из VMT → байты VTF (мод, затем игра) — чтобы
+        маска в альфе нормали ложилась на РОДНУЮ нормаль, а не на выдуманную.
 
         material_maps: {material_name: {map_id: spec}} — карты для каждого выбранного
         материала (а не глобально на главный). Карты каждого материала пишутся в
@@ -274,15 +291,16 @@ class VpkTextureBuilder:
                 if not mat_vmt.exists():
                     logger.warning(f"Карты материала '{mat}': VMT не найден ({mat_vmt.name}), пропуск")
                     continue
-            VpkTextureBuilder._apply_maps_for_material(
+            red = VpkTextureBuilder._apply_maps_for_material(
                 maps, real_mat, mat_vmt, mat_base, vtf_output_path,
-                patched_cdmaterials_path, size, is_normal_map,
+                patched_cdmaterials_path, size, is_normal_map, read_texture=read_texture,
             )
             _blu_vmt = vtf_output_path / f"{real_mat}_blue.vmt"
             if _blu_vmt.exists():
                 VpkTextureBuilder._apply_maps_for_material(
                     maps, real_mat, _blu_vmt, mat_base, vtf_output_path,
                     patched_cdmaterials_path, size, is_normal_map, params_only=True,
+                    read_texture=read_texture, red=red,
                 )
 
     @staticmethod
@@ -296,7 +314,9 @@ class VpkTextureBuilder:
         size: Tuple[int, int],
         is_normal_map: bool = False,
         params_only: bool = False,
-    ) -> None:
+        read_texture: Optional[Callable[[str], Optional[bytes]]] = None,
+        red: Optional[dict] = None,
+    ) -> dict:
         """
         Применяет набор карт к ОДНОМУ материалу: генерит VTF (имена {mat}{suffix})
         и вписывает параметры в его VMT. params_only=True — только параметры (VTF
@@ -304,61 +324,100 @@ class VpkTextureBuilder:
 
         Источник карты: "image" (файл) либо "derive" (из базовой текстуры material'а).
         Для derive-phong доп. создаётся карта нормалей + $envmap («Авто-блеск»).
+
+        Возвращает {"mask": маска легла в альфу {mat}_normal, "bump": $bumpmap
+        материала ДО сборки}. Синий (`params_only`) получает это как `red`:
+        следует за нормалью красного, только если у красного маска вышла и
+        нормаль у них была одна (своя синяя нормаль мода не подменяется).
         """
         from src.data.material_maps import MATERIAL_MAPS, MAP_ORDER
+        from src.services import vmt_parse
+        from src.services.mod_textures import texture_key
 
-        # ── Pre-pass: разрешение конфликта $envmapmask + $bumpmap ──────────────
-        # Source игнорирует отдельный $envmapmask при наличии $bumpmap. Если на
-        # материале вместе с отражением активен эффект с нормалью (rim/phong) и
-        # нормаль генерим МЫ — печём маску отражения в альфу нормали и используем
-        # $normalmapalphaenvmapmask. Тогда обе фичи работают одновременно.
+        def vmt_doc():
+            try:
+                return vmt_parse.parse(Path(vmt_path).read_text(encoding="utf-8", errors="ignore"))
+            except OSError:
+                return vmt_parse.parse("")
+
+        orig_bump = vmt_doc().path("$bumpmap")
+        orig_exp = vmt_doc().path("$phongexponenttexture")
+        # Каким материал был до карт: под это написан его $envmaptint (_envmap_tint).
+        was_phong = vmt_doc().flag("$phong")
+        result = {"mask": False, "bump": orig_bump, "exp": False, "exp_tex": orig_exp}
+
+        def blue_follows() -> bool:
+            return bool(red and red.get("mask")) and (
+                orig_bump is None
+                or texture_key(orig_bump) == texture_key(red.get("bump") or ""))
+
+        # ── Pre-pass: маска отражения при нормали или phong ───────────────────
+        # Вики Valve ($envmapmask): отдельная маска не работает с $bumpmap и
+        # с $phong вовсе. В TF2 Valve ни разу не ставит её вместе с $bumpmap —
+        # маска лежит в альфе нормали ($normalmapalphaenvmapmask, 684
+        # материала). Значит, у оружия с родной нормалью или phong маска уходит
+        # в альфу нормали ВСЕГДА, а не только когда нормаль строим мы: раньше
+        # здесь писался нерабочий $envmapmask. При phong та же альфа — маска
+        # блеска (у движка она одна на оба эффекта).
         envmask_combined = False
         envmask_spec = material_maps.get("envmapmask")
-        if envmask_spec and base_image_path and os.path.isfile(base_image_path):
-            rim_on = bool((material_maps.get("rimlight") or {}).get("enabled"))
-            phong_on = bool(material_maps.get("phongexp"))
-            try:
-                _vmt_txt0 = Path(vmt_path).read_text(encoding="utf-8", errors="ignore").lower()
-            except OSError:
-                _vmt_txt0 = ""
-            real_normal = (is_normal_map
+        if envmask_spec and not (envmask_spec.get("mod") or envmask_spec.get("off")):
+            doc = vmt_doc()
+            uses_normal = (is_normal_map
                            or (vtf_output_path / f"{mat}_normal.vtf").exists()
-                           or VMTService.has_live_param(_vmt_txt0, "$bumpmap"))
-            needs_bump = real_normal or rim_on or phong_on
-            if needs_bump and not real_normal:
-                # Нормаль генерим мы → можем запечь маску в её альфу.
+                           or doc.get("$bumpmap") is not None
+                           or doc.flag("$phong")
+                           or bool((material_maps.get("rimlight") or {}).get("enabled"))
+                           or bool(material_maps.get("phongexp"))
+                           # «Сильнее по краю» и карты блика включат phong,
+                           # контур свечения — нормаль; с ними отдельная маска
+                           # не читается, значит маска сразу уходит в альфу нормали.
+                           or float(envmask_spec.get("env_fresnel") or 0) > 0
+                           or bool((material_maps.get("phongcolor") or {}).get("enabled"))
+                           or bool(material_maps.get("phongwarp"))
+                           or (material_maps.get("selfillum") or {}).get("glow_edge") == "on")
+            if uses_normal:
                 if params_only:
-                    # BLU-дубль: VTF уже создан для RED, пишем только параметры.
-                    VMTService.add_material_map_params(
-                        str(vmt_path), patched_cdmaterials_path, None, None,
-                        {"$envmap": "env_cubemap", "$normalmapalphaenvmapmask": "1"})
+                    # BLU-дубль: нормаль с маской уже создана для RED. Не вышла
+                    # у красного или у синего своя нормаль — синий не трогаем
+                    # (и нерабочий $envmapmask ему тоже не пишем).
+                    if blue_follows():
+                        VpkTextureBuilder._mask_params(
+                            vmt_path, patched_cdmaterials_path, mat,
+                            {"$envmap": "env_cubemap", "$normalmapalphaenvmapmask": "1"},
+                            vtf_output_path)
                     envmask_combined = True
                 else:
-                    mask_png = vtf_output_path / f"{mat}_envmask_src.png"
-                    ok_mask = False
-                    if envmask_spec.get("derive"):
-                        thr = envmask_spec.get("threshold")
-                        thr = int(thr) if thr not in (None, "") else None
-                        TextureService.derive_effect_map(
-                            base_image_path, str(mask_png), "envmapmask", size, threshold=thr)
-                        ok_mask = mask_png.exists()
-                    elif envmask_spec.get("image") and os.path.isfile(envmask_spec["image"]):
-                        TextureService.process_image(envmask_spec["image"], str(mask_png), size)
-                        ok_mask = mask_png.exists()
-                    if ok_mask:
-                        envmask_combined = VpkTextureBuilder._ensure_normal_with_envmask(
-                            base_image_path, mask_png, vtf_output_path, mat,
-                            vmt_path, patched_cdmaterials_path, size)
-                        if mask_png.exists():
-                            mask_png.unlink()
-            elif real_normal:
-                logger.warning(
-                    f"[{mat}] envmapmask + готовая нормаль: отдельный $envmapmask "
-                    f"может игнорироваться движком (есть $bumpmap)")
+                    mask_png = VpkTextureBuilder._mask_png(
+                        envmask_spec, "envmapmask", base_image_path, vtf_output_path,
+                        f"{mat}_envmask_src", size)
+                    if mask_png and VpkTextureBuilder._normal_with_mask(
+                            mask_png, mat, vmt_path, vtf_output_path, patched_cdmaterials_path,
+                            size, base_image_path, read_texture):
+                        envmask_combined = VpkTextureBuilder._mask_params(
+                            vmt_path, patched_cdmaterials_path, mat,
+                            {"$envmap": "env_cubemap", "$normalmapalphaenvmapmask": "1"},
+                            vtf_output_path)
+                    if mask_png and mask_png.exists():
+                        mask_png.unlink()
+                    result["mask"] = envmask_combined
+                    if not envmask_combined:
+                        logger.warning(f"[{mat}] маску отражения не удалось положить в "
+                                       f"альфу нормали: отдельный $envmapmask с нормалью "
+                                       f"или phong игра не читает")
+
+        def with_defaults(cfg: dict, extra: dict) -> dict:
+            """Параметры карты + `vmt_defaults` тех, чего в VMT ещё нет (своё
+            у материала важнее: у оружия TF2 $phongfresnelranges подобран)."""
+            doc = vmt_doc()
+            missing = {k: v for k, v in cfg.get("vmt_defaults", {}).items()
+                       if doc.get(k) is None}
+            return {**missing, **extra}
 
         for map_id in MAP_ORDER:
             spec = material_maps.get(map_id)
-            if not spec:
+            # Карты мода (оставить/снять) — забота сборки мода, не генератора.
+            if not spec or spec.get("mod") or spec.get("off"):
                 continue
             # envmapmask уже разрешён через альфу нормали — отдельную карту не пишем.
             if map_id == "envmapmask" and envmask_combined:
@@ -375,6 +434,7 @@ class VpkTextureBuilder:
                 for k, v in spec.items():
                     if isinstance(k, str) and k.startswith("$"):
                         extra[k] = str(v)
+                extra = with_defaults(cfg, extra)
                 # Rim/phong не считаются без $bumpmap. Если в VMT его ещё нет —
                 # генерим нормаль из базы (существующую НЕ трогаем). params_only
                 # (дубль в BLU-VMT) только пишет параметры, VTF уже создан.
@@ -418,6 +478,12 @@ class VpkTextureBuilder:
                     # Карта может требовать фиксированный размер (warp-градиенты:
                     # lightwarp = 256×1, phongwarp = 256×256). Иначе — глобальный.
                     _map_size = tuple(cfg.get("size") or size)
+                    # Формат может зависеть от параметра (detail в режиме 2
+                    # накладывается по своей альфе — DXT1 её теряет).
+                    _fmt = cfg["format"]
+                    for _param, _by in cfg.get("format_by", {}).items():
+                        _value = str(spec.get(_param, cfg["extra_vmt"].get(_param, "")))
+                        _fmt = _by.get(_value, _fmt)
                     if derive:
                         threshold = spec.get("threshold")
                         threshold = int(threshold) if threshold not in (None, "") else None
@@ -426,11 +492,11 @@ class VpkTextureBuilder:
                             threshold=threshold,
                         )
                         TextureService.create_vtf(str(temp_png), str(vtf_output_path),
-                                               cfg["format"], list(cfg["flags"]), _map_opts)
+                                               _fmt, list(cfg["flags"]), _map_opts)
                     else:
                         TextureService.process_image(image, str(temp_png), _map_size)
                         TextureService.create_vtf(str(temp_png), str(vtf_output_path),
-                                               cfg["format"], list(cfg["flags"]), _map_opts)
+                                               _fmt, list(cfg["flags"]), _map_opts)
                     if temp_png.exists():
                         temp_png.unlink()
                 except Exception as e:
@@ -442,56 +508,590 @@ class VpkTextureBuilder:
                 if isinstance(k, str) and k.startswith("$"):
                     extra[k] = str(v)
             if derive:
-                extra.update(cfg.get("derive_extra_vmt", {}))
-                if cfg.get("derive_auto_normal") and not params_only:
-                    VpkTextureBuilder._ensure_derived_normal(
-                        base_image_path, vtf_output_path, mat, vmt_path,
-                        patched_cdmaterials_path, size, is_normal_map,
-                    )
+                # Окружение предмета (золото, студийный блик) не подменяем.
+                has_env = vmt_doc().get("$envmap") is not None
+                extra.update({k: v for k, v in cfg.get("derive_extra_vmt", {}).items()
+                              if not (k == "$envmap" and has_env)})
+                if cfg.get("derive_auto_normal") and not params_only and not envmask_combined:
+                    # Авто-блеск: ГДЕ блестит — альфа нормали (вики Valve:
+                    # маска phong по умолчанию в альфе $bumpmap), а не альфа
+                    # exponent-текстуры (там маска rim light). Раньше маска
+                    # уходила в exponent, и «Порог» ни на что не влиял.
+                    gloss = VpkTextureBuilder._mask_png(
+                        spec, "envmapmask", base_image_path, vtf_output_path,
+                        f"{mat}_gloss_src", size)
+                    if gloss and VpkTextureBuilder._normal_with_mask(
+                            gloss, mat, vmt_path, vtf_output_path, patched_cdmaterials_path,
+                            size, base_image_path, read_texture):
+                        result["mask"] = VpkTextureBuilder._mask_params(
+                            vmt_path, patched_cdmaterials_path, mat, {}, vtf_output_path)
+                    if gloss and gloss.exists():
+                        gloss.unlink()
+                elif (cfg.get("derive_auto_normal") and params_only and not envmask_combined
+                      and blue_follows()):
+                    # Синий: та же нормаль с маской, что у красного.
+                    VpkTextureBuilder._mask_params(
+                        vmt_path, patched_cdmaterials_path, mat, {}, vtf_output_path)
+
+            if map_id == "detail":
+                # Огонь снимаем, только когда своя detail-карта и правда есть.
+                if not (params_only or (vtf_output_path / f"{map_key}.vtf").exists()):
+                    continue
+                if VMTService.release_detail(str(vmt_path)):
+                    logger.warning(f"[{mat}] $detail был занят эффектом горения (BurnLevel): "
+                                   f"прокси огня сняты, на предмете огня видно не будет")
+                # Режим 5 (свечение) на VertexLitGeneric с нормалью рисуется
+                # только при $phong (вики Valve, $detailblendmode) — без него
+                # берём 1: то же сложение, но с освещением.
+                doc = vmt_doc()
+                if (str(extra.get("$detailblendmode")) == "5" and doc.get("$bumpmap") is not None
+                        and not doc.flag("$phong")):
+                    extra["$detailblendmode"] = "1"
+                    logger.warning(f"[{mat}] detail-свечение без $phong не рисуется, взят режим 1")
+
+            if map_id == "phongexp":
+                # Размер блика теперь в красном канале нашей карты. $phongexponent
+                # > 0 его перекрывает (skin_dx9_helper.cpp) — а он стоит у 8379
+                # из 8511 phong-материалов TF2. Без снятия карта не меняла блик.
+                if params_only or (vtf_output_path / f"{map_key}.vtf").exists():
+                    if VMTService.remove_param(str(vmt_path), "$phongexponent"):
+                        logger.info(f"[{mat}] $phongexponent снят: размер блика — из Phong-карты")
+                    result["exp"] = not params_only
 
             VMTService.add_material_map_params(
-                str(vmt_path), patched_cdmaterials_path, map_key, cfg["path_param"], extra
+                str(vmt_path), patched_cdmaterials_path, map_key, cfg["path_param"],
+                with_defaults(cfg, extra)
             )
             logger.info(f"Карта '{map_id}' [{mat}] → {map_key}.vtf ({'derive' if derive else 'file'})")
 
-    @staticmethod
-    def _ensure_normal_with_envmask(
-        base_image_path: str,
-        mask_png: Path,
-        vtf_output_path: Path,
-        mat: str,
-        vmt_path: Path,
-        patched_cdmaterials_path: str,
-        size: Tuple[int, int],
-    ) -> bool:
-        """
-        Создаёт {mat}_normal.vtf, у которого RGB — нормаль из базы, а АЛЬФА —
-        маска отражения. Прописывает $bumpmap + $envmap + $normalmapalphaenvmapmask.
+        VpkTextureBuilder._phong_channels(
+            material_maps, mat, vmt_path, vtf_output_path, patched_cdmaterials_path, size,
+            base_image_path, read_texture, params_only, red, result)
+        VpkTextureBuilder._apply_settings(
+            {k: v for k, v in material_maps.items() if not (v.get("mod") or v.get("off"))},
+            mat, vmt_path, vtf_output_path, patched_cdmaterials_path, size,
+            base_image_path, is_normal_map, params_only, was_phong)
+        return result
 
-        Так отражение по маске и эффекты с нормалью (rim/phong) уживаются: движок
-        берёт маску отражения из альфы нормали, а не из отдельного $envmapmask
-        (который при наличии $bumpmap игнорируется).
-        """
-        try:
-            norm_png = vtf_output_path / f"{mat}_normal.png"
-            TextureService.make_normal_with_alpha(
-                base_image_path, str(mask_png), str(norm_png), size)
-            # DXT5 — сохраняет альфу (маску). Не -normal: RGB уже нормаль.
-            TextureService.create_vtf(str(norm_png), str(vtf_output_path), "DXT5", [], {})
-            if norm_png.exists():
-                norm_png.unlink()
-            if not (vtf_output_path / f"{mat}_normal.vtf").exists():
-                return False
-            VMTService.update_vmt_bumpmap_path(
-                str(vmt_path), patched_cdmaterials_path, f"{mat}_normal")
-            VMTService.add_material_map_params(
-                str(vmt_path), patched_cdmaterials_path, None, None,
-                {"$envmap": "env_cubemap", "$normalmapalphaenvmapmask": "1"})
-            logger.info(f"[{mat}] отражение запечено в альфу нормали ($normalmapalphaenvmapmask)")
-            return True
-        except Exception as e:
-            logger.warning(f"[{mat}] не удалось запечь маску отражения в нормаль: {e}", exc_info=True)
+    @staticmethod
+    def _ensure_phong(vmt_path: Path, cdmaterials: str) -> bool:
+        """$phong там, где без него эффект не считается: с силой 0, чтобы
+        блика не появилось (вики Valve, $phongboost: «phong boost of zero is
+        visually identical to no phong, and can be used to work around certain
+        shader parameter combinations that require phong»)."""
+        from src.services import vmt_parse
+        doc = vmt_parse.parse(Path(vmt_path).read_text(encoding="utf-8", errors="ignore"))
+        if doc.flag("$phong"):
             return False
+        params = {"$phong": "1", "$phongboost": "0"}
+        if doc.get("$phongfresnelranges") is None:
+            params["$phongfresnelranges"] = "[0 0.5 1]"
+        VMTService.add_material_map_params(str(vmt_path), cdmaterials, None, None, params)
+        return True
+
+    @staticmethod
+    def _apply_settings(entries: dict, mat: str, vmt_path: Path, out_dir: Path,
+                        cdmaterials: str, size: Tuple[int, int],
+                        base_image_path: Optional[str], is_normal_map: bool,
+                        params_only: bool, was_phong: Optional[bool] = None) -> None:
+        """
+        Свои настройки отражения и свечения (MATERIAL_MAPS[…]["settings"]).
+        Пустое поле — «как у материала»: в VMT ничего не пишется.
+
+        Отражение: окружение ($envmap), цвет и сила ($envmaptint — без phong
+        игра возводит его в степень 2.2, с phong берёт как есть), френель ($envmapfresnel,
+        на ветке TF2 считается только при $phong).
+        Свечение: цвет и яркость ($selfillumtint) через свой прокси в конце
+        блока — так он перебивает родные прокси свечения (у многих вещей
+        Equals $glowcolor → $selfillumtint); пульсация — Sine × Multiply, как у
+        Valve; контур — $selfillumfresnel (нужен $bumpmap).
+        """
+        from src.data.material_maps import CUBEMAPS
+        from src.services import vmt_parse, vmt_effects
+
+        def rgb(hex_colour: str):
+            return [int(hex_colour[i:i + 2], 16) / 255.0 for i in (1, 3, 5)]
+
+        def srgb_to_linear(values):
+            return [c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4 for c in values]
+
+        def vec(values):
+            return "[%.3f %.3f %.3f]" % tuple(values)
+
+        def native(name: str):
+            """Вектор параметра материала: [r g b] — доли, {r g b} — 0..255.
+            Значения выше 1 сохраняются (у Valve $selfillumtint бывает [2 .5 .1])."""
+            import re
+            raw = vmt_parse.parse(Path(vmt_path).read_text(encoding="utf-8", errors="ignore")
+                                  ).get(name) or ""
+            nums = [float(n) for n in re.findall(r"-?\d*\.?\d+", raw)][:3]
+            if len(nums) == 1:
+                nums = nums * 3                       # «$envmaptint 0.5» — на все каналы
+            if len(nums) != 3:
+                return None
+            return [n / 255.0 for n in nums] if "{" in raw else nums
+
+        if was_phong is None:
+            was_phong = vmt_parse.parse(Path(vmt_path).read_text(
+                encoding="utf-8", errors="ignore")).flag("$phong")
+        env = entries.get("envmapmask") or {}
+        params = {}
+        if env.get("env_cubemap") in CUBEMAPS:
+            params["$envmap"] = CUBEMAPS[env["env_cubemap"]]
+        if env.get("env_fresnel"):
+            amount = float(env["env_fresnel"]) / 100.0
+            params["$envmapfresnel"] = "%g" % amount
+            if amount > 0:
+                doc = vmt_parse.parse(Path(vmt_path).read_text(encoding="utf-8", errors="ignore"))
+                if doc.get("$envmapmask") is not None and not doc.flag("$phong"):
+                    # С phong отдельная маска не читается (вики Valve) — маску
+                    # предмета не ломаем, френель без phong не считается.
+                    params.pop("$envmapfresnel")
+                    logger.warning(f"[{mat}] «сильнее по краю» пропущено: у материала "
+                                   f"отдельная маска отражения, а с phong она не работает")
+                elif VpkTextureBuilder._ensure_phong(vmt_path, cdmaterials):
+                    logger.info(f"[{mat}] $phong с силой 0: $envmapfresnel без него не считается")
+        if params:
+            VMTService.add_material_map_params(str(vmt_path), cdmaterials, None, None, params)
+
+        glow = entries.get("selfillum") or {}
+        if glow:
+            doc = vmt_parse.parse(Path(vmt_path).read_text(encoding="utf-8", errors="ignore"))
+            if doc.flag("$blendtintbybasealpha"):
+                # skin_ps20b.fxc: «SKIP: ($BLENDTINTBYBASEALPHA) && ($SELFILLUM)» —
+                # такой комбинации шейдера нет, у красящихся вещей свечения не будет.
+                logger.warning(f"[{mat}] самосвечение не работает с покраской по альфе "
+                               f"($blendtintbybasealpha) — в игре его не будет")
+        pulse = glow.get("glow_pulse", "off")
+        pulsing = pulse in ("slow", "medium", "fast")
+        if glow.get("glow_color") or glow.get("glow_power") or pulsing:
+            power = float(glow.get("glow_power", 100)) / 100.0
+            # Цвет не выбран — родной цвет свечения материала, а не белый.
+            # $selfillumtint движок берёт как есть, без перевода из гаммы
+            # (SetPixelShaderConstant_W, в отличие от $envmaptint), — цвет из
+            # палитры переводим в линейный сами, иначе он выходил бледнее.
+            base = (srgb_to_linear(rgb(glow["glow_color"])) if glow.get("glow_color")
+                    else native("$selfillumtint") or [1.0, 1.0, 1.0])
+            tint = vec([c * power for c in base])
+            text, encoding = _vmt_io_read(str(vmt_path))
+            text = vmt_effects._strip_marked_proxies(text, _GLOW_MARK)
+            text = VMTService._set_vmt_param(text, "$selfillumtint", tint)
+            tail = ""
+            if pulsing:
+                period = {"slow": 3.0, "medium": 1.5, "fast": 0.6}[pulse]
+                low = float(glow.get("glow_pulse_min", 30)) / 100.0
+                text = VMTService._set_vmt_param(text, "$tf2sg_glow", tint)
+                text = VMTService._set_vmt_param(text, "$tf2sg_pulse", "1")
+                tail = (vmt_effects._proxy("Sine", [
+                            ("sineperiod", "%g" % period), ("sinemin", "%g" % low),
+                            ("sinemax", "1"), ("resultVar", "$tf2sg_pulse")], _GLOW_MARK)
+                        + vmt_effects._proxy("Multiply", [
+                            ("srcVar1", "$tf2sg_glow"), ("srcVar2", "$tf2sg_pulse"),
+                            ("resultVar", "$selfillumtint")], _GLOW_MARK))
+            elif glow.get("glow_color"):
+                # Свой цвет перебивает родные прокси свечения (Equals
+                # $glowcolor → $selfillumtint) — наш Equals в конце блока.
+                # Только яркость — без прокси: родные эффекты не трогаем.
+                text = VMTService._set_vmt_param(text, "$tf2sg_glow", tint)
+                tail = vmt_effects._proxy("Equals", [
+                    ("srcVar1", "$tf2sg_glow"), ("resultVar", "$selfillumtint")], _GLOW_MARK)
+            if tail:
+                text = vmt_effects._add_proxies(text, "", tail)
+            _vmt_io_write(str(vmt_path), text, encoding)
+
+        if glow.get("glow_edge") == "on":
+            bright = float(glow.get("edge_bright", 5))
+            sharp = float(glow.get("edge_sharp", 8))
+            doc = vmt_parse.parse(Path(vmt_path).read_text(encoding="utf-8", errors="ignore"))
+            if doc.get("$bumpmap") is None:
+                # Вики Valve: $selfillumfresnel требует $bumpmap. Синий — на
+                # нормаль красного, если она собрана.
+                if params_only:
+                    if (Path(out_dir) / f"{mat}_normal.vtf").exists():
+                        VMTService.update_vmt_bumpmap_path(str(vmt_path), cdmaterials,
+                                                           f"{mat}_normal")
+                elif base_image_path and os.path.isfile(base_image_path):
+                    VpkTextureBuilder._ensure_derived_normal(
+                        base_image_path, out_dir, mat, vmt_path, cdmaterials, size, is_normal_map)
+                doc = vmt_parse.parse(Path(vmt_path).read_text(encoding="utf-8", errors="ignore"))
+            if doc.get("$bumpmap") is None:
+                logger.warning(f"[{mat}] затухание свечения пропущено: нет карты нормалей "
+                               f"и не из чего её построить")
+            else:
+                if doc.flag("$normalmapalphaenvmapmask") or doc.get("$envmapmask") is not None:
+                    logger.warning(f"[{mat}] затухание свечения отключает маску отражения "
+                                   f"(вики Valve, $selfillumfresnel)")
+                if doc.get("$selfillummask") is not None:
+                    # skin_ps20b.fxc: в режиме френеля вес — baseColor.a * френель,
+                    # маска $selfillummask не читается.
+                    logger.warning(f"[{mat}] при затухании к краю игра берёт маску свечения из "
+                                   f"альфы основной текстуры, а не из карты самосвечения")
+                if doc.get("$lightwarptexture") is not None or doc.get("$detail") is not None:
+                    if VpkTextureBuilder._ensure_phong(vmt_path, cdmaterials):
+                        logger.info(f"[{mat}] $phong с силой 0: контур свечения с lightwarp/detail "
+                                    f"без него не работает")
+                VMTService.add_material_map_params(str(vmt_path), cdmaterials, None, None, {
+                    "$selfillumfresnel": "1",
+                    "$selfillumfresnelminmaxexp": "[0 %g %g]" % (bright, sharp)})
+
+        VpkTextureBuilder._envmap_tint(env, mat, vmt_path, cdmaterials, was_phong, native)
+
+    @staticmethod
+    def _envmap_tint(env: dict, mat: str, vmt_path: Path, cdmaterials: str,
+                     was_phong: bool, native) -> None:
+        """
+        $envmaptint - последним, когда $phong уже окончательный (его включают
+        карты, френель отражения и контур свечения).
+
+        Phong-материал берёт $envmaptint линейным (skin_dx9_helper.cpp), без
+        phong движок переводит его из гаммы, возводя в 2.2
+        (vertexlitgeneric_dx9_helper.cpp). Цвет палитры пишем так, чтобы в
+        шейдер пришло одно и то же: цвет в линейном × сила. Родной оттенок
+        материала написан под его прежний phong: если сборка phong включила,
+        переводим его в линейный сами, иначе отражение стало бы ярче.
+        """
+        from src.services import vmt_parse
+
+        def rgb(hex_colour: str):
+            return [int(hex_colour[i:i + 2], 16) / 255.0 for i in (1, 3, 5)]
+
+        doc = vmt_parse.parse(Path(vmt_path).read_text(encoding="utf-8", errors="ignore"))
+        phong = doc.flag("$phong")
+        own = native("$envmaptint")
+        if own is not None and phong and not was_phong:
+            own = [c ** 2.2 if c > 0 else c for c in own]
+        if env.get("env_tint") or env.get("env_strength"):
+            k = float(env.get("env_strength", 100)) / 100.0
+            scale = k if phong else k ** (1 / 2.2)
+            if env.get("env_tint"):
+                base = rgb(env["env_tint"])
+                base = [c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+                        for c in base] if phong else base
+            else:
+                # Цвет не выбран - оттенок материала (у золота он тёплый),
+                # иначе «Сила» перекрашивала бы его в серебро.
+                base = own or [1.0, 1.0, 1.0]
+            tint = [c * scale for c in base]
+        elif own is not None and phong and not was_phong and doc.get("$envmap") is not None:
+            tint = own
+            logger.info(f"[{mat}] $envmaptint переведён в линейный: материал стал phong")
+        else:
+            return
+        VMTService.add_material_map_params(str(vmt_path), cdmaterials, None, None,
+                                           {"$envmaptint": "[%.3f %.3f %.3f]" % tuple(tint)})
+
+    @staticmethod
+    def _phong_channels(material_maps: dict, mat: str, vmt_path: Path, out_dir: Path,
+                        cdmaterials: str, size: Tuple[int, int],
+                        base_image_path: Optional[str],
+                        read_texture: Optional[Callable[[str], Optional[bytes]]],
+                        params_only: bool, red: Optional[dict], result: dict) -> None:
+        """
+        «Цвет блика» и маска Rim light — каналы Phong-карты {mat}_exp.
+
+        Шейдер (skin_ps20b.fxc): оттенок блика = lerp(1, цвет текстуры, G) при
+        $phongalbedotint, а $phongtint его отключает; обводка × lerp(1, A,
+        $rimmask). Поэтому обе вещи живут в одной текстуре: G и A
+        дописываются в нашу Phong-карту, в Phong-карту материала (из мода или
+        игры) или в новую, если её не было.
+
+        Что не вышло — не трогает материал: маска не собралась — родная маска
+        обводки на месте и цвет блика всё равно делается; Phong-карта не
+        собралась — $phongtint материала не снят.
+        """
+        from src.services.mod_textures import texture_key
+
+        def active(entry):
+            return bool(entry) and entry.get("enabled") and not (entry.get("mod") or entry.get("off"))
+
+        colour = material_maps.get("phongcolor") or {}
+        rim = material_maps.get("rimlight") or {}
+        albedo = tint = None
+        if active(colour):
+            # «Как у предмета» — цвет блика не трогаем (карточка может быть
+            # включена ради краёв блика).
+            mode = colour.get("tint", "keep")
+            if mode == "albedo":
+                albedo = int(colour.get("tint_amount", 100)) / 100.0
+            elif mode == "color":
+                tint = colour.get("tint_color", "#ffc864")
+            VpkTextureBuilder._fresnel_ranges(colour, vmt_path, cdmaterials)
+        # Нет выбора в записи (карта из старой работы) — маску материала не трогаем.
+        rim_mode = rim.get("rim_mask") if active(rim) else None
+
+        mask = None
+        if rim_mode in ("auto", "file"):
+            if params_only:
+                # Синий: маска та же, что у красного, — если она у него вышла.
+                if not (red and red.get("rim")):
+                    rim_mode = None
+            else:
+                spec = ({"image": rim.get("rim_image")} if rim_mode == "file"
+                        else {"derive": True, "threshold": rim.get("rim_threshold")})
+                mask = VpkTextureBuilder._mask_png(
+                    spec, "envmapmask", base_image_path, out_dir, f"{mat}_rim_src", size)
+                if mask is None:
+                    logger.warning(f"[{mat}] маска обводки не вышла (нет файла или базы) — "
+                                   f"обводка как у материала")
+                    rim_mode = None
+        result["rim"] = rim_mode in ("auto", "file")
+
+        if tint:
+            rgb = [int(tint[i:i + 2], 16) / 255.0 for i in (1, 3, 5)]
+            VMTService.remove_param(str(vmt_path), "$phongalbedotint")
+            VMTService.add_material_map_params(
+                str(vmt_path), cdmaterials, None, None,
+                {"$phongtint": "[%.3f %.3f %.3f]" % tuple(rgb)})
+        if rim_mode == "all":
+            # «Везде» — значит и без родной маски обводки.
+            VMTService.remove_param(str(vmt_path), "$rimmask")
+
+        if albedo is None and rim_mode not in ("auto", "file"):
+            return
+
+        if params_only:
+            # Синий идёт за Phong-картой красного, если она у красного своя
+            # (тогда синий уже смотрит на неё) или у них была одна и та же.
+            own = result.get("exp_tex")
+            ok = bool(red and red.get("exp_extra")) and (
+                bool(red.get("exp")) or own is None
+                or texture_key(own) == texture_key(red.get("exp_tex") or ""))
+        else:
+            ok = VpkTextureBuilder._compose_exponent(
+                mat, vmt_path, out_dir, read_texture, albedo, mask,
+                own_exp=bool(result.get("exp")))
+            result["exp_extra"] = ok
+        if mask and mask.exists():
+            mask.unlink()
+        if not ok:
+            logger.warning(f"[{mat}] Phong-карта для цвета блика / маски обводки не вышла — "
+                           f"материал оставлен как был")
+            return
+        params = {}
+        if albedo is not None:
+            VMTService.remove_param(str(vmt_path), "$phongtint")
+            params["$phongalbedotint"] = "1"
+        if rim_mode in ("auto", "file"):
+            params["$rimmask"] = "1"
+        VMTService.add_material_map_params(
+            str(vmt_path), cdmaterials, f"{mat}_exp", "$phongexponenttexture", params)
+
+    @staticmethod
+    def _fresnel_ranges(entry: dict, vmt_path: Path, cdmaterials: str) -> None:
+        """«Где ярче блик» → $phongfresnelranges [центр середина край].
+        Незаданное — как у материала (у оружия TF2 свои значения), иначе
+        [.25 .5 1] — так у 5922 материалов Valve."""
+        import re
+
+        from src.services import vmt_parse
+
+        keys = ("fres_center", "fres_mid", "fres_edge")
+        if not any(str(entry.get(k, "")).strip() for k in keys):
+            return
+        own = vmt_parse.parse(Path(vmt_path).read_text(encoding="utf-8", errors="ignore")
+                              ).get("$phongfresnelranges") or ""
+        nums = [float(n) for n in re.findall(r"-?\d*\.?\d+", own)][:3]
+        current = nums if len(nums) == 3 else [0.25, 0.5, 1.0]
+        values = [float(entry[k]) if str(entry.get(k, "")).strip() else current[i]
+                  for i, k in enumerate(keys)]
+        VMTService.add_material_map_params(
+            str(vmt_path), cdmaterials, None, None,
+            {"$phongfresnelranges": "[%g %g %g]" % tuple(values)})
+
+    @staticmethod
+    def _compose_exponent(mat: str, vmt_path: Path, out_dir: Path,
+                          read_texture: Optional[Callable[[str], Optional[bytes]]],
+                          albedo: Optional[float], rim_mask: Optional[Path],
+                          own_exp: bool = False) -> bool:
+        """{mat}_exp.vtf с G = сила окраски и A = маска обводки.
+
+        Основа (R — размер блика) — по старшинству: Phong-карта, собранная
+        этой же сборкой (`own_exp`; файл с тем же именем из мода — не наш, он
+        мог быть снят), Phong-карта материала (`read_texture`), иначе ровная из
+        его $phongexponent (R = (e − 1) / 149, обратная к 1 + 149·R шейдера;
+        при заданном $phongexponent R всё равно не читается).
+
+        G: у родной Phong-карты с $phongalbedotint зелёный — поканальная маска
+        Valve (металл окрашен, дерево нет): её масштабируем, а не заливаем."""
+        import numpy as np
+        from PIL import Image
+
+        from src.services import normal_map, vmt_parse
+
+        out_dir = Path(out_dir)
+        ours = out_dir / f"{mat}_exp.vtf"
+        doc = vmt_parse.parse(Path(vmt_path).read_text(encoding="utf-8", errors="ignore"))
+        try:
+            rgba = None
+            stock_mask = False
+            if own_exp and ours.exists():
+                rgba = normal_map.rgba_from_vtf(ours.read_bytes())
+            if rgba is None and read_texture and doc.path("$phongexponenttexture"):
+                data = read_texture(doc.path("$phongexponenttexture"))
+                rgba = normal_map.rgba_from_vtf(data) if data else None
+                stock_mask = rgba is not None and doc.flag("$phongalbedotint")
+            if rgba is None:
+                exponent = doc.number("$phongexponent", 5.0) or 5.0
+                exponent = exponent if exponent > 0 else 5.0
+                side = 64
+                if rim_mask is not None:
+                    with Image.open(rim_mask) as m:
+                        side = max(m.size)
+                rgba = np.zeros((side, side, 4), np.uint8)
+                rgba[..., 0] = int(round(min(1.0, max(0.0, (exponent - 1) / 149.0)) * 255))
+                rgba[..., 3] = 255
+            rgba = rgba.copy()
+            rows, cols = rgba.shape[:2]
+            if albedo is not None:
+                if stock_mask:
+                    rgba[..., 1] = np.round(rgba[..., 1] * albedo).astype(np.uint8)
+                else:
+                    rgba[..., 1] = int(round(albedo * 255))
+            if rim_mask is not None:
+                with Image.open(rim_mask) as m:
+                    rgba[..., 3] = np.asarray(m.convert("L").resize((cols, rows), Image.LANCZOS))
+            png = out_dir / f"{mat}_exp.png"
+            Image.fromarray(rgba, "RGBA").save(png)
+            TextureService.create_vtf(str(png), str(out_dir), "DXT5", [], {})
+            png.unlink(missing_ok=True)
+        except Exception as e:                              # noqa: BLE001
+            logger.warning(f"[{mat}] Phong-карта по каналам не вышла: {e}", exc_info=True)
+            return False
+        return ours.exists()
+
+    @staticmethod
+    def texture_reader(local_root: Optional[Path], vpk_paths) -> Callable[[str], Optional[bytes]]:
+        """Читалка текстур по пути из VMT: сначала файлы мода
+        (`local_root`/materials), затем VPK игры."""
+        from src.services.game_vpk_reader import GameVpkReader
+
+        paks = [p for p in (vpk_paths or []) if p]
+        reader = GameVpkReader(paks) if paks else None
+
+        def read(texture: str) -> Optional[bytes]:
+            from src.services.mod_textures import texture_key
+            key = texture_key(texture)
+            if local_root is not None:
+                local = Path(local_root) / "materials" / f"{key}.vtf"
+                if local.is_file():
+                    return local.read_bytes()
+            return reader.find_vtf_for_basetexture(key) if reader else None
+
+        return read
+
+    @staticmethod
+    def _mask_png(spec: dict, kind: str, base_image_path: Optional[str],
+                  out_dir: Path, stem: str, size: Tuple[int, int]) -> Optional[Path]:
+        """Маска (L) из записи карты: из базы по яркости (derive, с порогом) или
+        из файла. None — не из чего."""
+        png = Path(out_dir) / f"{stem}.png"
+        try:
+            if spec.get("derive"):
+                if not (base_image_path and os.path.isfile(base_image_path)):
+                    return None
+                thr = spec.get("threshold")
+                TextureService.derive_effect_map(
+                    base_image_path, str(png), kind, size,
+                    threshold=int(thr) if thr not in (None, "") else None)
+            elif spec.get("image") and os.path.isfile(spec["image"]):
+                TextureService.process_image(spec["image"], str(png), size)
+            else:
+                return None
+        except Exception as e:                              # noqa: BLE001
+            logger.warning(f"Маска '{stem}' не вышла: {e}", exc_info=True)
+            return None
+        return png if png.exists() else None
+
+    @staticmethod
+    def _normal_with_mask(mask_png: Path, mat: str, vmt_path: Path, out_dir: Path,
+                          cdmaterials: str, size: Tuple[int, int],
+                          base_image_path: Optional[str],
+                          read_texture: Optional[Callable[[str], Optional[bytes]]]) -> bool:
+        """
+        {mat}_normal.vtf = нормаль (RGB) + маска в альфе; $bumpmap — на неё.
+
+        RGB нормали — по старшинству: уже собранная нами (галка Normal Map,
+        рельеф поверх родного), родная нормаль материала (`read_texture` по
+        его $bumpmap — из мода или игры), иначе построенная из базы. Так маска
+        не стирает рельеф предмета, как стёрла бы «нормаль из диффуза».
+        """
+        import numpy as np
+        from PIL import Image
+
+        from src.services import normal_map, vmt_parse
+
+        out_dir = Path(out_dir)
+        ours = out_dir / f"{mat}_normal.vtf"
+        if ours.exists() and VpkTextureBuilder._vtf_frames(ours) > 1:
+            # Многокадровый рельеф (гифка + Normal Map): маска на первом кадре
+            # заморозила бы его. Оставляем как есть.
+            logger.warning(f"[{mat}] нормаль анимирована — маску в её альфу не кладём")
+            return False
+        rgba = None
+        try:
+            if ours.exists():
+                rgba = normal_map.rgba_from_vtf(ours.read_bytes())
+            if rgba is None and read_texture:
+                text = Path(vmt_path).read_text(encoding="utf-8", errors="ignore")
+                bump = vmt_parse.parse(text).path("$bumpmap")
+                data = read_texture(bump) if bump else None
+                rgba = normal_map.rgba_from_vtf(data) if data else None
+            if rgba is None:
+                if not (base_image_path and os.path.isfile(base_image_path)):
+                    return False
+                with Image.open(base_image_path) as base:
+                    rgb = np.asarray(base.convert("RGB").resize(tuple(size), Image.LANCZOS))
+                rgba = normal_map.encode(normal_map.from_image(rgb), None)
+            rows, cols = rgba.shape[:2]
+            with Image.open(mask_png) as mask:
+                alpha = np.asarray(mask.convert("L").resize((cols, rows), Image.LANCZOS))
+            rgba = rgba.copy()
+            rgba[..., 3] = alpha
+            png = out_dir / f"{mat}_normal.png"
+            Image.fromarray(rgba, "RGBA").save(png)
+            # DXT5 хранит альфу; флаг NORMAL — как у нормалей Valve.
+            TextureService.create_vtf(str(png), str(out_dir), "DXT5", ["NORMAL"], {})
+            png.unlink(missing_ok=True)
+        except Exception as e:                              # noqa: BLE001
+            logger.warning(f"[{mat}] нормаль с маской не вышла: {e}", exc_info=True)
+            return False
+        if not ours.exists():
+            return False
+        VMTService.update_vmt_bumpmap_path(str(vmt_path), cdmaterials, f"{mat}_normal")
+        logger.info(f"[{mat}] маска положена в альфу нормали")
+        return True
+
+    @staticmethod
+    def _vtf_frames(path: Path) -> int:
+        """Число кадров VTF из заголовка (uint16 по смещению 24, VTF 7.x)."""
+        try:
+            with open(path, "rb") as f:
+                head = f.read(26)
+            return int.from_bytes(head[24:26], "little") if head[:4] == b"VTF\0" else 1
+        except OSError:
+            return 1
+
+    @staticmethod
+    def _mask_params(vmt_path: Path, cdmaterials: str, mat: str, extra: dict,
+                     out_dir: Path) -> bool:
+        """Параметры для маски в альфе нормали. $basemapalphaphongmask (у 2105
+        материалов TF2) снимается: при нём движок берёт и маску отражения из
+        альфы основы (вики Valve, $normalmapalphaenvmapmask), и наша маска
+        молча не работала бы. Синий VMT смотрит на ту же нормаль красного."""
+        if not (Path(out_dir) / f"{mat}_normal.vtf").exists():
+            return False
+        VMTService.update_vmt_bumpmap_path(str(vmt_path), cdmaterials, f"{mat}_normal")
+        if VMTService.remove_param(str(vmt_path), "$basemapalphaphongmask"):
+            logger.info(f"[{mat}] $basemapalphaphongmask снят: маска блеска теперь в альфе нормали")
+        if extra and "$envmap" in extra:
+            from src.services import vmt_parse
+            text = Path(vmt_path).read_text(encoding="utf-8", errors="ignore")
+            if vmt_parse.parse(text).get("$envmap") is not None:
+                # Окружение предмета (золото, студийный блик) не подменяем.
+                extra = {k: v for k, v in extra.items() if k != "$envmap"}
+        if extra:
+            VMTService.add_material_map_params(str(vmt_path), cdmaterials, None, None, extra)
+        return True
 
     @staticmethod
     def _ensure_derived_normal(
@@ -1302,8 +1902,9 @@ class VpkTextureBuilder:
         VMT начинается с ИГРОВОГО VMT материала, стоящего на его месте
         (главный, BLU, золото, стиль), и поверх ложится правка VMT части.
         $basetexture — своя картинка части для её команды (`image` в строках
-        исходного, `image_blu` в строках его синего, `blu_of`), иначе игровая
-        текстура строки; выбранный человеком в правке — он. Картинку, правку и
+        исходного, `image_blu` в строках его синего, `blu_of`), её правка
+        стиля в строке стиля (`style_images` по материалу строки), иначе
+        игровая текстура строки; выбранный человеком в правке — он. Картинку, правку и
         карты исходного материал части получил копией при создании
         (PartsEditor._fork_card): то, что лежит на исходном сейчас, его не
         касается.
@@ -1315,7 +1916,7 @@ class VpkTextureBuilder:
         from src.services import part_materials as pm
         from src.services.edited_vmt_service import EditedVMTService
 
-        by_name = {str(s['name']).lower(): s for s in specs}
+        by_name = {str(s['name']).lower(): s for s in specs if not s.get('existing')}
         names = sorted(by_name, key=len, reverse=True)
         blu_of = {str(k).lower(): str(v).lower() for k, v in (blu_of or {}).items()}
         written = {p.stem.lower(): p for p in slots.vtf_output_path.glob('*.vmt')}
@@ -1360,7 +1961,7 @@ class VpkTextureBuilder:
             low = source.lower()
             image = (spec.get('image') if low == origin.lower()
                      else spec.get('image_blu') if low == blu_of.get(origin.lower())
-                     else None)
+                     else (spec.get('style_images') or {}).get(low))
             if image and not chosen:
                 VMTService.update_vmt_basetexture_path(
                     str(target), slots.patched_cdmaterials_path, name)
@@ -1452,7 +2053,7 @@ class VpkTextureBuilder:
                             _f.write(_orig_vtf)
                     else:
                         ctx.warn(
-                            f"Не найдена оригинальная текстура плеч '{_orig_name}' — "
+                            f"Не найдена оригинальная текстура плеч '{_orig_name}' - "
                             f"плечи вьюмодели могут быть фиолетовыми."
                         )
                         continue
@@ -1754,7 +2355,7 @@ class VpkTextureBuilder:
                         _game_vmt_name, ctx, slots, tex, _eff)
                 else:
                     ctx.warn(
-                        f"Не найдена игровая текстура '{texture_filename}' — "
+                        f"Не найдена игровая текстура '{texture_filename}' - "
                         f"в игре материал может быть фиолетовым. Загрузите свою "
                         f"текстуру в главный слот."
                     )
@@ -1917,8 +2518,9 @@ class VpkTextureBuilder:
         VpkTextureBuilder._write_fixed_extra_files(weapon_key, ctx)
 
         # Картинки и карты частей, чей материал сборка пропустила (модель не
-        # та), в мод не идут вовсе: их VMT некому показать.
-        parts = {str(s['name']).lower() for s in part_specs or ()}
+        # та), в мод не идут вовсе: их VMT некому показать. Родной материал,
+        # получивший части (`existing`), — не материал части: его карты свои.
+        parts = {str(s['name']).lower() for s in part_specs or () if not s.get('existing')}
 
         def split(store):
             store = store or {}
@@ -1935,11 +2537,14 @@ class VpkTextureBuilder:
         # ── Пер-текстурные файловые карты (detail/selfillum/phong/warp) ──────
         # Теперь VMT всех материалов (главный + доп. + BLU) созданы, поэтому
         # карты каждого материала ложатся в его собственный VMT.
+        # Родные нормали — из мода (что уже собрано) и из игры.
+        read_texture = VpkTextureBuilder.texture_reader(
+            ctx.vpkroot_dir, [slots.tf2_textures_vpk, slots.tf2_misc_vpk])
         VpkTextureBuilder._build_material_maps(
             maps, slots.vtf_output_path, texture_filename, slots.vmt_path,
             slots.patched_cdmaterials_path, tex.size,
             base_image_path=image_path, is_normal_map=is_normal_map,
-            panel_extra_textures=extras,
+            panel_extra_textures=extras, read_texture=read_texture,
         )
 
         # ── VTF/VMT вариантов стилей (skinfamilies) ─────────────────
@@ -1981,7 +2586,7 @@ class VpkTextureBuilder:
                 part_maps, slots.vtf_output_path, texture_filename, slots.vmt_path,
                 slots.patched_cdmaterials_path, tex.size,
                 base_image_path=image_path, is_normal_map=is_normal_map,
-                panel_extra_textures=bases,
+                panel_extra_textures=bases, read_texture=read_texture,
             )
 
     @staticmethod

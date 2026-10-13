@@ -785,6 +785,7 @@ def cancel_build() -> Dict[str, object]:
 def material_map_schema(lang: str = '') -> Dict[str, object]:
     """Какие карты материала бывают и что у них настраивается."""
     from src.data.material_maps import MAP_DISPLAY_ORDER, MATERIAL_MAPS
+    from src.services import lightwarp
 
     lang = _lang(lang)
     t = _t(lang)
@@ -798,15 +799,40 @@ def material_map_schema(lang: str = '') -> Dict[str, object]:
                 'default': str(cfg.get('extra_vmt', {}).get(param, '')),
                 'choices': None,
             }
-            # Режим смешивания detail — не число, а три именованных варианта.
-            if param == '$detailblendmode':
-                field['choices'] = [
-                    {'value': '1', 'label': t.get('map_blend_additive', 'Additive')},
-                    {'value': '7', 'label': t.get('map_blend_multiply', 'Multiply')},
-                    {'value': '5', 'label': t.get('map_blend_overlay', 'Overlay')},
-                ]
+            # Режим смешивания detail — не число, а именованные варианты;
+            # какие допустимы, решает MATERIAL_MAPS (номера по вики Valve).
+            allowed = cfg.get('choices', {}).get(param)
+            if allowed:
+                field['choices'] = [{'value': v, 'label': t.get(f'map_blend_{v}', v)}
+                                    for v in allowed]
             out.append(field)
         return out
+
+    def settings_fields(cfg: dict) -> List[dict]:
+        """Свои настройки карты (не параметры VMT) — поля со всем, что нужно
+        странице: вид, варианты, пределы, когда поле видно."""
+        out = []
+        for key, rule in cfg.get('settings', {}).items():
+            field = {'key': key, 'label': t.get(f'set_{key}_label', t.get(f'set_{key}', key)),
+                     'tip': t.get(f'set_{key}_tip', ''),
+                     'note': t.get(f'set_{key}_note', ''),
+                     'default': rule.get('default', ''), 'show_if': rule.get('show_if')}
+            if 'choices' in rule:
+                field['kind'] = 'choice'
+                field['choices'] = [{'value': v, 'label': t.get(f'set_{key}_{v}', v)}
+                                    for v in rule['choices']]
+            elif rule.get('color'):
+                field['kind'] = 'color'
+            elif rule.get('file'):
+                field['kind'] = 'file'
+            else:
+                field.update(kind='number', min=rule['min'], max=rule['max'],
+                             step=rule.get('step', 1), slider=bool(rule.get('slider')))
+            field['display'] = rule.get('display', rule.get('default', ''))
+            out.append(field)
+        return out
+
+    from src.services import phongwarp
 
     return {
         'title': t.get('material_maps_title', 'Material Maps'),
@@ -823,10 +849,78 @@ def material_map_schema(lang: str = '') -> Dict[str, object]:
                 'vmt_only': bool(MATERIAL_MAPS[map_id].get('vmt_only')),
                 'derive': bool(MATERIAL_MAPS[map_id].get('derive_kind')),
                 'numeric': numeric_fields(MATERIAL_MAPS[map_id]),
+                'generator': MATERIAL_MAPS[map_id].get('generator'),
+                'settings': settings_fields(MATERIAL_MAPS[map_id]),
+                'preview': MATERIAL_MAPS[map_id].get('preview'),
             }
             for map_id in MAP_DISPLAY_ORDER
         ],
+        # Конструктор градиента блика (services/phongwarp.py).
+        'phongwarp': {
+            'defaults': dict(phongwarp.DEFAULTS),
+            'custom': 'custom',
+            'max_bands': phongwarp.MAX_BANDS,
+            'max_stops': lightwarp.MAX_STOPS,
+            'presets': [{'id': key, 'label': t.get(f'phongwarp_{key}', key)}
+                        for key in phongwarp.PRESETS],
+            'labels': {
+                **{key: t.get(f'phongwarp_{key}', key) for key in (
+                    'preset', 'strength', 'bands', 'shift', 'edge', 'before', 'after',
+                    'texture', 'hint', 'points', 'angle', 'angle_hint', 'edge_row',
+                    'row_main', 'row_edge')},
+                # Редактор точек общий с lightwarp — и подписи к нему те же.
+                **{key: t.get(f'lightwarp_{key}', key) for key in (
+                    'point', 'position', 'remove_point', 'gradient_hint')},
+            },
+            'tips': {key: t.get(f'phongwarp_tip_{key}', '') for key in (
+                'preset', 'strength', 'bands', 'shift', 'edge', 'texture', 'before', 'after',
+                'angle', 'edge_row')},
+        },
+        'from_mod': t.get('map_from_mod', 'From the mod'),
+        'ui': {key: t.get(f'maps_{key}', key) for key in (
+            'source', 'src_file', 'src_auto', 'src_gen', 'on', 'off', 'no_file',
+            'drop', 'auto_text', 'params', 'preview', 'preview_tip', 'glow_lit',
+            'glow_dark', 'glow_fade', 'glow_tip', 'glow_none', 'view_gloss', 'view_gloss_tip', 'view_gloss_only', 'view_gloss_only_tip',
+            'view_rim', 'view_rim_tip', 'view_mask', 'view_mask_tip', 'view_env',
+            'view_env_tip', 'view_env_tex', 'view_env_tex_tip', 'view_stand_in',
+            'view_no_game', 'view_detail', 'view_detail_tip', 'view_none', 'view_no_texture')},
+        # Конструктор полоски lightwarp: основы — полоски самой игры.
+        'lightwarp': {
+            'defaults': dict(lightwarp.DEFAULTS),
+            'max_steps': lightwarp.MAX_STEPS,
+            'custom': lightwarp.CUSTOM,
+            'max_stops': lightwarp.MAX_STOPS,
+            'presets': [{'id': key, 'label': t.get(f'lightwarp_{key}', key)}
+                        for key in (*lightwarp.PRESETS, lightwarp.CUSTOM)],
+            'labels': {key: t.get(f'lightwarp_{key}', key) for key in (
+                'make', 'preset', 'steps', 'smooth', 'shadow', 'light',
+                'brightness', 'preview', 'hint', 'to_points', 'gradient_hint',
+                'point', 'position', 'remove_point', 'graph_hint', 'before', 'after')},
+            # Подсказки при наведении — что делает каждое поле.
+            'tips': {key: t.get(f'lightwarp_tip_{key}', '') for key in (
+                'preset', 'steps', 'brightness', 'shadow', 'light', 'strip', 'graph',
+                'before', 'after')},
+        },
     }
+
+
+def map_preview(material: str = '', map_id: str = 'selfillum',
+                spec: Optional[Dict[str, object]] = None) -> Dict[str, object]:
+    """Текстура, её альфа и карта (у отражения - и кубмапа) для превью карты."""
+    from src.app.session import session
+    return session().map_preview(material, map_id, spec)
+
+
+def phongwarp_preview(params: Optional[Dict[str, object]] = None) -> Dict[str, object]:
+    """Градиент блика конструктора phongwarp для живого превью."""
+    from src.app.session import session
+    return session().phongwarp_preview(params)
+
+
+def lightwarp_ramp(params: Optional[Dict[str, object]] = None) -> Dict[str, object]:
+    """Полоска конструктора lightwarp для живого превью."""
+    from src.app.session import session
+    return session().lightwarp_ramp(params)
 
 
 def texture_maps(material: str = '') -> Dict[str, object]:
@@ -1102,10 +1196,12 @@ def set_part_material(material: str = '', parts: Optional[list] = None,
     return session().parts.set_part_material(material, parts, target)
 
 
-def drop_part_material(name: str = '') -> Dict[str, object]:
-    """Возвращает все части материала в общий; его карточка исчезает."""
+def drop_part_material(name: str = '', material: str = '') -> Dict[str, object]:
+    """Возвращает все части материала в общий; его карточка исчезает.
+    `material` — только части этого материала (родной материал модели
+    получает их от разных)."""
     from src.app.session import session
-    return session().parts.drop_part_material(name)
+    return session().parts.drop_part_material(name, material)
 
 
 def undo_edits(delta: int = -1, lang: str = '') -> Dict[str, object]:
@@ -1132,7 +1228,24 @@ _SETTINGS_KEYS = (
     'ui_animations',
     # Как выглядит сборка в нижней полосе: вариант на каждую группу.
     'build_fx',
+    # Потолок кэша разобранных моделей, МБ; 0 — без ограничения.
+    'model_cache_mb',
 )
+
+#: Какие потолки кэша моделей предлагает настройка. Меньше 512 МБ нет: кэш —
+#: это и рабочая папка открытой модели, а модель класса с анимациями для
+#: «На модели» одна весит до 165 МБ. Удали её посреди работы — превью и
+#: сборка не нашли бы свои файлы.
+_CACHE_CAPS = (512, 1024, 2048, 5120, 10240, 0)
+
+
+def _cache_cap(value: object) -> int:
+    """Потолок кэша из списка; чужое значение — умолчание (1 ГБ)."""
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        return 1024
+    return value if value in _CACHE_CAPS else 1024
 
 #: Группы выбора в разделе «Кастомизация» (frontend/mockup/buildfx.js).
 #: Сами варианты знает страница, и чужое значение она заменит умолчанием;
@@ -1323,6 +1436,7 @@ def settings(lang: str = '') -> Dict[str, object]:
     if values.get('panels_pinned') is None:
         values['panels_pinned'] = False
     values['build_fx'] = _build_fx(values.get('build_fx'))
+    values['model_cache_mb'] = _cache_cap(values.get('model_cache_mb'))
     # Мелочи раскладки правят на экране, а не здесь, но читает их страница
     # тем же запросом: настройки внешнего вида она спрашивает один раз.
     for key in _UI_STATE:
@@ -1353,6 +1467,7 @@ def settings(lang: str = '') -> Dict[str, object]:
              'label': t.get('bypass_vgui', 'vgui\\replay\\thumbnails\\')},
         ],
         'bypass_tip': t.get('bypass_tooltip', ''),
+        'cache_caps': list(_CACHE_CAPS),
         'support_url': SUPPORT_URL,
     }
 
@@ -1653,7 +1768,13 @@ def vmt_apply_effect(key: str = '', values: Optional[Dict[str, object]] = None,
     сохраняет — текст ложится в редактор, сохраняет человек. `game` —
     игровой оригинал материала (родная текстура для эффекта)."""
     from src.services import vmt_effects
-    return vmt_effects.apply(key, dict(values or {}), text or '', game or '')
+    values = dict(values or {})
+    bounds = None
+    if key == vmt_effects.SHEEN and values.get('when') == 'always':
+        # Полоса блеска кладётся по габаритам модели, как у игры.
+        from src.app.session import session
+        bounds = session().sheen_mask_params()
+    return vmt_effects.apply(key, values, text or '', game or '', bounds)
 
 
 def set_settings(values: Optional[Dict[str, object]] = None,
@@ -1673,6 +1794,7 @@ def set_settings(values: Optional[Dict[str, object]] = None,
     # записью потерялся бы.
     with AppConfig.lock:
         cfg = AppConfig.load_config()
+        was_cap = _cache_cap(cfg.get('model_cache_mb'))
         for key, value in (values or {}).items():
             if key not in _SETTINGS_KEYS:
                 continue
@@ -1683,6 +1805,8 @@ def set_settings(values: Optional[Dict[str, object]] = None,
                 cfg[key] = str(value or '').strip() or 'export'
             elif key == 'build_fx':
                 cfg[key] = _build_fx(value)
+            elif key == 'model_cache_mb':
+                cfg[key] = _cache_cap(value)
             elif key in ('particles_group_tree', 'keep_temp_files', 'debug_mode',
                          'save_edits', 'panels_pinned', 'advanced_vtf_flags',
                          'parts_animation', 'ui_animations'):
@@ -1695,6 +1819,12 @@ def set_settings(values: Optional[Dict[str, object]] = None,
     # как INFO — все logger.debug молчали при любом её положении.
     from src.shared.logging_config import set_debug
     set_debug(bool(cfg.get('debug_mode')))
+    cap = _cache_cap(cfg.get('model_cache_mb'))
+    if cap and (not was_cap or cap < was_cap):
+        # Потолок стал теснее: кэш ужимается сразу, а не при следующей
+        # распаковке. Фоном — обход кэша идёт stat'ом по каждому файлу.
+        from src.services.decompile_cache import enforce_cache_limit
+        threading.Thread(target=enforce_cache_limit, daemon=True).start()
     from src.app.session import session
     session().parts.refresh_parts_animation()
     return settings(lang)
@@ -1925,19 +2055,35 @@ def paintkits(lang: str = '') -> Dict[str, object]:
     return session().paintkits(_lang(lang))
 
 
+def _cards(materials) -> Optional[List[str]]:
+    """Отмеченные материалы War Paint: None — как по умолчанию."""
+    if materials is None:
+        return None
+    return [str(m) for m in materials if isinstance(m, str) and m][:64]
+
+
+def paintkit_materials(item: int = 0) -> Dict[str, object]:
+    """Материалы оружия для War Paint: {materials: [{card, game}]}."""
+    from src.app.session import session
+    return session().paintkit_materials(int(item))
+
+
 def apply_paintkit(kit: int, item: int, wear: int = 1, seed: int = 0,
-                   size: int = 1024, layout: int = 0) -> Dict[str, object]:
-    """Накладывает War Paint на главную текстуру. Готовность придёт событием."""
+                   size: int = 1024, layout: int = 0,
+                   materials: Optional[List[str]] = None) -> Dict[str, object]:
+    """Накладывает War Paint на отмеченные материалы. Готовность придёт событием."""
     from src.app.session import session
     return session().apply_paintkit(int(kit), int(item), int(wear), int(seed),
-                                    int(size), int(layout))
+                                    int(size), int(layout), _cards(materials))
 
 
 def preview_paintkit(kit: int, item: int, wear: int = 1, seed: int = 0,
-                     layout: int = 0) -> Dict[str, object]:
-    """Предпросмотр War Paint (512 px): {png, materials} — на модель временно."""
+                     layout: int = 0, materials: Optional[List[str]] = None
+                     ) -> Dict[str, object]:
+    """Предпросмотр War Paint (512 px): {images: {карточка: png}} — на модель временно."""
     from src.app.session import session
-    return session().preview_paintkit(int(kit), int(item), int(wear), int(seed), int(layout))
+    return session().preview_paintkit(int(kit), int(item), int(wear), int(seed),
+                                      int(layout), _cards(materials))
 
 
 def paintkit_layout(kit: int, item: int, layout: int = 0) -> Dict[str, object]:

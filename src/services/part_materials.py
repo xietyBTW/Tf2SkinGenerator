@@ -111,25 +111,45 @@ def rename_triangles(smd_text: str, material: str, names: Dict[int, str],
         (новый текст, сколько треугольников `material` в файле,
         {новое имя: сколько треугольников получило его})
     """
+    text, done, seen = rename_many(smd_text, {material: (names, start)})
+    return text, seen[material], Counter({new: n for (_old, new), n in done.items()})
+
+
+def rename_many(smd_text: str, jobs: Dict[str, Tuple[Dict[int, str], int]]
+                ) -> Tuple[str, Counter, Counter]:
+    """
+    Переименовывает треугольники нескольких материалов одним проходом.
+
+    `jobs` — {материал: ({номер его треугольника в OBJ превью: новое имя},
+    сколько его треугольников было в предыдущих файлах)}. Номер считается
+    по ИСХОДНОМУ имени: часть, отданная родному материалу соседа
+    (`existing`), его нумерацию не сдвигает, а по очереди — сдвинула бы.
+
+    Returns:
+        (новый текст, {(материал, новое имя): сколько треугольников},
+        {материал: сколько его треугольников в файле})
+    """
     renamed: Counter = Counter()
+    seen: Counter = Counter()
     m = _RE_TRIANGLES.search(smd_text)
     if not m:
-        return smd_text, 0, renamed
+        return smd_text, renamed, seen
     lines = smd_text[m.start(1):m.end(1)].splitlines(keepends=True)
-    count = 0
     for name_at, name, _verts in _triangles(lines):
-        if name != material:
+        job = jobs.get(name)
+        if job is None:
             continue
-        new_name = names.get(start + count)
+        names, start = job
+        new_name = names.get(start + seen[name])
+        seen[name] += 1
         if new_name:
             line = lines[name_at]
             lead = line[:len(line) - len(line.lstrip())]
             end = line[len(line.rstrip('\r\n')):]
             lines[name_at] = lead + new_name + end
-            renamed[new_name] += 1
-        count += 1
+            renamed[(name, new_name)] += 1
     text = smd_text[:m.start(1)] + ''.join(lines) + smd_text[m.end(1):]
-    return text, count, renamed
+    return text, renamed, seen
 
 
 def _triangles(lines: Sequence[str]):
@@ -199,7 +219,18 @@ def specs_for_custom_model(specs: Sequence[dict], reference_smd: str,
         model_main = counts.most_common(1)[0][0] if counts else ''
         base_of = lambda raw: model_main    # noqa: E731 — вся геометрия на одном
     source = os.path.basename(reference_smd)
-    return [{**s, 'base': base_of(str(s['base'])), 'sources': [source]} for s in specs]
+    out = []
+    for s in specs:
+        if s.get('existing'):
+            # Родной материал своей модели: «только форма» сливает их все в
+            # один — отдавать нечему; со своими материалами имя в модели
+            # очищено (Material.001 → material_001), иначе studiomdl
+            # обрежет его по точке и материал станет фиолетовым.
+            if not keep_materials:
+                continue
+            s = {**s, 'name': model_name(str(s['name']))}
+        out.append({**s, 'base': base_of(str(s['base'])), 'sources': [source]})
+    return out
 
 
 # ── Другая модель того же предмета ───────────────────────────────────────── #
@@ -365,11 +396,18 @@ def specs_for_other_model(specs: Sequence[dict], source_folder: str,
     walked = {f: _uv_triangles(os.path.join(folder, f)) for f in smds}
 
     groups: Dict[str, List[dict]] = {}
+    missed: List[str] = []
     for spec in specs:
         groups.setdefault(str(spec['base']), []).append(spec)
+    for base in [b for b, group in groups.items() if any(s.get('existing') for s in group)]:
+        # Части, отданные родному материалу: в разобранной исходной модели они
+        # носят его имя вместе с его собственными треугольниками, и по UV их
+        # уже не отличить. Без них в сетке UV пусто там, где они лежали, и
+        # треугольники класса ушли бы к ближайшему соседу — в чужую часть.
+        # Поэтому у такого исходного не переносится ничего.
+        missed += [str(s['name']) for s in groups.pop(base)]
 
     out: List[dict] = []
-    missed: List[str] = []
     for base, group in groups.items():
         parts = {str(s['name']).lower() for s in group}
         source = [(name.lower() if name.lower() in parts else None, uv)
@@ -453,6 +491,10 @@ def apply_to_model(qc_path: str, specs: Sequence[dict],
     вовсе, и `warn` говорит об этом: по чужим номерам они легли бы не на те
     треугольники.
 
+    Спека с `existing` отдаёт треугольники родному материалу модели: им
+    только меняется имя (в его написании), столбца и VMT у него не будет —
+    они у материала уже есть.
+
     Returns:
         {имя материала части: материал, чей VMT она берёт} — по нему сборка
         пишет VMT частей.
@@ -464,6 +506,13 @@ def apply_to_model(qc_path: str, specs: Sequence[dict],
     shells = _projectile_files(qc_path)
 
     applied: List[Tuple[str, str]] = []
+    # Каждый файл читается один раз и переписывается одним проходом по всем
+    # материалам (rename_many): родной материал, получивший части соседа,
+    # сам бывает исходным, и посчитанный после чужого переименования он
+    # «не совпал» бы с моделью — его части молча пропадали.
+    originals: Dict[str, str] = {}
+    jobs: Dict[str, Dict[str, Tuple[Dict[int, str], int]]] = {}
+    chosen: Dict[str, List[dict]] = {}
     for base, group in groups.items():
         # Самый длинный список: выбранные до того, как снаряд в оружии попал в
         # кадр, помнят OBJ без его SMD, а нумерация у всех одна — снаряд в конце.
@@ -472,8 +521,10 @@ def apply_to_model(qc_path: str, specs: Sequence[dict],
         texts: List[Tuple[str, str]] = []
         if paths and all(os.path.isfile(p) for p in paths):
             for path in paths:
-                with open(path, 'r', encoding='utf-8', errors='replace') as f:
-                    texts.append((path, f.read()))
+                if path not in originals:
+                    with open(path, 'r', encoding='utf-8', errors='replace') as f:
+                        originals[path] = f.read()
+                texts.append((path, originals[path]))
         # Сколько треугольников у материала и сколько из них — само оружие:
         # снаряд в оружии (своя модель) мог смениться после выбора (fits).
         counts = [material_counts(text)[base] for _, text in texts]
@@ -490,22 +541,27 @@ def apply_to_model(qc_path: str, specs: Sequence[dict],
                      f"модель не та, на которой выбирали части")
         if not good:
             continue
-        names = {int(t): str(s['name']).lower() for s in good for t in s.get('tris') or ()}
-        out, offset, renamed = [], 0, Counter()
-        for path, text in texts:
-            text, count, done = rename_triangles(text, base, names, offset)
+        names = {int(t): _target(s) for s in good for t in s.get('tris') or ()}
+        offset = 0
+        for (path, _), count in zip(texts, counts):
+            jobs.setdefault(path, {})[base] = (names, offset)
             offset += count
+        chosen[base] = good
+
+    renamed: Counter = Counter()
+    for path, by_base in jobs.items():
+        text, done, _seen = rename_many(originals[path], by_base)
+        if done:
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(text)
             renamed += done
-            out.append((path, text, done))
-        for path, text, done in out:
-            if done:
-                with open(path, 'w', encoding='utf-8') as f:
-                    f.write(text)
+    for base, good in chosen.items():
         for s in good:
-            name = str(s['name']).lower()
-            if renamed[name]:
-                applied.append((name, base))
-                logger.info(f"[ЧАСТИ] {name}: {renamed[name]} треугольников из {base}")
+            name = _target(s)
+            if renamed[(base, name)]:
+                if not s.get('existing'):
+                    applied.append((name, base))
+                logger.info(f"[ЧАСТИ] {name}: {renamed[(base, name)]} треугольников из {base}")
             else:
                 logger.warning(f"[ЧАСТИ] {name}: треугольники не найдены — часть пропущена")
 
@@ -522,6 +578,13 @@ def apply_to_model(qc_path: str, specs: Sequence[dict],
     else:
         variants = {name: base for name, base in applied}
     return variants
+
+
+def _target(spec: dict) -> str:
+    """Имя, под которое уходят треугольники: у материала части — его (они
+    все в нижнем регистре), у родного материала — как он записан в модели."""
+    name = str(spec['name'])
+    return name if spec.get('existing') else name.lower()
 
 
 # ── VMT ───────────────────────────────────────────────────────────────────── #

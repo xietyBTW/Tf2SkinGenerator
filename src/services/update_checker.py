@@ -241,7 +241,7 @@ def download_update(
             f"размер не совпал: {done} вместо {expected_size}")
     if expected_digest and sha.hexdigest() != expected_digest:
         part.unlink(missing_ok=True)
-        raise RuntimeError("контрольная сумма не совпала — файл повреждён")
+        raise RuntimeError("контрольная сумма не совпала - файл повреждён")
 
     os.replace(part, dest)
     logger.info(f"Установщик скачан: {dest} ({done} байт)")

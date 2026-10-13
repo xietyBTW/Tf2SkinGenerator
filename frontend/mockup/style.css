@@ -1604,6 +1604,14 @@
   color: var(--surface);
 }
 .pmat__num { flex: none; font-size: 9px; opacity: .7; font-variant-numeric: tabular-nums; }
+/* Родные материалы модели — своей группой под своими материалами частей. */
+.pmat__head {
+  margin: 6px 0 0;
+  font-size: 9.5px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+}
 .pmat__name {
   flex: 1;
   min-width: 0;
@@ -1905,6 +1913,19 @@
   background: color-mix(in srgb, var(--accent) 8%, transparent);
 }
 .wpanel__tag { flex: none; font-family: var(--mono); font-size: 9.5px; letter-spacing: .06em; color: var(--ink-mute); }
+.wpanel__name { flex: none; max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Английское название — по нему скин знают в сообществе и ищут. */
+.wpanel__en {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 11.5px; color: var(--ink-mute);
+}
+/* Раздел «Украшенное оружие» — после War Paint. */
+.wpanel__section {
+  margin: 0; padding: 16px 10px 7px;
+  border-bottom: 1px solid var(--hairline);
+  font-size: 10px; font-weight: 500; letter-spacing: .16em; text-transform: uppercase;
+  color: var(--ink-mute); cursor: default;
+}
 .wpanel__empty { margin: 18px 10px; font-size: 12px; color: var(--ink-mute); }
 .wpanel__controls { display: flex; flex-direction: column; gap: 10px; }
 .wpanel__field { display: flex; align-items: center; gap: 12px; }
@@ -1922,6 +1943,64 @@
 .wpanel__wear.is-active { position: relative; background: var(--ink); border-color: var(--ink); color: var(--surface); }
 .wpanel__seed { width: 190px; font-variant-numeric: tabular-nums; }
 .wpanel__status { margin: 0; min-height: 1.4em; font-size: 11.5px; color: var(--ink-mute); }
+/* Материалы: плитки-переключатели с миниатюрой, как плитки узоров раскладки.
+   Отмеченная — в цвете (и с предпросмотром War Paint), снятая — приглушена. */
+.wpanel__mats { display: flex; flex-direction: column; gap: 8px; }
+.wpanel__mats[hidden], .wpanel__matnote[hidden] { display: none; }
+.wpanel__matcount { font: 10.5px/1 var(--mono); color: var(--ink-mute); font-variant-numeric: tabular-nums; }
+.wpanel__matlist {
+  display: grid; gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+}
+.wmat {
+  position: relative;
+  display: flex; flex-direction: column; gap: 5px;
+  padding: 0; border: 0; background: none; min-width: 0;
+  color: var(--ink-mute); text-align: left; cursor: pointer;
+  transition: color var(--dur);
+}
+.wmat__swatch {
+  position: relative; display: block;
+  aspect-ratio: 1; width: 100%;
+  background: var(--viewport) center / cover no-repeat;
+  outline: 1px solid var(--hairline); outline-offset: -1px;
+  filter: grayscale(.7) opacity(.5);
+  transition: transform var(--dur-panel) cubic-bezier(.2, .7, .2, 1),
+              outline-color var(--dur), filter var(--dur-panel);
+}
+/* Флажок в углу: тот же квадрат, что у обычных галочек приложения. */
+.wmat__swatch::before {
+  content: ""; position: absolute; left: 5px; top: 5px;
+  width: 13px; height: 13px; box-sizing: border-box;
+  border: 1px solid var(--hairline-strong); background: var(--overlay);
+  transition: background var(--dur), border-color var(--dur);
+}
+.wmat__swatch::after {
+  content: ""; position: absolute; left: 9.5px; top: 5.5px;
+  width: 4px; height: 8px;
+  border-right: 1.5px solid var(--surface); border-bottom: 1.5px solid var(--surface);
+  transform: rotate(42deg) scale(0);
+  transition: transform var(--dur);
+}
+.wmat__name {
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden; overflow-wrap: break-word;
+  font-size: 11.5px; line-height: 1.3; color: inherit;
+}
+.wmat__tag { font: 9.5px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-mute); }
+.wmat:hover { color: var(--ink-soft); }
+.wmat:hover .wmat__swatch { transform: translateY(-2px); }
+.wmat:focus-visible { outline: none; }
+.wmat:focus-visible .wmat__swatch { outline: 1px solid var(--accent); outline-offset: 2px; }
+.wmat[aria-checked="true"] { color: var(--ink); }
+.wmat[aria-checked="true"] .wmat__swatch { filter: none; outline: 2px solid var(--ink); outline-offset: -2px; }
+.wmat[aria-checked="true"] .wmat__swatch::before { background: var(--ink); border-color: var(--ink); }
+.wmat[aria-checked="true"] .wmat__swatch::after { transform: rotate(42deg) scale(1); }
+/* Рецепт под одну пушку: на этот материал его не разложить. */
+.wmat:disabled { cursor: default; color: var(--ink-mute); }
+.wmat:disabled .wmat__swatch { transform: none; filter: grayscale(1) opacity(.3); }
+.wmat:disabled .wmat__swatch::before { display: none; }
+.wpanel__matnote { margin: 0; font-size: 11.5px; line-height: 1.5; color: var(--ink-mute); }
 #warpaint.is-active { color: var(--ink); }
 
 /* ── War Paint: два экрана панели ────────────────────────────────────────
@@ -2137,6 +2216,12 @@
 .field__note { font-size: 10px; color: var(--ink-mute); }
 .input--tiny { width: 70px; margin-left: 23px; }
 .input--tiny:disabled { color: var(--ink-mute); border-bottom-style: dashed; }
+/* Галка со своим значением в одной строке (сила гамма-коррекции). Пока
+   галка снята, число просто бледное: подчёркивание обещало бы, что его
+   можно править. */
+.optval { display: flex; align-items: center; gap: 10px; }
+.optval__input { width: 3.5em; padding-top: 0; padding-bottom: 1px; text-align: center; }
+.optval__input:disabled { color: var(--ink-mute); border-bottom-color: transparent; }
 
 /* Карта нормалей: галка и её настройки под ней, с отступом галки. */
 .nmap { display: flex; flex-direction: column; gap: 9px; }
@@ -2230,6 +2315,30 @@
 .dock__summary:hover .dock__more { color: var(--ink); border-bottom-color: var(--ink); }
 .dock__tf2 { margin-left: auto; }
 
+/* Полоса всегда в одну строку. Длинное сообщение («VPK создан: путь…»)
+   раньше отрывало квадратик на свою строку и ломало «Собрать VPK» надвое:
+   теперь первым режется путь к игре, потом сводка, потом само сообщение. */
+.dock__summary { min-width: 0; }
+.dock__state { display: flex; align-items: baseline; min-width: 0; white-space: nowrap; }
+.dock__state::before { flex: none; align-self: center; }
+.dock__state > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* Сжатие делится пропорционально; огромные множители дают почти очередь:
+   путь к игре (до начала строки), за ним сводка, сообщение последним. */
+#docksum { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 100; }
+.dock__more { flex: none; }
+.dock__tf2 { min-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 10000; }
+.dock > .btn--primary { flex: none; white-space: nowrap; }
+/* Пока идёт сборка и пока виден её итог, полоса занята только ими: сводка
+   параметров и путь к игре вернутся вместе с обычной полосой (layout.js). */
+[data-dock="focus"] #docksum,
+[data-dock="focus"] .dock__more,
+[data-dock="focus"] .dock__tf2 { display: none; }
+[data-dock="focus"] .dock__summary { margin-right: auto; }
+/* Смена главной кнопки (сборка, «Остановить», «Открыть папку») — мягким
+   проявлением, а не скачком. Без анимаций --dur-panel ноль. */
+.dock > .btn--primary:not([hidden]) { animation: dock-btn-in var(--dur-panel) ease-out; }
+@keyframes dock-btn-in { from { opacity: 0; transform: translateY(3px); } }
+
 /* ── Сборка в полосе (buildfx.js) ─────────────────────────────────────────
    Линия по верхнему краю полосы, счётчик на месте сводки, кнопка
    «Остановить» с заливкой или кольцом. Тот же набор — у примера в настройках. */
@@ -2263,12 +2372,12 @@
 .bfx__over { position: absolute; z-index: 30; pointer-events: none; }
 /* Текст этапа: старая и новая строка в одной клетке — смена строкой
    вверх или вбок уезжает внутри неё. */
-.bfx__text { display: inline-grid; overflow: hidden; vertical-align: bottom; }
-.bfx__text > span { grid-area: 1 / 1; white-space: nowrap; }
+.bfx__text { display: inline-grid; grid-template-columns: minmax(0, 1fr); overflow: hidden; vertical-align: bottom; }
+.bfx__text > span { grid-area: 1 / 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .bfx__ch { display: inline-block; white-space: pre; }
 .bfx__caret { color: var(--accent); }
 .bfx__ghost { position: absolute; left: 0; top: 0; opacity: .85; }
-.dock__prog { display: inline-flex; gap: 12px; }
+.dock__prog { display: inline-flex; flex: none; gap: 12px; }
 .dock__prog[hidden] { display: none; }
 .is-roll { display: inline-flex; height: 1.25em; line-height: 1.25em; overflow: hidden; vertical-align: bottom; }
 .bfx__digit { display: inline-flex; flex-direction: column; transition: transform .45s cubic-bezier(.3, 0, .2, 1); }
@@ -2460,7 +2569,7 @@
    По общему языку: ни рамок-карточек, ни заливок. Ряды разделены волосяной
    линией, включённая карта отмечена инверсией подписи и акцентной чертой —
    так же, как вкладки и теги в остальном интерфейсе. */
-.maps { width: min(820px, 94vw); }
+.maps { width: min(980px, 94vw); }
 .vmt  { width: min(860px, 94vw); }
 
 /* Заголовок диалога и предмет, к которому он относится, — в одну строку:
@@ -2468,61 +2577,201 @@
 .dlg__head { display: flex; align-items: baseline; gap: 14px; }
 .dlg__mat { color: var(--accent); }
 
-.maps__list {
+/* Две колонки: слева все карты строкой, справа выбранная целиком. Высота
+   окна постоянная — переключение карт не дёргает его вверх-вниз. */
+.maps__split {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(330px, 1fr));
-  gap: 0 var(--rhythm);
-  max-height: 58vh;
-  overflow: auto;
+  grid-template-columns: 230px minmax(0, 1fr);
+  height: min(560px, 66vh);
+  border-top: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--hairline);
 }
-
-.mapcard {
+.maps__nav {
   display: flex;
   flex-direction: column;
-  gap: 9px;
-  padding: 15px 0;
-  border-top: 1px solid var(--hairline);
+  border-right: 1px solid var(--hairline);
+  overflow-y: auto;
 }
-.mapcard__head { align-items: baseline; }
-.mapcard__title {
-  flex: 1;
-  font-size: 13px;
-  /* Выключенная карта приглушена, включённая — полным тоном: состояние видно
-     без заливок и рамок. */
-  color: var(--ink-soft);
-  transition: color var(--dur);
+.maprow {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border-left: 2px solid transparent;
+  cursor: pointer;
+  transition: background var(--dur);
 }
-.mapcard.is-on .mapcard__title { color: var(--ink); }
-.mapcard__badge { flex: none; letter-spacing: .1em; }
-.mapcard.is-on .mapcard__badge { color: var(--accent); }
+.maprow:hover { background: var(--bg); }
+.maprow.is-active { background: var(--bg); border-left-color: var(--accent); }
+.maprow input { margin-top: 1px; flex: none; }
+.maprow__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.maprow__title { font-size: 12px; color: var(--ink-soft); transition: color var(--dur); }
+.maprow.is-on .maprow__title,
+.maprow.is-active .maprow__title { color: var(--ink); }
+.maprow__status {
+  font-size: 10.5px;
+  color: var(--ink-mute);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.maprow.is-on .maprow__status { color: var(--accent); }
+.maprow__status.is-warn { color: var(--ink-soft); font-style: italic; }
 
+/* Справа отступ: ручки крайних точек градиента выступают за полосу на
+   половину своей ширины. */
+.maps__pane { overflow-y: auto; overflow-x: hidden; padding: 14px 10px 14px 18px; }
+/* По центру, а не по базовой линии: у галочки текста нет, и по линии
+   она сползала ниже подписи. */
+.mappane__head { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+.mappane__title { margin: 0; font-size: 14px; flex: 1; }
+.mappane__on { flex: none; }
+.mappane__body { display: flex; flex-direction: column; gap: 14px; transition: opacity var(--dur); }
+/* Выключенная карта видна, но приглушена: настраивать её можно, любая правка
+   её и включает. */
+.mappane__body.is-off { opacity: .55; }
+.mappane__tip { padding-left: 0; }
+.mappane__row { display: flex; align-items: center; gap: 12px; }
+.mappane__seg { flex: 1; max-width: 520px; }
+.mappane__params { padding-top: 12px; border-top: 1px solid var(--hairline); }
+.mappane__auto { display: flex; flex-direction: column; gap: 10px; }
+.mappane__file { display: flex; align-items: center; gap: 12px; min-width: 0; }
+
+/* Поле файла: превью картинки и кнопки; картинку можно бросить на поле. */
+.mappane__drop {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 72px;
+  padding: 10px 12px;
+  border: 1px dashed var(--hairline-strong);
+  transition: border-color var(--dur), background var(--dur);
+}
+.mappane__drop.is-over { border-color: var(--accent); background: var(--bg); }
+.mappane__drop.has-file { border-style: solid; }
+.mappane__drop .mapcard__thumb,
+.mappane__file .mapcard__thumb { width: 72px; height: 52px; object-fit: contain; }
+.mappane__droptext { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.mappane__acts { display: flex; gap: 12px; }
+.mappane__acts [hidden] { display: none; }
+
+.mapcard__badge { flex: none; letter-spacing: .1em; color: var(--accent); }
 .mapcard__tip {
   margin: 0;
-  padding-left: 23px;             /* по левому краю подписи, а не чекбокса */
   color: var(--ink-mute);
   font-size: 11px;
   line-height: 1.5;
 }
-
-.mapcard__body {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding-left: 23px;
-  /* Тонкая акцентная черта вместо рамки: видно, докуда простирается карта. */
-  border-left: 1px solid var(--accent);
-  margin-left: 5px;
-}
-.mapcard__body[hidden] { display: none; }
-
-.mapcard__file { display: flex; align-items: center; gap: 12px; }
-.mapcard__file .input { flex: 1; min-width: 0; font-size: 12px; }
 .mapcard__params { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; }
 .mapcard__cell { display: flex; align-items: center; gap: 8px; }
 .mapcard__cell .label { white-space: nowrap; }
 .mapcard__cell .select select { font-size: 12px; }
-.mapcard .check:has(input:disabled),
 .mapcard__cell:has(input:disabled) .label { color: var(--ink-mute); }
+.mapcard__cell[hidden] { display: none; }
+.mappane__settings { display: flex; flex-direction: column; gap: 12px; }
+/* Пояснение о последствиях выбора — акцентной чертой, как предупреждение. */
+.mappane__warn { padding-left: 10px; border-left: 2px solid var(--accent); color: var(--ink-soft); }
+/* Превью свечения: текстура на свету, в темноте и шар затухания. */
+.glow { display: flex; flex-direction: column; gap: 8px; padding-top: 12px; border-top: 1px solid var(--hairline); }
+.glow__row { display: flex; gap: 14px; align-items: flex-start; flex-wrap: wrap; }
+.glow__row[hidden], .glow .lwarp__fig[hidden] { display: none; }
+.glow__img { width: 150px; height: auto; max-height: 150px; object-fit: contain;
+             border: 1px solid var(--hairline); image-rendering: auto; }
+/* Конструктор блика: ряды точек и направление. */
+.lwarp__custom { display: flex; flex-direction: column; gap: 8px; }
+.lwarp__custom[hidden], .lwarp__angle[hidden], .lwarp__rowhead[hidden] { display: none; }
+.lwarp__rowhead { margin: 4px 0 0; }
+.lwarp__angleseg { flex: none; width: 200px; }
+.lwarp__angle .input--num { width: 64px; }
+.pwarp__texture.is-draggable { cursor: crosshair; touch-action: none; }
+/* Сам градиент блика: 64×64 превью, растянутое без сглаживания. */
+.pwarp__texture {
+  width: 120px;
+  height: 120px;
+  border: 1px solid var(--hairline);
+  image-rendering: pixelated;
+}
+.mapcard__thumb {
+  flex: none;
+  width: 44px;
+  height: 22px;
+  object-fit: fill;              /* полоска 256×1 растягивается, а не теряется */
+  border: 1px solid var(--hairline);
+  image-rendering: pixelated;
+}
+.mapcard__modname {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+
+/* Конструктор lightwarp. */
+.lwarp { display: flex; flex-direction: column; gap: 10px; }
+.lwarp[hidden] { display: none; }
+.lwarp__preset { width: 100%; }
+.lwarp__preset .select { flex: 1; min-width: 0; }
+.lwarp__range { width: 84px; }
+.lwarp__value { min-width: 3.2em; font-size: 11px; color: var(--ink-soft); }
+/* Не тронуто — как у материала, в VMT не пишется. */
+.lwarp__value.is-default { color: var(--ink-mute); font-style: italic; }
+.lwarp__color {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--hairline-strong);
+  background: none;
+  cursor: pointer;
+}
+.lwarp__view { display: flex; gap: 16px; align-items: flex-start; }
+.lwarp__spheres { flex: none; display: flex; gap: 10px; }
+.lwarp__fig { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.lwarp__sphere { width: 120px; height: 120px; }
+/* Ползунки в две колонки: в одну они тянули окно вниз. */
+.lwarp__grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 18px; }
+@media (max-width: 720px) {
+  .maps__split { grid-template-columns: 1fr; height: auto; }
+  .maps__nav { border-right: 0; border-bottom: 1px solid var(--hairline); max-height: 200px; }
+  .maps__pane { padding-left: 0; }
+  .lwarp__view { flex-direction: column; }
+  .lwarp__grid { grid-template-columns: 1fr; }
+}
+.lwarp__stripbox { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.lwarp__strip {
+  width: 100%;
+  height: 18px;
+  border: 1px solid var(--hairline);
+  image-rendering: pixelated;
+}
+.lwarp__note { padding-left: 0; }
+.lwarp__preset .textbtn[hidden] { display: none; }
+.lwarp__graph { width: 100%; height: 64px; border: 1px solid var(--hairline); }
+
+/* Редактор цветных точек: полоса, ручки под ней. */
+.lwarp__grad { display: flex; flex-direction: column; gap: 6px; }
+.lwarp__grad[hidden] { display: none; }
+.lwarp__bar {
+  height: 24px;
+  border: 1px solid var(--hairline-strong);
+  cursor: copy;                   /* щелчок добавляет точку */
+}
+.lwarp__bar canvas { display: block; width: 100%; height: 100%; image-rendering: pixelated; }
+.lwarp__handles { position: relative; height: 14px; margin: 0 1px; }
+.lwarp__stop {
+  position: absolute;
+  top: 0;
+  width: 11px;
+  height: 11px;
+  padding: 0;
+  transform: translateX(-50%);
+  border: 1px solid var(--ink-soft);
+  cursor: ew-resize;
+  touch-action: none;
+}
+.lwarp__stop.is-on { outline: 2px solid var(--accent); outline-offset: 1px; }
+.lwarp__stop:focus-visible { outline: 2px solid var(--accent); }
 
 /* ── Редактор VMT ──────────────────────────────────────────────────────
    Текст здесь — главная масса на экране, поэтому у него своя поверхность
@@ -2757,8 +3006,17 @@
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: var(--gap) var(--rhythm);
 }
-/* Окно не выше экрана: прокручиваются секции, заголовок и «Сохранить» стоят. */
-.cfg .ask__body { max-height: calc(100vh - 48px); }
+/* Окно одной высоты на всех вкладках, иначе оно прыгало бы при переключении;
+   не выше экрана: прокручивается секция, заголовок и «Сохранить» стоят. */
+.cfg .ask__body { height: min(570px, calc(100vh - 48px)); }
+/* Вкладки: подчёркивание выбранной ложится на линию под ними. */
+.cfg__tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  border-bottom: 1px solid var(--hairline-strong);
+}
+.cfg__tabs .underlined { padding-bottom: 9px; margin-bottom: -1px; }
 .cfg__body {
   flex: 1;
   min-height: 0;
@@ -2769,14 +3027,7 @@
   margin-right: calc(-1 * var(--rhythm));     /* полоса прокрутки — у края окна */
   padding-right: var(--rhythm);
 }
-/* Секция: подзаголовок над волосяной линией, внутри — свой ритм. */
 .cfg__sec { display: flex; flex-direction: column; gap: 14px; }
-.cfg__head {
-  margin: 0;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--hairline-strong);
-  color: var(--ink);             /* не путать с подписями полей под ним */
-}
 /* Галочки и действия обслуживания — ровными колонками, а не вразнобой по
    длине подписи: так их пробегают глазом сверху вниз. */
 .cfg__checks, .cfg__maintgrid {

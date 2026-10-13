@@ -19,7 +19,7 @@ TRANSLATIONS = {
         'particles_cp_model': 'Модель…',
         'particles_cp_attachment': 'Точка крепления',
         'particles_cp_pick_model': 'Модель из кэша декомпиляции:',
-        'particles_cp_no_models': 'В кэше нет разобранных моделей. Откройте модель на вкладке оружия или шапок — она попадёт в кэш, и её точки крепления появятся здесь.',
+        'particles_cp_no_models': 'В кэше нет разобранных моделей. Откройте модель на вкладке оружия или шапок - она попадёт в кэш, и её точки крепления появятся здесь.',
         'particles_cp_no_attachments': 'У этой модели нет точек крепления ($attachment в QC).',
         'particles_cp_toggle': 'Контрол-пойнт: позиция, углы, движение',
         'particles_cp_index': 'CP',
@@ -43,7 +43,7 @@ TRANSLATIONS = {
         'particles_loading': 'Загрузка эффекта…',
         'particles_load_error': 'Не удалось загрузить PCF',
         'particles_saved': 'PCF сохранён: {path}',
-        'particles_no_tf2': 'Путь к TF2 не задан — список эффектов игры недоступен. Укажите путь в настройках.',
+        'particles_no_tf2': 'Путь к TF2 не задан - список эффектов игры недоступен. Укажите путь в настройках.',
         'particles_pick_pcf': 'Выберите PCF-файл эффектов',
         'particles_val_prompt': 'Новое значение:',
         'particles_vec3_prompt': 'Три числа через пробел (x y z):',
@@ -56,14 +56,14 @@ TRANSLATIONS = {
                               'В казуальных матчах кастомные частицы блокируются sv_pure.',
         'particles_textures_vpk_done': 'Заменённые текстуры собраны отдельным модом: {path} '
                                        '(VMT игры + ваш VTF, без PCF). В casual-pre-loader '
-                                       'он попадёт на вкладку аддонов — отметьте его там; '
+                                       'он попадёт на вкладку аддонов - отметьте его там; '
                                        'моды с PCF внутри тулза считает партикл-паками '
                                        'и текстуры из них не устанавливает.',
-        'particles_casual_overflow': 'Внимание: PCF на {bytes} байт больше оригинального — '
+        'particles_casual_overflow': 'Внимание: PCF на {bytes} байт больше оригинального - '
                                      'в казуале (через бай-пасс) он может не загрузиться. '
                                      'Удалите лишние/неиспользуемые системы, чтобы уменьшить размер. '
                                      'На своём сервере (sv_pure 0) работает без ограничений.',
-        'particles_2d_hint': 'Текстуры эффекта — двойной клик или перетащите картинку на карточку; правый клик — сброс',
+        'particles_2d_hint': 'Текстуры эффекта - двойной клик или перетащите картинку на карточку; правый клик - сброс',
         'particles_reset_texture': 'Вернуть текстуру игры',
         'particles_pick_game_tex': 'Игровая текстура из списка…',
         'particles_pick_game_prompt': 'Текстура из эффектов игры (работает в казуале, '
@@ -74,9 +74,9 @@ TRANSLATIONS = {
         'particles_natural_colors': 'Цвета текстуры',
         'particles_colors_confirm': 'Убрать у эффекта и его дочерних систем модули цвета '
                                     '(Color Random, Color Fade и т.п.)? Текстуры будут '
-                                    'рендериться родными цветами. Отмена — перезагрузка PCF.',
+                                    'рендериться родными цветами. Отмена - перезагрузка PCF.',
         'particles_colors_done': 'Удалено модулей цвета: {count}. Не забудьте сохранить или собрать VPK.',
-        'particles_colors_none': 'У этого эффекта нет модулей цвета — текстуры уже в родных цветах.',
+        'particles_colors_none': 'У этого эффекта нет модулей цвета - текстуры уже в родных цветах.',
         'particles_menu_add_layer': 'Добавить слой со своей текстурой…',
         'particles_menu_param_reference': 'Сохранить справочник параметров (JSON)…',
         'particles_reference_purpose': 'Для чего нужен файл?',
@@ -103,15 +103,15 @@ TRANSLATIONS = {
         'particles_menu_remove_module': 'Удалить модуль',
         'particles_menu_add_attr': 'Добавить параметр…',
         'particles_menu_remove_attr': 'Удалить параметр (вернуть умолчание)',
-        'particles_pick_attr': 'Параметр (значение — как в эффектах игры):',
+        'particles_pick_attr': 'Параметр (значение - как в эффектах игры):',
         'particles_attr_all_set': 'Все известные параметры уже заданы.',
         'particles_menu_copy': 'Копировать выделенное',
         'particles_menu_copy_all': 'Копировать все параметры',
         'particles_menu_paste': 'Вставить параметры',
         'particles_paste_full_prompt': 'Скопированы все параметры эффекта. Как вставить?\n\n'
-                                       '«Без замены» — существующие параметры этого эффекта '
+                                       '«Без замены» - существующие параметры этого эффекта '
                                        'останутся на месте, добавятся только недостающие.\n'
-                                       '«Полная замена» — параметры эффекта будут удалены '
+                                       '«Полная замена» - параметры эффекта будут удалены '
                                        'и заменены вставляемыми.',
         'particles_copy_problem': 'Копировать',
         'particles_copy_problem_json': 'Разбираемый JSON:',
@@ -119,7 +119,7 @@ TRANSLATIONS = {
         'particles_paste_partial': 'Параметры вставлены, но часть пропущена.',
         'particles_paste_empty': 'Буфер обмена пуст.',
         'particles_paste_not_json': 'В буфере не JSON: {detail}',
-        'particles_paste_no_key': 'В JSON нет раздела "tf2sgParticleParams" — '
+        'particles_paste_no_key': 'В JSON нет раздела "tf2sgParticleParams" - '
                                   'скопирован не тот текст.',
         'particles_paste_bad_root': '"tf2sgParticleParams" должен быть '
                                     'объектом с полями attrs и modules.',
@@ -130,13 +130,13 @@ TRANSLATIONS = {
         'particles_paste_bad_group': 'Группа "{group}" записана неверно: нужен '
                                      'список пар ["Имя модуля", {{параметры}}].',
         'particles_paste_nothing': 'В наборе нет ни параметров, ни модулей.',
-        'particles_paste_nothing_applied': 'Ни один параметр не подошёл — '
+        'particles_paste_nothing_applied': 'Ни один параметр не подошёл - '
                                            'проверьте имена модулей и полей.',
         'particles_paste_failed': 'Ошибка разбора: {detail}',
         'particles_paste_unknown_group': 'Неизвестная группа "{group}". '
                                          'Допустимы: {known}',
         'particles_paste_unknown_module': 'Модуля "{module}" нет в игре '
-                                          '(группа {group}) — вероятно, '
+                                          '(группа {group}) - вероятно, '
                                           'опечатка; в игре он работать не '
                                           'будет.',
         'particles_paste_bad_value': 'Значение "{attr}" в "{where}" не '
@@ -146,7 +146,7 @@ TRANSLATIONS = {
         'particles_paste_replace': 'Полная замена',
         'particles_search': 'Поиск системы…',
         'particles_not_previewed': 'нет в превью',
-        'particles_not_previewed_tip': 'Этот модуль превью не симулирует — '
+        'particles_not_previewed_tip': 'Этот модуль превью не симулирует - '
                                        'в игре он работает, но здесь изменения '
                                        'не видны.',
         'particles_lint_title': 'Проверка перед сборкой',
@@ -157,34 +157,34 @@ TRANSLATIONS = {
         'particles_lint_as_is': 'Собрать как есть',
         'particles_lint_cp_camera': 'Эффект скрыт, когда на контрольной точке '
                                     'камера игрока (обычно нужно -1)',
-        'particles_lint_no_renderer': 'Нет рендерера — частицы не рисуются',
-        'particles_lint_no_emitter': 'Нет эмиттера и дочерних систем — система '
+        'particles_lint_no_renderer': 'Нет рендерера - частицы не рисуются',
+        'particles_lint_no_emitter': 'Нет эмиттера и дочерних систем - система '
                                      'ничего не создаёт',
-        'particles_lint_no_particles': 'Максимум частиц равен нулю — частиц '
+        'particles_lint_no_particles': 'Максимум частиц равен нулю - частиц '
                                        'не будет',
-        'particles_lint_zero_radius': 'Нулевой размер частиц — их не будет видно',
-        'particles_lint_zero_alpha': 'Прозрачность цвета равна нулю — частицы '
+        'particles_lint_zero_radius': 'Нулевой размер частиц - их не будет видно',
+        'particles_lint_zero_alpha': 'Прозрачность цвета равна нулю - частицы '
                                      'невидимы',
         'particles_lint_immortal': 'Частицы не умирают: нет оператора '
                                   'Lifespan Decay. Поток встанет, как только '
                                   'наберётся максимум частиц',
         'particles_lint_parent_scale_zero': 'Эмиссия по частицам родителя, но '
                                            'множитель «scale emission to used '
-                                           'control points» равен нулю — в игре '
+                                           'control points» равен нулю - в игре '
                                            'эмиттер не создаст ничего',
         'particles_lint_frozen_anim': 'Анимация текстуры ({frames} кадров) '
-                                     'не успевает проиграться — в игре будет '
+                                     'не успевает проиграться - в игре будет '
                                      'один кадр. Растянуть лист на время жизни '
                                      'частицы?',
         'particles_group_tree': 'Группировать системы частиц по родителям',
-        'particles_group_tree_tip': 'В стоковом PCF почти все определения — дети (держатели, спавнеры). Группировка показывает только вершину каждого эффекта, остальное раскрывается по клику.',
+        'particles_group_tree_tip': 'В стоковом PCF почти все определения - дети (держатели, спавнеры). Группировка показывает только вершину каждого эффекта, остальное раскрывается по клику.',
         'particles_lint_not_previewed': 'Превью не исполняет: {modules}. В игре эффект будет другим; операторы размещения без этого сваливают частицы в одну точку',
         'particles_lint_viewmodel': 'Все копии эффекта уходят в вид-модельный проход: в третьем лице он пропадёт',
         'particles_lint_missing_child': 'Дочерняя система "{child}" не найдена '
                                         'в файле',
-        'particles_lint_material': 'Материал "{material}" не читается — в игре '
+        'particles_lint_material': 'Материал "{material}" не читается - в игре '
                                    'текстуры не будет',
-        'particles_lint_custom_override': 'Этот эффект перекрыт файлом: {path} — '
+        'particles_lint_custom_override': 'Этот эффект перекрыт файлом: {path} - '
                                           'игра возьмёт его, а не ваш мод',
         'particles_expand': 'Развернуть превью (F11)',
         'particles_collapse': 'Свернуть превью (F11 / Esc)',
@@ -214,12 +214,12 @@ TRANSLATIONS = {
         'particles_sp_spawn_rate_tip': 'Сколько частиц эмиттер выпускает за секунду.',
         'particles_sp_spawn_burst_tip': 'Сколько частиц выпускается разом одним залпом.',
         'particles_sp_emit_delay_tip': 'Через сколько секунд после запуска эффекта начнётся эмиссия.',
-        'particles_sp_emit_duration_tip': 'Сколько секунд идёт эмиссия. 0 — бесконечно.',
+        'particles_sp_emit_duration_tip': 'Сколько секунд идёт эмиссия. 0 - бесконечно.',
         'particles_sp_max_particles_tip': 'Потолок одновременно живущих частиц. Пока он забит, новые не рождаются.',
         'particles_sp_spawn_area_tip': 'Расстояние от контрольной точки, на котором рождаются частицы, в юнитах (минимум и максимум).',
         'particles_sp_speed_tip': 'Начальная скорость частицы наружу, юнитов в секунду.',
         'particles_sp_gravity_tip': 'Постоянное ускорение по Z. Отрицательное тянет вниз.',
-        'particles_sp_drag_tip': 'Торможение частицы средой: 0 — летит по инерции, 1 — почти сразу встаёт.',
+        'particles_sp_drag_tip': 'Торможение частицы средой: 0 - летит по инерции, 1 - почти сразу встаёт.',
         'particles_sp_size_tip': 'Радиус спрайта в юнитах, если разброс размера не задан.',
         'particles_sp_size_range_tip': 'Радиус в юнитах выбирается случайно в этих пределах при рождении.',
         'particles_sp_size_scale_tip': 'Во сколько раз меняется радиус за жизнь частицы: в начале и в конце.',
@@ -227,17 +227,17 @@ TRANSLATIONS = {
         'particles_sp_alpha_tip': 'Стартовая непрозрачность частицы, 0-255 (минимум и максимум).',
         'particles_sp_fade_in_tip': 'Сколько секунд длится проявление в начале жизни частицы (минимум и максимум).',
         'particles_sp_fade_out_tip': 'Сколько секунд длится угасание перед смертью частицы (минимум и максимум).',
-        'particles_sp_colors_tip': 'Цвет каждой частицы — случайный между этими двумя.',
+        'particles_sp_colors_tip': 'Цвет каждой частицы - случайный между этими двумя.',
         'particles_sp_spin_tip': 'Вращение спрайта вокруг оси взгляда, градусов в секунду.',
         'particles_new_name_prompt': 'Имя новой системы:',
         'particles_pick_child': 'Какую систему подцепить ребёнком:',
         'particles_pick_module': 'Модуль (можно вписать свой):',
         'particles_remove_system_confirm': 'Удалить систему «{name}» из PCF? '
-                                           'Она исчезнет совсем — в том числе будет отцеплена '
+                                           'Она исчезнет совсем - в том числе будет отцеплена '
                                            'от всех систем, где была дочерней.',
         'make_team_tip': 'Сделать оружие командным: добавить отдельную BLU-текстуру (RED/BLU)',
         'misc_textures': 'Прочее',
-        'misc_textures_tip': 'Служебные текстуры (глаза/убер/зомби и т.п.) — обычно скрыты. Открыть для опциональной замены.',
+        'misc_textures_tip': 'Служебные текстуры (глаза/убер/зомби и т.п.) - обычно скрыты. Открыть для опциональной замены.',
         'file_not_found': 'Файл не найден по пути:',
         'load_image': 'Сначала загрузите изображение.',
         'enter_name': 'Введите имя VPK-файла.',
@@ -250,7 +250,7 @@ TRANSLATIONS = {
         'tex_done': 'Готово',
         'tex_settings_tip': 'Настройки этой текстуры',
         'material_blacklist_label': 'Блэклист материалов (доп.)',
-        'material_blacklist_hint': 'По одному паттерну в строке. Совпадение по подстроке; префикс «=» — точное имя. Такие материалы не показываются карточками в 2D (в т.ч. в «Прочем»), но пишутся в мод оригинальной текстурой.',
+        'material_blacklist_hint': 'По одному паттерну в строке. Совпадение по подстроке; префикс «=» - точное имя. Такие материалы не показываются карточками в 2D (в т.ч. в «Прочем»), но пишутся в мод оригинальной текстурой.',
         'build': 'Собрать VPK',
         'save': 'Сохранить',
         'restore': 'Восстановить из backup',
@@ -318,47 +318,205 @@ TRANSLATIONS = {
         'point_sample': 'Point Sample (резкие пиксели)',
         'point_sample_tip': 'Отключает билинейное сглаживание текстуры.\n'
                             'Для скайбокса: грань растянута на 90° обзора, и '
-                            'сглаживание превращает звёзды в мягкие пятна — '
+                            'сглаживание превращает звёзды в мягкие пятна - '
                             'с этой галкой они остаются резкими точками.\n'
                             'Плата: плавные градиенты (закат) могут стать '
                             'ступенчатыми, заметнее на гранях 512 и 1024.',
         'normal_map': 'Normal Map',
         'material_maps_button': 'Карты материала…',
-        'material_maps_button_tip': 'Добавить карты detail / самосвечения / phong из картинок — приложение само сгенерит VTF и пропишет VMT.',
+        'material_maps_button_tip': 'Добавить карты detail / самосвечения / phong из картинок - приложение само сгенерит VTF и пропишет VMT.',
         'edit_vmt_button': 'Редактировать VMT…',
         'edit_vmt_button_tip': 'Открыть VMT этого материала для ручной правки. У каждого материала своя правка.',
         'material_maps_title': 'Карты материала',
-        'material_maps_intro': 'Включите карту и выберите картинку — приложение сгенерирует VTF с правильным форматом и само пропишет путь в VMT.',
+        'material_maps_intro': 'Включите карту и выберите картинку - приложение сгенерирует VTF с правильным форматом и само пропишет путь в VMT.',
         'map_detail': 'Detail-слой',
-        'map_detail_tip': 'Добавляет мелкую детализацию вблизи — фактуру ткани, зернистость, мелкие царапины. Заметно только вплотную к модели.',
+        'map_detail_tip': 'Мелкая фактура вблизи: ткань, зерно, царапины. У косметики заменяет эффект горения.',
         'map_selfillum': 'Самосвечение (маска)',
-        'map_selfillum_tip': 'Заставляет выбранные участки светиться сами по себе — ярко в темноте, не зависит от освещения сцены. Для экранов, рун, энергии.',
+        'map_selfillum_tip': 'Заставляет выбранные участки светиться сами по себе - ярко в темноте, не зависит от освещения сцены. Для экранов, рун, энергии.',
         'map_phongexp': 'Phong-карта (блеск)',
-        'map_phongexp_tip': 'Делает поверхность блестящей и гладкой — резкие блики, как у металла, пластика или мокрого.',
+        'map_phongexp_tip': 'Блеск поверхности. Красный канал файла: размер блика. Альфа: маска обводки.',
         'map_envmapmask': 'Отражение (маска)',
-        'map_envmapmask_tip': 'Поверхность отражает окружение, как хром или зеркало — выбираешь, где блестящий металл, а где матовое.',
+        'map_envmapmask_tip': 'Отражение окружения, как у хрома. Маска задаёт, где поверхность блестит.',
         'map_rimlight': 'Rim light (обводка светом)',
-        'map_rimlight_tip': 'Мягкое свечение по краям модели — «подсветка сзади», обводка светом; силуэт читается ярче и объёмнее.',
+        'map_rimlight_tip': 'Мягкое свечение по краям модели - «подсветка сзади», обводка светом; силуэт читается ярче и объёмнее.',
         'map_rimlightexponent': 'Резкость',
         'map_rimlightboost': 'Сила',
+        'map_phongcolor': 'Блик: цвет и края',
+        'map_phongcolor_tip': 'Цвет блика и где он ярче.',
+        'set_tint_keep': 'Как у предмета',
+        'set_fres_center': 'Блик в центре',
+        'set_fres_mid': 'посередине',
+        'set_fres_edge': 'по краю',
+        'set_fres_center_tip': 'Яркость блика на поверхности, повёрнутой к камере. Пусто: как у предмета.',
+        'set_fres_mid_tip': 'Яркость блика между центром и краем. Пусто: как у предмета.',
+        'set_fres_edge_tip': 'Яркость блика по краю модели. Пусто: как у предмета.',
+        'set_env_cubemap': 'Окружение',
+        'set_env_cubemap_keep': 'Как было',
+        'set_env_cubemap_map': 'Карта',
+        'set_env_cubemap_specular': 'Студия',
+        'set_env_cubemap_gold': 'Золото',
+        'set_env_cubemap_saxxy': 'Saxxy',
+        'set_env_cubemap_sunset': 'Закат',
+        'set_env_cubemap_tip': 'Что отражается в предмете.',
+        'set_env_tint': 'Цвет',
+        'set_env_tint_tip': 'Цвет отражения.',
+        'set_env_strength': 'Сила, %',
+        'set_env_strength_tip': 'Яркость отражения.',
+        'set_env_fresnel': 'Сильнее по краю, %',
+        'set_env_fresnel_tip': 'Отражение слабее в центре и сильнее по краям, как у лака.',
+        'set_glow_color': 'Цвет',
+        'set_glow_color_tip': 'Цвет свечения.',
+        'set_glow_power': 'Яркость, %',
+        'set_glow_power_tip': 'Яркость свечения. При 100 как на текстуре.',
+        'set_glow_pulse': 'Пульсация',
+        'set_glow_pulse_off': 'Нет',
+        'set_glow_pulse_slow': 'Медленно',
+        'set_glow_pulse_medium': 'Средне',
+        'set_glow_pulse_fast': 'Быстро',
+        'set_glow_pulse_tip': 'Свечение плавно мигает: то ярче, то тусклее. Медленно, средне, быстро: как часто.',
+        'set_glow_pulse_min': 'Тусклее всего, %',
+        'set_glow_pulse_min_tip': 'Насколько гаснет свечение: 0 полностью, 100 не гаснет.',
+        'set_glow_edge': 'Затухание к краю',
+        'set_glow_edge_off': 'Нет',
+        'set_glow_edge_on': 'Гаснет к краю',
+        'set_glow_edge_tip': 'Свечение ярче в центре и слабее к краям модели.',
+        'set_glow_edge_note': 'В этом режиме маска берётся из альфа-канала основной текстуры.',
+        'set_edge_bright': 'Яркость',
+        'set_edge_bright_tip': 'Яркость свечения в центре.',
+        'set_edge_sharp': 'Сужение к центру',
+        'set_edge_sharp_tip': 'Чем больше, тем меньше светящееся пятно в центре.',
+        'set_tint': 'Цвет',
+        'set_tint_albedo': 'От текстуры',
+        'set_tint_color': 'Свой цвет',
+        'set_tint_amount': 'Сила, %',
+        'set_tint_color_label': 'Цвет блика',
+        'set_rim_mask': 'Где светится',
+        'set_rim_mask_all': 'Везде',
+        'set_rim_mask_auto': 'Авто',
+        'set_rim_mask_file': 'Маска',
+        'set_rim_threshold': 'Порог',
+        'set_rim_image': 'Маска обводки (белое светится)',
+        'phongwarp_angle': 'Направление',
+        'phongwarp_angle_hint': 'или тяните по квадрату',
+        'phongwarp_edge_row': 'Другие цвета у края модели',
+        'phongwarp_row_main': 'У камеры: верх квадрата',
+        'phongwarp_row_edge': 'У края модели: низ квадрата',
+        'phongwarp_tip_angle': 'Направление цветов на квадрате. Можно тянуть мышью по квадрату.',
+        'phongwarp_tip_edge_row': 'Второй ряд точек: цвета у края модели.',
+        'phongwarp_preset': 'Узор',
+        'phongwarp_rainbow': 'Радужный отлив',
+        'phongwarp_oil': 'Бензиновая плёнка',
+        'phongwarp_gold': 'Золото',
+        'phongwarp_custom': 'Свой градиент (точки)',
+        'phongwarp_strength': 'Сила, %',
+        'phongwarp_bands': 'Полосы',
+        'phongwarp_shift': 'Сдвиг оттенка',
+        'phongwarp_edge': 'Цвет у края',
+        'phongwarp_before': 'Обычный блик',
+        'phongwarp_after': 'С градиентом',
+        'phongwarp_texture': 'Вправо: к центру блика. Вниз: к краю модели.',
+        'phongwarp_hint': 'Белый оставляет блик как был, цвет красит его.',
+        'phongwarp_points': 'Точки идут по стрелке на квадрате.',
+        'phongwarp_tip_preset': 'Набор цветов для блика.',
+        'phongwarp_tip_strength': 'Насколько заметны цвета. При 0 блик белый.',
+        'phongwarp_tip_bands': 'Сколько раз повторяются цвета.',
+        'phongwarp_tip_shift': 'Сдвигает все цвета по кругу.',
+        'phongwarp_tip_edge': 'Цвет блика по краю модели и его сила.',
+        'phongwarp_tip_texture': 'Картинка, которая уйдёт в игру. Вправо: к центру блика. Вниз: к краю модели. Белые точки: что сейчас берёт шар.',
+        'phongwarp_tip_before': 'Блик без градиента.',
+        'phongwarp_tip_after': 'Блик с градиентом.',
+        'lightwarp_tip_preset': 'С какой полоски начать.',
+        'lightwarp_tip_steps': 'Делит свет на резкие полосы, как в мультфильме.',
+        'lightwarp_tip_brightness': 'Общая яркость освещения.',
+        'lightwarp_tip_shadow': 'Оттенок теней и его сила.',
+        'lightwarp_tip_light': 'Оттенок света и его сила.',
+        'lightwarp_tip_strip': 'Полоска, которая уйдёт в игру: слева тень, справа свет.',
+        'lightwarp_tip_graph': 'Яркость полоски. Выше пунктира: пересвет.',
+        'lightwarp_tip_before': 'Освещение без lightwarp.',
+        'lightwarp_tip_after': 'Освещение с этой полоской.',
+        'set_tint_tip': 'Цвет блика: как у предмета, цвет текстуры или свой.',
+        'set_tint_amount_tip': 'Насколько блик окрашен цветом текстуры.',
+        'set_tint_color_tip': 'Цвет блика.',
+        'set_rim_mask_tip': 'Где светится обводка: везде, на светлых участках текстуры или по маске.',
+        'set_rim_threshold_tip': 'Светятся только участки ярче этого значения. Пусто: плавно.',
+        'set_rim_image_tip': 'Чёрно-белая маска: белое светится.',
         'map_phongwarp': 'Phong-warp (градиент блика)',
-        'map_phongwarp_tip': 'Подкрашивает блики — переливающийся радужный / бензиновый отлив на глянце вместо обычного белого.',
+        'map_phongwarp_tip': 'Подкрашивает блики - переливающийся радужный / бензиновый отлив на глянце вместо обычного белого.',
         'map_lightwarp': 'Lightwarp (тонировка света)',
-        'map_lightwarp_tip': 'Меняет, как ложатся свет и тень на модели — стилизованный «мультяшный» вид TF2; можно сделать теплее или холоднее.',
+        'map_lightwarp_tip': 'Меняет, как ложатся свет и тень на модели - стилизованный «мультяшный» вид TF2; можно сделать теплее или холоднее.',
         'map_no_file': 'Файл не выбран',
         'map_browse': 'Обзор…',
         'map_select': 'Выберите изображение карты',
+        'map_from_mod': 'Из мода',
+        'maps_source': 'Источник',
+        'maps_glow_lit': 'На свету',
+        'maps_glow_dark': 'В темноте',
+        'maps_glow_fade': 'Затухание',
+        'maps_glow_tip': 'Ваша текстура со свечением. В темноте видно, что светится.',
+        'maps_glow_none': 'Выберите источник маски, чтобы увидеть свечение.',
+        'maps_view_gloss': 'Блеск на текстуре',
+        'maps_view_gloss_tip': 'Текстура согнута как ствол, свет ходит. Узкий блик - острый, широкий - мягкий.',
+        'maps_view_gloss_only': 'Только блик',
+        'maps_view_gloss_only_tip': 'Тот же блик без текстуры.',
+        'maps_view_rim': 'Обводка на шаре',
+        'maps_view_rim_tip': 'Свет обходит шар. Обводка видна, когда свет сзади.',
+        'maps_view_mask': 'Маска',
+        'maps_view_mask_tip': 'Белое - обводка есть, чёрное - нет.',
+        'maps_view_env': 'Окружение',
+        'maps_view_env_tip': 'Отражение на шаре: окружение, цвет, сила и край.',
+        'maps_view_env_tex': 'На текстуре',
+        'maps_view_env_tex_tip': 'Где текстура отражает по маске. Текстура согнута как ствол.',
+        'maps_view_stand_in': 'Окружение карты своё на каждой карте, показан пример.',
+        'maps_view_no_game': 'Укажите папку игры, чтобы увидеть окружение.',
+        'maps_view_detail': 'Деталь на текстуре',
+        'maps_view_detail_tip': 'Ваша текстура с деталью: плотность, режим и сила как в игре.',
+        'maps_view_none': 'Выберите источник карты, чтобы увидеть превью.',
+        'maps_view_no_texture': 'Загрузите текстуру материала, чтобы увидеть превью.',
+        'maps_preview': 'Блик на шаре',
+        'maps_preview_tip': 'Блик на шаре. Свет движется, чтобы были видны центр и край.',
+        'maps_src_file': 'Файл',
+        'maps_src_auto': 'Авто',
+        'maps_src_gen': 'Конструктор',
+        'maps_on': 'Включена',
+        'maps_off': 'выключена',
+        'maps_no_file': 'нет файла',
+        'maps_drop': 'Перетащите картинку сюда или выберите файл',
+        'maps_auto_text': 'Маска строится по яркости текстуры. Порог делает её резкой.',
+        'maps_params': 'Параметры',
+        'lightwarp_before': 'Без lightwarp',
+        'lightwarp_after': 'С полоской',
+        'lightwarp_make': 'Собрать полоску в приложении',
+        'lightwarp_preset': 'Основа',
+        'lightwarp_steps': 'Ступени',
+        'lightwarp_smooth': 'плавно',
+        'lightwarp_shadow': 'Оттенок теней',
+        'lightwarp_light': 'Оттенок света',
+        'lightwarp_brightness': 'Яркость, %',
+        'lightwarp_preview': 'Шары освещены по формуле игры, без бликов и отражений.',
+        'lightwarp_hint': 'Основы взяты из файлов игры.',
+        'lightwarp_tf2_player': 'TF2: персонажи и вещи (pyro_lightwarp)',
+        'lightwarp_tf2_weapon': 'TF2: резкая двухтоновая (weapon_lightwarp)',
+        'lightwarp_tf2_soft': 'TF2: мягкая (softened_weapon_lightwarp)',
+        'lightwarp_neutral': 'Нейтральная, как без lightwarp (identitylightwarp)',
+        'lightwarp_custom': 'Свой градиент (цветные точки)',
+        'lightwarp_to_points': 'Сделать точками',
+        'lightwarp_gradient_hint': 'Щелчок по полосе добавляет точку, точку можно тащить. Две точки в одном месте дают резкую границу. Цвет пишется в файл как есть.',
+        'lightwarp_point': 'Точка',
+        'lightwarp_position': 'позиция, %',
+        'lightwarp_remove_point': 'Удалить точку',
+        'lightwarp_graph_hint': 'Яркость по каналам. Пунктир - обычная яркость (128), выше - пересвет.',
         'map_auto': 'Авто из текстуры (без файла)',
-        'map_auto_tip': 'Строит карту из базовой текстуры автоматически. Для блеска ещё добавляет карту нормалей и отражение мира — готовый «блестящий металл» в один клик.',
+        'map_auto_tip': 'Строит карту из базовой текстуры автоматически. Для блеска ещё добавляет карту нормалей и отражение мира - готовый «блестящий металл» в один клик.',
         'map_threshold': 'Порог',
         'map_clear': 'Очистить',
         'map_detailscale': 'Масштаб',
         'map_detailblendmode': 'Смешивание',
         'map_detailblendfactor': 'Сила',
         'map_phongboost': 'Сила блеска',
-        'map_blend_additive': 'Сложение',
-        'map_blend_multiply': 'Умножение',
-        'map_blend_overlay': 'Наложение',
+        'map_blend_0': 'Модуляция (темнее и светлее)',
+        'map_blend_1': 'Сложение (только светлее)',
+        'map_blend_2': 'Цветной слой по альфе',
+        'map_blend_5': 'Свечение (без освещения)',
         'draw_uv_layout': 'Нарисовать UV разметку',
         'tools': 'Инструменты',
         'step_1_selection': 'Выбор',
@@ -456,9 +614,9 @@ TRANSLATIONS = {
         # 3D Preview
         '3d_prompt_weapon':    'Выберите оружие и нажмите кнопку ▶ чтобы загрузить модель',
         '3d_prompt_smd':       'Нажмите ▶ и выберите SMD файл',
-        '3d_prompt_crithit':   'Перейдите в режим 3D — солдат появится автоматически',
-        '3d_prompt_death_effect': 'Перейдите в режим 3D — эффект ляжет на модель',
-        '3d_prompt_skybox':    'Перейдите в режим 3D — скайбокс появится автоматически',
+        '3d_prompt_crithit':   'Перейдите в режим 3D - солдат появится автоматически',
+        '3d_prompt_death_effect': 'Перейдите в режим 3D - эффект ляжет на модель',
+        '3d_prompt_skybox':    'Перейдите в режим 3D - скайбокс появится автоматически',
         '3d_prompt_skybox_empty': 'Загрузите панораму или текстуры граней, чтобы увидеть скайбокс',
         '3d_prompt_no_tf2':    'Укажите папку TF2 в Настройках чтобы загружать оригинальные модели',
         '3d_preparing':        'Подготовка 3D модели...',
@@ -474,11 +632,11 @@ TRANSLATIONS = {
         '3d_select_smd_title': 'Выберите SMD файл модели',
         '3d_load_model_tip':   'Загрузить 3D модель',
         '3d_load_vpk_tip':     'Загрузить VPK мод для 3D Preview',
-        '3d_replace_model_tip': 'Заменить модель своей (SMD) — сразу видно в 3D, материалы → карточки',
+        '3d_replace_model_tip': 'Заменить модель своей (SMD) - сразу видно в 3D, материалы → карточки',
         '3d_team_red_tip':     'Текстура команды RED',
         '3d_team_blu_tip':     'Текстура команды BLU',
-        'hat_tex_paint_mask_note': 'Тёмные участки на текстуре — это маска командной окраски: цвет к ним игра подставляет сама (RED/BLU или краска игрока). В превью они уже показаны с цветом.',
-        '3d_team_blu_same_tip': 'Текстура команды BLU. В игре эта шапка у обеих команд выглядит одинаково — BLU-скин совпадает с RED; свою отдельную BLU-текстуру сделать всё равно можно',
+        'hat_tex_paint_mask_note': 'Тёмные участки на текстуре - это маска командной окраски: цвет к ним игра подставляет сама (RED/BLU или краска игрока). В превью они уже показаны с цветом.',
+        '3d_team_blu_same_tip': 'Текстура команды BLU. В игре эта шапка у обеих команд выглядит одинаково - BLU-скин совпадает с RED; свою отдельную BLU-текстуру сделать всё равно можно',
 
         # Error messages
         'error_tf2_not_specified': 'Не указана папка TF2. Укажите её в настройках.',
@@ -510,7 +668,7 @@ TRANSLATIONS = {
         'error_vpk_creation_failed': 'VPK создание не удалось:\nSTDOUT: {stdout}\nSTDERR: {stderr}',
         'error_vpkroot_not_found': 'Файл vpkroot.vpk не найден после сборки в {path}',
         'error_vpk_locked': 'Файл {path} занят другим процессом.\n\nЗакройте Team Fortress 2 (или программу, которая открыла этот VPK) и соберите заново.',
-        'error_vpk_tool_not_found': 'Инструмент vpk.exe не найден.\n\nУкажите папку Team Fortress 2 в настройках — vpk.exe берётся из <TF2>\\bin\\vpk.exe.',
+        'error_vpk_tool_not_found': 'Инструмент vpk.exe не найден.\n\nУкажите папку Team Fortress 2 в настройках - vpk.exe берётся из <TF2>\\bin\\vpk.exe.',
         'error_modelname_not_extracted': 'Не удалось извлечь путь из $modelname в QC файле: {qc_path}',
         'error_compile_dir_not_found': 'Директория компила не найдена: {path}',
         'error_model_files_not_found': 'Файлы модели не найдены в {path} для модели {model}',
@@ -538,7 +696,7 @@ TRANSLATIONS = {
         'extract_model': 'Извлечь оригинальную модель (SMD)',
         'export_uv': 'Экспортировать UV-шаблон (PNG)',
         'isolate_shoulders': 'Изолировать плечи (вьюмодель)',
-        'isolate_shoulders_tip': 'Плечи/тело руки переименовываются в уникальный материал — правка не затронет мирового персонажа.',
+        'isolate_shoulders_tip': 'Плечи/тело руки переименовываются в уникальный материал - правка не затронет мирового персонажа.',
         'export_uv_progress_title': 'UV-шаблон',
         'export_uv_progress_text': 'Генерация UV-шаблона...',
         'export_uv_success': 'UV-шаблон сохранён:',
@@ -574,13 +732,13 @@ TRANSLATIONS = {
         'success': 'Успех',
         
         # Тема страницы и безымянный стиль косметики: подписи выбора, а не
-        # сообщения — им положено следовать языку приложения.
+        # сообщения - им положено следовать языку приложения.
         'theme_light': 'Светлая',
         'theme_dark': 'Тёмная',
         'hat_style_n': 'Стиль {n}',
 
         # Фильтр списка косметики: это переключатели «скрыть», а не «показать»
-        # (одних медалей 7628 из 9504). Короткое имя — на кнопку, полное — в
+        # (одних медалей 7628 из 9504). Короткое имя - на кнопку, полное - в
         # подсказку: в ряду фильтров «Скрыть сезонные (Christmas и др.)» не
         # помещается.
         'hat_filter_medals': 'Медали',
@@ -596,11 +754,11 @@ TRANSLATIONS = {
 
         # Hat Game Paints Dialog
         'hat_game_paints_title': 'Краски из игры',
-        'hat_game_paints_question': 'Хотите ли вы чтобы краски из игры применялись к вашей текстуре?\n\nЕсли "Да" — VMT файл будет загружен с оригинальными настройками красок.\nЕсли "Нет" — краски будут отключены, ваша текстура будет отображаться без окраски игрой.',
+        'hat_game_paints_question': 'Хотите ли вы чтобы краски из игры применялись к вашей текстуре?\n\nЕсли "Да" - VMT файл будет загружен с оригинальными настройками красок.\nЕсли "Нет" - краски будут отключены, ваша текстура будет отображаться без окраски игрой.',
 
         # Extra Texture Dialog
         'extra_texture_title': 'Дополнительная текстура',
-        'extra_texture_question': 'У оружия есть дополнительный материал: "{material}".\nХотите загрузить отдельное изображение для него?\n\nЕсли нажмёте "Нет" — будет использована основная текстура.',
+        'extra_texture_question': 'У оружия есть дополнительный материал: "{material}".\nХотите загрузить отдельное изображение для него?\n\nЕсли нажмёте "Нет" - будет использована основная текстура.',
         'extra_texture_select': 'Выберите изображение для "{material}"',
 
         # Extra Model Dialog
@@ -663,7 +821,7 @@ TRANSLATIONS = {
         'particles_loading': 'Loading effect…',
         'particles_load_error': 'Failed to load PCF',
         'particles_saved': 'PCF saved: {path}',
-        'particles_no_tf2': 'TF2 path is not set — the game effect list is unavailable. Set the path in settings.',
+        'particles_no_tf2': 'TF2 path is not set - the game effect list is unavailable. Set the path in settings.',
         'particles_pick_pcf': 'Choose a PCF effects file',
         'particles_val_prompt': 'New value:',
         'particles_vec3_prompt': 'Three numbers separated by spaces (x y z):',
@@ -676,14 +834,14 @@ TRANSLATIONS = {
                               'Note: custom particles are blocked by sv_pure in casual matches.',
         'particles_textures_vpk_done': 'Replaced textures were packed as a separate mod: {path} '
                                        '(game VMT + your VTF, no PCF). In casual-pre-loader it '
-                                       'will show up as an addon — check it there; the tool '
+                                       'will show up as an addon - check it there; the tool '
                                        'treats any mod containing a PCF as a particle pack '
                                        'and does not install textures from it.',
-        'particles_casual_overflow': 'Warning: the PCF is {bytes} bytes larger than the original — '
+        'particles_casual_overflow': 'Warning: the PCF is {bytes} bytes larger than the original - '
                                      'it may fail to load in casual (via a bypass). '
                                      'Remove extra/unused systems to shrink it. '
                                      'On your own server (sv_pure 0) it works without limits.',
-        'particles_2d_hint': 'Effect textures — double-click or drop an image onto a card; right-click to reset',
+        'particles_2d_hint': 'Effect textures - double-click or drop an image onto a card; right-click to reset',
         'particles_reset_texture': 'Restore game texture',
         'particles_pick_game_tex': 'Game texture from list…',
         'particles_pick_game_prompt': 'Texture from the game\'s effects (works in casual, '
@@ -696,7 +854,7 @@ TRANSLATIONS = {
                                     'from this effect and its children? Textures will render '
                                     'in their own colors. To undo, reload the PCF.',
         'particles_colors_done': 'Removed {count} color modules. Remember to save or build the VPK.',
-        'particles_colors_none': 'This effect has no color modules — textures already use their own colors.',
+        'particles_colors_none': 'This effect has no color modules - textures already use their own colors.',
         'particles_menu_add_layer': 'Add layer with custom texture…',
         'particles_menu_param_reference': 'Save parameter reference (JSON)…',
         'particles_reference_purpose': 'What is the file for?',
@@ -729,9 +887,9 @@ TRANSLATIONS = {
         'particles_menu_copy_all': 'Copy all parameters',
         'particles_menu_paste': 'Paste parameters',
         'particles_paste_full_prompt': 'A full parameter set was copied. How to paste?\n\n'
-                                       '"Keep existing" — this effect\'s current parameters '
+                                       '"Keep existing" - this effect\'s current parameters '
                                        'stay in place, only missing ones are added.\n'
-                                       '"Replace all" — the effect\'s parameters are removed '
+                                       '"Replace all" - the effect\'s parameters are removed '
                                        'and replaced with the pasted ones.',
         'particles_copy_problem': 'Copy',
         'particles_copy_problem_json': 'JSON being parsed:',
@@ -740,7 +898,7 @@ TRANSLATIONS = {
         'particles_paste_empty': 'The clipboard is empty.',
         'particles_paste_not_json': 'The clipboard does not contain JSON: {detail}',
         'particles_paste_no_key': 'The JSON has no "tf2sgParticleParams" '
-                                  'section — the wrong text was copied.',
+                                  'section - the wrong text was copied.',
         'particles_paste_bad_root': '"tf2sgParticleParams" must be an object '
                                     'with attrs and modules.',
         'particles_paste_bad_attrs': '"{where}" must be an object like '
@@ -751,13 +909,13 @@ TRANSLATIONS = {
                                      'list of ["Module Name", {{params}}] pairs.',
         'particles_paste_nothing': 'The set contains neither parameters nor '
                                    'modules.',
-        'particles_paste_nothing_applied': 'Nothing matched — check the module '
+        'particles_paste_nothing_applied': 'Nothing matched - check the module '
                                            'and parameter names.',
         'particles_paste_failed': 'Parsing error: {detail}',
         'particles_paste_unknown_group': 'Unknown group "{group}". '
                                          'Allowed: {known}',
         'particles_paste_unknown_module': 'Module "{module}" does not exist in '
-                                          'the game (group {group}) — likely a '
+                                          'the game (group {group}) - likely a '
                                           'typo; it will not work in game.',
         'particles_paste_bad_value': 'Value "{attr}" in "{where}" was not '
                                      'understood: expected '
@@ -766,7 +924,7 @@ TRANSLATIONS = {
         'particles_paste_replace': 'Replace all',
         'particles_not_previewed': 'not in preview',
         'particles_not_previewed_tip': 'This module is not simulated by the '
-                                       'preview — it works in game, but changes '
+                                       'preview - it works in game, but changes '
                                        'are not visible here.',
         'particles_search': 'Find system…',
         'particles_lint_title': 'Pre-build check',
@@ -777,22 +935,22 @@ TRANSLATIONS = {
         'particles_lint_as_is': 'Build as is',
         'particles_lint_cp_camera': 'Effect is hidden when the player camera is '
                                     'on this control point (-1 is usually wanted)',
-        'particles_lint_no_renderer': 'No renderer — particles are not drawn',
-        'particles_lint_no_emitter': 'No emitter and no children — this system '
+        'particles_lint_no_renderer': 'No renderer - particles are not drawn',
+        'particles_lint_no_emitter': 'No emitter and no children - this system '
                                      'creates nothing',
-        'particles_lint_no_particles': 'Max particles is zero — there will be '
+        'particles_lint_no_particles': 'Max particles is zero - there will be '
                                        'no particles',
-        'particles_lint_zero_radius': 'Zero particle size — nothing will be seen',
-        'particles_lint_zero_alpha': 'Color alpha is zero — particles are invisible',
+        'particles_lint_zero_radius': 'Zero particle size - nothing will be seen',
+        'particles_lint_zero_alpha': 'Color alpha is zero - particles are invisible',
         'particles_lint_immortal': 'Particles never die: no Lifespan Decay '
                                   'operator. The stream stops as soon as max '
                                   'particles is reached',
         'particles_lint_parent_scale_zero': 'Emission scales with parent '
                                            'particles, but "scale emission to '
-                                           'used control points" is zero — in '
+                                           'used control points" is zero - in '
                                            'game the emitter creates nothing',
         'particles_lint_frozen_anim': 'The texture animation ({frames} frames) '
-                                     'does not get to play — in game it shows a '
+                                     'does not get to play - in game it shows a '
                                      'single frame. Stretch the sheet over the '
                                      'particle lifetime?',
         'particles_group_tree': 'Group particle systems by parent',
@@ -801,9 +959,9 @@ TRANSLATIONS = {
         'particles_lint_viewmodel': 'Every copy of the effect goes into the view-model pass: it disappears in third person',
         'particles_lint_missing_child': 'Child system "{child}" is missing from '
                                         'the file',
-        'particles_lint_material': 'Material "{material}" cannot be read — there '
+        'particles_lint_material': 'Material "{material}" cannot be read - there '
                                    'will be no texture in game',
-        'particles_lint_custom_override': 'This effect is overridden by: {path} — '
+        'particles_lint_custom_override': 'This effect is overridden by: {path} - '
                                           'the game will use it instead of your mod',
         'particles_expand': 'Expand preview (F11)',
         'particles_collapse': 'Collapse preview (F11 / Esc)',
@@ -856,7 +1014,7 @@ TRANSLATIONS = {
                                            'from any parent systems.',
         'make_team_tip': 'Make this weapon team-colored: add a separate BLU texture (RED/BLU)',
         'misc_textures': 'Other',
-        'misc_textures_tip': 'Service textures (eyes/uber/zombie, etc.) — normally hidden. Open to optionally replace.',
+        'misc_textures_tip': 'Service textures (eyes/uber/zombie, etc.) - normally hidden. Open to optionally replace.',
         'file_not_found': 'File not found at path:',
         'load_image': 'Please load an image first.',
         'enter_name': 'Please enter the VPK file name.',
@@ -937,47 +1095,205 @@ TRANSLATIONS = {
         'point_sample': 'Point Sample (crisp pixels)',
         'point_sample_tip': 'Disables bilinear texture filtering.\n'
                             'For a skybox: a face is stretched across 90° of '
-                            'view, and filtering turns stars into soft blobs — '
+                            'view, and filtering turns stars into soft blobs - '
                             'with this flag they stay crisp points.\n'
                             'Trade-off: smooth gradients (sunsets) may band, '
                             'more visibly on 512 and 1024 faces.',
         'normal_map': 'Normal Map',
         'material_maps_button': 'Material Maps…',
-        'material_maps_button_tip': 'Add detail / self-illum / phong maps from images — the app builds the VTF and wires the VMT.',
+        'material_maps_button_tip': 'Add detail / self-illum / phong maps from images - the app builds the VTF and wires the VMT.',
         'edit_vmt_button': 'Edit VMT…',
         'edit_vmt_button_tip': "Open this material's VMT for manual editing. Each material has its own edit.",
         'material_maps_title': 'Material Maps',
-        'material_maps_intro': 'Enable a map and pick an image — the app generates the VTF with the right format and wires the path into the VMT automatically.',
+        'material_maps_intro': 'Enable a map and pick an image - the app generates the VTF with the right format and wires the path into the VMT automatically.',
         'map_detail': 'Detail layer',
-        'map_detail_tip': 'Adds fine surface detail up close — fabric weave, grain, tiny scratches. Only noticeable near the model.',
+        'map_detail_tip': 'Fine close-up texture: fabric, grain, scratches. On cosmetics it replaces the burning effect.',
         'map_selfillum': 'Self-illumination (mask)',
-        'map_selfillum_tip': 'Makes the chosen parts glow on their own — bright in the dark, unaffected by scene lighting. Great for screens, runes, energy.',
+        'map_selfillum_tip': 'Makes the chosen parts glow on their own - bright in the dark, unaffected by scene lighting. Great for screens, runes, energy.',
         'map_phongexp': 'Phong map (gloss)',
-        'map_phongexp_tip': 'Makes the surface shiny and polished — sharp specular highlights, like metal, plastic or a wet look.',
+        'map_phongexp_tip': 'Surface gloss. Red channel of the file: highlight size. Alpha: rim mask.',
         'map_envmapmask': 'Reflection (mask)',
-        'map_envmapmask_tip': 'Makes the surface reflect its surroundings like chrome or a mirror — you pick which parts are glossy metal and which stay matte.',
+        'map_envmapmask_tip': 'Chrome-like reflection. The mask sets where the surface shines.',
         'map_rimlight': 'Rim light',
-        'map_rimlight_tip': 'Adds a soft glow around the model\'s edges — a backlit, "outlined by light" look that makes the shape pop.',
+        'map_rimlight_tip': 'Adds a soft glow around the model\'s edges - a backlit, "outlined by light" look that makes the shape pop.',
         'map_rimlightexponent': 'Sharpness',
         'map_rimlightboost': 'Strength',
+        'map_phongcolor': 'Highlight: colour and edges',
+        'map_phongcolor_tip': 'Highlight colour and where it is brighter.',
+        'set_tint_keep': 'As the item has',
+        'set_fres_center': 'Highlight centre',
+        'set_fres_mid': 'middle',
+        'set_fres_edge': 'edge',
+        'set_fres_center_tip': 'Highlight brightness where the surface faces the camera. Empty: as the item has.',
+        'set_fres_mid_tip': 'Highlight brightness between centre and edge. Empty: as the item has.',
+        'set_fres_edge_tip': 'Highlight brightness at the model edge. Empty: as the item has.',
+        'set_env_cubemap': 'Environment',
+        'set_env_cubemap_keep': 'Original',
+        'set_env_cubemap_map': 'Map',
+        'set_env_cubemap_specular': 'Studio',
+        'set_env_cubemap_gold': 'Gold',
+        'set_env_cubemap_saxxy': 'Saxxy',
+        'set_env_cubemap_sunset': 'Sunset',
+        'set_env_cubemap_tip': 'What the item reflects.',
+        'set_env_tint': 'Colour',
+        'set_env_tint_tip': 'Reflection colour.',
+        'set_env_strength': 'Strength, %',
+        'set_env_strength_tip': 'Reflection brightness.',
+        'set_env_fresnel': 'Stronger at the edge, %',
+        'set_env_fresnel_tip': 'Weaker reflection in the centre, stronger at the edges, like lacquer.',
+        'set_glow_color': 'Colour',
+        'set_glow_color_tip': 'Glow colour.',
+        'set_glow_power': 'Brightness, %',
+        'set_glow_power_tip': 'Glow brightness. At 100 as on the texture.',
+        'set_glow_pulse': 'Pulse',
+        'set_glow_pulse_off': 'Off',
+        'set_glow_pulse_slow': 'Slow',
+        'set_glow_pulse_medium': 'Medium',
+        'set_glow_pulse_fast': 'Fast',
+        'set_glow_pulse_tip': 'The glow gently blinks: brighter, then dimmer. Slow, medium, fast: how often.',
+        'set_glow_pulse_min': 'Dimmest, %',
+        'set_glow_pulse_min_tip': 'How far the glow fades: 0 fully, 100 not at all.',
+        'set_glow_edge': 'Fade to edge',
+        'set_glow_edge_off': 'Off',
+        'set_glow_edge_on': 'Fades to edge',
+        'set_glow_edge_tip': 'The glow is brighter in the centre and weaker towards the model edges.',
+        'set_glow_edge_note': 'In this mode the mask is taken from the alpha channel of the base texture.',
+        'set_edge_bright': 'Brightness',
+        'set_edge_bright_tip': 'Glow brightness in the centre.',
+        'set_edge_sharp': 'Narrow to centre',
+        'set_edge_sharp_tip': 'The higher, the smaller the glowing spot in the centre.',
+        'set_tint': 'Colour',
+        'set_tint_albedo': 'From texture',
+        'set_tint_color': 'Own colour',
+        'set_tint_amount': 'Strength, %',
+        'set_tint_color_label': 'Highlight colour',
+        'set_rim_mask': 'Where it glows',
+        'set_rim_mask_all': 'Everywhere',
+        'set_rim_mask_auto': 'Auto',
+        'set_rim_mask_file': 'Mask',
+        'set_rim_threshold': 'Threshold',
+        'set_rim_image': 'Rim mask (white glows)',
+        'phongwarp_angle': 'Direction',
+        'phongwarp_angle_hint': 'or drag on the square',
+        'phongwarp_edge_row': 'Different colours at the model edge',
+        'phongwarp_row_main': 'Facing the camera: top of the square',
+        'phongwarp_row_edge': 'At the model edge: bottom of the square',
+        'phongwarp_tip_angle': 'Direction of the colours on the square. You can drag on the square.',
+        'phongwarp_tip_edge_row': 'A second row of stops: colours at the model edge.',
+        'phongwarp_preset': 'Pattern',
+        'phongwarp_rainbow': 'Rainbow sheen',
+        'phongwarp_oil': 'Oil slick',
+        'phongwarp_gold': 'Gold',
+        'phongwarp_custom': 'Own gradient (stops)',
+        'phongwarp_strength': 'Strength, %',
+        'phongwarp_bands': 'Bands',
+        'phongwarp_shift': 'Hue shift',
+        'phongwarp_edge': 'Edge colour',
+        'phongwarp_before': 'Plain highlight',
+        'phongwarp_after': 'With the gradient',
+        'phongwarp_texture': 'Right: to the highlight centre. Down: to the model edge.',
+        'phongwarp_hint': 'White keeps the highlight, a colour tints it.',
+        'phongwarp_points': 'Stops run along the arrow on the square.',
+        'phongwarp_tip_preset': 'Colour set for the highlight.',
+        'phongwarp_tip_strength': 'How visible the colours are. At 0 the highlight is white.',
+        'phongwarp_tip_bands': 'How many times the colours repeat.',
+        'phongwarp_tip_shift': 'Rotates all colours.',
+        'phongwarp_tip_edge': 'Highlight colour at the model edge and its strength.',
+        'phongwarp_tip_texture': 'The image that goes into the game. Right: to the highlight centre. Down: to the model edge. White dots: what the sphere uses now.',
+        'phongwarp_tip_before': 'Highlight without the gradient.',
+        'phongwarp_tip_after': 'Highlight with the gradient.',
+        'lightwarp_tip_preset': 'Which strip to start from.',
+        'lightwarp_tip_steps': 'Splits the light into hard bands, like a cartoon.',
+        'lightwarp_tip_brightness': 'Overall lighting brightness.',
+        'lightwarp_tip_shadow': 'Shadow tint and its strength.',
+        'lightwarp_tip_light': 'Light tint and its strength.',
+        'lightwarp_tip_strip': 'The strip that goes into the game: shadow on the left, light on the right.',
+        'lightwarp_tip_graph': 'Strip brightness. Above the dashed line: overbright.',
+        'lightwarp_tip_before': 'Lighting without lightwarp.',
+        'lightwarp_tip_after': 'Lighting with this strip.',
+        'set_tint_tip': 'Highlight colour: as the item has, the texture colour or your own.',
+        'set_tint_amount_tip': 'How much the highlight takes the texture colour.',
+        'set_tint_color_tip': 'Highlight colour.',
+        'set_rim_mask_tip': 'Where the rim glows: everywhere, on light parts of the texture or by a mask.',
+        'set_rim_threshold_tip': 'Only areas brighter than this glow. Empty: smooth.',
+        'set_rim_image_tip': 'Black-and-white mask: white glows.',
         'map_phongwarp': 'Phong warp (highlight gradient)',
-        'map_phongwarp_tip': 'Tints the highlights — an iridescent, rainbow / oil-slick sheen on the gloss instead of plain white.',
+        'map_phongwarp_tip': 'Tints the highlights - an iridescent, rainbow / oil-slick sheen on the gloss instead of plain white.',
         'map_lightwarp': 'Lightwarp (light tint)',
-        'map_lightwarp_tip': 'Restyles how light and shadow fall on the model — the stylized "cartoon" TF2 look; can warm or cool the shading.',
+        'map_lightwarp_tip': 'Restyles how light and shadow fall on the model - the stylized "cartoon" TF2 look; can warm or cool the shading.',
         'map_no_file': 'No file selected',
         'map_browse': 'Browse…',
         'map_select': 'Select map image',
+        'map_from_mod': 'From the mod',
+        'maps_source': 'Source',
+        'maps_glow_lit': 'Lit',
+        'maps_glow_dark': 'In the dark',
+        'maps_glow_fade': 'Fade',
+        'maps_glow_tip': 'Your texture with the glow. In the dark you see what glows.',
+        'maps_glow_none': 'Pick a mask source to see the glow.',
+        'maps_view_gloss': 'Gloss on the texture',
+        'maps_view_gloss_tip': 'The texture is bent like a barrel and the light moves. A narrow highlight is sharp, a wide one is soft.',
+        'maps_view_gloss_only': 'Highlight only',
+        'maps_view_gloss_only_tip': 'The same highlight without the texture.',
+        'maps_view_rim': 'Rim on a sphere',
+        'maps_view_rim_tip': 'The light circles the sphere. The rim shows when the light is behind.',
+        'maps_view_mask': 'Mask',
+        'maps_view_mask_tip': 'White - rim on, black - off.',
+        'maps_view_env': 'Environment',
+        'maps_view_env_tip': 'The reflection on a sphere: environment, colour, strength and edge.',
+        'maps_view_env_tex': 'On the texture',
+        'maps_view_env_tex_tip': 'Where the texture reflects by the mask. The texture is bent like a barrel.',
+        'maps_view_stand_in': 'The map environment differs on every map, an example is shown.',
+        'maps_view_no_game': 'Set the game folder to see the environment.',
+        'maps_view_detail': 'Detail on the texture',
+        'maps_view_detail_tip': 'Your texture with the detail: scale, mode and strength as in the game.',
+        'maps_view_none': 'Pick a map source to see the preview.',
+        'maps_view_no_texture': 'Load the material texture to see the preview.',
+        'maps_preview': 'Highlight on a sphere',
+        'maps_preview_tip': 'The highlight on a sphere. The light moves to show the centre and the edge.',
+        'maps_src_file': 'File',
+        'maps_src_auto': 'Auto',
+        'maps_src_gen': 'Builder',
+        'maps_on': 'Enabled',
+        'maps_off': 'off',
+        'maps_no_file': 'no file',
+        'maps_drop': 'Drop an image here or pick a file',
+        'maps_auto_text': 'The mask is built from texture brightness. Threshold makes it sharp.',
+        'maps_params': 'Settings',
+        'lightwarp_before': 'Without lightwarp',
+        'lightwarp_after': 'With the strip',
+        'lightwarp_make': 'Build the strip in the app',
+        'lightwarp_preset': 'Base',
+        'lightwarp_steps': 'Steps',
+        'lightwarp_smooth': 'smooth',
+        'lightwarp_shadow': 'Shadow tint',
+        'lightwarp_light': 'Light tint',
+        'lightwarp_brightness': 'Brightness, %',
+        'lightwarp_preview': 'The spheres are lit with the game formula, without highlights or reflections.',
+        'lightwarp_hint': 'Bases are taken from the game files.',
+        'lightwarp_tf2_player': 'TF2: characters and items (pyro_lightwarp)',
+        'lightwarp_tf2_weapon': 'TF2: hard two-tone (weapon_lightwarp)',
+        'lightwarp_tf2_soft': 'TF2: soft (softened_weapon_lightwarp)',
+        'lightwarp_neutral': 'Neutral, as without lightwarp (identitylightwarp)',
+        'lightwarp_custom': 'Own gradient (colour stops)',
+        'lightwarp_to_points': 'Turn into stops',
+        'lightwarp_gradient_hint': 'Click the bar to add a stop, drag stops to move them. Two stops at one place give a hard edge. Colours go into the file as they are.',
+        'lightwarp_point': 'Stop',
+        'lightwarp_position': 'position, %',
+        'lightwarp_remove_point': 'Remove stop',
+        'lightwarp_graph_hint': 'Brightness per channel. Dashed line is normal brightness (128), above it overbrightens.',
         'map_auto': 'Auto from texture (no file)',
-        'map_auto_tip': 'Builds the map from the base texture automatically. For gloss it also adds a normal map and world reflection — one-click shiny metal.',
+        'map_auto_tip': 'Builds the map from the base texture automatically. For gloss it also adds a normal map and world reflection - one-click shiny metal.',
         'map_threshold': 'Threshold',
         'map_clear': 'Clear',
         'map_detailscale': 'Scale',
         'map_detailblendmode': 'Blend',
         'map_detailblendfactor': 'Factor',
         'map_phongboost': 'Phong boost',
-        'map_blend_additive': 'Additive',
-        'map_blend_multiply': 'Multiply',
-        'map_blend_overlay': 'Overlay',
+        'map_blend_0': 'Modulate (darker and lighter)',
+        'map_blend_1': 'Additive (lighter only)',
+        'map_blend_2': 'Colour layer by alpha',
+        'map_blend_5': 'Glow (unlit)',
         'draw_uv_layout': 'Draw UV Layout',
         'tools': 'Tools',
         'step_1_selection': 'Selection',
@@ -1047,7 +1363,7 @@ TRANSLATIONS = {
         'particles_cp_model': 'Model...',
         'particles_cp_attachment': 'Attachment',
         'particles_cp_pick_model': 'Model from the decompile cache:',
-        'particles_cp_no_models': 'No decompiled models in the cache. Open a model on the Weapons or Hats tab — it lands in the cache and its attachment points show up here.',
+        'particles_cp_no_models': 'No decompiled models in the cache. Open a model on the Weapons or Hats tab - it lands in the cache and its attachment points show up here.',
         'particles_cp_no_attachments': 'This model has no attachment points ($attachment in the QC).',
         'particles_cp_toggle': 'Control point: position, angles, motion',
         'particles_cp_index': 'CP',
@@ -1096,9 +1412,9 @@ TRANSLATIONS = {
         # 3D Preview
         '3d_prompt_weapon':    'Select a weapon and click ▶ to load the model',
         '3d_prompt_smd':       'Click ▶ and select an SMD file',
-        '3d_prompt_crithit':   'Switch to 3D tab — the soldier will appear automatically',
-        '3d_prompt_death_effect': 'Switch to 3D tab — the effect will appear on the model',
-        '3d_prompt_skybox':    'Switch to 3D tab — the skybox will appear automatically',
+        '3d_prompt_crithit':   'Switch to 3D tab - the soldier will appear automatically',
+        '3d_prompt_death_effect': 'Switch to 3D tab - the effect will appear on the model',
+        '3d_prompt_skybox':    'Switch to 3D tab - the skybox will appear automatically',
         '3d_prompt_skybox_empty': 'Load a panorama or face textures to preview the skybox',
         '3d_prompt_no_tf2':    'Set TF2 folder in Settings to load original models',
         '3d_preparing':        'Preparing 3D model...',
@@ -1114,11 +1430,11 @@ TRANSLATIONS = {
         '3d_select_smd_title': 'Select SMD Model File',
         '3d_load_model_tip':   'Load 3D model',
         '3d_load_vpk_tip':     'Load VPK mod for 3D Preview',
-        '3d_replace_model_tip': 'Replace the model with your own (SMD) — shown in 3D, materials → cards',
+        '3d_replace_model_tip': 'Replace the model with your own (SMD) - shown in 3D, materials → cards',
         '3d_team_red_tip':     'RED team texture',
         '3d_team_blu_tip':     'BLU team texture',
         'hat_tex_paint_mask_note': 'The dark areas in this texture are the team paint mask: the game fills them with a color itself (RED/BLU or the player paint). The preview already shows them colored.',
-        '3d_team_blu_same_tip': 'BLU team texture. In game this item looks the same for both teams — the BLU skin matches RED; you can still give BLU its own texture',
+        '3d_team_blu_same_tip': 'BLU team texture. In game this item looks the same for both teams - the BLU skin matches RED; you can still give BLU its own texture',
 
         # Error messages
         'error_tf2_not_specified': 'TF2 folder not specified. Please specify it in settings.',
@@ -1150,7 +1466,7 @@ TRANSLATIONS = {
         'error_vpk_creation_failed': 'VPK creation failed:\nSTDOUT: {stdout}\nSTDERR: {stderr}',
         'error_vpkroot_not_found': 'File vpkroot.vpk not found after build in {path}',
         'error_vpk_locked': 'The file {path} is in use by another process.\n\nClose Team Fortress 2 (or whatever program opened this VPK) and build again.',
-        'error_vpk_tool_not_found': 'vpk.exe tool not found.\n\nSet the Team Fortress 2 folder in settings — vpk.exe is taken from <TF2>\\bin\\vpk.exe.',
+        'error_vpk_tool_not_found': 'vpk.exe tool not found.\n\nSet the Team Fortress 2 folder in settings - vpk.exe is taken from <TF2>\\bin\\vpk.exe.',
         'error_modelname_not_extracted': 'Failed to extract path from $modelname in QC file: {qc_path}',
         'error_compile_dir_not_found': 'Compile directory not found: {path}',
         'error_model_files_not_found': 'Model files not found in {path} for model {model}',
@@ -1178,7 +1494,7 @@ TRANSLATIONS = {
         'extract_model': 'Extract Original Model (SMD)',
         'export_uv': 'Export UV Template (PNG)',
         'isolate_shoulders': 'Isolate shoulders (viewmodel)',
-        'isolate_shoulders_tip': 'The arm model\'s shoulders/body are renamed to a unique material — editing them will not affect the world player.',
+        'isolate_shoulders_tip': 'The arm model\'s shoulders/body are renamed to a unique material - editing them will not affect the world player.',
         'export_uv_progress_title': 'UV Template',
         'export_uv_progress_text': 'Generating UV template...',
         'export_uv_success': 'UV template saved:',
@@ -1234,7 +1550,7 @@ TRANSLATIONS = {
 
         # Hat Game Paints Dialog
         'hat_game_paints_title': 'Game Paints',
-        'hat_game_paints_question': 'Do you want game paints to apply to your texture?\n\nIf "Yes" — the VMT file will be loaded with original paint settings.\nIf "No" — paints will be disabled, your texture will display without game coloring.',
+        'hat_game_paints_question': 'Do you want game paints to apply to your texture?\n\nIf "Yes" - the VMT file will be loaded with original paint settings.\nIf "No" - paints will be disabled, your texture will display without game coloring.',
 
         # Extra Texture Dialog
         'extra_texture_title': 'Additional Texture',

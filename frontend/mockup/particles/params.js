@@ -1,7 +1,7 @@
 /*
  * Панель свойств выбранной системы.
  *
- * Что показать — крутилки или файл как есть — решает переключатель режима.
+ * Что показать - крутилки или файл как есть - решает переключатель режима.
  * Список параметров приходит из Python готовым: схема одна на панель
  * приложения и на эту страницу.
  */
@@ -42,7 +42,7 @@ export async function showParams(system) {
     const box = row.querySelector('.params__in');
 
     // value = null означает «модуля под параметром нет». Если создать его
-    // нельзя (эмиттеры), поле не врём — гасим и говорим почему.
+    // нельзя (эмиттеры), поле не врём - гасим и говорим почему.
     const shown = param.value === null ? param.placeholder : param.value;
     const dead = param.value === null && !param.creatable;
 
@@ -53,7 +53,7 @@ export async function showParams(system) {
         editParam(param, pair);
       })));
     } else if (param.kind === 'range') {
-      // Минимум и максимум — своя пара «дорожка + поле» у каждого: одной
+      // Минимум и максимум - своя пара «дорожка + поле» у каждого: одной
       // дорожкой на два конца управлять неудобно, а концы правят порознь.
       shown.forEach((v, n) => box.append(pairedField(v, param, (x) => {
         const pair = shown.slice();

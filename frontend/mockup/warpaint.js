@@ -4,21 +4,30 @@
  * Панель ложится на место альбома, модель справа остаётся видна. Любой выбор
  * (раскраска, износ, сид, раскладка по деталям) сразу собирается в 512 px и
  * временно кладётся на модель; «Отмена» возвращает показ, «Нанести» собирает
- * в полном размере — это уже обычная своя текстура. Собирает Python
+ * в полном размере - это уже обычная своя текстура. Собирает Python
  * (paintkit_compositor), страница только выбирает и показывает.
  *
- * У оружия без War Paint в игре список — все War Paint с шаблоном, а узоры
+ * У оружия без War Paint в игре список - все War Paint с шаблоном, а узоры
  * раскладываются по деталям модели (paintkit_generic). «Перемешать детали»
- * раздаёт узоры по-другому, «Настроить по деталям» открывает второй экран —
+ * раздаёт узоры по-другому, «Настроить по деталям» открывает второй экран -
  * раскладку вручную (warpaint-layout.js); она работает и у своих War Paint.
+ *
+ * У оружия из нескольких материалов узор собирается под каждый отмеченный:
+ * у каждого своя развёртка. War Paint игры по умолчанию ложится туда же, куда
+ * в игре (материалы с WeaponSkin), остальные можно отметить - узор на них
+ * разложится по их деталям, как в универсальном режиме.
+ *
+ * Ниже War Paint - украшенное оружие коллекций (Current Event, Night Owl…):
+ * в игре каждый такой скин есть только у своих пушек, здесь он ложится по
+ * деталям любой модели. Искать можно и по английскому названию - им скины
+ * знают в сообществе.
  */
 
 import * as api from './api.js';
 import { say } from './stage.js';
 import { modeControls } from './controls.js';
 import { t } from './i18n.js';
-import { SINGLE_TEX } from './album.js';
-import { applyView, lastView, refreshView } from './preview.js';
+import { applyView, cardTitle, lastView, refreshView } from './preview.js';
 import { openPartsCut, closeParts } from './parts.js';
 import { openLayout, closeLayout, flushLayout, shuffleLayout } from './warpaint-layout.js';
 
@@ -35,6 +44,10 @@ const seedEl = q('.wpanel__seed');
 const statusEl = q('.wpanel__status');
 const applyBtn = q('.wpanel__apply');
 const partsField = q('.wpanel__parts');
+const matsField = q('.wpanel__mats');
+const matList = q('.wpanel__matlist');
+const matNote = q('.wpanel__matnote');
+const matCount = q('.wpanel__matcount');
 const returnBtn = document.getElementById('parts-return');
 
 //: Уровни износа War Paint по порядку игры (1…5): полное имя и сокращение.
@@ -42,7 +55,7 @@ const WEARS = [['Прямо с завода', 'FN'], ['Немного понош
                ['После полевых испытаний', 'FT'], ['Поношенное', 'WW'],
                ['Закалённое в боях', 'BS']];
 
-//: War Paint показанного оружия; null — ещё не спрашивали.
+//: War Paint показанного оружия; null - ещё не спрашивали.
 let items = null;
 let generic = false;
 //: Для какого оружия список: ответ на прошлую пушку сюда не годится.
@@ -53,21 +66,23 @@ let wear = 1;
 //: Номер последнего запроса предпросмотра: ответы на прежние отбрасываются.
 let previewSeq = 0;
 let previewTimer = null;
-//: Предпросмотр на модели: {png, materials} — картинка и карточки, на которые
-//: она легла бы. null — на модели настоящие текстуры.
+//: Предпросмотр на модели: {карточка: png}. null - на модели настоящие текстуры.
 let preview = null;
+//: Материалы оружия [{card, game}] и карточки, чья галочка не как по
+//: умолчанию: так новая карточка (материал части) встаёт отмеченной сама.
+let mats = [];
+let flipped = new Set();
 
 /**
  * Предпросмотр для раздачи текстур: {карточка: png} или null.
  *
  * Кладётся не отдельным вызовом во вьювер, а в ту же раздачу, что и настоящие
  * текстуры (applyView): сцена пересобирается при смене вида (модель, руки), и
- * отдельно положенная картинка пропадала бы — или проигрывала гонку загрузки
+ * отдельно положенная картинка пропадала бы - или проигрывала гонку загрузки
  * настоящей текстуре. Панель при этом продолжала бы обещать предпросмотр.
  */
 export function warpaintPreview() {
-  if (!preview) return null;
-  return Object.fromEntries(preview.materials.map((m) => [m, preview.png]));
+  return preview;
 }
 
 /**
@@ -77,6 +92,8 @@ export function warpaintPreview() {
 export async function refreshWarpaint(weaponKey) {
   items = null;
   itemsFor = weaponKey || '';
+  mats = [];
+  flipped = new Set();
   button.hidden = true;
   // Модель перезагрузили: вьювер снова свой, карты деталей раскладки в нём нет.
   closeLayout();
@@ -90,13 +107,16 @@ export async function refreshWarpaint(weaponKey) {
   if (itemsFor !== (weaponKey || '')) return;     // пока ждали, выбрали другое
   items = res.items || [];
   generic = Boolean(res.generic);
-  // id раскраски общий у всех пушек, а item — свой у каждой: берём запись
+  // id раскраски общий у всех пушек, а item - свой у каждой: берём запись
   // НОВОГО списка, иначе ушёл бы рецепт прошлой пушки.
   chosen = chosen ? (items.find((k) => k.id === chosen.id) || null) : null;
   applyBtn.disabled = !chosen;
   syncParts();
   // Пока ждали ответа, режим мог смениться (мод из VPK, другая категория).
   button.hidden = !(modeControls.warpaint && items.length);
+  // Модель перезагрузили при открытой панели (переключатель частей): ряд
+  // материалов строится заново, иначе галочки на экране ни на что не влияли.
+  if (!panel.hidden && items.length) await loadMaterials();
 }
 
 /**
@@ -129,18 +149,19 @@ async function open() {
   button.classList.add('is-active');
   sub.textContent = generic
     ? t('Универсальный режим')
-    : t('Раскрасок для этого оружия: {}').replace('{}', items.length);
+    : t('Раскрасок для этого оружия: {}').replace('{}', items.filter((k) => !k.decorated).length);
   genericBox.hidden = !generic;
   search.value = '';
   renderList();
   renderWears();
-  status(chosen ? '' : 'Выберите раскраску — она сразу покажется на модели.');
+  await loadMaterials();
+  status(chosen ? '' : 'Выберите раскраску - она сразу покажется на модели.');
   search.focus();
   listEl.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'center' });
   if (chosen) schedulePreview(0);
 }
 
-/** Закрывает панель; restore — вернуть на модель настоящую текстуру. */
+/** Закрывает панель; restore - вернуть на модель настоящую текстуру. */
 function close(restore = true) {
   clearTimeout(previewTimer);
   previewSeq++;
@@ -161,20 +182,40 @@ function rows() { return [...listEl.querySelectorAll('.wpanel__row')]; }
 function renderList() {
   const needle = search.value.trim().toLowerCase();
   listEl.innerHTML = '';
+  let section = false;
   for (const kit of items || []) {
-    if (needle && !kit.name.toLowerCase().includes(needle)) continue;
+    if (needle && !kit.name.toLowerCase().includes(needle)
+        && !(kit.en || '').toLowerCase().includes(needle)) continue;
+    // Украшенное оружие с других пушек - своим разделом после War Paint.
+    if (kit.decorated && !section) {
+      section = true;
+      const head = document.createElement('p');
+      head.className = 'wpanel__section';
+      head.setAttribute('role', 'presentation');
+      head.textContent = t('Украшенное оружие');
+      head.title = t('Скины коллекций, которые в игре есть только у своего оружия. Здесь узор ложится по деталям этой модели.');
+      listEl.appendChild(head);
+    }
     const b = document.createElement('button');
     b.type = 'button';
     b.className = 'wpanel__row';
     b.dataset.id = kit.id;
     b.setAttribute('role', 'option');
     b.setAttribute('aria-selected', String(Boolean(chosen && chosen.id === kit.id)));
-    b.textContent = kit.name;
+    const name = document.createElement('span');
+    name.className = 'wpanel__name';
+    name.textContent = kit.name;
+    // Английское название - рядом: по нему скин и ищут.
+    const en = document.createElement('span');
+    en.className = 'wpanel__en';
+    en.textContent = kit.en && kit.en !== kit.name ? kit.en : '';
+    b.append(name, en);
+    if (kit.decorated) b.title = t('В игре только у: {}').replace('{}', kit.weapons.join(', '));
     if (kit.team) {
       const tag = document.createElement('span');
       tag.className = 'wpanel__tag';
       tag.textContent = 'RED / BLU';
-      tag.title = t('Узор у команд разный — собирается под текущую команду');
+      tag.title = t('Узор у команд разный - собирается под текущую команду');
       b.appendChild(tag);
     }
     b.addEventListener('click', () => select(kit));
@@ -187,8 +228,109 @@ function renderList() {
     empty.textContent = t('Ничего не нашлось');
     listEl.appendChild(empty);
   }
-  applyBtn.disabled = !chosen;
+  syncMaterials();
   syncParts();
+}
+
+// ── Материалы ────────────────────────────────────────────────────────────
+
+/** Весь War Paint ложится по деталям: универсальный режим или скин с другой пушки. */
+const byParts = () => generic || Boolean(chosen?.decorated);
+/** Отмечен по умолчанию: War Paint игры - где его кладёт игра, иначе все. */
+const byDefault = (m) => generic || m.game;
+/**
+ * Ляжет ли War Paint на материал. Рецепт игры красит её материалы и без своей
+ * геометрии; по деталям - только материал с ней, и не рецептом под одну пушку.
+ */
+const canPaint = (m) => (m.game && !byParts())
+  || (m.parts && (byParts() || !chosen || chosen.by_parts));
+const isOn = (m) => canPaint(m) && byDefault(m) !== flipped.has(m.card);
+
+/**
+ * Материалы оружия для ряда галочек. Спрашиваются при каждом открытии и после
+ * перезагрузки модели: у многоматериальной модели они приходят позже самой
+ * модели, а части могли добавить свои.
+ */
+async function loadMaterials() {
+  const asked = itemsFor;
+  let res;
+  try {
+    res = await api.paintkitMaterials((chosen || items[0]).item);
+  } catch {
+    res = {};
+  }
+  if (asked !== itemsFor || !items) return;       // пока ждали, сменили оружие
+  mats = res.materials || [];
+  renderMaterials();
+}
+
+/** Что красить: отмеченные карточки; null - список не пришёл, решит Python. */
+function picked() {
+  return mats.length ? mats.filter(isOn).map((m) => m.card) : null;
+}
+
+/** Плитки материалов: миниатюра, имя и пометка «в игре» у War Paint игры. */
+function renderMaterials() {
+  // Одна карточка - выбирать нечего.
+  matsField.hidden = mats.length < 2;
+  matList.replaceChildren(...mats.map((m) => {
+    const tile = document.createElement('button');
+    tile.type = 'button';
+    tile.className = 'wmat';
+    tile.dataset.card = m.card;
+    tile.setAttribute('role', 'checkbox');
+    tile.disabled = !canPaint(m);
+    const swatch = document.createElement('span');
+    swatch.className = 'wmat__swatch';
+    const name = document.createElement('span');
+    name.className = 'wmat__name';
+    // Длинное имя переносится по подчёркиваниям (c_bazaar_sniper_ | lens), а
+    // не посреди слова.
+    name.textContent = cardTitle(m.card).replace(/_/g, '_\u200b');
+    tile.append(swatch, name);
+    // Пометки - только когда War Paint игры: у скина с другой пушки и в
+    // универсальном режиме по деталям ложится всё.
+    if (!byParts() && canPaint(m)) {
+      const tag = document.createElement('span');
+      tag.className = 'wmat__tag';
+      tag.textContent = t(m.game ? 'в игре' : 'по деталям');
+      tile.append(tag);
+    }
+    const why = !canPaint(m)
+      ? (m.parts ? t('Этот War Paint нарисован под развёртку оружия: по другим материалам его не разложить')
+        : t('У этого материала нет своей геометрии: узор по деталям на него не положить'))
+      : byParts() ? ''
+        : t(m.game ? 'Игра кладёт War Paint на этот материал сама'
+          : 'Игра этот материал не красит: узор ляжет по его деталям');
+    // Имя материала целиком - в подсказке: на плитке оно может не влезть.
+    tile.title = why ? m.card + '\n' + why : m.card;
+    tile.addEventListener('click', () => {
+      if (flipped.has(m.card)) flipped.delete(m.card); else flipped.add(m.card);
+      syncMaterials();
+      schedulePreview(0);
+    });
+    return tile;
+  }));
+  syncMaterials();
+}
+
+/**
+ * Состояние плиток, счётчик, подпись и «Нанести» (без отмеченных наносить
+ * нечего). Миниатюра отмеченного материала - его предпросмотр War Paint,
+ * пока он есть, иначе текстура карточки, как в альбоме.
+ */
+function syncMaterials() {
+  for (const tile of matList.children) {
+    const m = mats.find((x) => x.card === tile.dataset.card);
+    const on = isOn(m);
+    tile.setAttribute('aria-checked', String(on));
+    const shown = (on && preview?.[m.card]) || lastView?.textures?.[m.card];
+    tile.firstChild.style.backgroundImage = shown ? `url("${api.opaqueUrl(shown)}")` : '';
+  }
+  const count = picked()?.length ?? 0;
+  matCount.textContent = t('Выбрано {} из {}').replace('{}', count).replace('{}', mats.length);
+  matNote.hidden = byParts() || matsField.hidden || !mats.some((m) => !m.game && isOn(m));
+  applyBtn.disabled = !chosen || picked()?.length === 0;
 }
 
 /** Детали можно раскладывать, если War Paint разложен по группам шаблоном. */
@@ -199,7 +341,8 @@ function syncParts() {
 function select(kit) {
   chosen = kit;
   for (const r of rows()) r.setAttribute('aria-selected', String(Number(r.dataset.id) === kit.id));
-  applyBtn.disabled = false;
+  // Ляжет ли War Paint на материалы, которые игра не красит, зависит от него.
+  renderMaterials();
   syncParts();
   renderWears();
   schedulePreview();
@@ -223,7 +366,7 @@ function renderWears() {
   wearName.textContent = t(WEARS[wear - 1][0]);
 }
 
-/** Сид — целое без знака до 2^64: в игре он 64-битный. */
+/** Сид - целое без знака до 2^64: в игре он 64-битный. */
 function seedValue() {
   const digits = seedEl.value.replace(/\D/g, '');
   return digits ? BigInt.asUintN(64, BigInt(digits)).toString() : '0';
@@ -247,23 +390,32 @@ async function runPreview() {
   status('Собираю предпросмотр…');
   let res;
   try {
-    res = await api.previewPaintkit(chosen.id, chosen.item, wear, seedValue());
+    res = await api.previewPaintkit(chosen.id, chosen.item, wear, seedValue(), picked());
   } catch (err) {
     res = { error: err.message };
   }
   if (seq !== previewSeq || panel.hidden) return;    // выбор уже другой
-  if (res.error) { status(res.error); return; }
-  preview = { png: res.png, materials: res.materials?.length ? res.materials : [SINGLE_TEX] };
+  if (res.error) {
+    status(res.error);
+    // Прошлый предпросмотр не про этот выбор (сняли все галочки, другой
+    // War Paint не собрался) - на модели остаются настоящие текстуры.
+    if (preview) { preview = null; if (lastView) applyView(lastView); syncMaterials(); }
+    return;
+  }
+  preview = res.images || null;
+  syncMaterials();
   if (lastView) applyView(lastView);
   status('Предпросмотр на модели. «Нанести» соберёт в полном размере.');
 }
 
 async function apply() {
   if (!chosen) return;
+  // Enter и двойной щелчок идут мимо выключенной «Нанести».
+  if (picked()?.length === 0) { status('Отметьте хотя бы один материал'); return; }
   const seed = seedValue();
   seedEl.value = seed;
   const kit = chosen;
-  // Раскладка по деталям могла ещё не уйти в Python — сборка её не увидела бы.
+  // Раскладка по деталям могла ещё не уйти в Python - сборка её не увидела бы.
   await flushLayout();
   // Предпросмотр остаётся на модели, пока не приедет полная сборка:
   // её покажет событие paintkit_ready.
@@ -271,11 +423,11 @@ async function apply() {
   say(t('War Paint «{}»: собираю…').replace('{}', kit.name));
   let res;
   try {
-    res = await api.applyPaintkit(kit.id, kit.item, wear, seed);
+    res = await api.applyPaintkit(kit.id, kit.item, wear, seed, picked());
   } catch (err) {
     res = { error: err.message };
   }
-  // Не собралось — на модели не должен остаться предпросмотр, будто War
+  // Не собралось - на модели не должен остаться предпросмотр, будто War
   // Paint наложен.
   if (res.error) { say(res.error); refreshView(); }
 }
@@ -295,7 +447,7 @@ const layoutCallbacks = {
     status('');
     listEl.querySelector('[aria-selected="true"]')?.focus({ preventScroll: true });
   },
-  // Резать уходят в «Части модели» с ножницами, а обратно — кнопкой в кадре
+  // Резать уходят в «Части модели» с ножницами, а обратно - кнопкой в кадре
   // на тот же экран раскладки: номера деталей после разреза уже новые.
   async cut() {
     close();
@@ -309,7 +461,7 @@ returnBtn.addEventListener('click', async () => {
   await open();
   if (chosen && !panel.hidden) openLayout(chosen, layoutCallbacks);
 });
-// Части закрыли сами — возвращаться уже неоткуда.
+// Части закрыли сами - возвращаться уже неоткуда.
 document.addEventListener('parts:changed', () => {
   if (document.getElementById('partsbar').hidden) returnBtn.hidden = true;
 });
@@ -326,7 +478,7 @@ q('.wpanel__tune').addEventListener('click', () => {
 seedEl.addEventListener('input', () => schedulePreview(500));
 search.addEventListener('input', renderList);
 
-// Стрелки двигают выбор по списку прямо из поиска, Enter — нанести, Esc —
+// Стрелки двигают выбор по списку прямо из поиска, Enter - нанести, Esc -
 // закрыть с возвратом: мышь для перебора раскрасок не нужна.
 panel.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
@@ -336,7 +488,7 @@ panel.addEventListener('keydown', (e) => {
     close();
     return;
   }
-  // Enter и стрелки — только в поиске и списке: на «Отмене» или «Случайном»
+  // Enter и стрелки - только в поиске и списке: на «Отмене» или «Случайном»
   // Enter должен нажимать их, а не накладывать War Paint.
   const inList = e.target === search || e.target.classList?.contains('wpanel__row');
   if (!inList) return;

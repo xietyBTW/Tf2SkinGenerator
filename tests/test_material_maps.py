@@ -37,7 +37,10 @@ class MaterialMapsConfigTests(unittest.TestCase):
         cfg = MATERIAL_MAPS['envmapmask']
         self.assertEqual(cfg.get('derive_kind'), 'envmapmask')
         self.assertEqual(cfg['path_param'], '$envmapmask')
-        self.assertIn('$envmap', cfg['extra_vmt'])  # маска без $envmap не работает
+        # Маска без $envmap не работает — но родное окружение (золото) не
+        # подменяем: $envmap пишется, только если его нет.
+        self.assertIn('$envmap', cfg['vmt_defaults'])
+        self.assertNotIn('$envmap', cfg['extra_vmt'])
 
     def test_rimlight_is_vmt_only(self):
         cfg = MATERIAL_MAPS['rimlight']
@@ -182,24 +185,6 @@ class DeriveEffectMapTests(unittest.TestCase):
                 self.assertEqual(im.mode, "L")
         finally:
             for p in (base, out):
-                if os.path.exists(p):
-                    os.remove(p)
-
-    def test_normal_with_alpha_bakes_mask(self):
-        base = self._base()
-        mask = base + ".mask.png"
-        out = base + ".nrm.png"
-        try:
-            # маска = сплошной серый 200 → ожидаем её в альфе нормали
-            Image.new("L", (16, 16), 200).save(mask)
-            TextureService.make_normal_with_alpha(base, mask, out, (32, 32))
-            with Image.open(out) as im:
-                self.assertEqual(im.mode, "RGBA")
-                self.assertEqual(im.size, (32, 32))
-                alpha = im.getchannel("A")
-                self.assertEqual(alpha.getextrema(), (200, 200))  # альфа = маска
-        finally:
-            for p in (base, mask, out):
                 if os.path.exists(p):
                     os.remove(p)
 

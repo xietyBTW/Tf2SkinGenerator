@@ -145,6 +145,8 @@ class VPKService:
                     decor_builds=r.decor_builds,
                     tf2_root_dir=r.tf2_root_dir,
                     bypass_method=r.bypass_method,
+                    material_maps=r.material_maps,
+                    material_settings=r.material_settings,
                 )
                 emit_progress(100 if success else 0,
                               t.get('build_completed', 'Build completed') if success
@@ -804,6 +806,13 @@ class VPKService:
             with open(qc_path, 'w', encoding='utf-8') as _qf:
                 _qf.write(_final_qc)
             logger.info("[QC EDIT] QC заменён пользовательским (texturegroup синхронизирован)")
+            # Описания своих костей модели писались в прежний QC
+            # (_apply_model_replacement) — правленый их стёр, и studiomdl
+            # снова свернул бы кости в родителя.
+            _ref = VpkModelPipeline._find_decompiled_reference_smd(
+                qc_path, weapon_key, ctx.decompile_dir)
+            if _ref:
+                ModelBuildService.define_missing_bones(qc_path, _ref)
         return _MaterialPlan(
             tg_structure=tg_structure, blu_row=blu_row, extra_materials=extra_materials,
             blu_is_team=blu_is_team, blacklisted_extra=blacklisted_extra,
@@ -899,7 +908,7 @@ class VPKService:
         # изменений на стволе (items_game: "attached_models").
         if mode != "hat" and VPKService._is_attachment_only(weapon_key, tf2_misc_vpk):
             ctx.warn(
-                f"'{weapon_key}' — это навесное украшение (гирлянда), а не сам "
+                f"'{weapon_key}' - это навесное украшение (гирлянда), а не сам "
                 f"ствол: игра рисует его поверх базового оружия. Красится только "
                 f"украшение; чтобы изменить сам ствол, соберите базовое оружие."
             )
@@ -1370,7 +1379,11 @@ class VPKService:
                         bypass_prefix=_bypass_prefix,
                         # Части выбирали на модели этого класса: остальным их
                         # переносят по участкам текстуры.
-                        part_specs=_part_specs if _part_variants else None,
+                        # Родная цель частей (`existing`) столбца не даёт, но
+                        # треугольники переименовала — классы узнают о ней тоже
+                        # (specs_for_other_model её не переносит и скажет).
+                        part_specs=_part_specs if (_part_variants or any(
+                            s.get('existing') for s in _part_specs or ())) else None,
                         part_source_qc=qc_path,
                         part_names=_part_variants,
                     )

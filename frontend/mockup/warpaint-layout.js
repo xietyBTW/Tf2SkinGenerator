@@ -1,5 +1,5 @@
 /*
- * War Paint: раскладка узоров по деталям — второй экран панели War Paint.
+ * War Paint: раскладка узоров по деталям - второй экран панели War Paint.
  *
  * Сверху плитки узоров шаблона (картинки из игры), снизу детали модели от
  * крупной к мелкой. Узор кладут тремя способами, какой удобнее: выбрать
@@ -7,9 +7,9 @@
  * выделенные) на плитку; перетащить плитку на строку. Каждое изменение сразу
  * уходит в Python и пересобирает живой предпросмотр.
  *
- * Детали — части модели (у оружия без своих War Paint) или группы маски Valve
+ * Детали - части модели (у оружия без своих War Paint) или группы маски Valve
  * (у своих); это решает Python (paintkit_layout), страница показывает то, что
- * пришло. Слой 0 — основа: первый узор шаблона или голая текстура оружия.
+ * пришло. Слой 0 - основа: первый узор шаблона или голая текстура оружия.
  */
 
 import * as api from './api.js';
@@ -30,7 +30,7 @@ const undoBtn = q('.wlay__undo');
 const resetBtn = q('.wlay__reset');
 const cutBtn = q('.wlay__cut');
 
-//: Мельче этой доли развёртки деталь почти не видна — «Мелкие — в основу».
+//: Мельче этой доли развёртки деталь почти не видна - «Мелкие - в основу».
 const SMALL = 0.02;
 const DRAG_UNITS = 'text/x-wlay-units';
 const DRAG_LAYER = 'text/x-wlay-layer';
@@ -41,7 +41,7 @@ let kit = null;
 let brush = 0;
 const selected = new Set();
 let anchor = -1;
-//: Снимки слоёв деталей до каждого изменения — Ctrl+Z внутри раскладки.
+//: Снимки слоёв деталей до каждого изменения - Ctrl+Z внутри раскладки.
 let history = [];
 let hooks = null;
 let saveTimer = null;
@@ -140,7 +140,7 @@ export function flushLayout() {
       callbacks.changed(target);
     })
     .catch((err) => {
-      // Предпросмотр по старой раскладке выдал бы её за новую — молчать нельзя.
+      // Предпросмотр по старой раскладке выдал бы её за новую - молчать нельзя.
       statusEl.textContent = t('Не удалось сохранить раскладку: {}')
         .replace('{}', t(err.message || ''));
     });
@@ -150,7 +150,7 @@ export function flushLayout() {
 // ── Экран ────────────────────────────────────────────────────────────────
 
 /**
- * Открывает раскладку War Paint ``k``. ``cb`` — {changed(kit), back(), cut()}:
+ * Открывает раскладку War Paint ``k``. ``cb`` - {changed(kit), back(), cut()}:
  * пересобрать предпросмотр, вернуться к списку, уйти резать детали.
  */
 export async function openLayout(k, cb) {
@@ -176,8 +176,8 @@ export async function openLayout(k, cb) {
   brush = (data.layers[1] || data.layers[0]).n;
   hintEl.innerHTML = '';
   hintEl.append(t(data.mode === 'groups'
-    ? 'Детали здесь — группы, как их разметили художники Valve.'
-    : 'Детали — части модели, как их видно в «Частях модели».'), ' ',
+    ? 'Детали здесь - группы, как их разметили художники Valve.'
+    : 'Детали - части модели, как их видно в «Частях модели».'), ' ',
   t('Выберите узор и щёлкайте детали на модели или перетаскивайте строки на узоры.'));
   cutBtn.hidden = data.mode !== 'parts';
   buildLayers();
@@ -190,7 +190,7 @@ export async function openLayout(k, cb) {
 
 /**
  * Уходит с экрана раскладки: изменения уже отданы или уйдут сейчас.
- * ``discard`` — предмет сменился: неотправленное относится к прошлой пушке и
+ * ``discard`` - предмет сменился: неотправленное относится к прошлой пушке и
  * в новую попасть не должно.
  */
 export function closeLayout(discard = false) {
@@ -224,7 +224,7 @@ export async function shuffleLayout(k, cb) {
 function status(text) { statusEl.textContent = text ? t(text) : ''; }
 
 function brushHint() {
-  return t('Кисть — «{}». Щелчок по детали на модели кладёт этот узор.')
+  return t('Кисть - «{}». Щелчок по детали на модели кладёт этот узор.')
     .replace('{}', layerName(brush));
 }
 
@@ -333,7 +333,7 @@ function buildUnits() {
     row.addEventListener('dragend', () => {
       for (const r of unitsEl.children) r.classList.remove('is-dragging', 'is-hot');
     });
-    // Плитку узора роняют на строку — узор ложится на неё (и на выделенные
+    // Плитку узора роняют на строку - узор ложится на неё (и на выделенные
     // вместе с ней).
     row.addEventListener('dragover', (e) => {
       if (!e.dataTransfer.types.includes(DRAG_LAYER)) return;
@@ -377,7 +377,7 @@ function choose(i, e) {
     : brushHint());
 }
 
-/** Обновляет строки, счётчики плиток и кнопки; ``flash`` — только что изменённые. */
+/** Обновляет строки, счётчики плиток и кнопки; ``flash`` - только что изменённые. */
 function refresh(flash = []) {
   if (!data) return;
   const total = {};
@@ -443,7 +443,7 @@ function ghost(carried) {
 
 // ── Модель ───────────────────────────────────────────────────────────────
 
-/** Карта треугольников для вьювера: у других материалов модели — пустая. */
+/** Карта треугольников для вьювера: у других материалов модели - пустая. */
 function modelMap(list) {
   const map = { [data.material]: list };
   for (const f of document.querySelectorAll('.frame')) {
@@ -456,7 +456,7 @@ function modelMap(list) {
 function attachViewer() {
   const w = viewer();
   if (!w || !data) return;
-  // «Части модели» держат свои карты и свои ответы на щелчок — две раскладки
+  // «Части модели» держат свои карты и свои ответы на щелчок - две раскладки
   // на одной модели спорили бы, чья деталь под курсором.
   closeParts();
   hooks = { hover: w.onPartHover, picked: w.onPartPicked, keys: w.onPartsKey, win: w,
@@ -486,7 +486,7 @@ function detachViewer() {
     w.setPartsMode(false);
     w.setModelParts(null);
   } catch {
-    /* вьювер уже перезагрузили — чистить нечего */
+    /* вьювер уже перезагрузили - чистить нечего */
   }
 }
 
@@ -569,12 +569,12 @@ pane.addEventListener('keydown', (e) => {
   }
 });
 
-/** Ctrl+Y и Ctrl+Shift+Z: своего повтора у раскладки нет, общий — не про неё. */
+/** Ctrl+Y и Ctrl+Shift+Z: своего повтора у раскладки нет, общий - не про неё. */
 function isHistoryKey(e) {
   return (e.ctrlKey || e.metaKey) && (e.code === 'KeyY' || (e.code === 'KeyZ' && e.shiftKey));
 }
 
-/** Клавиши раскладки; true — нажатие её. */
+/** Клавиши раскладки; true - нажатие её. */
 function layoutKey(e) {
   if (pane.hidden || !data || document.querySelector('dialog[open]')) return false;
   if (/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || '')) return false;
@@ -609,7 +609,7 @@ function layoutKey(e) {
   return false;
 }
 
-// Клавиши раскладки — раньше общих: Ctrl+Z здесь отменяет раскладку, а не
+// Клавиши раскладки - раньше общих: Ctrl+Z здесь отменяет раскладку, а не
 // правку текстуры, которую человек сейчас не видит.
 document.addEventListener('keydown', (e) => {
   if (layoutKey(e) || (!pane.hidden && data && isHistoryKey(e))) {

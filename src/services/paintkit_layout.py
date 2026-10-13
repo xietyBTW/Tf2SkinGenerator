@@ -11,6 +11,10 @@
 
 Слой 0 везде значит «основа»: первый слой обычного шаблона (лежит всюду, где
 не выбран другой) или сама текстура пушки у шаблона «поверх альбедо».
+
+У украшенного оружия коллекций шаблона нет, и слои — виды его рецепта
+(paintkit_generic.recipe_looks): плитка вида — сам рецепт на ровной детали
+этого вида.
 Раскладка человека — ``{ключ детали: слой}``; деталей, которых в ней нет,
 касается автомат (или раскладка самого War Paint).
 """
@@ -19,6 +23,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import threading
 from typing import Dict, List, Optional, Sequence
 
 import numpy as np
@@ -108,9 +113,12 @@ def describe(defs, kit, item, parts_model, obj_material: str, own: bool,
     from src.services.paintkit_generic import assign_layers, units_for, valve_units
 
     layers, over_albedo = template_layers(defs, kit)
+    if not layers and not own:
+        return _describe_looks(defs, kit, item, parts_model, obj_material, loader,
+                               swatch_loader, swatch_dir, assign, layout_seed)
     found = defs.variables(kit, item, 1) if layers else None
     if not found:
-        return {'error': 'Этот War Paint нарисован под одну пушку — его детали не переложить'}
+        return {'error': 'Этот War Paint нарисован под одну пушку - его детали не переложить'}
     _op, values = found
 
     if own:
@@ -124,9 +132,24 @@ def describe(defs, kit, item, parts_model, obj_material: str, own: bool,
         units = units_for(parts_model, obj_material, len(layers))
         auto = assign_layers([u.area for u in units], layers, over_albedo, layout_seed)
     if not units:
-        return {'error': 'У модели нет развёртки — War Paint положить некуда'}
+        return {'error': 'У модели нет развёртки - War Paint положить некуда'}
+    out_units, tri_unit = _units(units, auto, set(layers) | {0}, assign,
+                                 parts_model, obj_material)
 
-    allowed = set(layers) | {0}
+    out_layers = [{'n': 0, 'base': True,
+                   **(_swatch(swatch_loader, values.get(f'texture_layer_{layers[0]}', ''),
+                              swatch_dir) if not over_albedo
+                      else {'swatch': '', 'color': '#6b6b6b'})}]
+    for layer in _paint_layers(layers, over_albedo):
+        out_layers.append({'n': layer, 'base': False,
+                           **_swatch(swatch_loader, values.get(f'texture_layer_{layer}', ''),
+                                     swatch_dir)})
+    return {'mode': 'groups' if own else 'parts', 'over_albedo': over_albedo,
+            'layers': out_layers, 'units': out_units, 'tri_unit': tri_unit}
+
+
+def _units(units, auto, allowed, assign, parts_model, obj_material):
+    """Детали для страницы (с их слоем: ручным или автомата) и карта «треугольник → деталь»."""
     total = sum(u.area for u in units) or 1.0
     tri_unit: List[Optional[int]] = [None] * len((parts_model.uv or {}).get(obj_material) or [])
     out_units = []
@@ -139,14 +162,64 @@ def describe(defs, kit, item, parts_model, obj_material: str, own: bool,
         for tri in unit.tris:
             if tri < len(tri_unit):
                 tri_unit[tri] = i
+    return out_units, tri_unit
 
-    out_layers = [{'n': 0, 'base': True,
-                   **(_swatch(swatch_loader, values.get(f'texture_layer_{layers[0]}', ''),
-                              swatch_dir) if not over_albedo
-                      else {'swatch': '', 'color': '#6b6b6b'})}]
-    for layer in _paint_layers(layers, over_albedo):
-        out_layers.append({'n': layer, 'base': False,
-                           **_swatch(swatch_loader, values.get(f'texture_layer_{layer}', ''),
-                                     swatch_dir)})
-    return {'mode': 'groups' if own else 'parts', 'over_albedo': over_albedo,
-            'layers': out_layers, 'units': out_units, 'tri_unit': tri_unit}
+
+def _describe_looks(defs, kit, item, parts_model, obj_material: str, loader,
+                    swatch_loader, swatch_dir: str, assign, layout_seed: int) -> dict:
+    """Раскладка украшенного оружия: слои — виды его рецепта, раздача — в долях оригинала."""
+    from src.services.paintkit_generic import (assign_shares, recipe_looks,
+                                               swap_weapon_textures, units_for)
+
+    recipe = defs.recipe(kit, item, 1, strip_stickers=True)
+    if recipe is None:
+        return {'error': 'Этот War Paint не ложится на это оружие'}
+    looks = recipe_looks(recipe, loader)
+    units = units_for(parts_model, obj_material, len(looks.values))
+    if not units:
+        return {'error': 'У модели нет развёртки - War Paint положить некуда'}
+    auto = assign_shares([u.area for u in units], looks.shares, layout_seed)
+    out_units, tri_unit = _units(units, auto, set(range(len(looks.values))), assign,
+                                 parts_model, obj_material)
+    swapped = swap_weapon_textures(recipe)
+    stem = f'{kit.header.defindex}_{item.item_def}'
+    layers = [{'n': i, 'base': i == 0,
+               **_look_swatch(swapped, value, swatch_loader, swatch_dir, f'{stem}_{i}')}
+              for i, value in enumerate(looks.values)]
+    return {'mode': 'parts', 'over_albedo': False,
+            'layers': layers, 'units': out_units, 'tri_unit': tri_unit}
+
+
+def _look_swatch(recipe: dict, value: int, loader, out_dir: str, key: str) -> Dict[str, str]:
+    """Плитка вида (96 px): рецепт на ровной серой детали, вся она — этот вид, без износа."""
+    from PIL import Image
+
+    from src.services.paintkit_compositor import PaintkitCompositor
+    from src.services.paintkit_generic import GEN
+
+    out = os.path.join(out_dir, f'warpaint_look_{key}_{int(value)}.png')
+    if os.path.isfile(out):
+        with Image.open(out) as im:
+            rgb = np.asarray(im.convert('RGB'))
+    else:
+        size = 96
+        flat = lambda v: np.full((size, size, 4), (v, v, v, 255), np.uint8)  # noqa: E731
+        groups = np.zeros((size, size, 4), np.uint8)
+        groups[..., 0], groups[..., 3] = value, 255
+        made = {GEN + 'albedo': flat(128), GEN + 'ao': flat(255),
+                GEN + 'wearblend': flat(255), GEN + 'groups': groups}
+
+        def load(path: str, raw: bool = False):
+            got = made.get(path)
+            return got if got is not None else loader(path, raw=raw)
+
+        rgb = np.ascontiguousarray(
+            PaintkitCompositor(load, size, 'red').compose(recipe, seed=0)[..., :3])
+        os.makedirs(out_dir, exist_ok=True)
+        # Через временный файл: «Перемешать» и «Настроить» спрашивают
+        # раскладку разом, и второй прочёл бы недописанную плитку.
+        tmp = f'{out}.{os.getpid()}.{threading.get_ident()}.tmp'
+        Image.fromarray(rgb, 'RGB').save(tmp, format='PNG')
+        os.replace(tmp, out)
+    mean = rgb.reshape(-1, 3).astype(np.float32).mean(axis=0)
+    return {'swatch': out, 'color': '#' + ''.join(f'{int(v):02x}' for v in mean)}

@@ -161,6 +161,211 @@ class RainbowTests(unittest.TestCase):
                          ('rainbow', 4.0, 1.5))
 
 
+#: Стоковое оружие с блеском киллстрика и свечением крита (как c_shogun_kunai).
+SHEEN_STOCK = '''"VertexLitGeneric"
+{
+	"$basetexture" "models/w/kunai"
+	"$glowcolor" "1"
+	"$sheenPassEnabled" "1"
+	"$sheenmap" "cubemaps/cubemap_sheen001"
+	"$sheenmapmask" "Effects/AnimatedSheen/animatedsheen0"
+	"$sheenmaptint" "[ 1 1 1 ]"
+	"$sheenmapmaskframe" "0"
+	"$sheenindex" "0"
+	"$yellow" "0"
+	"Proxies"
+	{
+		"AnimatedWeaponSheen"
+		{
+			"animatedtexturevar" "$sheenmapmask"
+			"animatedtextureframenumvar" "$sheenmapmaskframe"
+			"animatedtextureframerate" "40"
+		}
+		"invis"
+		{
+		}
+		"ModelGlowColor"
+		{
+			"resultVar" "$glowcolor"
+		}
+		"Equals"
+		{
+			"srcVar1"  "$glowcolor"
+			"resultVar" "$color2"
+		}
+		"YellowLevel"
+		{
+			"resultVar" "$yellow"
+		}
+	}
+}
+'''
+
+BOUNDS = {"scale_x": 19.4, "scale_y": 3.5, "offset_x": -5.8, "offset_y": -1.4, "direction": 2}
+GAME = {'AnimatedWeaponSheen': 0, 'ModelGlowColor': [1, 1, 1], 'YellowLevel': [1, 1, 1]}
+
+
+def run_proxies(text: str, game: dict, curtime: float = 0.0) -> dict:
+    """Прогон блока Proxies по семантике mathproxy.cpp / functionproxy.cpp
+    (source-sdk-2013): переменные из VMT, игровые прокси пишут `game`."""
+    vars_ = {}
+    for key, val in re.findall(r'^\t"(\$\w+)"\s+"([^"]*)"', text, re.MULTILINE):
+        nums = [float(n) for n in re.findall(r'-?\d*\.?\d+', val)]
+        if nums:
+            vars_[key.lower()] = nums if val.strip().startswith('[') else nums[0]
+    block = text[text.lower().index('"proxies"'):]
+    for name, body in re.findall(r'^\t\t"(\w+)"\s*\{([^}]*)\}', block, re.MULTILINE):
+        args = {k.lower(): v for k, v in re.findall(r'"(\w+)"\s+"([^"]*)"', body)}
+
+        def get(ref):
+            m = re.fullmatch(r'(\$\w+)\[(\d)\]', ref)
+            if m:
+                return vars_[m.group(1).lower()][int(m.group(2))]
+            if ref.startswith('$'):
+                return vars_[ref.lower()]
+            return float(ref)
+
+        def put(ref, value):
+            m = re.fullmatch(r'(\$\w+)\[(\d)\]', ref)
+            if m:
+                vec = list(vars_[m.group(1).lower()])
+                vec[int(m.group(2))] = value
+                vars_[m.group(1).lower()] = vec
+            else:
+                vars_[ref.lower()] = value
+
+        res = args.get('resultvar')
+        if name in game:
+            put(res or args.get('animatedtextureframenumvar', ''), game[name])
+        elif name == 'Equals':
+            put(res, get(args['srcvar1']))
+        elif name == 'Clamp':
+            lo, hi = sorted((get(args['min']), get(args['max'])))
+            put(res, min(hi, max(lo, get(args['srcvar1']))))
+        elif name in ('Add', 'Subtract', 'Multiply', 'Divide'):
+            a, b = get(args['srcvar1']), get(args['srcvar2'])
+            put(res, a + b if name == 'Add' else a - b if name == 'Subtract'
+                else a * b if name == 'Multiply' else a / b)
+        elif name == 'LinearRamp':
+            put(res, float(args['rate']) * curtime + float(args['initialvalue']))
+        elif name == 'WrapMinMax':
+            lo, hi = float(args['minval']), float(args['maxval'])
+            f = (get(args['srcvar1']) - lo) / (hi - lo)
+            put(res, (f - int(f)) * (hi - lo) + lo)
+        elif name == 'Int':
+            put(res, float(int(get(args['srcvar1']))))
+        elif name == 'LessOrEqual':
+            pick = 'lessequalvar' if get(args['srcvar1']) <= get(args['srcvar2']) else 'greatervar'
+            put(res, get(args[pick]))
+    return vars_
+
+
+class SheenTests(unittest.TestCase):
+
+    def sheen(self, text=SHEEN_STOCK, **vals):
+        vals = {'color': '#00ff00', 'bright': 1, 'look': 'normal', 'when': 'game', **vals}
+        return fx.apply(fx.SHEEN, vals, text, '', BOUNDS)
+
+    def test_own_colour_wins_over_game_and_is_linear(self):
+        out = self.sheen(color='#808080')['text']
+        self.assertTrue(VMTService.validate_vmt_syntax(out)[0])
+        # Игра ставит цвет набора, наш Equals ниже его перебивает.
+        got = run_proxies(out, GAME)
+        self.assertEqual([round(c, 3) for c in got['$sheenmaptint']], [0.216, 0.216, 0.216])
+        self.assertEqual(proxies(out)[-1], 'Equals')
+
+    def test_dark_colour_round_trips(self):
+        for colour, bright in (('#050505', 1), ('#102030', 0.3)):
+            out = self.sheen(color=colour, bright=bright)['text']
+            self.assertEqual(fx.values(fx.SHEEN, out)['color'], colour)
+
+    def test_reconfigure_and_values(self):
+        out = self.sheen(self.sheen(when='always', pause=2, look='bright')['text'],
+                         color='#ff0000')['text']
+        self.assertNotIn('LinearRamp', out)                   # «всегда» снято
+        self.assertEqual(out.count('// tf2sg sheen'), 1)
+        self.assertEqual(fx.values(fx.SHEEN, out)['color'], '#ff0000')
+        self.assertEqual(fx.values(fx.SHEEN, out)['when'], 'game')
+
+    def test_always_drives_frames_with_pause(self):
+        out = self.sheen(when='always', pause=2)['text']
+        self.assertTrue(VMTService.validate_vmt_syntax(out)[0])
+        self.assertIn('"$sheenmapmaskdirection" "2"', out)
+        self.assertEqual(fx.values(fx.SHEEN, out)['pause'], 2)
+        frame = lambda t: run_proxies(out, GAME, t)['$sheenmapmaskframe']
+        # 25 кадров/с: полоса идёт 59 кадров (2.4 с), потом 2 с кадр 0.
+        self.assertEqual(frame(1.0), 25)
+        self.assertEqual(frame(2.3), 57)
+        self.assertEqual(frame(3.0), 0)
+        self.assertEqual(frame(4.4 + 1.0), 25)                # цикл 110 кадров = 4.4 с
+
+    def test_game_mode_needs_game_sheen(self):
+        bare = '"VertexLitGeneric"\n{\n\t"$basetexture" "a/b"\n}\n'
+        self.assertIn('error', self.sheen(bare))
+        out = self.sheen(bare, when='always')['text']
+        self.assertIn('"$sheenpassenabled" "1"', out)        # проход добавлен
+
+    def test_mask_params_like_the_game(self):
+        import struct
+        mdl = bytearray(300)
+        mdl[:4] = b'IDST'
+        struct.pack_into('<3f', mdl, 104, -1.4, -1.0, -5.8)   # hull_min
+        struct.pack_into('<3f', mdl, 116, 2.1, 1.3, 13.6)     # hull_max
+        struct.pack_into('<ii', mdl, 188, 1, 200)             # одна анимация
+        struct.pack_into('<3f', mdl, 232, -1.4, -1.0, -5.8)
+        struct.pack_into('<3f', mdl, 244, 2.1, 1.3, 13.6)
+        got = fx.sheen_mask_params(bytes(mdl))
+        self.assertEqual(got['direction'], 2)                 # длинная сторона Z
+        self.assertAlmostEqual(got['scale_x'], 19.4, places=4)
+        self.assertAlmostEqual(got['offset_y'], -1.0, places=4)
+
+
+class CritGlowTests(unittest.TestCase):
+
+    def crit(self, text=SHEEN_STOCK, **vals):
+        vals = {'red': '#ff00ff', 'blue': '#00ffff', 'bright': 1, **vals}
+        return fx.apply(fx.CRIT, vals, text)
+
+    def glow(self, out, game_glow):
+        return run_proxies(out, {**GAME, 'ModelGlowColor': game_glow})['$color2']
+
+    def test_recolours_each_team_and_keeps_normal(self):
+        out = self.crit()['text']
+        self.assertTrue(VMTService.validate_vmt_syntax(out)[0])
+        # Сразу за ModelGlowColor: родной Equals в $color2 несёт уже наш цвет.
+        names = proxies(out)
+        self.assertEqual(names[names.index('ModelGlowColor') + 1], 'Clamp')
+        self.assertEqual([round(c, 3) for c in self.glow(out, [80, 8, 5])], [80, 0, 80])
+        self.assertEqual([round(c, 3) for c in self.glow(out, [5, 20, 80])], [0, 80, 80])
+        self.assertEqual([round(c, 3) for c in self.glow(out, [1, 1, 1])], [1, 1, 1])
+        # Свечение баффов (знамя, Crit-a-Cola) остаётся родным.
+        self.assertEqual([round(c, 3) for c in self.glow(out, [226, 150, 62])], [226, 150, 62])
+        self.assertEqual([round(c, 3) for c in self.glow(out, [29, 202, 135])], [29, 202, 135])
+        # Заряд щита демомана: половина пути к своему цвету.
+        half = self.glow(out, [40, 4, 2.5])
+        self.assertAlmostEqual(half[0], 40 * 0.5 + 80 * 0.5, delta=0.5)
+
+    def test_reconfigure_replaces_chain(self):
+        once = self.crit()['text']
+        twice = self.crit(once, bright=2)['text']
+        self.assertEqual(twice.count('// tf2sg crit'), once.count('// tf2sg crit'))
+        self.assertEqual(fx.values(fx.CRIT, twice),
+                         {'red': '#ff00ff', 'blue': '#00ffff', 'bright': 2.0})
+
+    def test_one_line_proxies(self):
+        # Комментарий между именем и «{», тело в одну строку.
+        flat = SHEEN_STOCK.replace(
+            '"ModelGlowColor"\n\t\t{\n\t\t\t"resultVar" "$glowcolor"\n\t\t}',
+            '"ModelGlowColor" // crit\n\t\t{ "resultVar" "$glowcolor" }')
+        self.assertIn('// crit\n', flat)
+        out = self.crit(flat)['text']
+        self.assertLess(out.index('"ModelGlowColor"'), out.index('// tf2sg crit'))
+        self.assertTrue(VMTService.validate_vmt_syntax(out)[0])
+
+    def test_needs_model_glow_proxy(self):
+        self.assertIn('error', self.crit(STOCK))
+
+
 class BuildKeepsChosenBaseTests(unittest.TestCase):
     """Сборка не переписывает $basetexture, выбранный в правке сознательно."""
 

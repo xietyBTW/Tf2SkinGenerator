@@ -29,19 +29,9 @@ from src.shared.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-# VTF-параметры которые не являются основной текстурой (basetexture ≠ это)
-_SKIP_VMT_KEYS = {
-    "$lightwarptexture", "$bumpmap", "$normalmap", "$phongwarptexture",
-    "$envmap", "$envmapmask", "$detail", "$selfillummask",
-    "$blendmodulatetexture", "$maskstexture", "$phongexponenttexture",
-    "$rimlight", "$rimlightexponent",
-}
-
-# Слова в пути VTF-файла которые говорят «это не основная текстура»
-_SKIP_VTF_KEYWORDS = (
-    "lightwarp", "phongwarp", "envmap", "cubemap", "sheen",
-    "bump", "normal", "detail", "spec", "mask", "selfillum",
-)
+# Правило «основная или служебная» одно на приложение — mod_textures.
+# Имя оставлено здесь: его импортирует библиотека модов.
+from src.services.mod_textures import is_base_vtf, vmt_references  # noqa: E402,F401
 
 
 # ── Утилиты ──────────────────────────────────────────────────────────────── #
@@ -75,16 +65,6 @@ def _weapon_mdl(mdl_files: List[str], weapon_key: Optional[str]) -> str:
         if weapon_key and os.path.splitext(os.path.basename(mdl))[0].lower() == weapon_key:
             return mdl
     return mdl_files[0]
-
-
-def is_base_vtf(vtf_path: str) -> bool:
-    """True если VTF скорее всего является основной текстурой (не служебной).
-
-    Публичная: тем же правилом выбирается обложка мода в библиотеке — двух
-    списков «что считать служебным» быть не должно.
-    """
-    low = vtf_path.lower()
-    return not any(kw in low for kw in _SKIP_VTF_KEYWORDS)
 
 
 # ── Воркер ───────────────────────────────────────────────────────────────── #
@@ -151,6 +131,8 @@ class PreviewVpkModWorker(BaseWorker):
         self.textures_vpk_path = textures_vpk_path
         self._preview_dir: Optional[str] = None
         self._model_materials: List[str] = []
+        self._vmt_texts: dict = {}
+        self._refs = None
         # Игровой tf2_textures_dir.vpk открываем один раз за прогон (fallback-пути).
         self._game_reader: Optional[GameVpkReader] = None
         self._p = self._PROGRESS.get(lang, self._PROGRESS['en'])
@@ -201,6 +183,16 @@ class PreviewVpkModWorker(BaseWorker):
                 f"{len(mdl_files)} MDL, {len(vmt_files)} VMT, {len(vtf_files)} VTF"
             )
 
+            # Тексты VMT — один раз: по ним решается, какая текстура основная
+            # (на что смотрит $basetexture), и какие карты у материала уже есть.
+            self._vmt_texts = {}
+            for vmt_rel in vmt_files:
+                try:
+                    self._vmt_texts[vmt_rel] = pak[vmt_rel].read().decode('utf-8', errors='replace')
+                except Exception:
+                    continue
+            self._refs = vmt_references(self._vmt_texts.values())
+
             # ── 2D-карточки всех текстур мода (РАНО) ──────────────────────── #
             # Эмитим карточки сразу после сканирования VTF, ДО тяжёлой/прерываемой
             # работы по модели — иначе перезапуск воркера (смена категории) мог
@@ -245,7 +237,7 @@ class PreviewVpkModWorker(BaseWorker):
 
             if not weapon_key:
                 for vtf_rel in vtf_files:
-                    if is_base_vtf(vtf_rel):
+                    if is_base_vtf(vtf_rel, self._refs):
                         weapon_key = _weapon_key_from_path(vtf_rel)
                         if weapon_key:
                             break
@@ -361,13 +353,22 @@ class PreviewVpkModWorker(BaseWorker):
         Имя карточки = стебель VTF; при коллизии добавляется папка. Превью —
         первый кадр VTF. vmt_path привязывается по совпадению стебля.
         """
-        # Индекс VMT по стеблю для привязки.
+        from src.services import vmt_parse
+        from src.services.mod_textures import texture_key
+
+        # VMT для текстуры: тот, чей $basetexture на неё смотрит (так её
+        # находит игра), иначе — по совпадению стебля.
         vmt_by_stem = {}
+        vmt_by_base = {}
         for vmt_rel in vmt_files:
             stem = os.path.splitext(os.path.basename(vmt_rel))[0].lower()
             vmt_by_stem.setdefault(stem, vmt_rel)
+            base_tex = vmt_parse.parse(self._vmt_texts.get(vmt_rel, '')).path('$basetexture')
+            if base_tex:
+                vmt_by_base.setdefault(texture_key(base_tex), vmt_rel)
+        vtf_by_key = {texture_key(v): v for v in vtf_files}
 
-        base = sorted(v for v in vtf_files if is_base_vtf(v))
+        base = sorted(v for v in vtf_files if is_base_vtf(v, self._refs))
         # Подсчёт коллизий стеблей для дизамбигуации.
         stems = [os.path.splitext(os.path.basename(v))[0] for v in base]
         counts: dict = {}
@@ -391,12 +392,14 @@ class PreviewVpkModWorker(BaseWorker):
             except Exception as exc:
                 logger.debug(f"VPK мод: превью VTF не удалось ({vtf_rel}): {exc}")
 
+            vmt_rel = vmt_by_base.get(texture_key(vtf_rel)) or vmt_by_stem.get(stem.lower())
             cards.append({
                 'name': name,
                 'display_name': name,
                 'is_blue': stem.lower().endswith('_blue'),
                 'preview_png': preview_png,
-                'vmt_path': vmt_by_stem.get(stem.lower()),
+                'vmt_path': vmt_rel,
+                'maps': self._mod_maps(pak, name, self._vmt_texts.get(vmt_rel, ''), vtf_by_key),
             })
 
         # RED-материалы первыми, затем BLU (как в обычной раскладке карточек).
@@ -448,6 +451,32 @@ class PreviewVpkModWorker(BaseWorker):
             if mp:
                 out[ridx] = mp
         return out
+
+    def _mod_maps(self, pak, card: str, vmt_text: str, vtf_by_key: dict) -> dict:
+        """Карты материала, что уже стоят в VMT мода, — с превью их текстуры
+        (диалог карт показывает их отмеченными)."""
+        from src.data.material_maps import detect_maps
+        from src.services.mod_textures import texture_key
+
+        maps = detect_maps(vmt_text)
+        for map_id, entry in maps.items():
+            texture = entry.get('texture')
+            if not texture:
+                continue
+            vtf_rel = vtf_by_key.get(texture_key(texture))
+            try:
+                # Своя текстура мода, иначе игровая (lightwarp модов часто
+                # смотрит на полоску самой игры).
+                if vtf_rel:
+                    data = pak[vtf_rel].read()
+                else:
+                    self._game_textures_pak()
+                    data = self._game_reader.find_vtf_for_basetexture(texture)
+                if data:
+                    entry['preview'] = self._vtf_bytes_first_frame_png(data, f"{card}__{map_id}")
+            except Exception as exc:
+                logger.debug(f"VPK мод: превью карты {map_id} не вышло ({texture}): {exc}")
+        return maps
 
     def _vtf_bytes_first_frame_png(self, vtf_data: bytes, key: str) -> Optional[str]:
         """Сохраняет первый кадр VTF в уникальный PNG (для превью карточки).
@@ -654,7 +683,7 @@ class PreviewVpkModWorker(BaseWorker):
             bt_stem = os.path.splitext(os.path.basename(basetexture_path))[0].lower()
             for vtf_rel in vtf_files:
                 vtf_stem = os.path.splitext(os.path.basename(vtf_rel))[0].lower()
-                if vtf_stem == bt_stem and is_base_vtf(vtf_rel):
+                if vtf_stem == bt_stem and is_base_vtf(vtf_rel, self._refs):
                     try:
                         vtf_data = pak[vtf_rel].read()
                         logger.info(f"Текстура мода (by $basetexture): {vtf_rel}")
@@ -667,7 +696,7 @@ class PreviewVpkModWorker(BaseWorker):
             wk_stem = weapon_key.lower()
             for vtf_rel in vtf_files:
                 vtf_stem = os.path.splitext(os.path.basename(vtf_rel))[0].lower()
-                if vtf_stem == wk_stem and is_base_vtf(vtf_rel):
+                if vtf_stem == wk_stem and is_base_vtf(vtf_rel, self._refs):
                     try:
                         vtf_data = pak[vtf_rel].read()
                         logger.info(f"Текстура мода (by weapon_key stem): {vtf_rel}")
@@ -678,7 +707,7 @@ class PreviewVpkModWorker(BaseWorker):
         # ── Приоритет 4: первый не-служебный VTF ─────────────────────────────
         if not vtf_data:
             for vtf_rel in vtf_files:
-                if not is_base_vtf(vtf_rel):
+                if not is_base_vtf(vtf_rel, self._refs):
                     continue
                 try:
                     vtf_data = pak[vtf_rel].read()
@@ -806,7 +835,7 @@ class PreviewVpkModWorker(BaseWorker):
         if not vtf_data:
             for vtf_rel in vtf_files:
                 stem = os.path.splitext(os.path.basename(vtf_rel))[0].lower()
-                if stem.endswith("_blue") and is_base_vtf(vtf_rel):
+                if stem.endswith("_blue") and is_base_vtf(vtf_rel, self._refs):
                     try:
                         vtf_data = pak[vtf_rel].read()
                         logger.info(f"BLU текстура мода (endswith _blue): {vtf_rel}")

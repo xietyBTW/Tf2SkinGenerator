@@ -173,11 +173,11 @@ The buttons on the bottom right of the model view work on the model itself:
 
 | Element | What it does |
 |---|---|
-| Status | The current state: **Done** when nothing is running, loading messages, build steps, results. Clicking it opens the [log](#log). |
+| Status | The current state: **Done** when nothing is running, loading messages, build steps, results. A successful build is reported briefly as "Mod built · file name", plus the number of warnings if there were any. The warnings themselves are in the [log](#log), which opens when you click the status. |
 | Summary | What the build will produce: resolution, VTF format, the estimated size of one texture, the file name. It updates as you change settings. |
 | **Parameters** | Opens and closes the build settings. With pinned panels they are always on screen. |
 | Game path | Where TF2 was found and whether Crowbar is in place. If the game isn't found, set it in the settings first. |
-| **Build VPK** | Builds the mod. During a build it turns into **Stop**, and the floating build settings panel closes by itself so you can see the model and the progress. How the build looks is chosen in [settings](settings.md#customization). |
+| **Build VPK** | Builds the mod. During a build it turns into **Stop**, and the floating build settings panel closes by itself so you can see the model and the progress. While a build runs and for 15 seconds after it, the bar shows only the progress and the result; the summary and the game path come back afterwards. After a successful build the button becomes **Open folder** for those 15 seconds, which opens the export folder with the new mod. How the build looks is chosen in [settings](settings.md#customization). |
 
 ## Build settings
 

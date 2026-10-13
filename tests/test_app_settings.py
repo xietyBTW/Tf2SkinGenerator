@@ -105,6 +105,20 @@ class SettingsRoundTripTests(unittest.TestCase):
                 values = api.set_settings({'build_fx': 'decode'}, 'ru')['values']
             self.assertEqual(values['build_fx'], {})
 
+    def test_model_cache_cap_comes_from_the_list(self):
+        """Потолок кэша моделей: только из предложенных, остальное — 1 ГБ."""
+        with tempfile.TemporaryDirectory() as tmp:
+            config_file = self._isolated(tmp)
+            with patch.object(AppConfig, 'CONFIG_FILE', config_file), \
+                 patch('src.services.decompile_cache.enforce_cache_limit',
+                       return_value=0):
+                cfg = api.settings('ru')
+                self.assertEqual(cfg['values']['model_cache_mb'], 1024)
+                self.assertIn(0, cfg['cache_caps'])              # без ограничения
+                for sent, kept in ((5120, 5120), ('0', 0), (100, 1024), ('x', 1024)):
+                    values = api.set_settings({'model_cache_mb': sent}, 'ru')['values']
+                    self.assertEqual(values['model_cache_mb'], kept, sent)
+
 
 class UiStateTests(unittest.TestCase):
     """Ширина панели и громкость: их правят на экране, а хранит тот же конфиг."""

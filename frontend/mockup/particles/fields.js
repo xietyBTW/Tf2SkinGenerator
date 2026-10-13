@@ -1,7 +1,7 @@
 /*
  * Поля редактора: ползунок, число, цвет, атрибут экспертного режима.
  *
- * Крутилки описаны в Python (services/simple_params) — здесь только поля и
+ * Крутилки описаны в Python (services/simple_params) - здесь только поля и
  * отправка значений. Список параметров, границы и подписи приходят готовыми:
  * схема одна на панель приложения и на эту страницу.
  */
@@ -28,7 +28,7 @@ export function sliderField(value, param, onLive, onDone) {
     const v = curveValue(param, Number(r.value) / 1000);
     return param.decimals ? Number(v.toFixed(param.decimals)) : Math.round(v);
   };
-  // Пока тянут — только показываем; в Python уходит отпускание, иначе одно
+  // Пока тянут - только показываем; в Python уходит отпускание, иначе одно
   // перетаскивание давало бы сотню правок файла.
   r.addEventListener('input', () => onLive(read()));
   r.addEventListener('change', () => onDone(read()));
@@ -58,7 +58,7 @@ export function numberField(value, param, onEdit) {
 /**
  * Дорожка и поле на одно значение: тянуть удобнее, вписать точнее.
  *
- * Дорожка ходит по мягким границам, поле принимает и жёсткие — поэтому
+ * Дорожка ходит по мягким границам, поле принимает и жёсткие - поэтому
  * значение из чужого эффекта (emission_rate под миллион) правится вручную,
  * а дорожка просто упирается в край.
  */
@@ -76,7 +76,7 @@ export function pairedField(value, param, onEdit) {
   return wrap;
 }
 
-/** Цвет как #rrggbb; альфу сохраняем — её правит отдельный параметр. */
+/** Цвет как #rrggbb; альфу сохраняем - её правит отдельный параметр. */
 export function colorField(rgba, onEdit) {
   const i = document.createElement('input');
   i.type = 'color';
@@ -98,17 +98,17 @@ export async function editParam(param, value) {
   setDiff(res.diff);
   fillTree(pcfNodes, pSystem);
   setTitle(pSystem);
-  // Значение могло создать модуль — перечитываем, чтобы бледные поля стали
+  // Значение могло создать модуль - перечитываем, чтобы бледные поля стали
   // обычными, а соседние крутилки показали то, что теперь в файле.
   await showParams(pSystem);
 }
 
-/** Редактор одного атрибута экспертного режима — по типу из PCF. */
+/** Редактор одного атрибута экспертного режима - по типу из PCF. */
 export function attrField(attr, onEdit) {
   const box = document.createElement('div');
   box.className = 'params__in';
 
-  // Атрибут с фиксированным набором значений — список, а не голое число.
+  // Атрибут с фиксированным набором значений - список, а не голое число.
   if (attr.enum) {
     const sel = document.createElement('select');
     sel.className = 'input';
@@ -129,7 +129,7 @@ export function attrField(attr, onEdit) {
   }
 
   if (attr.t === 'color') {
-    // Цвет и прозрачность — разными полями: альфа в PCF четвёртая компонента,
+    // Цвет и прозрачность - разными полями: альфа в PCF четвёртая компонента,
     // а <input type="color"> о ней не знает.
     const rgba = attr.v.slice();
     const hex = (n) => Math.max(0, Math.min(255, n | 0)).toString(16).padStart(2, '0');
@@ -162,7 +162,7 @@ export function attrField(attr, onEdit) {
   }
 
   if (Array.isArray(attr.v)) {
-    // vec2/vec3/vec4 — по полю на компоненту, значение уходит целиком.
+    // vec2/vec3/vec4 - по полю на компоненту, значение уходит целиком.
     const vals = attr.v.slice();
     vals.forEach((v, n) => {
       const i = document.createElement('input');
@@ -191,7 +191,7 @@ export function attrField(attr, onEdit) {
   return box;
 }
 
-/** Проверка «умеет ли движок этот модуль», либо null — движок ещё молчит. */
+/** Проверка «умеет ли движок этот модуль», либо null - движок ещё молчит. */
 export function supportedModules() {
   const w = particles();
   if (!w || typeof w.implementedModules !== 'function') return null;

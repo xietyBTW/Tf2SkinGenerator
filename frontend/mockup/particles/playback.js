@@ -1,7 +1,7 @@
 /*
  * Проигрывание и отмена правок.
  *
- * Снимками занимается Python — он же и хранит дерево. Здесь только сочетание
+ * Снимками занимается Python - он же и хранит дерево. Здесь только сочетание
  * клавиш, кнопки проигрывателя и перерисовка тем, что вернулось. Состояние
  * кнопок держим у себя: движок своего не отдаёт.
  */
@@ -48,17 +48,17 @@ document.getElementById('predo').addEventListener('click', () => historyGo(1));
  */
 export function editorKey(e) {
   if (root.dataset.section !== 'particles' || !(e.ctrlKey || e.metaKey)) return;
-  // В поле ввода Ctrl+Z — это отмена ТЕКСТА, её перехватывать нельзя; то же
+  // В поле ввода Ctrl+Z - это отмена ТЕКСТА, её перехватывать нельзя; то же
   // с копированием выделенного.
   const tag = (e.target.tagName || '').toLowerCase();
   if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
-  // По коду клавиши, а не по символу: в русской раскладке Z — это «я».
+  // По коду клавиши, а не по символу: в русской раскладке Z - это «я».
   if (e.code === 'KeyZ' && !e.shiftKey) { e.preventDefault(); historyGo(-1); }
   else if (e.code === 'KeyY' || (e.code === 'KeyZ' && e.shiftKey)) {
     e.preventDefault();
     historyGo(1);
   } else if (e.code === 'KeyC' && pSystem) {
-    // Выделенный текст копируют как текст — это не про эффект.
+    // Выделенный текст копируют как текст - это не про эффект.
     if (String(window.getSelection && window.getSelection()).trim()) return;
     e.preventDefault();
     PACTS.copy();
@@ -97,21 +97,21 @@ function cycleSpeed() {
 }
 document.getElementById('pspeed').addEventListener('click', cycleSpeed);
 
-// Горячие клавиши кадра: пробел — пауза, R — заново, S — скорость. Только
-// когда фокус не в поле ввода: там пробел — это пробел.
+// Горячие клавиши кадра: пробел - пауза, R - заново, S - скорость. Только
+// когда фокус не в поле ввода: там пробел - это пробел.
 document.addEventListener('keydown', (e) => {
   if (root.dataset.section !== 'particles' || e.ctrlKey || e.altKey) return;
   const tag = (e.target.tagName || '').toLowerCase();
   if (tag === 'input' || tag === 'textarea' || tag === 'select'
       || e.target.isContentEditable) return;
-  // По коду клавиши, а не по символу: в русской раскладке R — это «к».
+  // По коду клавиши, а не по символу: в русской раскладке R - это «к».
   if (e.code === 'Space') { e.preventDefault(); togglePause(); }
   else if (e.code === 'KeyR') withParticles((w) => w.restartEffect());
   else if (e.code === 'KeyS') cycleSpeed();
 });
 
 //: Фон кадра: тёмный, как карта в тени, как карта на свету. Полупрозрачные
-//: слои (дымка воды) видны только на светлом — на чёрном это чёрный ящик.
+//: слои (дымка воды) видны только на светлом - на чёрном это чёрный ящик.
 const BACKGROUNDS = [0x1a1a1a, 0x5c6a72, 0xb8c2c8];
 let pBg = 0;
 document.getElementById('pbg').addEventListener('click', () => {

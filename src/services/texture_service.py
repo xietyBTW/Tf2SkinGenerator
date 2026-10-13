@@ -74,9 +74,9 @@ class TextureService:
         Строит карту эффекта ИЗ базовой текстуры (без участия пользователя).
 
         kind:
-          • "phong"     → RGBA: RGB = яркость (карта экспоненты), ALPHA = маска
-                          блеска (по яркости / порогу). Светлые линии → острый
-                          блик, тёмное → матовое.
+          • "phong"     → RGBA: RGB = яркость (карта экспоненты: светлое → острый
+                          блик), ALPHA = 255 (маска rim light). Маска блеска —
+                          в альфе нормали, не здесь.
           • "selfillum" → L (grayscale): маска свечения по яркости / порогу.
 
         threshold: 0..255 — если задан, маска бинаризуется по этому порогу
@@ -96,7 +96,12 @@ class TextureService:
             return src.point(lambda p: 255 if p >= threshold else 0)
 
         if kind == "phong":
-            out = Image.merge("RGBA", (gray, gray, gray, _mask(gray)))
+            # $phongexponenttexture (вики Valve): R — размер блика, G — маска
+            # $phongalbedotint, A — маска rim light ($rimmask). ГДЕ блестит —
+            # не здесь, а в альфе нормали (её кладёт сборка). Альфа 255 —
+            # обводка не обрезается.
+            full = Image.new("L", gray.size, 255)
+            out = Image.merge("RGBA", (gray, gray, gray, full))
         elif kind == "selfillum":
             out = _mask(gray).convert("L")
         elif kind == "envmapmask":
@@ -106,34 +111,6 @@ class TextureService:
             out = gray
         out.save(out_png_path)
         logger.info(f"Карта '{kind}' выведена из базовой текстуры: {out_png_path}")
-        return out_png_path
-
-    @staticmethod
-    def make_normal_with_alpha(
-        base_image_path: str,
-        mask_png_path: str,
-        out_png_path: str,
-        size: Tuple[int, int],
-    ) -> str:
-        """
-        Строит карту нормалей из базовой текстуры (normal_map) и кладёт в её
-        АЛЬФУ маску из mask_png_path.
-
-        Нужно для сосуществования отражения и эффектов с нормалью: при наличии
-        $bumpmap движок игнорирует отдельный $envmapmask и читает маску отражения
-        из альфы нормали ($normalmapalphaenvmapmask). Нормаль приближённая (как и
-        любая «нормаль из диффуза»), но направление здесь некритично — важна альфа.
-        """
-        base = Image.open(base_image_path).convert("RGB")
-        if size:
-            base = base.resize(size, Image.LANCZOS)
-        import numpy as np
-        from src.services import normal_map
-
-        mask = Image.open(mask_png_path).convert("L").resize(base.size, Image.LANCZOS)
-        n = normal_map.from_image(np.asarray(base))
-        Image.fromarray(normal_map.encode(n, np.asarray(mask)), "RGBA").save(out_png_path)
-        logger.info(f"Нормаль с маской отражения в альфе: {out_png_path}")
         return out_png_path
 
     @staticmethod

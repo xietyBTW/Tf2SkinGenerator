@@ -314,6 +314,10 @@ class VpkModelPipeline:
                         progress_cb=lambda pct: emit_sub(pct, "Replacing model..." if language == "en" else "Замена модели..."),
                         keep_user_materials=keep_user_materials,
                     )
+                    if keep_user_materials:
+                        # Свои кости модели — в QC, иначе studiomdl свернёт их
+                        # в родителя (кость без анимации ему не нужна).
+                        ModelBuildService.define_missing_bones(qc_path, original_smd_path)
                     logger.info(
                         f"Модель успешно заменена: {original_smd_path} "
                         f"(keep_user_materials={keep_user_materials})"
@@ -329,7 +333,7 @@ class VpkModelPipeline:
             except Exception as e:
                 logger.error(f"Ошибка при замене модели: {e}", exc_info=True)
                 ctx.warn(
-                    "Замена модели завершилась ошибкой — в мод попадёт "
+                    "Замена модели завершилась ошибкой - в мод попадёт "
                     f"оригинальная модель. ({e})"
                 )
                 # Не прерываем сборку, просто продолжаем с оригинальной моделью (лучше так, чем упасть)
@@ -527,6 +531,8 @@ class VpkModelPipeline:
                         replace_model_smd_path, ref_smd, ref_smd,
                         keep_user_materials=keep_user_materials,
                     )
+                    if keep_user_materials:
+                        ModelBuildService.define_missing_bones(qc_p, ref_smd)
 
                 if part_specs and part_source_qc:
                     try:
@@ -680,6 +686,8 @@ class VpkModelPipeline:
                             SMDService.replace_model_sections(
                                 replace_smd, ref_smd, ref_smd, keep_user_materials=keep_mat,
                             )
+                            if keep_mat:
+                                ModelBuildService.define_missing_bones(qc_p, ref_smd)
                         else:
                             logger.warning(f"[HAT STYLE] {wk}: reference SMD не найден — геометрия оригинала")
 

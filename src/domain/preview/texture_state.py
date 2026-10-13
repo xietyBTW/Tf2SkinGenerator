@@ -299,9 +299,17 @@ class PreviewTextureState:
         return self.resolve_base(mat)
 
     def style_texture(self, style: int, mat: str) -> Optional[str]:
-        """Текстура материала в стиле: правка человека, иначе оригинал стиля."""
-        return (_existing(self.skin_overrides.get(style, {}).get(mat))
-                or _existing(self.style_game_tex.get(style, {}).get(mat)))
+        """Текстура материала в стиле: правка человека, иначе оригинал стиля.
+
+        У материала части без своей правки оригинал — стиля его исходного:
+        строка стиля ведёт часть в игровой VMT материала стиля
+        (part_materials.add_part_columns), у гильотины Bloody — кровь."""
+        own = (_existing(self.skin_overrides.get(style, {}).get(mat))
+               or _existing(self.style_game_tex.get(style, {}).get(mat)))
+        base = self.part_cards.get(mat)
+        if own or not base or base == mat:
+            return own
+        return _existing(self.style_game_tex.get(style, {}).get(base))
 
     def style_upload_for(self, mat: str) -> Optional[str]:
         """Правка стиля, загруженная под ИМЯ материала строки $texturegroup.

@@ -31,6 +31,7 @@ _CACHE_VERSION = 4  # v3: vpk_mtime вместо mdl_hash; v4: SMD дописа�
 # Мягкий потолок размера кэша. После сохранения новой записи кэш само-урезается
 # до этого размера, удаляя самые давно использованные записи (LRU по mtime папки;
 # mtime «трогается» на cache hit). Без лимита кэш рос бы бесконечно. <=0 — выкл.
+# Это умолчание: человек выбирает потолок в настройках (`model_cache_mb`).
 _CACHE_MAX_MB = 1024
 
 #: Превью и поиск стилей разбирают одну модель параллельно и оба несут её в
@@ -263,16 +264,27 @@ def _save_to_cache(weapon_key: str, vpk_path: str, mdl_rel_path: str,
         return None
 
 
-def enforce_cache_limit(max_mb: float = _CACHE_MAX_MB) -> int:
+def _limit_mb() -> float:
+    """Потолок из настроек (вкладка «Обслуживание»); 0 — без ограничения."""
+    try:
+        from src.config.app_config import AppConfig
+        return float(AppConfig.get('model_cache_mb', _CACHE_MAX_MB))
+    except Exception:                                         # noqa: BLE001
+        return _CACHE_MAX_MB
+
+
+def enforce_cache_limit(max_mb: Optional[float] = None) -> int:
     """Удаляет самые давно использованные записи, пока кэш не уложится в max_mb.
 
     LRU приближается через mtime папки записи (трогается на cache hit в
     get_cached_decompile). Запись — атомарная единица удаления. Метафайл записи
-    учитывается в её размере. <=0 или None в max_mb — лимит отключён.
+    учитывается в её размере. None — потолок из настроек; <=0 — лимит отключён.
 
     Returns:
         Количество удалённых записей.
     """
+    if max_mb is None:
+        max_mb = _limit_mb()
     if not max_mb or max_mb <= 0:
         return 0
     try:

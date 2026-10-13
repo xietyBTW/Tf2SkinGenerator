@@ -573,7 +573,7 @@ class ParticlesEditor:
             return err
         paths = self._host.tf2_paths()
         if not self.pcf.revert_system(paths.get('root', ''), system):
-            return {'error': 'В игре такой системы нет — возвращать не к чему'}
+            return {'error': 'В игре такой системы нет - возвращать не к чему'}
         return self._particles_state(selected=system)
 
     def revert_particle_attr(self, system: str, group: Optional[str],
@@ -813,7 +813,7 @@ class ParticlesEditor:
         if (err := self._need_pcf()):
             return err
         if not self.pcf.duplicate_system(system, new_name):
-            return {'error': 'не удалось дублировать — возможно, имя занято'}
+            return {'error': 'не удалось дублировать - возможно, имя занято'}
         return self._particles_state(selected=new_name)
 
     def rename_particle_system(self, system: str,
@@ -821,7 +821,7 @@ class ParticlesEditor:
         if (err := self._need_pcf()):
             return err
         if not self.pcf.rename_system(system, new_name):
-            return {'error': 'не удалось переименовать — возможно, имя занято'}
+            return {'error': 'не удалось переименовать - возможно, имя занято'}
         return self._particles_state(selected=new_name)
 
     def remove_particle_system(self, system: str) -> Dict[str, Any]:
@@ -1312,7 +1312,7 @@ class ParticlesEditor:
         if (err := self._need_pcf()):
             return err
         if not self.pcf.rename_material(material, new_material):
-            return {'error': 'не удалось переименовать — возможно, путь занят'}
+            return {'error': 'не удалось переименовать - возможно, путь занят'}
         return self._materials_result()
 
     def use_particle_texture_colors(self, system: str) -> Dict[str, Any]:
@@ -1414,7 +1414,6 @@ class ParticlesEditor:
         кладёт внутрь и само задание.
         """
         import json
-        from pathlib import Path
 
         from src.services.particle_editor_service import ParticleEditorService
 

@@ -2,7 +2,7 @@
  * Контрольные точки эффекта.
  *
  * Движок держит их у себя (позиция, углы, пресет движения); отсюда только
- * команды. Номера точек, которые эффекту нужны, считает Python — вычитать их
+ * команды. Номера точек, которые эффекту нужны, считает Python - вычитать их
  * из дерева свойств вручную никто не станет.
  */
 
@@ -14,12 +14,12 @@ import { pSystem } from './state.js';
 
 // ── Контрольные точки ────────────────────────────────────────────────────
 // Движок держит их у себя (позиция, углы, пресет движения); отсюда только
-// команды. Номера точек, которые эффекту нужны, считает Python — вычитать их
+// команды. Номера точек, которые эффекту нужны, считает Python - вычитать их
 // из дерева свойств вручную никто не станет.
 
 export const cpBox = document.getElementById('cp');
 const cpEl = (id) => document.getElementById(id);
-//: Текущая точка. Ноль — та, вокруг которой строится почти всё в TF2.
+//: Текущая точка. Ноль - та, вокруг которой строится почти всё в TF2.
 let cpIndex = 0;
 //: Точки крепления выбранной модели (имя, позиция, углы).
 let cpAttachments = [];
@@ -38,8 +38,8 @@ function cpLoad() {
     || { values: [0, 0, 0, 0, 0, 0, 24, 2], motion: 'none' };
   CP_FIELDS.forEach((id, n) => { cpEl(id).value = st.values[n]; });
   cpEl('cp-motion').value = st.motion;
-  // Точка крепления — тоже часть состояния точки: у оружия точка 0 висит на
-  // unusual_0, точка 1 — на unusual_1, и список должен показывать своё.
+  // Точка крепления - тоже часть состояния точки: у оружия точка 0 висит на
+  // unusual_0, точка 1 - на unusual_1, и список должен показывать своё.
   cpEl('cp-attach').value = st.attach ?? '';
 }
 
@@ -57,7 +57,7 @@ function cpPushIndex(index, st) {
   cpState.set(index, st);
   withParticles((w) => {
     w.setControlPoint(index, x, y, z);
-    // Нулевые углы — это тоже углы: сбрасывать ориентацию надо явно, иначе
+    // Нулевые углы - это тоже углы: сбрасывать ориентацию надо явно, иначе
     // точка осталась бы повёрнутой от прошлой правки.
     if (p || yaw || r) w.setControlPointOrientation(index, p, yaw, r);
     else w.clearControlPointOrientation(index);
@@ -75,7 +75,7 @@ export async function cpFillIndexes() {
 
   box.innerHTML = '';
   // Показываем нужные точки плюс небольшой запас: всего их 64, и рисовать
-  // все — это ряд из шестидесяти четырёх кнопок ради двух используемых.
+  // все - это ряд из шестидесяти четырёх кнопок ради двух используемых.
   const shown = [...new Set([...used, 0, 1, 2, 3])].sort((a, b) => a - b);
   for (const i of shown) {
     const b = document.createElement('button');
@@ -140,7 +140,7 @@ export function showCpModel(ev) {
 }
 
 function applyCpModelScene(scene, label) {
-  // Корневая кость — первой: к ней игра цепляет анюжуал косметики
+  // Корневая кость - первой: к ней игра цепляет анюжуал косметики
   // (attach_to_rootbone), и у шапки это голова, а не ноги.
   const root = scene.root ? [{ ...scene.root, name: scene.root.name + ' (' + t('корень') + ')' }] : [];
   cpAttachments = [...root, ...(scene.attachments || [])];
@@ -150,7 +150,7 @@ function applyCpModelScene(scene, label) {
 
   const sel = cpEl('cp-attach');
   sel.innerHTML = '';
-  sel.append(new Option('— не выбрана —', ''));
+  sel.append(new Option('- не выбрана -', ''));
   cpAttachments.forEach((a, i) => sel.append(new Option(a.name, String(i))));
   sel.disabled = cpAttachments.length === 0;
 
@@ -160,12 +160,12 @@ function applyCpModelScene(scene, label) {
   });
   cpScene(true);
   // Точки сразу туда, куда вешает игра (econ_entity.cpp,
-  // UpdateSingleParticleSystem): точка 0 — на attachment «unusual» (у шапок)
-  // или «unusual_0» (у оружия), без них — на корневую кость (attach_to_rootbone);
-  // точки 1..5 — на «unusual_1».. «unusual_5» (control_point_N в items_game).
-  // Иначе эффект шапки стоял в нуле сцены, а сама шапка — на высоте головы,
+  // UpdateSingleParticleSystem): точка 0 - на attachment «unusual» (у шапок)
+  // или «unusual_0» (у оружия), без них - на корневую кость (attach_to_rootbone);
+  // точки 1..5 - на «unusual_1».. «unusual_5» (control_point_N в items_game).
+  // Иначе эффект шапки стоял в нуле сцены, а сама шапка - на высоте головы,
   // и «как прицепить» было неоткуда узнать. Корень у шапки с полным
-  // скелетом — таз, не голова: так и в игре.
+  // скелетом - таз, не голова: так и в игре.
   const byName = new Map(cpAttachments.map((a, i) => [a.name.toLowerCase(), i]));
   const zero = byName.get('unusual') ?? byName.get('unusual_0') ?? (root.length ? 0 : -1);
   if (zero >= 0) {

@@ -12,6 +12,10 @@ import re
 import time
 from typing import Callable, Dict, List, Optional, Tuple
 
+from src.shared.logging_config import get_logger
+
+logger = get_logger(__name__)
+
 #: Подстроки в имени SMD, по которым файл НЕ является видимым reference-мешем
 #: (физика, анимации, позы). Единый источник для всех мест, что ищут reference SMD.
 NON_REFERENCE_SMD_KEYWORDS: Tuple[str, ...] = ("physics", "phys", "anim", "idle", "pose")
@@ -89,6 +93,32 @@ _GRIP_PREFIXES = ("weapon_bone", "vm_weapon_bone")
 _NODE_RE = re.compile(r'\s*(\d+)\s+"([^"]*)"\s+(-?\d+)')
 
 
+def _before_end(section: List[str], lines: List[str]) -> List[str]:
+    """Строки секции SMD с `lines` перед её закрывающим `end`."""
+    if not section:
+        return section
+    last = max((i for i, line in enumerate(section) if line.strip() == 'end'),
+               default=len(section))
+    return [*section[:last], *lines, *section[last:]]
+
+
+def _after_first_frame(section: List[str], lines: List[str]) -> List[str]:
+    """Секция skeleton с `lines` в конце первого кадра (`time 0`)."""
+    if not section:
+        return section
+    out: List[str] = []
+    seen, done = False, False
+    for line in section:
+        word = line.split()[0] if line.split() else ''
+        if seen and not done and word in ('time', 'end'):
+            out.extend(lines)
+            done = True
+        if word == 'time':
+            seen = True
+        out.append(line)
+    return out
+
+
 class SMDService:
 
     @staticmethod
@@ -149,10 +179,12 @@ class SMDService:
             output_smd_path:   Куда записать результат (None = перезаписать user_smd_path)
             progress_cb:       Опциональный callback(pct: int 0-100). Вызывается с троттлингом
                                ~60 fps, чтобы не замедлять парсинг.
-            keep_user_materials: True — сохранить ИМЕНА материалов пользователя (для
-                               многотекстурных/«готовых» моделей; иначе все материалы
-                               схлопнутся в один материал оригинала). nodes/skeleton
-                               всё равно берутся из оригинала (риггинг под скелет TF2).
+            keep_user_materials: True — «со своими материалами и костями»: имена
+                               материалов пользователя остаются (иначе все схлопнутся
+                               в один материал оригинала), а его кости, которых нет в
+                               игровом скелете, дописываются к нему (`_own_bones`).
+                               Скелет игры остаётся основой: по его костям модель
+                               держат в руке и анимируют.
         Returns:
             Путь к записанному файлу.
         """
@@ -189,10 +221,30 @@ class SMDService:
         if output_smd_path is None:
             output_smd_path = user_smd_path
 
+        mapping = SMDService._bone_mapping(user_parts.get('nodes'), orig_parts.get('nodes'))
+        grip = SMDService._grip_bone(orig_parts.get('nodes'),
+                                     orig_parts.get('triangles_data', []))
+        nodes = orig_parts.get('nodes') or user_parts.get('nodes')
+        skeleton = orig_parts.get('skeleton') or user_parts.get('skeleton')
+        if keep_user_materials and orig_parts.get('nodes'):
+            # Свои кости модели (джигл-кости, крышка, лента) — в скелет вслед
+            # за игровыми. Раньше их вершины молча садились на хват, и после
+            # сборки своих костей у модели не было.
+            own = SMDService._own_bones(user_parts.get('nodes'), orig_parts.get('nodes'),
+                                        mapping, grip)
+            if own:
+                pose = SMDService._bind_pose(user_parts.get('skeleton'))
+                nodes = _before_end(nodes, [f'{new} "{name}" {parent}\n'
+                                            for _old, new, name, parent in own])
+                skeleton = _after_first_frame(skeleton, [
+                    f"{new} {pose.get(old, '0 0 0 0 0 0')}\n" for old, new, _n, _p in own])
+                mapping = {**mapping, **{old: new for old, new, _n, _p in own}}
+                logger.info(f"[SMD] свои кости модели: {[name for _o, _n, name, _p in own]}")
+
         with open(output_smd_path, 'w', encoding='utf-8') as out:
             _wlines(out, orig_parts.get('version') or user_parts.get('version'))
-            _wlines(out, orig_parts.get('nodes') or user_parts.get('nodes'))
-            _wlines(out, orig_parts.get('skeleton') or user_parts.get('skeleton'))
+            _wlines(out, nodes)
+            _wlines(out, skeleton)
             # Запись треугольников → 80..100 %
             # keep_user_materials → передаём пустой список оригинальных имён,
             # тогда _write_merged_triangles сохраняет материалы пользователя.
@@ -210,11 +262,8 @@ class SMDService:
                 progress_cb=_cb,
                 pct_start=80,
                 pct_end=100,
-                bone_mapping=SMDService._bone_mapping(user_parts.get('nodes'),
-                                                     orig_parts.get('nodes')),
-                fallback_bone=SMDService._grip_bone(
-                    orig_parts.get('nodes'),
-                    orig_parts.get('triangles_data', [])),
+                bone_mapping=mapping,
+                fallback_bone=grip,
             )
 
         _cb(100)
@@ -360,11 +409,72 @@ class SMDService:
         одни номера, модель, зарриганная под игровые ИМЕНА, садилась на чужие
         кости — а угадать нужный порядок риггер не может никак.
         """
-        by_name = {name: bone
+        # Без учёта регистра, как и studiomdl: `Weapon_Bone` из Blender — та
+        # же кость, а не своя с тем же именем (её он счёл бы повтором).
+        by_name = {name.lower(): bone
                    for bone, name in SMDService._node_names(orig_nodes).items()}
-        return {bone: by_name[name]
+        return {bone: by_name[name.lower()]
                 for bone, name in SMDService._node_names(user_nodes).items()
-                if name in by_name}
+                if name.lower() in by_name}
+
+    @staticmethod
+    def _own_bones(user_nodes: Optional[List[str]], orig_nodes: Optional[List[str]],
+                   mapping: Dict[int, int], grip: int) -> List[Tuple[int, int, str, int]]:
+        """
+        Кости модели, которых нет в игровом скелете:
+        [(номер у пользователя, номер в выходном файле, имя, родитель)].
+
+        Номера идут за игровыми. Родитель — игровая кость, если она и у
+        пользователя родитель (по имени), иначе такая же своя. Корень своей
+        иерархии вешается на хват: оружие держит рука, и висящая в начале
+        координат кость оставила бы свою часть модели на месте.
+
+        Плоский скелет — все кости без родителя — своими костями не считается:
+        так пишет кости конвертер OBJ/GLB (одна `root` или суставы glTF без
+        иерархии и позы), и так выглядит модель без рига. Такие кости висели
+        бы на хвате без дела, а у сетки из Blender их десятки — до предела
+        studiomdl в 128 костей. Их вершины, как и раньше, садятся на хват.
+        """
+        user: Dict[int, Tuple[str, int]] = {}
+        for line in user_nodes or ():
+            m = _NODE_RE.match(line)
+            if m:
+                user[int(m.group(1))] = (m.group(2), int(m.group(3)))
+        extra = [bone for bone in sorted(user) if bone not in mapping]
+        if not extra or all(parent < 0 for _name, parent in user.values()):
+            return []
+        start = max(SMDService._node_names(orig_nodes), default=-1) + 1
+        renumbered = {bone: start + k for k, bone in enumerate(extra)}
+        out = []
+        for bone in extra:
+            name, parent = user[bone]
+            # ponytail: локальная поза своей кости берётся как есть, без пересчёта
+            # к игровому родителю. Риггер берёт скелет из разобранной модели, и
+            # позы совпадают; если нет — сетка встанет верно (вершины в мировых
+            # координатах), а ось поворота своей кости сдвинется. Пересчёт —
+            # через мировые матрицы обоих скелетов.
+            out.append((bone, renumbered[bone], name,
+                        mapping.get(parent, renumbered.get(parent, grip))))
+        return out
+
+    @staticmethod
+    def _bind_pose(skeleton_lines: Optional[List[str]]) -> Dict[int, str]:
+        """{кость: «x y z rx ry rz»} первого кадра секции skeleton."""
+        pose: Dict[int, str] = {}
+        started = False
+        for line in skeleton_lines or ():
+            parts = line.split()
+            if parts and parts[0] == 'time':
+                if started:
+                    break
+                started = True
+                continue
+            if started and len(parts) >= 7:
+                try:
+                    pose[int(parts[0])] = ' '.join(parts[1:7])
+                except ValueError:
+                    continue
+        return pose
 
     @staticmethod
     def _mesh_bones(triangles_data: List[Tuple[str, List[str]]]) -> set:

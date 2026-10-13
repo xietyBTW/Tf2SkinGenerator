@@ -1,15 +1,15 @@
 /*
  * «Готовые эффекты» редактора VMT: панель категорий вместо длинного меню.
  *
- * Слева категории, справа пункты выбранной — высота панели своя, и она не
+ * Слева категории, справа пункты выбранной - высота панели своя, и она не
  * тянется через весь экран, как меню на двадцать пунктов с пояснениями.
  * Эффект с настройками (цвет, сила) открывает форму на месте списка: она
  * заполнена тем, что уже стоит в материале, так что эффект можно
- * перенастроить. Текст эффекта собирает Python (vmt_effects.py) — здесь
+ * перенастроить. Текст эффекта собирает Python (vmt_effects.py) - здесь
  * только выбор значений.
  *
- * Панель отдаёт выбор, а вставляет его vmt.js: {item} — обычный пункт меню,
- * {text, replace} — готовый текст эффекта.
+ * Панель отдаёт выбор, а вставляет его vmt.js: {item} - обычный пункт меню,
+ * {text, replace} - готовый текст эффекта.
  */
 
 import * as api from './api.js';
@@ -28,7 +28,7 @@ let finish = null;
 //: Игровой оригинал материала: из него эффект берёт родную текстуру.
 let gameText = '';
 
-/** Панель открыта — повторный щелчок по кнопке её закрывает. */
+/** Панель открыта - повторный щелчок по кнопке её закрывает. */
 export function closeEffects() {
   if (!finish) return false;
   finish(null);
@@ -36,7 +36,7 @@ export function closeEffects() {
 }
 
 /**
- * Показывает панель над кнопкой `anchor`. `getText` — текущий текст
+ * Показывает панель над кнопкой `anchor`. `getText` - текущий текст
  * материала (форма эффекта читает из него значения). Отдаёт выбор или null.
  */
 export function pickEffect(anchor, data, getText, game = '') {
@@ -44,11 +44,11 @@ export function pickEffect(anchor, data, getText, game = '') {
   if (finish) finish(null);
   return new Promise((resolve) => {
     const onAway = (e) => {
-      // Палитра своего цвета — отдельный поповер, но выбор идёт для панели.
+      // Палитра своего цвета - отдельный поповер, но выбор идёт для панели.
       if (e.target.closest && e.target.closest('.picker')) return;
       if (!panel.contains(e.target) && e.target !== anchor) done(null);
     };
-    // Esc — только панель: общий Esc закрыл бы и само окно редактора. Пока
+    // Esc - только панель: общий Esc закрыл бы и само окно редактора. Пока
     // открыта палитра, Esc закрывает её одну (picker.js).
     const onKey = (e) => {
       if (e.key !== 'Escape' || picking()) return;
@@ -62,7 +62,7 @@ export function pickEffect(anchor, data, getText, game = '') {
       document.removeEventListener('keydown', onKey, true);
       if (panel.matches(':popover-open')) panel.hidePopover();
       panel.hidden = true;
-      // Кнопка выбранного пункта уже вне документа — фокус ушёл бы в body.
+      // Кнопка выбранного пункта уже вне документа - фокус ушёл бы в body.
       if (!value) anchor.focus();
       resolve(value);
     };
@@ -132,15 +132,15 @@ function showGroup(groups, index, done, getText) {
   pane.scrollTop = 0;
 }
 
-/** Форма эффекта: поля по описанию из Python, значения — из материала. */
+/** Форма эффекта: поля по описанию из Python, значения - из материала. */
 async function openForm(item, back, done, getText) {
   let values = {};
   try {
     const res = await api.vmtEffectValues(item.key, getText());
     values = res.values || {};
-  } catch { /* не прочиталось — умолчания формы */ }
+  } catch { /* не прочиталось - умолчания формы */ }
   // Пока ждали, панель закрыли или открыли заново: форма старого показа в
-  // новую панель не ложится (её `done` — чужой).
+  // новую панель не ложится (её `done` - чужой).
   if (finish !== done) return;
   for (const f of item.fields) if (!(f.key in values)) values[f.key] = f.default;
 
@@ -159,7 +159,7 @@ async function openForm(item, back, done, getText) {
   form.append(head, hint);
 
   // `show_if`: поле видно, пока другие поля имеют указанные значения («Круг
-  // цветов» — только у радуги, плашки — только у одного цвета).
+  // цветов» - только у радуги, плашки - только у одного цвета).
   const rows = [];
   const sync = () => rows.forEach(({ f, row }) => {
     row.hidden = !Object.entries(f.show_if || {}).every(([k, v]) => values[k] === v);
@@ -171,12 +171,12 @@ async function openForm(item, back, done, getText) {
   }
   sync();
 
-  // Замена всего материала — предупреждение прямо в форме, а не отдельным
+  // Замена всего материала - предупреждение прямо в форме, а не отдельным
   // окном после выбора: человек видит его до того, как нажмёт.
   if (item.replace) {
     form.append(Object.assign(document.createElement('p'), {
       className: 'fxpick__note',
-      textContent: t('Заменит весь материал. Вернуть игровой — «Как в игре».'),
+      textContent: t('Заменит весь материал. Вернуть игровой - «Как в игре».'),
     }));
   }
   const apply = Object.assign(document.createElement('button'),
@@ -201,11 +201,11 @@ async function openForm(item, back, done, getText) {
 }
 
 /** Одно поле формы. Значение пишется в `values[f.key]` сразу при выборе;
- *  `changed` — пересчитать, какие поля видны. */
+ *  `changed` - пересчитать, какие поля видны. */
 function field(f, values, changed = () => {}) {
   const row = document.createElement('div');
   row.className = 'fxpick__field';
-  // Без подписи — поле продолжает предыдущее (цвет под «Один цвет / Радуга»).
+  // Без подписи - поле продолжает предыдущее (цвет под «Один цвет / Радуга»).
   if (f.label) {
     row.append(Object.assign(document.createElement('span'),
       { className: 'label fxpick__label', textContent: f.label }));
@@ -214,7 +214,7 @@ function field(f, values, changed = () => {}) {
   ctl.className = 'fxpick__ctl';
 
   if (f.type === 'color') {
-    // Свой цвет — подписанная кнопка с образцом и кодом, а не ещё один
+    // Свой цвет - подписанная кнопка с образцом и кодом, а не ещё один
     // квадрат после готовых: пунктирный квадрат никто не узнавал как палитру.
     const own = Object.assign(document.createElement('label'), { className: 'fxpick__own' });
     const pick = Object.assign(document.createElement('input'),

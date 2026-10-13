@@ -353,9 +353,11 @@ class VTFLib:
                     pass
 
     @classmethod
-    def read_vtf_as_rgba(cls, vtf_path: str) -> tuple:
+    def read_vtf_as_rgba(cls, vtf_path: str, face: int = 0) -> tuple:
         """
         Загружает VTF файл и возвращает первый кадр в формате RGBA8888.
+        `face` - грань кубмапы (у VTF 7.4 и старше седьмая, 6, - сферическая
+        карта отражения).
 
         Returns:
             (rgba_bytes: bytes, width: int, height: int)
@@ -387,7 +389,7 @@ class VTFLib:
                 src_format = int(dll.vlImageGetFormat())
 
                 # Получаем указатель на сырые данные первого кадра (frame=0, face=0, slice=0, mip=0)
-                src_ptr = dll.vlImageGetData(vlUInt(0), vlUInt(0), vlUInt(0), vlUInt(0))
+                src_ptr = dll.vlImageGetData(vlUInt(0), vlUInt(face), vlUInt(0), vlUInt(0))
                 if not src_ptr:
                     raise RuntimeError("vlImageGetData returned NULL")
 

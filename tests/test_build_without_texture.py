@@ -153,8 +153,15 @@ class BuildEventsTests(unittest.TestCase):
         # BaseWorker.run: исключение шлёт error, а следом finished.
         self.w.error.emit('boom')
         self.w.finished.emit(False, 'boom')
-        self.assertEqual(self._done(), [{'ok': False, 'message': 'boom',
-                                         'cancelled': False}])
+        self.assertEqual(self._done(), [{'ok': False, 'message': 'boom', 'cancelled': False,
+                                         'filename': 'x.vpk', 'warnings': 0}])
+
+    def test_success_counts_warnings(self):
+        """Полоса показывает «Мод собран · имя · N предупреждений» — число отсюда."""
+        self.w.finished.emit(True, 'VPK успешно создан: export\\x.vpk\n\nВнимание:'
+                                   '\n- нет текстуры a\n- нет текстуры b')
+        done = self._done()[0]
+        self.assertEqual((done['ok'], done['filename'], done['warnings']), (True, 'x.vpk', 2))
 
     def test_stop_is_not_an_error(self):
         self.w.stopped = True
@@ -165,6 +172,17 @@ class BuildEventsTests(unittest.TestCase):
         """Воркер продолжает только на 'continue'; True он считал отказом."""
         self.w.texture_mismatch_warning.emit('материалы не совпадают')
         self.assertEqual(self.w.mismatch_answers, ['continue'])
+
+
+class VpkNameTests(unittest.TestCase):
+    """Имя мода набрали без «.vpk» — сборка его дописывает, а не падает."""
+
+    def test_extension_added_once(self):
+        from src.app.session import _vpk_name
+        self.assertEqual(_vpk_name('mymod', 'mod.vpk'), 'mymod.vpk')
+        self.assertEqual(_vpk_name(' mymod.VPK ', 'mod.vpk'), 'mymod.VPK')
+        self.assertEqual(_vpk_name('', 'mod.vpk'), 'mod.vpk')
+        self.assertEqual(_vpk_name(None, 'sounds_mod'), 'sounds_mod.vpk')
 
 
 if __name__ == '__main__':

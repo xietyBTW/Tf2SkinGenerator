@@ -173,6 +173,14 @@ def _own_paths(edits: Dict[str, object], files_dir: Path) -> Dict[str, object]:
                 if not owned:
                     continue          # картинки больше нет — карта без неё пуста
                 spec['image'] = owned
+            if spec.get('rim_image'):
+                # Маска обводки: пропала — обводка «везде», а не битый путь.
+                owned = _own_file(spec['rim_image'], files_dir)
+                if owned:
+                    spec['rim_image'] = owned
+                else:
+                    spec.pop('rim_image')
+                    spec['rim_mask'] = 'all'
             clean[map_id] = spec
         if clean:
             maps[mat] = clean

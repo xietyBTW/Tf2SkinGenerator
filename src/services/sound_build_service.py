@@ -41,14 +41,14 @@ def check_wav(path: str) -> str:
         head = _head(path)
         if head[:3] == b'ID3' or (head[:1] == b'\xff' and head[1:2] >= b'\xe0'):
             return ''
-        return 'внутри не MP3, а другой формат — игра его не прочитает'
+        return 'внутри не MP3, а другой формат - игра его не прочитает'
     try:
         with wave.open(path, 'rb') as snd:
             if snd.getsampwidth() != PCM_WIDTH:
-                return (f'{snd.getsampwidth() * 8}-битный звук — '
+                return (f'{snd.getsampwidth() * 8}-битный звук - '
                         f'игра играет только 16-битный')
             if snd.getframerate() not in GOOD_RATES:
-                return (f'частота {snd.getframerate()} Гц — '
+                return (f'частота {snd.getframerate()} Гц - '
                         f'игре нужна одна из {GOOD_RATES}')
     except wave.Error as exc:
         return f'не WAV с обычным PCM: {exc}'

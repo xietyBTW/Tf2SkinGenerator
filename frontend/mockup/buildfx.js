@@ -2,21 +2,21 @@
  * Сборка в нижней полосе: линия прогресса по её верхнему краю, текст этапа,
  * счётчик, кнопка «Остановить», финал, ошибка и звук.
  *
- * Как именно — выбирают в настройках, раздел «Кастомизация». Варианты и
+ * Как именно - выбирают в настройках, раздел «Кастомизация». Варианты и
  * умолчания живут здесь, Python только хранит выбор (`build_fx`). Движок один:
  * им играет и настоящая сборка (build.js, events.js), и пример в окне
- * настроек — у каждого свой набор элементов (createFx).
+ * настроек - у каждого свой набор элементов (createFx).
  *
  * Без анимаций интерфейса (настройка или системное «уменьшить движение»)
- * остаётся простая полоса: текст встаёт сразу, финал и ошибка — без
- * движения. Звук — своя настройка: от анимаций он не зависит.
+ * остаётся простая полоса: текст встаёт сразу, финал и ошибка - без
+ * движения. Звук - своя настройка: от анимаций он не зависит.
  */
 
 import * as api from './api.js';
 import { t } from './i18n.js';
 
 /** Варианты по группам: [ключ, подпись группы, [[значение, подпись], …]].
- *  Подписи русские — словарь страницы переводит их сам. */
+ *  Подписи русские - словарь страницы переводит их сам. */
 export const FX_GROUPS = [
   ['text', 'Текст этапа', [
     ['decode', 'Перебор букв'], ['type', 'Печать с кареткой'],
@@ -48,13 +48,14 @@ export const FX_GROUPS = [
     ['both', 'Щелчки и сигнал']]],
 ];
 
-/** Как выглядит сборка, пока человек ничего не выбрал. */
+/** Как выглядит сборка, пока человек ничего не выбрал. Звук только в конце
+ *  и при ошибке: щелчок на каждом этапе быстро надоедает. */
 export const FX_DEFAULTS = {
   text: 'decode', line: 'head', pct: 'roll', btn: 'stop',
-  fx: 'none', end: 'meet', err: 'shake', sound: 'both',
+  fx: 'none', end: 'meet', err: 'shake', sound: 'chime',
 };
 
-/** Сохранённый выбор, сверенный со списком: чужое значение — умолчание. */
+/** Сохранённый выбор, сверенный со списком: чужое значение - умолчание. */
 export function fxChoice(saved) {
   const out = { ...FX_DEFAULTS };
   for (const [key, , values] of FX_GROUPS) {
@@ -64,7 +65,7 @@ export function fxChoice(saved) {
   return out;
 }
 
-//: Цвета команд — те же, что у черт под знаком на заставке.
+//: Цвета команд - те же, что у черт под знаком на заставке.
 const RED = '#b8383b';
 const BLU = '#5885a2';
 const EASE = 'cubic-bezier(.3, 0, .2, 1)';
@@ -72,9 +73,9 @@ const EASE = 'cubic-bezier(.3, 0, .2, 1)';
 //: Кодами, а не строкой: строка кириллицы просилась бы в словарь перевода.
 const CYRILLIC = String.fromCharCode(...Array.from({ length: 32 }, (_, i) => 0x410 + i));
 const LATIN = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-//: Этап, который длится дольше, — «долгий»: на нём линия показывает, что
+//: Этап, который длится дольше, - «долгий»: на нём линия показывает, что
 //: сборка жива (сканер, сердцебиение, импульсы, искры). Сколько продлится
-//: этап, заранее не знает никто — смотрим, не пришёл ли следующий.
+//: этап, заранее не знает никто - смотрим, не пришёл ли следующий.
 const LONG_MS = 1200;
 //: Пример в настройках: этапы настоящей сборки оружия, второй с конца долгий.
 const DEMO = [[5, 'Подготовка сборки…', 800], [10, 'Извлечение модели…', 800],
@@ -94,7 +95,7 @@ function glyph() {
 }
 
 let audio = null;
-/** Короткий тон WebAudio — щелчок или сигнал. Звук — украшение: не вышло, и ладно. */
+/** Короткий тон WebAudio - щелчок или сигнал. Звук - украшение: не вышло, и ладно. */
 function tone(freq, dur, vol, type = 'sine') {
   try {
     audio = audio || new (window.AudioContext || window.webkitAudioContext)();
@@ -116,11 +117,11 @@ function tone(freq, dur, vol, type = 'sine') {
 /**
  * Движок на одном наборе элементов.
  *
- * `els`: host — полоса (в ней искры, луч, подсветка); line — контейнер линии
- * по её верхнему краю; state — текст этапа; pct и time — счётчик и время;
- * prog — их общий контейнер, rest — что он заслоняет на время сборки (сводка
- * параметров); button — кнопка «Остановить» (или её макет) с `.btn__label` и
- * `.btn__fill`; idleLabel — подпись кнопки в покое.
+ * `els`: host - полоса (в ней искры, луч, подсветка); line - контейнер линии
+ * по её верхнему краю; state - текст этапа; pct и time - счётчик и время;
+ * prog - их общий контейнер, rest - что он заслоняет на время сборки (сводка
+ * параметров); button - кнопка «Остановить» (или её макет) с `.btn__label` и
+ * `.btn__fill`; idleLabel - подпись кнопки в покое.
  */
 export function createFx(els) {
   //: Выбор из настроек. Действует со следующей сборки: смена посреди идущей
@@ -178,6 +179,15 @@ export function createFx(els) {
     d.style.cssText = css;
     parent.appendChild(d);
     return d;
+  }
+  /** Половины цветов команд: красная от левого края, синяя от правого.
+   *  Обычные блоки, и двигаются они шириной: такие встают на целые пиксели.
+   *  Слои (transform) и clip-path сглаживали верх и низ на полпикселя, и при
+   *  масштабе экрана 125% светлая синяя со своим полупрозрачным краем
+   *  казалась толще и ниже тёмной красной. */
+  function halves(width) {
+    return [seg(`height:100%;width:${width};background:${RED}`),
+            seg(`height:100%;left:auto;right:0;width:${width};background:${BLU}`)];
   }
   function ensureLine() {
     if (fill && fill.isConnected) return;
@@ -456,7 +466,7 @@ export function createFx(els) {
     if (opt.line === 'sparks') sparks(p);
     longTimer = setTimeout(() => { if (tok === run) slow(p); }, LONG_MS);
   }
-  /** Этап затянулся — линия показывает, что сборка жива. */
+  /** Этап затянулся - линия показывает, что сборка жива. */
   function slow(p) {
     if (opt.line === 'scanner' && head) {
       const w = edge(p) - 28;
@@ -516,7 +526,7 @@ export function createFx(els) {
   }
 
   // ── Финал и ошибка ──────────────────────────────────────────────────────
-  /** Всё, что двигалось по ходу сборки, — стоп: финалу и ошибке оно мешает. */
+  /** Всё, что двигалось по ходу сборки, - стоп: финалу и ошибке оно мешает. */
   function halt() {
     clearInterval(clock);
     clearTimeout(longTimer);
@@ -551,8 +561,10 @@ export function createFx(els) {
     const box = textBox();
     if (['stamp', 'assemble'].includes(opt.end)) {
       text = t(message);
+      // Штамп и буквы вылетают за строку: обрезку снимаем на время финала.
       box.style.overflow = 'visible';
       const s = document.createElement('span');
+      s.style.overflow = 'visible';
       box.replaceChildren(s);
       if (opt.end === 'stamp') {
         s.textContent = text;
@@ -565,40 +577,45 @@ export function createFx(els) {
                   { duration: 380, easing: 'cubic-bezier(.2, .8, .3, 1)' });
         els.host.animate([{ transform: 'none' }, { transform: 'translateY(2px)' },
                           { transform: 'none' }], { duration: 180, delay: 260 });
-      } else {
-        letters(s, text).forEach((e, i) => e.animate(
-          [{ transform: `translate(${rnd(80) - 40}px, ${rnd(40) - 20}px) rotate(${rnd(90) - 45}deg)`,
-             opacity: 0 }, { transform: 'none', opacity: 1 }],
-          { duration: 520, delay: i * 14, easing: 'cubic-bezier(.2, .8, .3, 1)', fill: 'backwards' }));
       }
-      await fadeFill();
+      const flying = opt.end === 'stamp' ? [] : letters(s, text).map((e, i) => e.animate(
+        [{ transform: `translate(${rnd(80) - 40}px, ${rnd(40) - 20}px) rotate(${rnd(90) - 45}deg)`,
+           opacity: 0 }, { transform: 'none', opacity: 1 }],
+        { duration: 520, delay: i * 14, easing: 'cubic-bezier(.2, .8, .3, 1)', fill: 'backwards' }));
+      // Обрезка возвращается, когда долетела последняя буква: длинное
+      // сообщение снова уходит под многоточие.
+      await Promise.all([fadeFill(), ...flying.map((a) => a.finished)]);
+      if (tok === run) box.style.overflow = s.style.overflow = '';
       return;
     }
     say(message, tok);
     const line = els.line;
     if (opt.end === 'meet') {
-      // Красный слева, синий справа — встретились, линия вздрогнула и
-      // схлопнулась к середине.
-      const halves = [seg(`width:50%;background:${RED};transform-origin:left`),
-                      seg(`left:50%;width:50%;background:${BLU};transform-origin:right`)];
-      await Promise.all(halves.map((x) => x.animate(
-        [{ transform: 'scaleX(0)' }, { transform: 'scaleX(1)' }],
-        { duration: 480, easing: EASE, fill: 'forwards' }).finished));
+      // Красный слева, синий справа - встретились, линия вздрогнула и
+      // схлопнулась к середине. Оранжевую цвета выдавливают к центру, а не
+      // накрывают: её край выглядывал из-под них и сливался с красной. Всё
+      // размерами, без transform: так края остаются целыми пикселями (halves).
+      const ms = { duration: 480, easing: EASE, fill: 'forwards' };
+      fill.style.transition = 'none';
+      fill.style.height = '100%';
+      fill.animate([{ left: '0%', width: '100%' }, { left: '50%', width: '0%' }], ms);
+      const [red, blu] = halves('0%');
+      await Promise.all([red, blu].map((x) => x.animate(
+        [{ width: '0%' }, { width: '50%' }], ms).finished));
       if (tok !== run) return;
-      line.style.transformOrigin = 'center';
-      await line.animate([{ transform: 'scaleY(1)' }, { transform: 'scaleY(2.5)' },
-                          { transform: 'scaleY(1)' }], { duration: 260, easing: 'ease-out' }).finished;
+      await line.animate([{ top: '-1px', height: '2px' }, { top: '-2.5px', height: '5px' },
+                          { top: '-1px', height: '2px' }], { duration: 260, easing: 'ease-out' }).finished;
       if (tok !== run) return;
-      await line.animate([{ transform: 'scaleX(1)' }, { transform: 'scaleX(0)' }],
-                         { duration: 520, delay: 240, easing: 'cubic-bezier(.6, 0, .4, 1)',
-                           fill: 'forwards' }).finished;
+      const out = { duration: 520, delay: 240, easing: 'cubic-bezier(.6, 0, .4, 1)', fill: 'forwards' };
+      await Promise.all([
+        red.animate([{ left: '0%', width: '50%' }, { left: '50%', width: '0%' }], out).finished,
+        blu.animate([{ right: '0%', width: '50%' }, { right: '50%', width: '0%' }], out).finished,
+      ]);
     } else if (opt.end === 'split') {
       fill.style.opacity = '0';
-      const halves = [seg(`width:50%;background:${RED};transform-origin:left`),
-                      seg(`left:50%;width:50%;background:${BLU};transform-origin:right`)];
-      await Promise.all(halves.map((x) => x.animate(
-        [{ transform: 'scaleX(1)', opacity: 1 }, { transform: 'scaleX(.12)', opacity: 1, offset: 0.7 },
-         { transform: 'scaleX(.12)', opacity: 0 }],
+      await Promise.all(halves('50%').map((x) => x.animate(
+        [{ width: '50%', opacity: 1 }, { width: '6%', opacity: 1, offset: 0.7 },
+         { width: '6%', opacity: 0 }],
         { duration: 1000, delay: 400, easing: EASE, fill: 'forwards' }).finished));
     } else if (opt.end === 'collapse') {
       line.style.transformOrigin = 'left';
@@ -700,7 +717,7 @@ export function createFx(els) {
     ants = null;
     tint = null;
     els.host.getAnimations().forEach((a) => a.cancel());
-    // Линия — заново: заливка и край прошлой сборки уехали бы к началу
+    // Линия - заново: заливка и край прошлой сборки уехали бы к началу
     // анимацией, а их ждущие финалы проснулись бы на новой.
     els.line.getAnimations({ subtree: true }).forEach((a) => a.cancel());
     els.line.replaceChildren();
@@ -742,7 +759,7 @@ export function createFx(els) {
     button(true, 0);
     say(label, tok);
     // Звуку нужен жест человека: контекст заводим, пока щелчок «Собрать»
-    // ещё свежий, — иначе первый щелчок этапа прозвучал бы с опозданием.
+    // ещё свежий, - иначе первый щелчок этапа прозвучал бы с опозданием.
     if (opt.sound !== 'none') tone(1, 0.001, 0.0001);
   }
 
@@ -769,7 +786,7 @@ export function createFx(els) {
   }
 
   /** Подшаг этапа (упаковка, замена модели): своя подпись, линия стоит.
-   *  Приходят они пачкой — чаще четырёх раз в секунду текст не дёргаем,
+   *  Приходят они пачкой - чаще четырёх раз в секунду текст не дёргаем,
    *  но последняя подпись пачки встаёт всё равно, с опозданием. */
   function detail(label) {
     if (!label) return;
@@ -847,7 +864,7 @@ export function createFx(els) {
   };
 }
 
-//: Полоса внизу окна — её сборка.
+//: Полоса внизу окна - её сборка.
 export const dockFx = createFx({
   host: document.querySelector('.dock'),
   line: document.getElementById('dockline'),

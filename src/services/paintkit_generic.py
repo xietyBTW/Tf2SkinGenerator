@@ -17,10 +17,18 @@ Paint их рисовал художник Valve (`p_<пушка>_albedo/_groups
 
 Результат — словарь «виртуальных» текстур для загрузчика компоновщика и
 значения переменных рецепта, которые на них указывают.
+
+Украшенное оружие коллекций (Current Event, Night Owl…) шаблона не имеет:
+его рецепт нарисован под маски одной пушки, пути к ним и номера её групп
+записаны в самом рецепте. Такой рецепт переносится иначе (``recipe_looks``):
+его «виды» — что получает деталь в зависимости от группы — раздаются по
+деталям модели в тех долях, что на пушке-оригинале, а маски оригинала
+подменяются масками модели (``swap_weapon_textures``).
 """
 
 from __future__ import annotations
 
+import math
 import random
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Tuple
@@ -51,9 +59,19 @@ def _rasterize(polys_by_value: Sequence[Tuple[int, List]], size: int) -> np.ndar
     draw = ImageDraw.Draw(img)
     for value, tris in polys_by_value:
         for tri in tris:
-            # v вверх у SMD/OBJ; строка картинки — сверху вниз.
-            pts = [(u * size, (1.0 - v) * size) for u, v in tri]
-            draw.polygon(pts, fill=int(value), outline=int(value))
+            # Текстура повторяется, и развёртку кладут и в соседнюю плитку (у
+            # линзы Базарной безделушки u от 1 до 2): её место на холсте то же,
+            # что в плитке 0..1. Треугольник через край плитки рисуется и с
+            # другой стороны — лишнее за холстом PIL обрежет сам.
+            cu = math.floor(sum(u for u, _ in tri) / 3)
+            cv = math.floor(sum(v for _, v in tri) / 3)
+            tri = [(u - cu, v - cv) for u, v in tri]
+            us, vs = [u for u, _ in tri], [v for _, v in tri]
+            for du in {0, -1 if max(us) > 1 else 0, 1 if min(us) < 0 else 0}:
+                for dv in {0, -1 if max(vs) > 1 else 0, 1 if min(vs) < 0 else 0}:
+                    # v вверх у SMD/OBJ; строка картинки — сверху вниз.
+                    pts = [((u + du) * size, (1.0 - (v + dv)) * size) for u, v in tri]
+                    draw.polygon(pts, fill=int(value), outline=int(value))
     return np.asarray(img)
 
 
@@ -147,28 +165,7 @@ def build_inputs(parts_model, obj_material: str, base_rgba: np.ndarray, size: in
     if not units or not layers:
         return None
     chosen = layout_for(units, layers, over_albedo, layout_seed, assign)
-
-    polys = []
-    labels_src = []
-    for i, unit in enumerate(units):
-        polys.append((chosen[i] * 16, unit.uv))
-        labels_src.append((min(i + 1, 255), unit.uv))
-    groups_r = _rasterize(polys, size)
-    labels = _rasterize(labels_src, size)
-
-    groups = np.zeros((size, size, 4), np.uint8)
-    groups[..., 0] = groups_r
-    groups[..., 3] = 255
-
-    from PIL import Image
-    base = np.asarray(Image.fromarray(base_rgba, 'RGBA').resize((size, size), Image.LANCZOS))
-
-    wear = (_edge_wear(labels, size) * 255).astype(np.uint8)
-    ao = (_soft_ao(base, size) * 255).astype(np.uint8)
-    gray = lambda a: np.dstack([a, a, a, np.full_like(a, 255)])  # noqa: E731
-
-    textures = {GEN + 'albedo': base, GEN + 'groups': groups,
-                GEN + 'wearblend': gray(wear), GEN + 'ao': gray(ao)}
+    textures = _textures(units, [c * 16 for c in chosen], base_rgba, size)
     forced = {'weapon_albedo': GEN + 'albedo', 'weapon_groups': GEN + 'groups',
               'weapon_wearblend': GEN + 'wearblend', 'weapon_ao': GEN + 'ao'}
     # Выбор групп: слой N берёт группу N (значение N·16 в маске). Остальные
@@ -178,6 +175,156 @@ def build_inputs(parts_model, obj_material: str, base_rgba: np.ndarray, size: in
             forced[f'texture_layer_{layer}_select_{k}'] = str(layer * 16) if k == 1 else '0'
     return GenericInputs(textures=textures, forced=forced,
                          assignment={u.key: chosen[i] for i, u in enumerate(units)})
+
+
+def _textures(units: Sequence['Unit'], values: Sequence[int], base_rgba: np.ndarray,
+              size: int) -> Dict[str, np.ndarray]:
+    """Альбедо, группы, износ и AO по деталям: деталь i — значение values[i] в маске групп."""
+    from PIL import Image
+
+    groups = np.zeros((size, size, 4), np.uint8)
+    groups[..., 0] = _rasterize([(values[i], u.uv) for i, u in enumerate(units)], size)
+    groups[..., 3] = 255
+    labels = _rasterize([(min(i + 1, 255), u.uv) for i, u in enumerate(units)], size)
+    base = np.asarray(Image.fromarray(base_rgba, 'RGBA').resize((size, size), Image.LANCZOS))
+    wear = (_edge_wear(labels, size) * 255).astype(np.uint8)
+    ao = (_soft_ao(base, size) * 255).astype(np.uint8)
+    gray = lambda a: np.dstack([a, a, a, np.full_like(a, 255)])  # noqa: E731
+    return {GEN + 'albedo': base, GEN + 'groups': groups,
+            GEN + 'wearblend': gray(wear), GEN + 'ao': gray(ao)}
+
+
+# ── Украшенное оружие: ручной рецепт одной пушки на любой модели ───────── #
+
+@dataclass
+class Looks:
+    """
+    Виды ручного рецепта: что получает деталь, смотря по номеру её группы.
+
+    Вид — набор узлов select, которые группу выбирают; вид 0 — «ни один»
+    (узор под всеми выборами; группу 0 рецепт не выбирает никогда).
+    """
+    groups: str              # маска групп пушки-оригинала в рецепте
+    values: List[int]        # значение маски у вида (номер группы · 16)
+    shares: List[float]      # доля вида на пушке-оригинале
+
+
+def _selects(node: dict, out: List[dict]) -> List[dict]:
+    if node.get('type') == 'select':
+        out.append(node)
+    for child in node.get('nodes') or []:
+        _selects(child, out)
+    return out
+
+
+def _group(value) -> int:
+    try:
+        return round(int(float(str(value).split()[0])) / 16.0)
+    except (ValueError, IndexError):
+        return 0
+
+
+def recipe_looks(recipe: dict, loader) -> Looks:
+    """
+    Виды рецепта и их доли на пушке-оригинале (по её маске групп; без маски —
+    поровну). Номера групп у разных select бывают одними и теми же (у Coffin
+    Nail узор и цвет выбирают одну группу) — это один вид.
+    """
+    nodes = _selects(recipe, [])
+    wanted = [{_group(v) for v in n.get('select') or []} - {0} for n in nodes]
+    by_look: Dict[frozenset, List[int]] = {}
+    # Групп 17: 248 и 255 в маске и в select — это round(·/16) = 16 (у ножа
+    # такая пятая часть, у Stabbed to Hell на ней трещины).
+    for gid in range(17):
+        look = frozenset(i for i, ids in enumerate(wanted) if gid in ids)
+        by_look.setdefault(look, []).append(gid)
+    gids = [by_look.pop(frozenset(), [0])] + sorted(by_look.values())
+    groups = next(((n.get('fields') or {}).get('groups', '') for n in nodes), '')
+
+    mask = loader(groups, raw=True) if groups else None
+    counts = (np.bincount(np.round(mask[..., 0] / 16.0).astype(np.int64).ravel(), minlength=17)
+              if mask is not None else None)
+    # Группа 0 у масок Valve — фон вне развёртки: в доли не входит.
+    areas = ([float(sum(counts[g] for g in ids if g)) for ids in gids]
+             if counts is not None else [])
+    total = sum(areas)
+    shares = ([a / total for a in areas] if total
+              else [1.0 / len(gids)] * len(gids))
+    # Группе 16 — 255: 256 в восьмибитную маску не влезет.
+    return Looks(groups=groups, values=[min(ids[0] * 16, 255) for ids in gids],
+                 shares=shares)
+
+
+def assign_shares(areas: Sequence[float], shares: Sequence[float],
+                  layout_seed: int = 0) -> List[int]:
+    """
+    Вид каждой детали (детали — от крупной к мелкой) так, чтобы площади видов
+    шли в тех же долях, что на пушке-оригинале: деталь достаётся виду, которому
+    сейчас больше всех недостаёт. ``layout_seed`` выбирает вид случайно, с
+    весом по недостаче.
+    """
+    total = sum(areas) or 1.0
+    got = [0.0] * len(shares)
+    rng = random.Random(layout_seed)
+    out = []
+    for area in areas:
+        lack = [max(share - have / total, 0.0) for share, have in zip(shares, got)]
+        if layout_seed and sum(lack) > 0:
+            look = rng.choices(range(len(shares)), weights=lack)[0]
+        else:
+            look = max(range(len(shares)), key=lambda k: lack[k])
+        got[look] += area
+        out.append(look)
+    return out
+
+
+def looks_inputs(parts_model, obj_material: str, base_rgba: np.ndarray, size: int,
+                 looks: Looks, layout_seed: int = 0,
+                 assign: Optional[Dict[str, int]] = None) -> Optional[GenericInputs]:
+    """Входы ручного рецепта на модели: маска групп — значения видов. None — нет развёртки."""
+    units = units_for(parts_model, obj_material, len(looks.values))
+    if not units:
+        return None
+    auto = assign_shares([u.area for u in units], looks.shares, layout_seed)
+    chosen = _manual(units, auto, set(range(len(looks.values))), assign)
+    return GenericInputs(
+        textures=_textures(units, [looks.values[c] for c in chosen], base_rgba, size),
+        forced={}, assignment={u.key: chosen[i] for i, u in enumerate(units)})
+
+
+def swap_weapon_textures(recipe: dict) -> dict:
+    """
+    Ручной рецепт на чужой модели: маски пушки-оригинала заменяются масками
+    модели. Её текстура и альбедо (``p_<пушка>_albedo``, у Old Country —
+    сама ``c_revolver``) — альбедо модели; группы, износ (у Gun Mettle бывает
+    свой: ``p_smg_wearblend_gunmettle``) и затенение — её же. Рисунок под
+    развёртку оригинала снимается.
+    """
+    from src.data.paintkit_defs import weapon_drawn
+
+    def swap(path: str) -> str:
+        low = (path or '').replace('\\', '/').lower()
+        weapon = low.startswith('models/weapons/')
+        # Картинка под развёртку оригинала (у Killer Bee — поверх узора
+        # умножением) на чужой модели легла бы куда попало: белое — без неё.
+        if weapon_drawn(low):
+            return 'patterns/blank_white'
+        if '_wearblend' in low:
+            return GEN + 'wearblend'
+        if weapon and low.endswith('_groups'):
+            return GEN + 'groups'
+        if weapon and low.endswith('_ao'):
+            return GEN + 'ao'
+        return GEN + 'albedo' if weapon else path
+
+    fields = dict(recipe.get('fields') or {})
+    if recipe.get('type') == 'select':
+        fields['groups'] = GEN + 'groups'
+    for key in ('texture', 'texture_red', 'texture_blue'):
+        if fields.get(key):
+            fields[key] = swap(fields[key])
+    return dict(recipe, fields=fields,
+                nodes=[swap_weapon_textures(n) for n in recipe.get('nodes') or []])
 
 
 def _uv_area(tris) -> float:
@@ -256,7 +403,12 @@ def layout_for(units: Sequence[Unit], layers: Sequence[int], over_albedo: bool,
                layout_seed: int = 0, assign: Optional[Dict[str, int]] = None) -> List[int]:
     """Слой каждой детали: ручной выбор человека поверх автоматической раскладки."""
     auto = assign_layers([u.area for u in units], layers, over_albedo, layout_seed)
-    allowed = set(layers) | {0}
+    return _manual(units, auto, set(layers) | {0}, assign)
+
+
+def _manual(units: Sequence[Unit], auto: Sequence[int], allowed: set,
+            assign: Optional[Dict[str, int]]) -> List[int]:
+    """Ручной выбор человека поверх автомата; слой, которого нет, не в счёт."""
     out = []
     for unit, default in zip(units, auto):
         chosen = (assign or {}).get(unit.key)

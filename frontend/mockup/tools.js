@@ -12,7 +12,7 @@ import { say } from './stage.js';
 import { loadPcf, pSystem } from './particles/index.js';
 import { floating, panel, closeCat } from './layout.js';
 
-// Инструменты: пока подключён экспорт UV-шаблона — он нужен, чтобы глазами
+// Инструменты: пока подключён экспорт UV-шаблона - он нужен, чтобы глазами
 // сверить, куда какой кусок текстуры садится на модель.
 document.getElementById('tools').addEventListener('click', async (e) => {
   const item = e.target.closest('.menu__item');
@@ -72,7 +72,7 @@ document.getElementById('tools').addEventListener('click', async (e) => {
   if (item.dataset.tool === 'texture') {
     const res = await api.extractTexture();
     if (res.error) { say(res.error); return; }
-    // У тела персонажа текстур два десятка — какие брать, решает человек.
+    // У тела персонажа текстур два десятка - какие брать, решает человек.
     if (res.need_textures) {
       const picked = await ask({
         title: 'Какие текстуры извлечь',
@@ -94,7 +94,7 @@ document.getElementById('tools').addEventListener('click', async (e) => {
 /**
  * Объединение собранных модов в один VPK.
  *
- * Моды, трогающие одно оружие, друг друга затирают — про такие Python
+ * Моды, трогающие одно оружие, друг друга затирают - про такие Python
  * предупреждает до запуска и ждёт подтверждения.
  */
 export async function mergeMods() {

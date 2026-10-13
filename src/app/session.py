@@ -17,7 +17,7 @@ from __future__ import annotations
 import os
 import queue
 import threading
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from src.app.parts_editor import PartsEditor
 from src.app.particles_editor import ParticlesEditor
@@ -74,6 +74,14 @@ def _part_kind(smd_name: str) -> str:
 def _existing_path(path: Optional[str]) -> Optional[str]:
     """Путь, если файл на месте, иначе None."""
     return path if path and os.path.isfile(path) else None
+
+
+def _vpk_name(name: Optional[str], default: str) -> str:
+    """Имя мода из поля страницы: набрали без «.vpk» — дописываем, а не
+    отказываем в сборке (поле подсказывает имя с расширением, и человек его
+    стирает)."""
+    name = (name or '').strip() or default
+    return name if name.lower().endswith('.vpk') else name + '.vpk'
 
 
 def _in_work_dir(path: str) -> bool:
@@ -1448,7 +1456,7 @@ class AppSession:
         got = (path or '').rsplit('.', 1)[-1].lower()
         if not want or got in want:
             return ''
-        return ('игра ждёт здесь {}, а это {} — звук просто не зазвучит'
+        return ('игра ждёт здесь {}, а это {} - звук просто не зазвучит'
                 .format('/'.join(sorted(k.upper() for k in want)),
                         got.upper() or '?'))
 
@@ -1550,9 +1558,7 @@ class AppSession:
         from src.shared.validators import validate_vpk_filename
 
         export_folder, _ = self._export_settings()
-        name = (filename or 'sounds_mod').strip()
-        if not name.lower().endswith('.vpk'):
-            name += '.vpk'
+        name = _vpk_name(filename, 'sounds_mod')
         # Имя приходит из поля на странице и становится путём файла: тем же
         # правилом, что у сборки текстур, отсекаем слэши и точки-родители.
         good, trouble = validate_vpk_filename(name)
@@ -1751,10 +1757,13 @@ class AppSession:
         decor_paths = [p for d in decor for teams in d['textures'].values()
                        for p in teams.values()]
         part_specs = self._part_material_specs() or []
-        part_paths = [s[k] for s in part_specs for k in ('image', 'image_blu') if s[k]]
+        part_paths = [*(s[k] for s in part_specs for k in ('image', 'image_blu') if s[k]),
+                      *(p for s in part_specs for p in s['style_images'].values())]
+        own_styles = self._own_style_data()
+        style_paths = list((own_styles or {}).get('variant_files', {}).values())
         plan = self.parts.bake_plan([image, *extra.values(),
                                      *t.blu_uploaded_paths().values(), *decor_paths,
-                                     *part_paths])
+                                     *part_paths, *style_paths])
         baked = self.parts.baked_path
         image = baked(image)
         extra = {mat: baked(p) for mat, p in extra.items()}
@@ -1765,6 +1774,10 @@ class AppSession:
                if mat not in own_parts}
         for s in part_specs:
             s['image'], s['image_blu'] = baked(s['image']), baked(s['image_blu'])
+            s['style_images'] = {row: baked(p) for row, p in s['style_images'].items()}
+        if own_styles:
+            own_styles['variant_files'] = {name: baked(p) for name, p
+                                           in own_styles['variant_files'].items()}
 
         # Краска игры по альфе ($blendtintbybasealpha): своя картинка без
         # альфы в игре перекрасится ЦЕЛИКОМ, а превью показывает её как есть.
@@ -1774,7 +1787,10 @@ class AppSession:
         if not (mode == 'hat' and not params.get('hat_paints', True)):
             risks = self._tint_risks([image, *extra.values(), *blu.values(),
                                       *(s[k] for s in part_specs
-                                        for k in ('image', 'image_blu') if s[k])])
+                                        for k in ('image', 'image_blu') if s[k]),
+                                      *(p for s in part_specs
+                                        for p in s['style_images'].values()),
+                                      *(own_styles or {}).get('variant_files', {}).values()])
             if risks and tint_mode not in ('none', 'mask', 'strip', 'keep'):
                 from src.services import vmt_tint
                 spec = next(iter(risks.values()))[0]
@@ -1789,6 +1805,11 @@ class AppSession:
                 for s in part_specs:
                     for k in ('image', 'image_blu'):
                         s[k] = fixed.get(s[k], s[k])
+                    s['style_images'] = {row: fixed.get(p, p)
+                                         for row, p in s['style_images'].items()}
+                if own_styles:
+                    own_styles['variant_files'] = {
+                        name: fixed.get(p, p) for name, p in own_styles['variant_files'].items()}
 
         hat_primary, hat_models = (self._hat_build_models(params.get('hat_classes'))
                                    if mode == 'hat' else (None, None))
@@ -1801,7 +1822,7 @@ class AppSession:
             image_path=image,
             main_from_game=main_from_game,
             mode=mode,
-            filename=params.get('filename') or 'mod.vpk',
+            filename=_vpk_name(params.get('filename'), 'mod.vpk'),
             size=(size, size),
             format_type=params.get('format') or 'DXT5',
             flags=list(params.get('flags') or []),
@@ -1845,6 +1866,9 @@ class AppSession:
             # номера треугольников превью — чужие).
             part_materials=(part_specs or None
                             if not self.preview.custom_vpk_mode else None),
+            # Стили своей модели «со своими материалами» (и её Australium):
+            # таблицу скинов сборка собирает из них сама.
+            skin_build_data=own_styles,
             # Папка обхода sv_pure из настроек (console / vgui): без неё
             # сборка молча оставалась на умолчании console.
             bypass_method=self._bypass_method(),
@@ -1902,9 +1926,17 @@ class AppSession:
                                                            sub=True))
         # Отмена кончается тем же «не собрано», но это не ошибка: интерфейсу
         # незачем вздрагивать красным.
-        w.finished.connect(lambda ok, msg: self._put(
-            'build_done', ok=bool(ok), message=msg,
-            cancelled=not ok and w.isInterruptionRequested()))
+        def _done(ok: bool, msg: str) -> None:
+            # Итог в полосе короткий: имя мода и число предупреждений. Сами
+            # предупреждения дописаны к сообщению строками «- …» после пустой
+            # строки (VPKService, «Внимание:») и лежат в журнале: строкой в
+            # полосе их было не прочесть.
+            tail = (msg or '').partition('\n\n')[2]
+            self._put('build_done', ok=bool(ok), message=msg,
+                      cancelled=not ok and w.isInterruptionRequested(),
+                      filename=os.path.basename(request.filename),
+                      warnings=sum(1 for line in tail.splitlines() if line.startswith('- ')))
+        w.finished.connect(_done)
         w.finished.connect(lambda ok, msg: self.parts.drop_baked())
         # `error` не слушаем: за ним всегда идёт `finished` (BaseWorker.run),
         # и одна ошибка приходила странице дважды.
@@ -1924,24 +1956,41 @@ class AppSession:
 
     def _part_material_specs(self) -> Optional[list]:
         """Части-материалы для сборки:
-        [{name, base, tris, total, sources, image, image_blu, map_base}].
+        [{name, base, tris, total, sources, image, image_blu, style_images,
+        map_base, existing?}].
 
         `image`/`image_blu` — своя картинка материала части на RED и на BLU
         (у нейтрального исходного это одна и та же): сборка ставит её только в
-        строки скина своей команды, в остальных — игровая текстура строки.
+        строки скина своей команды. `style_images` — {материал строки стиля:
+        картинка} — её правки стилей (у гильотины Bloody — в строке
+        `c_sd_cleaver_bloody`). В остальных строках — игровая текстура строки.
         `map_base` — основа карт «из текстуры»: своя картинка RED, иначе
-        игровая текстура исходного.
+        игровая текстура исходного. `existing` — части отданы родному
+        материалу модели: только переименовать треугольники.
         """
         from src.domain.preview.texture_state import _existing
+        from src.services import part_materials as pm
         from src.shared.constants import Team
 
         t = self.preview.textures
+        rows = (t.skin_info or {}).get('rows') or []
+        head = [str(n).lower() for n in rows[0]] if rows else []
         specs = []
         for base, entries in self.preview.part_materials.items():
+            col = head.index(base.lower()) if base.lower() in head else -1
             for e in entries:
                 if not e.get('tris'):
                     continue
                 name = e['name']
+                if e.get('existing'):
+                    # Картинка, VMT и место в $texturegroup у родного
+                    # материала свои — их сборка пишет и без частей.
+                    specs.append({'name': name, 'base': base, 'tris': list(e['tris']),
+                                  'total': e.get('total'), 'late': e.get('late'),
+                                  'sources': list(e.get('sources') or []),
+                                  'existing': True, 'image': None, 'image_blu': None,
+                                  'style_images': {}, 'map_base': None})
+                    continue
                 image = _existing(t.textures.get(Team.RED, {}).get(name))
                 blu = _existing(t.textures.get(Team.BLU, {}).get(name))
                 # «Сделать командным» без своей синей: синий берёт красную —
@@ -1950,14 +1999,65 @@ class AppSession:
                     blu = image
                 maps = self.preview.texture_maps.get(name) or {}
                 derive = any((m or {}).get('derive') for m in maps.values())
+                styles = {}
+                for style, overrides in t.skin_overrides.items():
+                    own = _existing((overrides or {}).get(name))
+                    if not own:
+                        continue
+                    if self.preview.own_styles:
+                        # Своя модель: строки стиля собирает сборка, и исходный
+                        # в них — `<материал>_<стиль>`, если его добавили в стиль.
+                        card = e.get('card') or base
+                        if card in (self.preview.skin_chosen.get(style) or set()):
+                            styles[f"{pm.model_name(base)}_"
+                                   f"{self.preview.style_suffix(style)}".lower()] = own
+                        continue
+                    row = rows[style] if 0 < int(style) < len(rows) else []
+                    if 0 <= col < len(row) and str(row[col]).lower() != base.lower():
+                        styles[str(row[col]).lower()] = own
                 specs.append({'name': name, 'base': base, 'tris': list(e['tris']),
                               'total': e.get('total'), 'late': e.get('late'),
                               'sources': list(e.get('sources') or []),
                               'image': image,
                               'image_blu': blu,
+                              'style_images': styles,
                               'map_base': (image or t.game_base(name, Team.RED))
                               if derive else None})
         return specs or None
+
+    def _own_style_data(self) -> Optional[Dict[str, Any]]:
+        """
+        Стили своей модели «со своими материалами» для сборки:
+        {mesh_materials, tg_overrides {скин: {материал: вариант}}, variant_files}.
+
+        Игровая таблица скинов к такой модели не подходит — её имена игровые,
+        — и сборка собирает свою (ModelBuildService.generate_texturegroup_block)
+        из того, что человек положил в стили «плюсиком»: материал стиля
+        получает вариант `<материал>_<стиль>` во всех строках этого стиля
+        (у Australium их две — RED и BLU), остальные во всех скинах те же.
+        Раньше это заполняла панель окна Qt; веб-версия — нет, и стили своей
+        модели молча пропадали из мода.
+        """
+        from src.domain.preview.texture_state import _existing
+
+        p, t = self.preview, self.preview.textures
+        if not p.own_styles:
+            return None
+        mats = list(t.material_names)
+        overrides: Dict[int, Dict[str, str]] = {}
+        files: Dict[str, str] = {}
+        for style, by_mat in sorted(t.skin_overrides.items()):
+            for mat in mats:
+                path = _existing((by_mat or {}).get(mat)) if style else None
+                if not path:
+                    continue
+                name = f"{mat}_{p.style_suffix(int(style))}"
+                files[name] = path
+                for row in p.style_rows(int(style)):
+                    overrides.setdefault(row, {})[mat] = name
+        if not overrides:
+            return None
+        return {'mesh_materials': mats, 'tg_overrides': overrides, 'variant_files': files}
 
     def _edits_besides_textures(self, mode: str, params: Dict[str, Any]) -> List[str]:
         """Что правлено кроме своих текстур — то, ради чего стоит собирать мод
@@ -2316,6 +2416,29 @@ class AppSession:
 
     # ── War Paint ─────────────────────────────────────────────────────── #
 
+    def sheen_mask_params(self) -> Optional[Dict[str, Any]]:
+        """Положение полосы блеска для показанного оружия — из заголовка его
+        MDL в игре (vmt_effects.sheen_mask_params). None — не оружие или нет
+        игры. Своя геометрия: берётся стоковая модель, полоса может лечь
+        чуть иначе."""
+        from src.services import vmt_effects
+        from src.services.game_vpk_reader import GameVpkReader
+
+        if not self._shown_weapon():
+            return None
+        paths = self.tf2_paths()
+        if 'error' in paths:
+            return None
+        from src.services.paintkit_worker import _find_mdl
+
+        reader = GameVpkReader([paths['misc_vpk']])
+        try:
+            # Не у всех оружий модель лежит в c_models/<ключ>/: тогда по имени.
+            data = _find_mdl(reader, self._paintkit_model())
+        finally:
+            reader.close()
+        return vmt_effects.sheen_mask_params(data) if data else None
+
     def _paintkit_model(self) -> str:
         """Файл модели показанного оружия — по нему War Paint и ищутся."""
         from src.data.weapons import WEAPON_MDL_PATHS
@@ -2342,7 +2465,9 @@ class AppSession:
         Есть свои в игре — отдаются они (``generic: False``). Нет (или модель
         своя) — все War Paint с шаблоном в универсальном режиме
         (``generic: True``): узор раскладывается по частям модели, см.
-        paintkit_generic.
+        paintkit_generic. Следом в обоих случаях — украшенное оружие
+        коллекций с других пушек (``decorated``): в игре каждый такой скин
+        есть только у своих, здесь он ложится по деталям.
         """
         from src.data import paintkit_defs
 
@@ -2352,18 +2477,148 @@ class AppSession:
         if not self._shown_weapon():
             return {'items': [], 'generic': False}
         own = self._own_paintkits(paths['root'], lang)
-        if own:
-            return {'items': own, 'generic': False}
-        return {'items': paintkit_defs.generic_kits(paths['root'], lang), 'generic': True}
+        kits = own or paintkit_defs.generic_kits(paths['root'], lang)
+        ids = {k['id'] for k in kits}
+        decorated = [k for k in paintkit_defs.decorated_kits(paths['root'], lang)
+                     if k['id'] not in ids]
+        return {'items': kits + decorated, 'generic': not own}
 
-    def _paintkit_plan(self, kit: int, item: int, layout: int):
+    def _paintkit_offer(self, paths: Dict[str, str], item: int,
+                        real: bool) -> Tuple[List[str], List[str], List[str]]:
         """
-        (универсальный режим или None, метка для имени файла) — или ошибка.
+        (карточки, на которые War Paint может лечь; те из них, что красит
+        игра; те, на которые узор ляжет по деталям). ``real`` — War Paint
+        игры, а не универсальный режим: карточку игры рецепт красит и без
+        своего меша, по деталям — нет.
+
+        Карточке без своего меша (вставки HUD, материал $texturegroup вне
+        модели, огоньки гирлянды мода) узор по деталям не положить: у
+        одноматериальной модели она нашла бы единственный меш, и War Paint
+        лёг бы по чужой развёртке, у многоматериальной — не нашла бы ничего.
+        Материал части идёт за своим исходным: развёртка у них общая, и
+        картинка исходного ложится на него как есть.
+        """
+        from src.domain.preview.texture_state import is_decor
+        from src.services import mesh_parts_service
+
+        t = self.preview.textures
+        main = t.stable_main()
+        game = self._game_cards(paths, item) if real else []
+        model = mesh_parts_service.load(self._obj_path, self.preview.part_cuts,
+                                        self.preview.part_regions)
+
+        def own_mesh(card: str) -> bool:
+            found = self.parts._mesh_of(model, card) if model else None
+            return isinstance(found, tuple) and found[0].lower() == card.lower()
+
+        cards: List[str] = []
+        spread: List[str] = []
+        for card in t.material_names:
+            if not card or is_decor(card):
+                continue
+            # У главной меш найдётся всегда: без своего узор ляжет по самому
+            # большому материалу модели (_paintkit_generic).
+            mesh = card == main or own_mesh(card)
+            if mesh or card in game:
+                group = [card, *(p for p, src in t.part_cards.items() if src == card)]
+                cards += group
+                if mesh:
+                    spread += group
+        cards += [c for c in game if c not in cards]
+        return cards, [c for c in cards if c in game or t.part_cards.get(c) in game], spread
+
+    def _game_cards(self, paths: Dict[str, str], item: int) -> List[str]:
+        """
+        Карточки, на которые War Paint кладёт сама игра: материалы с прокси
+        WeaponSkin у модели, куда игра его кладёт (items_game; у Детонатора
+        это ещё и гильза). Модель и её VMT за сеанс не меняются — ответ
+        запоминается.
+        """
+        from src.data import paintkit_defs
+        from src.services.game_vpk_reader import GameVpkReader
+        from src.services.paintkit_worker import paintable_materials
+
+        defs = paintkit_defs.load(paths['root'])
+        mdl = ((paintkit_defs.item_model_path(paths['root'], defs, item) if defs else '')
+               or self._paintkit_model())
+        known = self.__dict__.setdefault('_paintable_by_model', {})
+        if mdl not in known:
+            reader = GameVpkReader([paths['textures_vpk'], paths['misc_vpk']])
+            try:
+                known[mdl] = paintable_materials(reader, mdl)
+            finally:
+                reader.close()
+        return self._paintkit_targets(known[mdl], self.preview.textures.stable_main())
+
+    def paintkit_materials(self, item: int = 0) -> Dict[str, Any]:
+        """
+        Материалы оружия для панели War Paint: [{card, game, parts}].
+
+        ``game`` — War Paint на этот материал кладёт сама игра (у War Paint
+        игры они отмечены по умолчанию, остальные — по желанию, узором по
+        своим деталям). В универсальном режиме ``game`` нет ни у кого, и
+        отмечены все. ``parts`` — у материала есть своя геометрия, и узор по
+        деталям на него ляжет. Спрашивается при открытии панели: у
+        многоматериальной модели материалы приходят позже самой модели.
+        """
+        paths = self.tf2_paths()
+        if 'error' in paths:
+            return paths
+        own = self._own_paintkits(paths['root'])
+        # Куда War Paint кладёт игра — по модели этой пушки: у скина с другой
+        # пушки ``item`` её, а не этой.
+        if own and not any(k['item'] == int(item) for k in own):
+            item = own[0]['item']
+        cards, game, spread = self._paintkit_offer(paths, item, bool(own))
+        return {'materials': [{'card': c, 'game': c in game, 'parts': c in spread}
+                              for c in cards]}
+
+    def _paintkit_generic(self, card: str, layout: int, assign) -> Any:
+        """Универсальный режим для карточки: узор по её деталям — или ошибка.
+
+        Поверх игровой текстуры своей команды, а не поверх прошлой правки:
+        иначе War Paint накладывался бы на War Paint.
+        """
+        from src.services import mesh_parts_service
+
+        t = self.preview.textures
+        # Не через _parts_model: тот отказывает при включённом переключателе
+        # (разбитая бутылка), а узору хватает геометрии в кадре — воркер
+        # разбирает ту же модель заново.
+        model = mesh_parts_service.load(self._obj_path, self.preview.part_cuts,
+                                        self.preview.part_regions)
+        found = (self.parts._mesh_of(model, card) if model
+                 else {'error': 'Модель ещё не загружена'})
+        if isinstance(found, dict) and card != t.stable_main():
+            # Чужой узор не подставляем: у главной запасной ход — самый
+            # большой материал модели, у второстепенной он лёг бы мимо.
+            return found
+        return {'obj_path': self._obj_path, 'cuts': self.preview.part_cuts,
+                'regions': self.preview.part_regions, 'card': card,
+                'obj_material': found[0] if isinstance(found, tuple) else '',
+                'base_png': t.game_base(card, t.active_team) or t.resolve_base(card) or '',
+                'layout_seed': int(layout), 'assign': assign}
+
+    def _paintkit_plans(self, kit: int, item: int, layout: int,
+                        materials: Optional[List[str]] = None):
+        """
+        Что собрать: [(карточки, универсальный режим или None, forced, метка)]
+        — или ошибка.
+
+        War Paint игры собирается рецептом Valve один раз и ложится на
+        карточки, которые красит игра. Остальные материалы, как и все
+        материалы оружия без War Paint в игре, получают узор по своим
+        деталям — каждый отдельной сборкой: развёртка у каждого своя.
+        Материал части получает картинку своего исходного. ``materials`` —
+        что красить; None — что отмечено в панели по умолчанию
+        (paintkit_materials). Раскладка человека относится к главной
+        карточке: её детали он и раскладывал.
 
         Метка — отпечаток всего, от чего зависит картинка, кроме аргументов в
-        имени: оружие, его OBJ, разрезы частей, базовая текстура. Без неё у
-        универсального режима (донор у всех пушек один) с тем же сидом
-        всплывала бы картинка с развёрткой прошлой пушки или прошлых разрезов.
+        имени: оружие, карточки, его OBJ, разрезы частей, базовая текстура.
+        Без неё у универсального режима (донор у всех пушек один) с тем же
+        сидом всплывала бы картинка с развёрткой прошлой пушки или прошлых
+        разрезов.
         """
         import hashlib
         import json
@@ -2374,43 +2629,60 @@ class AppSession:
         if 'error' in paths:
             return paths
         t = self.preview.textures
-        material = t.stable_main()
-        if not material or not self._shown_weapon():
+        main = t.stable_main()
+        if not main or not self._shown_weapon():
             return {'error': 'Сначала выберите оружие'}
-        own = self._own_paintkits(paths['root'])
+        own = next((k for k in self._own_paintkits(paths['root'])
+                    if k['id'] == int(kit) and k['item'] == int(item)), None)
+        cards, game, spread = self._paintkit_offer(paths, item, own is not None)
+        wanted = set((game if own else cards) if materials is None else materials)
+        # Рецепт под одну пушку по деталям других материалов не разложить.
+        by_parts = own is None or own.get('by_parts', False)
+        chosen = [c for c in cards if c in wanted and (c in game or (by_parts and c in spread))]
+        if not chosen:
+            return {'error': 'Отметьте хотя бы один материал'}
         assign = self.preview.paintkit_layouts.get(str(int(kit))) or None
-        generic, forced = None, None
-        if not any(k['id'] == int(kit) and k['item'] == int(item) for k in own):
-            # Своих War Paint у пушки нет: узор ляжет по частям модели, поверх
-            # её игровой текстуры своей команды (не поверх прошлой правки —
-            # иначе War Paint накладывался бы на War Paint).
-            found = self.parts._parts_model(material)
-            generic = {'obj_path': self._obj_path, 'cuts': self.preview.part_cuts,
-                       'regions': self.preview.part_regions, 'card': material,
-                       'obj_material': found[1] if isinstance(found, tuple) else '',
-                       'base_png': (t.game_base(material, t.active_team)
-                                    or t.resolve_base(material) or ''),
-                       'layout_seed': int(layout), 'assign': assign}
-        elif assign:
-            # Свой War Paint с раскладкой человека: группы Valve выбираются
-            # заново переменными select.
-            from src.services.paintkit_layout import own_forced, own_groups
-            defs = paintkit_defs.load(paths['root'])
-            kit_obj, item_obj = (paintkit_defs.find_item(defs, kit, item)
-                                 if defs else (None, None))
-            layers, over = (paintkit_defs.template_layers(defs, kit_obj)
-                            if kit_obj else ([], False))
-            found = defs.variables(kit_obj, item_obj, 1) if layers and item_obj else None
-            if found:
-                forced = own_forced(own_groups(found[1], layers, over), assign,
-                                    layers, over) or None
+
+        plans = []
+        painted = [c for c in chosen if c in game]
+        if painted:
+            forced = None
+            if assign:
+                # Свой War Paint с раскладкой человека: группы Valve
+                # выбираются заново переменными select.
+                from src.services.paintkit_layout import own_forced, own_groups
+                defs = paintkit_defs.load(paths['root'])
+                kit_obj, item_obj = (paintkit_defs.find_item(defs, kit, item)
+                                     if defs else (None, None))
+                layers, over = (paintkit_defs.template_layers(defs, kit_obj)
+                                if kit_obj else ([], False))
+                found = defs.variables(kit_obj, item_obj, 1) if layers and item_obj else None
+                if found:
+                    forced = own_forced(own_groups(found[1], layers, over), assign,
+                                        layers, over) or None
+            plans.append((painted, None, forced))
+        by_source: Dict[str, List[str]] = {}
+        for card in chosen:
+            if card not in game:
+                by_source.setdefault(t.part_cards.get(card, card), []).append(card)
+        for source, members in by_source.items():
+            generic = self._paintkit_generic(source, layout,
+                                             assign if source == main and not own else None)
+            if 'error' in generic:
+                return generic
+            plans.append((members, generic, None))
+
         try:
             obj_mtime = os.path.getmtime(self._obj_path) if self._obj_path else 0
         except OSError:
             obj_mtime = 0
-        stamp = json.dumps([self._shown_weapon(), material, generic, forced, obj_mtime],
-                           sort_keys=True, default=str)
-        return generic, forced, hashlib.sha1(stamp.encode('utf-8')).hexdigest()[:10]
+        out = []
+        for cards_of, generic, forced in plans:
+            stamp = json.dumps([self._shown_weapon(), cards_of, generic, forced, obj_mtime],
+                               sort_keys=True, default=str)
+            out.append((cards_of, generic, forced,
+                        hashlib.sha1(stamp.encode('utf-8')).hexdigest()[:10]))
+        return out
 
     def _paintkit_job_for(self, kit: int, item: int, wear: int, seed: int, size: int,
                           generic, forced, out: str):
@@ -2423,71 +2695,74 @@ class AppSession:
         team = 'blue' if t.active_team == Team.BLU else 'red'
         return PaintkitWorker(paths['root'], paths['textures_vpk'], paths['misc_vpk'],
                               kit, item, wear, team, seed, out, size=size,
-                              mdl_path=self._paintkit_model(), generic=generic,
-                              forced=forced)
+                              generic=generic, forced=forced)
 
     def preview_paintkit(self, kit: int, item: int, wear: int = 1, seed: int = 0,
-                         layout: int = 0) -> Dict[str, Any]:
+                         layout: int = 0, materials: Optional[List[str]] = None
+                         ) -> Dict[str, Any]:
         """
         Быстрый предпросмотр War Paint (512 px): страница кладёт его на модель
         временно, пока человек выбирает. В текстуры ничего не пишется.
+        Ответ — {images: {карточка: png}}.
 
-        Синхронно: при кэше текстур это доли секунды, а страница всё равно
-        ждёт картинку, чтобы показать. Одновременно считается один.
+        Синхронно: при кэше текстур это доли секунды на материал, а страница
+        всё равно ждёт картинку, чтобы показать. Одновременно считается один.
         """
         seed = int(seed) & ((1 << 64) - 1)
         team = self.preview.textures.active_team
-        plan = self._paintkit_plan(kit, item, layout)
-        if isinstance(plan, dict):
-            return plan
-        generic, forced, tag = plan
-        out = os.path.join(self._work_dir(), f'warpaint_prev_{int(kit)}_{int(item)}'
-                           f'_w{int(wear)}_{seed}_{int(layout)}_{team}_{tag}.png')
+        plans = self._paintkit_plans(kit, item, layout, materials)
+        if isinstance(plans, dict):
+            return plans
+        images = {}
         lock = self.__dict__.setdefault('_paintkit_preview_lock', threading.Lock())
-        targets_by_file = self.__dict__.setdefault('_paintkit_prev_targets', {})
         with lock:
-            if not os.path.isfile(out) or out not in targets_by_file:
-                w = self._paintkit_job_for(kit, item, wear, seed, 512, generic, forced,
-                                           out)
-                ok, message = w.work()
-                if not ok:
-                    return {'error': message}
-                targets_by_file[out] = self._paintkit_targets(
-                    w.materials, self.preview.textures.stable_main())
-        return {'png': out, 'materials': targets_by_file[out]}
+            for cards, generic, forced, tag in plans:
+                out = os.path.join(self._work_dir(), f'warpaint_prev_{int(kit)}_{int(item)}'
+                                   f'_w{int(wear)}_{seed}_{int(layout)}_{team}_{tag}.png')
+                if not os.path.isfile(out):
+                    ok, message = self._paintkit_job_for(kit, item, wear, seed, 512,
+                                                         generic, forced, out).work()
+                    if not ok:
+                        return {'error': message}
+                images.update((card, out) for card in cards)
+        return {'images': images}
 
     def apply_paintkit(self, kit: int, item: int, wear: int = 1, seed: int = 0,
-                       size: int = 1024, layout: int = 0) -> Dict[str, Any]:
+                       size: int = 1024, layout: int = 0,
+                       materials: Optional[List[str]] = None) -> Dict[str, Any]:
         """
-        Собирает War Paint в текстуру и кладёт её на карточки, куда игра
-        кладёт War Paint (материалы с прокси WeaponSkin; обычно это главная,
-        у Детонатора ещё и гильза). У оружия без War Paint в игре — на
-        главную карточку, узор раскладывается по частям модели (``layout``
-        перемешивает, какой узор на какой части).
+        Собирает War Paint в текстуры и кладёт их на карточки (см.
+        _paintkit_plans): War Paint игры — туда, куда его кладёт игра
+        (материалы с прокси WeaponSkin), и по желанию на остальные материалы
+        узором по их деталям. У оружия без War Paint в игре узор ложится на
+        каждый отмеченный материал по его деталям (``layout`` перемешивает,
+        какой узор на какой детали).
 
         Собирается под активную команду: у War Paint с командными узорами RED
         и BLU разные, и человек накладывает второй, переключив команду. Дальше
-        это обычная своя текстура — её можно дорисовать и собрать в мод.
+        это обычные свои текстуры — их можно дорисовать и собрать в мод.
         Результат приходит событием ``paintkit_ready``.
         """
+        from src.services.paintkit_worker import PaintkitBatch
         from src.shared.constants import Team
 
         job = getattr(self, '_paintkit_job', None)
         if job is not None and job.isRunning():
             return {'error': 'War Paint уже накладывается'}
         t = self.preview.textures
-        material = t.stable_main()
         weapon_key = self._shown_weapon()
         team = 'blue' if t.active_team == Team.BLU else 'red'
         seed = int(seed) & ((1 << 64) - 1)
         size = min(max(int(size), 256), 2048)
-        plan = self._paintkit_plan(kit, item, layout)
-        if isinstance(plan, dict):
-            return plan
-        generic, forced, tag = plan
-        out = os.path.join(self._work_dir(), f'warpaint_{int(kit)}_{int(item)}'
-                           f'_w{int(wear)}_{team}_{seed}_{int(layout)}_{size}_{tag}.png')
-        w = self._paintkit_job_for(kit, item, wear, seed, size, generic, forced, out)
+        plans = self._paintkit_plans(kit, item, layout, materials)
+        if isinstance(plans, dict):
+            return plans
+        w = PaintkitBatch([
+            (cards, self._paintkit_job_for(
+                kit, item, wear, seed, size, generic, forced,
+                os.path.join(self._work_dir(), f'warpaint_{int(kit)}_{int(item)}'
+                             f'_w{int(wear)}_{team}_{seed}_{int(layout)}_{size}_{tag}.png')))
+            for cards, generic, forced, tag in plans])
         w.progress.connect(lambda _pct, text: self._put('progress', text=text))
 
         def done(ok: bool, message: str) -> None:
@@ -2496,16 +2771,34 @@ class AppSession:
             same = (self._shown_weapon() == weapon_key
                     and ('blue' if self.preview.textures.active_team == Team.BLU
                          else 'red') == team)
+            applied = 0
             try:
                 if ok and same:
-                    for target in self._paintkit_targets(w.materials, material):
-                        res = self.set_texture(target, message) or {}
-                        if 'error' in res:
-                            ok, message = False, res['error']
-                            break
+                    # Один War Paint — один шаг отмены, сколько бы карточек
+                    # он ни покрасил.
+                    self._edits_held = True
+                    try:
+                        for card, png in [(c, png) for cards, png in w.done for c in cards]:
+                            res = self.set_texture(card, png) or {}
+                            if 'error' in res:
+                                ok, message = False, res['error']
+                                break
+                            applied += 1
+                    finally:
+                        self._edits_held = False
+                    if ok:
+                        self._autosave()
             except Exception as exc:                      # noqa: BLE001
                 logger.error(f'[paintkit] {exc}', exc_info=True)
                 ok, message = False, str(exc)
+            if applied and not ok:
+                # Не легло на одну карточку — снимаем и с остальных: War Paint
+                # на половине оружия выглядел бы наложенным целиком. Шаг
+                # отмены ещё не записан, и последний снимок — то, что было до.
+                try:
+                    self.undo_edits(0)
+                except Exception as exc:                  # noqa: BLE001
+                    logger.error(f'[paintkit] откат: {exc}', exc_info=True)
             self._put('paintkit_ready', ok=bool(ok and same),
                       message='' if ok and same else (message or 'Оружие сменилось'),
                       missing=list(w.missing))
@@ -2524,7 +2817,7 @@ class AppSession:
         from src.data import paintkit_defs
         from src.services import paintkit_layout
         from src.services.game_vpk_reader import GameVpkReader
-        from src.services.paintkit_worker import make_loader
+        from src.services.paintkit_worker import LOOKS_MASK, make_loader
 
         paths = self.tf2_paths()
         if 'error' in paths:
@@ -2546,7 +2839,7 @@ class AppSession:
         try:
             res = paintkit_layout.describe(
                 defs, kit_obj, item_obj, model, obj_mat, own,
-                make_loader(reader, 512), make_loader(reader, 128),
+                make_loader(reader, LOOKS_MASK), make_loader(reader, 128),
                 os.path.join(self._work_dir(), 'warpaint_layers'),
                 self.preview.paintkit_layouts.get(str(int(kit))), int(layout))
         finally:
@@ -3022,7 +3315,7 @@ class AppSession:
         qc_path = decompile_cache.find_cached_qc_for_weapon(p.weapon_key)
         text = ModelBuildService.make_corrected_qc(qc_path or '', p.weapon_key, '')
         if not text.strip():
-            return {'error': 'QC ещё не извлечён из игры — дождитесь загрузки модели'}
+            return {'error': 'QC ещё не извлечён из игры - дождитесь загрузки модели'}
         return {'text': text, 'edited': False}
 
     def save_qc(self, text: str = '') -> Dict[str, Any]:
@@ -3054,9 +3347,11 @@ class AppSession:
         разошёлся бы с первым.
 
         ``step=False`` — запомнить, но не шагом отмены: настройка кисти на
-        модели ничего не меняет, и Ctrl+Z по ней был бы холостым."""
+        модели ничего не меняет, и Ctrl+Z по ней был бы холостым. Пока
+        ``_edits_held`` — правки одного действия на нескольких карточках
+        (War Paint) копятся в один шаг, его делает последний вызов."""
         from src.services import work_keeper
-        if step:
+        if step and not getattr(self, '_edits_held', False):
             self._edits_commit()
         elif not self.preview.has_user_edits():
             # Одна настройка кисти — не работа. Пустое сохранение УДАЛЯЕТ
@@ -3403,8 +3698,23 @@ class AppSession:
         return '' if material == SINGLE_TEX_KEY else material
 
     def texture_maps(self, material: str = '') -> Dict[str, Any]:
-        """Карты, уже назначенные материалу (для показа в диалоге)."""
-        return dict(self.preview.texture_maps.get(self._card_key(material), {}))
+        """Карты материала для показа в диалоге.
+
+        У мода из VPK это и карты из VMT самого мода (``{"mod": True,
+        "preview": …}``) — они отмечены, а не пусты. Сохранённая запись
+        важнее: снятая (``off``) не показывается, оставленная — с превью мода.
+        """
+        key = self._card_key(material)
+        mod = self.preview.mod_maps.get(key) or {}
+        out = {map_id: dict(entry) for map_id, entry in mod.items()}
+        for map_id, entry in (self.preview.texture_maps.get(key) or {}).items():
+            if entry.get('off'):
+                out.pop(map_id, None)
+            elif entry.get('mod') and map_id in mod:
+                out[map_id] = {**mod[map_id], **entry}
+            else:
+                out[map_id] = dict(entry)
+        return out
 
     def set_texture_maps(self, material: str = '',
                          maps: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -3413,14 +3723,28 @@ class AppSession:
 
         Присланное проверяется (``normalize_maps``): запись уходит в генератор
         VTF и в VMT, и мусорный ключ там превращается в сломанный материал.
+        Полоска из конструктора (``generate``) рисуется здесь же в PNG — дальше
+        она обычная картинка карты, и сборка о конструкторе не знает.
+
+        Карта мода, которой в присланном нет, сохраняется отметкой ``off``:
+        сборка уберёт её из VMT. Без отметки «снял» не отличить от «не
+        трогал» — и после перезапуска карта мода вернулась бы.
         """
-        from src.data.material_maps import normalize_maps
+        from src.data.material_maps import MATERIAL_MAPS, normalize_maps
 
         if not getattr(self, '_mode', ''):
             return {'error': 'Сначала выберите предмет'}
 
         key = self._card_key(material)
-        clean = normalize_maps(maps or {})
+        maps = {map_id: dict(entry) for map_id, entry in (maps or {}).items()
+                if isinstance(entry, dict)}
+        for map_id, entry in maps.items():
+            name = (MATERIAL_MAPS.get(map_id) or {}).get('generator')
+            if name and isinstance(entry.get('generate'), dict):
+                entry['image'] = self._generated_png(name, entry['generate'])
+        for map_id in self.preview.mod_maps.get(key) or {}:
+            maps.setdefault(map_id, {'off': True})
+        clean = normalize_maps(maps)
         with self._lock:
             if clean:
                 self.preview.texture_maps[key] = clean
@@ -3428,6 +3752,199 @@ class AppSession:
                 self.preview.texture_maps.pop(key, None)
         self._autosave()
         return {'material': key, 'maps': clean}
+
+    def _generated_png(self, name: str, params: Dict[str, Any]) -> str:
+        """PNG карты из конструктора (lightwarp, phongwarp) — рядом с
+        загрузками страницы (работа копирует его к себе, как любую картинку
+        карты). Дальше это обычная картинка, сборка о конструкторе не знает."""
+        import hashlib
+        import json
+        import tempfile
+        from pathlib import Path
+
+        from src.data.material_maps import generator
+
+        module = generator(name)
+        params = module.clean_params(params)
+        digest = hashlib.sha1(json.dumps(params, sort_keys=True).encode()).hexdigest()[:12]
+        out = Path(tempfile.gettempdir()) / 'tf2sg_uploads' / f'{name}_{digest}.png'
+        out.parent.mkdir(parents=True, exist_ok=True)
+        return module.write_png(params, str(out), self._game_root())
+
+    @staticmethod
+    def _game_root() -> str:
+        """Папка игры из настроек — без проверок tf2_paths: превью полоски
+        дёргается на каждое движение ползунка, а основа нужна только для
+        чтения VPK (нет игры — основа x/2)."""
+        from src.config.app_config import AppConfig
+        return (AppConfig.load_config().get('tf2_game_folder') or '').strip()
+
+    def lightwarp_ramp(self, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Полоска конструктора для живого превью: 256 цветов [r, g, b] и
+        она же точками."""
+        from src.services import lightwarp
+
+        params = lightwarp.clean_params(params or {})
+        strip = lightwarp.ramp(params, self._game_root())
+        # Точки той же полоски — для «Сделать точками»: любую основу со всеми
+        # настройками можно дальше править руками.
+        return {'params': params, 'ramp': strip.tolist(), 'stops': lightwarp.to_stops(strip)}
+
+    def map_preview(self, material: str = '', map_id: str = 'selfillum',
+                    spec: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """
+        Картинки для превью карты материала: текстура материала, её альфа и
+        сама карта - та же, что построит сборка (derive_effect_map /
+        process_image / карта мода). Смешивает их страница по формуле шейдера.
+
+        `map`: самосвечение, отражение, маска обводки - L; Phong-карта - RGBA
+        (R - размер блика); detail - RGBA в своём размере (она тайлится).
+        `mask`: у Phong-карты «Авто» - где блестит (сборка кладёт её в альфу
+        нормали). `env`: у отражения - шесть граней кубмапы строкой.
+
+        Не больше 256 px: превью, а не сборка. Имена по содержимому - браузер
+        не покажет старую картинку из кэша.
+        """
+        import hashlib
+        import tempfile
+        from pathlib import Path
+
+        from PIL import Image
+
+        from src.services.texture_service import TextureService
+
+        key = self._card_key(material)
+        tex = self.preview.textures.resolve_base(key)
+        if not tex or not os.path.isfile(tex):
+            # Без текстуры шар отражения и обводки всё равно показываем.
+            tex = None
+            if map_id == 'selfillum':
+                return {'error': 'У материала нет текстуры для превью'}
+        spec = dict(spec or {})
+        out = Path(tempfile.gettempdir()) / 'tf2sg_mapview'
+        out.mkdir(parents=True, exist_ok=True)
+        stamp = hashlib.sha1(repr((key, tex, tex and os.path.getmtime(tex), map_id, sorted(
+            (k, str(v)) for k, v in spec.items()))).encode()).hexdigest()[:12]
+
+        result = {'texture': '', 'alpha': '', 'map': '', 'mask': ''}
+        size = None
+        if tex:
+            with Image.open(tex) as img:
+                rgba = img.convert('RGBA')
+            rgba.thumbnail((256, 256), Image.LANCZOS)
+            size = rgba.size
+            texture = out / f'tex_{stamp}.png'
+            alpha = out / f'alpha_{stamp}.png'
+            rgba.convert('RGB').save(texture)
+            rgba.getchannel('A').save(alpha)
+            result.update(texture=str(texture), alpha=str(alpha))
+
+        kind = {'selfillum': 'selfillum', 'phongexp': 'phong'}.get(map_id, 'envmapmask')
+        colour = map_id in ('phongexp', 'detail')
+        thr = str(spec.get('threshold', '')).strip()
+        thr = int(thr) if thr.isdigit() else None
+        made = out / f'map_{stamp}.png'
+        # Имя по входным данным, но не по содержимому карты мода или файла:
+        # прошлый файл с тем же именем мог остаться от другого материала.
+        made.unlink(missing_ok=True)
+        source = None
+        if spec.get('derive') and tex:
+            if map_id != 'detail':
+                TextureService.derive_effect_map(str(texture), str(made), kind, size,
+                                                 threshold=None if colour else thr)
+            if map_id == 'phongexp':
+                # Где блестит: сборка кладёт маску в альфу нормали
+                # (VpkTextureBuilder: «Авто-блеск»), по яркости и порогу.
+                mask = out / f'mask_{stamp}.png'
+                TextureService.derive_effect_map(str(texture), str(mask), 'envmapmask',
+                                                 size, threshold=thr)
+                result['mask'] = str(mask)
+        elif spec.get('image') and os.path.isfile(spec['image']):
+            source = spec['image']
+        elif spec.get('mod'):
+            source = ((self.preview.mod_maps.get(key) or {}).get(map_id) or {}).get('preview')
+        if source and os.path.isfile(source):
+            with Image.open(source) as img:
+                pic = img.convert('RGBA' if colour else 'L')
+            if map_id == 'detail' or not size:
+                pic.thumbnail((256, 256), Image.LANCZOS)   # detail: своя развёртка × $detailscale
+            else:
+                pic = pic.resize(size, Image.LANCZOS)
+            pic.save(made)
+        if made.exists():
+            with Image.open(made) as img:
+                pic = img.convert('RGBA' if colour else 'L')
+            if colour:
+                # Альфа отдельно: браузер обнуляет цвет там, где альфа 0, а у
+                # Phong-карты альфа - маска обводки, у detail она нужна режиму 2.
+                if map_id == 'detail':
+                    alpha_map = out / f'map_alpha_{stamp}.png'
+                    pic.getchannel('A').save(alpha_map)
+                    result['map_alpha'] = str(alpha_map)
+                pic = pic.convert('RGB')
+            pic.save(made)
+            result['map'] = str(made)
+        if map_id == 'envmapmask':
+            result.update(self._cubemap_strip(material, spec.get('cubemap') or 'keep'))
+        return result
+
+    def _cubemap_strip(self, material: str, choice: str) -> Dict[str, Any]:
+        """Окружение отражения для превью: шесть граней кубмапы строкой
+        (+X -X +Y -Y +Z -Z, как в VTF). `env_cubemap` - окружение карты, его
+        в файлах нет: показываем студийный cubemap_specular001 (`stand_in`)."""
+        import tempfile
+        from pathlib import Path
+
+        import numpy as np
+        from PIL import Image
+
+        from src.data.material_maps import CUBEMAPS
+        from src.services import vmt_parse
+        from src.services.game_vpk_reader import GameVpkReader
+        from src.services.vtflib_wrapper import VTFLib
+
+        name = CUBEMAPS.get(choice)
+        if choice == 'keep':
+            vmt = self.open_vmt(material)
+            name = vmt_parse.parse(vmt.get('content') or '').path('$envmap') or ''
+        stand_in = not name or name == 'env_cubemap'     # path() уже с прямыми слэшами
+        if stand_in:
+            name = CUBEMAPS['specular']
+        out = Path(tempfile.gettempdir()) / 'tf2sg_mapview' / (
+            'env_' + name.replace('/', '_') + '.png')
+        if not out.exists():
+            paths = self.tf2_paths()
+            if 'error' in paths:
+                return {'env': '', 'stand_in': stand_in}
+            reader = GameVpkReader([paths['textures_vpk'], paths['misc_vpk']])
+            try:
+                data = reader.find_vtf_for_basetexture(name)
+            finally:
+                reader.close()
+            if not data:
+                return {'env': '', 'stand_in': stand_in}
+            vtf = out.with_suffix('.vtf')
+            vtf.write_bytes(data)
+            try:
+                faces = []
+                for face in range(6):
+                    raw, w, h = VTFLib.read_vtf_as_rgba(str(vtf), face)
+                    faces.append(np.frombuffer(raw, np.uint8).reshape(h, w, 4)[..., :3])
+                Image.fromarray(np.concatenate(faces, axis=1)).save(out)
+            except Exception as exc:                       # noqa: BLE001
+                logger.warning(f'[maps] кубмапа {name} не читается: {exc}')
+                return {'env': '', 'stand_in': stand_in}
+            finally:
+                vtf.unlink(missing_ok=True)
+        return {'env': str(out), 'stand_in': stand_in}
+
+    @staticmethod
+    def phongwarp_preview(params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Градиент блика для живого превью — уменьшенный (64×64)."""
+        from src.services import phongwarp
+
+        params = phongwarp.clean_params(params or {})
+        return {'params': params, 'image': phongwarp.preview(params)}
 
     def add_to_style(self, material: str = '') -> Dict[str, Any]:
         """Добавляет материал в активный стиль (пустой карточкой)."""
@@ -3587,7 +4104,6 @@ class AppSession:
         «вернуть как в игре», и без него сброс вернул бы саму правку.
         """
         from src.services.edited_vmt_service import EditedVMTService
-        from src.services import vmt_source_service
 
         target = self._vmt_target(material)
         if isinstance(target, dict):
@@ -4016,7 +4532,8 @@ class AppSession:
                            if self.preview.custom_source_path
                            and self.preview.custom_obj_path else None),
             'framerate': self.preview.team_framerate,
-            'skins': self.preview.textures.skin_info,
+            'skins': ({**self.preview.textures.skin_info, 'styles': self.preview.styles()}
+                      if self.preview.textures.skin_info else None),
             'active_skin': self.preview.textures.active_skin,
             # Вариантный стиль переопределяет базу выборочно: странице нужно
             # знать, что ещё можно в него добавить.

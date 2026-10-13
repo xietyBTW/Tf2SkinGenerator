@@ -33,8 +33,8 @@ The status line reports what the app did on its own, for example how many textur
 
 | Choice | What happens | When to use |
 |---|---|---|
-| **With its own materials and bones** | Every material of your model gets its own texture card. Bones named like the game's bones keep moving in the weapon's animations. The QC can be edited. | Models made for this item: rigged to its skeleton, with your own material setup. |
-| **Shape only — weapon materials** | All materials of your model collapse into the weapon's own material: one texture for everything, and the game's texture cards. The whole model is bound to a single bone. | Downloaded models and quick swaps, when you only need the shape. |
+| **With its own materials and bones** | Every material of your model gets its own texture card. Bones named like the game's bones keep moving in the weapon's animations, and bones of your own stay in the model after the build. The QC can be edited. | Models made for this item: rigged to its skeleton, with your own material setup. |
+| **Shape only - weapon materials** | All materials of your model collapse into the weapon's own material: one texture for everything, and the game's texture cards. The whole model is bound to a single bone. | Downloaded models and quick swaps, when you only need the shape. |
 
 The price of **Shape only** is that the model moves as one solid piece. A magazine that used to drop out during the reload animation now stays fused to the gun, because it no longer has a bone of its own. If parts need to keep moving, rig your model to the weapon's skeleton and load it **With its own materials and bones**.
 
@@ -81,7 +81,7 @@ Automatic simplification uses meshoptimizer and keeps the UV layout. It brings t
 ## Bones and animation
 
 - **OBJ** has no bones. The model is one rigid piece, and moving parts such as a magazine or a bolt won't animate.
-- **GLB and glTF** can carry a skin from Blender. Name the bones the way the game does (`weapon_bone`, `weapon_bone_1` and so on; look at the original's QC via **Tools → Extract model (SMD)**), model the weapon in the original's pose, and load it **With its own materials and bones**. Bones are matched by name, and part animations work.
+- **GLB and glTF** can carry a skin from Blender. Name the bones the way the game does (`weapon_bone`, `weapon_bone_1` and so on; look at the original's QC via **Tools → Extract model (SMD)**), model the weapon in the original's pose, and load it **With its own materials and bones**. Bones are matched by name, and part animations work. Bones the game doesn't have (for a `$jigglebone`, for example) stay in the model: the build adds them to the skeleton after the game's bones and describes them in the QC, otherwise the compiler would fold them into their parent. A bone of your own with no parent is attached to the grip bone, so the model stays in the hand.
 - Bones with names the game doesn't know are attached to the grip bone.
 - A mesh without a skin that is parented to a bone in Blender follows that bone as a whole.
 
@@ -90,6 +90,12 @@ Automatic simplification uses meshoptimizer and keeps the UV layout. It brings t
 The base color of the model lands in the album by itself: `map_Kd` from an OBJ's MTL file, or `baseColorTexture` from a glTF. With **With its own materials and bones** each material gets its own texture; with **Shape only** the texture goes onto the main material. Other PBR maps (metallic, roughness, normal) mean nothing to TF2's shaders and are ignored.
 
 A model without a UV layout can't carry a texture. Unwrap it in a 3D editor first.
+
+## Styles and Australium
+
+In the **Shape only** mode the model wears the weapon's materials, so styles and the **Australium** switch work as on the game model.
+
+In the **With its own materials and bones** mode your model's materials have no game counterparts for styles or gold, so the build assembles the model's skin table itself. Pick a style in the style bar, for example Bloody on the Flying Guillotine. If the weapon has an Australium version, it shows up in that bar too. Then press **+**, choose a material that should look different in this style, and put your own image on its card. Materials you don't add keep the base texture in every skin, which is how the game works. The skin number is the game's own, so the gold turns on wherever the regular Australium would.
 
 ## Editing the QC
 

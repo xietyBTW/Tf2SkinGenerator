@@ -2,7 +2,7 @@
 
 [Documentation](../README.md) · [Русская версия](../ru/settings.md)
 
-**Settings** in the top right corner opens one window with four groups. Changes apply when you press **Save**; **Cancel** closes the window without them. This page goes through every setting and then explains where the app keeps your files.
+**Settings** in the top right corner opens a window with five tabs: **Game and files**, **Interface**, **Customization**, **Work and build** and **Maintenance**. The window opens on the tab where you closed it, or on the first one if the game is not found. Changes apply when you press **Save**; **Cancel** closes the window without them. This page goes through every setting and then explains where the app keeps your files.
 
 ![The Settings window](../img/en/settings.webp)
 
@@ -39,7 +39,7 @@ This is where you choose how a build looks in the bottom bar of the window. Abov
 | **Bar** | What the bar itself does: nothing, a scanner beam runs across it, it flashes on every step, or its background fills along with the line. | Calm |
 | **Finale** | How a successful build ends: team colors meet, a stamp, confetti and more. | Colors meet |
 | **Error** | How the line shows a failure: it shakes, shatters or flickers. | Line shakes |
-| **Sound** | Clicks on steps, a chime at the end, both, or silence. | Clicks and chime |
+| **Sound** | Clicks on steps, a chime at the end (it also plays on an error), both, or silence. | Chime at the end |
 
 With **Interface animations** off, the bar stays simple: the text appears at once, and the finale and error play without motion. Sound does not depend on that option.
 
@@ -63,6 +63,7 @@ Some materials are hidden from the start and can't be unhidden here: eyes, teeth
 
 | Item | What it does |
 |---|---|
+| **Model cache size** | How much space decompiled models may take: from 512 MB to 10 GB or no limit, 1 GB by default. A cached model opens without Crowbar, in seconds instead of half a minute. When the cache is full, the models you have not opened for the longest go first. The app cannot work with no cache at all, because the model you have open right now lives there too. |
 | **Clear the model cache** | Deletes the decompiled models. The size of the cache is shown next to the button. After clearing, the first build of each item is slower, because the app decompiles it again. Clear it if models start misbehaving after a game update. |
 | **Delete drafts…** | Lists the drafts with their sizes so you can delete the ones you don't need. Saved works aren't listed and aren't touched. |
 | **Check for updates** | Asks GitHub whether a newer version exists and shows the current one. See [Updates](#updates). |

@@ -13,7 +13,7 @@ const grid = dlg.querySelector('.classpick__grid');
 const count = dlg.querySelector('.classpick__count');
 const okBtn = dlg.querySelector('.ask__ok');
 
-//: Порядок и названия — как в меню выбора класса игры.
+//: Порядок и названия - как в меню выбора класса игры.
 export const CLASS_ORDER = ['scout', 'soldier', 'pyro', 'demoman', 'heavy',
                             'engineer', 'medic', 'sniper', 'spy'];
 const NAMES = {
@@ -22,11 +22,11 @@ const NAMES = {
   medic: 'Медик', sniper: 'Снайпер', spy: 'Шпион',
 };
 
-//: Значки из игры — один запрос за сеанс.
+//: Значки из игры - один запрос за сеанс.
 let icons = null;
 
 async function loadIcons() {
-  // Пустой ответ (игра ещё не найдена) не запоминаем — спросим в следующий раз.
+  // Пустой ответ (игра ещё не найдена) не запоминаем - спросим в следующий раз.
   if (icons && Object.keys(icons).length) return icons;
   try {
     icons = (await api.classIcons()).icons || {};
@@ -39,7 +39,7 @@ async function loadIcons() {
 /**
  * Спрашивает классы. Возвращает отмеченные в порядке игры или null (отмена).
  *
- * classes — какие классы вообще предлагать; chosen — отмеченные сразу.
+ * classes - какие классы вообще предлагать; chosen - отмеченные сразу.
  */
 export async function pickClasses({ classes, chosen = classes, ok = 'Собрать' }) {
   const have = CLASS_ORDER.filter((c) => classes.includes(c))

@@ -22,6 +22,7 @@ War Paint, поверх — переменные пушки в War Paint, заг
 from __future__ import annotations
 
 import os
+import re
 import struct
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
@@ -381,6 +382,34 @@ def _without_stickers(node: dict) -> dict:
 #: Шаблон, нарисованный под одну развёртку: на чужую модель не переносится.
 _UV_BOUND_TEMPLATES = ('custom_uv',)
 
+#: Картинка, нарисованная под развёртку одной пушки: акулья пасть Warhawk
+#: (``patterns/combat/c_rocketlauncher_flyingtigers``), котик Mister Cuddles.
+_WEAPON_DRAWN = re.compile(r'^patterns/(?:.+/)?c_[a-z0-9_]+$')
+
+
+def weapon_drawn(texture: str) -> bool:
+    """Картинка рецепта нарисована под развёртку одной пушки."""
+    return bool(_WEAPON_DRAWN.match((texture or '').replace(chr(92), '/').lower()))
+
+
+def _drawn_whole(node: dict) -> bool:
+    """
+    Узор рецепта — одна картинка под развёртку своей пушки, без групп
+    (Warhawk, Balloonicorn, Mister Cuddles): на чужой модели от неё остались
+    бы обрывки в случайных местах.
+    """
+    found = {'select': False, 'drawn': False}
+
+    def walk(n: dict) -> None:
+        found['select'] |= n.get('type') == 'select'
+        found['drawn'] |= (n.get('type') == 'texture_lookup'
+                           and weapon_drawn((n.get('fields') or {}).get('texture', '')))
+        for child in n.get('nodes') or []:
+            walk(child)
+
+    walk(node)
+    return found['drawn'] and not found['select']
+
 #: Пушки-доноры по порядку предпочтения: у них средняя плотность развёртки,
 #: и масштаб узоров с них на чужой модели выглядит естественно.
 _DONORS = ('c_scattergun.mdl', 'c_shotgun.mdl', 'c_smg.mdl', 'c_rocketlauncher.mdl',
@@ -405,6 +434,19 @@ def template_layers(defs: PaintKitDefs, kit: PaintKit) -> Tuple[List[int], bool]
     return layers, 'over_albedo' in header.name
 
 
+def by_parts(defs: PaintKitDefs, kit: PaintKit) -> bool:
+    """War Paint раскладывается по деталям любой модели (универсальный режим).
+
+    Нужен шаблон с группами пушки (``weapon_groups``) и не привязанный к её
+    развёртке: рецепт, нарисованный под одну пушку, на чужую не разложить.
+    """
+    op = defs.operations.get(kit.operation) if kit.operation is not None else None
+    if op is None:
+        return False
+    header = _header(_first(_fields(op), 1, b''))
+    return header.name not in _UV_BOUND_TEMPLATES and 'weapon_groups' in header.variables
+
+
 def generic_kits(tf2_root: str, lang: str = 'ru') -> List[dict]:
     """
     War Paint, которые можно положить на любое оружие: [{id, name, item,
@@ -417,10 +459,7 @@ def generic_kits(tf2_root: str, lang: str = 'ru') -> List[dict]:
     rank = {m: i for i, m in enumerate(_DONORS)}
     out = []
     for kit in defs.kits.values():
-        if kit.operation is None or kit.operation not in defs.operations:
-            continue
-        header = _header(_first(_fields(defs.operations[kit.operation]), 1, b''))
-        if header.name in _UV_BOUND_TEMPLATES or 'weapon_groups' not in header.variables:
+        if not by_parts(defs, kit):
             continue
         donors = []
         for item in kit.items:
@@ -432,10 +471,68 @@ def generic_kits(tf2_root: str, lang: str = 'ru') -> List[dict]:
             continue
         _rank, donor, wears = min(donors)
         out.append({'id': kit.header.defindex, 'name': kit_name(tf2_root, kit, lang),
+                    'en': kit_name(tf2_root, kit, 'en'),
                     'item': donor, 'wears': wears, 'team': kit.has_team_textures,
                     'generic': True})
     out.sort(key=lambda k: k['name'].lower())
     return out
+
+
+def decorated_kits(tf2_root: str, lang: str = 'ru') -> List[dict]:
+    """
+    Украшенное оружие коллекций (Gun Mettle и позже: Current Event, Night Owl
+    и другие) на любой пушке: [{id, name, en, item, wears, team, generic,
+    decorated, layered, by_parts, weapons}] по алфавиту.
+
+    В игре каждый скин есть только у своих пушек (``weapons`` — их названия):
+    шаблона у него нет, рецепт каждого износа нарисован под маски пушки и
+    номера её групп. Приложение раскладывает его виды по деталям любой модели
+    (paintkit_generic.recipe_looks). ``item`` — пушка-оригинал, чей рецепт
+    берётся: из ряда _DONORS, если скин есть у неё. Скины, нарисованные
+    целиком под одну развёртку (_drawn_whole), сюда не входят — они остаются
+    у своих пушек.
+    """
+    defs = load(tf2_root)
+    if defs is None:
+        return []
+    models = item_models(tf2_root)
+    rank = {m: i for i, m in enumerate(_DONORS)}
+    out = []
+    for kit in defs.kits.values():
+        if kit.operation is not None:
+            continue
+        found = [(rank.get(models[d.item_index], len(rank)), i.item_def, len(d.wears),
+                  models[d.item_index])
+                 for i in kit.items
+                 if (d := defs.item_defs.get(i.item_def)) and i.can_apply and d.wears
+                 and d.item_index in models]
+        if not found:
+            continue
+        _rank, donor, wears, _model = min(found)
+        recipe = defs.recipe(kit, next(i for i in kit.items if i.item_def == donor), 1,
+                             strip_stickers=True)
+        if recipe is None or _drawn_whole(recipe):
+            continue
+        out.append({'id': kit.header.defindex, 'name': kit_name(tf2_root, kit, lang),
+                    'en': kit_name(tf2_root, kit, 'en'),
+                    'item': donor, 'wears': wears, 'team': kit.has_team_textures,
+                    'generic': True, 'decorated': True, 'layered': True, 'by_parts': True,
+                    'weapons': sorted({_weapon_title(f[3], lang) for f in found})})
+    out.sort(key=lambda k: k['name'].lower())
+    return out
+
+
+def _weapon_title(model: str, lang: str) -> str:
+    """Название оружия по файлу модели: c_scattergun.mdl → «Обрез»."""
+    from src.data.weapons import TF2_WEAPONS
+
+    key = model.rsplit('.', 1)[0]
+    for kinds in TF2_WEAPONS.values():
+        for names in kinds.values():
+            got = names.get(key)
+            if isinstance(got, dict):
+                return got.get(lang) or got.get('en') or key
+    return key
 
 
 # ── Каталог: какие War Paint ложатся на модель ─────────────────────────── #
@@ -521,13 +618,17 @@ def for_model(tf2_root: str, model: str, lang: str = 'ru') -> List[dict]:
                 continue
             out.append({'id': kit.header.defindex,
                         'name': kit_name(tf2_root, kit, lang),
+                        'en': kit_name(tf2_root, kit, 'en'),
                         'item': item.item_def,
                         'wears': len(item_def.wears),
                         'team': kit.has_team_textures,
                         # Шаблонный War Paint раскладывается по группам —
                         # раскладку можно переделать; ручной (рецепт под одну
                         # пушку) — нет.
-                        'layered': bool(template_layers(defs, kit)[0])})
+                        'layered': bool(template_layers(defs, kit)[0]),
+                        # Ляжет и на материалы, которые игра не красит: по
+                        # их деталям, как в универсальном режиме.
+                        'by_parts': by_parts(defs, kit)})
             break
     out.sort(key=lambda k: k['name'].lower())
     return out

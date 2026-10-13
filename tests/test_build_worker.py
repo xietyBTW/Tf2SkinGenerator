@@ -69,6 +69,18 @@ class BuildWorkerTests(unittest.TestCase):
         worker.error.emit.assert_called()
         worker.finished.emit.assert_called()
 
+    def test_unanswered_texture_question_keeps_game_texture(self):
+        """Ответа нет — материал не выкидывается: у пересобранной модели
+        оригинала не найти, и в игре вышла бы «шахматка» (синяя шапка)."""
+        from src.shared.constants import EXTRA_TEX_USE_GAME_ORIGINAL
+        worker = BuildWorker(image_path="img.png", mode="hat", filename="out.vpk",
+                             size=(512, 512), tf2_root_dir="C:/TF2")
+        worker._extra_texture_req = Mock(ask=Mock(return_value=None))
+        self.assertEqual(worker._request_extra_texture_callback("beret_blue", "hat"),
+                         EXTRA_TEX_USE_GAME_ORIGINAL)
+        worker._extra_texture_req = Mock(ask=Mock(return_value="mine.png"))
+        self.assertEqual(worker._request_extra_texture_callback("beret_blue", "hat"), "mine.png")
+
 
 if __name__ == "__main__":
     unittest.main()

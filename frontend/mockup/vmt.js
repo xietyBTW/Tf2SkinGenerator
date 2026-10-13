@@ -1,7 +1,7 @@
 /*
  * Редактор VMT: текст материала с подсветкой и подсказками по параметрам.
  *
- * Открывается сохранённая правка, иначе — оригинал из игры. Синтаксис
+ * Открывается сохранённая правка, иначе - оригинал из игры. Синтаксис
  * проверяет Python при сохранении: сломанный VMT в игре даёт невидимый
  * материал, и ловить это лучше до сборки.
  */
@@ -14,7 +14,7 @@ import { pickEffect, closeEffects } from './vmt-effects.js';
 import { currentMaterial } from './album.js';
 
 // ── Редактор VMT ────────────────────────────────────────────────────────
-// Открывается сохранённая правка, иначе — оригинал из игры. Проверку
+// Открывается сохранённая правка, иначе - оригинал из игры. Проверку
 // синтаксиса делает Python при сохранении: сломанный VMT в игре даёт
 // невидимый материал, и ловить это лучше до сборки.
 
@@ -22,20 +22,20 @@ const vmtDlg = document.getElementById('vmtdlg');
 const vmtText = document.getElementById('vmt-text');
 const vmtHl = document.getElementById('vmt-hl');
 const vmtStatus = document.getElementById('vmt-status');
-//: `custom` — стоит ли своя правка: от неё зависит и строка состояния, и
+//: `custom` - стоит ли своя правка: от неё зависит и строка состояния, и
 //: кнопка «Как в игре».
 let vmtState = { material: '', original: '', custom: false };
 
-//: {$параметр: описание} — для подсказок при наведении.
+//: {$параметр: описание} - для подсказок при наведении.
 let vmtDocs = {};
-//: Тот же справочник по группам — для списка «Справочник».
+//: Тот же справочник по группам - для списка «Справочник».
 let vmtRef = [];
 
 
 /**
  * Перерисовывает зеркало под полем.
  *
- * Подсветка тут вторична: главное — что $параметр становится отдельным
+ * Подсветка тут вторична: главное - что $параметр становится отдельным
  * элементом, и на него можно навести мышь. Описание берётся из Python, поэтому
  * подсказка не может разойтись с тем, что редактор действительно знает.
  */
@@ -49,7 +49,7 @@ function paintVmt() {
     html += escapeHtml(text.slice(last, m.index));
     const chunk = escapeHtml(m[0]);
     // Параметр в VMT почти всегда В КАВЫЧКАХ ("$basetexture" "models/..."),
-    // поэтому кавычки с $-именем внутри — это параметр, а не строка значения.
+    // поэтому кавычки с $-именем внутри - это параметр, а не строка значения.
     const quotedParam = m[2] && m[2].match(/^"(\$\w+)"$/);
     const param = m[3] || (quotedParam && quotedParam[1]);
     if (m[1]) html += `<span class="vmt-com">${chunk}</span>`;
@@ -88,7 +88,7 @@ function vmtSay(text, kind = '') {
  * Наведение на $параметр объясняет, что он делает.
  *
  * Мышь ловит ПОЛЕ: оно лежит поверх зеркала, и обработчики на самом зеркале
- * не получали ничего — подсказки молча пропали, когда редактор стал
+ * не получали ничего - подсказки молча пропали, когда редактор стал
  * прозрачным полем над подсветкой. Поэтому поле спрашивает, что под курсором
  * в зеркале (elementsFromPoint видит и то, что лежит ниже), и показывает
  * подсказку рядом с мышью, а не где-то в строке состояния.
@@ -119,7 +119,7 @@ vmtText.addEventListener('mousemove', (e) => {
     vmtTip.replaceChildren(name, doc);
     vmtTip.hidden = false;
   }
-  // У курсора, но не за краем окна: у правого и нижнего края — с другой стороны.
+  // У курсора, но не за краем окна: у правого и нижнего края - с другой стороны.
   const box = vmtTip.getBoundingClientRect();
   const x = e.clientX + 16 + box.width > innerWidth - 8 ? e.clientX - 16 - box.width : e.clientX + 16;
   const y = e.clientY + 20 + box.height > innerHeight - 8 ? e.clientY - 12 - box.height : e.clientY + 20;
@@ -127,21 +127,21 @@ vmtText.addEventListener('mousemove', (e) => {
   vmtTip.style.top = Math.max(8, y) + 'px';
 });
 vmtText.addEventListener('mouseleave', hideTip);
-// Печатают — подсказка мешает видеть строку.
+// Печатают - подсказка мешает видеть строку.
 vmtText.addEventListener('keydown', hideTip);
 
 /**
  * «Готовые эффекты»: свечение, блики, прозрачность, анимация, особые
  * материалы, шаблоны.
  *
- * Набор общий с данными Python (`src/data/vmt_snippets.py`) — держать второй
- * список в JS значило бы его разъезд. Выбор — в панели категорий
+ * Набор общий с данными Python (`src/data/vmt_snippets.py`) - держать второй
+ * список в JS значило бы его разъезд. Выбор - в панели категорий
  * (vmt-effects.js). Пункт-ШАБЛОН заменяет весь документ, поэтому о нём
- * спрашивают; эффект с формой приходит готовым текстом — о замене он
+ * спрашивают; эффект с формой приходит готовым текстом - о замене он
  * предупредил в самой форме.
  */
 async function insertMenu(e) {
-  if (closeEffects()) return;             // повторный щелчок — закрыть
+  if (closeEffects()) return;             // повторный щелчок - закрыть
   const anchor = e.currentTarget;         // после await его у события уже нет
   const data = await api.vmtSnippets();
   const res = await pickEffect(anchor, data, () => vmtText.value, vmtState.game);
@@ -168,7 +168,7 @@ async function insertMenu(e) {
     }
     vmtText.value = body;
   } else if (picked.merge) {
-    // Слияние (австралий): у ключей, что уже есть, меняется значение — в
+    // Слияние (австралий): у ключей, что уже есть, меняется значение - в
     // VMT последний одноимённый ключ перекрывает первые, и вставка в начало
     // блока ничего не дала бы; мешающие ключи гасятся комментарием.
     vmtText.value = mergeSnippet(vmtText.value, picked.snippet, picked.remove || []);
@@ -183,22 +183,22 @@ async function insertMenu(e) {
 /**
  * Вставляет сниппет в документ.
  *
- * Параметры — под курсор, если его ставил человек. Окно открывается с
+ * Параметры - под курсор, если его ставил человек. Окно открывается с
  * кареткой в нуле, и вставка «под курсор» уехала бы ПЕРЕД шейдером: битый VMT
- * с первого нажатия. Поэтому по умолчанию — сразу за открывающей скобкой.
+ * с первого нажатия. Поэтому по умолчанию - сразу за открывающей скобкой.
  *
  * Блок "Proxies" вливается в уже существующий: материал читает только первый
- * "Proxies" (KeyValues::FindKey), а у почти каждого VMT из игры он уже есть —
+ * "Proxies" (KeyValues::FindKey), а у почти каждого VMT из игры он уже есть -
  * второй блок молча не работал бы, и «краска» или «анимация» не включались.
  * В КОНЕЦ блока: прокси выполняются по порядку, и в оружии TF2 уже стоит
- * Equals $glowcolor → $color2 — встав раньше, краска была бы им затёрта.
+ * Equals $glowcolor → $color2 - встав раньше, краска была бы им затёрта.
  */
 function insertSnippet(snippet) {
   const { plain, proxies } = splitProxies(snippet);
   let docProxies = proxies ? findProxiesBrace(vmtText.value) : -1;
-  // Блок не закрыт (человек его как раз пишет) — вливать некуда.
+  // Блок не закрыт (человек его как раз пишет) - вливать некуда.
   if (docProxies >= 0 && matchingBrace(vmtText.value, docProxies) < 0) docProxies = -1;
-  // Своего блока у документа нет — сниппет встаёт целиком, со своим.
+  // Своего блока у документа нет - сниппет встаёт целиком, со своим.
   const body = proxies && docProxies < 0 ? snippet : plain;
   let text = vmtText.value;
   let caret = null;
@@ -209,7 +209,7 @@ function insertSnippet(snippet) {
     caret = at + block.length;
   }
   if (proxies && docProxies >= 0) {
-    // Позиция блока — по уже изменённому тексту: вставка выше могла её сдвинуть.
+    // Позиция блока - по уже изменённому тексту: вставка выше могла её сдвинуть.
     const close = matchingBrace(text, findProxiesBrace(text));
     let end = close;
     while (end > 0 && /\s/.test(text[end - 1])) end--;      // за последним прокси
@@ -229,7 +229,7 @@ function splitProxies(snippet) {
   return { plain: snippet.slice(0, at), proxies: snippet.slice(open + 1, close) };
 }
 
-/** Позиция «{» блока "Proxies" документа; нет блока — -1. Строки-комментарии
+/** Позиция «{» блока "Proxies" документа; нет блока - -1. Строки-комментарии
  *  не в счёт: `//"Proxies"` начинается не с кавычки и не с имени. */
 function findProxiesBrace(text) {
   // Между именем и скобкой бывают пустые строки и комментарии: в VMT из игры
@@ -259,7 +259,7 @@ function matchingBrace(text, open) {
 
 /**
  * Куда вставлять: туда, где стоит каретка, если её ставил человек. После
- * записи в поле браузер уводит каретку в конец текста — за корневую «}», и
+ * записи в поле браузер уводит каретку в конец текста - за корневую «}», и
  * вставка туда дала бы битый VMT. Поэтому каретка в нуле или за последней
  * «}» считается «не выбрана»: вставка идёт сразу за открывающей скобкой.
  */
@@ -298,14 +298,14 @@ function mergeSnippet(text, snippet, remove) {
   return out.slice(0, at) + block + out.slice(at);
 }
 
-/** Позиция сразу после открывающей скобки блока; её нет — конец файла. */
+/** Позиция сразу после открывающей скобки блока; её нет - конец файла. */
 function afterBrace(text) {
   const at = text.indexOf('{');
   return at < 0 ? text.length : at + 1;
 }
 
 /**
- * Строка состояния: что сейчас в окне — оригинал игры, сохранённая правка или
+ * Строка состояния: что сейчас в окне - оригинал игры, сохранённая правка или
  * несохранённые изменения. Раньше об этом можно было судить только по памяти.
  */
 function markVmtState() {
@@ -324,7 +324,7 @@ export async function openVmtEditor() {
     .map((p) => [p.param.toLowerCase(), p.doc]));
   renderRef();
 
-  // `game` — игровой оригинал на всё время окна: `original` после сохранения
+  // `game` - игровой оригинал на всё время окна: `original` после сохранения
   // становится сохранённым текстом, а эффекту нужна родная текстура.
   vmtState = { material: res.material, original: res.original,
                custom: Boolean(res.edited), game: res.original };
@@ -335,7 +335,7 @@ export async function openVmtEditor() {
   document.getElementById('vmt-reset').hidden = !res.edited;
   vmtDlg.showModal();
   // Прокрутка сбрасывается ТОЛЬКО после показа: у скрытого поля нет раскладки,
-  // и присвоение до showModal терялось — файл открывался на хвосте.
+  // и присвоение до showModal терялось - файл открывался на хвосте.
   vmtText.scrollTop = 0;
   vmtText.setSelectionRange(0, 0);
 }
@@ -366,12 +366,12 @@ document.getElementById('vmt-reset').addEventListener('click', async () => {
 });
 
 document.getElementById('vmt-insert').addEventListener('click', insertMenu);
-// Окно закрыли с открытой панелью — она не должна пережить его.
+// Окно закрыли с открытой панелью - она не должна пережить его.
 vmtDlg.addEventListener('close', closeEffects);
 
 // ── Справочник ──────────────────────────────────────────────────────────
 // Все известные параметры по группам: узнать, что вообще бывает, и добавить
-// нужный, не выходя из окна. Поиск — и по имени, и по описанию: «блики»
+// нужный, не выходя из окна. Поиск - и по имени, и по описанию: «блики»
 // находит $phong, хотя в имени этого слова нет.
 const refPanel = document.getElementById('vmt-ref');
 const refFind = document.getElementById('vmt-find');
@@ -412,8 +412,8 @@ function renderRef() {
 }
 
 /**
- * Щелчок по параметру справочника. Уже есть в материале — ставим курсор на
- * его значение: второй такой же ключ только запутал бы. Нет — добавляем
+ * Щелчок по параметру справочника. Уже есть в материале - ставим курсор на
+ * его значение: второй такой же ключ только запутал бы. Нет - добавляем
  * строку с пустым значением и курсором внутри кавычек.
  */
 function useParam(param) {
@@ -423,7 +423,7 @@ function useParam(param) {
   let until = null;
   if (found) {
     // Выделяем значение: начатый ввод его заменит. Значение бывает и без
-    // кавычек ("$phong" 1) — тогда последняя кавычка строки принадлежит
+    // кавычек ("$phong" 1) - тогда последняя кавычка строки принадлежит
     // ключу, и каретка встала бы внутрь имени.
     const m = /^([ \t]*"?\$\w+"?[ \t]+)(.*?)[ \t]*(?:\/\/.*)?$/.exec(found[0]);
     const start = found.index + (m ? m[1].length : found[0].length);
@@ -436,7 +436,7 @@ function useParam(param) {
     }
     caret = from;
     until = from + value.length;
-    vmtSay('Уже есть в материале — курсор на нём');
+    vmtSay('Уже есть в материале - курсор на нём');
   } else {
     const at = afterBrace(text);
     const block = `\n\t"${param}" ""`;
@@ -462,9 +462,9 @@ document.getElementById('vmt-help').addEventListener('click', (e) => {
 });
 document.getElementById('vmt-close').addEventListener('click', () => vmtDlg.close());
 
-// Ctrl+S — привычка любого, кто правит текст. Браузерное «сохранить страницу»
+// Ctrl+S - привычка любого, кто правит текст. Браузерное «сохранить страницу»
 // здесь ни к чему.
-// По коду клавиши, а не по символу: в русской раскладке S — это «ы».
+// По коду клавиши, а не по символу: в русской раскладке S - это «ы».
 vmtText.addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.code === 'KeyS') {
     e.preventDefault();

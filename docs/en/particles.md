@@ -153,7 +153,7 @@ Custom particle files are blocked by `sv_pure` on casual servers. In local games
 
 Players who want custom particles in casual use [casual-pre-loader](https://github.com/cueki/casual-pre-loader), a separate community tool. The app prepares files for it in two ways:
 
-- **The size limit.** casual-pre-loader doesn't load a PCF larger than the original. The app compresses the file when saving and warns you if it's still bigger: **Built, but the PCF is N B larger than the original — casual will not load it**. Removing unused systems helps.
+- **The size limit.** casual-pre-loader doesn't load a PCF larger than the original. The app compresses the file when saving and warns you if it's still bigger: **Built, but the PCF is N B larger than the original - casual will not load it**. Removing unused systems helps.
 - **Textures as a separate mod.** casual-pre-loader treats any VPK with a PCF inside as a particle pack and doesn't install textures from it. That's why replaced textures also go into `name_textures.vpk`, which you add on its addons tab.
 
 Textures picked with **Game texture from the list…** don't need any of this: the file is already in the game.

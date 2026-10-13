@@ -22,14 +22,14 @@ import { cpBox, cpFillIndexes } from './points.js';
 //: Имена эффектов из игры по имени системы: «Burning Flames» под
 //: `superrare_burning1`. Наполняется каталогом эффектов.
 const fxNames = new Map();
-//: Какой файл открыт — чтобы по щелчку в списке эффектов не перечитывать его.
+//: Какой файл открыт - чтобы по щелчку в списке эффектов не перечитывать его.
 let loadedFile = '';
 let loadedShort = '';
 
 /**
- * Заголовок: имя из игры, если оно есть, иначе имя системы; в подписи —
+ * Заголовок: имя из игры, если оно есть, иначе имя системы; в подписи -
  * система, файл и размер. «Язычки пламени» человек узнаёт сразу,
- * `superrare_burning1` — нет.
+ * `superrare_burning1` - нет.
  */
 export function setTitle(system) {
   const known = fxNames.get(system);
@@ -48,13 +48,13 @@ export const currentFile = () => loadedFile;
 /**
  * Рисует дерево систем.
  *
- * Ребёнок стоит под родителем с отступом, у родителя — треугольник. Плоским
+ * Ребёнок стоит под родителем с отступом, у родителя - треугольник. Плоским
  * списком 104 системы class_fx читаются как свалка, а вложенность в PCF
  * настоящая: родитель тянет детей за собой.
  */
 export function fillTree(nodes, selected) {
   els.grid.innerHTML = '';
-  // Источники — про список игры; у дерева файла им делать нечего.
+  // Источники - про список игры; у дерева файла им делать нечего.
   els.fSource.hidden = true;
   let shown = 0;
 
@@ -86,8 +86,8 @@ export function fillTree(nodes, selected) {
       name.className = 'tree__name' + (node.key === selected ? ' is-active' : '');
       name.type = 'button';
       name.textContent = node.name;
-      // Имя из игры — рядом: `superrare_burning1` человеку ничего не
-      // говорит, «Burning Flames» — всё.
+      // Имя из игры - рядом: `superrare_burning1` человеку ничего не
+      // говорит, «Burning Flames» - всё.
       const known = fxNames.get(node.key);
       if (known) {
         const tag = document.createElement('span');
@@ -116,7 +116,7 @@ export function fillTree(nodes, selected) {
   };
 
   walk(nodes, 0);
-  // Счётчик — общий с предметами, но считает системы, а не предметы.
+  // Счётчик - общий с предметами, но считает системы, а не предметы.
   const count = document.getElementById('cat-count');
   count.hidden = !shown;
   count.textContent = shown + ' ' + plural(shown, 'система', 'системы', 'систем');
@@ -124,9 +124,9 @@ export function fillTree(nodes, selected) {
 
 //: Номер последнего запроса эффектов: ответы приходят не по порядку.
 let fxTurn = 0;
-//: Выбранный источник: оружие, постройки, игрок… Пусто — все.
+//: Выбранный источник: оружие, постройки, игрок… Пусто - все.
 let source = '';
-//: Последний запрос — чтобы смена источника перерисовала тот же список.
+//: Последний запрос - чтобы смена источника перерисовала тот же список.
 let lastQuery = '';
 //: Корни списка эффектов, развёрнутые рукой; держатся между перерисовками.
 const fxOpen = new Set();
@@ -134,8 +134,8 @@ const fxOpen = new Set();
 /**
  * Каталог эффектов игры: по имени, а не по файлу.
  *
- * Без запроса — необычные эффекты с именами из игры по категориям: это то,
- * за чем сюда приходят. С запросом — поиск по ним и по всем системам всех
+ * Без запроса - необычные эффекты с именами из игры по категориям: это то,
+ * за чем сюда приходят. С запросом - поиск по ним и по всем системам всех
  * 134 файлов: знать, что «Burning Flames» лежит в `item_fx.pcf` как
  * `superrare_burning1`, никто не обязан.
  */
@@ -148,7 +148,7 @@ export async function showEffects(query = '') {
     for (const k of [it, ...it.kids]) if (k.name) fxNames.set(k.system, k.name);
   }
 
-  // Виды источников — только те, что есть под этим запросом; выбор
+  // Виды источников - только те, что есть под этим запросом; выбор
   // держится, пока его не сняли.
   fillFilters(els.fSource, res.facets || [], source || null, (key) => {
     source = key || '';
@@ -159,8 +159,8 @@ export async function showEffects(query = '') {
   els.grid.innerHTML = '';
   let group = '';
   for (const it of res.items) {
-    // Без запроса список идёт группами: каталог — по категориям, источник
-    // — по предмету («Огнемёт», «Турель»); подписываем границы.
+    // Без запроса список идёт группами: каталог - по категориям, источник
+    // - по предмету («Огнемёт», «Турель»); подписываем границы.
     const key = query ? '' : (source ? (it.labels[0] || '') : it.category_name);
     if (!query && key !== group) {
       group = key;
@@ -171,10 +171,10 @@ export async function showEffects(query = '') {
     }
     // Корень первым, дочерние системы под ним свёрнуты: у эффекта из
     // тридцати систем человеку нужна одна строка. При поиске раскрыты те,
-    // где совпали именно дети — иначе непонятно, почему корень в списке.
+    // где совпали именно дети - иначе непонятно, почему корень в списке.
     const row = effectRow(it, 0, query);
     // У ребёнка не повторяем то, что уже сказано у корня: «Язычки пламени»
-    // под «Язычками пламени» — шум.
+    // под «Язычками пламени» - шум.
     const said = new Set([it.name, ...it.labels]);
     const kids = it.kids.map((k) => effectRow(k, 1, query, said));
     if (kids.length) {
@@ -205,7 +205,7 @@ export async function showEffects(query = '') {
   els.note.hidden = res.items.length > 0;
   els.note.textContent = res.ready
     ? 'Ничего не найдено.'
-    : 'Индекс эффектов ещё строится — пока ищем только по именам из игры.';
+    : 'Индекс эффектов ещё строится - пока ищем только по именам из игры.';
 }
 
 /** Строка списка эффектов: имя, чем вызывается, система, файл. */
@@ -227,8 +227,8 @@ function effectRow(it, depth, query, said = new Set()) {
                 + '<span class="fx__sys mono"></span>'
                 + '<span class="fx__file mono"></span>';
   btn.querySelector('.fx__name').textContent = it.name || it.system;
-  // Чем вызывается — словами: «Огнемёт», «Турель». В группе по предмету
-  // первый уже в заголовке, остальные (общие эффекты) — при строке.
+  // Чем вызывается - словами: «Огнемёт», «Турель». В группе по предмету
+  // первый уже в заголовке, остальные (общие эффекты) - при строке.
   const who = it.labels.filter((l, i) => !(source && !query && i === 0) && !said.has(l));
   btn.querySelector('.fx__who').textContent = who.join(', ');
   btn.querySelector('.fx__sys').textContent = it.name ? it.system : '';
@@ -245,12 +245,12 @@ function effectRow(it, depth, query, said = new Set()) {
 /** Открывает эффект из списка: файл, если он другой, затем систему. */
 async function openEffect(it) {
   if (!it.file) {
-    say('Индекс эффектов ещё строится — попробуйте через несколько секунд');
+    say('Индекс эффектов ещё строится - попробуйте через несколько секунд');
     return;
   }
   if (it.file !== loadedFile) {
     await loadPcf(it.file);
-    // Файл не открылся — дерева нет, выбирать не из чего.
+    // Файл не открылся - дерева нет, выбирать не из чего.
     if (loadedFile !== it.file) return;
   }
   const node = pcfTree.find((n) => n.key === it.system);
@@ -267,7 +267,7 @@ export function showParticleFrame(on) {
   // грузить незачем.
   if (on && !stage.pframe.src) {
     stage.pframe.src = '/viewer/particles3d.html';
-    // Язык — сразу: подсказка «выберите систему» стоит в кадре до первого
+    // Язык - сразу: подсказка «выберите систему» стоит в кадре до первого
     // файла, а до него движок говорил по-английски при любой настройке.
     withParticles((w) => w.setLanguage && w.setLanguage(api.lang()));
   }
@@ -286,17 +286,17 @@ export async function loadPcf(source, label = '') {
   setTree(data.tree || []);
   setDiff(data.diff || {});
   loadedFile = source;
-  applyToolsMenu();            // «Сохранить PCF» — теперь есть что
+  applyToolsMenu();            // «Сохранить PCF» - теперь есть что
   // Выпадашка показывает открытый файл и когда его выбрали из списка игры.
   if ([...els.cat.options].some((o) => o.value === source)) els.cat.value = source;
-  // Новый файл — свои узлы; старое состояние свёрнутости к ним не относится.
+  // Новый файл - свои узлы; старое состояние свёрнутости к ним не относится.
   pcfCollapsed.clear();
   // Дочерние сворачиваем сразу: сверху видно корни эффектов, а не всё подряд.
   for (const n of pcfNodes) if (n.kids.length) pcfCollapsed.add(n.key);
 
   withParticles((w) => {
     w.setLanguage && w.setLanguage(api.lang());
-    // Клавиши принадлежат странице, а фокус после щелчка по кадру — движку:
+    // Клавиши принадлежат странице, а фокус после щелчка по кадру - движку:
     // он передаёт нажатие сюда (см. playback.js → editorKey).
     w.onEditorKey = editorKey;
     w.loadParticleData(data);

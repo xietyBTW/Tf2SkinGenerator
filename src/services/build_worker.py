@@ -73,6 +73,15 @@ class BuildWorker(StandardWorker):
                                         remaining: int = 0) -> Optional[str]:
         """Запрашивает дополнительную текстуру из UI потока."""
         result = self._extra_texture_req.ask(material_name, weapon_key, remaining)
+        if result is None and not self.isInterruptionRequested():
+            # Ответа не дождались (окно закрыли, человек отошёл). «Пропустить»
+            # нельзя: пересобранная модель ищет материалы только в своей папке
+            # (patch_qc_file), и выкинутый из мода материал в игре стал бы
+            # фиолетово-чёрной «шахматкой» — у шапки это вся синяя команда.
+            # «Оставить игровую» — первый пункт вопроса — даёт рабочий мод.
+            from src.shared.constants import EXTRA_TEX_USE_GAME_ORIGINAL
+            logger.warning(f"Нет ответа про текстуру «{material_name}» — оставляю игровую")
+            return EXTRA_TEX_USE_GAME_ORIGINAL
         logger.debug(f"Получена доп. текстура: {result}")
         return result
 

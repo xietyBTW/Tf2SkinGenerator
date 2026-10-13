@@ -2,12 +2,12 @@
  * Модель для точек частиц: выбор из каталога игры, не из кэша.
  *
  * Тот же каталог, что в левой колонке (классы, шапки, оружие: обложки,
- * фильтр по классу, поиск), только в окне и с одним исходом — модель
+ * фильтр по классу, поиск), только в окне и с одним исходом - модель
  * встаёт в сцену частиц. Кэш декомпиляции общий с вкладками оружия и шапок:
  * что уже открывали, приходит сразу, остальное разбирает Crowbar (это
- * секунды-минуты, поэтому фоном: ответ «начали», сцена — событием cp_model).
+ * секунды-минуты, поэтому фоном: ответ «начали», сцена - событием cp_model).
  *
- * Четвёртая вкладка «Из кэша» — то, чего в каталоге нет (реквизит насмешек)
+ * Четвёртая вкладка «Из кэша» - то, чего в каталоге нет (реквизит насмешек)
  * и вообще всё, что уже разобрано: без Crowbar и без ожидания.
  */
 
@@ -38,7 +38,7 @@ const GROUPS = { player: 'Игроки', hat: 'Косметика', weapon: 'О�
 const state = { tab: 'character', cls: null, query: '' };
 let resolveWith = null;
 
-/** Открывает окно; ответ — {mode, key, qc, label} или null. */
+/** Открывает окно; ответ - {mode, key, qc, label} или null. */
 export function pickCpModel() {
   return new Promise((resolve) => {
     resolveWith = resolve;
@@ -62,7 +62,7 @@ dlg.addEventListener('cancel', () => settle(null));
 dlg.addEventListener('close', () => settle(null));
 document.getElementById('cpm-cancel').addEventListener('click', () => settle(null));
 findEl.addEventListener('input', () => { state.query = findEl.value.trim(); refresh(); });
-// Enter в поиске — не «отправить форму» (окно закрылось бы без ответа).
+// Enter в поиске - не «отправить форму» (окно закрылось бы без ответа).
 findEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') e.preventDefault(); });
 
 function drawTabs() {
@@ -84,7 +84,7 @@ let refreshSeq = 0;
 async function refresh() {
   const tab = state.tab;
   const seq = ++refreshSeq;
-  // Классы — сами по себе фильтр, у кэша класса нет.
+  // Классы - сами по себе фильтр, у кэша класса нет.
   const withClass = tab === 'hat' || tab === 'weapon';
   classEl.hidden = !withClass;
   if (withClass) {
@@ -110,13 +110,13 @@ async function refresh() {
   gridEl.hidden = list.length === 0;
   noteEl.hidden = list.length > 0;
   noteEl.textContent = tab === 'cache'
-    ? t('В кэше нет разобранных моделей — откройте модель на вкладке оружия или шапок, и она появится здесь')
+    ? t('В кэше нет разобранных моделей - откройте модель на вкладке оружия или шапок, и она появится здесь')
     : t('Ничего не найдено');
 }
 
 async function load(tab) {
   if (tab === 'character') {
-    // Класс — заголовок карточки, «тело»/«руки» — подпись: здесь выбирают
+    // Класс - заголовок карточки, «тело»/«руки» - подпись: здесь выбирают
     // модель, а не скин, и класс важнее.
     return (await api.items({ category: 'character' })).map((it) => ({
       ...it, name: it.cls, label: it.name,
@@ -128,8 +128,8 @@ async function load(tab) {
   if (tab === 'weapon') {
     return api.items({ category: 'weapon', tf2_class: state.cls });
   }
-  // Кэш: обложек у него нет — тип как у частиц, чтобы карточка не ходила
-  // за иконкой; подпись — группа.
+  // Кэш: обложек у него нет - тип как у частиц, чтобы карточка не ходила
+  // за иконкой; подпись - группа.
   return (await api.particleModels()).map((m) => ({
     key: m.qc, name: m.label, label: t(GROUPS[m.group] || GROUPS.other),
     type: 'particle', mode: 'cache',

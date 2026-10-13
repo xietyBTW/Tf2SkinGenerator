@@ -21,7 +21,7 @@ The panel takes the album's place while the model stays visible on the right, so
 
 ## Picking a paint
 
-Type in **Search paints** to filter the list, then click a paint. A quick 512-pixel preview is built and laid over the model within a moment. Nothing is applied yet, so you can go through the list freely.
+Type in **Search paints** to filter the list, then click a paint. When the interface is in another language, you can also search by the English name: it is shown in gray next to the translated one, since that's the name the community uses. A quick 512-pixel preview is built and laid over the model within a moment. Nothing is applied yet, so you can go through the list freely.
 
 Some paints are marked **RED / BLU**: their pattern differs between teams, and the app builds the version for the team that is active right now.
 
@@ -35,13 +35,34 @@ From the search box you can use the keyboard: the arrow keys move through the li
 
 The app reproduces the game's compositing step by step, so the result is very close to what you see on the weapon in game. An exact match for a given seed hasn't been verified in game, so treat the seed as a way to find a look you like rather than a way to copy a specific item.
 
+## Materials
+
+When the weapon has several materials, a **Materials** row appears under the seed, with a thumbnail tile for each material. Click a tile to check or uncheck it. A checked tile shows right away how the paint lands on that material, and an unchecked one stays dimmed. Every material has its own UV layout, so the paint is built separately for each checked material, with the same wear and seed.
+
+- For the game's War Paints, the materials the game paints itself are checked at first. Usually that's the main one; the Detonator adds its shell. You can check the others too: the pattern is then laid out over their parts, as in [universal mode](#universal-mode). Each tile is marked **in game** or **by parts**, and a note under the row reminds you that the game doesn't paint those materials. A paint drawn for one specific weapon can't be laid out over other materials, so their tiles are disabled for it.
+- In universal mode every material is checked. Uncheck what shouldn't be painted, such as a scope lens or a pilot light.
+
+A part material from [painting by parts](model-parts.md) sits in the list right after its source material and gets the same picture, since they share the UV layout. Materials with no geometry of their own in the model aren't listed.
+
+Arranging patterns by part by hand applies to the main material. The other materials are arranged automatically.
+
 ## Applying
 
-**Apply** builds the paint at full size (1024 × 1024) and puts it on the weapon's materials that the game paints with War Paints, usually the main one. From this moment it's a regular texture on the card: the preview shows it, you can paint over it, and the build will scale it to the resolution in the build settings.
+**Apply** builds the paint at full size (1024 × 1024) and puts it on the checked materials. From this moment it's a regular texture on the card: the preview shows it, you can paint over it, and the build will scale it to the resolution in the build settings.
 
 The paint goes onto the cards of the active team. If the weapon has separate RED and BLU textures, switch to the other team and apply the paint there as well. Alternatively, leave BLU alone and answer **Copy the main one** when the build asks about it.
 
-Applying is a normal edit: <kbd>Ctrl</kbd>+<kbd>Z</kbd> takes it back.
+Applying is a normal edit: <kbd>Ctrl</kbd>+<kbd>Z</kbd> takes it back on every painted material at once.
+
+## Decorated weapons
+
+Below the War Paints the list has a **Decorated weapons** section. These are collection skins that came out of cases as finished weapons, starting with the Gun Mettle update: Current Event, Night Owl, Pink Elephant and others, 84 in total. In the game each of them exists only on its own weapon: Current Event, for example, only on the Scattergun. The tooltip on the row names that weapon.
+
+The recipe of such a skin is drawn for the masks of its own weapon: which pattern goes on which of its parts. The app lays it out over the parts of your model the same way as [universal mode](#universal-mode) does: the skin's different looks (for Current Event, the purple lightning, the lavender and the black) go to the parts in roughly the same shares as on the original. **Shuffle parts** and **Arrange by part** work here too, and on the arrangement screen the tiles show the looks themselves. The result is in the style of the skin rather than an exact copy, because on the original Valve's artists laid the pattern out by hand.
+
+On the weapon the skin belongs to, it sits in the regular list and is built exactly as in the game.
+
+Three skins, Warhawk, Balloonicorn and Mister Cuddles, are drawn as one picture for the UV layout of their own weapon, with no split into parts. On another weapon only scraps of them would land in random places, so they aren't in this section and stay with their own weapons. Killer Bee has a picture of the same kind on top of its pattern: on another weapon the picture is removed and the stripes stay.
 
 ## Universal mode
 

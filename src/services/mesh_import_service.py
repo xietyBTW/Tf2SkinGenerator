@@ -179,11 +179,11 @@ def check_limits(mesh: Mesh) -> Optional[str]:
     tris, verts = mesh.triangle_count, mesh.vertex_count()
     mats, limit = len(mesh.groups), MAX_STUDIO_VERTS
     if tris > MAX_STUDIO_TRIANGLES:
-        return f'{tris} треугольников — лимит игры {limit}. Упростите модель в редакторе'
+        return f'{tris} треугольников - лимит игры {limit}. Упростите модель в редакторе'
     if verts > MAX_STUDIO_VERTS:
-        return f'{verts} вершин (после разрезания по швам и рёбрам) — лимит игры {limit}. Упростите модель в редакторе'
+        return f'{verts} вершин (после разрезания по швам и рёбрам) - лимит игры {limit}. Упростите модель в редакторе'
     if mats > MAX_STUDIO_SKINS:
-        return f'{mats} материалов — лимит игры {MAX_STUDIO_SKINS}. Объедините материалы в редакторе'
+        return f'{mats} материалов - лимит игры {MAX_STUDIO_SKINS}. Объедините материалы в редакторе'
     return None
 
 
@@ -593,7 +593,7 @@ def _gltf_buffer(desc: dict, base_dir: str, glb_bin: Optional[bytes]) -> bytes:
     full = os.path.join(base_dir, uri)
     if not os.path.isfile(full):
         raise MeshImportError(
-            f'Рядом с glTF нет файла {uri} — сохраните модель как GLB (один файл)')
+            f'Рядом с glTF нет файла {uri} - сохраните модель как GLB (один файл)')
     with open(full, 'rb') as f:
         return f.read()
 

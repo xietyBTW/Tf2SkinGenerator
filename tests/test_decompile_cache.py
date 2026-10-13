@@ -204,6 +204,18 @@ class DecompileCacheTests(unittest.TestCase):
         self.assertEqual(dc.enforce_cache_limit(max_mb=0), 0)
         self.assertIsNotNone(dc.find_cached_qc_for_weapon("c_a"))
 
+    def test_enforce_cache_limit_reads_the_setting(self):
+        """Без аргумента потолок берётся из настроек (вкладка «Обслуживание»)."""
+        from unittest.mock import patch
+        vpk = _make_vpk(self.base)
+        decomp = _make_decompile_dir(self.base)
+        with patch("src.config.app_config.AppConfig.get", return_value=0):
+            dc.save_to_cache("c_a", str(vpk), "models/c_a.mdl", str(decomp))
+            self.assertEqual(dc.enforce_cache_limit(), 0)     # 0 — без ограничения
+        with patch("src.config.app_config.AppConfig.get", return_value=0.000001):
+            self.assertEqual(dc.enforce_cache_limit(), 1)
+        self.assertIsNone(dc.find_cached_qc_for_weapon("c_a"))
+
     def test_get_cached_decompile_touches_mtime_for_lru(self):
         """Cache hit обновляет mtime записи (иначе LRU считала бы её старой)."""
         import os

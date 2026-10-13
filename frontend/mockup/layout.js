@@ -1,10 +1,10 @@
 /*
  * Раскладка окна: три панели, каталог и правая панель раздела.
  *
- * Единственная настройка, меняющая раскладку, — «прибить панели». Всё
+ * Единственная настройка, меняющая раскладку, - «прибить панели». Всё
  * остальное здесь про видимость: что показано в плавающем режиме, а что в
  * прибитом. Ниже 1100 px прибитый режим не помещается и выключается
- * принудительно — честнее сказать «не влезает», чем показать сломанный экран.
+ * принудительно - честнее сказать «не влезает», чем показать сломанный экран.
  */
 
 import * as api from './api.js';
@@ -39,16 +39,16 @@ export function applyRightPanel() {
 
 // ── Панели: прибиты к краям или вызываются поверх ────────────────────────
 // Единственная настройка, которая меняет раскладку. Каталог и параметры
-// нарисованы по одному разу; здесь только их видимость в плавающем режиме —
+// нарисованы по одному разу; здесь только их видимость в плавающем режиме -
 // в прибитом они видны всегда.
 
-// Ниже этого порога три прибитые панели в строку не встают — они налезали бы
+// Ниже этого порога три прибитые панели в строку не встают - они налезали бы
 // друг на друга. Режим тогда принудительно плавающий, а кнопка гаснет: честнее
 // сказать «не помещается», чем показать сломанный экран.
 const narrow = matchMedia('(max-width: 1100px)');
 
 //: Выбор пользователя. Хранится ОТДЕЛЬНО от действующего режима, иначе узкое
-//: окно затирало бы его: сузил, вернул — а панели не вернулись.
+//: окно затирало бы его: сузил, вернул - а панели не вернулись.
 let wantPinned = false;
 
 function applyPanels() {
@@ -63,7 +63,7 @@ function applyPanels() {
 
 /**
  * Закрепить панели или отпустить. Значение приходит из настроек и там же
- * хранится: кнопкой в шапке оно не переживало перезапуск, а раскладка — не то,
+ * хранится: кнопкой в шапке оно не переживало перезапуск, а раскладка - не то,
  * что хочется выбирать заново каждый раз.
  */
 export function setPinned(on) {
@@ -77,13 +77,13 @@ export function pinnedFits() {
 }
 
 // Слушаем и медиазапрос, и resize: change у MediaQueryList приходит не во
-// всех окружениях (проверено — в эмулированном вьюпорте не пришёл), а
+// всех окружениях (проверено - в эмулированном вьюпорте не пришёл), а
 // applyPanels идемпотентна, лишний вызов ничего не стоит.
 narrow.addEventListener('change', applyPanels);
 addEventListener('resize', applyPanels);
 applyPanels();
 
-/** Проявляет стол заново — после смены раздела, когда его содержимое
+/** Проявляет стол заново - после смены раздела, когда его содержимое
  *  подменилось целиком. Снять и поставить класс через reflow: иначе
  *  анимация не перезапустится. */
 export function freshenStage() {
@@ -121,7 +121,7 @@ gamma.addEventListener('change', () => {
  *
  * Эффект частиц смотрят целиком, а на обычном экране под него отведена
  * половина. Прячем всё, кроме сцены: каталог, панели, альбом, шапку и низ.
- * Выход — тем же F11 или Esc, как в окне приложения.
+ * Выход - тем же F11 или Esc, как в окне приложения.
  */
 export function toggleExpanded(on) {
   const want = on === undefined ? root.dataset.expanded !== '1' : Boolean(on);
@@ -147,41 +147,96 @@ document.addEventListener('keydown', (e) => {
 }, true);
 
 export function setStatus(text, busy) {
-  document.querySelector('.dock__state').textContent = text;
+  writeState(text);
   setBusy(busy);
 }
 
+/** Текст полосы - в своём span: длинное сообщение режется многоточием
+ *  (style.css, .dock). */
+function writeState(text) {
+  const label = document.createElement('span');
+  label.textContent = text;
+  document.querySelector('.dock__state').replaceChildren(label);
+}
+
 /** Пока идёт сборка, кнопка сборки уступает место отмене: собрать второй раз
- *  всё равно нельзя, а бросить начатое — надо. */
+ *  всё равно нельзя, а бросить начатое - надо. Полоса на это время занята
+ *  только сборкой: сводка параметров и путь к игре прячутся. */
 export function setBusy(busy) {
   const build = document.getElementById('buildvpk');
   const stop = document.getElementById('buildstop');
+  clearTimeout(resultTimer);
+  document.getElementById('buildopen').hidden = true;
+  if (busy) root.dataset.dock = 'focus';
+  else delete root.dataset.dock;
   build.disabled = Boolean(busy);
   build.hidden = Boolean(busy);
   stop.hidden = !busy;
 }
 
+// ── Итог сборки ─────────────────────────────────────────────────────────
+// 15 секунд полоса показывает только итог, а после удачи «Собрать VPK»
+// становится «Открыть папку»: следующий шаг после сборки - найти мод. Потом
+// полоса возвращается к обычной, и чистый успех сменяется на «Готово»:
+// ошибку и предупреждения оставляем, их ещё читать. Раньше конца - при
+// правке параметров и после щелчка. Под курсором кнопка не меняется: ушла
+// бы из-под руки.
+
+let resultTimer = null;
+let calm = false;
+
+/** ok - удалась ли сборка; quiet - успех без предупреждений. */
+export function showResult(ok, quiet = false) {
+  root.dataset.dock = 'focus';
+  calm = ok && quiet;
+  document.getElementById('buildvpk').hidden = ok;
+  document.getElementById('buildopen').hidden = !ok;
+  clearTimeout(resultTimer);
+  resultTimer = setTimeout(endResult, 15000);
+}
+
+export function endResult() {
+  const open = document.getElementById('buildopen');
+  clearTimeout(resultTimer);
+  if (root.dataset.dock !== 'focus' || !document.getElementById('buildstop').hidden) return;
+  if (!open.hidden && open.matches(':hover')) {
+    open.addEventListener('mouseleave', endResult, { once: true });
+    return;
+  }
+  delete root.dataset.dock;
+  open.hidden = true;
+  document.getElementById('buildvpk').hidden = false;
+  if (calm) writeState('Готово');
+  calm = false;
+}
+
+document.getElementById('buildopen').addEventListener('click', async () => {
+  const res = await api.exportFolder();
+  endResult();
+  if (res.error) setStatus(res.error, false);
+});
+
 /**
  * Подпись внизу: где найдена игра.
  *
- * Не украшение — без пути к TF2 не работает ничего, и узнать об этом лучше
+ * Не украшение - без пути к TF2 не работает ничего, и узнать об этом лучше
  * сразу, а не по ошибке на первой же загрузке модели.
  */
 export async function showTf2Path() {
   const el = document.querySelector('.dock__tf2');
   const paths = await api.call('tf2_paths');
-  if (paths.error) { el.textContent = 'TF2 не найдена — укажите папку игры в настройках'; return; }
-  // Crowbar — вторая обязательная половина: без него модель не разобрать, а
+  if (paths.error) { el.textContent = 'TF2 не найдена - укажите папку игры в настройках'; return; }
+  // Crowbar - вторая обязательная половина: без него модель не разобрать, а
   // узнать об этом раньше было можно только по ошибке сборки.
   // Через t(): строка собирается из трёх кусков, и целиком её в словаре не
-  // найти — переводим каждый кусок отдельно.
+  // найти - переводим каждый кусок отдельно.
   el.textContent = t('TF2 найдена · ') + paths.root
     + (paths.crowbar ? t(' · Crowbar готов') : t(' · Crowbar НЕ НАЙДЕН'));
 }
 
-// Высота колонки значков — панели настроек рядом (--bar-h): она встаёт вровень
+// Высота колонки значков - панели настроек рядом (--bar-h): она встаёт вровень
 // с верхом колонки и растёт вниз, а не от центра (см. .ptools__opts). Колонка
-// меняет высоту, когда её сворачивают, — поэтому наблюдатель, а не замер.
+// меняет высоту, когда её сворачивают, - поэтому наблюдатель, а не замер.
 document.querySelectorAll('.ptools').forEach((pal) => {
   const bar = pal.querySelector('.ptools__bar');
   if (!bar) return;

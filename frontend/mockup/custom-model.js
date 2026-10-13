@@ -1,7 +1,7 @@
 /*
  * Своя модель и её QC.
  *
- * Замена включается самим фактом загрузки — отдельной галочки нет ни здесь, ни
+ * Замена включается самим фактом загрузки - отдельной галочки нет ни здесь, ни
  * в приложении. Тип модели («готова» / «только геометрия») решает всё
  * дальнейшее, поэтому спрашиваем до показа.
  */
@@ -14,7 +14,7 @@ import { say, viewer, withViewer } from './stage.js';
 import { applyView, lastView, refreshView, reloadSceneIfFp } from './preview.js';
 import { closeParts } from './parts.js';
 
-//: Гирлянды оружия — отдельные модели, и заменить можно каждую.
+//: Гирлянды оружия - отдельные модели, и заменить можно каждую.
 const GARLANDS = { xmas: 'Праздничная гирлянда', festivizer: 'Гирлянда фестивайзера' };
 
 //: Приставка цели «снаряд» в выборе, что заменить: `shell:<группа>`.
@@ -28,7 +28,7 @@ function shellGroups(st, ownOnly) {
 
 /**
  * Что заменить или убрать: само оружие, одну из его гирлянд или заряженный
- * снаряд. Вопрос — только когда выбирать есть из чего; `kinds` — виды гирлянд.
+ * снаряд. Вопрос - только когда выбирать есть из чего; `kinds` - виды гирлянд.
  */
 async function pickTarget(title, withModel, kinds, ok, shells = []) {
   const list = [
@@ -63,7 +63,7 @@ export async function dropModel() {
     say('Гирлянда снова стоковая');
     return;
   }
-  dropFitSave();            // подгонки больше не будет — и записывать нечего
+  dropFitSave();            // подгонки больше не будет - и записывать нечего
   const res = await api.dropCustomModel();
   if (res.error) { say(res.error); return; }
   say('Своя модель убрана');
@@ -77,13 +77,13 @@ export async function dropModel() {
 // дальнейшее, поэтому спрашиваем до показа.
 
 /**
- * SMD — из Blender; OBJ/GLB/glTF — «из интернета», их приложение разбирает
+ * SMD - из Blender; OBJ/GLB/glTF - «из интернета», их приложение разбирает
  * само. Файлы рядом (MTL, .bin, картинки) выбирают вместе с моделью: все
  * ложатся в одну папку, и ссылки из OBJ/glTF находят их.
  */
 export async function replaceModel() {
   // У оружия с гирляндами заменить можно и её: каждая замена своя, так что
-  // оружие и гирлянда меняются вместе — просто двумя заходами.
+  // оружие и гирлянда меняются вместе - просто двумя заходами.
   const kind = await pickTarget('Что заменить?', true,
                                 (lastView || {}).festive_options || [], 'Выбрать файл',
                                 shellGroups(lastView || {}, false));
@@ -111,8 +111,8 @@ export async function replaceModel() {
       list: [
         { label: 'Со своими материалами и костями',
           value: 'keep',
-          hint: 'Каждый материал модели получит свой слот текстуры, кости с игровыми именами оживут в анимациях, QC можно править. Для моделей, сделанных под это оружие' },
-        { label: 'Только форма — материалы оружия',
+          hint: 'Каждый материал модели получит свой слот текстуры. Кости с игровыми именами оживут в анимациях, свои кости модели останутся в ней. QC можно править. Для моделей, сделанных под это оружие' },
+        { label: 'Только форма - материалы оружия',
           value: 'geometry',
           hint: 'Все материалы модели схлопнутся в материал оружия: одна текстура на всё, кости игровые. Для моделей с сайта и простых замен' },
       ],
@@ -138,8 +138,8 @@ export async function replaceModel() {
   await reloadSceneIfFp();
 }
 
-/** Своя модель снаряда: кость игрового. SMD — как выставлен, на материале
- *  оружия; OBJ/GLB — по габаритам игрового, со своим материалом и картинкой
+/** Своя модель снаряда: кость игрового. SMD - как выставлен, на материале
+ *  оружия; OBJ/GLB - по габаритам игрового, со своим материалом и картинкой
  *  из файла, когда приедет модель (Python: load_part_model). */
 async function replaceShell(group, path) {
   const res = await api.loadPartModel(group, path);
@@ -164,17 +164,17 @@ async function replaceGarland(kind, path) {
 }
 
 // ── Подгонка своей модели и гирлянды ─────────────────────────────────────
-// Значения — в осях SMD оружия (Y вверх, ствол по +Z), теми же, что запекает
+// Значения - в осях SMD оружия (Y вверх, ствол по +Z), теми же, что запекает
 // Python. Вьювер крутит модель сам и сразу (гизмо в кадре, как в Blender);
-// SMD пересобирается после паузы в правке — он нужен только сборке и виду от
+// SMD пересобирается после паузы в правке - он нужен только сборке и виду от
 // первого лица. Кнопка «Масштабировать» включает режим: призрак оригинала в
 // кадре, гизмо и палитра поверх кадра, как у частей. Режимы частей и
 // подгонки взаимоисключающие: у обоих свой захват мыши в кадре.
 //
 // Цель подгонки две: своя модель ('model') и гирлянда праздничной версии
-// ('decor') — её сдвигают под свою модель, чтобы огоньки легли на неё, а не
+// ('decor') - её сдвигают под свою модель, чтобы огоньки легли на неё, а не
 // висели там, где их повесила бы стоковая. Панель и клавиши у них общие,
-// числа и запись — у каждой свои.
+// числа и запись - у каждой свои.
 
 const fitPanel = document.getElementById('fitpanel');
 const fitBtn = document.getElementById('fitbtn');
@@ -184,7 +184,7 @@ const fitEl = (id) => document.getElementById(id);
 let fitTimer = null;
 let fitOn = false;
 let fitAvailable = false;
-//: Что подгоняют сейчас и последние числа каждой цели (null — единица).
+//: Что подгоняют сейчас и последние числа каждой цели (null - единица).
 let fitTarget = 'model';
 const fitValues = { model: null, decor: null };
 
@@ -205,7 +205,7 @@ function fitWrite(fit) {
   FIT_FIELDS.forEach((id, i) => { fitEl(id).value = vals[i]; });
 }
 
-/** Кнопка подгонки доступна, когда в кадре своя модель; `fit` — её числа. */
+/** Кнопка подгонки доступна, когда в кадре своя модель; `fit` - её числа. */
 export function showFit(fit) {
   fitAvailable = Boolean(fit);
   if (!fit && fitTarget === 'model') setFitMode(false);
@@ -216,7 +216,7 @@ export function showFit(fit) {
 }
 
 /**
- * Гирлянда показана (`available`) и её подгонка (`fit`, null — стоковая).
+ * Гирлянда показана (`available`) и её подгонка (`fit`, null - стоковая).
  * Вьюверу числа отдаются всегда: гирлянда пересобирается при каждом показе,
  * и без них вставала бы на стоковое место.
  */
@@ -225,7 +225,7 @@ export function showDecorFit(fit, available) {
   applyTarget('decor', available ? fit : null);
 }
 
-/** Числа цели — во вьювер, а в поля только если её сейчас и правят. Пока
+/** Числа цели - во вьювер, а в поля только если её сейчас и правят. Пока
  *  человек крутит гизмо, ответ сервера его не перебивает. */
 function applyTarget(target, fit) {
   fitValues[target] = fit || null;
@@ -266,7 +266,7 @@ function setFitMode(on, target = 'model') {
     fitTarget = target === 'decor' ? 'decor' : 'model';
     closeParts();
     fitWrite(fitValues[fitTarget]);
-    // «Гнуть» и «Выпрямить» — только у гирлянды.
+    // «Гнуть» и «Выпрямить» - только у гирлянды.
     fitPanel.querySelectorAll('[data-decor]').forEach(
       (b) => { b.hidden = fitTarget !== 'decor'; });
     if (fitTarget !== 'decor' && currentTool() === 'bend') markTool('scale');
@@ -291,7 +291,7 @@ function setFitMode(on, target = 'model') {
 
 fitBtn.addEventListener('click', () => setFitMode(!fitOn));
 fitEl('fit-done').addEventListener('click', () => setFitMode(false));
-// Части открываются — подгонка уходит первой (capture: раньше их обработчика).
+// Части открываются - подгонка уходит первой (capture: раньше их обработчика).
 partsBtn.addEventListener('click', () => setFitMode(false), true);
 document.addEventListener('parts:changed', fitButtons);
 
@@ -313,10 +313,10 @@ fitPanel.addEventListener('click', (e) => {
   withViewer((w) => w.setFitTool && w.setFitTool(b.dataset.tool));
 });
 
-let fitPending = null;    // {target, fit} — числа, которые ждут записи
+let fitPending = null;    // {target, fit} - числа, которые ждут записи
 
 function fitSave(f) {
-  // Другая цель — сначала записать прежнюю: иначе её правка потерялась бы.
+  // Другая цель - сначала записать прежнюю: иначе её правка потерялась бы.
   if (fitPending && fitPending.target !== fitTarget) flushFitSave();
   clearTimeout(fitTimer);
   fitValues[fitTarget] = f;
@@ -327,7 +327,7 @@ function fitSave(f) {
 /**
  * Записать ожидающую подгонку сейчас. Зовут перед всем, что читает SMD или
  * состояние: выход из режима перечитывает числа у Python, а сцена в руках
- * собирается из SMD — оба видели бы правку до последнего движения.
+ * собирается из SMD - оба видели бы правку до последнего движения.
  */
 export async function flushFitSave() {
   clearTimeout(fitTimer);
@@ -348,7 +348,7 @@ export async function flushFitSave() {
 /**
  * Предмет сменился: отложенная запись подгонки принадлежала прошлому и на
  * новом либо падала ошибкой, либо запекла бы чужие числа в его модель.
- * Последние полсекунды правки теряются — они же и не были ещё записаны.
+ * Последние полсекунды правки теряются - они же и не были ещё записаны.
  */
 export function dropFitSave() {
   clearTimeout(fitTimer);
@@ -365,13 +365,13 @@ function fitPush(save = true, animate = false) {
 }
 
 for (const id of FIT_FIELDS) fitEl(id).addEventListener('input', () => fitPush());
-// Сброс — с движением: видно, откуда и куда вернулась модель.
+// Сброс - с движением: видно, откуда и куда вернулась модель.
 fitEl('fit-reset').addEventListener('click', () => { fitWrite(null); fitPush(true, true); });
 
 // Те же клавиши на странице: фокус после щелчка по кнопке остаётся у неё, а
-// не у кадра. Как в Blender: G/R/S начинают операцию — модель идёт за
+// не у кадра. Как в Blender: G/R/S начинают операцию - модель идёт за
 // мышью, X/Y/Z ограничивают ось, клик подтверждает, Esc отменяет; Esc без
-// операции (или Enter) закрывает подгонку. В полях ввода буквы — текст, там
+// операции (или Enter) закрывает подгонку. В полях ввода буквы - текст, там
 // не перехватываем.
 const FIT_KEYS = { KeyG: 'translate', KeyR: 'rotate', KeyS: 'scale' };
 const FIT_AXES = { KeyX: 'x', KeyY: 'y', KeyZ: 'z' };
@@ -391,11 +391,11 @@ document.addEventListener('keydown', (e) => {
 
 // ── Изгибы гирлянды ─────────────────────────────────────────────────────
 // Вьювер гнёт сам и после каждого движения присылает весь список; пишем его
-// по очереди — ответы не должны обгонять друг друга.
+// по очереди - ответы не должны обгонять друг друга.
 let bendWrite = Promise.resolve();
 //: Сколько списков ещё пишется. Пока > 0, состояние от Python старше того,
 //: что во вьювере, и отдавать его вьюверу нельзя: он откатил бы последний
-//: изгиб, а следующий дописал бы к откаченному — и тот пропал бы совсем.
+//: изгиб, а следующий дописал бы к откаченному - и тот пропал бы совсем.
 let bendsPending = 0;
 
 function saveBends(bends) {
@@ -421,13 +421,13 @@ fitEl('fit-radius').addEventListener('input', () => {
   withViewer((w) => w.setBendRadius && w.setBendRadius(r));
 });
 
-/** Изгибы из состояния — вьюверу (отмена, возврат работы, новая гирлянда). */
+/** Изгибы из состояния - вьюверу (отмена, возврат работы, новая гирлянда). */
 export function showDecorBends(bends) {
   if (bendsPending) return;
   withViewer((w) => w.setDecorBends && w.setDecorBends(bends || []));
 }
 
-/** Гизмо в кадре сдвинули: числа и SMD — за ним. */
+/** Гизмо в кадре сдвинули: числа и SMD - за ним. */
 export function bindFitViewer(w) {
   w.onDecorBends = (bends) => saveBends(bends);
   w.onBendRadius = (r) => { fitEl('fit-radius').value = Math.round(r * 10) / 10; };
@@ -481,7 +481,7 @@ document.getElementById('qc-reset').addEventListener('click', async () => {
 
 document.getElementById('qc-close').addEventListener('click', () => qcDlg.close());
 
-// По коду клавиши, а не по символу: в русской раскладке S — это «ы».
+// По коду клавиши, а не по символу: в русской раскладке S - это «ы».
 qcText.addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.code === 'KeyS') {
     e.preventDefault();

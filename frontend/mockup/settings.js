@@ -20,7 +20,7 @@ import { EN } from './strings.js';
 import { refreshView, stopPartsAnimation } from './preview.js';
 import { setTexSize } from './particles/materials.js';
 import { setToursDone, replayTours } from './tour.js';
-import { FX_GROUPS, createFx, dockFx, fxChoice } from './buildfx.js';
+import { FX_DEFAULTS, FX_GROUPS, createFx, dockFx, fxChoice } from './buildfx.js';
 
 // ── Настройки ───────────────────────────────────────────────────────────
 // Конфиг общий с окном приложения, поэтому здесь только показ и запись: что
@@ -33,7 +33,7 @@ const cfgDlg = document.getElementById('cfgdlg');
 /**
  * Ставит внешний вид по сохранённым настройкам: тему и закрепление панелей.
  *
- * Раньше обе жили кнопками в шапке и не переживали перезапуск — приложение
+ * Раньше обе жили кнопками в шапке и не переживали перезапуск - приложение
  * каждый раз открывалось светлым и с плавающими панелями. Зовётся и на старте,
  * и после сохранения.
  */
@@ -41,7 +41,7 @@ export function applyLook(values) {
   setTheme(values.theme || 'light');
   setPinned(Boolean(values.panels_pinned));
   // Ширины боковых панелей и граница половин: их тянут мышью, а не выбирают в
-  // этом окне, но читаются они тем же ответом — настройки внешнего вида
+  // этом окне, но читаются они тем же ответом - настройки внешнего вида
   // страница спрашивает один раз.
   setParamsWidth(values.params_width);
   setCatalogWidth(values.catalog_width);
@@ -53,17 +53,17 @@ export function applyLook(values) {
   setTexSize(values.particle_tex_size);
   setToursDone(values.tours_done);
   // Язык: ответы Python берут его из общего конфига сами, а вьюверу сказать
-  // некому — он живёт отдельным документом и до конфига не дотягивается.
+  // некому - он живёт отдельным документом и до конфига не дотягивается.
   api.setLang(values.language);
   withViewer((w) => w.setLanguage && w.setLanguage(api.lang()));
   // Подписи самой страницы: разметка и всё, что построит код (см. i18n.js).
   useDict(api.lang() === 'en' ? EN : null);
   // Особые флаги VTF: признак на корне, показом занимается CSS. Так галка
-  // действует сразу и не требует перерисовки колонки — а скрытая галка в
+  // действует сразу и не требует перерисовки колонки - а скрытая галка в
   // сборку не уходит (см. build.js: невидимое не читается).
   document.documentElement.dataset.advflags =
     values.advanced_vtf_flags ? '1' : '';
-  // Анимации: признак на корне гасит CSS-переходы страницы, вьюверу — своим
+  // Анимации: признак на корне гасит CSS-переходы страницы, вьюверу - своим
   // вызовом: перелёт камеры и проявление модели считает он сам.
   const motion = values.ui_animations !== false;
   document.documentElement.dataset.motion = motion ? '' : 'off';
@@ -86,7 +86,7 @@ export async function openSettings() {
   document.querySelectorAll('[data-pick]').forEach((b) => { b.hidden = !cfg.folder_picker; });
   fillSelect('cfg-format', cfg.formats, v.export_image_format);
   fillSelect('cfg-lang', cfg.languages, v.language);
-  // Тема страницы — она же тема приложения: другого интерфейса больше нет.
+  // Тема страницы - она же тема приложения: другого интерфейса больше нет.
   fillSelect('cfg-theme', cfg.themes, v.theme || 'light');
   document.getElementById('cfg-panels').checked = Boolean(v.panels_pinned);
   document.getElementById('cfg-panels').disabled = !pinnedFits();
@@ -101,6 +101,12 @@ export async function openSettings() {
   document.getElementById('cfg-debug').checked = Boolean(v.debug_mode);
   document.getElementById('cfg-blacklist').value =
     (v.material_blacklist || []).join('\n');
+  // Потолки кэша моделей: значения знает Python, подписи - страница.
+  fillSelect('cfg-cachecap', (cfg.cache_caps || []).map((mb) => ({
+    value: mb,
+    label: !mb ? t('Без ограничения')
+      : mb < 1024 ? mb + ' ' + t('МБ') : mb / 1024 + ' ' + t('ГБ'),
+  })), v.model_cache_mb);
   document.getElementById('cfg-note').textContent =
     pinnedFits() ? '' : 'для закреплённых панелей нужно окно шире 1100 px';
   const fx = fxChoice(v.build_fx);
@@ -112,9 +118,10 @@ export async function openSettings() {
   supp.href = cfg.support_url || '#';
   supp.hidden = !cfg.support_url;
 
+  showTab(cfg.tf2_ok ? cfgTab : 0);
   cfgDlg.showModal();
 
-  // Размер кэша — ПОСЛЕ показа окна и без await: он считается обходом всей
+  // Размер кэша - ПОСЛЕ показа окна и без await: он считается обходом всей
   // папки со stat на каждый файл, и на большой библиотеке это секунды. Число
   // нужно только для подписи рядом с кнопкой «очистить», ждать его незачем.
   const cacheSize = document.getElementById('cfg-cache-size');
@@ -124,17 +131,17 @@ export async function openSettings() {
       r.cache_mb ? r.cache_mb + ' ' + t('МБ') : t('пусто'); })
     .catch(() => { cacheSize.textContent = t('пусто'); });
 
-  // Обновление — тоже после показа окна и тоже без await: это запрос к GitHub,
+  // Обновление - тоже после показа окна и тоже без await: это запрос к GitHub,
   // и открытие настроек не должно ждать сеть.
   showUpdate();
 }
 
 // ── Обновление приложения ───────────────────────────────────────────────
 // Ставит СОБРАННОЕ приложение установщиком из релиза: он умеет закрыть нас,
-// заменить файлы и починить ярлыки. Из репозитория обновляются через git —
+// заменить файлы и починить ярлыки. Из репозитория обновляются через git -
 // тогда Python отвечает can_install: false, и остаётся только ссылка.
 
-//: Что делает кнопка обновления прямо сейчас. null — «проверить»; после
+//: Что делает кнопка обновления прямо сейчас. null - «проверить»; после
 //: проверки это либо установка, либо открытие страницы релиза. Состояние
 //: отдельной переменной, а не в onclick элемента: два обработчика на одной
 //: кнопке разъезжаются при первой же правке.
@@ -156,7 +163,7 @@ function showUpdate(force = false) {
     line.textContent = 'v' + u.current;
     if (!u.checked) {
       note.hidden = false;
-      note.textContent = t('Не удалось проверить обновления — нет связи с GitHub.');
+      note.textContent = t('Не удалось проверить обновления - нет связи с GitHub.');
       return;
     }
     if (!u.available) {
@@ -167,7 +174,7 @@ function showUpdate(force = false) {
     note.hidden = false;
     note.textContent = t('Доступна версия') + ' ' + u.version + '. '
       + (u.can_install
-        ? t('Нажмите «Обновить» — приложение закроется и вернётся уже новым.')
+        ? t('Нажмите «Обновить» - приложение закроется и вернётся уже новым.')
         : t('Скачайте её со страницы релиза.'));
     btn.textContent = u.can_install ? t('Обновить') : t('Открыть страницу релиза');
     updateAction = u.can_install
@@ -184,8 +191,8 @@ function showUpdate(force = false) {
 async function runUpdate(u) {
   const go = await ask({
     title: t('Обновить до') + ' ' + u.version,
-    // eslint-disable-next-line max-len — ключ словаря должен быть одним литералом
-    text: t('Приложение закроется, установщик заменит его на новую версию и запустит заново. Ваши работы, моды и настройки не тронутся — они хранятся отдельно от папки установки.'),
+    // eslint-disable-next-line max-len - ключ словаря должен быть одним литералом
+    text: t('Приложение закроется, установщик заменит его на новую версию и запустит заново. Ваши работы, моды и настройки не тронутся - они хранятся отдельно от папки установки.'),
     ok: t('Обновить'),
   });
   if (!go) return;
@@ -212,7 +219,7 @@ async function runUpdate(u) {
  * Опрашивает ход обновления и пишет его в подпись.
  *
  * Опрос, а не поток событий: установщик носит приложение внутри себя, это
- * десятки мегабайт, и всё, что нужно показать, — сколько уже скачано.
+ * десятки мегабайт, и всё, что нужно показать, - сколько уже скачано.
  * Заводить ради одной строки подписку не за чем.
  */
 function watchUpdate() {
@@ -225,7 +232,7 @@ function watchUpdate() {
     try {
       p = await api.updateProgress();
     } catch (err) {
-      // Приложение уже закрывается — опрос обрывается, и это норма.
+      // Приложение уже закрывается - опрос обрывается, и это норма.
       return;
     }
     if (p.state === 'downloading') {
@@ -250,20 +257,20 @@ function watchUpdate() {
 }
 
 document.getElementById('cfg-update').addEventListener('click', () => {
-  // Пока проверки не было — кнопка спрашивает заново, минуя ответ,
-  // запомненный на сеанс. После — делает то, что предложила.
+  // Пока проверки не было - кнопка спрашивает заново, минуя ответ,
+  // запомненный на сеанс. После - делает то, что предложила.
   if (updateAction) updateAction();
   else showUpdate(true);
 });
 
 // Обслуживание: после обновления игры старые разобранные модели остаются в
-// кэше и собираются с прежней геометрией. Спрашиваем — очистка не бесплатна:
+// кэше и собираются с прежней геометрией. Спрашиваем - очистка не бесплатна:
 // первая сборка каждого оружия после неё будет медленнее.
 document.getElementById('cfg-cache').addEventListener('click', async () => {
   const size = document.getElementById('cfg-cache-size').textContent;
   const go = await ask({
     title: 'Очистить кэш моделей',
-    text: `Сейчас в кэше ${size}. Кэш ускоряет повторную сборку того же оружия — после очистки первая сборка каждого будет медленнее.`,
+    text: `Сейчас в кэше ${size}. Кэш ускоряет повторную сборку того же оружия - после очистки первая сборка каждого будет медленнее.`,
     ok: 'Очистить',
   });
   if (!go) return;
@@ -300,11 +307,11 @@ document.getElementById('cfg-drafts').addEventListener('click', async () => {
   if (!draftList.length) { say('Черновиков нет'); return; }
   const picked = await ask({
     title: 'Удалить черновики',
-    text: 'Это молчаливые записи автосохранения — работы, сохранённые кнопкой, '
+    text: 'Это молчаливые записи автосохранения - работы, сохранённые кнопкой, '
         + 'здесь не показаны и не пострадают. Снимите отметку с того, что '
         + 'нужно оставить.',
     list: draftList.map((d) => ({
-      label: d.name + ' — ' + fileSize(d.size || 0),
+      label: d.name + ' - ' + fileSize(d.size || 0),
       value: d.key,
       hint: d.key,
     })),
@@ -316,14 +323,14 @@ document.getElementById('cfg-drafts').addEventListener('click', async () => {
   const res = await api.forgetDrafts(picked);
   if (res.error) { say(res.error); return; }
   say(`Черновиков удалено: ${res.removed ?? 0}`);
-  // Ушёл черновик открытого предмета — вместе с ним ушли и правки на экране.
+  // Ушёл черновик открытого предмета - вместе с ним ушли и правки на экране.
   if (res.reset) refreshView();
   showDrafts();
 });
 
 // ── Кастомизация: как выглядит сборка ───────────────────────────────────
 // Списки строятся из вариантов движка (buildfx.js): новый вариант появится
-// здесь сам. Пример играет тот же движок на своей маленькой полосе — что
+// здесь сам. Пример играет тот же движок на своей маленькой полосе - что
 // видно здесь, то будет и при настоящей сборке.
 
 const fxGrid = document.getElementById('cfg-fx');
@@ -354,21 +361,47 @@ for (const [key, title, values] of FX_GROUPS) {
   fxGrid.append(field);
 }
 
+//: В конфиг - только то, что отличается от умолчаний: иначе первое же
+//: сохранение навсегда закрепило бы умолчания этой версии, и новые до
+//: человека не дошли бы.
 const readFx = () => Object.fromEntries(
-  FX_GROUPS.map(([key]) => [key, document.getElementById('cfg-fx-' + key).value]));
+  FX_GROUPS.map(([key]) => [key, document.getElementById('cfg-fx-' + key).value])
+    .filter(([key, value]) => value !== FX_DEFAULTS[key]));
 function playFx(failing = false) {
   prevFx.set(readFx());
   prevFx.demo(failing);
 }
-// Выбрал вариант — сразу видишь его в деле.
+// Выбрал вариант - сразу видишь его в деле.
 fxGrid.addEventListener('change', () => playFx());
 document.getElementById('cfg-fxplay').addEventListener('click', () => playFx());
 document.getElementById('cfg-fxfail').addEventListener('click', () => playFx(true));
-// Закрытое окно не играет: таймеры и звук примера гаснут вместе с ним.
-cfgDlg.addEventListener('close', () => {
+// Пример играет, только пока его видно: закрытое окно и другая вкладка
+// гасят его таймеры и звук.
+function stopFx() {
   prevFx.clear();
   fxPrev.querySelector('.fxprev__state').textContent = t('Готово');
-});
+}
+cfgDlg.addEventListener('close', stopFx);
+
+// ── Вкладки ─────────────────────────────────────────────────────────────
+// n-я кнопка показывает n-ю секцию. Открывается та вкладка, на которой окно
+// закрыли, а без найденной игры - первая: там путь к ней.
+
+const cfgTabs = [...document.querySelectorAll('#cfg-tabs [role="tab"]')];
+const cfgSecs = [...cfgDlg.querySelectorAll('.cfg__sec')];
+let cfgTab = 0;
+
+function showTab(n) {
+  if (n !== cfgTab) stopFx();
+  cfgTab = n;
+  cfgTabs.forEach((b, k) => {
+    b.classList.toggle('is-active', k === n);
+    b.setAttribute('aria-selected', String(k === n));
+  });
+  cfgSecs.forEach((sec, k) => { sec.hidden = k !== n; });
+}
+cfgTabs.forEach((b, n) => b.addEventListener('click', () => showTab(n)));
+showTab(0);
 
 document.getElementById('cfg-save').addEventListener('click', async () => {
   const res = await api.setSettings({
@@ -388,31 +421,32 @@ document.getElementById('cfg-save').addEventListener('click', async () => {
     material_blacklist: document.getElementById('cfg-blacklist').value,
     panels_pinned: document.getElementById('cfg-panels').checked,
     build_fx: readFx(),
+    model_cache_mb: Number(document.getElementById('cfg-cachecap').value),
   });
   if (res.error) { say(res.error); return; }
   cfgDlg.close();
   // Язык пропитывает всё: разметку, то, что построил код, и то, что
   // присылает Python уже словами (звуки, подписи эффектов, фасеты).
-  // Переводить это на месте — гоняться за каждым списком; честнее поднять
-  // страницу заново. Python остаётся жить, правки и кэши — с ним.
+  // Переводить это на месте - гоняться за каждым списком; честнее поднять
+  // страницу заново. Python остаётся жить, правки и кэши - с ним.
   const before = api.lang();
   api.setLang((res.values || {}).language);
   if (api.lang() !== before) { restart(res.values || {}); return; }
   say('Настройки сохранены');
-  // Гифки на модели: выключили — сцена перекрашивается неподвижной склейкой;
-  // включили — кадры приедут событием parts_animated.
+  // Гифки на модели: выключили - сцена перекрашивается неподвижной склейкой;
+  // включили - кадры приедут событием parts_animated.
   if (!(res.values || {}).parts_animation) stopPartsAnimation();
-  // Тема и раскладка применяются сразу: ждать перезапуска ради галки —
+  // Тема и раскладка применяются сразу: ждать перезапуска ради галки -
   // не то, чего ждут от настроек.
   applyLook(res.values || {});
-  // Путь к игре мог измениться — подпись внизу обязана это показать.
+  // Путь к игре мог измениться - подпись внизу обязана это показать.
   showTf2Path();
 });
 
 /** Занавес и перезагрузка страницы: гаснет в цвет фона, поднимается на том
- *  же разделе (см. boot в catalog.js). Без анимаций — сразу.
+ *  же разделе (см. boot в catalog.js). Без анимаций - сразу.
  *  Первый кадр новой страницы берёт тему и анимации из сессии (index.html),
- *  а applyLook с новыми значениями до перезагрузки уже не дойдёт — пишем их
+ *  а applyLook с новыми значениями до перезагрузки уже не дойдёт - пишем их
  *  сами. Заставку там показываем только занавесом (splash.js). */
 function restart(values) {
   try {
@@ -436,7 +470,7 @@ function showFindTf2(show) {
 /**
  * Автопоиск игры: подставляет найденный путь в поле.
  *
- * Ищет Python (`find_tf2`) — реестром Steam и списком его библиотек, а не
+ * Ищет Python (`find_tf2`) - реестром Steam и списком его библиотек, а не
  * обходом диска. Найденное заведомо годное: проверка та же, по которой
  * работает всё приложение.
  */
@@ -446,11 +480,11 @@ document.getElementById('cfg-findtf2').addEventListener('click', async (e) => {
   try {
     const found = (await api.findTf2()).found || [];
     if (!found.length) {
-      say(t('Игра не нашлась — укажите папку вручную'));
+      say(t('Игра не нашлась - укажите папку вручную'));
       return;
     }
     document.getElementById('cfg-tf2').value = found[0];
-    // Копий больше одной — редкость (вторая библиотека Steam). Берём первую,
+    // Копий больше одной - редкость (вторая библиотека Steam). Берём первую,
     // но молчать об этом нельзя: путь могли ждать другой.
     say(found.length > 1
       ? t('Найдено копий игры: ') + found.length + t(', взял первую')
@@ -464,7 +498,7 @@ document.getElementById('cfg-findtf2').addEventListener('click', async (e) => {
  * Первый запуск: предложить найденную игру или дать вставить путь руками.
  *
  * Без пути к игре не работает ничего, а узнать об этом человек мог только по
- * ошибке на первой же загрузке модели. Спрашиваем ОДИН раз — когда путь не
+ * ошибке на первой же загрузке модели. Спрашиваем ОДИН раз - когда путь не
  * настроен; сохранённый путь окно вопроса не трогает.
  */
 export async function offerTf2() {
@@ -503,7 +537,7 @@ document.querySelectorAll('[data-pick]').forEach((btn) => {
       if (res.error) { say(res.error); return; }
       if (!res.path) return;
       input.value = res.path;
-      // Правка руками и выбор — одно и то же для тех, кто слушает поле
+      // Правка руками и выбор - одно и то же для тех, кто слушает поле
       // (кнопка автопоиска игры).
       input.dispatchEvent(new Event('input'));
     } finally {
@@ -513,7 +547,7 @@ document.querySelectorAll('[data-pick]').forEach((btn) => {
 });
 
 // Путь начали править руками: годность прежнего пути ничего уже не значит, и
-// кнопка снова может понадобиться — проверять каждую букву в Python незачем.
+// кнопка снова может понадобиться - проверять каждую букву в Python незачем.
 document.getElementById('cfg-tf2').addEventListener('input', () => showFindTf2(true));
 
 document.getElementById('cfg-cancel').addEventListener('click', () => cfgDlg.close());

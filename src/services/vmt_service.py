@@ -5,6 +5,22 @@ from typing import Tuple
 from src.data.weapons import SPECIAL_MODES
 
 
+def _read_vmt(path: str) -> Tuple[str, str]:
+    """Текст VMT и его кодировка. Моды бывают в cp1251 (русские комментарии):
+    latin-1 читает любой байт и пишет его обратно тем же, файл не портится."""
+    with open(path, 'rb') as f:
+        raw = f.read()
+    try:
+        return raw.decode('utf-8'), 'utf-8'
+    except UnicodeDecodeError:
+        return raw.decode('latin-1'), 'latin-1'
+
+
+def _write_vmt(path: str, text: str, encoding: str) -> None:
+    with open(path, 'w', encoding=encoding, newline='') as f:
+        f.write(text)
+
+
 def _live_param(name: str) -> "re.Pattern":
     """Строка параметра ``name`` (группа 1 — всё до значения) в VMT.
 
@@ -331,12 +347,10 @@ class VMTService:
         """Добавляет прокси AnimatedTexture для var в VMT-ФАЙЛ."""
         if not os.path.exists(vmt_path):
             return
-        with open(vmt_path, 'r', encoding='utf-8') as f:
-            content = f.read()
+        content, encoding = _read_vmt(vmt_path)
         content = VMTService.add_animated_texture_proxy(
             content, fps, var=var, framenumvar=framenumvar)
-        with open(vmt_path, 'w', encoding='utf-8') as f:
-            f.write(content)
+        _write_vmt(vmt_path, content, encoding)
 
     @staticmethod
     def add_animated_texture_proxy(content: str, fps: int,
@@ -455,9 +469,9 @@ class VMTService:
         if not os.path.exists(vmt_path):
             return
         
-        with open(vmt_path, 'r', encoding='utf-8') as f:
-            content = f.read()
-        
+        # Мод бывает в cp1251 — строгое utf-8 падало и роняло все его карты.
+        content, encoding = _read_vmt(vmt_path)
+
         # Формируем путь для $bumpmap (тот же путь что и для $basetexture, но с _normal в имени файла)
         normal_texture_path = VMTService._get_texture_path_from_cdmaterials(cdmaterials_path, weapon_key)
         
@@ -492,10 +506,9 @@ class VMTService:
                         lines.insert(i + 1, f'{indent}"$bumpmap" "{normal_texture_path}"')
                         new_content = '\n'.join(lines)
                         break
-        
+
         # Записываем обратно
-        with open(vmt_path, 'w', encoding='utf-8') as f:
-            f.write(new_content)
+        _write_vmt(vmt_path, new_content, encoding)
     
     @staticmethod
     def has_live_param(content: str, param: str) -> bool:
@@ -511,11 +524,11 @@ class VMTService:
         перед закрывающей скобкой корневого блока. Регистронезависимо
         (Valve пишет $EnvMap/$envmap как попало).
         """
-        pattern = re.compile(
-            r'(^[ \t]*"?' + re.escape(param) + r'"?[ \t]+)"[^"]*"',
-            re.IGNORECASE | re.MULTILINE,
-        )
-        new_content, n = pattern.subn(lambda m: f'{m.group(1)}"{value}"', content, count=1)
+        # Значение в кавычках или без: моды пишут и `$rimlight 1`. Раньше
+        # такое не находилось, и строка дописывалась второй, а движок читает
+        # ПЕРВУЮ, так что правка молча не действовала.
+        new_content, n = _live_param(param).subn(
+            lambda m: f'{m.group(1)}"{value}"', content, count=1)
         if n:
             return new_content
 
@@ -544,11 +557,11 @@ class VMTService:
         if not os.path.exists(vmt_path):
             return False
 
-        with open(vmt_path, 'r', encoding='utf-8') as f:
-            content = f.read()
+        from src.services import vmt_parse
 
-        m = re.match(r'\s*"?([A-Za-z_]+)"?', content)
-        if not (m and m.group(1).lower() == 'vertexlitgeneric'):
+        content, encoding = _read_vmt(vmt_path)
+        # Шейдер разбором: перед ним бывают комментарий и BOM.
+        if vmt_parse.parse(content.lstrip('﻿')).shader.lower() != 'vertexlitgeneric':
             return False
 
         # path_param=None — карта без своей текстуры (только параметры, напр. rim light).
@@ -562,8 +575,48 @@ class VMTService:
         if not is_valid:
             return False
 
-        with open(vmt_path, 'w', encoding='utf-8') as f:
-            f.write(content)
+        _write_vmt(vmt_path, content, encoding)
+        return True
+
+    @staticmethod
+    def remove_param(vmt_path: str, param: str) -> bool:
+        """Снимает живую строку параметра (комментарии не трогает). True — снята."""
+        if not os.path.exists(vmt_path):
+            return False
+        content, encoding = _read_vmt(vmt_path)
+        new = re.sub(_live_param(param).pattern + r'[^\n]*\n?', '', content,
+                     flags=re.IGNORECASE | re.MULTILINE)
+        if new == content:
+            return False
+        _write_vmt(vmt_path, new, encoding)
+        return True
+
+    @staticmethod
+    def remove_material_map(vmt_path: str, map_id: str) -> bool:
+        """
+        Снимает карту материала (MATERIAL_MAPS) с VMT: строку её пути, а у
+        карты без текстуры (rim light) — выключает флаг.
+
+        Сопутствующие числа ($detailscale, $phongboost…) остаются: без пути
+        карты движок их не читает, а $phong и $envmap могли стоять в моде и до
+        неё. Только живые строки — закомментированные не трогаем.
+        """
+        from src.data.material_maps import MATERIAL_MAPS
+
+        cfg = MATERIAL_MAPS.get(map_id)
+        if not cfg or not os.path.exists(vmt_path):
+            return False
+        if cfg.get('path_param'):
+            return VMTService.remove_param(vmt_path, cfg['path_param'])
+        if map_id == 'phongcolor':
+            # Цвет блика — это $phongtint или $phongalbedotint, не обводка.
+            tint = VMTService.remove_param(vmt_path, '$phongtint')
+            return VMTService.remove_param(vmt_path, '$phongalbedotint') or tint
+        content, encoding = _read_vmt(vmt_path)
+        new = VMTService._set_vmt_param(content, '$rimlight', '0')
+        if new == content:
+            return False
+        _write_vmt(vmt_path, new, encoding)
         return True
 
     @staticmethod
@@ -618,6 +671,60 @@ class VMTService:
 
         with open(vmt_path, 'w', encoding='utf-8') as f:
             f.write(content)
+
+    @staticmethod
+    def _remove_vmt_blocks(content: str, name: str, condition) -> str:
+        """Все блоки `name { … }`, чьё тело проходит `condition`, — долой.
+        В отличие от _remove_named_vmt_block смотрит ВСЕ одноимённые блоки:
+        AnimatedTexture в одном VMT бывает и у основы, и у $detail."""
+        # Имя, затем { — на той же строке или ниже, с комментарием между:
+        # `"BurnLevel" {` и `"BurnLevel" // огонь` тоже встречаются.
+        header_re = re.compile(r'^[ \t]*"?' + re.escape(name) + r'"?(?=[\s{/])',
+                               re.IGNORECASE | re.MULTILINE)
+        gap_re = re.compile(r'(?:\s+|//[^\n]*)*')
+        pos = 0
+        while True:
+            m = header_re.search(content, pos)
+            if not m:
+                return content
+            gap = gap_re.match(content, m.end())
+            brace = gap.end() if content.startswith('{', gap.end()) else -1
+            end = VMTService._find_block_end(content, brace) if brace != -1 else None
+            if end is None or not condition(content[brace:end + 1]):
+                pos = m.end()
+                continue
+            stop = end + 1
+            if content.startswith('\r\n', stop):
+                stop += 2
+            elif content.startswith('\n', stop):
+                stop += 1
+            content = content[:m.start()] + content[stop:]
+            pos = m.start()
+
+    @staticmethod
+    def release_detail(vmt_path: str) -> bool:
+        """
+        Освобождает $detail от эффекта горения TF2.
+
+        У косметики $detail занят огнём: прокси BurnLevel каждый кадр пишет
+        $detailblendfactor (0, пока предмет не горит), AnimatedTexture листает
+        кадры огня в $detail. Своя detail-карта с ними невидима, а при горении
+        вместо огня. Снимаем оба прокси — предмет перестаёт показывать огонь
+        на себе, это цена своей detail-карты. True — VMT изменён.
+        """
+        if not os.path.exists(vmt_path):
+            return False
+        content, encoding = _read_vmt(vmt_path)
+        new = VMTService._remove_vmt_blocks(
+            content, 'BurnLevel',
+            lambda body: re.search(r'\$detailblendfactor\b', body, re.IGNORECASE))
+        new = VMTService._remove_vmt_blocks(
+            new, 'AnimatedTexture',
+            lambda body: re.search(r'animatedtexturevar"?\s+"?\$detail"?\s', body, re.IGNORECASE))
+        if new == content:
+            return False
+        _write_vmt(vmt_path, new, encoding)
+        return True
 
     @staticmethod
     def _remove_named_vmt_block(content: str, name: str, condition=None) -> str:

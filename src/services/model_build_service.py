@@ -191,6 +191,67 @@ class ModelBuildService:
         return result
 
     @staticmethod
+    def define_missing_bones(qc_path: str, smd_path: str) -> List[str]:
+        """
+        Описывает в QC (`$definebone`) кости reference-SMD, которых там нет.
+
+        Кость без анимации, вложений и описания studiomdl сворачивает в
+        родителя («Collapsed N bones»): свои кости модели, дописанные к
+        игровому скелету (SMDService._own_bones), после сборки пропадали.
+        Описанная кость остаётся. Поза — из первого кадра skeleton; углы в
+        `$definebone` в градусах и в порядке Y, Z, X, как их пишет Crowbar
+        (в SMD — радианы X, Y, Z).
+
+        Returns:
+            Имена описанных костей.
+        """
+        import math
+        from src.services.smd_service import SMDService
+
+        try:
+            with open(smd_path, 'r', encoding='utf-8', errors='replace') as f:
+                parts = SMDService._parse_smd_lines(f.readlines())
+            with open(qc_path, 'r', encoding='utf-8', errors='replace') as f:
+                lines = f.readlines()
+        except OSError as exc:
+            # Модель уже заменена; без описания кости свернутся, но мод соберётся.
+            logger.warning(f"[QC] свои кости не описаны: {exc}")
+            return []
+        defined = {m.group(1).lower() for line in lines
+                   for m in [re.match(r'\s*\$definebone\s+"([^"]*)"', line, re.IGNORECASE)] if m}
+        names = SMDService._node_names(parts.get('nodes'))
+        parents = {int(m.group(1)): int(m.group(3)) for line in parts.get('nodes') or ()
+                   for m in [re.match(r'\s*(\d+)\s+"([^"]*)"\s+(-?\d+)', line)] if m}
+        pose = SMDService._bind_pose(parts.get('skeleton'))
+        added, new_lines = [], []
+        for bone in sorted(names):
+            name = names[bone]
+            if name.lower() in defined:
+                continue
+            try:
+                px, py, pz, rx, ry, rz = (float(v) for v in pose.get(bone, '0 0 0 0 0 0').split())
+            except ValueError:
+                px = py = pz = rx = ry = rz = 0.0
+            angles = ' '.join(f"{math.degrees(a):.6f}" for a in (ry, rz, rx))
+            new_lines.append(f'$definebone "{name}" "{names.get(parents.get(bone, -1), "")}" '
+                             f'{px:.6f} {py:.6f} {pz:.6f} {angles} 0 0 0 0 0 0\n')
+            added.append(name)
+        if not new_lines:
+            return []
+        # После последнего описания кости, иначе перед первой анимацией.
+        at = max((i + 1 for i, line in enumerate(lines)
+                  if re.match(r'\s*\$definebone\b', line, re.IGNORECASE)), default=None)
+        if at is None:
+            at = next((i for i, line in enumerate(lines)
+                       if re.match(r'\s*\$(sequence|animation|collisionmodel|collisionjoints)\b',
+                                   line, re.IGNORECASE)), len(lines))
+        lines[at:at] = new_lines
+        with open(qc_path, 'w', encoding='utf-8') as f:
+            f.writelines(lines)
+        logger.info(f"[QC] описаны свои кости модели: {added}")
+        return added
+
+    @staticmethod
     def extract_modelname_path(qc_path: str) -> Optional[str]:
         """
         Вытаскивает путь из $modelname в QC файле.

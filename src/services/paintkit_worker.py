@@ -24,6 +24,9 @@ logger = get_logger(__name__)
 #: Сколько разобранных текстур держать: у War Paint их 10–20, у соседнего
 #: износа они почти те же. По 4 МБ на 1024² — десятки мегабайт, не больше.
 _CACHE_LIMIT = 48
+#: Размер маски групп оригинала, по которой считаются доли видов украшенного
+#: оружия: один у предпросмотра, сборки и экрана раскладки.
+LOOKS_MASK = 512
 _cache: "OrderedDict[Tuple[str, int, bool], Optional[np.ndarray]]" = OrderedDict()
 _cache_lock = threading.Lock()
 
@@ -132,7 +135,7 @@ class PaintkitWorker(StandardWorker):
 
     def __init__(self, tf2_root: str, textures_vpk: str, misc_vpk: str,
                  kit_id: int, item_def: int, wear: int, team: str, seed: int,
-                 out_path: str, size: int = 1024, mdl_path: str = '',
+                 out_path: str, size: int = 1024,
                  generic: Optional[dict] = None, forced: Optional[dict] = None,
                  parent=None):
         super().__init__(parent)
@@ -143,14 +146,12 @@ class PaintkitWorker(StandardWorker):
         # Больше 2048 у игры текстур оружия нет, меньше 256 — узор не разглядеть.
         self.size = min(max(int(size), 256), 2048)
         self.out_path = out_path
-        self.mdl_path = mdl_path
-        #: Универсальный режим (у оружия нет War Paint в игре): {obj_path,
-        #: cuts, regions, card, base_png, layout_seed} — см. paintkit_generic.
+        #: Универсальный режим (у оружия нет War Paint в игре или материал
+        #: игра не красит): {obj_path, cuts, regions, card, obj_material,
+        #: base_png, layout_seed, assign} — см. paintkit_generic.
         self.generic = generic
         #: Переменные рецепта поверх War Paint (раскладка групп человеком).
         self.forced = forced or None
-        #: Материалы, на которые игра кладёт War Paint (см. paintable_materials).
-        self.materials: list = []
         #: Текстуры рецепта, которых в игре не нашлось (для подсказки человеку).
         self.missing: list = []
 
@@ -168,23 +169,25 @@ class PaintkitWorker(StandardWorker):
         kit, item = paintkit_defs.find_item(defs, self.kit_id, self.item_def)
         if not (kit and item):
             return False, 'Этот War Paint не ложится на это оружие'
-        generated = {}
-        if self.generic:
-            inputs = self._generic_inputs(defs, kit)
-            if inputs is None:
-                return False, 'У модели нет развёртки — War Paint положить некуда'
-            generated = inputs.textures
-            recipe = defs.recipe(kit, item, self.wear, forced=inputs.forced,
-                                 strip_stickers=True)
-        else:
-            recipe = defs.recipe(kit, item, self.wear, forced=self.forced)
-        if recipe is None:
-            return False, 'Этот War Paint не ложится на это оружие'
-
-        self.progress.emit(30, 'Наношу War Paint…')
         reader = GameVpkReader(self.vpks)
         try:
             game_loader = make_loader(reader, self.size)
+            generated = {}
+            if self.generic:
+                # Доли видов украшенного оружия — по маске оригинала одного
+                # размера (как у экрана раскладки): с другим размером доли
+                # сдвигаются в третьем знаке, и детали предпросмотра и полной
+                # сборки раздавались бы по-разному.
+                made = self._generic_recipe(defs, kit, item, make_loader(reader, LOOKS_MASK))
+                if made is None:
+                    return False, 'У модели нет развёртки - War Paint положить некуда'
+                recipe, generated = made
+            else:
+                recipe = defs.recipe(kit, item, self.wear, forced=self.forced)
+            if recipe is None:
+                return False, 'Этот War Paint не ложится на это оружие'
+
+            self.progress.emit(30, 'Наношу War Paint…')
 
             def loader(path: str, raw: bool = False):
                 own = generated.get(path)
@@ -192,13 +195,6 @@ class PaintkitWorker(StandardWorker):
 
             comp = PaintkitCompositor(loader, self.size, self.team)
             rgba = comp.compose(recipe, seed=self.seed)
-            # Модель — та, на которую игра кладёт War Paint (items_game), а
-            # если её не узнать — модель оружия приложения. У универсального
-            # режима модель своя, и War Paint ложится на её главную карточку.
-            mdl = (paintkit_defs.item_model_path(self.tf2_root, defs, self.item_def)
-                   or self.mdl_path)
-            if mdl and not self.generic:
-                self.materials = paintable_materials(reader, mdl)
         finally:
             reader.close()
         if self.isInterruptionRequested():
@@ -210,13 +206,20 @@ class PaintkitWorker(StandardWorker):
                     f'сид {self.seed} → {self.out_path}')
         return True, self.out_path
 
-    def _generic_inputs(self, defs, kit):
-        """Альбедо, группы, износ и AO из самой модели (paintkit_generic)."""
+    def _generic_recipe(self, defs, kit, item, loader):
+        """
+        (рецепт, свои текстуры) универсального режима: альбедо, группы, износ
+        и AO из самой модели (paintkit_generic). None — у модели нет развёртки.
+
+        У шаблонного War Paint входы подставляются переменными рецепта. У
+        украшенного оружия шаблона нет: виды его рецепта раздаются по деталям,
+        а маски пушки-оригинала в рецепте подменяются масками модели.
+        """
         from PIL import Image
 
         from src.data import paintkit_defs
         from src.services import mesh_parts_service
-        from src.services.paintkit_generic import build_inputs
+        from src.services import paintkit_generic as pg
 
         g = self.generic
         model = mesh_parts_service.load(g.get('obj_path', ''), g.get('cuts'), g.get('regions'))
@@ -234,6 +237,49 @@ class PaintkitWorker(StandardWorker):
             base = np.asarray(Image.open(g['base_png']).convert('RGBA'))
         except (OSError, KeyError, ValueError):
             base = np.full((self.size, self.size, 4), 160, np.uint8)
+        seed, assign = int(g.get('layout_seed') or 0), g.get('assign')
         layers, over_albedo = paintkit_defs.template_layers(defs, kit)
-        return build_inputs(model, material, base, self.size, layers, over_albedo,
-                            int(g.get('layout_seed') or 0), g.get('assign'))
+        if layers:
+            inputs = pg.build_inputs(model, material, base, self.size, layers, over_albedo,
+                                     seed, assign)
+            if inputs is None:
+                return None
+            return (defs.recipe(kit, item, self.wear, forced=inputs.forced,
+                                strip_stickers=True), inputs.textures)
+        recipe = defs.recipe(kit, item, self.wear, strip_stickers=True)
+        if recipe is None:
+            return None, {}
+        inputs = pg.looks_inputs(model, material, base, self.size,
+                                 pg.recipe_looks(recipe, loader), seed, assign)
+        if inputs is None:
+            return None
+        return pg.swap_weapon_textures(recipe), inputs.textures
+
+
+class PaintkitBatch(StandardWorker):
+    """
+    Несколько сборок War Paint по очереди — у оружия из нескольких
+    материалов у каждого своя развёртка, и узор собирается под каждую.
+
+    ``jobs`` — [(карточки, PaintkitWorker)]; готовое копится в ``done``
+    [(карточки, png)]. Не собрался один — останавливаемся: War Paint на
+    половине оружия выглядел бы как наложенный целиком.
+    """
+
+    def __init__(self, jobs: list, parent=None):
+        super().__init__(parent)
+        self.jobs = jobs
+        self.done: list = []
+        self.missing: list = []
+
+    def work(self) -> Tuple[bool, str]:
+        for cards, job in self.jobs:
+            job.progress.connect(self.progress.emit)
+            ok, message = job.work()
+            if not ok:
+                return False, message
+            if self.isInterruptionRequested():
+                return False, 'Отменено'
+            self.missing += [m for m in job.missing if m not in self.missing]
+            self.done.append((cards, message))
+        return True, ''

@@ -19,6 +19,7 @@ PreviewSession владеет двумя моделями, которые уже
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -142,6 +143,10 @@ class PreviewSession:
     #: {материал: {map_id: спецификация}} — detail / самосвечение / phong и т.п.
     #: Уходят в сборку как есть: VTF по ним генерит vpk_texture_builder.
     texture_maps: Dict[str, dict] = field(default_factory=dict)
+    #: {материал: {map_id: запись}} — карты, что уже стоят в VMT загруженного
+    #: мода (material_maps.detect_maps + превью). Не правка: в работу не идёт,
+    #: заново читается из мода при загрузке.
+    mod_maps: Dict[str, dict] = field(default_factory=dict)
     #: {материал: {size, format, flags, options}} — СВОИ настройки сборки.
     #: Разреженно: есть запись ⟺ материал собирается не как все остальные.
     texture_overrides: Dict[str, dict] = field(default_factory=dict)
@@ -315,12 +320,18 @@ class PreviewSession:
         # Гирлянда — после своих карточек предмета; стилей у неё нет, поэтому
         # она видна и в стиле.
         decor = [c for c in self.decor_cards if is_decor(c)]
+        parts = self.textures.part_cards
         if self.active_style:
+            # Материал части — в стиле вместе со своим исходным: строка стиля
+            # меняет и его (part_materials.add_part_columns), и правка части
+            # в стиле — её правка, а не базового.
             chosen = self.skin_chosen.get(self.active_style) or set()
-            return [m for m in self.textures.material_names if m in chosen] + decor
+            return [name for card in self.textures.material_names if card in chosen
+                    for name in [card, *(p for p, base in parts.items()
+                                         if base == card and self._styled(p))]
+                    ] + decor
         cards = list(self.textures.material_names)
         # Часть-материал — сразу за своим исходным: так видно, откуда она.
-        parts = self.textures.part_cards
         if parts:
             cards = [name for card in cards
                      for name in [card, *(p for p, base in parts.items() if base == card)]]
@@ -334,6 +345,70 @@ class PreviewSession:
             main = self.textures.stable_main() or cards[0]
             cards = [gold if c == main else c for c in cards]
         return cards + decor
+
+    def _styled(self, part: str) -> bool:
+        """Меняет ли строка активного стиля исходный материал части. Только
+        тогда у части в этом скине свой материал (part_materials.
+        add_part_columns); иначе там та же базовая, и правке стиля некуда.
+        У своей модели строки стиля — те, что собрал человек: исходный
+        меняется, если его добавили в стиль «плюсиком»."""
+        style = self.active_style
+        if self.own_styles:
+            source = self.textures.part_cards.get(part, '')
+            return bool(style) and source in (self.skin_chosen.get(style) or set())
+        rows = (self.textures.skin_info or {}).get('rows') or []
+        base = next((b for b, entries in self.part_materials.items()
+                     for e in entries if e['name'] == part), '')
+        head = [str(n).lower() for n in rows[0]] if rows else []
+        if not base or base.lower() not in head or not 0 < style < len(rows):
+            return False
+        row, col = rows[style], head.index(base.lower())
+        return col < len(row) and str(row[col]).lower() != base.lower()
+
+    @property
+    def own_styles(self) -> bool:
+        """Своя модель «со своими материалами»: игровая таблица скинов к ней
+        не подходит, сборка собирает свою из того, что положено в стили."""
+        return bool(self.custom_smd_path and self.custom_keep_materials)
+
+    def gold_row(self) -> int:
+        """Первая строка Australium в таблице скинов игровой модели (0 — нет).
+        Australium в игре — тот же скин, только с материалом `_gold`."""
+        rows = (self.textures.skin_info or {}).get('rows') or []
+        base = str(rows[0][0]).lower() if rows and rows[0] else ''
+        return next((r for r, row in enumerate(rows)
+                     if row and str(row[0]).lower() != base
+                     and str(row[0]).lower().endswith('_gold')), 0)
+
+    def styles(self) -> List[Any]:
+        """Стили для полосы стилей: [(подпись, индекс скина)].
+
+        У своей модели «со своими материалами» к стилям оружия добавляется
+        Australium: переключателя варианта у неё нет (золотой пары у её
+        материалов нет), и золото даётся так же, как стиль, — «плюсиком»."""
+        styles = list((self.textures.skin_info or {}).get('styles') or [])
+        gold = self.gold_row() if self.own_styles else 0
+        if gold and all(int(index) != gold for _label, index in styles):
+            styles.append(['Australium', gold])
+        return styles
+
+    def style_rows(self, style: int) -> List[int]:
+        """Строки таблицы скинов, которые и есть этот стиль: у Australium их
+        две (RED и BLU одинаковые), у Bloody гильотины одна."""
+        rows = (self.textures.skin_info or {}).get('rows') or []
+        if not 0 < style < len(rows):
+            return [style] if style else []
+        return [r for r, row in enumerate(rows) if r and row == rows[style]]
+
+    def style_suffix(self, style: int) -> str:
+        """Хвост имени материала стиля своей модели: `<материал>_bloody`."""
+        if style and style == self.gold_row():
+            return 'gold'
+        label = next((str(name) for name, index in
+                      (self.textures.skin_info or {}).get('styles') or ()
+                      if int(index) == style), '')
+        clean = re.sub(r'[^a-z0-9]+', '_', label.lower()).strip('_')
+        return clean or f'style{style}'
 
     @property
     def active_style(self) -> int:
@@ -394,12 +469,28 @@ class PreviewSession:
         style = self.active_style
         if not style:
             return False
-        chosen = self.skin_chosen.get(style) or set()
-        if material not in chosen:
-            return False
-        chosen.discard(material)
-        (self.textures.skin_overrides.get(style) or {}).pop(material, None)
-        (self.textures.style_game_tex.get(style) or {}).pop(material, None)
+        parts = self.textures.part_cards
+        if material in parts:
+            # Карточка материала части: снимается её правка стиля, и часть
+            # показывает оригинал стиля исходного.
+            names = [material]
+        else:
+            chosen = self.skin_chosen.get(style) or set()
+            if material not in chosen:
+                return False
+            chosen.discard(material)
+            # Материалы его частей уходят из стиля с ним: их карточек в стиле
+            # больше не видно, а правка стиля уехала бы в сборку.
+            names = [material, *(p for p, base in parts.items() if base == material)]
+            (self.textures.style_game_tex.get(style) or {}).pop(material, None)
+        for name in names:
+            (self.textures.skin_overrides.get(style) or {}).pop(name, None)
+            # Мазки и основа склейки этого стиля — тоже: следующая пересборка
+            # вернула бы стилю снятую правку.
+            slot = part_specs.slot_key(name, style)
+            self.part_textures.pop(slot, None)
+            self.part_colors.pop(slot, None)
+            self.part_bases.pop(slot, None)
         return True
 
     def visible_textures(self) -> Dict[str, str]:
@@ -482,10 +573,6 @@ class PreviewSession:
             if mat in out:
                 continue
             path = t.style_texture(style, mat) if style else None
-            if not path and style and mat in t.part_cards:
-                # Материал части в стиле, который заменяет исходный: строка
-                # стиля ведёт его в игровой VMT материала стиля.
-                path = _existing(t.style_game_tex.get(style, {}).get(t.part_cards[mat]))
             if not path:
                 path = t.resolve_base(mat) if style else t.resolve_card(mat)
             if path:
@@ -726,8 +813,11 @@ class PreviewSession:
         }
 
     def part_material_names(self) -> List[str]:
-        """Имена всех частей, ставших своими материалами."""
-        return [e['name'] for entries in self.part_materials.values() for e in entries]
+        """Имена всех частей, ставших своими материалами. Родные материалы
+        модели, получившие части (`existing`), сюда не входят: карточка,
+        картинки и место в сборке у них свои, а не материала части."""
+        return [e['name'] for entries in self.part_materials.values()
+                for e in entries if not e.get('existing')]
 
     def drop_part_cards(self, names: Iterable[str]) -> None:
         """Снимает всё, что лежало на карточках материалов частей: картинки,
@@ -745,10 +835,12 @@ class PreviewSession:
                 del self.part_bases[slot]
 
     def sync_part_cards(self) -> None:
-        """Передаёт текстурам, какая часть чью картинку наследует."""
+        """Передаёт текстурам, какая часть чью картинку наследует. Части,
+        отданные в родной материал модели (`existing`), своей карточки не
+        заводят: у этого материала она уже есть."""
         self.textures.part_cards = {e['name']: e.get('card') or base
                                     for base, entries in self.part_materials.items()
-                                    for e in entries}
+                                    for e in entries if not e.get('existing')}
 
     def has_user_edits(self) -> bool:
         """Есть ли что сохранять. Пустую работу на диск не пишем."""
@@ -822,7 +914,9 @@ class PreviewSession:
                          # Сколько из них — само оружие, до снаряда в оружии
                          # (part_materials.fits): смена снаряда номера оружия
                          # не трогает.
-                         **({'late': int(e['late'])} if e.get('late') is not None else {})}
+                         **({'late': int(e['late'])} if e.get('late') is not None else {}),
+                         # Части отданы родному материалу модели, а не своему.
+                         **({'existing': True} if e.get('existing') else {})}
                         for e in (entries or ()) if e and e.get('name')]
             for base, entries in (edits.get('part_materials') or {}).items()}
         self.sync_part_cards()
@@ -886,6 +980,7 @@ class PreviewSession:
         self.custom_vpk_weapon = None
         self.custom_vpk_smd = None
         self.custom_vpk_own_model = False
+        self.mod_maps = {}
 
     def forget_decor_look(self, kind: str) -> None:
         """Правки гирлянды вида `kind`, привязанные к её геометрии: краска,
@@ -926,6 +1021,9 @@ class PreviewSession:
     def reset_team_frames(self) -> None:
         """Забывает командные кадры, вариант и режим мода из VPK."""
         self.custom_vpk_mode = False
+        # Карты мода — про его материалы; у чужой модели их имена совпали бы
+        # с игровыми, и диалог показал бы карты мода не тому материалу.
+        self.mod_maps = {}
         # webview перезагружается — что было наложено, больше не актуально
         self.applied_3d_tex = {}
         self.team_framerate = 0.0
