@@ -14,7 +14,6 @@
 import * as api from './api.js';
 import { ask } from './ask.js';
 import { say } from './stage.js';
-import { build, floating } from './layout.js';
 import { SINGLE_TEX, frameOf } from './album.js';
 import { sel, applyToolsMenu } from './catalog.js';
 import { buildParams, checkName } from './build.js';
@@ -241,9 +240,7 @@ async function enterTextureEdit(material) {
   // Служебный ключ наружу не отдаём - Python сам подставит главный материал.
   const key = material === SINGLE_TEX ? '' : material;
   if (texEdit === null) {
-    texEdit = { key, mat: material, inputs: readInputs(), global: buildParams(),
-                // Плавающую панель открыла правка - правка её и закроет.
-                openedPanel: floating() && build.hidden };
+    texEdit = { key, mat: material, inputs: readInputs(), global: buildParams() };
   } else {
     texEdit.key = key;
     texEdit.mat = material;
@@ -253,8 +250,9 @@ async function enterTextureEdit(material) {
   // не говорит.
   document.getElementById('editmat').textContent =
     material === SINGLE_TEX ? 'текстура' : material;
+  // Панель сборки сама не открывается: правку видно по горящей
+  // шестерёнке, а открытая панель покажет плашку с именем материала.
   editbar.hidden = false;
-  if (floating()) build.hidden = false;   // панель должна быть на виду
   markGear();
 
   const res = await api.textureSettings(key);
@@ -267,7 +265,6 @@ async function enterTextureEdit(material) {
 function exitTextureEdit() {
   if (texEdit === null) return;
   writeInputs(texEdit.inputs);
-  if (texEdit.openedPanel && floating()) build.hidden = true;
   texEdit = null;
   editbar.hidden = true;
   markGear();

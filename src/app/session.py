@@ -2197,11 +2197,16 @@ class AppSession:
         if uploaded:
             self._answer_texture_request(self.parts.baked_path(uploaded))
             return
+        from src.shared.constants import EXTRA_TEX_USE_GAME_ORIGINAL
+        # Мод из VPK: текстура материала уже лежит в моде и видна на
+        # карточке - своей нет, значит остаётся его. Спрашивать не о чем.
+        if self.preview.custom_vpk_mode:
+            self._answer_texture_request(EXTRA_TEX_USE_GAME_ORIGINAL)
+            return
         # Сборку отменяют: воркер дойдёт до проверки отмены только после
         # ответа, а каждый новый вопрос до неё показывал бы окно заново.
         build = self._build
         if build is not None and build.isInterruptionRequested():
-            from src.shared.constants import EXTRA_TEX_USE_GAME_ORIGINAL
             self._answer_texture_request(EXTRA_TEX_USE_GAME_ORIGINAL)
             return
         if self._texture_choice is not _NO_CHOICE:
@@ -2426,6 +2431,13 @@ class AppSession:
 
         if not self._shown_weapon():
             return None
+        # Мод из VPK со своей моделью: полоса - по ней. У куная из мода
+        # модель на 2.5 единицы длиннее стоковой, и низ выпадал из маски.
+        p = self.preview
+        if p.custom_vpk_mode and p.custom_vpk_own_model and self._vpk_mod_path:
+            data = self._mod_mdl(self._shown_weapon())
+            if data:
+                return vmt_effects.sheen_mask_params(data)
         paths = self.tf2_paths()
         if 'error' in paths:
             return None
@@ -2438,6 +2450,70 @@ class AppSession:
         finally:
             reader.close()
         return vmt_effects.sheen_mask_params(data) if data else None
+
+    def _mod_mdl(self, weapon_key: str) -> Optional[bytes]:
+        """MDL оружия из архива показанного мода (имя = ключ оружия;
+        гирлянда того же мода - отдельный файл и сюда не попадает)."""
+        import vpk as vpklib
+        try:
+            pak = vpklib.open(self._vpk_mod_path)
+            for name in pak:
+                if (name.lower().endswith('.mdl')
+                        and os.path.basename(name)[:-4].lower() == weapon_key.lower()):
+                    return pak[name].read()
+        except Exception as exc:                             # noqa: BLE001
+            logger.warning(f'MDL мода не прочитан: {exc}')
+        return None
+
+    def _sheen_aspect(self) -> tuple:
+        """(пропорция показанного оружия, оружие ли это) — как в имени маски."""
+        from src.services import sheen_builder
+        try:
+            bounds = self.sheen_mask_params()
+        except Exception:                                  # noqa: BLE001
+            bounds = None
+        aspect = (bounds['stencil']['aspect'] if bounds and bounds.get('stencil')
+                  else sheen_builder.DEFAULT_ASPECT)
+        return round(min(12.0, max(0.5, aspect)), 1), bool(bounds)
+
+    def sheen_preset_thumbs(self) -> Dict[str, Any]:
+        import tempfile
+        from pathlib import Path
+
+        from src.services import sheen_builder
+
+        aspect, _weapon = self._sheen_aspect()
+        out = Path(tempfile.gettempdir()) / 'tf2sg_sheen_thumbs'
+        thumbs = {}
+        for key, p in sheen_builder.PRESETS.items():
+            png = out / f'{key}_{aspect}.png'
+            thumbs[key] = str(png) if png.exists() else sheen_builder.thumbnail(p['spec'], aspect, png)
+        return {'thumbs': thumbs, 'aspect': aspect}
+
+    def sheen_pattern_preview(self, spec: Dict[str, Any], length: float) -> Dict[str, Any]:
+        """Кадры узора из конструктора картинкой-сеткой — в пропорции
+        показанного оружия (как ляжет в игре), иначе обычного ствола."""
+        import hashlib
+        import json
+        import tempfile
+        from pathlib import Path
+
+        from src.services import sheen_builder, sheen_patterns
+
+        aspect, weapon = self._sheen_aspect()             # как в имени маски
+        frames = sheen_patterns.frames_for(float(length or 2.5))
+        spec = sheen_builder.clean_spec(spec)
+        key = hashlib.sha1(json.dumps([spec, frames, aspect], sort_keys=True)
+                           .encode()).hexdigest()[:16]
+        out = Path(tempfile.gettempdir()) / 'tf2sg_sheen' / f'{key}.png'
+        if out.parent.is_dir():
+            olds = sorted((p for p in out.parent.glob('*.png') if p != out),
+                          key=lambda p: p.stat().st_mtime, reverse=True)
+            for old in olds[4:]:
+                old.unlink(missing_ok=True)
+        res = sheen_builder.preview_sheet(spec, frames, aspect, out)
+        res.update(aspect=aspect, weapon=weapon)
+        return res
 
     def _paintkit_model(self) -> str:
         """Файл модели показанного оружия — по нему War Paint и ищутся."""
@@ -4083,7 +4159,16 @@ class AppSession:
         mode = getattr(self, '_mode', '')
         if not mode:
             return {'error': 'Сначала выберите предмет'}
-        if mode in set(SPECIAL_MODES) | {'custom'}:
+        if mode == 'custom':
+            # Мод из VPK: правится VMT самого мода (путь в архиве вместо
+            # ключа оружия), правка - под ключом этого мода.
+            from src.services.edited_vmt_service import EditedVMTService
+            card = self._card_key(material)
+            vmt = self.preview.mod_vmts.get(card)
+            if not (vmt and self._vpk_mod_path):
+                return {'error': 'У этой текстуры в моде нет VMT'}
+            return vmt, EditedVMTService.mod_key(self._vpk_mod_path, card)
+        if mode in SPECIAL_MODES:
             return {'error': 'Для этого режима редактор VMT недоступен'}
 
         target = vmt_source_service.resolve_target(
@@ -4095,6 +4180,14 @@ class AppSession:
         # Ключ хранения правки — имя материала: у главного он совпадает с
         # texture_filename, который сборка и ищет.
         return weapon_key, (self._card_key(material) or weapon_key)
+
+    def _vmt_label(self, edit_key: str, material: str) -> str:
+        """Имя материала для страницы - она шлёт его обратно при сохранении.
+        У мода из VPK ключ хранения свой (EditedVMTService.mod_key), и
+        вернувшись, он не находил карточку: «нет VMT»."""
+        if getattr(self, '_mode', '') == 'custom':
+            return self._card_key(material)
+        return edit_key
 
     def open_vmt(self, material: str = '', lang: str = 'ru') -> Dict[str, Any]:
         """
@@ -4125,7 +4218,7 @@ class AppSession:
                     content = f.read()
             except OSError as exc:
                 return {'error': f'не прочитать правку: {exc}'}
-            return {'material': edit_key, 'content': content,
+            return {'material': self._vmt_label(edit_key, material), 'content': content,
                     'original': original if original is not None else content,
                     'edited': True}
 
@@ -4134,7 +4227,7 @@ class AppSession:
         original = self._vmt_original(mode, weapon_key, tf2_root, edit_key, lang)
         if original is None:
             return {'error': f'Оригинальный VMT для «{edit_key}» не найден'}
-        return {'material': edit_key, 'content': original,
+        return {'material': self._vmt_label(edit_key, material), 'content': original,
                 'original': original, 'edited': False}
 
     def _vmt_original(self, mode: str, weapon_key: str, tf2_root: str,
@@ -4149,6 +4242,8 @@ class AppSession:
         """
         from src.services import vmt_source_service
 
+        if mode == 'custom':
+            return self._mod_vmt_text(weapon_key)
         base = self.preview.textures.part_cards.get(edit_key)
         if base is not None:
             edit_key = self._card_key(base) or weapon_key
@@ -4156,6 +4251,19 @@ class AppSession:
             return None
         return vmt_source_service.original_content(
             mode, weapon_key, tf2_root, edit_key, lang)
+
+    def _mod_vmt_text(self, vmt_rel: str) -> Optional[str]:
+        """VMT из архива показанного мода - оригинал для его редактора."""
+        import vpk as vpklib
+        try:
+            data = vpklib.open(self._vpk_mod_path)[vmt_rel].read()
+        except Exception as exc:                             # noqa: BLE001
+            logger.warning(f'VMT мода не прочитан ({vmt_rel}): {exc}')
+            return None
+        try:
+            return data.decode('utf-8')
+        except UnicodeDecodeError:
+            return data.decode('cp1251', errors='replace')
 
     def save_vmt(self, material: str = '', content: str = '',
                  original: str = '', lang: str = 'ru') -> Dict[str, Any]:
@@ -4171,7 +4279,7 @@ class AppSession:
             edit_key, content, original or None, lang)
         if not ok:
             return {'error': error}
-        return {'material': edit_key, 'content': saved, 'edited': True}
+        return {'material': self._vmt_label(edit_key, material), 'content': saved, 'edited': True}
 
     def reset_vmt(self, material: str = '') -> Dict[str, Any]:
         """Удаляет правку: материал вернётся к игровому оригиналу."""
@@ -4182,7 +4290,7 @@ class AppSession:
             return target
         _weapon_key, edit_key = target
         EditedVMTService.delete_edited_vmt(edit_key)
-        return {'material': edit_key, 'edited': False}
+        return {'material': self._vmt_label(edit_key, material), 'edited': False}
 
     # ═══════════════════════════════════════════════════════════════════════ #
     # Инструменты: извлечение оригиналов и объединение модов

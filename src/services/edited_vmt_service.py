@@ -23,6 +23,16 @@ class EditedVMTService:
     EDITED_VMT_DIR = str(DirectoryPaths.EDITED_VMT_DIR)
     
     @staticmethod
+    def mod_key(mod_path: str, material: str) -> str:
+        """Ключ правки материала мода из VPK. У мода свой VMT: правка того
+        же материала игры (тот же c_shogun_kunai) в него попадать не должна,
+        как и правка одного мода в другой."""
+        import hashlib
+        digest = hashlib.sha1(os.path.normcase(os.path.abspath(mod_path))
+                              .encode('utf-8')).hexdigest()[:8]
+        return f"vpkmod_{digest}_{material}"
+
+    @staticmethod
     def get_edited_vmt_path(edit_key: str) -> str:
         """
         Возвращает путь к отредактированному VMT файлу для оружия

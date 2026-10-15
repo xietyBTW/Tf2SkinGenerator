@@ -292,6 +292,10 @@ class CustomVPKService:
                     "В VPK не найдено текстур (нет VTF файлов)."
                 )
 
+            # Правки VMT из редактора - до рельефа и карт: те дописываются
+            # уже в правленый VMT, как у модельной сборки.
+            CustomVPKService._apply_vmt_edits(custom_vpk_source_path, all_textures)
+
             # ── 3. Подготовка конвертера ───────────────────────────────── #
             # Настройки материала (свои поверх общих) — как у модельной сборки.
             # Раньше здесь были только общие, а галка Normal Map выкидывалась:
@@ -411,6 +415,18 @@ class CustomVPKService:
             return False, str(e)
         finally:
             shutil.rmtree(str(temp_root), ignore_errors=True)
+
+    @staticmethod
+    def _apply_vmt_edits(mod_path: str, textures: List[Dict]) -> None:
+        """Правленые VMT материалов мода (ключ - мод + карточка) - вместо его."""
+        from src.services.edited_vmt_service import EditedVMTService
+        for tex in textures:
+            vmt = tex.get('vmt_path')
+            edited = vmt and EditedVMTService.get_edited_vmt(
+                EditedVMTService.mod_key(mod_path, tex['name']))
+            if edited:
+                shutil.copyfile(edited, vmt)
+                logger.info(f"Правленый VMT мода: {tex['name']} -> {vmt}")
 
     @staticmethod
     def _materials_dir(vtf_dir: Path, vpkroot_dir: Path) -> Optional[str]:

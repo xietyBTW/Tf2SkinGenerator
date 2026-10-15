@@ -439,6 +439,8 @@ class VpkModController:
                 s.textures.vpk_red_tex_map[card['name']] = png
         # Карты, что уже есть в VMT мода: диалог карт покажет их отмеченными.
         s.mod_maps = {c['name']: c['maps'] for c in cards if c.get('name') and c.get('maps')}
+        s.mod_vmts = {c['name']: c['vmt_path'] for c in cards
+                      if c.get('name') and c.get('vmt_path')}
         self.cards.emit(cards)
 
     def _on_materials(self, materials: list) -> None:

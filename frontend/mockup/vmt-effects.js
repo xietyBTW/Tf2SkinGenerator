@@ -15,6 +15,10 @@
 import * as api from './api.js';
 import { t } from './i18n.js';
 import { picking } from './picker.js';
+import { openSheenBuilder } from './sheen-builder.js';
+
+//: Свой узор блеска из конструктора: id вида u + 8 hex (sheen_builder.ID_RE).
+const OWN_PATTERN = /^u[0-9a-f]{8}$/;
 
 const panel = document.getElementById('vmt-fx');
 const cats = document.getElementById('vmt-fx-cats');
@@ -45,13 +49,14 @@ export function pickEffect(anchor, data, getText, game = '') {
   return new Promise((resolve) => {
     const onAway = (e) => {
       // Палитра своего цвета - отдельный поповер, но выбор идёт для панели.
-      if (e.target.closest && e.target.closest('.picker')) return;
+      // И окно конструктора узора блеска: оно поверх панели, но работает на неё.
+      if (e.target.closest && e.target.closest('.picker, #sheenb')) return;
       if (!panel.contains(e.target) && e.target !== anchor) done(null);
     };
     // Esc - только панель: общий Esc закрыл бы и само окно редактора. Пока
     // открыта палитра, Esc закрывает её одну (picker.js).
     const onKey = (e) => {
-      if (e.key !== 'Escape' || picking()) return;
+      if (e.key !== 'Escape' || picking() || document.getElementById('sheenb')?.open) return;
       e.preventDefault();
       e.stopPropagation();
       done(null);
@@ -162,8 +167,10 @@ async function openForm(item, back, done, getText) {
   // цветов» - только у радуги, плашки - только у одного цвета).
   const rows = [];
   const sync = () => rows.forEach(({ f, row }) => {
-    row.hidden = !Object.entries(f.show_if || {}).every(([k, v]) => (Array.isArray(v)
-      ? v.includes(values[k]) : values[k] === v));
+    // «ключ!» - поле видно, пока значение НЕ равно указанному.
+    row.hidden = !Object.entries(f.show_if || {}).every(([k, v]) => (k.endsWith('!')
+      ? values[k.slice(0, -1)] !== v
+      : (Array.isArray(v) ? v.includes(values[k]) : values[k] === v)));
   });
   for (const f of item.fields) {
     const row = field(f, values, sync);
@@ -206,6 +213,7 @@ async function openForm(item, back, done, getText) {
 function field(f, values, changed = () => {}) {
   const row = document.createElement('div');
   row.className = 'fxpick__field';
+  row.dataset.key = f.key;
   // Без подписи - поле продолжает предыдущее (цвет под «Один цвет / Радуга»).
   if (f.label) {
     row.append(Object.assign(document.createElement('span'),
@@ -239,18 +247,60 @@ function field(f, values, changed = () => {}) {
     mark();
     ctl.append(...swatches, own);
   } else if (f.type === 'choice') {
-    const tags = f.choices.map((c) => {
+    const tags = [];
+    const mark = () => tags.forEach((x) => x.classList.toggle('is-active',
+      x.dataset.value === String(values[f.key])));
+    const tag = (value, label) => {
       const b = Object.assign(document.createElement('button'),
-        { type: 'button', className: 'tag', textContent: c.label });
-      b.addEventListener('click', () => {
-        values[f.key] = c.value;
-        changed();
-        tags.forEach((x) => x.classList.toggle('is-active', x === b));
-      });
-      b.classList.toggle('is-active', c.value === values[f.key]);
+        { type: 'button', className: 'tag', textContent: label });
+      b.dataset.value = value;
+      b.addEventListener('click', () => { values[f.key] = value; changed(); mark(); syncEdit(); });
+      tags.push(b);
       return b;
-    });
-    ctl.append(...tags);
+    };
+    ctl.append(...f.choices.map((c) => tag(c.value, c.label)));
+    let syncEdit = () => {};
+    if (f.builder) {
+      // Свои узоры из конструктора - следом за готовыми, и сам конструктор.
+      const own = document.createElement('span');
+      own.className = 'fxpick__own-patterns';
+      const create = Object.assign(document.createElement('button'),
+        { type: 'button', className: 'tag fxpick__builder', textContent: t('+ Свой узор') });
+      const edit = Object.assign(document.createElement('button'),
+        { type: 'button', className: 'textbtn textbtn--sm', textContent: t('Изменить узор') });
+      syncEdit = () => { edit.hidden = !OWN_PATTERN.test(String(values[f.key])); };
+      const loadOwn = async () => {
+        let list = [];
+        try { list = (await api.sheenPatterns()).patterns || []; } catch { /* нет - пусто */ }
+        tags.splice(f.choices.length);
+        own.replaceChildren(...list.map((p) => tag(p.id, p.name)));
+        mark();
+        syncEdit();
+      };
+      const open = async (id) => {
+        const res = await openSheenBuilder({ patternId: id, length: values.length, color: values.color });
+        if (!res) return;
+        await loadOwn();
+        if (res.deleted) {
+          if (values[f.key] === res.deleted) { values[f.key] = 'game'; changed(); mark(); syncEdit(); }
+          return;
+        }
+        values[f.key] = res.id;
+        values.length = res.length;
+        // Длина прохода из конструктора - и в её ползунок формы.
+        const len = row.parentElement?.querySelector('[data-key="length"] input[type=range]');
+        if (len) { len.value = res.length; len.dispatchEvent(new Event('input')); }
+        changed();
+        mark();
+        syncEdit();
+      };
+      create.addEventListener('click', () => open(''));
+      edit.addEventListener('click', () => open(String(values[f.key])));
+      ctl.append(own, create, edit);
+      loadOwn();
+    }
+    mark();
+    syncEdit();
   } else if (f.type === 'range') {
     const input = Object.assign(document.createElement('input'), {
       type: 'range', className: 'slider', min: f.min, max: f.max, step: f.step,

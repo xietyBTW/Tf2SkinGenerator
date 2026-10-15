@@ -292,6 +292,15 @@ export const clearModelCache = () => call('clear_model_cache');
 export const vmtSnippets  = () => cached('vmt_snippets', {});
 export const vmtEffectValues = (key, text) => call('vmt_effect_values', { key, text });
 export const vmtApplyEffect  = (key, values, text, game) => call('vmt_apply_effect', { key, values, text, game });
+// Конструктор узора блеска.
+export const sheenBuilderSchema = () => cached('sheen_builder_schema', { lang: lang() });
+export const sheenPatterns   = () => call('sheen_patterns_list', {});
+export const sheenPresetThumbs = () => call('sheen_preset_thumbs', {});
+export const sheenPatternLoad = (pattern_id) => call('sheen_pattern_load', { pattern_id });
+export const sheenPatternPreview = (spec, length) => call('sheen_pattern_preview', { spec, length });
+export const sheenPatternSave = (pattern_id, name, spec, length) =>
+  call('sheen_pattern_save', { pattern_id, name, spec, length });
+export const sheenPatternDelete = (pattern_id) => call('sheen_pattern_delete', { pattern_id });
 export const setSettings  = (values) => call('set_settings', { values });
 //: Мелочь раскладки (ширина панели, громкость): её правят прямо на экране, и
 //: сохраняется она по одной, а не всем окном настроек разом.

@@ -40,11 +40,31 @@ FPS = 25                       # tf_sheen_framerate игры
 MIN_FRAMES, MAX_FRAMES = 26, 201
 PEAK = 230                     # стоковая маска доходит до 216
 
-_NAME_RE = re.compile(r'^tf2sg/sheen/([a-z0-9]+)_(\d+)$')
+#: Ровная кубмапа блеска вместо игровой cubemaps/cubemap_sheen001. Цвет
+#: прохода = кубмапа x цвет x 10 x маска, а прозрачность - его яркость; у
+#: игровой кубмапы почти всё тёмное (в среднем 30-60 из 255) с редкими
+#: светлыми пятнами, поэтому от узора видны только куски. Серый 89 (sRGB)
+#: = 0.1 линейно: x10 даёт ровно цвет блеска по всему узору.
+FLAT_CUBE = PREFIX + "flat"
+FLAT_GREY = 89
+STOCK_CUBE = "cubemaps/cubemap_sheen001"
+
+#: Готовый узор: имя, «_r» - маска повёрнута (оружие длинное по Z), кадры.
+_NAME_RE = re.compile(r'^tf2sg/sheen/([a-z0-9]+?)(_r)?_(\d+)$')
 #: `$sheenmapmask` с нашей маской: в кавычках или без, с пробелом или без,
 #: с обратными слэшами, с папкой-обходом впереди (повторная упаковка).
 _VMT_RE = re.compile(r'("?\$sheenmapmask"?\s*"?)((?:[\w.\\/-]*[\\/])?tf2sg[\\/]sheen[\\/]\w+?_\d+)'
                      r'(?:\.vtf)?', re.IGNORECASE)
+
+
+#: `$sheenmap` с нашей ровной кубмапой (не `$sheenmapmask`).
+_CUBE_RE = re.compile(r'("?\$sheenmap"?\s+"?)((?:[\w.\\/-]*[\\/])?tf2sg[\\/]sheen[\\/]flat)'
+                      r'(?:\.vtf)?(?![\w])', re.IGNORECASE)
+
+
+def is_flat_cube(name: str) -> bool:
+    """`$sheenmap` - наша ровная кубмапа (в том числе уже в папке-обходе)."""
+    return str(name or '').strip().lower().replace('\\', '/').endswith(FLAT_CUBE)
 
 
 def frames_for(seconds: float) -> int:
@@ -52,8 +72,19 @@ def frames_for(seconds: float) -> int:
     return int(min(MAX_FRAMES, max(MIN_FRAMES, round(seconds * FPS) + 1)))
 
 
-def texture_name(pattern: str, frames: int) -> str:
-    return f"{PREFIX}{pattern}_{int(frames)}"
+def texture_name(pattern: str, frames: int, rotate: bool = False) -> str:
+    return f"{PREFIX}{pattern}{'_r' if rotate else ''}_{int(frames)}"
+
+
+def rotated(name: str) -> bool:
+    """Маска повёрнута на 90°: оружие длинное по Z, маска лежит по X и Z
+    (vmt_effects.sheen_mask_params, «stencil»), а рисуется длиной по X."""
+    short = str(name or '').strip().lower().replace('\\', '/')
+    m = _NAME_RE.match(short)
+    if m and m.group(1) in PATTERNS:
+        return bool(m.group(2))
+    m = _CUSTOM_RE.match(short)
+    return bool(m and m.group(3))
 
 
 def parse(name: str) -> Optional[Tuple[str, int]]:
@@ -61,8 +92,30 @@ def parse(name: str) -> Optional[Tuple[str, int]]:
     m = _NAME_RE.match(str(name or '').strip().lower().replace('\\', '/'))
     if not m or m.group(1) not in PATTERNS:
         return None
-    frames = int(m.group(2))
+    frames = int(m.group(3))
     return (m.group(1), frames) if MIN_FRAMES <= frames <= MAX_FRAMES else None
+
+
+#: Своя маска: id узора, (в моде) отпечаток содержимого, пропорция, кадры.
+_CUSTOM_RE = re.compile(r'^tf2sg/sheen/(u[0-9a-f]{8})(?:_h[0-9a-f]{8})?_a(\d+)(r?)_(\d+)$')
+
+
+def custom_name(pattern_id: str, aspect: float, frames: int, rotate: bool = False) -> str:
+    """Своя маска из конструктора: id узора, пропорция оружия ×10 («r» -
+    маска повёрнута), кадры."""
+    return (f"{PREFIX}{pattern_id}_a{int(round(max(0.5, min(12.0, aspect)) * 10))}"
+            f"{'r' if rotate else ''}_{int(frames)}")
+
+
+def parse_custom(name: str) -> Optional[Tuple[str, float, int]]:
+    """(id узора, пропорция, кадров) или None."""
+    m = _CUSTOM_RE.match(str(name or '').strip().lower().replace('\\', '/'))
+    if not m:
+        return None
+    frames = int(m.group(4))
+    if not MIN_FRAMES <= frames <= MAX_FRAMES:
+        return None
+    return m.group(1), int(m.group(2)) / 10.0, frames
 
 
 def _envelope(t: float) -> float:
@@ -196,14 +249,17 @@ def frames(pattern: str, count: int, size: int = SIZE) -> List[np.ndarray]:
 
 def write_vtf(pattern: str, count: int, out_path: Path) -> Path:
     """VTF маски: DXT1 без мипмапов, как маски модов (NOMIP | NOLOD)."""
+    return _write(frames(pattern, count), out_path)
+
+
+def _write(pics: List[np.ndarray], out_path: Path) -> Path:
     from src.services.vtflib_wrapper import VTFImageFormat, VTFImageFlags, VTFLib
 
-    pics = frames(pattern, count)
-    side = pics[0].shape[0]
+    h, w = pics[0].shape[:2]
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     VTFLib.create_animated_vtf(
-        [p.tobytes() for p in pics], side, side, VTFImageFormat.DXT1,
+        [p.tobytes() for p in pics], w, h, VTFImageFormat.DXT1,
         VTFImageFlags.NOMIP | VTFImageFlags.NOLOD, str(out_path))
     return out_path
 
@@ -246,12 +302,27 @@ def materialize(vpkroot_dir: Path, folder: Optional[str] = None) -> int:
         def move(m):
             ref = m.group(2).replace('\\', '/').lower()
             short = ref[ref.index('tf2sg/sheen/'):]
-            if not parse(short):
+            own = parse_custom(short)
+            if own:
+                # В моде — с отпечатком содержимого: моды, собранные до и
+                # после правки узора, не делят один путь.
+                from src.services import sheen_builder
+                digest = sheen_builder.content_hash(own[0])
+                if not digest:
+                    raise RuntimeError(f"sheen pattern {own[0]} not found in "
+                                       f"{sheen_builder.library_dir()}")
+                short = (f"{PREFIX}{own[0]}_h{digest}_a{int(round(own[1] * 10))}"
+                         f"{'r' if rotated(short) else ''}_{own[2]}")
+            elif not parse(short):
                 return m.group(0)
             wanted.add(short)
             return m.group(1) + (f"{folder}/{short}" if folder else short)
 
-        new = _VMT_RE.sub(move, text)
+        def cube(m):
+            wanted.add(FLAT_CUBE)
+            return m.group(1) + (f"{folder}/{FLAT_CUBE}" if folder else FLAT_CUBE)
+
+        new = _CUBE_RE.sub(cube, _VMT_RE.sub(move, text))
         if new != text:
             vmt.write_bytes(new.encode("latin-1"))
     made = 0
@@ -259,8 +330,29 @@ def materialize(vpkroot_dir: Path, folder: Optional[str] = None) -> int:
         target = materials / folder / (short + ".vtf") if folder else materials / (short + ".vtf")
         if target.exists():
             continue
-        pattern, count = parse(short)
-        write_vtf(pattern, count, target)
+        if short == FLAT_CUBE:
+            from src.services.vtflib_wrapper import VTFLib
+            target.parent.mkdir(parents=True, exist_ok=True)
+            face = bytes((FLAT_GREY, FLAT_GREY, FLAT_GREY, 255)) * 16
+            VTFLib.create_cubemap_vtf([face] * 6, 4, str(target))
+            made += 1
+            continue
+        own = parse_custom(short)
+        if own:
+            from src.services import sheen_builder
+            pattern_id, aspect, count = own
+            data = sheen_builder.load(pattern_id, deleted=True)
+            if data is None:
+                raise RuntimeError(f"sheen pattern {pattern_id} not found in "
+                                   f"{sheen_builder.library_dir()}")
+            pics = sheen_builder.render(data["spec"], count, aspect)
+        else:
+            pattern, count = parse(short)
+            pics = frames(pattern, count)
+        if rotated(short):
+            # Длина узора - по вертикали маски (ось Z оружия).
+            pics = [np.ascontiguousarray(np.transpose(p, (1, 0, 2))) for p in pics]
+        _write(pics, target)
         logger.info(f"[sheen] маска узора {target.relative_to(root).as_posix()} ({count} кадров)")
         made += 1
     return made

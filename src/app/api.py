@@ -423,10 +423,11 @@ def controls_for(mode: str, key: str = '') -> Dict[str, object]:
         'warpaint': (is_normal and kind_of(mode).is_weapon
                      and not category_of_mode(mode)),
         'misc': not (is_hands or is_spy_mask),
-        # Редактор VMT — там, где материал модели: у спрея, крита, неба и
-        # мода из VPK своего VMT нет (то же правило, что в `_vmt_target`).
-        # Без признака кнопка висела под пустым альбомом до выбора предмета.
-        'vmt_editor': model_like and mode != 'custom',
+        # Редактор VMT — там, где материал модели: у спрея, крита и неба
+        # своего VMT нет (то же правило, что в `_vmt_target`). У мода из VPK
+        # правится VMT самого мода. Без признака кнопка висела под пустым
+        # альбомом до выбора предмета.
+        'vmt_editor': model_like,
         'styles': not (is_spray or is_crit or is_skybox),
         # Команды и вариант зависят от загруженной модели, не от режима:
         # маски шпиона прячут их безусловно, остальное решает контроллер.
@@ -1770,11 +1771,97 @@ def vmt_apply_effect(key: str = '', values: Optional[Dict[str, object]] = None,
     from src.services import vmt_effects
     values = dict(values or {})
     bounds = None
-    if key == vmt_effects.SHEEN and values.get('when') == 'always':
-        # Полоса блеска кладётся по габаритам модели, как у игры.
+    if key == vmt_effects.SHEEN and (values.get('when') == 'always'
+                                     or str(values.get('pattern') or 'game') != 'game'):
+        # Полоса блеска «всегда» и любой свой узор (и готовый тоже) кладутся
+        # по габаритам модели: раскладка игры у оружия, длинного по Z (кунай),
+        # сводит узор в тонкую линию. Не прочиталась модель — узор возьмёт
+        # обычную пропорцию ствола, «всегда» скажет об ошибке сам.
         from src.app.session import session
-        bounds = session().sheen_mask_params()
+        try:
+            bounds = session().sheen_mask_params()
+        except Exception as exc:                             # noqa: BLE001
+            logger.warning(f'[sheen] габариты модели не прочитались: {exc}')
     return vmt_effects.apply(key, values, text or '', game or '', bounds)
+
+
+# ── Конструктор узора блеска (src/services/sheen_builder.py) ─────────── #
+
+def sheen_builder_schema(lang: str = '') -> Dict[str, object]:
+    """Слои конструктора и их поля, готовые узоры для начала — на языке
+    интерфейса. Поля формы страница строит отсюда."""
+    from src.services import sheen_builder as sb
+    from src.services import sheen_patterns as sp
+
+    i = 1 if _lang(lang) != 'ru' else 0
+
+    def field(key, view, default, lo, hi, step, label):
+        out = {'key': key, 'view': view, 'default': default, 'label': label[i]}
+        if view == 'choice':
+            out['choices'] = [{'value': c, 'label': sb.CHOICE_LABELS.get(c, (c, c))[i]}
+                              for c in lo]
+        elif view in ('range', 'seed', 'angle'):
+            out.update(min=lo, max=hi, step=step)
+        elif view == 'stops':
+            out['max_stops'] = sb.MAX_STOPS
+        return out
+
+    return {
+        'types': [{'id': kind, 'label': d['label'][i],
+                   'fields': [field(*f) for f in d['fields']],
+                   'defaults': sb.new_layer(kind)}
+                  for kind, d in sb.LAYER_TYPES.items()],
+        'common': [field(*f) for f in sb._COMMON],
+        'presets': [{'id': k, 'label': p['label'][i], 'spec': sb.clean_spec(p['spec'])}
+                    for k, p in sb.PRESETS.items()],
+        'max_layers': sb.MAX_LAYERS,
+        # Размер маски страница считает сама, сразу при выборе качества,
+        # а не после расчёта кадров (sheen_builder.mask_shape).
+        'quality': dict(sb.QUALITY),
+        'default_aspect': sb.DEFAULT_ASPECT,
+        'frames': {'min': sp.MIN_FRAMES, 'max': sp.MAX_FRAMES, 'fps': sp.FPS},
+        'fps': 25,
+    }
+
+
+def sheen_preset_thumbs() -> Dict[str, object]:
+    """Карточки шаблонов «Начать с»: по картинке на шаблон."""
+    from src.app.session import session
+    return session().sheen_preset_thumbs()
+
+
+def sheen_patterns_list() -> Dict[str, object]:
+    """Свои узоры блеска: [{id, name, length}]."""
+    from src.services import sheen_builder
+    return {'patterns': sheen_builder.list_patterns()}
+
+
+def sheen_pattern_load(pattern_id: str = '') -> Dict[str, object]:
+    from src.services import sheen_builder
+    data = sheen_builder.load(pattern_id)
+    return data if data else {'error': 'Узор не найден'}
+
+
+def sheen_pattern_preview(spec: Optional[Dict[str, object]] = None,
+                          length: float = 2.5) -> Dict[str, object]:
+    """Кадры узора сеткой (те же, что уйдут в мод) и пропорция оружия."""
+    from src.app.session import session
+    return session().sheen_pattern_preview(spec or {}, length)
+
+
+def sheen_pattern_save(pattern_id: str = '', name: str = '',
+                       spec: Optional[Dict[str, object]] = None,
+                       length: float = 2.5) -> Dict[str, object]:
+    from src.services import sheen_builder
+    try:
+        return {'id': sheen_builder.save(pattern_id, name, spec or {}, length)}
+    except (OSError, ValueError) as exc:
+        return {'error': f'Узор не сохранился: {exc}'}
+
+
+def sheen_pattern_delete(pattern_id: str = '') -> Dict[str, object]:
+    from src.services import sheen_builder
+    return {'deleted': sheen_builder.delete(pattern_id)}
 
 
 def set_settings(values: Optional[Dict[str, object]] = None,

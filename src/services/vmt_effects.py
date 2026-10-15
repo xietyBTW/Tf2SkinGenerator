@@ -156,14 +156,20 @@ EFFECTS: Dict[str, dict] = {
              "default": "normal",
              "choices": [("normal", "Обычный", "Normal"),
                          ("bright", "Ярче, как у австралия", "Brighter, like Australium")]},
+            # `builder`: страница добавляет свои узоры из конструктора и
+            # кнопку самого конструктора (sheen-builder.js).
             {"key": "pattern", "type": "choice", "label": ("Узор", "Pattern"),
-             "default": "game",
+             "default": "game", "builder": True,
              "choices": [("game", "Как в игре", "As in game"),
                          *[(k, ru, en) for k, (ru, en) in _sheen_patterns().items()]]},
             {"key": "length", "type": "range",
              "label": ("Длина прохода, сек", "Sweep length, s"),
              "min": 1, "max": 8, "step": 0.5, "default": 2.5,
-             "show_if": {"pattern": list(_sheen_patterns())}},
+             "show_if": {"pattern!": "game"}},
+            {"key": "shine", "type": "choice", "label": ("Отблеск", "Shine"),
+             "default": "flat", "show_if": {"pattern!": "game"},
+             "choices": [("flat", "Ровный, узор виден целиком", "Even, the whole pattern shows"),
+                         ("live", "Живой, как в игре", "Live, as in game")]},
             {"key": "when", "type": "choice", "label": ("Когда", "When"),
              "default": "game",
              "choices": [("game", "С киллстриком, как в игре", "With a killstreak, as in game"),
@@ -298,10 +304,18 @@ def values(key: str, text: str) -> Dict[str, object]:
             out["speed"] = _num(rainbow[0], 0.5, 10, 3)
         out["look"] = "bright" if _value(text, MARK + "sheenidx") is not None else "normal"
         from src.services import sheen_patterns
-        own = sheen_patterns.parse(_value(text, "$sheenmapmask") or "")
+        mask = _value(text, "$sheenmapmask") or ""
+        own = sheen_patterns.parse(mask)
+        custom = sheen_patterns.parse_custom(mask)
         if own:
             out["pattern"] = own[0]
             out["length"] = round((own[1] - 1) / sheen_patterns.FPS * 2) / 2
+        elif custom:
+            out["pattern"] = custom[0]
+            out["length"] = round((custom[2] - 1) / sheen_patterns.FPS * 2) / 2
+        if own or custom:
+            out["shine"] = ("flat" if sheen_patterns.is_flat_cube(_value(text, "$sheenmap"))
+                            else "live")
         pause = _value(text, MARK + "sheenpause")
         if pause is not None:
             out["when"] = "always"
@@ -439,9 +453,31 @@ def sheen_mask_params(mdl: bytes) -> Optional[dict]:
         sx, ox, sy, oy, d = size[1], lo[1], size[0], lo[0], 1
     if size[2] > sx:
         sx, ox, sy, oy, d = size[2], lo[2], size[1], lo[1], 2
-    if sx <= 0 or sy <= 0:
+    if sx <= 0 or sy <= 0 or size[0] <= 0 or size[2] <= 0:
         return None
-    return {"scale_x": sx, "scale_y": sy, "offset_x": ox, "offset_y": oy, "direction": d}
+    # Для своих узоров - трафарет сбоку: направление 0, маска по X и Z,
+    # проекция сквозь толщину Y. Только оно проверено калибровкой в игре
+    # (Scattergun). Направление игры у оружия, длинного по Z (кунай: Z 19.4,
+    # Y 2.3), кладёт по вертикали маски ТОЛЩИНУ клинка, и плоская сторона
+    # видела одну строку маски - тонкую линию (мод пользователя 2026-10-14).
+    # Длинное по Z оружие - маска повёрнута: в конструкторе длина всё
+    # равно идёт слева направо.
+    rotate = size[2] > size[0]
+    stencil = {"scale_x": size[0], "offset_x": lo[0], "scale_y": size[2], "offset_y": lo[2],
+               "direction": 0, "rotate": rotate,
+               "aspect": max(size[0], size[2]) / min(size[0], size[2])}
+    return {"scale_x": sx, "scale_y": sy, "offset_x": ox, "offset_y": oy, "direction": d,
+            "stencil": stencil}
+
+
+def _stencil(bounds: Optional[dict]) -> Optional[dict]:
+    """Раскладка своей маски по оружию (sheen_mask_params["stencil"])."""
+    if not bounds:
+        return None
+    if "stencil" in bounds:
+        return bounds["stencil"]
+    return {**bounds, "rotate": False,
+            "aspect": bounds["scale_x"] / bounds["scale_y"] if bounds.get("scale_y") else 3.0}
 
 
 def _sheen(vals: Dict[str, object], text: str, bounds: Optional[dict],
@@ -471,14 +507,37 @@ def _sheen(vals: Dict[str, object], text: str, bounds: Optional[dict],
     # по имени (sheen_patterns.materialize).
     frames = _SHEEN_FRAMES
     pattern = str(vals.get("pattern") or "game")
+    from src.services import sheen_builder
+    stencil = _stencil(bounds)
+    rotate = bool(stencil and stencil["rotate"])
+    own = False
     if pattern in sheen_patterns.PATTERNS:
+        own = True
         frames = sheen_patterns.frames_for(_num(vals.get("length"), 1, 8, 2.5))
-        keys.append(("$sheenmapmask", sheen_patterns.texture_name(pattern, frames)))
-    elif sheen_patterns.parse(_value(out, "$sheenmapmask") or ""):
+        keys.append(("$sheenmapmask", sheen_patterns.texture_name(pattern, frames, rotate)))
+    elif sheen_builder.ID_RE.match(pattern):
+        # Узор из конструктора: в имени пропорция ЭТОГО оружия — сборка
+        # нарисует маску так, чтобы искры на нём были круглыми.
+        if sheen_builder.load(pattern) is None:
+            return {"error": "Такого своего узора больше нет. Выберите другой."}
+        own = True
+        frames = sheen_patterns.frames_for(_num(vals.get("length"), 1, 8, 2.5))
+        aspect = stencil["aspect"] if stencil else sheen_builder.DEFAULT_ASPECT
+        keys.append(("$sheenmapmask", sheen_patterns.custom_name(pattern, aspect, frames, rotate)))
+    elif (sheen_patterns.parse(_value(out, "$sheenmapmask") or "")
+          or sheen_patterns.parse_custom(_value(out, "$sheenmapmask") or "")):
         # Назад к маске материала (у мода она могла быть своя), иначе стоковая.
         native = _value(game, "$sheenmapmask") or ""
-        keys.append(("$sheenmapmask", native if native and not sheen_patterns.parse(native)
-                     else _STOCK_MASK))
+        own_mask = sheen_patterns.parse(native) or sheen_patterns.parse_custom(native)
+        keys.append(("$sheenmapmask", native if native and not own_mask else _STOCK_MASK))
+    # Ровная кубмапа - узор виден целиком (sheen_patterns.FLAT_CUBE); у
+    # маски игры остаётся игровая, как и при «Живой».
+    if own and vals.get("shine") != "live":
+        keys.append(("$sheenmap", sheen_patterns.FLAT_CUBE))
+    elif sheen_patterns.is_flat_cube(_value(out, "$sheenmap")):
+        native = _value(game, "$sheenmap") or ""
+        keys.append(("$sheenmap", native if native and not sheen_patterns.is_flat_cube(native)
+                     else sheen_patterns.STOCK_CUBE))
     tail = ""
     if rainbow:
         tail += _rainbow(MARK + "sheen", _num(vals.get("speed"), 0.5, 10, 3), bright,
@@ -489,23 +548,38 @@ def _sheen(vals: Dict[str, object], text: str, bounds: Optional[dict],
         keys.append((MARK + "sheenidx", "1"))
         tail += _proxy("Equals", [("srcVar1", MARK + "sheenidx"),
                                   ("resultVar", "$sheenindex")], _SHEEN_MARK)
+    if own and stencil:
+        # Раскладка своей маски закреплена: игра у киллстрик-оружия каждый
+        # кадр ставит свою (InitParams), наши Equals ниже её перебивают.
+        for name, key, value in (
+                ("sheenmx", "$sheenmapmaskscaleX", stencil["scale_x"]),
+                ("sheenmy", "$sheenmapmaskscaleY", stencil["scale_y"]),
+                ("sheenox", "$sheenmapmaskoffsetX", stencil["offset_x"]),
+                ("sheenoy", "$sheenmapmaskoffsetY", stencil["offset_y"])):
+            keys += [(MARK + name, f"{value:.4g}"), (key, f"{value:.4g}")]
+            tail += _proxy("Equals", [("srcVar1", MARK + name), ("resultVar", key)], _SHEEN_MARK)
+        keys += [(MARK + "sheendir", "0"), ("$sheenmapmaskdirection", "0")]
+        tail += _proxy("Equals", [("srcVar1", MARK + "sheendir"),
+                                  ("resultVar", "$sheenmapmaskdirection")], _SHEEN_MARK)
     if always:
         pause = _num(vals.get("pause"), 0, 10, 5)
         # Блеск без киллстрика: параметры прохода, если материала их нет.
         for key, value in (("$sheenpassenabled", "1"),
-                           ("$sheenmap", "cubemaps/cubemap_sheen001"),
+                           ("$sheenmap", sheen_patterns.STOCK_CUBE),
                            ("$sheenmapmask", _STOCK_MASK),
                            ("$sheenmaptint", "[1 1 1]"),
                            ("$sheenmapmaskframe", "0"),
                            ("$sheenindex", "0")):
             if _value(out, key) is None and key not in dict(keys):
                 keys.append((key, value))
-        keys += [("$sheenmapmaskscaleX", f'{bounds["scale_x"]:.4g}'),
-                 ("$sheenmapmaskscaleY", f'{bounds["scale_y"]:.4g}'),
-                 ("$sheenmapmaskoffsetX", f'{bounds["offset_x"]:.4g}'),
-                 ("$sheenmapmaskoffsetY", f'{bounds["offset_y"]:.4g}'),
-                 ("$sheenmapmaskdirection", str(bounds["direction"])),
-                 (MARK + "sheenpause", f"{pause:g}"),
+        if not own:
+            # Стоковая маска - раскладка, как её ставит игра (InitParams).
+            keys += [("$sheenmapmaskscaleX", f'{bounds["scale_x"]:.4g}'),
+                     ("$sheenmapmaskscaleY", f'{bounds["scale_y"]:.4g}'),
+                     ("$sheenmapmaskoffsetX", f'{bounds["offset_x"]:.4g}'),
+                     ("$sheenmapmaskoffsetY", f'{bounds["offset_y"]:.4g}'),
+                     ("$sheenmapmaskdirection", str(bounds["direction"]))]
+        keys += [(MARK + "sheenpause", f"{pause:g}"),
                  (MARK + "sheent", "0.0"),
                  (MARK + "sheenlast", f"{frames - 1}.0"),
                  (MARK + "sheenzero", "0.0")]

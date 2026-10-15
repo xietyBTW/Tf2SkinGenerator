@@ -439,6 +439,18 @@ class MissingTextureAnswerTests(unittest.TestCase):
         s._on_build_needs_texture('mat', 'key')
         self.assertEqual(s.answers, [__file__])
 
+    def test_vpk_mod_keeps_its_own_texture_without_asking(self):
+        """У мода из VPK текстура второго материала (брелок) уже в моде:
+        спрашивать «загрузить свою?» незачем."""
+        from src.shared.constants import EXTRA_TEX_USE_GAME_ORIGINAL
+        s = self._session()
+        s.preview.custom_vpk_mode = True
+        events = []
+        s._put = lambda name, **payload: events.append(name)
+        s._on_build_needs_texture('keychain', 'custom')
+        self.assertEqual(events, [])
+        self.assertEqual(s.answers, [EXTRA_TEX_USE_GAME_ORIGINAL])
+
 
 class MissingPartModelAnswerTests(unittest.TestCase):
     """Сменная часть модели (`$bodygroup`): вопрос доходит до страницы, ответ —

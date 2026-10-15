@@ -147,6 +147,8 @@ class PreviewSession:
     #: мода (material_maps.detect_maps + превью). Не правка: в работу не идёт,
     #: заново читается из мода при загрузке.
     mod_maps: Dict[str, dict] = field(default_factory=dict)
+    #: {материал: путь VMT в архиве мода} - его открывает редактор VMT.
+    mod_vmts: Dict[str, str] = field(default_factory=dict)
     #: {материал: {size, format, flags, options}} — СВОИ настройки сборки.
     #: Разреженно: есть запись ⟺ материал собирается не как все остальные.
     texture_overrides: Dict[str, dict] = field(default_factory=dict)
@@ -981,6 +983,7 @@ class PreviewSession:
         self.custom_vpk_smd = None
         self.custom_vpk_own_model = False
         self.mod_maps = {}
+        self.mod_vmts = {}
 
     def forget_decor_look(self, kind: str) -> None:
         """Правки гирлянды вида `kind`, привязанные к её геометрии: краска,
@@ -1024,6 +1027,7 @@ class PreviewSession:
         # Карты мода — про его материалы; у чужой модели их имена совпали бы
         # с игровыми, и диалог показал бы карты мода не тому материалу.
         self.mod_maps = {}
+        self.mod_vmts = {}
         # webview перезагружается — что было наложено, больше не актуально
         self.applied_3d_tex = {}
         self.team_framerate = 0.0

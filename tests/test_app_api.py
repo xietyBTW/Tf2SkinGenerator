@@ -273,9 +273,9 @@ class ControlsTests(unittest.TestCase):
 
     def test_vmt_editor_only_where_the_model_has_a_material(self):
         """Кнопка VMT висела под пустым альбомом до выбора предмета."""
-        for mode in ('c_scattergun', 'hat', 'scout_body', 'scout_hands'):
+        for mode in ('c_scattergun', 'hat', 'scout_body', 'scout_hands', 'custom'):
             self.assertTrue(api.controls_for(mode)['vmt_editor'], mode)
-        for mode in ('', 'spray', 'skybox', 'critHIT', 'custom'):
+        for mode in ('', 'spray', 'skybox', 'critHIT'):
             self.assertFalse(api.controls_for(mode)['vmt_editor'], mode)
 
     def test_replace_model_not_offered_for_player_body(self):

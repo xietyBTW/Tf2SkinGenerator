@@ -54,6 +54,7 @@ class VTFImageFlags:
     NOLOD = 0x00000200
     ALL_MIPS = 0x00000400   # VTFEdit: «No Minimum Mipmap» (TEXTUREFLAGS_ALL_MIPS)
     ONEBITALPHA = 0x00001000
+    ENVMAP = 0x00004000     # кубмапа: шесть граней
     EIGHTBITALPHA = 0x00002000
     NODEBUGOVERRIDE = 0x00020000
     SINGLECOPY = 0x00040000
@@ -260,6 +261,49 @@ class VTFLib:
 
                 out_bytes = str(Path(output_file)).encode("utf-8")
                 if not dll.vlImageSave(out_bytes):
+                    raise RuntimeError(cls._last_error())
+            finally:
+                try:
+                    dll.vlImageDestroy()
+                except Exception:
+                    pass
+                try:
+                    dll.vlDeleteImage(img_id.value)
+                except Exception:
+                    pass
+
+    @classmethod
+    def create_cubemap_vtf(cls, faces_rgba8888, size: int, output_file: str) -> None:
+        """Кубмапа RGBA8888 из шести граней (+X −X +Y −Y +Z −Z), без мипмапов.
+        Нужна своя ровная кубмапа блеска Killstreak (sheen_patterns).
+
+        Седьмая грань - сферическая карта (копия первой): TF2 читает VTF до
+        7.4, где у кубмапы всегда 7 граней. Шесть граней с startFrame
+        0xFFFF - соглашение одной VTFLib, игра такой файл читает мимо данных
+        и блеск выходит чёрным."""
+        if len(faces_rgba8888) != 6:
+            raise ValueError("cubemap needs 6 faces")
+        faces_rgba8888 = list(faces_rgba8888) + [faces_rgba8888[0]]
+        with cls._lock:
+            cls.initialize()
+            dll = cls._load()
+            img_id = c_uint(0)
+            if not dll.vlCreateImage(pointer(img_id)):
+                raise RuntimeError(cls._last_error())
+            try:
+                if not dll.vlBindImage(img_id.value):
+                    raise RuntimeError(cls._last_error())
+                if not dll.vlImageCreate(c_uint(size), c_uint(size), c_uint(1), c_uint(7), c_uint(1),
+                                         c_int(VTFImageFormat.RGBA8888), c_int(0), c_int(0), c_int(1)):
+                    raise RuntimeError(cls._last_error())
+                dll.vlImageSetFlags(c_uint(VTFImageFlags.ENVMAP | VTFImageFlags.CLAMPS | VTFImageFlags.CLAMPT
+                                           | VTFImageFlags.NOMIP | VTFImageFlags.NOLOD))
+                for face, data in enumerate(faces_rgba8888):
+                    if len(data) != size * size * 4:
+                        raise ValueError("Face size mismatch")
+                    buf = (c_ubyte * len(data)).from_buffer_copy(data)
+                    dll.vlImageSetData(c_uint(0), c_uint(face), c_uint(0), c_uint(0), buf)
+                if not dll.vlImageSave(str(Path(output_file)).encode("utf-8")):
                     raise RuntimeError(cls._last_error())
             finally:
                 try:

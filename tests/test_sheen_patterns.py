@@ -122,6 +122,36 @@ class EffectPatternTests(unittest.TestCase):
         back = fx.apply(fx.SHEEN, {"color": "#00ff00", "pattern": "game"}, own, mod, BOUNDS)["text"]
         self.assertIn('"$sheenmapmask" "mods/my_mask"', back)
 
+    def test_flat_cube_for_own_pattern_and_back(self):
+        out = self.sheen(pattern="mist")
+        self.assertIn('"$sheenmap" "tf2sg/sheen/flat"', out)
+        self.assertEqual(fx.values(fx.SHEEN, out)["shine"], "flat")
+        live = self.sheen(out, pattern="mist", shine="live")
+        self.assertIn('"$sheenmap" "cubemaps/cubemap_sheen001"', live)
+        self.assertEqual(fx.values(fx.SHEEN, live)["shine"], "live")
+        back = fx.apply(fx.SHEEN, {"color": "#00ff00", "pattern": "game"}, out, STOCK, BOUNDS)["text"]
+        self.assertIn('"$sheenmap" "cubemaps/cubemap_sheen001"', back)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            mat = root / "materials" / "models"
+            mat.mkdir(parents=True)
+            (mat / "a.vmt").write_text(out, encoding="utf-8")
+            self.assertEqual(sp.materialize(root, "console"), 2)   # маска + кубмапа
+            text = (mat / "a.vmt").read_text(encoding="utf-8")
+            self.assertIn('"$sheenmap" "console/tf2sg/sheen/flat"', text)
+            self.assertIn('"$sheenmapmask" "console/tf2sg/sheen/mist_', text)
+            from src.services.vtflib_wrapper import VTFLib
+            cube = str(root / "materials" / "console" / "tf2sg" / "sheen" / "flat.vtf")
+            for face in range(7):
+                self.assertEqual(VTFLib.read_vtf_as_rgba(cube, face)[0][:3], bytes([sp.FLAT_GREY] * 3))
+            # Как у игровой кубмапы: 7 граней (со сферической), startFrame 0 -
+            # TF2 не знает соглашения VTFLib «6 граней при 0xFFFF».
+            raw = Path(cube).read_bytes()
+            header = int.from_bytes(raw[12:16], "little")
+            self.assertEqual(int.from_bytes(raw[26:28], "little"), 0)
+            self.assertEqual(len(raw) - header, 7 * 4 * 4 * 4)
+            self.assertEqual(sp.materialize(root, "console"), 0)
+
     def test_always_counts_pattern_frames(self):
         out = self.sheen(pattern="double", length=2, when="always")
         self.assertIn('"$tf2sg_sheenlast" "50.0"', out)               # 51 кадр

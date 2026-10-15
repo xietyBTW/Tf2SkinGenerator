@@ -75,6 +75,18 @@ class ApplyMaterialExtrasTests(unittest.TestCase):
         problems, apply_maps = self.run_extras({'m9': {'rimlight': {'enabled': True}}}, {})
         self.assertEqual(len(problems), 1)
 
+    def test_vmt_edit_of_this_mod_replaces_its_vmt(self):
+        from src.services.edited_vmt_service import EditedVMTService
+        edited = '"VertexLitGeneric"\n{\n\t"$basetexture" "models/w/m9"\n\t"$phong" "1"\n}\n'
+        with mock.patch.object(EditedVMTService, 'EDITED_VMT_DIR', str(self.temp / 'edits')):
+            EditedVMTService.save_edited_vmt(EditedVMTService.mod_key('D:/mods/a.vpk', 'm9'), edited)
+            # Правка того же материала игры и другого мода - не про этот мод.
+            EditedVMTService.save_edited_vmt('m9_blue', edited)
+            EditedVMTService.save_edited_vmt(EditedVMTService.mod_key('D:/mods/b.vpk', 'm9_blue'), edited)
+            CustomVPKService._apply_vmt_edits('D:/mods/a.vpk', self.textures)
+        self.assertEqual((self.folder / 'm9.vmt').read_text(encoding='utf-8'), edited)
+        self.assertEqual((self.folder / 'm9_blue.vmt').read_text(encoding='utf-8'), VMT)
+
 
 if __name__ == '__main__':
     unittest.main()
