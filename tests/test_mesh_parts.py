@@ -915,7 +915,6 @@ class ComposeTests(unittest.TestCase):
         """Отпечаток решает, слать ли карты треугольников. Спутает два разных
         разбиения — вьювер останется со старой картой, и в 3D нельзя будет
         выбрать появившиеся части."""
-        from src.app.session import AppSession
 
         from src.app.parts_editor import PartsEditor
         host = type('Host', (), {})()
@@ -1640,11 +1639,11 @@ class SessionPartsTests(unittest.TestCase):
                                                       'strength': 1.0,
                                                       'exact': False}})
         painted = t.uploaded_for_mat(t.storage_main_key())
-        steps = len(self.session._edit_history)
+        steps = len(self.session.history)
 
         self.session.parts.set_part_colors('weapon', {}, strength=0.3, exact=True)
         self.assertEqual(t.uploaded_for_mat(t.storage_main_key()), painted)
-        self.assertEqual(len(self.session._edit_history), steps)
+        self.assertEqual(len(self.session.history), steps)
         self.assertEqual(self.session.preview.part_tint, 0.3)
 
     def test_a_pasted_picture_keeps_its_size_on_the_texture(self):

@@ -1,0 +1,242 @@
+/*
+ * Звуки: строка записи и пульт.
+ *
+ * Часть стилей страницы: файлы подключены в index.html в порядке каскада
+ * (style.css первым), порядок менять нельзя.
+ */
+
+/* ── Строка записи ───────────────────────────────────────────────────── */
+.snd {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 2fr) minmax(0, 1.2fr) minmax(0, 2.4fr) auto;
+  align-items: center;
+  gap: var(--rhythm);
+  padding: 9px 10px 9px 12px;
+  border-bottom: 1px solid var(--hairline);
+  /* Метка своей замены — полоска слева. Ставим её всегда прозрачной, чтобы
+     строки не прыгали на пиксель, когда звук заменили. */
+  box-shadow: inset 2px 0 0 transparent;
+  transition: background var(--dur), box-shadow var(--dur);
+}
+
+.snd:hover { background: var(--surface); }
+
+/* Картинка того, чей это звук: иконка предмета из рюкзака, портрет класса,
+   значок постройки. Вписываем целиком — у портретов свои пропорции. */
+.snd__icon {
+  width: 34px;
+  height: 34px;
+  object-fit: contain;
+}
+.snd__icon[hidden] { display: none; }
+
+.snd__what  { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.snd__title {
+  font-size: 13px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.snd__name,
+.snd__file {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--ink-mute);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Столбец файлов у записи с несколькими вариантами — кнопка: она их
+   раскрывает. У одиночных выглядит обычным текстом. */
+.snd__file {
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  font: inherit;
+}
+.snd__file.is-many { cursor: pointer; color: var(--ink-soft); }
+.snd__file.is-many:hover { color: var(--accent); }
+/* Общий файл — число при имени: у `bat_miss.wav` девять хозяев, и замена у
+   одного — замена у всех. */
+.snd__shared { margin-left: 8px; color: var(--ink-mute); }
+.snd__shared[hidden] { display: none; }
+
+/* Курсор клавиатуры — рамка волосяной линией: фон занят наведением. */
+.sounds__list:focus { outline: none; }
+.snd.is-cursor { box-shadow: inset 2px 0 0 transparent, inset 0 0 0 1px var(--hairline-strong); }
+.snd.is-own.is-cursor { box-shadow: inset 2px 0 0 var(--accent), inset 0 0 0 1px var(--hairline-strong); }
+
+/* Файл тащат на строку — та же пунктирная рамка, что у кадра текстуры. */
+.snd.is-drop, .snd__file-row.is-drop { outline: 1px dashed var(--accent); outline-offset: -1px; }
+
+/* Раскрытые файлы записи: игра берёт из них случайный, и менять иногда надо
+   один вариант, а не все разом. */
+.snd__files {
+  padding: 2px 0 8px 44px;
+  border-bottom: 1px solid var(--hairline);
+  background: var(--surface);
+}
+
+.snd__file-row {
+  display: flex;
+  align-items: center;
+  gap: var(--rhythm);
+  padding: 4px 10px 4px 0;
+  box-shadow: inset 2px 0 0 transparent;
+}
+.snd__file-row.is-own { box-shadow: inset 2px 0 0 var(--accent); }
+.snd__file-what { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.snd__file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Список «также у» не режем: у `bat_miss.wav` девять хозяев, и все нужны. */
+.snd__file-also { font-size: 10px; white-space: normal; }
+/* Как игра играет запись: канал, уровень, громкость — строкой над файлами. */
+.snd__props { padding: 6px 0 4px; letter-spacing: .06em; }
+.snd__file-row .snd__acts .textbtn { border-bottom-color: transparent; }
+.snd__file-row:hover .snd__acts .textbtn {
+  border-bottom-color: var(--hairline-strong);
+}
+
+.snd__group {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+}
+
+/* Роботизированный дубль для MvM — метка при имени: имя записи его и так
+   выдаёт (`MVM_`), но в списке из сотен строк буквы в моно не читаются. */
+.snd__mvm {
+  margin-left: 8px;
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+}
+
+/* Кнопки строки держим приглушёнными: их три на каждую из восьмисот строк, и
+   в полную силу они забивают собой список. Наводка возвращает контраст. */
+.snd__acts { display: flex; gap: 14px; }
+.snd__acts .textbtn { border-bottom-color: transparent; color: var(--ink-mute); }
+.snd:hover .snd__acts .textbtn { border-bottom-color: var(--hairline-strong); }
+.snd__acts .textbtn:hover { color: var(--accent); border-bottom-color: var(--accent); }
+
+.snd.is-own { box-shadow: inset 2px 0 0 var(--accent); }
+
+/* Слово, а не только полоска: в списке из восьмисот строк цвет слева легко
+   не заметить. В разметке, а не в `content`, — иначе его не перевести.
+   «Частично» — тем же словом-меткой, но приглушённо. */
+.snd__part { color: var(--ink-mute); }
+.snd__own {
+  margin-left: 8px;
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.snd.is-playing { background: var(--surface); }
+.snd.is-playing .snd__title { color: var(--accent); }
+
+/* ── Пульт ───────────────────────────────────────────────────────────────
+   Браузерный <audio controls> выпадает из вида приложения целиком: свои
+   скруглённые кнопки, свой шрифт, своя тень. Движок оставляем его, вид — наш. */
+.player {
+  display: flex;
+  align-items: center;
+  gap: var(--rhythm);
+  padding: 12px 2px 2px;
+  border-top: 1px solid var(--hairline);
+}
+
+.player__play {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--hairline-strong);
+  background: none;
+  cursor: pointer;
+  position: relative;
+  transition: border-color var(--dur);
+}
+.player__play:hover { border-color: var(--accent); }
+
+/* Треугольник и пауза рисуем рамками — как стрелку у select. Значков-картинок
+   в приложении нет нигде. */
+.player__play::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  transform: translate(-40%, -50%);
+  border-left: 8px solid var(--ink);
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+}
+.player__play.is-playing::before {
+  width: 8px;
+  height: 10px;
+  transform: translate(-50%, -50%);
+  border: 0;
+  border-left: 3px solid var(--ink);
+  border-right: 3px solid var(--ink);
+}
+.player__play:hover::before { border-left-color: var(--accent); }
+.player__play.is-playing:hover::before { border-right-color: var(--accent); }
+
+.player__body { flex: 1; min-width: 0; display: flex;
+                flex-direction: column; gap: 6px; }
+.player__what { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.player__time { flex: none; }
+.player__vol  { flex: none; display: flex; align-items: center; gap: 10px; }
+
+/* Полоса: у input type=range нет своей «пройденной» части — рисуем градиентом
+   по переменной, которую двигает скрипт. */
+.player__seek,
+.player__level {
+  appearance: none;
+  height: 3px;
+  border: 0;
+  background: var(--hairline-strong);
+  cursor: pointer;
+}
+.player__seek  { width: 100%; background:
+  linear-gradient(to right, var(--accent) var(--done, 0%),
+                            var(--hairline-strong) var(--done, 0%)); }
+.player__level { width: 90px; }
+
+.player__seek::-webkit-slider-thumb,
+.player__level::-webkit-slider-thumb {
+  appearance: none;
+  width: 3px;
+  height: 13px;
+  background: var(--ink);
+  border: 0;
+  cursor: pointer;
+}
+.player__seek:hover::-webkit-slider-thumb,
+.player__level:hover::-webkit-slider-thumb { background: var(--accent); }
+
+.sounds__foot {
+  display: flex;
+  align-items: center;
+  gap: var(--rhythm);
+  padding-top: 4px;
+}
+.sounds__foot #snd-note { flex: 1; }
+.sounds__foot .btn--primary:disabled { opacity: .4; cursor: default; }
+.sounds__foot .btn--primary:disabled:hover {
+  background: var(--ink);
+  border-color: var(--ink);
+}
+

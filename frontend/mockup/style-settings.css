@@ -1,0 +1,165 @@
+/*
+ * Диагностика и настройки.
+ *
+ * Часть стилей страницы: файлы подключены в index.html в порядке каскада
+ * (style.css первым), порядок менять нельзя.
+ */
+
+/* ── Диагностика ───────────────────────────────────────────────────────
+   Уровень находки — цвет вертикальной черты. Заливок нет: в остальном
+   интерфейсе состояние тоже показано линией, а не плашкой. */
+.diag { width: min(760px, 94vw); }
+.diag__list { display: flex; flex-direction: column; max-height: 56vh; overflow: auto; }
+
+.finding {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 0 12px 14px;
+  border-top: 1px solid var(--hairline);
+  border-left: 2px solid var(--hairline-strong);
+}
+.finding--error { border-left-color: var(--accent); }
+.finding--warning { border-left-color: var(--ink-soft); }
+.finding--info { border-left-color: var(--hairline-strong); }
+
+.finding__title { font-size: 13px; color: var(--ink); }
+.finding--info .finding__title { color: var(--ink-soft); }
+.finding__where { color: var(--ink-mute); }
+.finding__detail { margin: 0; font-size: 11px; line-height: 1.5; color: var(--ink-soft); }
+.finding__fix { margin: 0; font-size: 11px; line-height: 1.5; color: var(--accent); }
+
+
+/* ── Настройки ─────────────────────────────────────────────────────────
+   Два столбца полей, дальше галочки и список исключений — тот же порядок,
+   что в окне приложения. */
+.cfg { width: min(720px, 94vw); }
+.cfg__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: var(--gap) var(--rhythm);
+}
+/* Окно одной высоты на всех вкладках, иначе оно прыгало бы при переключении;
+   не выше экрана: прокручивается секция, заголовок и «Сохранить» стоят. */
+.cfg .ask__body { height: min(570px, calc(100vh - 48px)); }
+/* Вкладки: подчёркивание выбранной ложится на линию под ними. */
+.cfg__tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  border-bottom: 1px solid var(--hairline-strong);
+}
+.cfg__tabs .underlined { padding-bottom: 9px; margin-bottom: -1px; }
+.cfg__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  margin-right: calc(-1 * var(--rhythm));     /* полоса прокрутки — у края окна */
+  padding-right: var(--rhythm);
+}
+.cfg__sec { display: flex; flex-direction: column; gap: 14px; }
+/* Галочки и действия обслуживания — ровными колонками, а не вразнобой по
+   длине подписи: так их пробегают глазом сверху вниз. */
+.cfg__checks, .cfg__maintgrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 10px var(--rhythm);
+}
+/* Поле пути и значок выбора папки в одну строку: поле тянется, значок — в
+   том же весе, что инструменты палитры частей. */
+.pathpick { display: flex; align-items: center; gap: 6px; }
+.pathpick .input { flex: 1; min-width: 0; }
+.pathpick__btn {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink-soft);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: color var(--dur), background var(--dur);
+}
+.pathpick__btn svg {
+  width: 17px; height: 17px;
+  fill: none; stroke: currentColor; stroke-width: 1.15; stroke-linejoin: round;
+}
+.pathpick__btn:hover { color: var(--ink); background: var(--bg); }
+.pathpick__btn:disabled { opacity: .4; cursor: default; }
+.cfg__list {
+  min-height: 62px;
+  padding: 6px 0;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.6;
+  resize: vertical;
+}
+
+
+/* Карточка-дверь в каталоге («Открыть VPK-мод…»): обложки у неё нет и быть
+   не может, поэтому в пустой рамке — знак действия. */
+.pick--open .pick__box {
+  display: grid;
+  place-items: center;
+  color: var(--ink-mute);
+  font-size: 26px;
+  line-height: 1;
+}
+.pick--open .pick__box::after { content: "+"; }
+.pick--open:hover .pick__box { color: var(--accent); }
+
+
+/* Мод в библиотеке: удаление — на самой карточке. Крестик виден ВСЕГДА, а не
+   по наведению: у кадров в альбоме прятать инструменты можно (их там ищут
+   глазами по одному), а здесь способ удалить мод не должен быть тайной. В
+   покое он приглушён, чтобы список читался именами. */
+.pick--mod { position: relative; }
+.pick__drop {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  color: var(--ink-mute);
+  font-size: 14px;
+  line-height: 1;
+  transition: color var(--dur), border-color var(--dur);
+}
+.pick--mod:hover .pick__drop { border-color: var(--hairline-strong); }
+.pick__drop:hover { color: var(--accent); border-color: var(--accent); }
+
+/* В прибитом режиме карточка — узкая строка: крестик садится у правого края
+   по центру, а строке добавляется отступ, иначе имя уезжает под него. */
+[data-panels="pinned"] .pick--mod { padding-right: 30px; }
+[data-panels="pinned"] .pick--mod .pick__drop {
+  top: 50%;
+  right: 4px;
+  transform: translateY(-50%);
+  border: 0;
+  background: none;
+}
+
+
+
+/* Полоса вариантного стиля: объяснение слева, действие справа. */
+.stylebar {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--gap);
+  padding: 8px 0 0;
+}
+.stylebar .label { text-transform: none; letter-spacing: .04em; font-size: 11px; }
+
+/* Крестик «убрать из стиля» стоит рядом с шестерёнкой кадра. */
+.frame__off { font-size: 14px; }
+

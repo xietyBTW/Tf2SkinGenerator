@@ -402,7 +402,8 @@ document.querySelector('.half--flat .acts').addEventListener('click', (e) => {
   if (btn.id === 'restore') { restoreWork(); return; }
   if (btn.id === 'forget') { forgetWork(); return; }
   if (btn.dataset.cond === 'maps') openMaterialMaps();
-  else if (btn.id === 'vmt') openVmtEditor();
+  // Шестерёнка горит - правка только её материала, иначе - всех.
+  else if (btn.id === 'vmt') openVmtEditor(texEdit !== null ? { only: texEdit.key } : {});
 });
 
 /** Спрашивает Python, что показывать при этом режиме, и применяет ответ.

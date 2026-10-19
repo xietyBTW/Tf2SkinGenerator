@@ -263,7 +263,7 @@ def run_proxies(text: str, game: dict, curtime: float = 0.0) -> dict:
 class SheenTests(unittest.TestCase):
 
     def sheen(self, text=SHEEN_STOCK, **vals):
-        vals = {'color': '#00ff00', 'bright': 1, 'look': 'normal', 'when': 'game', **vals}
+        vals = {'color': '#00ff00', 'bright': 1, 'when': 'game', **vals}
         return fx.apply(fx.SHEEN, vals, text, '', BOUNDS)
 
     def test_own_colour_wins_over_game_and_is_linear(self):
@@ -280,12 +280,24 @@ class SheenTests(unittest.TestCase):
             self.assertEqual(fx.values(fx.SHEEN, out)['color'], colour)
 
     def test_reconfigure_and_values(self):
-        out = self.sheen(self.sheen(when='always', pause=2, look='bright')['text'],
+        out = self.sheen(self.sheen(when='always', pause=2)['text'],
                          color='#ff0000')['text']
         self.assertNotIn('LinearRamp', out)                   # «всегда» снято
         self.assertEqual(out.count('// tf2sg sheen'), 1)
         self.assertEqual(fx.values(fx.SHEEN, out)['color'], '#ff0000')
         self.assertEqual(fx.values(fx.SHEEN, out)['when'], 'game')
+
+    def test_old_australium_look_folds_into_brightness(self):
+        """«Ярче, как у австралия» ($sheenindex 1) - это x1.8 к яркости.
+
+        Поле «Вид» убрано: оно повторяло ползунок «Яркость». Старая настройка
+        открывается яркостью, а перенастройка снимает и ключ, и прокси.
+        """
+        old = self.sheen(bright=1.5)['text'].replace(
+            '"$tf2sg_sheenbright" "1.5"', '"$tf2sg_sheenbright" "1.5"\n\t"$tf2sg_sheenidx" "1"')
+        self.assertEqual(fx.values(fx.SHEEN, old)['bright'], 2.7)
+        again = self.sheen(old, bright=2.7)['text']
+        self.assertNotIn('sheenidx', again)
 
     def test_always_drives_frames_with_pause(self):
         out = self.sheen(when='always', pause=2)['text']

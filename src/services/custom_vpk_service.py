@@ -470,7 +470,7 @@ class CustomVPKService:
 
         Источник картинки: своя (если текстуру заменили) или VTF из мода — как
         у модельной сборки «нормаль и из игровой текстуры». Карты ложатся теми
-        же правилами (VpkTextureBuilder._apply_maps_for_material), путь — от
+        же правилами (texture_build.material_maps.apply_maps_for_material), путь — от
         папки VTF под materials/. Синий VMT без своих карт наследует карты
         красного (параметры, VTF те же). Возвращает строки для отчёта сборки.
 
@@ -487,13 +487,14 @@ class CustomVPKService:
         from src.services.part_materials import model_name
         from src.services.texture_service import TextureService
         from src.services.vmt_service import VMTService
-        from src.services.vpk_texture_builder import VpkTextureBuilder
+        from src.services.texture_build import game_source, map_settings
+        from src.services.texture_build import material_maps as mat_maps
 
         from src.services.tf2_paths import TF2Paths
 
         # Родная нормаль материала — из мода, иначе из игры: маска отражения и
         # блеска ложится в её альфу, не стирая рельеф.
-        read_texture = VpkTextureBuilder.texture_reader(
+        read_texture = game_source.texture_reader(
             vpkroot_dir, [TF2Paths.resolve_textures_vpk(tf2_root_dir)] if tf2_root_dir else [])
         problems: List[str] = []
         dropped: set = set()          # текстуры снятых карт мода
@@ -577,11 +578,11 @@ class CustomVPKService:
                     for target in filter(None, (vmt, blue_vmt)):
                         keep_and_drop(target, record)
                     if maps:
-                        red = VpkTextureBuilder._apply_maps_for_material(
+                        red = mat_maps.apply_maps_for_material(
                             maps, mat, Path(vmt), image, vtf_dir, cdmat, size, has_normal,
                             read_texture=read_texture)
                         if blue_vmt:
-                            VpkTextureBuilder._apply_maps_for_material(
+                            mat_maps.apply_maps_for_material(
                                 maps, mat, Path(blue_vmt), image, vtf_dir, cdmat,
                                 size, has_normal, params_only=True, read_texture=read_texture,
                                 red=red)
@@ -592,7 +593,7 @@ class CustomVPKService:
                     if kept:
                         for target, only in ((vmt, False), (blue_vmt, True)):
                             if target:
-                                VpkTextureBuilder._apply_settings(
+                                map_settings.apply_settings(
                                     kept, mat, Path(target), vtf_dir, cdmat, size, image,
                                     has_normal, only)
             except Exception as e:                          # noqa: BLE001

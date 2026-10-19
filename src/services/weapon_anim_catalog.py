@@ -16,11 +16,25 @@
     sg_reload_start        ACT_PRIMARY_RELOAD_START
     primary_inspect_idle   ACT_PRIMARY_VM_INSPECT_IDLE
 
-Отсюда и правило поиска: слот берётся из items_game ([viewmodel_anims]),
-действие задаёт вызывающий, а имя активности собирается по грамматике
-`ACT_{СЛОТ}_VM_{ДЕЙСТВИЕ}` (у перезарядки — без `VM_`). Проверено на всех девяти
-классах: 209 разных активностей, все разбираются этой грамматикой, без активности
-остаётся только служебная `r_handposes`.
+Какую из них играть, решает не грамматика имён, а тот же путь, что в движке
+(source-sdk-2013, `CTFWeaponBase::TranslateViewmodelHandActivityInternal`):
+
+  1. Оружие шлёт БАЗОВУЮ активность: idle - ACT_VM_IDLE, выстрел -
+     ACT_VM_PRIMARYATTACK, удар ближнего боя - ACT_VM_HITCENTER, у кулаков -
+     ACT_VM_HITLEFT / ACT_VM_HITRIGHT, крит - ACT_VM_SWINGHARD. Осмотр сразу
+     назван слотом снаряжения: ACT_MELEE_VM_INSPECT_IDLE.
+  2. Часть классов оружия переводит её сама: горны и парашют - в набор ITEM1,
+     мечи подрывника - в *_SPECIAL.
+  3. Подмена из items_game (`animation_replacement`). Нашлась - это и есть
+     ответ, дальше игра не ищет.
+  4. Таблица ролей `s_viewmodelacttable`: ACT_VM_IDLE у роли melee ->
+     ACT_MELEE_VM_IDLE. Строки нет - активность остаётся базовой (так саппер
+     шпиона играет просто ACT_VM_IDLE).
+
+Запасных путей нет: чего у оружия нет в игре, того нет и здесь. Прежний
+перебор «слот -> без цифры -> всеклассовый набор» давал Кусай-хлебу на удар
+замах сковородой (у кулаков удар не HITCENTER, и поиск доходил до
+ACT_MELEE_ALLCLASS_VM_HITCENTER), а дробовику хэви - анимации минигана.
 
 Каталог — просто индекс уже декомпилированной папки, он ничего не скачивает и
 не считает поз. Кадр из выбранной последовательности берёт [viewmodel_pose].
@@ -33,10 +47,11 @@ from __future__ import annotations
 import glob
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, List, Optional
+from typing import Dict, List, Mapping, Optional
 
+from src.data import viewmodel_anims
 from src.shared.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -52,57 +67,52 @@ _LOOP_RE = re.compile(r'^\s*loop\s*$', re.M)
 #: медик сперва лезет за пазуху и только на 23-м кадре достаёт снимок.
 _EVENT_RE = re.compile(r'\{\s*event\s+AE_WPN_(HIDE|UNHIDE)\s+(\d+)', re.I)
 
-
-#: Слоты, чьи активности названы не по слоту. Инструменты инженера единственные
-#: выбиваются из общей грамматики, и это видно прямо в QC:
-#:   pda_idle  ACT_ENGINEER_PDA1_VM_IDLE   ПДА строительства
-#:   bld_idle  ACT_ENGINEER_PDA2_VM_IDLE   ПДА разрушения
-#:   box_idle  ACT_ENGINEER_BLD_VM_IDLE    ящик с постройками
-#: Пробуются ПОСЛЕ буквального имени слота: у шпиона тот же слот `building`
-#: пользуется обычным ACT_BUILDING_*.
-#: Часы невидимости — «вторая рука» шпиона (offhand_idle), а саппер назван
-#: вообще без слота (`ACT_VM_IDLE`); пустая строка и означает «без слота».
-SLOT_ACTIVITY_ALIASES: Dict[str, tuple] = {
-    "PDA": ("ENGINEER_PDA1",),
-    "PDA2": ("ENGINEER_PDA2",),
-    "BUILDING": ("ENGINEER_BLD", ""),
-    "WATCH": ("OFFHAND",),
-    # Модель ВИДА (часы шпиона) держит свои последовательности сама, и слота у
-    # её активностей нет: `idle` там помечен просто ACT_VM_IDLE.
-    "VIEWMODEL": ("",),
-}
-
 #: Слот, под которым разбирается собственная модель вида (см. VIEWMODEL_ONLY).
+#: Ролей у такой модели нет: её `idle` помечен просто ACT_VM_IDLE.
 VIEWMODEL_SLOT = "viewmodel"
 
 
 class Action(Enum):
-    """Действие оружия. Значение — токены действия в имени активности.
+    """Действие оружия, как его выбирает пользователь.
 
-    Токенов может быть несколько: у стрелкового оружия атака зовётся
-    PRIMARYATTACK, а у ближнего боя тот же удар — HITCENTER. Перечисляем оба и
-    берём то, что нашлось в модели анимаций класса.
+    Какая активность за ним стоит, зависит от оружия (см. `activity_for`):
+    FIRE у стрелкового - PRIMARYATTACK, у ближнего боя - HITCENTER, у кулаков -
+    левый удар HITLEFT, а ALT_FIRE у них - правый HITRIGHT.
     """
 
-    IDLE = ("IDLE",)
-    DRAW = ("DRAW",)
-    HOLSTER = ("HOLSTER",)
-    FIRE = ("PRIMARYATTACK", "HITCENTER")
-    ALT_FIRE = ("SECONDARYATTACK", "SWINGHARD")
-    RELOAD = ("RELOAD",)
-    RELOAD_START = ("RELOAD_START",)
-    RELOAD_FINISH = ("RELOAD_FINISH",)
-    INSPECT_START = ("INSPECT_START",)
-    INSPECT_IDLE = ("INSPECT_IDLE",)
-    INSPECT_END = ("INSPECT_END",)
-
-    @property
-    def tokens(self) -> tuple:
-        return self.value
+    IDLE = "IDLE"
+    DRAW = "DRAW"
+    HOLSTER = "HOLSTER"
+    FIRE = "FIRE"
+    ALT_FIRE = "ALT_FIRE"
+    CRIT = "CRIT"
+    RELOAD = "RELOAD"
+    RELOAD_START = "RELOAD_START"
+    RELOAD_FINISH = "RELOAD_FINISH"
+    INSPECT_START = "INSPECT_START"
+    INSPECT_IDLE = "INSPECT_IDLE"
+    INSPECT_END = "INSPECT_END"
 
     @property
     def is_inspect(self) -> bool:
         return self.name.startswith("INSPECT_")
+
+
+@dataclass(frozen=True)
+class WeaponProfile:
+    """Всё, от чего игра выбирает последовательность предмета."""
+
+    #: Роль анимаций: `anim_slot` из items_game, иначе слот снаряжения класса.
+    slot: str
+    #: Подмена активностей из items_game (`visuals → animation_replacement`).
+    replacement: Mapping[str, str] = field(default_factory=dict)
+    #: Слот снаряжения у ЭТОГО класса. По нему игра выбирает осмотр
+    #: (`GetInspectActivity`), и по нему же оружие считается ближним боем.
+    loadout_slot: str = ""
+    #: Класс оружия в коде игры: от него зависят удары и собственный перевод.
+    item_class: str = ""
+    #: Чьи руки: мечи у подрывника играют свой набор *_SPECIAL.
+    tf2_class: str = ""
 
 
 @dataclass(frozen=True)
@@ -130,42 +140,33 @@ class AnimCatalog:
     by_activity: Dict[str, AnimSequence]
     by_name: Dict[str, AnimSequence]
 
-    def find(self, slot: str, action: Action,
-             replacement: Optional[Dict[str, str]] = None,
-             inspect_slot: str = "") -> Optional[AnimSequence]:
-        """Последовательность для слота и действия. None — такой в модели нет.
+    def find(self, weapon: WeaponProfile,
+             action: Action) -> Optional[AnimSequence]:
+        """Последовательность для действия. None — у оружия его нет в игре."""
+        activity = activity_for(weapon, action)
+        found = self.by_activity.get(activity) if activity else None
+        return found if found is not None and found.exists else None
 
-        Args:
-            replacement: подмена активностей из items_game
-                (`visuals → animation_replacement`). Это самый точный источник:
-                у куная слот остаётся melee, но играет он набор ITEM2.
-            inspect_slot: слот снаряжения для осмотра — игра выбирает осмотр
-                по нему, а не по слоту анимаций (см.
-                `viewmodel_anims.inspect_slot_for`). Пусто — как у остальных.
-        """
-        if action.is_inspect and inspect_slot:
-            slot = inspect_slot
-        for activity in activity_candidates(slot, action, replacement):
-            found = self.by_activity.get(activity)
-            if found is not None and found.exists:
-                return found
-        return None
-
-    def actions_for(self, slot: str,
-                    replacement: Optional[Dict[str, str]] = None,
-                    inspect_slot: str = ""
-                    ) -> Dict[Action, AnimSequence]:
-        """Все действия, доступные оружию этого слота.
-
-        То, из чего интерфейс может собрать список: у одного оружия есть
-        перезарядка, у другого только бросок.
-        """
+    def actions_for(self, weapon: WeaponProfile) -> Dict[Action, AnimSequence]:
+        """Все действия, которые у оружия есть. Из них интерфейс строит выбор."""
         found = {}
         for action in Action:
-            seq = self.find(slot, action, replacement, inspect_slot)
+            seq = self.find(weapon, action)
             if seq is not None:
                 found[action] = seq
         return found
+
+
+def profile_for(weapon_key: str, tf2_root: str, tf2_class: str) -> WeaponProfile:
+    """Профиль предмета в руках класса — из items_game ([viewmodel_anims])."""
+    info = viewmodel_anims.anim_info(weapon_key, tf2_root)
+    return WeaponProfile(
+        slot=viewmodel_anims.slot_for(weapon_key, tf2_root, tf2_class),
+        replacement=info.replacement if info else {},
+        loadout_slot=viewmodel_anims.loadout_slot(weapon_key, tf2_root, tf2_class),
+        item_class=info.item_class if info else "",
+        tf2_class=(tf2_class or "").lower(),
+    )
 
 
 def load(decompiled_dir: str) -> Optional[AnimCatalog]:
@@ -208,8 +209,9 @@ def load(decompiled_dir: str) -> Optional[AnimCatalog]:
         logger.warning(f"[anim] в {os.path.basename(qc_path)} нет $sequence")
         return None
 
-    # Первая последовательность с активностью выигрывает: у Valve дубликатов
-    # активностей в одной модели нет, но чужой QC на это полагаться не даёт.
+    # Первая последовательность с активностью выигрывает. У Valve бывает
+    # несколько на одну активность (три idle у Кусай-хлеба) — игра выбирает
+    # из них случайно по весу, превью берёт первую, чтобы кадр не прыгал.
     by_activity: Dict[str, AnimSequence] = {}
     for seq in sequences:
         if seq.activity:
@@ -226,91 +228,156 @@ def load(decompiled_dir: str) -> Optional[AnimCatalog]:
     )
 
 
-def activity_candidates(slot: str, action: Action,
-                        replacement: Optional[Dict[str, str]] = None
-                        ) -> List[str]:
+# ── Активность: путь движка ──────────────────────────────────────────────── #
+
+#: Базовая активность действия: то, что шлёт `SendWeaponAnim` обычное оружие.
+_BASE: Dict[Action, str] = {
+    Action.IDLE: "ACT_VM_IDLE",
+    Action.DRAW: "ACT_VM_DRAW",
+    Action.HOLSTER: "ACT_VM_HOLSTER",
+    Action.FIRE: "ACT_VM_PRIMARYATTACK",
+    Action.ALT_FIRE: "ACT_VM_SECONDARYATTACK",
+    Action.RELOAD: "ACT_VM_RELOAD",
+    Action.RELOAD_START: "ACT_RELOAD_START",
+    Action.RELOAD_FINISH: "ACT_RELOAD_FINISH",
+}
+
+#: Удары ближнего боя (`CTFWeaponBaseMelee::DoViewModelAnimation`): обычный -
+#: HITCENTER, крит - SWINGHARD. Вторая кнопка анимации не шлёт вовсе.
+_MELEE_HITS: Dict[Action, Optional[str]] = {
+    Action.FIRE: "ACT_VM_HITCENTER",
+    Action.ALT_FIRE: None,
+    Action.CRIT: "ACT_VM_SWINGHARD",
+}
+
+#: Оружие со своим `DoViewModelAnimation`.
+_OWN_HITS: Dict[str, Dict[Action, Optional[str]]] = {
+    # Кулаки: левой, правой, крит (`CTFFists`).
+    "tf_weapon_fists": {
+        Action.FIRE: "ACT_VM_HITLEFT",
+        Action.ALT_FIRE: "ACT_VM_HITRIGHT",
+        Action.CRIT: "ACT_VM_SWINGHARD",
+    },
+    # Оружейник (`CTFRobotArm`): шлёт уже готовый набор ITEM2, третий удар
+    # серии - SWINGHARD.
+    "tf_weapon_robot_arm": {
+        Action.FIRE: "ACT_ITEM2_VM_HITCENTER",
+        Action.ALT_FIRE: None,
+        Action.CRIT: "ACT_ITEM2_VM_SWINGHARD",
+    },
+}
+
+_LOWERED = ("IDLE_TO_LOWERED", "IDLE_LOWERED", "LOWERED_TO_IDLE")
+
+#: Горны и парашют переводят базовый набор в ITEM1 сами (`CTFBuffItem`).
+_BUFF_ITEM = {f"ACT_VM_{x}": f"ACT_ITEM1_VM_{x}" for x in (
+    "DRAW", "HOLSTER", "IDLE", "PULLBACK", "PRIMARYATTACK", "SECONDARYATTACK",
+    *_LOWERED)}
+
+#: Мечи у подрывника - в набор *_SPECIAL (`CTFDecapitationMeleeWeaponBase`).
+_DEMO_SWORD = {f"ACT_VM_{x}": f"ACT_VM_{x}_SPECIAL" for x in (
+    "DRAW", "HOLSTER", "IDLE", "PULLBACK", "PRIMARYATTACK", "HITCENTER",
+    "SWINGHARD", *_LOWERED)}
+_DEMO_SWORD["ACT_VM_SECONDARYATTACK"] = "ACT_VM_PRIMARYATTACK_SPECIAL"
+
+#: Слоты снаряжения с набором осмотра (`GetInspectActivity`). У остальных
+#: (ПДА, часы) осмотра в игре нет.
+INSPECT_SLOTS = ("PRIMARY", "SECONDARY", "MELEE", "BUILDING")
+
+#: Роли, у которых есть строки в `s_viewmodelacttable`.
+_TABLE_ROLES = frozenset({
+    "PRIMARY", "SECONDARY", "MELEE", "PDA", "ITEM1", "ITEM2", "ITEM3", "ITEM4",
+    "MELEE_ALLCLASS", "SECONDARY2", "PRIMARY2"})
+#: Что таблица переводит у каждой из них.
+_VM_ACTS = frozenset({
+    "DRAW", "HOLSTER", "IDLE", "PULLBACK", "PRIMARYATTACK", "SECONDARYATTACK",
+    "RELOAD", "DRYFIRE", *_LOWERED})
+#: Удары переводятся только у ближнего боя.
+_MELEE_ROLES = frozenset({"MELEE", "MELEE_ALLCLASS"})
+#: Перезарядка по патрону (`ACT_RELOAD_START` без `VM_`) есть не у всех ролей.
+_RELOAD_ROLES = frozenset({"PRIMARY", "SECONDARY", "SECONDARY2", "ITEM1",
+                           "PRIMARY2"})
+
+#: Наш собственный слот, которого ролью в игре нет: часы невидимости -
+#: «вторая рука» шпиона.
+_PSEUDO_ROLES = {"WATCH": "OFFHAND"}
+
+#: Роли без строк в таблице, которые всё же держат оружие: саппер шпиона и
+#: ящик инженера (building), своя модель вида у часов. Их активность - базовая.
+_BASE_ROLES = frozenset({"BUILDING", VIEWMODEL_SLOT.upper()})
+
+
+def activity_for(weapon: WeaponProfile, action: Action) -> Optional[str]:
     """
-    Имена активностей для слота и действия, от точного к общему.
+    Активность, которую игра проиграет у этого оружия на это действие.
 
-    Порядок:
-      1. слот как есть:      item2      → ACT_ITEM2_VM_IDLE
-      2. цифра как вариант:  secondary2 → ACT_SECONDARY_VM_IDLE_2
-      3. слот без цифры:     secondary2 → ACT_SECONDARY_VM_IDLE
-      4. у ближнего боя — всеклассовый набор: ACT_MELEE_ALLCLASS_VM_IDLE
-      5. вообще без слота:   ACT_VM_IDLE
-
-    Затем КАЖДОЕ из этих имён пропускается через подмену из items_game, и
-    замена встаёт перед оригиналом: она точнее слота. У куная, Большого
-    добытчика и Сосульки слот остаётся melee, но `animation_replacement`
-    переписывает активности на набор ITEM2 — без этого все ножи шпиона
-    показывали анимацию обычного ножа-бабочки.
-
-    Ключи подмены бывают и голыми (`ACT_VM_IDLE`), и со слотом
-    (`ACT_MELEE_VM_INSPECT_IDLE` — как раз осмотр у тех же ножей), поэтому
-    список кандидатов включает обе формы.
-
-    Пункты 1 и 2 именно в этом порядке: цифра в конце слота значит разное.
-    `item2` — самостоятельный слот (Неумолимая сила), а `secondary2` — второй
-    вариант вторичного (Прерыватель: `ACT_SECONDARY_VM_IDLE_2`). Отличить их по
-    написанию нельзя, поэтому сначала пробуем буквальное имя.
-
-    У перезарядки `VM_` в активности нет (`ACT_PRIMARY_RELOAD_START`), поэтому
-    оба написания пробуются всегда: перечислять исключения дороже, чем проверить
-    лишний ключ словаря.
+    None — действия у оружия нет вовсе (вторая кнопка ближнего боя, осмотр
+    ПДА). Шаги — как в движке, см. описание модуля.
     """
-    literal, variant = split_slot(slot)
-    if not literal:
-        return []
+    role = (weapon.slot or "").strip().upper()
+    if role not in _TABLE_ROLES and role not in _PSEUDO_ROLES \
+            and role not in _BASE_ROLES:
+        # Не оружие в руке: тело, маски, `force_not_used` у часов. Базовая
+        # ACT_VM_IDLE у шпиона нашлась бы - это саппер.
+        return None
+    if action.is_inspect:
+        loadout = (weapon.loadout_slot or "").upper()
+        if loadout not in INSPECT_SLOTS:
+            return None
+        base = f"ACT_{loadout}_VM_{action.name}"
+    else:
+        hits = _OWN_HITS.get(weapon.item_class)
+        if hits is None and (weapon.loadout_slot or "").lower() == "melee":
+            hits = _MELEE_HITS
+        base = hits[action] if hits and action in hits else _BASE.get(action)
+        if not base:
+            return None
 
-    # (имя слота, суффикс варианта) — от точного к общему.
-    forms = [(literal, "")]
-    forms += [(alias, "") for alias in SLOT_ACTIVITY_ALIASES.get(literal, ())]
-    if variant:
-        base = literal[: -len(variant.lstrip("_"))]
-        forms.append((base, variant))
-        forms.append((base, ""))
-    if literal == "MELEE":
-        forms.append(("MELEE_ALLCLASS", ""))
-
-    base_names: List[str] = []
-    for token in action.tokens:
-        for slot_name, suffix in forms:
-            for infix in ("VM_", ""):
-                # Пустой алиас — активность вообще без слота: так назван саппер
-                # шпиона (`ACT_VM_IDLE` → c_sapper_idle).
-                prefix = f"{slot_name}_" if slot_name else ""
-                name = f"ACT_{prefix}{infix}{token}{suffix}"
-                if name not in base_names:
-                    base_names.append(name)
-
-    # Ключи подмены бывают двух видов: голые (`ACT_VM_IDLE` → набор целиком) и
-    # со слотом (`ACT_MELEE_VM_INSPECT_IDLE` → осмотр у ножей шпиона). Ищем по
-    # обоим, и найденное встаёт впереди — подмена точнее слота.
-    sources = list(base_names)
-    for token in action.tokens:
-        sources += [f"ACT_VM_{token}", f"ACT_{token}"]
-
-    names: List[str] = []
-    for source in sources:
-        swapped = (replacement or {}).get(source)
-        if swapped and swapped not in names:
-            names.append(swapped)
-    for name in base_names:
-        if name not in names:
-            names.append(name)
-    return names
+    base = _own_translation(weapon, base)
+    swapped = (weapon.replacement or {}).get(base)
+    if swapped:
+        return swapped
+    return translate(weapon.slot, base)
 
 
-def split_slot(slot: str) -> tuple:
-    """`secondary2` → ("SECONDARY2", "_2"); `melee_allclass` → ("MELEE_ALLCLASS", "").
+def _own_translation(weapon: WeaponProfile, activity: str) -> str:
+    """Перевод, который класс оружия делает ДО подмены и таблицы ролей."""
+    cls = weapon.item_class
+    if cls == "tf_weapon_buff_item" or cls.startswith("tf_weapon_parachute"):
+        return _BUFF_ITEM.get(activity, activity)
+    if (cls in ("tf_weapon_sword", "tf_weapon_katana")
+            and weapon.tf2_class == "demoman"
+            and (weapon.slot or "").lower() != "melee_allclass"):
+        return _DEMO_SWORD.get(activity, activity)
+    return activity
 
-    Первый элемент — слот как записан, второй — суффикс варианта, если слот
-    оканчивается цифрой. Что из этого верно, решает наличие активности.
+
+def translate(slot: str, activity: str) -> str:
+    """Базовая активность -> активность роли (`s_viewmodelacttable`).
+
+    Неизвестная роль или активность без строки в таблице остаются как есть:
+    так делает игра, и так саппер шпиона (роль building) играет ACT_VM_IDLE.
     """
-    text = (slot or "").strip().upper()
-    if not text or text == "FORCE_NOT_USED":
-        return "", ""
-    return text, f"_{text[-1]}" if text[-1].isdigit() else ""
+    role = (slot or "").strip().upper()
+    if role in _PSEUDO_ROLES:
+        return activity.replace("ACT_VM_", f"ACT_{_PSEUDO_ROLES[role]}_VM_", 1)
+    if role not in _TABLE_ROLES:
+        return activity
+    # Коровья мясорубка: набор ракетомёта, но своя перезарядка `_3`.
+    target, reload_suffix = ("PRIMARY", "_3") if role == "PRIMARY2" else (role, "")
+    if activity.startswith("ACT_VM_"):
+        name = activity[len("ACT_VM_"):]
+        if name in ("HITCENTER", "SWINGHARD"):
+            return f"ACT_{target}_VM_{name}" if role in _MELEE_ROLES else activity
+        if name not in _VM_ACTS or (role in ("SECONDARY2", "PRIMARY2")
+                                    and name == "SECONDARYATTACK"):
+            return activity
+        suffix = reload_suffix if name == "RELOAD" else ""
+        return f"ACT_{target}_VM_{name}{suffix}"
+    if activity in ("ACT_RELOAD_START", "ACT_RELOAD_FINISH") \
+            and role in _RELOAD_ROLES:
+        return f"ACT_{target}_{activity[len('ACT_'):]}{reload_suffix}"
+    return activity
 
 
 def _find_qc(directory: str) -> Optional[str]:

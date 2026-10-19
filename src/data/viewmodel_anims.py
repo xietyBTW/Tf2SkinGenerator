@@ -30,6 +30,7 @@ from re import IGNORECASE, compile as _compile
 from typing import Dict, Optional, Tuple
 
 from src.data import items_game_kv
+from src.data.hats_parser import _bodygroup_pairs
 from src.data.weapon_model_index import get_items_game_path
 from src.shared.logging_config import get_logger
 from src.shared.paths import data_dir
@@ -89,6 +90,8 @@ _PER_CLASS_RE = _compile(r'"([^"]+)"\s+"([^"]*\.mdl)"', IGNORECASE)
 #: Shortstop), KeyValues это читает. С `\s+` пара срывалась, значение цеплялось
 #: к следующему ключу, и вся таблица ниже съезжала на одну позицию.
 _ACT_PAIR_RE = _compile(r'"(ACT_[A-Z0-9_]+)"\s*"(ACT_[A-Z0-9_]+)"', IGNORECASE)
+#: Пара «класс → слот» внутри used_by_classes.
+_USED_BY_RE = _compile(r'"(\w+)"\s*"(\w+)"')
 #: Любой путь до .mdl внутри вложенного блока.
 _MODEL_PATH_RE = _compile(r'"([^"]+\.mdl)"', IGNORECASE)
 
@@ -100,7 +103,11 @@ _CACHE_FILE = data_dir() / "cache" / "weapon_anim_slots.json"
 #: 3 — добавлена модель-носитель праздничных гирлянд (carried_on).
 #: 4 — добавлены гирлянды самой модели (decor).
 #: 5 — пары подмены, записанные без пробела, больше не сдвигают таблицу.
-_CACHE_VERSION = 5
+#: 6 — слоты снаряжения по классам (class_slots).
+#: 7 — своё пустое anim_slot отменяет префаб (Полу-Дзатоити).
+#: 8 — рюкзаки знамён (extra_wearable) и модель в руке (held).
+#: 9 — что предмет прячет у персонажа (hides).
+_CACHE_VERSION = 9
 
 #: tf2_root → индекс (чтобы не разбирать 8 МБ повторно за сессию).
 _MEM: Dict[str, Dict[str, "WeaponAnimInfo"]] = {}
@@ -133,15 +140,33 @@ class WeaponAnimInfo:
     #: включается атрибутом `is_festivized`. Собирается со всех предметов
     #: модели: у обреза праздничную даёт один предмет, фестивайзер — другой.
     decor: Tuple[Tuple[str, str], ...] = ()
+    #: Что держат в руке, если сама модель надевается: у знамён солдата в
+    #: каталоге рюкзак (`extra_wearable`), а от первого лица видна дудка
+    #: (`model_player`) - со своими анимациями. Пусто - в руке сама модель.
+    held: str = ""
+    #: Что предмет прячет у персонажа: (("hands", 1), …) из
+    #: `visuals → player_bodygroups` - Кусай-хлеб убирает кулаки, ботинки -
+    #: обувь. Нужно сцене «На персонаже».
+    hides: Tuple[Tuple[str, int], ...] = ()
+    #: Слот снаряжения по классам: (("engineer", "primary"), ("soldier",
+    #: "secondary"), …). Одна модель — у разных классов разные слоты: дробовик
+    #: инженера основной, у солдата, пиро и хэви — вторичный. Игра берёт его
+    #: для осмотра (`GetLoadoutSlot(iClass)`), а без `anim_slot` — и для набора
+    #: анимаций; по общему `item_slot` дробовик у хэви играл анимации минигана.
+    class_slots: Tuple[Tuple[str, str], ...] = ()
 
     @property
     def replacement(self) -> Dict[str, str]:
         """Подмена активностей словарём (в самом поле — кортеж ради hashable)."""
         return dict(self.animation_replacement)
 
+    def loadout_slot(self, tf2_class: str = "") -> str:
+        """Слот снаряжения у этого класса; без класса — общий `item_slot`."""
+        return dict(self.class_slots).get((tf2_class or "").lower(), self.item_slot)
+
     @property
     def slot(self) -> str:
-        """Слот, по которому выбирается последовательность осмотра.
+        """Слот анимаций без учёта класса: `anim_slot`, иначе `item_slot`.
 
         `anim_slot` сильнее: он для того и заведён, чтобы переопределить слот
         инвентаря там, где анимация взята от другого оружия.
@@ -189,6 +214,12 @@ def anim_info(weapon_key: str, tf2_root: str) -> Optional[WeaponAnimInfo]:
             if base is not None:
                 logger.debug(f"[vm] {weapon_key}: анимации взяты от базового оружия")
                 return base
+    # Ключ нашего списка, которого items_game не знает (Mantreads - модель
+    # `mantreads`, у нас `tankerboots`): то же соответствие, что у иконок.
+    from src.data.weapon_model_index import MODEL_ALIASES
+    alias = MODEL_ALIASES.get(key)
+    if alias and alias in index:
+        return index[alias]
     if key.startswith("w_"):
         # У части оружия в нашем списке стоит МИРОВАЯ модель (`w_sd_sapper`), а
         # items_game знает вьюмодельную (`c_sd_sapper`). Без этого Записыватель
@@ -213,9 +244,23 @@ def decor_models(weapon_key: str, tf2_root: str) -> Dict[str, str]:
     return dict(info.decor) if info else {}
 
 
-def slot_for(weapon_key: str, tf2_root: str) -> str:
+def is_worn(weapon_key: str, tf2_root: str) -> bool:
+    """Предмет надевают, а не держат: рюкзак знамени, ботинки, щит, парашют.
+
+    Такие предметы смотрят на персонаже. От первого лица у них видно только
+    то, что держат вместо них (`held` - дудка знамени), а без этого вида от
+    первого лица нет вовсе.
     """
-    Слот анимаций оружия: `anim_slot` → `item_slot` → слот из нашей таблицы.
+    info = anim_info(weapon_key, tf2_root)
+    if info is None:
+        return False
+    return (bool(info.held) or info.anim_slot == "force_not_used"
+            or info.item_class.startswith(("tf_wearable", "tf_weapon_parachute")))
+
+
+def slot_for(weapon_key: str, tf2_root: str, tf2_class: str = "") -> str:
+    """
+    Слот анимаций оружия: `anim_slot` -> слот снаряжения класса -> наша таблица.
 
     Порядок не произволен. items_game авторитетнее нашего разбиения по вкладкам:
     у шпиона револьвер лежит в нашем списке под «Primary», а в игре это
@@ -227,33 +272,21 @@ def slot_for(weapon_key: str, tf2_root: str) -> str:
         Имя слота в нижнем регистре, либо "" — если определить нечем.
     """
     info = anim_info(weapon_key, tf2_root)
-    if info and info.slot:
-        return info.slot
-    return _own_slot(weapon_key)
+    if info and info.anim_slot:
+        return info.anim_slot
+    return loadout_slot(weapon_key, tf2_root, tf2_class)
 
 
-#: Слоты снаряжения, у которых в игре есть свой набор осмотра
-#: (`CTFWeaponBase::GetInspectActivity`, source-sdk-2013).
-INSPECT_SLOTS = ("primary", "secondary", "melee", "building")
-
-
-def inspect_slot_for(weapon_key: str, tf2_root: str) -> str:
+def loadout_slot(weapon_key: str, tf2_root: str, tf2_class: str = "") -> str:
     """
-    Слот, по которому игра выбирает ОСМОТР.
+    Слот СНАРЯЖЕНИЯ оружия у класса (`GetLoadoutSlot(iClass)`).
 
-    Не слот анимаций: `GetInspectActivity` смотрит на слот СНАРЯЖЕНИЯ
-    (`GetLoadoutSlot`). У подрывника они перекрёстные — гранатомёт стоит в
-    primary, но idle/fire/reload у него `ACT_SECONDARY_*`, у липучкомёта
-    наоборот. По слоту анимаций гранатомёт получал осмотр липучкомёта (и
-    разваливался в руке), а липучкомёт — гранатомёта. Подтверждает и сам
-    items_game: Loch-n-Load (слот анимаций secondary) подменяет именно
-    `ACT_PRIMARY_VM_INSPECT_*`.
-
-    Слоты вне таблицы игры (ПДА, часы) остаются при слоте анимаций — как было.
+    По нему игра выбирает осмотр, и он же не совпадает со слотом анимаций у
+    подрывника: гранатомёт стоит в primary, а idle/fire у него `ACT_SECONDARY_*`.
     """
     info = anim_info(weapon_key, tf2_root)
-    loadout = ((info.item_slot if info else "") or _own_slot(weapon_key)).lower()
-    return loadout if loadout in INSPECT_SLOTS else slot_for(weapon_key, tf2_root)
+    found = info.loadout_slot(tf2_class) if info else ""
+    return (found or _own_slot(weapon_key)).lower()
 
 
 #: Раздел приложения со всеклассовым оружием — сам по себе не класс.
@@ -338,19 +371,33 @@ def _build_index(items_path: Path) -> Dict[str, WeaponAnimInfo]:
         return {}
     index: Dict[str, WeaponAnimInfo] = {}
     decor: Dict[str, Dict[str, list]] = {}
+    class_slots: Dict[str, Dict[str, str]] = {}
     for _defindex, block in game.items:
         info = WeaponAnimInfo(
             item_class=(game.inherited(block, "item_class") or "").lower(),
-            anim_slot=(game.inherited(block, "anim_slot") or "").lower(),
+            anim_slot=_anim_slot(game, block),
             item_slot=(game.inherited(block, "item_slot") or "").lower(),
             animation_replacement=_replacement(game, block),
+            hides=tuple(sorted(_bodygroup_pairs(
+                game.inherited_block(block, "player_bodygroups")).items())),
         )
         stems = _model_stems(game, block)
         for stem in stems:
             index.setdefault(stem, info)   # первый предмет с моделью выигрывает
+        # Надеваемое к оружию (рюкзак знамени): анимации - предмета, а в
+        # руке его `model_player`. У парашюта в руке нет ничего.
+        worn = game.inherited(block, "extra_wearable")
+        if worn:
+            index.setdefault(_stem(worn), replace(info, held=stems[0] if stems else ""))
         attached = _attached_paths(game, block, "attached_models")
         for path in attached:
             index.setdefault(_stem(path), replace(info, carried_on=stems[0] if stems else ""))
+        for stem in stems + [_stem(p) for p in attached]:
+            # Слоты по классам собираются со ВСЕХ предметов модели: стоковый
+            # дробовик - это четыре предмета, по одному на класс.
+            per_class = class_slots.setdefault(stem, {})
+            for tf2_class, slot in _used_by(game, block, info.item_slot):
+                per_class.setdefault(tf2_class, slot)
         festive = _attached_paths(game, block, "attached_models_festive")
         for stem in stems:
             found = decor.setdefault(stem, {})
@@ -368,9 +415,39 @@ def _build_index(items_path: Path) -> Dict[str, WeaponAnimInfo]:
         if chosen:
             index[stem] = replace(index[stem], decor=chosen)
 
+    for stem, per_class in class_slots.items():
+        if stem in index and per_class:
+            index[stem] = replace(index[stem], class_slots=tuple(sorted(per_class.items())))
+
     logger.info(f"[vm] индекс анимаций из items_game: {len(index)} моделей")
     _save_cache(items_path, index)
     return index
+
+
+def _anim_slot(game: "items_game_kv.ItemsGame", block: str) -> str:
+    """`anim_slot` предмета; СВОЁ пустое значение отменяет префаб.
+
+    У Полу-Дзатоити `"anim_slot" ""` при префабе меча с item1: игра тогда берёт
+    роль из скрипта оружия (ближний бой), а по префабу солдат махал катаной
+    анимациями Знамени.
+    """
+    own = items_game_kv.flat_value(block, "anim_slot")
+    value = own if own is not None else game.inherited(block, "anim_slot")
+    return (value or "").lower()
+
+
+def _used_by(game: "items_game_kv.ItemsGame", block: str, item_slot: str) -> list:
+    """[(класс, слот снаряжения)] из `used_by_classes`.
+
+    Значение "1" - класс носит предмет в общем `item_slot`; иначе там сам слот
+    (`"engineer" "primary"` у дробовика, который у остальных вторичный).
+    """
+    nested = game.inherited_block(block, "used_by_classes")
+    if not nested:
+        return []
+    return [(cls.lower(), (slot if slot != "1" else item_slot).lower())
+            for cls, slot in _USED_BY_RE.findall(nested)
+            if cls.lower() in CLASS_MODEL_STEM]
 
 
 def _replacement(game: "items_game_kv.ItemsGame", block: str) -> tuple:
@@ -456,7 +533,10 @@ def _load_cache(items_path: Path) -> Optional[Dict[str, WeaponAnimInfo]]:
                     **{**v,
                        "animation_replacement": tuple(
                            tuple(pair) for pair in v.get("animation_replacement") or ()),
-                       "decor": tuple(tuple(pair) for pair in v.get("decor") or ())})
+                       "decor": tuple(tuple(pair) for pair in v.get("decor") or ()),
+                       "class_slots": tuple(
+                           tuple(pair) for pair in v.get("class_slots") or ()),
+                       "hides": tuple(tuple(pair) for pair in v.get("hides") or ())})
                 for k, v in items.items()}
     except Exception as exc:
         logger.debug(f"[vm] кэш анимаций не прочитан: {exc}")

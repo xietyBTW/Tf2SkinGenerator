@@ -726,7 +726,7 @@ class PreviewVpkModWorker(BaseWorker):
     def _extract_game_texture_frames(self, weapon_key: str) -> tuple:
         """Извлекает текстуру оружия из игровых VPK (fallback). Возвращает (frames, fps)."""
         try:
-            from src.data.weapons import WEAPON_TEXTURE_PATHS
+            from src.data.weapon_quirks import WEAPON_TEXTURE_PATHS
 
             _standard = [
                 f"materials/models/workshop_partner/weapons/c_models/{weapon_key}/{weapon_key}.vtf",
@@ -846,7 +846,7 @@ class PreviewVpkModWorker(BaseWorker):
         # ── Приоритет 5: игровой VPK ──────────────────────────────────────────
         if not vtf_data and weapon_key and self.textures_vpk_path:
             try:
-                from src.data.weapons import WEAPON_TEXTURE_PATHS
+                from src.data.weapon_quirks import WEAPON_TEXTURE_PATHS
                 game_pak = self._game_textures_pak()
                 if game_pak is None:
                     raise FileNotFoundError(self.textures_vpk_path)

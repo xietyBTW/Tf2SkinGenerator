@@ -524,12 +524,12 @@ class PreviewTextureState:
         }
 
     def decor_uploads(self) -> Dict[str, Dict[str, str]]:
-        """Свои текстуры гирлянд: {карточка: {команда: путь}} — как лежат.
+        """Свои текстуры гирлянд: {карточка: {команда: путь}}.
 
-        Без подстановки чужой команды: общая картинка и так записана в обе
-        (см. set_texture), а у командных огоньков синие без своей правки
-        остаются игровыми. Сборка решает сама — по $texturegroup гирлянды,
-        который здесь неизвестен (показ мог быть выключен).
+        Команда без своей правки берёт картинку другой, как и текстуры оружия
+        (resolve_base): покрасили огоньки за RED - у BLU в игре те же. Иначе
+        синие оставались игровыми, и в руках за BLU правка пропадала.
+        Покрашенная отдельно команда остаётся своей.
         """
         out: Dict[str, Dict[str, str]] = {}
         cards = {m for paths in self.textures.values() for m in paths if is_decor(m)}
@@ -537,7 +537,7 @@ class PreviewTextureState:
             red = _existing(self.textures.get(Team.RED, {}).get(card))
             blu = _existing(self.textures.get(Team.BLU, {}).get(card))
             if red or blu:
-                out[card] = {Team.RED: red or '', Team.BLU: blu or ''}
+                out[card] = {Team.RED: red or blu, Team.BLU: blu or red}
         return out
 
     # ═══════════════════════════════════════════════════════════════════════ #

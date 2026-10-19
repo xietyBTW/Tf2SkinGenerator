@@ -10,7 +10,23 @@
      заново после смены языка), затем адрес: его собирает app.py из конфига.
      После смены языка заставка - только занавес (splash: quick, settings.js). -->
 <script>(function(){var d=document.documentElement,q=new URLSearchParams(location.search);function pick(k){try{var v=sessionStorage.getItem(k);if(v!==null)return v}catch(e){}return q.get(k)}var t=pick('theme');if(t)d.dataset.theme=t;if(pick('motion')==='off')d.dataset.motion='off';if(q.get('frame')==='custom')d.dataset.frame='custom';try{if(sessionStorage.getItem('splash')==='quick'){d.dataset.splash='quick';sessionStorage.removeItem('splash')}}catch(e){}d.classList.add('is-splash')})()</script>
+<!-- Стили страницы по областям; порядок - порядок каскада, менять нельзя. -->
 <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style-album.css">
+<link rel="stylesheet" href="style-catalog.css">
+<link rel="stylesheet" href="style-particles.css">
+<link rel="stylesheet" href="style-parts.css">
+<link rel="stylesheet" href="style-warpaint.css">
+<link rel="stylesheet" href="style-dock.css">
+<link rel="stylesheet" href="style-vmt.css">
+<link rel="stylesheet" href="style-settings.css">
+<link rel="stylesheet" href="style-place.css">
+<link rel="stylesheet" href="style-overlays.css">
+<link rel="stylesheet" href="style-sounds.css">
+<link rel="stylesheet" href="style-motion.css">
+<link rel="stylesheet" href="style-sound-rows.css">
+<link rel="stylesheet" href="style-intro.css">
+<link rel="stylesheet" href="style-sheen.css">
 </head>
 <body>
 
@@ -312,8 +328,9 @@
         <button class="mattab is-active" data-scene="item">Модель</button>
         <button class="mattab" data-scene="fp" data-cond="firstperson">От первого лица</button>
         <button class="mattab" data-scene="taunt" data-cond="taunt">Насмешка</button>
-        <!-- Шапка на персонаже в игровой стойке: так её и видят в игре. -->
-        <button class="mattab" data-scene="wear" data-cond="wear">На модели</button>
+        <!-- Предмет на персонаже в игровой стойке: шапка, надетое оружие
+             или оружие в руках - так его и видят в игре. -->
+        <button class="mattab" data-scene="wear" data-cond="wear">На персонаже</button>
       </div>
 
       <div class="viewport">
@@ -797,7 +814,7 @@
         <!-- Классы, которые играют эту насмешку. Список приходит из
              items_game: у каждого класса своя модель реквизита и своя
              последовательность. -->
-        <!-- Слот оружия в сцене «На модели»: от него зависит и стойка
+        <!-- Слот оружия в сцене «На персонаже»: от него зависит и стойка
              персонажа, и что у него в руках. Кнопки строит код по классу. -->
         <div class="styles" id="wearbar" hidden>
           <span class="label label--inline">Оружие</span>
@@ -831,6 +848,10 @@
                   title="Подогнать размер, поворот и положение по призраку оригинала">Масштабировать</button>
           <button class="textbtn textbtn--sm" data-cond="qc">Редактировать QC</button>
           <button class="textbtn textbtn--sm" id="maketeam" data-cond="team">Сделать командным</button>
+          <!-- Гирлянда праздничной версии - частью модели оружия: в игре она
+               видна у всех, а не только у владельца праздничного предмета. -->
+          <button class="textbtn textbtn--sm" id="makefestive" hidden
+                  title="Вшить гирлянду в модель: в игре она будет на обычном оружии">Сделать праздничным</button>
           <button class="textbtn textbtn--sm" id="parts" data-cond="parts">Разделить на части</button>
           <!-- Своя модель - не билет в один конец: вернуть игровую надо уметь
                не только сменой предмета. -->

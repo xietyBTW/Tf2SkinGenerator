@@ -14,7 +14,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from src.services.vpk_model_pipeline import VpkModelPipeline, texture_slot_key
-from src.services.vpk_texture_builder import VpkTextureBuilder
+from src.services.texture_build import panel_extras
 from src.shared.constants import Team
 
 BS = chr(92)
@@ -46,16 +46,16 @@ class StyleTexturesTests(unittest.TestCase):
         self._tmp = TemporaryDirectory()
         self.dir = Path(self._tmp.name)
         self.calls = []
-        self._orig = VpkTextureBuilder._render_extra_texture
+        self._orig = panel_extras.render_extra_texture
 
         def spy(name, img, *a, **kw):
             self.calls.append((name, os.path.basename(img)))
             return True
 
-        VpkTextureBuilder._render_extra_texture = staticmethod(spy)
+        panel_extras.render_extra_texture = spy
 
     def tearDown(self):
-        VpkTextureBuilder._render_extra_texture = self._orig
+        panel_extras.render_extra_texture = self._orig
         self._tmp.cleanup()
 
     def _qc(self, text: str) -> str:

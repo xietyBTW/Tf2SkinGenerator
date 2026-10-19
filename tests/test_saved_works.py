@@ -47,6 +47,21 @@ class ListSavedTests(unittest.TestCase):
                 keys = [w['key'] for w in work_store.list_saved()]
             self.assertEqual(keys, ['c_scattergun__c_scattergun', 'hat__demo'])
 
+    def test_delete_from_the_library_card(self):
+        """Крестик на карточке работы: только сохранённая и только по имени."""
+        from src.app.api import saved_works
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._folder(root, 'hat__demo', 1000.0)
+            self._folder(root, 'c_knife__c_knife', 2000.0, kept=False)
+            with mock.patch.object(work_store, 'WORK_DIR', root):
+                self.assertIn('error', saved_works.delete_work('../hat__demo'))
+                self.assertIn('error', saved_works.delete_work('c_knife__c_knife'))  # черновик
+                self.assertEqual(saved_works.delete_work('hat__demo'), {'deleted': True})
+                self.assertEqual(work_store.list_saved(), [])
+            self.assertFalse((root / 'hat__demo').exists())
+            self.assertTrue((root / 'c_knife__c_knife').exists())
+
     def test_draft_nobody_saved_stays_out_of_the_library(self):
         """Открыл предмет, что-то тронул — это ещё не мод."""
         with TemporaryDirectory() as tmp:
@@ -273,7 +288,7 @@ class WorkNamesTests(unittest.TestCase):
         rows = [{'key': 'hat__models_player_items_scout_hat.mdl',
                  'saved_at': 1.0, 'item': item}]
         with mock.patch.object(
-                api, '_hat_index',
+                api.saved_works, '_hat_index',
                 lambda lang: {'models/player/items/scout/hat.mdl': ('Шапка', 'backpack/hat')}):
             return api._named(rows, 'ru')[0]
 
@@ -335,7 +350,7 @@ class CustomModelComesBackTests(unittest.TestCase):
         self.events = self.session.subscribe()
         # Конвертация SMD и воркеры — не предмет проверки.
         patches = [
-            mock.patch.object(self.session, '_custom_model_obj',
+            mock.patch.object(self.session.custom_model, '_custom_model_obj',
                               return_value=(self.obj, ['own_mat'])),
             mock.patch.object(self.session, '_on_model_ready'),
             mock.patch.object(self.session.controller, 'load_game_model'),

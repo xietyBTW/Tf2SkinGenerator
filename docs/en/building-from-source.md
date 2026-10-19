@@ -61,7 +61,7 @@ The development server serves the same page and the same API over HTTP, so you c
 
 - Open `127.0.0.1`, not `localhost`. With `localhost`, Chromium tries IPv6 first, gets refused and falls back, which adds about 300 ms to every API call.
 - `--work-dir .devwork` keeps the server's drafts and works out of `work/`. Without it, a server running next to the open app writes into the same drafts as the app. The settings file and VMT edits are still shared between the two.
-- The server answers only the API methods listed in `ALLOWED` in `frontend/devserver.py`. A new method in `src/app/api.py` has to be added there too.
+- The server answers only the API functions marked `@endpoint` in the `src/app/api/` package. A function without the decorator is not reachable from the page.
 
 ## Project layout
 
@@ -95,11 +95,11 @@ build-release.ps1         release script
 
 **The window.** There's no GUI toolkit. `frontend/app.py` starts a small HTTP server on `127.0.0.1` with a random free port and opens the page in a pywebview window, which on Windows is Edge WebView2. The 3D viewer and the particle engine are separate pages from `src/static`, loaded into iframes.
 
-**Calls.** The page talks to Python through one module, `frontend/mockup/api.js`. Each call is `POST /api/<method>` with JSON parameters; the server passes it to the function of the same name in `src/app/api.py` and returns `{result}` or `{error}`. `api.py` knows nothing about HTTP: its functions take and return plain values, so they can be tested without a browser.
+**Calls.** The page talks to Python through one module, `frontend/mockup/api.js`. Each call is `POST /api/<method>` with JSON parameters; the server passes it to the function of the same name in the `src/app/api/` package and returns `{result}` or `{error}`. The package knows nothing about HTTP: its functions take and return plain values, so they can be tested without a browser.
 
 **Events.** Long operations (loading a model, building, extracting) run in worker threads from `src/services`. The session (`src/app/session.py`) turns their signals into events in a queue, and the page receives them as Server-Sent Events from `GET /events`, where each subscriber gets a queue of its own. `frontend/mockup/events.js` dispatches them. Files that workers produce, such as OBJ meshes and PNG previews, are served by `GET /file`, only from the temporary folder and the app's data folders.
 
-**Rules live in Python.** Which controls a mode shows is decided by `controls_for(mode)` in `src/app/api.py`; the page only applies the answer. `frontend/CONTROLS.md` explains the reasoning behind each rule. Keeping the rules on one side means the page can't drift away from what the build actually does.
+**Rules live in Python.** Which controls a mode shows is decided by `controls_for(mode)` in `src/app/api/catalog.py`; the page only applies the answer. `frontend/CONTROLS.md` explains the reasoning behind each rule. Keeping the rules on one side means the page can't drift away from what the build actually does.
 
 **Layers.** `domain` imports nothing from `app` or `services`, and `services` imports nothing from `app`. `tests/test_layer_boundaries.py` enforces this by parsing the imports.
 

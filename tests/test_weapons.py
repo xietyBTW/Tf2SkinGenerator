@@ -49,8 +49,8 @@ class WeaponMdlPathsTests(unittest.TestCase):
     def test_special_override_preserved(self):
         # Явный оверрайд (папка ≠ имени ключа) не затирается циклом
         self.assertEqual(
-            WEAPON_MDL_PATHS.get("c_batt_buffpack"),
-            "models/weapons/c_models/c_battalion_buffpack/c_batt_buffpack.mdl",
+            WEAPON_MDL_PATHS.get("c_battalion_buffpack"),
+            "models/workshop/weapons/c_models/c_battalion_buffpack/c_battalion_buffpack.mdl",
         )
 
     def test_all_paths_under_models_dir(self):

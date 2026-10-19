@@ -204,7 +204,7 @@ def _reference_smd(qc_path: Path) -> Optional[Path]:
     # Сперва — то, что QC зовёт телом (`$body`/`$model`): у игроков рядом
     # лежат бодигруппы (dogtags, hat, shoes), и перебор по алфавиту отдавал
     # жетоны разведчика вместо самого разведчика. Правило то же, что у 3D
-    # (preview_3d_worker._character_body_smd), включая пустой LOD0 пиромана.
+    # (smd_locator.character_body_smd), включая пустой LOD0 пиромана.
     body = body_smd_from_qc(qc_path)
     if body is not None:
         return body

@@ -138,9 +138,9 @@ The buttons above the 3D view choose what it shows.
 | **Model** | everything | The item alone with a free camera. |
 | **First person** | weapons held in hand | The weapon in the hands of its class from the player's eyes, with the weapon's own animations. |
 | **Taunt** | taunt props | A class performing the taunt with the prop. |
-| **On the model** | cosmetics | The cosmetic on a class standing in the pose of the chosen weapon slot. |
+| **On the character** | cosmetics and worn weapons with no first-person view (boots, shields, parachute) | The item on a class standing in the pose of the chosen weapon slot. |
 
-Scenes take a few seconds to assemble the first time. **Taunt** and **On the model** with a new class can take up to half a minute, because the app unpacks that class's animations. It keeps the animations it used separately, so after that these scenes open in a couple of seconds, after a restart too. Switching animations within a scene is fast because the app reuses the mesh and textures.
+Scenes take a few seconds to assemble the first time. **Taunt** and **On the character** with a new class can take up to half a minute, because the app unpacks that class's animations. It keeps the animations it used separately, so after that these scenes open in a couple of seconds, after a restart too. Switching animations within a scene is fast because the app reuses the mesh and textures.
 
 ### Rows under the view
 
@@ -153,8 +153,8 @@ These rows appear when the item has something to choose:
 | **Version** | **Regular**, **Festive**, **Festivized**: shows the festive lights the game hangs on the weapon. With a custom model, **Fit the lights** appears so you can move them onto your geometry. See [festive lights](custom-models.md#festive-weapons-and-their-lights). |
 | **Cosmetic style** | Model styles of a cosmetic. Each style has its own geometry, and a dot marks the styles you edited. |
 | **Animation** | In **First person**: the animations of this weapon. |
-| **Weapons** | In **On the model**: which slot the class holds, which also sets the pose. |
-| **Class** | In **Taunt** and **On the model**: which class to show when several can use the item. |
+| **Weapons** | In **On the character**: which slot the class holds, which also sets the pose. |
+| **Class** | In **Taunt** and **On the character**: which class to show when several can use the item. |
 
 ### Model actions
 

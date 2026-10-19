@@ -45,24 +45,24 @@ class MergeVpkGuardTests(unittest.TestCase):
         s = AppSession()
         s._export_settings = staticmethod(lambda: (folder, 'PNG'))
         s.started = []
-        s._run_tool = lambda worker, done='tool_done': (
+        s.tools._run_tool = lambda worker, done='tool_done': (
             s.started.append(worker) or {'started': True})
         return s
 
     def test_one_mod_is_not_a_merge(self):
         with tempfile.TemporaryDirectory() as tmp:
-            res = self._session(tmp).merge_vpk(['a.vpk'], 'out.vpk')
+            res = self._session(tmp).tools.merge_vpk(['a.vpk'], 'out.vpk')
             self.assertIn('error', res)
 
     def test_name_is_required(self):
         with tempfile.TemporaryDirectory() as tmp:
-            res = self._session(tmp).merge_vpk(['a.vpk', 'b.vpk'], '  ')
+            res = self._session(tmp).tools.merge_vpk(['a.vpk', 'b.vpk'], '  ')
             self.assertIn('error', res)
 
     def test_missing_files_are_named(self):
         with tempfile.TemporaryDirectory() as tmp:
             (Path(tmp) / 'a.vpk').write_bytes(b'')
-            res = self._session(tmp).merge_vpk(['a.vpk', 'b.vpk'], 'out.vpk')
+            res = self._session(tmp).tools.merge_vpk(['a.vpk', 'b.vpk'], 'out.vpk')
             self.assertIn('b.vpk', res.get('error', ''))
 
     def test_path_from_the_page_cannot_leave_the_export_folder(self):
@@ -72,7 +72,7 @@ class MergeVpkGuardTests(unittest.TestCase):
             (Path(tmp) / 'a.vpk').write_bytes(b'')
             (Path(tmp) / 'b.vpk').write_bytes(b'')
             session = self._session(tmp)
-            res = session.merge_vpk(['../../secret/a.vpk', 'b.vpk'], 'out.vpk')
+            res = session.tools.merge_vpk(['../../secret/a.vpk', 'b.vpk'], 'out.vpk')
             # '../../secret/a.vpk' сведён к 'a.vpk' — файл внутри папки экспорта.
             self.assertNotIn('error', res)
             self.assertEqual([p.parent for p in session.started[0].vpk_files],
@@ -82,7 +82,7 @@ class MergeVpkGuardTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             (Path(tmp) / 'mod.vpk').write_bytes(b'')
             (Path(tmp) / 'notes.txt').write_text('x')
-            self.assertEqual(self._session(tmp).export_vpks(), ['mod.vpk'])
+            self.assertEqual(self._session(tmp).tools.export_vpks(), ['mod.vpk'])
 
 
 class CardKeyTests(unittest.TestCase):
@@ -106,7 +106,7 @@ class CardKeyTests(unittest.TestCase):
 
     def test_maps_need_an_item(self):
         s = AppSession()
-        self.assertIn('error', s.set_texture_maps('', {'rimlight': {'enabled': True}}))
+        self.assertIn('error', s.materials.set_texture_maps('', {'rimlight': {'enabled': True}}))
 
 
 class TextureSettingsTests(unittest.TestCase):
@@ -120,29 +120,29 @@ class TextureSettingsTests(unittest.TestCase):
 
     def test_settings_are_stored_per_material(self):
         s = self._session()
-        s.set_texture_settings('scattergun_extra',
+        s.materials.set_texture_settings('scattergun_extra',
                                {'size': [1024, 1024], 'format': 'DXT5'})
-        self.assertEqual(s.texture_settings('scattergun_extra')['settings'],
+        self.assertEqual(s.materials.texture_settings('scattergun_extra')['settings'],
                          {'size': [1024, 1024], 'format': 'DXT5'})
         # Соседний материал остаётся на глобальных.
-        self.assertEqual(s.texture_settings('scattergun')['settings'], {})
+        self.assertEqual(s.materials.texture_settings('scattergun')['settings'], {})
 
     def test_empty_settings_return_the_material_to_global(self):
         s = self._session()
-        s.set_texture_settings('scattergun', {'size': [1024, 1024]})
-        s.set_texture_settings('scattergun', None)
+        s.materials.set_texture_settings('scattergun', {'size': [1024, 1024]})
+        s.materials.set_texture_settings('scattergun', None)
         self.assertEqual(s.preview.texture_overrides, {})
 
     def test_unknown_keys_do_not_reach_the_build(self):
         """В запись попадают только те ключи, которые сборка умеет наложить."""
         s = self._session()
-        res = s.set_texture_settings('scattergun',
+        res = s.materials.set_texture_settings('scattergun',
                                      {'size': [512, 512], 'filename': 'взлом.vpk'})
         self.assertEqual(res['settings'], {'size': [512, 512]})
 
     def test_badge_shows_resolution_and_format(self):
         s = self._session()
-        res = s.set_texture_settings('scattergun',
+        res = s.materials.set_texture_settings('scattergun',
                                      {'size': [1024, 1024], 'format': 'DXT5'})
         self.assertEqual(res['badge'], '1024 · DXT5')
 
@@ -150,7 +150,7 @@ class TextureSettingsTests(unittest.TestCase):
         """Имена материалов принадлежат предмету: у следующего они чужие."""
         s = self._session()
         s.preview.begin_item('c_scattergun', 'scout_c_scattergun')
-        s.set_texture_settings('scattergun', {'size': [1024, 1024]})
+        s.materials.set_texture_settings('scattergun', {'size': [1024, 1024]})
         s.preview.texture_maps['scattergun'] = {'rimlight': {'enabled': True}}
         s.preview.begin_item('c_shortstop', 'scout_c_shortstop')
         self.assertEqual(s.preview.texture_overrides, {})
@@ -162,27 +162,27 @@ class CustomModelTests(unittest.TestCase):
 
     def test_missing_file_is_an_error_not_a_crash(self):
         s = AppSession()
-        self.assertIn('error', s.load_custom_model('нет-такого.smd'))
+        self.assertIn('error', s.custom_model.load_custom_model('нет-такого.smd'))
 
     def test_qc_is_only_for_a_ready_model(self):
         """У замены геометрии QC собирает сборка — править нечего."""
         s = AppSession()
         s.preview.custom_smd_path = 'C:/models/my.smd'
         s.preview.custom_keep_materials = False
-        self.assertIn('error', s.qc_text())
+        self.assertIn('error', s.custom_model.qc_text())
 
     def test_saving_and_clearing_the_qc(self):
         s = AppSession()
-        self.assertTrue(s.save_qc('$modelname "a.mdl"')['edited'])
+        self.assertTrue(s.custom_model.save_qc('$modelname "a.mdl"')['edited'])
         self.assertEqual(s.preview.custom_qc_text, '$modelname "a.mdl"')
-        self.assertFalse(s.save_qc('   ')['edited'])
+        self.assertFalse(s.custom_model.save_qc('   ')['edited'])
         self.assertIsNone(s.preview.custom_qc_text)
 
     def test_dropping_the_model_forgets_its_qc(self):
         s = AppSession()
         s.preview.custom_smd_path = 'C:/models/my.smd'
-        s.save_qc('$modelname "a.mdl"')
-        s.drop_custom_model()
+        s.custom_model.save_qc('$modelname "a.mdl"')
+        s.custom_model.drop_custom_model()
         self.assertIsNone(s.preview.custom_smd_path)
         self.assertIsNone(s.preview.custom_qc_text)
 
@@ -199,7 +199,7 @@ class CustomModelTests(unittest.TestCase):
         paths = {'misc_vpk': 'm', 'textures_vpk': 't', 'root': 'r', 'tf_dir': 'd'}
         with patch.object(AppSession, 'tf2_paths', staticmethod(lambda: paths)),                 patch.object(s.controller, 'load_game_model',
                              lambda key, mode, *a, **k: seen.update(key=key, mode=mode)),                 patch.object(s.skins, 'detect', lambda *a, **k: None),                 patch.object(s.viewmodel, 'stop', lambda: seen.update(fp='stopped')):
-            s.drop_custom_model()
+            s.custom_model.drop_custom_model()
         self.assertEqual(seen, {'key': 'c_scattergun', 'mode': 'scout_c_scattergun',
                                 'fp': 'stopped'})
         self.assertIsNone(s.preview.custom_source_path)
@@ -493,7 +493,7 @@ class MissingPartModelAnswerTests(unittest.TestCase):
     def test_the_build_listens_for_part_requests(self):
         """Проводка сигнала — то, чего не хватало."""
         import inspect
-        src = inspect.getsource(AppSession.build)
+        src = inspect.getsource(AppSession._start_build)
         self.assertIn('request_extra_model.connect', src)
 
 

@@ -27,6 +27,10 @@ ITEMS_GAME = '''
             "item_slot"   "primary"
             "model_player" "models/weapons/c_models/c_scattergun.mdl"
         }
+        "weapon_sword"
+        {
+            "anim_slot"   "item1"
+        }
         "valve_weapon"
         {
             "quality" "unique"
@@ -60,6 +64,45 @@ ITEMS_GAME = '''
                     "ACT_VM_HITCENTER"  "ACT_ITEM2_VM_HITCENTER"
                 }
             }
+        }
+        "9"
+        {
+            "name"         "Engineer Shotgun"
+            "item_class"   "tf_weapon_shotgun_primary"
+            "item_slot"    "primary"
+            "model_player" "models/weapons/c_models/c_shotgun/c_shotgun.mdl"
+            "used_by_classes" { "engineer" "1" }
+        }
+        "199"
+        {
+            "name"         "Upgradeable Shotgun"
+            "item_class"   "tf_weapon_shotgun"
+            "item_slot"    "secondary"
+            "model_player" "models/weapons/c_models/c_shotgun/c_shotgun.mdl"
+            "used_by_classes"
+            {
+                "soldier"  "1"
+                "heavy"    "1"
+                "engineer" "primary"
+            }
+        }
+        "357"
+        {
+            "name"         "The Half-Zatoichi"
+            "prefab"       "weapon_sword"
+            "item_class"   "tf_weapon_katana"
+            "anim_slot"    ""
+            "item_slot"    "melee"
+            "model_player" "models/weapons/c_models/c_shogun_katana.mdl"
+        }
+        "129"
+        {
+            "name"           "The Buff Banner"
+            "item_class"     "tf_weapon_buff_item"
+            "item_slot"      "secondary"
+            "anim_slot"      "melee"
+            "model_player"   "models/weapons/c_models/c_bugle/c_bugle.mdl"
+            "extra_wearable" "models/weapons/c_models/c_buffpack/c_buffpack.mdl"
         }
         "999"
         {
@@ -160,7 +203,45 @@ class ItemsGameParsingTests(unittest.TestCase):
 
     def test_items_without_a_model_are_skipped(self):
         self.assertNotIn("", viewmodel_anims.anim_index("root"))
-        self.assertEqual(len(viewmodel_anims.anim_index("root")), 3)
+        self.assertEqual(len(viewmodel_anims.anim_index("root")), 7)
+
+    def test_worn_banner_knows_what_is_held(self):
+        """Знамя в каталоге - рюкзак (extra_wearable), а в руке - дудка.
+
+        Без этого вид от первого лица сажал в руку рюкзак и писал, что
+        анимаций нет.
+        """
+        pack = viewmodel_anims.anim_info("c_buffpack", "root")
+        self.assertEqual((pack.held, pack.item_class), ("c_bugle", "tf_weapon_buff_item"))
+        self.assertEqual(viewmodel_anims.anim_info("c_bugle", "root").held, "")
+
+    def test_loadout_slot_depends_on_the_class(self):
+        """Одна модель дробовика - у инженера основной, у остальных вторичный.
+
+        Слоты собираются со всех предметов модели, первый предмет не решает.
+        """
+        self.assertEqual(viewmodel_anims.loadout_slot("c_shotgun", "root", "engineer"),
+                         "primary")
+        for tf2_class in ("soldier", "heavy"):
+            self.assertEqual(viewmodel_anims.slot_for("c_shotgun", "root", tf2_class),
+                             "secondary", tf2_class)
+        # Без класса - общий слот первого предмета, как было.
+        self.assertEqual(viewmodel_anims.slot_for("c_shotgun", "root"), "primary")
+
+    def test_class_slots_survive_the_cache(self):
+        viewmodel_anims.anim_index("root")
+        viewmodel_anims._MEM.clear()
+        self.assertEqual(viewmodel_anims.loadout_slot("c_shotgun", "root", "heavy"),
+                         "secondary")
+
+    def test_own_empty_anim_slot_cancels_the_prefab(self):
+        """Полу-Дзатоити: `"anim_slot" ""` при префабе с другим слотом.
+
+        По префабу солдат махал катаной анимациями Знамени (item1).
+        """
+        self.assertEqual(viewmodel_anims.anim_info("c_shogun_katana", "root").anim_slot, "")
+        self.assertEqual(viewmodel_anims.slot_for("c_shogun_katana", "root", "soldier"),
+                         "melee")
 
     def test_unknown_weapon_is_none(self):
         self.assertIsNone(viewmodel_anims.anim_info("c_nonexistent", "root"))

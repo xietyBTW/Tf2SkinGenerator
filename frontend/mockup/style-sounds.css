@@ -1,0 +1,178 @@
+/*
+ * Звуки и колонка фильтров.
+ *
+ * Часть стилей страницы: файлы подключены в index.html в порядке каскада
+ * (style.css первым), порядок менять нельзя.
+ */
+
+/* ── Звуки ───────────────────────────────────────────────────────────────
+   Раздел без предмета: ни модели, ни текстур. Стол занимает целиком — список
+   записей длинный, и делить его с пустым вьюпортом незачем. */
+[data-section="sounds"] .stage > :not(.sounds) { display: none; }
+
+/* Верхняя полоса — про ПРЕДМЕТ: его имя, инструменты и переключатель показа.
+   Здесь предмета нет, и «Вместе / Текстура / Модель» висели от прошлого
+   раздела. */
+[data-section="sounds"] .title { display: none; }
+
+/* Общий подвал собирает ТЕКСТУРУ выбранного предмета — с её размером,
+   форматом и именем файла. На странице звуков предмета нет, и кнопка там
+   собрала бы чужой мод. Свой подвал у раздела внутри. */
+[data-section="sounds"] .dock { display: none; }
+
+.sounds {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  gap: 14px;
+}
+
+/* Шапка: разделы набраны как заголовок предмета — это и есть «что открыто»,
+   — а поиск справа, как у каталога. */
+.sounds__head {
+  flex: none;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--rhythm);
+  padding-top: 6px;
+}
+
+.sounds__tabs { display: flex; align-items: flex-end; gap: 26px; }
+
+.sounds__tab {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 0 0 4px;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  background: none;
+  color: var(--ink-mute);
+  font-size: 22px;
+  font-weight: 300;
+  letter-spacing: -.01em;
+  cursor: pointer;
+  transition: color var(--dur), border-color var(--dur);
+}
+.sounds__tab:hover { color: var(--ink); }
+.sounds__tab.is-active { color: var(--ink); border-bottom-color: var(--accent); }
+/* Под поиском в разделе пусто: вкладка остаётся, но гаснет — исчезающая
+   вкладка читалась бы как поломка. */
+.sounds__tab.is-empty { opacity: .45; }
+/* Сколько записей в разделе: цифра при слове, а не отдельный столбец. */
+.sounds__tab b { font-family: var(--mono); font-size: 10.5px; font-weight: 400;
+                 color: var(--ink-mute); }
+
+.sounds__search { flex: 0 1 340px; }
+.sounds__name   { flex: 0 0 170px; }
+
+.sounds__body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 188px minmax(0, 1fr);
+  gap: var(--rhythm);
+  border-top: 1px solid var(--hairline);
+}
+
+.sounds__main {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+.sounds__main .catalog__count { flex: none; margin: 10px 0 6px; }
+/* Подсказка «есть в разделе …» живёт в той же строке счётчика. */
+.sounds__main .catalog__count .textbtn { margin: 0 2px; }
+.sounds__main .catalog__count .textbtn b { font-weight: 400; color: var(--ink-mute); }
+
+.sounds__list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  border-top: 1px solid var(--hairline);
+}
+
+/* Хвост списка: сколько ещё за кадром. Рисуем не всё разом — десять тысяч
+   строк стоили бы секунды на пустом месте, а до сотой всё равно не долистать. */
+.sounds__more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 16px 0 12px;
+}
+
+/* ── Колонка фильтров ────────────────────────────────────────────────────
+   Фасеты со счётчиками, один под другим: три ряда кнопок в строку занимали
+   полэкрана и всё равно не вмещали реплик. Здесь у каждого значения видно,
+   сколько за ним записей, — это и подсказка, и карта раздела. */
+.facets {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 10px 12px 0;
+  border-right: 1px solid var(--hairline);
+}
+
+.facet { display: flex; flex-direction: column; gap: 2px; }
+.facet > .label { margin-bottom: 6px; }
+
+.facet__opt {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 3px 0 3px 10px;
+  border: 0;
+  background: none;
+  color: var(--ink-soft);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  /* Отметка выбранного — полоска слева, та же, что у заменённых строк списка.
+     Всегда прозрачная, чтобы строки не прыгали при выборе. */
+  box-shadow: inset 2px 0 0 transparent;
+  transition: color var(--dur), box-shadow var(--dur);
+}
+.facet__opt:hover { color: var(--ink); }
+.facet__opt.is-active { color: var(--ink); box-shadow: inset 2px 0 0 var(--accent); }
+.facet__opt span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.facet__opt b { flex: none; font-family: var(--mono); font-size: 10.5px;
+                font-weight: 400; color: var(--ink-mute); }
+.facet__opt.is-active b { color: var(--ink-soft); }
+
+/* Кружок ожидания. Тот же приём, что у вьювера моделей (viewer3d.html):
+   кольцо и подпись под ним по центру пустого места. */
+.loading {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.loading__ring {
+  width: 26px;
+  height: 26px;
+  border: 2px solid var(--hairline);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin .75s linear infinite;
+}
+
+/* Кому вращение мешает — тому статичное кольцо: подпись под ним и так всё
+   говорит. */
+@media (prefers-reduced-motion: reduce) {
+  .loading__ring { animation: none; }
+}
+

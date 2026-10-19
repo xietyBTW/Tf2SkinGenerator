@@ -492,6 +492,9 @@ class SkinDetectController:
     def __init__(self, session: PreviewSession):
         self._session = session
         self._worker = None
+        #: С какой строки скина начать (Критокола - строка 2 модели Бонка);
+        #: ставится, когда стили определятся, если такой стиль есть.
+        self._start_skin = 0
 
     def stop(self) -> None:
         if self._worker is not None:
@@ -499,8 +502,9 @@ class SkinDetectController:
             self._worker = None
 
     def detect(self, weapon_key: str, mode: str, misc_vpk: str,
-               lang: str = 'en') -> None:
+               lang: str = 'en', start_skin: int = 0) -> None:
         self.stop()
+        self._start_skin = int(start_skin or 0)
         from src.services.skin_detect_worker import SkinDetectWorker
 
         w = SkinDetectWorker(weapon_key=weapon_key, mode=mode,
@@ -514,7 +518,8 @@ class SkinDetectController:
     def _on_detected(self, info: dict) -> None:
         s = self._session
         s.textures.skin_info = info
-        s.textures.active_skin = 0
+        styles = {int(index) for _label, index in (info or {}).get('styles') or ()}
+        s.textures.active_skin = self._start_skin if self._start_skin in styles else 0
         # skin_overrides здесь НЕ чистим: оба вызова detect() идут сразу после
         # reset_skins(), а игровые текстуры стилей приезжают параллельно от
         # 3D-воркера — очистка съедала бы их в зависимости от того, кто успел.
@@ -653,9 +658,12 @@ class ViewmodelController:
 
     def load_wear(self, hat_models: dict, misc_vpk: str, textures_vpk: str,
                   tf2_root: str, tf2_class: str = '', slot: str = '',
-                  lang: str = 'en', hidden_bodygroups: dict = None) -> None:
+                  lang: str = 'en', hidden_bodygroups: dict = None,
+                  weapon_key: str = '',
+                  custom_smd: str = '', custom_keep: bool = False) -> None:
         """
-        Сцена «На модели»: персонаж в стойке со стоковым оружием, на нём шапка.
+        Сцена «На персонаже»: персонаж в стойке, на нём предмет - шапка или
+        надеваемое оружие (`weapon_key`).
 
         Тот же случай, что насмешка: свой воркер, общие сигналы. Шапка идёт
         предметом сцены — правка её текстуры видна на персонаже.
@@ -672,6 +680,9 @@ class ViewmodelController:
             slot=slot,
             lang=lang,
             hidden_bodygroups=hidden_bodygroups,
+            weapon_key=weapon_key,
+            custom_smd=custom_smd,
+            custom_keep=custom_keep,
         )
         w.progress.connect(self.progress.emit)
         w.animated_ready.connect(self.animated.emit)

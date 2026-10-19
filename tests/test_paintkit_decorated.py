@@ -117,9 +117,10 @@ class CatalogTests(unittest.TestCase):
     def _session(self, own):
         from src.app.session import AppSession
         from src.domain.preview.session import PreviewSession
-        s = AppSession.__new__(AppSession)
-        s.preview = PreviewSession(custom_vpk_mode=True, custom_vpk_weapon='c_rocketlauncher')
-        s.tf2_paths = lambda: {'root': 'C:/tf2'}
+        from src.app.paintkit_editor import PaintkitEditor
+        s = PaintkitEditor(AppSession.__new__(AppSession))
+        s._host.preview = PreviewSession(custom_vpk_mode=True, custom_vpk_weapon='c_rocketlauncher')
+        s._host.tf2_paths = lambda: {'root': 'C:/tf2'}
         s._own_paintkits = lambda root, lang='ru': list(own)
         return s
 

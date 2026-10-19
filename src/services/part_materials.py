@@ -652,7 +652,7 @@ def _basetexture(vmt_text: str) -> str:
 def basetexture_changed(original: str, edited: str) -> bool:
     """Человек сам сменил $basetexture в правке части. Это выбор (белая основа
     под свечение, чужая текстура игры), а не устаревший путь: сборка его не
-    подменяет, как и у главного материала (VpkTextureBuilder._basetexture_chosen)."""
+    подменяет, как и у главного материала (texture_build.game_source.basetexture_chosen)."""
     chosen = _basetexture(edited)
     return bool(chosen) and chosen != _basetexture(original)
 

@@ -12,6 +12,7 @@ import { say, particles, withParticles } from '../stage.js';
 import { pSystem, pcfNodes, setDiff } from './state.js';
 import { showParams } from './params.js';
 import { fillTree, setTitle } from './tree.js';
+import { ensureEffectMaterials } from './materials.js';
 
 /**
  * Дорожка ползунка. Границы у неё МЯГКИЕ (сколько нужно в 99% эффектов), а
@@ -95,6 +96,7 @@ export async function editParam(param, value) {
   const res = await api.setParticleParam(pSystem, param.key, value);
   if (res.error) { say(res.error); return; }
   withParticles((w) => w.updateSystems(res.systems, pSystem));
+  ensureEffectMaterials();
   setDiff(res.diff);
   fillTree(pcfNodes, pSystem);
   setTitle(pSystem);

@@ -10,20 +10,38 @@
  * длиной в единицу.
  */
 
+
 import * as api from './api.js';
-import { ask } from './ask.js';
 import { t } from './i18n.js';
-import { say, sayBusy, stage, viewer, withViewer } from './stage.js';
-import { root, work } from './layout.js';
-import { bindAlbum, goTo, SINGLE_TEX } from './album.js';
+import { say, stage, viewer, withViewer } from './stage.js';
+import { work } from './layout.js';
+import { SINGLE_TEX } from './album.js';
 import { modeControls, restoreBadges } from './controls.js';
 import { syncPaint } from './paint.js';
 import { hideWarpaint, warpaintPreview } from './warpaint.js';
-import { closeParts, bindParts, suspendParts, resumeParts, refreshParts } from './parts.js';
+import { closeParts, bindParts, refreshParts } from './parts.js';
 import { updateDockSummary } from './build.js';
 import { refreshNormal } from './normals.js';
-import { showFit, showDecorFit, showDecorBends, toggleDecorFit, isDecorFitOn, leaveDecorFit,
-         bindFitViewer, isFitOn, dropFitSave, flushFitSave } from './custom-model.js';
+import { showFit, showDecorFit, showDecorBends, dropFitSave, bindFitViewer, isFitOn }
+  from './custom-model.js';
+import { hatModels, showHatClasses, showHatStyles, markEditedStyles } from './preview-hats.js';
+import { showMaterials, setCardTitles } from './preview-frames.js';
+import { showBodygroups, decorFittable, showFestive, forgetDecor, showSkins, showStyleBar }
+  from './preview-variants.js';
+import { resetView, forgetSpecialScene, applySpecialTexture } from './preview-scenes.js';
+
+// Области превью - свои модули: шапки (preview-hats), карточки альбома
+// (preview-frames), ряды вариантов модели (preview-variants), сцены кадра
+// (preview-scenes). Остальные модули берут всё отсюда, как и раньше.
+export { hatModels, showHatClasses, hatClasses, showHatStyles, markEditedStyles }
+  from './preview-hats.js';
+export { frameNode, addFrame, cardTitles, setCardTitles, cardTitle, showMaterials }
+  from './preview-frames.js';
+export { showDecor, festiveFailed, showSkins, showStyleBar } from './preview-variants.js';
+export { resetView, fpAction, applyFpClip, reloadSceneIfFp, showFpActions, tauntClass,
+         showTauntClasses, showWearSlots, sceneKind, sceneModelTex, showSpecialScene,
+         specialSceneFailed, showSpecialAnimated, applySpecialTexture, showSkybox,
+         showFirstPerson } from './preview-scenes.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Данные из Python
@@ -48,87 +66,6 @@ export function refreshView() {
   }, 80);
 }
 
-/** Покласcовые модели шапки: у стилевой они в стиле, у обычной - в предмете. */
-export function hatModels(item, index) {
-  if (!item) return null;
-  const style = ((item.styles || [])[index] || {}).per_class;
-  const own = item.per_class;
-  const models = (style && Object.keys(style).length) ? style : own;
-  return (models && Object.keys(models).length) ? models : null;
-}
-
-//: Классы мультиклассовой шапки (у каждого своя модель). Для кого собирать,
-//: спрашивает сборка (build.js) - отдельная строка кнопок перегружала экран.
-let hatClassList = [];
-
-export function showHatClasses(item) {
-  hatClassList = Object.keys((item && item.per_class) || {});
-}
-
-/** Классы показанной шапки; пусто - шапка не мультиклассовая. */
-export function hatClasses() {
-  return hatClassList.length > 1 ? [...hatClassList] : [];
-}
-
-/**
- * Модельные стили шапки.
- *
- * Это не skinfamilies: у стиля СВОЯ геометрия («Только камень» - та же шапка
- * без оправы), поэтому выбор перезагружает превью другой моделью и меняет то,
- * что уйдёт в сборку.
- */
-export function showHatStyles(item, active = 0) {
-  const bar = document.getElementById('hatstyles');
-  bar.querySelectorAll('.tag').forEach((b) => b.remove());
-  const styles = (item && item.styles) || [];
-  bar.hidden = styles.length < 2;
-  if (bar.hidden) return;
-
-  styles.forEach((style, index) => {
-    const b = document.createElement('button');
-    b.className = 'tag' + (index === active ? ' is-active' : '');
-    b.dataset.style = index;
-    b.textContent = style.name;
-    b.addEventListener('click', async () => {
-      bar.querySelectorAll('.tag').forEach(
-        (x) => x.classList.toggle('is-active', x === b));
-      const models = hatModels(item, index) || {};
-      showHatClasses({ per_class: models });
-      const first = Object.values(models)[0] || item.key;
-      say(`Загрузка стиля: ${style.name}…`);
-      // Индекс нужен сеансу: по нему он и запоминает правки стиля, и понимает,
-      // что это стиль ТОЙ ЖЕ шапки, а не новый предмет.
-      const res = await api.loadPreview('hat', null, first, models, index,
-                                        false, item.key);
-      if (res.error) { say(res.error); return; }
-      markEditedStyles(res.edited_styles);
-      // На «На модели» сцену надо собрать заново: загрузка стиля её погасила
-      // (session.load_preview → taunt.stop), а без пересборки на персонаже
-      // оставался последний кадр прежнего стиля. Модели нового стиля сеанс
-      // к этому моменту уже знает.
-      if (work.dataset.scene === 'wear') {
-        const again = await api.loadWear(tauntClass, wearSlot);
-        if (again.error) say(again.error);
-      }
-    });
-    bar.appendChild(b);
-  });
-}
-
-/**
- * Метка «стиль правлен».
- *
- * Правки соседних стилей уходят в тот же мод, и без метки о них вспоминают
- * уже в игре. Имя стиля берём из кнопки - список стилей здесь не нужен.
- */
-export function markEditedStyles(indexes) {
-  const edited = new Set((indexes || []).map(Number));
-  document.querySelectorAll('#hatstyles .tag').forEach((b) => {
-    const name = b.textContent.replace(/ ●$/, '');
-    b.textContent = edited.has(Number(b.dataset.style)) ? name + ' ●' : name;
-  });
-}
-
 /**
  * Убирает с экрана всё, что относилось к прошлому предмету.
  *
@@ -136,36 +73,14 @@ export function markEditedStyles(indexes) {
  * шапки, человек уходит от оружия, а его текстура оставалась висеть в альбоме
  * - над чужим каталогом, с чужими карточками.
  */
-/**
- * Возвращает обычный вид «Вместе».
- *
- * Вид от первого лица и насмешка - это СЦЕНЫ, собранные под конкретный
- * предмет. У нового предмета такой сцены ещё нет, и оставленный выбор
- * показывал бы пустой кадр с активной кнопкой: человек уже сменил предмет, а
- * приложение всё ещё «в насмешке».
- */
-export function resetView() {
-  document.querySelectorAll('.modes .underlined').forEach(
-    (b) => b.classList.toggle('is-active', b.dataset.view === 'both'));
-  work.dataset.view = 'both';
-  // Сцену прошлого предмета Python погасил сам (select_item → viewmodel.stop и
-  // taunt.stop), поэтому здесь только отметка: звать выход неоткуда и незачем.
-  markScene('item');
-  document.getElementById('fpbar').hidden = true;
-  document.getElementById('tauntbar').hidden = true;
-  document.getElementById('wearbar').hidden = true;
-  // Камера возвращается к свободной орбите: риг остался от вида от первого лица.
-  withViewer((w) => w.setViewRig(null));
-}
-
 export function clearPreview() {
-  decorSeq++;             // гирлянда прошлого предмета, если ещё качается, не нужна
-  cardTitles = {};        // подписи прошлого мода к новому предмету не относятся
-  sceneKind = '';         // и спец-сцена: у обычной модели её нет
+  forgetDecor();          // гирлянда прошлого предмета, если ещё качается, не нужна
+  setCardTitles({});      // подписи прошлого мода к новому предмету не относятся
+  forgetSpecialScene();   // и спец-сцена: у обычной модели её нет
   lastModel = null;       // и кадр превью: вернуться к чужой модели нельзя
   resetView();
   document.getElementById('hatstyles').hidden = true;
-  hatClassList = [];
+  showHatClasses(null);
   // Части считаны по ПРОШЛОЙ модели: у новой под тем же номером другой кусок.
   closeParts();
   hideWarpaint();         // War Paint - про прошлое оружие, у нового свой список
@@ -198,9 +113,11 @@ export async function startPreview(item) {
   const models = hatModels(item, 0);
   showHatClasses({ per_class: models });
   showHatStyles(item);
+  // item.skin - строка скина модели, на которой открыть (Критокола - строка 2
+  // модели Бонка): стиль включится, как только скины модели определятся.
   const res = await api.loadPreview(item.mode, null,
                                     item.type === 'hat' ? item.key : null,
-                                    models || null, null, false,
+                                    models || null, item.skin ?? null, false,
                                     item.type === 'hat' ? item.key : '');
   if (res.error) say(res.error);
 }
@@ -499,12 +416,6 @@ export function applyView(st) {
 }
 
 /**
- * Кнопки вариантных стилей (skinfamilies).
- *
- * Один стиль означает, что стилей НЕТ: «Skin 0» - это сама модель, и
- * предлагать выбор из одного варианта незачем.
- */
-/**
  * Приём текстуры на кадр: перетаскиванием или двойным щелчком.
  *
  * Файл уезжает на диск, а материалу назначается путь - сборка работает с
@@ -547,654 +458,6 @@ export function bindDrop(frame) {
   });
 }
 
-/**
- * Переключатель состояний модели: ряд на каждую бодигруппу с вариантами.
- *
- * Только показ - в мод уходят все состояния, игра переключает их сама. Ряд
- * прячется, когда переключать нечего (у большинства оружия один вариант).
- * Части закрываются: их номера считаны по геометрии в кадре.
- */
-function showBodygroups(groups) {
-  const bar = document.getElementById('bodybar');
-  bar.innerHTML = '';
-  bar.hidden = !groups.length || work.dataset.scene !== 'item';
-  if (bar.hidden) return;
-  for (const g of groups) {
-    const label = document.createElement('span');
-    label.className = 'label label--inline';
-    // Снаряд в оружии - не состояние, а деталь: виден, пока его правят.
-    label.textContent = g.projectile
-      ? (g.custom ? 'Свой снаряд в оружии' : 'Снаряд в оружии')
-      : groups.length > 1 ? `Состояние · ${g.name}` : 'Состояние модели';
-    bar.appendChild(label);
-    g.variants.forEach((name, i) => {
-      const b = document.createElement('button');
-      b.className = 'tag' + (i === g.chosen ? ' is-active' : '');
-      b.textContent = name;
-      b.addEventListener('click', async () => {
-        if (i === g.chosen) return;
-        closeParts();
-        say('Собираю состояние…');
-        const res = await api.setBodygroup(g.name, i);
-        if (res.error) { say(res.error); return; }
-        applyView(res);
-      });
-      bar.appendChild(b);
-    });
-  }
-}
-
-//: Подписи видов гирлянды. Ключи задаёт Python (festive_decor / items_game).
-/** Гирлянду есть что подгонять: своя модель (оружия, мода из VPK или её
- *  самой) или уже правлена. */
-const decorFittable = (st) => Boolean(st.custom_geometry || st.decor_fit
-  || (st.decor_bends || []).length || (st.decor_models || []).includes(st.festive));
-
-const FESTIVE_LABELS = { '': 'Обычная', xmas: 'Праздничная', festivizer: 'Фестивайзер' };
-
-/**
- * Праздничная версия оружия: обычная, праздничная, фестивайзер.
- *
- * Только показ: гирлянда висит поверх модели своим слоем вьювера и в мод не
- * идёт - поэтому и на своей модели она остаётся там, где её повесит игра.
- * Ряд есть в кадре предмета и в руках: игра показывает гирлянду и там, и там.
- */
-function showFestive(st) {
-  const bar = document.getElementById('festivebar');
-  const options = st.festive_options || [];
-  const scene = work.dataset.scene || 'item';
-  bar.querySelectorAll('.tag, .festive__note').forEach((n) => n.remove());
-  bar.hidden = !options.length || !(scene === 'item' || scene === 'fp');
-  withViewer((w) => w.setDecorTeam && w.setDecorTeam(st.team));
-  if (bar.hidden) return;
-
-  // Правки гирлянды живут и при выключенном показе - метка на кнопке
-  // говорит, что в мод уйдёт своя гирлянда (как метка правленого стиля).
-  const edited = new Set(st.festive_edited || []);
-  for (const kind of ['', ...options]) {
-    const b = document.createElement('button');
-    b.className = 'tag' + (kind === (st.festive || '') ? ' is-active' : '');
-    b.dataset.kind = kind;
-    b.textContent = t(FESTIVE_LABELS[kind] || kind) + (edited.has(kind) ? ' ●' : '');
-    b.addEventListener('click', async () => {
-      if (b.classList.contains('is-active')) return;
-      bar.querySelectorAll('.tag[data-kind]').forEach(
-        (x) => x.classList.toggle('is-active', x === b));
-      // Первое включение - разбор модели гирлянды, около секунды; повторное
-      // из памяти, и подпись тогда не мигнёт (sayBusy отложенная).
-      if (kind) sayBusy('Загрузка гирлянды…');
-      // Подгонку прошлой гирлянды - записать и закрыть: отложенная запись
-      // иначе легла бы уже на новую (или потерялась бы на «Обычная»).
-      await leaveDecorFit();
-      try {
-        applyView(await api.setFestive(kind));
-      } catch (err) {
-        say(err.message);
-        refreshView();
-      }
-    });
-    bar.appendChild(b);
-  }
-  // Подгонка гирлянды под модель - тем же инструментом, что и своя модель.
-  // Только при своей модели: на стоковой гирлянда уже стоит на месте. Уже
-  // сделанную подгонку оставляем доступной и без неё - иначе, убрав свою
-  // модель, сдвинутую гирлянду было бы не вернуть, и она ушла бы в мод.
-  if (st.festive && scene === 'item' && decorFittable(st)) {
-    const fit = document.createElement('button');
-    fit.className = 'tag festive__fit' + (isDecorFitOn() ? ' is-active' : '');
-    fit.textContent = 'Подогнать гирлянду';
-    fit.title = t('Сдвинуть, повернуть и растянуть гирлянду под свою модель (G/R/S)');
-    fit.addEventListener('click', () => {
-      toggleDecorFit();
-      fit.classList.toggle('is-active', isDecorFitOn());
-    });
-    bar.appendChild(fit);
-  }
-  // На своей модели гирлянда стоит по стоковой, пока её не подогнали: так её
-  // и повесит игра, и огоньки будут висеть мимо.
-  if (st.festive && st.custom_geometry && !st.decor_fit && !(st.decor_bends || []).length) {
-    const note = document.createElement('span');
-    note.className = 'label label--inline festive__note';
-    note.textContent = 'Висит как на стоковой модели - подгоните под свою';
-    bar.appendChild(note);
-  }
-}
-
-/**
- * Гирлянда приехала (или её выключили): слой вьювера и, если открыт вид от
- * первого лица, сцена в руках - там гирлянда собирается вместе с оружием.
- */
-//: Номер последнего события гирлянды: OBJ качается отдельно, и за это время
-//: гирлянду могли выключить или уйти к другому предмету - старая не должна
-//: встать поверх.
-let decorSeq = 0;
-
-export async function showDecor(ev) {
-  const w = viewer();
-  if (!w || !w.setDecor) return;
-  const seq = ++decorSeq;
-  // Гирлянда пересобирается во вьювере - её подгонка там гаснет; страница
-  // обязана погасить свою половину, иначе панель висела бы без гизмо.
-  await leaveDecorFit();
-  if (!ev.kind) {
-    w.clearDecor();
-  } else {
-    try {
-      const obj = await (await fetch(api.fileUrl(ev.obj))).text();
-      if (seq !== decorSeq) return;
-      const urls = (list) => (list || []).map(api.fileUrl);
-      const mats = Object.fromEntries(Object.entries(ev.materials || {}).map(
-        ([name, m]) => [name, { ...m, red: urls(m.red), blu: urls(m.blu) }]));
-      w.setDecor(obj, mats, ev.hints || {}, ev.groups || {});
-    } catch (err) {
-      say(`Не удалось показать гирлянду: ${err.message}`);
-      return;
-    }
-  }
-  say('');
-  refreshView();
-  await reloadSceneIfFp();
-}
-
-/** Гирлянду собрать не вышло: кнопка возвращается на «Обычная». */
-export function festiveFailed() {
-  say('Гирлянду этой версии не удалось загрузить');
-  refreshView();
-}
-
-export function showSkins(info) {
-  const row = document.getElementById('skinbar');
-  row.querySelectorAll('.tag').forEach((b) => b.remove());
-
-  // Стили - это ДОПОЛНИТЕЛЬНЫЕ скины (bloody/clean и т.п.), а не команда и не
-  // вариант: у тех свои тумблеры. Строить ряд по num_skins/roles было нельзя -
-  // у командного оружия он повторял RED/BLU, а клик по такому «стилю» уходил
-  // с ПОЗИЦИОННЫМ индексом и попадал в другую строку $texturegroup (у
-  // праздничного гранатомёта - в Festive). Картинка не менялась.
-  const styles = (info && info.styles) || [];
-  // Что нарисовано - для сверки с ответом Python (applyView).
-  row.dataset.styles = JSON.stringify(styles);
-  row.hidden = styles.length === 0;
-  if (row.hidden) return;
-
-  // Базовый стиль - первой кнопкой. Без него из варианта не выйти: в списке
-  // styles его нет (там только варианты), и полоса становилась ловушкой.
-  for (const entry of [['Базовый', 0], ...styles]) {
-    // (подпись, сырой индекс скина в модели) - индекс именно сырой, по нему
-    // выбирают скин и превью, и сборка.
-    const [label, index] = Array.isArray(entry) ? entry : [String(entry), 0];
-    const b = document.createElement('button');
-    b.className = 'tag';
-    b.dataset.skin = index;
-    b.textContent = label;
-    b.addEventListener('click', async () => {
-      applyView(await api.setSkin(index));
-      // Мазки у стиля свои: полоса частей должна показать его покраску.
-      if (!document.getElementById('partsbar').hidden) await refreshParts();
-    });
-    row.appendChild(b);
-  }
-}
-
-/**
- * Полоса вариантного стиля под альбомом.
- *
- * Стиль переопределяет базу ВЫБОРОЧНО: у него нет своих карточек, пока человек
- * не скажет, какой материал в нём меняет. Пустой альбом здесь - не поломка, но
- * молчать о нём нельзя: именно так это и выглядело - «текстура пропала».
- * Модель при этом показывает базу, а не пустоту.
- */
-export function showStyleBar(st) {
-  const bar = document.getElementById('stylebar');
-  const style = st.style || 0;
-  bar.hidden = !style;
-  if (!style) return;
-
-  const add = document.getElementById('style-add');
-  const candidates = st.style_candidates || [];
-  add.hidden = candidates.length === 0;
-
-  document.getElementById('style-note').textContent = st.materials.length
-    ? 'Материалы стиля: остальные наследуют базовую текстуру.'
-    : 'Стиль пока целиком наследует базу. Добавьте материал, чтобы дать ему свою текстуру.';
-
-  add.onclick = async () => {
-    const material = await ask({
-      title: 'Какой материал меняет этот стиль',
-      list: candidates,
-      ok: 'Добавить',
-    });
-    if (!material) return;
-    applyView(await api.addToStyle(material));
-  };
-}
-
-//: Проигрываемая сейчас анимация вида от первого лица.
-export let fpAction = 'IDLE';
-
-/**
- * Ряд анимаций вида от первого лица.
- *
- * Показывается только в этом виде: в обычном ракурсе выбирать нечего, а
- * пустой ряд занимал бы место под моделью.
- */
-/**
- * Смена анимации на УЖЕ показанной сцене: приехали одни дорожки.
- *
- * Меш, скелет и текстуры у одного оружия те же, поэтому Python и не собирает
- * их заново. Не легли (сцены в кадре почему-то нет) - просим полную сборку,
- * иначе кадр остался бы с прошлой анимацией и без объяснений.
- */
-export function applyFpClip(clip) {
-  withViewer((w) => {
-    if (clip && w.setViewmodelClip && w.setViewmodelClip(clip)) {
-      say('');
-      return;
-    }
-    api.loadFirstPerson(fpAction, true);
-  });
-}
-
-/**
- * Пересобирает сцену в руках, если она сейчас в кадре.
- *
- * Своя модель заменяет геометрию и на руках тоже - сцена под прошлую
- * геометрию устарела. Полная сборка (`full`): Python сцену уже забыл, но
- * страница просит явно, чтобы не зависеть от порядка.
- */
-export async function reloadSceneIfFp() {
-  if (work.dataset.scene !== 'fp') return false;
-  sayBusy('Сборка вида от первого лица…');   // отложенно: подпись о модели успеет прочитаться
-  const res = await api.loadFirstPerson(fpAction, true);
-  if (res.error) say(res.error);
-  return true;
-}
-
-export function showFpActions(actions) {
-  const bar = document.getElementById('fpbar');
-  bar.querySelectorAll('.tag').forEach((b) => b.remove());
-  const list = actions || [];
-  bar.hidden = list.length < 2 || work.dataset.scene !== 'fp';
-  if (bar.hidden) return;
-
-  for (const action of list) {
-    const b = document.createElement('button');
-    b.className = 'tag' + (action === fpAction ? ' is-active' : '');
-    b.textContent = action;
-    b.addEventListener('click', async () => {
-      fpAction = action;
-      bar.querySelectorAll('.tag').forEach(
-        (x) => x.classList.toggle('is-active', x === b));
-      // Из кэша сцена приезжает дорожками за треть секунды - при такой
-      // скорости подпись только мигнёт, поэтому она отложенная.
-      sayBusy(`Сборка сцены: ${action}…`);
-      const res = await api.loadFirstPerson(action);
-      if (res.error) say(res.error);
-    });
-    bar.appendChild(b);
-  }
-}
-
-//: Класс, чью насмешку показываем. Пусто - первый, кто её умеет.
-export let tauntClass = '';
-
-/**
- * Ряд классов насмешки.
- *
- * Одну и ту же насмешку играют до девяти классов, и у каждого своя модель
- * реквизита - выбор меняет и персонажа, и то, что у него в руках.
- */
-export function showTauntClasses(classes) {
-  const bar = document.getElementById('tauntbar');
-  bar.querySelectorAll('.tag').forEach((b) => b.remove());
-  const list = classes || [];
-  // Ряд общий у двух сцен: насмешки и шапки на персонаже. Какую пересобрать
-  // по щелчку, решает сцена, открытая сейчас.
-  const scene = work.dataset.scene;
-  bar.hidden = list.length < 2 || (scene !== 'taunt' && scene !== 'wear');
-  if (bar.hidden) return;
-
-  if (!list.includes(tauntClass)) tauntClass = list[0];
-  for (const name of list) {
-    const b = document.createElement('button');
-    b.className = 'tag' + (name === tauntClass ? ' is-active' : '');
-    b.textContent = name;
-    b.addEventListener('click', async () => {
-      tauntClass = name;
-      bar.querySelectorAll('.tag').forEach(
-        (x) => x.classList.toggle('is-active', x === b));
-      sayBusy(`Сборка сцены: ${name}…`);
-      // У другого класса другое оружие: слот выбираем заново, первый.
-      if (scene === 'wear') wearSlot = '';
-      const res = scene === 'wear' ? await api.loadWear(name, '')
-                                   : await api.loadTaunt(name);
-      if (res.error) say(res.error);
-    });
-    bar.appendChild(b);
-  }
-}
-
-//: Какое оружие у персонажа в сцене «На модели». Пусто - первый слот класса.
-let wearSlot = '';
-
-//: Подписи слотов раскладки. У шпиона второй слот - сапёр, четвёртый -
-//: набор маскировки; у инженера четвёртый - КПК постройки.
-const SLOT_TITLES = {
-  primary: 'Основное', secondary: 'Вспомогательное', building: 'Сапёр',
-  melee: 'Ближний бой', pda: 'КПК',
-};
-
-/**
- * Ряд слотов оружия в сцене «На модели».
- *
- * Слоты приходят от воркера: у каждого класса свой набор (у инженера и
- * шпиона - четыре, у остальных три). Стойку персонажа задаёт слот, поэтому
- * выбор пересобирает сцену целиком.
- */
-export function showWearSlots(ev) {
-  const bar = document.getElementById('wearbar');
-  bar.querySelectorAll('.tag').forEach((b) => b.remove());
-  const slots = ev.slots || [];
-  bar.hidden = !slots.length || work.dataset.scene !== 'wear';
-  if (bar.hidden) return;
-  wearSlot = ev.slot || slots[0];
-  if (ev.tf2_class) tauntClass = ev.tf2_class;
-  for (const slot of slots) {
-    const b = document.createElement('button');
-    b.className = 'tag' + (slot === wearSlot ? ' is-active' : '');
-    b.textContent = t(SLOT_TITLES[slot] || slot);
-    b.addEventListener('click', async () => {
-      if (slot === wearSlot) return;
-      wearSlot = slot;
-      bar.querySelectorAll('.tag').forEach(
-        (x) => x.classList.toggle('is-active', x === b));
-      sayBusy('Сборка сцены…');
-      const res = await api.loadWear(tauntClass, slot);
-      if (res.error) say(res.error);
-    });
-    bar.appendChild(b);
-  }
-}
-
-//: Какая спец-сцена сейчас в кадре: '' | 'none' | 'crit' | 'death'.
-//: От неё зависит, КУДА кладётся текстура - на билборд или на персонажа.
-export let sceneKind = '';
-//: Текстура персонажа в сцене (у эффекта смерти - игровая по умолчанию).
-export let sceneModelTex = '';
-//: Что человек положил сам. Сцена приходит позже текстуры и наоборот -
-//: помним последнее, иначе сборка сцены стирала уже выбранную картинку.
-let userTextures = {};
-
-/**
- * Сцена спец-режима.
- *
- * Спрей - просто картинка, показывать нечего. Крит - персонаж и билборд над
- * ним. Эффект смерти - тот же персонаж, но текстура ложится на него.
- */
-export function showSpecialScene(ev) {
-  sceneKind = ev.scene_kind || 'none';
-  sceneModelTex = ev.model_texture || '';
-  userTextures = {};
-  // Кнопки стилей прошлого предмета к спец-режиму не относятся: своего
-  // события skins тут не будет, и они остались бы в ряду навсегда.
-  document.querySelectorAll('#skinbar .tag').forEach((b) => b.remove());
-
-  if (sceneKind === 'none') {
-    withViewer((w) => w.resetViewer && w.resetViewer());
-    say('Положите картинку в кадр - модели у этого режима нет');
-    return;
-  }
-
-  // Настоящую сцену - солдата с анимацией смерти - собирает воркер, и это
-  // секунды на распаковку модели. Кубики в это время показывать нельзя: при
-  // каждом переключении режима в кадре мелькал бы человечек из коробок.
-  if (ev.pending) {
-    say('Собираем сцену…');
-    return;
-  }
-  specialFallback();
-}
-
-//: Кубики вместо персонажа. Запасной кадр: сюда приходят, если сцену собрать
-//: не вышло - игры нет или модель не разобралась.
-function specialFallback() {
-  const modelUrl = sceneModelTex ? api.fileUrl(sceneModelTex) : '';
-  withViewer((w) => w.loadCritHitScene('', modelUrl));
-  say(sceneKind === 'crit'
-    ? 'Картинка ляжет билбордом над персонажем'
-    : 'Картинка ляжет на персонажа - так эффект выглядит в игре');
-}
-
-/** Сцену собрать не вышло: показываем то, что показывали раньше. */
-export function specialSceneFailed(error) {
-  if (!sceneKind || sceneKind === 'none') return false;
-  specialFallback();
-  if (error) say(error);       // причина важнее подсказки про картинку
-  return true;
-}
-
-/**
- * Настоящая сцена спец-режима: солдат играет ту смерть, что подходит режиму.
- *
- * Крит - выстрел в голову и билборд над телом; лёд и золото - удар в спину;
- * огонь - своя анимация горения. Сцена та же, что у насмешки, поэтому и
- * показывает её общий загрузчик.
- */
-export function showSpecialAnimated(ev) {
-  const url = specialTextureUrl();
-  withViewer((w) => {
-    w.setViewRig(null);
-    w.loadViewmodelAnimated(ev.scene, 0);
-    if (sceneKind === 'crit') w.setCritSprite(url);
-    // У эффекта смерти игра ЗАМЕНЯЕТ материалы трупа целиком: одна картинка
-    // ложится на всё тело, а не по материалам.
-    else if (url) w.updateTextureFromDataUrl(url);
-  });
-  // Сообщение о сборке иначе висит поверх кадра до конца сеанса: своего
-  // события «готово» у прогресса нет.
-  say('');
-  // Текстуры персонажа приехали раньше сцены - разложить их некуда было.
-  if (sceneKind === 'crit') refreshView();
-}
-
-//: Что сейчас показывать в спец-сцене: своя картинка человека, иначе игровая.
-function specialTextureUrl() {
-  const own = Object.values(userTextures || {})[0];
-  if (own) return api.fileUrl(own);
-  return sceneModelTex ? api.fileUrl(sceneModelTex) : '';
-}
-
-/**
- * Текстура спец-сцены: у крита - билборд, у эффекта смерти - сам персонаж.
- *
- * Возвращает true, если сцена забрала текстуру на себя и обычная раздача по
- * материалам не нужна.
- */
-export function applySpecialTexture(textures) {
-  if (!sceneKind || sceneKind === 'none') return false;
-  userTextures = textures || {};
-  const url = specialTextureUrl();
-  if (sceneKind === 'crit') {
-    // Крит забирает на себя ТОЛЬКО билборд: сам солдат красится своими
-    // игровыми текстурами, и обычную раздачу по материалам перебивать нельзя
-    // - иначе он остаётся серым.
-    withViewer((w) => w.updateCritHitTexture(url));
-    return false;
-  }
-  // На кубиках-заглушке это тоже работает: текстура кладётся на все меши
-  // сцены, чем бы она ни была.
-  withViewer((w) => w.updateTextureFromDataUrl(url));
-  return true;
-}
-
-/** Небо: шесть граней кубмапой вместо модели. */
-export function showSkybox(ev) {
-  const faces = (ev && ev.faces) || {};
-  const names = Object.keys(faces);
-  if (!names.length) {
-    say('У этого неба граней в игре не нашлось');
-    return;
-  }
-  withViewer((w) => w.loadSkybox(
-    Object.fromEntries(names.map((f) => [f, api.fileUrl(faces[f])]))));
-  say(names.length < 6 ? `Найдено граней: ${names.length} из 6` : '');
-
-  // Панорама - ПЕРВАЯ карточка ленты. Это единственное место, куда кладут
-  // фото 360°: грани принимают по одной картинке каждая, а панорама одна на
-  // все шесть - Python режет её сам и присылает результат гранями. Без этой
-  // карточки перенос фото 360° не делал ничего вовсе: класть его было некуда.
-  const pano = (ev && ev.pano_key) || '__pano__';
-  cardTitles[pano] = 'Панорама 360°';
-  showMaterials([pano, ...names], { ...faces, [pano]: (ev && ev.pano) || '' });
-  // Пустая карточка - шахматка без объяснений, и её принимали за отсутствие
-  // функции. Подпись говорит, что сюда класть; с картинкой она не нужна.
-  if (!(ev && ev.pano)) {
-    const hint = document.createElement('span');
-    hint.className = 'frame__hint';
-    hint.textContent = 'Перетащите фото 360° (2:1) - оно разрежется на все шесть граней';
-    document.querySelector(`.frame[data-mat="${pano}"] .frame__img`).appendChild(hint);
-  }
-
-  // Небо приходит своим событием, минуя applyView, поэтому кнопки прошлого
-  // предмета надо убрать здесь: у неба нет ни команд, ни варианта, ни стилей.
-  document.querySelectorAll('.teams .tag').forEach((b) => { b.hidden = true; });
-  document.getElementById('skinbar').hidden = true;
-  document.getElementById('stylebar').hidden = true;
-}
-
-/** Статичная сцена вида от первого лица. */
-export async function showFirstPerson(objPath, rig) {
-  const w = viewer();
-  if (!w) return;
-  try {
-    const obj = await (await fetch(api.fileUrl(objPath))).text();
-    // Риг до загрузки: сцена уже стоит там, где надо относительно глаза, и
-    // центрировать её нельзя - двигается камера.
-    w.setViewRig(rig);
-    w.loadModelFromContent(obj, '', 0, 0, 0, 1, 0);
-    say('');
-  } catch (err) {
-    say(`Не удалось показать сцену: ${err.message}`);
-  }
-}
-
-/**
- * Пустой кадр альбома.
- *
- * Шестерёнка тут не для красоты: она переводит панель сборки в правку
- * настроек ЭТОГО материала (разрешение и формат бывают нужны свои - например
- * мелкой детали ни к чему 2048).
- */
-//: Значок настроек кадра. Раньше здесь стоял знак шестерни (U+2699): системный
-//: шрифт рисует его сплошным пятном, и рядом с интерфейсом из волосяных линий
-//: он выглядел чужим. Две дорожки с ползунками - та же толщина линии, что у
-//: рамок, и честнее по смыслу: за кнопкой параметры сборки, а не механизм.
-//: Рисуем 1:1 - единица `viewBox` равна точке экрана, а дорожки стоят на
-//: половинах (4.5, 9.5). Линия толщиной 1 ложится тогда РОВНО в пиксельный
-//: ряд; при 12 точках из шестнадцатеричной сетки она попадала между рядами и
-//: размывалась неравномерно - значок выглядел косым.
-const GEAR = `<svg viewBox="0 0 14 14" width="14" height="14" fill="none"
-                   stroke="currentColor" stroke-width="1" stroke-linecap="round"
-                   aria-hidden="true">
-                <path d="M1.5 4.5h11M1.5 9.5h11"/>
-                <circle cx="4.5" cy="4.5" r="1.75" fill="var(--surface)"/>
-                <circle cx="9.5" cy="9.5" r="1.75" fill="var(--surface)"/>
-              </svg>`;
-
-//: Какая картинка стояла на карточке при прошлой сборке альбома: проявляем
-//: только сменившиеся, иначе каждое обновление состояния мигало бы всем рядом.
-const shownSrc = new Map();
-
-/** <img> карточки; помечен `is-new`, если картинка не та, что была. */
-function frameImage(name, png) {
-  const img = document.createElement('img');
-  img.src = api.opaqueUrl(png);
-  img.alt = name;
-  if (shownSrc.get(name) !== img.src) img.classList.add('is-new');
-  shownSrc.set(name, img.src);
-  return img;
-}
-
-export function frameNode(name) {
-  const fig = document.createElement('figure');
-  fig.className = 'frame';
-  fig.dataset.mat = name;
-  fig.innerHTML = `<div class="frame__img">
-                     <div class="frame__tools">
-                       <button class="frame__tool" type="button"
-                               title="Настройки этой текстуры">${GEAR}</button>
-                       <button class="frame__tool frame__off" type="button" hidden
-                               title="Убрать материал из стиля">×</button>
-                     </div>
-                   </div>
-                   <figcaption class="frame__name"></figcaption>`;
-  return fig;
-}
-
-/** Добавляет один кадр в конец альбома, не трогая остальные. */
-export function addFrame(name, png) {
-  const tab = document.createElement('button');
-  tab.className = 'mattab';
-  tab.textContent = name;
-  stage.tabs.appendChild(tab);
-
-  const fig = frameNode(name);
-  fig.querySelector('.frame__name').textContent = name;
-  fig.querySelector('.frame__img').appendChild(frameImage(name, png));
-  stage.album.appendChild(fig);
-
-  bindAlbum();
-  goTo(frames.length - 1);        // сразу показываем то, что построили
-}
-
-//: {имя_карточки: подпись} - мод из VPK называет текстуры по VTF, а человеку
-//: показывает понятное имя. Пусто у обычных моделей.
-export let cardTitles = {};
-
-/** Как подписать карточку: служебный ключ и имена мода - особые случаи. */
-export function cardTitle(name) {
-  if (name === SINGLE_TEX) return 'текстура';
-  // Карточка гирлянды: `deco:<вид>/<материал>` - вид подписью, материал как есть.
-  const decor = /^deco:([^/]+)\/(.+)$/.exec(name || '');
-  if (decor) return t('Гирлянда: {}').replace('{}', decor[2]);
-  // Карточка варианта встаёт на место главной, пока он включён: подпись
-  // называет вариант, а не материал - имя материала есть в подсказке.
-  if (/_(gold|australium)$/i.test(name)) return 'Australium';
-  // Материал части: номер тот же, что метка на её чипах в списке частей;
-  // имя материала (оно нужно для VMT) - в подсказке.
-  for (const spec of Object.values(lastView?.part_materials || {})) {
-    const at = (spec.parts || []).findIndex((p) => p.name === name);
-    if (at >= 0) return t('Материал части {}').replace('{}', at + 1);
-  }
-  return cardTitles[name] || name;
-}
-
-/** Перерисовывает вкладки и альбом под материалы, пришедшие от воркера. */
-export function showMaterials(names, textures = {}, inStyle = false) {
-  stage.tabs.innerHTML = '';
-  stage.album.innerHTML = '';
-
-  for (const name of names) {
-    const tab = document.createElement('button');
-    tab.className = 'mattab';
-    tab.textContent = cardTitle(name);
-    stage.tabs.appendChild(tab);
-    // Убрать из стиля можно только то, что в стиль добавляли.
-
-    const fig = frameNode(name);
-    const png = textures[name];
-    // Служебный ключ одноматериальной модели показывать как имя нельзя.
-    const label = fig.querySelector('.frame__name');
-    label.textContent = cardTitle(name);
-    // Подпись бывает не именем материала (вариант): имя - в подсказке.
-    if (name !== SINGLE_TEX && label.textContent !== name) label.title = name;
-    if (png) fig.querySelector('.frame__img').appendChild(frameImage(name, png));
-    fig.querySelector('.frame__off').hidden = !inStyle;
-    stage.album.appendChild(fig);
-  }
-  bindAlbum();
-}
-
 // ── Раскладка: текстура, модель или обе ─────────────────────────────────
 //
 // Только раскладка. Что показано в кадре, решает ряд у самого кадра (сцены):
@@ -1226,81 +489,6 @@ document.querySelector('.modes').addEventListener('click', (e) => {
   }
 });
 
-// ── Сцена: сам предмет, руки или насмешка ───────────────────────────────
-//
-// Вид от первого лица и насмешка - не ракурсы, а собранные сцены: их ставит
-// отдельный воркер, и снять их обязан тот же, кто поставил. «Сам по себе» -
-// это и есть выход, названный словом, а не побочное действие чего-то другого.
-async function showScene(name) {
-  if ((work.dataset.scene || 'item') === name) return;   // уже показано
-  markScene(name);
-  // Резка модели относится к обычной геометрии: на сцене её карта частей уже
-  // не про то, что в кадре. Откладываем, а не закрываем насовсем - по выходу
-  // режим вернётся сам (см. resumeParts).
-  if (name !== 'item') suspendParts();
-
-  if (name === 'wear') {
-    say('Сборка сцены…');
-    withViewer((w) => w.setViewRig(null));   // камера свободная, как у насмешки
-    const res = await api.loadWear(tauntClass, wearSlot);
-    if (res.error) say(res.error);
-    return;
-  }
-  if (name === 'taunt') {
-    say('Сборка насмешки…');
-    withViewer((w) => w.setViewRig(null));   // у насмешки камера свободная
-    const res = await api.loadTaunt(tauntClass);
-    if (res.error) say(res.error);
-    return;
-  }
-  if (name === 'fp') {
-    say('Сборка вида от первого лица…');
-    await flushFitSave();       // сцена собирается из SMD - с последней подгонкой
-    const res = await api.loadFirstPerson(fpAction);
-    if (res.error) say(res.error);
-    return;   // риг придёт вместе со сценой: порядок ответа и события не задан
-  }
-
-  // Свободная камера - это ещё не выход: сцену собирал отдельный воркер, и без
-  // возврата обычной модели оружие оставалось в руках, только вертеть его
-  // теперь можно было свободно. Кадр обычного превью уже есть, поэтому Python
-  // пересобирать нечего - он лишь снимает сцену и подложку. Выход у обеих
-  // сцен один: `leave_first_person` гасит и вьюмодель, и насмешку - обе держат
-  // подложку с текстурами персонажа (см. session.leave_first_person).
-  withViewer((w) => w.setViewRig(null));
-  document.getElementById('fpbar').hidden = true;
-  document.getElementById('tauntbar').hidden = true;
-  document.getElementById('wearbar').hidden = true;
-  if (root.dataset.section === 'particles') return;   // там вьювера моделей нет
-  applyView(await api.leaveFirstPerson());
-  if (lastModel) await showModel(lastModel);
-  // Строго после модели: `showModel` заново связывает части со вьювером
-  // (bindParts закрывает режим), и включённый до него он тут же и погас бы.
-  await resumeParts();
-}
-
-/**
- * Отмечает выбранную сцену.
- *
- * Состояние живёт на `.work`: по нему открываются ряды выбора анимации и
- * класса, и спрашивать его у кнопок значило бы держать одно и то же в
- * разметке дважды.
- *
- * Кнопки ищем ТОЛЬКО в своём ряду: `data-scene` есть и у точек эффекта («в
- * мире» / «на модели») - там это сцена самой точки, и общий поиск красил бы
- * заодно их.
- */
-function markScene(name) {
-  work.dataset.scene = name;
-  document.querySelectorAll('.half__bar--scenes [data-scene]').forEach(
-    (b) => b.classList.toggle('is-active', b.dataset.scene === name));
-}
-
-document.querySelector('.half__bar--scenes').addEventListener('click', (e) => {
-  const btn = e.target.closest('[data-scene]');
-  if (btn) showScene(btn.dataset.scene);
-});
-
 // Команды и вариант: решение принимает Python, страница применяет ответ.
 document.querySelector('.teams').addEventListener('click', async (e) => {
   const btn = e.target.closest('.tag');
@@ -1328,6 +516,3 @@ document.getElementById('maketeam').addEventListener('click', async () => {
  *  вида от первого лица, не пересобирая её воркером. */
 export function rememberModel(ev) { lastModel = ev; }
 
-/** Подписи карточек мода из VPK: он называет текстуры по VTF, а человеку
- *  показывает понятное имя. */
-export function setCardTitles(titles) { cardTitles = titles; }

@@ -27,6 +27,8 @@ import {
 import {
   loadPcf,
   showEffects,
+  showTree,
+  currentFile,
   pickSystem,
   systemMenu,
   showParticleFrame,
@@ -234,8 +236,8 @@ export async function showModLibrary() {
   els.note.textContent = 'Свои работы и моды из VPK. Предмет из списка оружия '
     + 'открывается игровым - сохранённая работа открывается отсюда.';
 
-  const works = await showWorks();
-
+  // Сверху моды из VPK (первой - дверь к новому файлу), под полосой - свои
+  // работы: в одной сетке они путались, хвост модов уезжал в ряд к работам.
   const open = document.createElement('button');
   open.className = 'pick pick--open';
   open.innerHTML = `<span class="pick__box"></span>
@@ -278,6 +280,13 @@ export async function showModLibrary() {
     card.append(drop);
     els.grid.append(card);
   }
+
+  const rule = document.createElement('div');
+  rule.className = 'catalog__rule';
+  rule.textContent = 'Мои работы';
+  els.grid.append(rule);
+  const works = await showWorks();
+  if (!works) rule.remove();
   // Счётчик строится мимо fillGrid, обновить его надо самим: иначе тут
   // висит число от прошлой категории.
   showCount(works + mods.length);
@@ -335,6 +344,26 @@ async function showWorks() {
       card.querySelector('.pick__box').appendChild(img);
     }
     card.addEventListener('click', () => openWork(work));
+
+    // Удаление - как у модов, на самой карточке. Работа уходит насовсем:
+    // копии, как у мода из VPK, у неё нет.
+    const drop = document.createElement('span');
+    drop.className = 'pick__drop';
+    drop.title = 'Удалить работу';
+    drop.textContent = '×';
+    drop.addEventListener('click', async (e) => {
+      e.stopPropagation();                  // не открыть заодно
+      const yes = await ask({
+        title: 'Удалить работу',
+        text: `${work.name}\nРабота удалится насовсем вместе с её файлами. Игровой предмет не изменится.`,
+        ok: 'Удалить',
+      });
+      if (!yes) return;
+      const res = await api.deleteWork(work.key);
+      if (res.error) { say(res.error); return; }
+      await showModLibrary();
+    });
+    card.append(drop);
     els.grid.append(card);
   }
   return list.length;
@@ -695,8 +724,7 @@ export async function pickSection(name) {
 
 /** Каталог частиц без запроса: дерево выбранного файла или эффекты игры. */
 async function showParticleHome() {
-  const { pcfNodes, pSystem, fillTree } = await import('./particles/index.js');
-  if (els.cat.value && pcfNodes.length) fillTree(pcfNodes, pSystem);
+  if (els.cat.value && pcfNodes.length) showTree();
   else await showEffects('');
 }
 
@@ -834,7 +862,11 @@ export async function boot() {
   await fillCategories();
   els.cat.addEventListener('change', () => {
     if (sel.section !== 'particles') return pickCategory(els.cat.value);
-    return els.cat.value ? loadPcf(els.cat.value) : showEffects(sel.query);
+    if (!els.cat.value) return showEffects(sel.query);
+    // Уже открытый файл (его открыли из списка эффектов) - только дерево:
+    // разбор заново выбросил бы несохранённые правки без вопроса.
+    if (els.cat.value === currentFile()) return showTree();
+    return loadPcf(els.cat.value);
   });
   await pickCategory('weapon');
   // Страницу подняли заново после смены языка - возвращаемся в тот же раздел.

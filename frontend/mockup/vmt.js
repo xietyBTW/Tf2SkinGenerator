@@ -11,7 +11,8 @@ import { escapeHtml } from './util.js';
 import { say } from './stage.js';
 import { ask } from './ask.js';
 import { pickEffect, closeEffects } from './vmt-effects.js';
-import { currentMaterial } from './album.js';
+import { currentMaterial, allMaterials } from './album.js';
+import { t } from './i18n.js';
 
 // ── Редактор VMT ────────────────────────────────────────────────────────
 // Открывается сохранённая правка, иначе - оригинал из игры. Проверку
@@ -23,8 +24,9 @@ const vmtText = document.getElementById('vmt-text');
 const vmtHl = document.getElementById('vmt-hl');
 const vmtStatus = document.getElementById('vmt-status');
 //: `custom` - стоит ли своя правка: от неё зависит и строка состояния, и
-//: кнопка «Как в игре».
-let vmtState = { material: '', original: '', custom: false };
+//: кнопка «Как в игре». `all` - материалы, куда уходит правка без
+//: шестерёнки (null - правка только этого материала).
+let vmtState = { material: '', original: '', custom: false, all: null };
 
 //: {$параметр: описание} - для подсказок при наведении.
 let vmtDocs = {};
@@ -315,8 +317,14 @@ function markVmtState() {
                          : 'Показывается оригинал из игры');
 }
 
-export async function openVmtEditor() {
-  const [res, groups] = await Promise.all([api.openVmt(currentMaterial()),
+/**
+ * `only` - материал под горящей шестерёнкой: правка только его. Без неё
+ * правка общая: в окне VMT текущей карточки, а сохранение разносит её во все
+ * материалы предмета (vmt_spread.py).
+ */
+export async function openVmtEditor({ only } = {}) {
+  const single = only !== undefined;
+  const [res, groups] = await Promise.all([api.openVmt(single ? only : currentMaterial()),
                                            api.vmtParams()]);
   if (res.error) { say(res.error); return; }
   vmtRef = groups;
@@ -326,13 +334,23 @@ export async function openVmtEditor() {
 
   // `game` - игровой оригинал на всё время окна: `original` после сохранения
   // становится сохранённым текстом, а эффекту нужна родная текстура.
+  const all = single ? null : allMaterials();
   vmtState = { material: res.material, original: res.original,
-               custom: Boolean(res.edited), game: res.original };
-  document.getElementById('vmt-mat').textContent = res.material;
+               custom: Boolean(res.edited), game: res.original,
+               all: all && all.length > 1 ? all : null,
+               // Текст до правки: из разницы с ним остальным материалам
+               // уходят изменённые ключи и эффекты.
+               before: res.content };
+  // Куда пойдёт правка - видно сразу: режим задаёт шестерёнка, а её на
+  // экране редактора нет.
+  document.getElementById('vmt-mat').textContent = vmtState.all
+    ? t(`${res.material} · все материалы (${vmtState.all.length})`) : res.material;
   vmtText.value = res.content;
   paintVmt();
   markVmtState();
-  document.getElementById('vmt-reset').hidden = !res.edited;
+  // В общем режиме правки могут быть у других материалов, даже если у
+  // этого их нет.
+  document.getElementById('vmt-reset').hidden = !res.edited && !vmtState.all;
   vmtDlg.showModal();
   // Прокрутка сбрасывается ТОЛЬКО после показа: у скрытого поля нет раскладки,
   // и присвоение до showModal терялось - файл открывался на хвосте.
@@ -343,25 +361,53 @@ export async function openVmtEditor() {
 document.getElementById('vmt-save').addEventListener('click', async () => {
   // Оригинал отправляем вместе с правкой: Python фиксирует его бэкапом один
   // раз, иначе «как в игре» после второй правки вернуло бы первую.
-  const res = await api.saveVmt(vmtState.material, vmtText.value, vmtState.original);
+  const res = vmtState.all
+    ? await api.saveVmtAll(vmtState.material, vmtText.value, vmtState.before,
+                           vmtState.game, vmtState.all)
+    : await api.saveVmt(vmtState.material, vmtText.value, vmtState.original);
   if (res.error) { vmtSay(res.error, 'bad'); return; }
   vmtText.value = res.content;          // с дописанным ватермарком
   paintVmt();
   // Сохранённое становится новым «оригиналом» окна: иначе маркер «есть
   // несохранённые» висел бы сразу после сохранения.
   vmtState.original = res.content;
+  vmtState.before = res.content;
   vmtState.custom = true;
   document.getElementById('vmt-reset').hidden = false;
-  vmtSay('Сохранено', 'good');
+  vmtSay(...spreadReport(res.spread));
 });
 
+/** Итог переноса правки в остальные материалы - одной строкой состояния. */
+function spreadReport(spread) {
+  if (!spread) return ['Сохранено', 'good'];
+  const parts = [t(`Сохранено, ещё в ${spread.updated.length} мат.`)];
+  if (spread.notes.length) {
+    parts.push(t('не перенесено: ') + spread.notes.map((n) => (n === 'proxies'
+      ? t('правки в Proxies') : t('снятие эффекта'))).join(', '));
+  }
+  if (spread.skipped.length) {
+    parts.push(t('не легло: ') + spread.skipped.map((x) => `${x.material} (${x.reason})`).join('; '));
+  }
+  return [parts.join(' · '), spread.notes.length || spread.skipped.length ? 'warn' : 'good'];
+}
+
 document.getElementById('vmt-reset').addEventListener('click', async () => {
-  const res = await api.resetVmt(vmtState.material);
+  if (vmtState.all) {
+    const go = await ask({ title: 'Как в игре',
+                           text: t(`Правки VMT снимутся у всех материалов предмета (${vmtState.all.length}).`),
+                           ok: 'Снять' });
+    if (!go) return;
+  }
+  const res = vmtState.all ? await api.resetVmtAll(vmtState.all)
+                           : await api.resetVmt(vmtState.material);
   if (res.error) { vmtSay(res.error, 'bad'); return; }
-  vmtText.value = vmtState.original;
+  // Игровой оригинал, а не `original`: после сохранения там сама правка.
+  vmtText.value = vmtState.game;
+  vmtState.original = vmtState.game;
+  vmtState.before = vmtState.game;
   paintVmt();
   vmtState.custom = false;
-  document.getElementById('vmt-reset').hidden = true;
+  document.getElementById('vmt-reset').hidden = !vmtState.all;
   vmtSay('Правка удалена, показан игровой оригинал');
 });
 

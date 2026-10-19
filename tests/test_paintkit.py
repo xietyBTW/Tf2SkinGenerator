@@ -221,7 +221,8 @@ class TargetsTests(unittest.TestCase):
         from src.domain.preview.session import PreviewSession
         s.preview = PreviewSession()
         s.preview.textures.material_names = cards
-        return s._paintkit_targets(paintable, main)
+        from src.app.paintkit_editor import PaintkitEditor
+        return PaintkitEditor(s)._paintkit_targets(paintable, main)
 
     def test_single_material_goes_to_main_card(self):
         self.assertEqual(self.targets(['__single__'], ['c_sniperrifle'], '__single__'),

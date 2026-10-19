@@ -2,6 +2,7 @@
 с эффектом «Цвет блеска киллстрика»."""
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 import numpy as np
@@ -40,22 +41,12 @@ class PatternTests(unittest.TestCase):
         self.assertIsNone(sp.parse("effects/animatedsheen/animatedsheen0"))
 
     def test_frames_start_blank_and_light_up(self):
-        for name in (p for p in sp.PATTERNS if p != "calib"):
+        for name in sp.PATTERNS:
             pics = sp.frames(name, 31)
             self.assertEqual(len(pics), 31)
             self.assertEqual(pics[0][..., :3].max(), 0, name)          # кадр 0 не рисуется
             self.assertGreater(max(p[..., 0].max() for p in pics), 120, name)
             self.assertEqual(pics[-1][..., :3].max(), 0, name)         # пауза в конце прохода
-
-    def test_calibration_stays_for_the_whole_pass(self):
-        pics = sp.frames("calib", 26)
-        self.assertEqual(pics[0][..., :3].max(), 0)
-        self.assertTrue(all(np.array_equal(pics[1], p) for p in pics[1:]))
-        self.assertEqual(pics[1].shape[:2], (sp.CALIB_SIZE, sp.CALIB_SIZE))
-        lum = pics[1][..., 0]
-        # Несимметрична: зеркало и поворот дают другую картинку.
-        self.assertFalse(np.array_equal(lum, lum[:, ::-1]))
-        self.assertFalse(np.array_equal(lum, lum[::-1, :]))
 
     def test_frames_are_deterministic(self):
         a, b = sp.frames("sparkle", 30), sp.frames("sparkle", 30)
@@ -87,6 +78,27 @@ class PatternTests(unittest.TestCase):
             self.assertEqual(sp.materialize(root, "vgui\\replay\\thumbnails"), 0)
             self.assertNotIn('thumbnails/vgui', (mat / "a.vmt").read_text(encoding="utf-8"))
 
+    def test_each_mod_gets_its_own_sheen_folder(self):
+        """Два мода с одинаковыми именами масок и ровной кубмапой не должны
+        делить путь: прелоадер видел конфликт, а при разном содержимом один
+        мод ломал бы блеск другого."""
+        out = fx.apply(fx.SHEEN, {"color": "#00ff00", "pattern": "p_mist"}, STOCK, STOCK,
+                       BOUNDS)["text"]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "materials" / "models").mkdir(parents=True)
+            vmt = root / "materials" / "models" / "a.vmt"
+            vmt.write_text(out, encoding="utf-8")
+            self.assertEqual(sp.materialize(root, "console", namespace="My Kunai-mod"), 2)
+            text = vmt.read_text(encoding="utf-8")
+            self.assertIn('"$sheenmap" "console/my_kunai_mod/tf2sg/sheen/flat"', text)
+            self.assertIn('"$sheenmapmask" "console/my_kunai_mod/tf2sg/sheen/p_mist_h', text)
+            self.assertTrue((root / "materials" / "console" / "my_kunai_mod" / "tf2sg"
+                             / "sheen" / "flat.vtf").is_file())
+            # Повторная упаковка не плодит вложенных папок.
+            self.assertEqual(sp.materialize(root, "console", namespace="My Kunai-mod"), 0)
+            self.assertEqual(vmt.read_text(encoding="utf-8"), text)
+
     def test_materialize_without_bypass_folder(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -100,33 +112,53 @@ class PatternTests(unittest.TestCase):
 
 class EffectPatternTests(unittest.TestCase):
     def sheen(self, text=STOCK, **vals):
-        vals = {"color": "#00ff00", "bright": 1, "look": "normal", "when": "game", **vals}
+        vals = {"color": "#00ff00", "bright": 1, "when": "game", **vals}
         return fx.apply(fx.SHEEN, vals, text, "", BOUNDS)["text"]
 
     def test_pattern_sets_own_mask_and_reopens(self):
-        out = self.sheen(pattern="pulse2", length=4)
-        self.assertIn('"$sheenmapmask" "tf2sg/sheen/pulse2_101"', out)
+        """Готовый узор - шаблон конструктора, маска в пропорции оружия."""
+        out = self.sheen(pattern="p_pulse", length=4)
+        self.assertRegex(out, r'"\$sheenmapmask" "tf2sg/sheen/p_pulse_a\d+r?_101"')
         got = fx.values(fx.SHEEN, out)
-        self.assertEqual((got["pattern"], got["length"]), ("pulse2", 4.0))
+        self.assertEqual((got["pattern"], got["length"]), ("p_pulse", 4.0))
         # Кадры по-прежнему крутит прокси игры — он в материале остался.
         self.assertIn("AnimatedWeaponSheen", out)
 
+    def test_old_pattern_reopens_as_its_template(self):
+        """VMT старой работы со старым узором открывается тем же видом."""
+        old = STOCK.replace("Effects/AnimatedSheen/animatedsheen0", "tf2sg/sheen/stripes_101")
+        old = old.replace('"$sheenPassEnabled"', '"$tf2sg_sheen" "[1 1 1]"\n\t"$sheenPassEnabled"')
+        got = fx.values(fx.SHEEN, old)
+        self.assertEqual((got["pattern"], got["length"]), ("p_running", 4.0))
+
+    def test_own_pattern_ignores_effect_colour(self):
+        """Свой узор красят слои: цвет эффекта белый, радуга не включается."""
+        from src.services import sheen_library
+        with mock.patch.object(sheen_library, "load",
+                               lambda pid, deleted=False: {"id": pid, "length": 3.0,
+                                                           "spec": {"layers": []}}):
+            out = self.sheen(pattern="u0123abcd", color="#00ff00", bright=2,
+                             color_mode="rainbow", length=8)
+        self.assertIn('"$tf2sg_sheen" "[2 2 2]"', out)
+        self.assertNotIn("Sine", out)
+        self.assertIn("_76", out)            # длина из конструктора, 3 с
+
     def test_back_to_game_pattern_restores_stock_mask(self):
-        out = self.sheen(self.sheen(pattern="mist"), pattern="game")
+        out = self.sheen(self.sheen(pattern="p_mist"), pattern="game")
         self.assertIn('"$sheenmapmask" "effects/animatedsheen/animatedsheen0"', out)
         self.assertEqual(fx.values(fx.SHEEN, out)["pattern"], "game")
 
     def test_back_to_game_restores_own_mod_mask(self):
         mod = STOCK.replace("Effects/AnimatedSheen/animatedsheen0", "mods/my_mask")
-        own = fx.apply(fx.SHEEN, {"color": "#00ff00", "pattern": "mist"}, mod, mod, BOUNDS)["text"]
+        own = fx.apply(fx.SHEEN, {"color": "#00ff00", "pattern": "p_mist"}, mod, mod, BOUNDS)["text"]
         back = fx.apply(fx.SHEEN, {"color": "#00ff00", "pattern": "game"}, own, mod, BOUNDS)["text"]
         self.assertIn('"$sheenmapmask" "mods/my_mask"', back)
 
     def test_flat_cube_for_own_pattern_and_back(self):
-        out = self.sheen(pattern="mist")
+        out = self.sheen(pattern="p_mist")
         self.assertIn('"$sheenmap" "tf2sg/sheen/flat"', out)
         self.assertEqual(fx.values(fx.SHEEN, out)["shine"], "flat")
-        live = self.sheen(out, pattern="mist", shine="live")
+        live = self.sheen(out, pattern="p_mist", shine="live")
         self.assertIn('"$sheenmap" "cubemaps/cubemap_sheen001"', live)
         self.assertEqual(fx.values(fx.SHEEN, live)["shine"], "live")
         back = fx.apply(fx.SHEEN, {"color": "#00ff00", "pattern": "game"}, out, STOCK, BOUNDS)["text"]
@@ -139,7 +171,7 @@ class EffectPatternTests(unittest.TestCase):
             self.assertEqual(sp.materialize(root, "console"), 2)   # маска + кубмапа
             text = (mat / "a.vmt").read_text(encoding="utf-8")
             self.assertIn('"$sheenmap" "console/tf2sg/sheen/flat"', text)
-            self.assertIn('"$sheenmapmask" "console/tf2sg/sheen/mist_', text)
+            self.assertIn('"$sheenmapmask" "console/tf2sg/sheen/p_mist_h', text)
             from src.services.vtflib_wrapper import VTFLib
             cube = str(root / "materials" / "console" / "tf2sg" / "sheen" / "flat.vtf")
             for face in range(7):
@@ -152,11 +184,43 @@ class EffectPatternTests(unittest.TestCase):
             self.assertEqual(len(raw) - header, 7 * 4 * 4 * 4)
             self.assertEqual(sp.materialize(root, "console"), 0)
 
+    def test_black_sheen_green_tint_on_red_only_mask(self):
+        """Чёрный блеск (проверен в игре): непрозрачность берётся из красного
+        канала маски, цвет - оттенок x маска. Зелёный оттенок на красной маске
+        = полная непрозрачность при цвете 0."""
+        out = self.sheen(pattern="p_classic", dark="on", color="#ff00ff", bright=2)
+        self.assertIn('"$tf2sg_sheen" "[0 2 2]"', out)          # без красного
+        self.assertRegex(out, r'"\$sheenmapmask" "tf2sg/sheen/p_classic_a\d+k_\d+"')
+        got = fx.values(fx.SHEEN, out)
+        self.assertEqual((got["dark"], got["color"]), ("on", "#ffffff"))
+        # У игрового узора маска серая - чёрный там не получится, и поля нет.
+        game = self.sheen(pattern="game", dark="on", color="#ff0000")
+        self.assertIn('"$tf2sg_sheen" "[1 0 0]"', game)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "materials" / "models").mkdir(parents=True)
+            (root / "materials" / "models" / "a.vmt").write_text(out, encoding="utf-8")
+            sp.materialize(root, "console")
+            vtf = next(root.rglob("p_classic_*k_*.vtf"))
+            from src.services.vtflib_wrapper import VTFLib
+            frames, w, h = VTFLib.read_vtf_all_frames(str(vtf))
+            px = np.stack([np.frombuffer(f, np.uint8).reshape(h, w, 4) for f in frames])
+            self.assertGreater(px[..., 0].max(), 120)
+            self.assertEqual(px[..., 1:3].max(), 0)
+
+    def test_black_hides_the_colour_fields(self):
+        fields = {f["key"]: f for f in fx.fields(fx.SHEEN, False)}
+        # Только у шаблонов: у своего узора гамму выбирают цвета слоёв.
+        self.assertIn("p_classic", fields["dark"]["show_if"]["pattern"])
+        self.assertNotIn("game", fields["dark"]["show_if"]["pattern"])
+        self.assertEqual(fields["color_mode"]["show_if"]["dark!"], "on")
+
     def test_always_counts_pattern_frames(self):
-        out = self.sheen(pattern="double", length=2, when="always")
+        out = self.sheen(pattern="p_double", length=2, when="always")
         self.assertIn('"$tf2sg_sheenlast" "50.0"', out)               # 51 кадр
         keys = [l for l in out.lower().splitlines() if l.startswith('	"$sheenmapmask" ')]
-        self.assertEqual(keys, ['	"$sheenmapmask" "tf2sg/sheen/double_51"'])
+        self.assertEqual(len(keys), 1)
+        self.assertRegex(keys[0], r'"tf2sg/sheen/p_double_a\d+r?_51"$')
 
 
 if __name__ == "__main__":

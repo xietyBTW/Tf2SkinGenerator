@@ -1,0 +1,641 @@
+/*
+ * Части модели: палитра, панель частей, чипы, свой материал части.
+ *
+ * Часть стилей страницы: файлы подключены в index.html в порядке каскада
+ * (style.css первым), порядок менять нельзя.
+ */
+
+/* ── Части модели ───────────────────────────────────────────────────────
+   Палитра ПОВЕРХ кадра, а не ряд кнопок под ним. Инструментом работают по
+   самой модели, и место ему рядом с ней; в подвале он вдобавок исчезал
+   вместе с подвалом, стоило развернуть кадр на всё окно (F11).
+
+   Сам слой указатель не перехватывает — только панели: между ними и под ними
+   модель должна вращаться как обычно. Панели прибиты каждая к своему краю
+   абсолютно, а не выложены флексом: у флекса высота считается по содержимому,
+   и ограничить прокруткой в нём можно только распоркой. */
+.ptools {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+.ptools > * { pointer-events: auto; }
+
+/* Колонка значков — у правого края, по центру: рука с мышью и так там, а
+   середина высоты — то место, куда её не надо вести. */
+.ptools__bar {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  padding: 3px;
+  border: 1px solid var(--hairline-strong);
+  background: var(--surface);
+}
+.ptools__body { display: flex; flex-direction: column; }
+
+.ptools__btn {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink-soft);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: color var(--dur), background var(--dur);
+}
+/* Значки рисуются волосяной линией — тем же весом, что рамки и подчёркивания
+   всего интерфейса. Заливка есть только у точек на кубике. */
+.ptools__btn svg { width: 18px; height: 18px; fill: none; stroke: currentColor; }
+.ptools__btn .ptools__pip { fill: currentColor; stroke: none; }
+.ptools__btn:hover { color: var(--ink); background: var(--bg); }
+/* Выбранный инструмент — инверсия, как всё выбранное в этом интерфейсе. */
+.ptools__btn.is-active { background: var(--ink); color: var(--surface); }
+
+/* Свёрнутая палитра: остаётся одна кнопка разворота, стрелка смотрит в другую
+   сторону. Кадр при этом чист — модель разглядывают и издали тоже. */
+.ptools__fold {
+  width: auto;
+  height: 18px;
+  border-bottom: 1px solid var(--hairline);
+}
+.ptools__fold svg { width: 12px; height: 12px; }
+/* Свёртка: столбик значков складывается по высоте (`interpolate-size` —
+   высота auto ↔ 0 анимируется), панель настроек уходит вправо и гаснет.
+   Панель настроек прячут ещё и атрибутом hidden — когда у инструмента
+   настроек нет; оба состояния уходят одинаково. */
+.ptools__body {
+  interpolate-size: allow-keywords;
+  height: auto;
+  overflow: hidden;
+  transition: height var(--dur-panel), opacity var(--dur-panel),
+              visibility var(--dur-panel) allow-discrete;
+}
+.ptools.is-folded .ptools__body { height: 0; opacity: 0; visibility: hidden; }
+.ptools__opts {
+  transition: opacity var(--dur-panel), transform var(--dur-panel),
+              display var(--dur-panel) allow-discrete;
+}
+.ptools.is-folded .ptools__opts { display: none; }
+.ptools.is-folded .ptools__opts, .ptools__opts[hidden] {
+  opacity: 0;
+  transform: translateX(16px);
+}
+@starting-style {
+  .ptools:not(.is-folded) .ptools__opts:not([hidden]) {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+}
+.ptools.is-folded .ptools__fold { border-bottom: 0; }
+.ptools.is-folded .ptools__fold svg { transform: scaleX(-1); }
+
+/* Черта отделяет инструменты от цвета и от действий над всей работой:
+   «Убрать всё» необратимо, и стоять вплотную к кисти ему не место. */
+.ptools__sep {
+  height: 1px;
+  margin: 4px 2px;
+  background: var(--hairline);
+}
+
+/* Чем красят: два квадрата внахлёст, как в редакторах изображений. Второй
+   виден только при переходе — иначе он обещал бы цвет, которым ничего не
+   красится. */
+.ptools__color { position: relative; }
+.ptools__color:hover { background: none; }   /* тут говорит цвет, а не подложка */
+.ptools__fg,
+.ptools__bg {
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--hairline-strong);
+}
+.ptools__fg { left: 50%; top: 50%; transform: translate(-50%, -50%); }
+.ptools__bg { display: none; }
+/* С переходом их двое, внахлёст — и пара стоит по центру как целое. */
+.ptools__color.is-grad .ptools__fg {
+  width: 14px;
+  height: 14px;
+  left: 4px;
+  top: 4px;
+  transform: none;
+}
+.ptools__color.is-grad .ptools__bg {
+  display: block;
+  width: 14px;
+  height: 14px;
+  right: 4px;
+  bottom: 4px;
+}
+.ptools__color:hover .ptools__fg,
+.ptools__color:hover .ptools__bg { border-color: var(--ink); }
+
+/* Настройки выбранного значка — слева от колонки, столбцом: рядом с колонкой
+   широкой панели нет места, да и сверху вниз читается быстрее.
+   Верх — вровень с верхом колонки (её высоту отдаёт layout.js в --bar-h), а
+   не по центру: у центрированной панели при появлении блока (выделение
+   ножниц) верх уезжал вверх, и переключатель уходил из-под курсора. Теперь
+   панель растёт только вниз. Прокрутка — на случай низкого окна. */
+.ptools__opts {
+  position: absolute;
+  right: 58px;
+  top: calc(50% - var(--bar-h, 0px) / 2);
+  width: 190px;
+  max-height: calc(50% + var(--bar-h, 0px) / 2 - 12px);
+  padding: 12px;
+  border: 1px solid var(--hairline-strong);
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow: auto;
+}
+.ptools__title { flex: none; }
+
+/* Видна ровно одна группа: человек в момент времени либо красит, либо режет,
+   либо обводит. */
+/* Ножницы: способ — переключателем во всю ширину, выделенное и нарезка всего
+   разом — своими блоками под волосяной линией. */
+.cut__modes,
+.cut__sel,
+.cut__auto { align-self: stretch; }
+.cut__sel,
+.cut__auto {
+  padding-top: 10px;
+  border-top: 1px solid var(--hairline);
+}
+.cut__sel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.cut__count { font-variant-numeric: tabular-nums; }
+.cut__acts {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+/* «Отделить» — главное действие блока: залита, как основная кнопка окна,
+   только в размер панели. */
+.cut__apply {
+  flex: 1 1 auto;
+  padding: 7px 10px;
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  color: var(--surface);
+  font: inherit;
+  font-size: 9.5px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background var(--dur), border-color var(--dur);
+}
+.cut__apply:hover { background: var(--accent); border-color: var(--accent); }
+
+.parts__group {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+}
+/* Подпись НАД ползунком: в столбце шириной с сам ползунок «Нарезать по островам» рядом
+   с ним не помещается. */
+.ptools .parts__strength { flex-direction: column; align-items: stretch; gap: 5px; }
+.ptools .parts__strength input { width: 100%; }
+
+/* Подгонка своей модели: числа столбцом в той же панели, что настройки
+   частей; три поля поворота или сдвига — в ряд, шире панель не станет. */
+.fit__group { display: flex; flex-direction: column; gap: 5px; }
+.fit__row { display: flex; gap: 4px; }
+.fit__row .input--num { width: 0; flex: 1; min-width: 0; }
+
+/* Переход из первого цвета во второй. Дома (в палитре) он не виден: его
+   место — подвал поповера выбора цвета, куда он переезжает на время. */
+.parts__grad { display: none; }
+.picker__extra .parts__grad { display: flex; flex-direction: column; gap: 10px; }
+.picker__extra {
+  display: flex;
+  flex-direction: column;
+  margin-top: 10px;
+}
+.picker__extra:empty { display: none; }
+/* Черта над переходом: он про то же, что и выбор выше, но это уже решение
+   «цвет или переход», а не подбор оттенка. */
+.picker__extra .parts__grad {
+  padding-top: 10px;
+  border-top: 1px solid var(--hairline);
+}
+.parts__grad-aim { display: flex; align-items: center; gap: 10px; }
+/* Ряд решений о кисти: «Градиент» слева, пипетка у правого края — она не про
+   переход, а про то, откуда взять сам цвет. */
+.parts__grad-row { display: flex; align-items: center; gap: 8px; }
+.parts__grad-row .textbtn { flex: 1; text-align: left; }
+.parts__grad-row .ptools__btn { flex: none; width: 22px; height: 22px; }
+.parts__grad-row .ptools__btn svg { width: 15px; height: 15px; }
+
+/* Образец под пипеткой: цвет того пикселя, на котором стоит курсор, пока
+   кнопку держат. `fixed` и поверх кадра — цвет берут и с модели в iframe, где
+   своего окошка у страницы нет. */
+.pickspot {
+  position: fixed;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 5px;
+  border: 1px solid var(--hairline-strong);
+  background: var(--overlay);
+  pointer-events: none;
+}
+/* Квадрат образца — с той же двойной рамкой, что метки выбора цвета: он лежит
+   на произвольном цвете, и любой цвет интерфейса на нём где-нибудь пропадёт. */
+.pickspot i {
+  width: 16px;
+  height: 16px;
+  border: 1px solid #fff;
+  outline: 1px solid rgba(0, 0, 0, .55);
+}
+.pickspot b { font-family: var(--mono); font-size: 11px; font-weight: 400; }
+
+/* Полоса перехода: единственное место, где видно, ЧТО получится на детали.
+   Ползунки прямо на ней — края перелива и его середина. */
+.parts__ramp {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  height: 16px;
+  border: 1px solid var(--hairline-strong);
+  touch-action: none;
+}
+/* Метки — белая рамка с тёмной обводкой, как у меток выбора цвета: они лежат
+   на произвольном цвете, и любой цвет интерфейса на нём где-нибудь пропадёт. */
+.parts__stop {
+  position: absolute;
+  top: 50%;
+  width: 9px;
+  height: 9px;
+  margin: -5px 0 0 -5px;
+  padding: 0;
+  border: 1px solid #fff;
+  outline: 1px solid rgba(0, 0, 0, .55);
+  background: none;
+  cursor: ew-resize;
+}
+.parts__stop.is-active { background: #fff; }
+/* Середина — ромбом: она не про цвет, а про перевес, и путать её с краями
+   нельзя. */
+.parts__stop--mid { transform: rotate(45deg); width: 7px; height: 7px; margin: -4px 0 0 -4px; }
+
+/* Список частей — у противоположного края: он про модель, а не про
+   инструмент. Частей бывает под три десятка, поэтому столбец прокручивается,
+   а не растёт за край; снизу оставлено место подсказке. */
+/* Панель двигают за заголовок (parts.js) и тянут за уголок справа снизу —
+   штатный `resize`. Прокручивается только сетка: заголовок, за который
+   держат, всегда на виду. */
+.parts__list {
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  z-index: 2;
+  width: 200px;
+  min-width: 96px;
+  min-height: 72px;
+  max-width: calc(100% - 24px);
+  max-height: calc(100% - 24px);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--hairline-strong);
+  background: var(--surface);
+  overflow: hidden;
+  resize: both;
+}
+.parts__head {
+  flex: none;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  cursor: move;
+  user-select: none;
+  touch-action: none;
+}
+.parts__count { font-variant-numeric: tabular-nums; }
+
+/* Столбцов столько, сколько влезает: растянул панель — части разложились
+   шире, сузил — выше, а лишнее по высоте прокручивается. */
+.parts__grid {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(52px, 1fr));
+  /* Ряд — по содержимому: у чипа `overflow: hidden`, его наименьшая высота
+     для сетки нулевая, и в низкой панели ряды сплющивались вместо прокрутки. */
+  grid-auto-rows: max-content;
+  align-content: start;
+  gap: 4px;
+  overflow-y: auto;
+}
+/* Чип с двумя-тремя действиями не влезает в треть — он занимает две. */
+.parts__grid .tag.part--wide { grid-column: span 2; }
+
+/* Номер вместо «Часть 7 · 3%»: доля развёртки уехала в подсказку. Двухстрочные
+   чипы были втрое шире любого другого тега в приложении. */
+.parts .tag {
+  position: relative;
+  flex: none;
+  padding: 4px 9px;
+  font-variant-numeric: tabular-nums;
+}
+/* Чип части: номер по центру, действия справа, доля развёртки — полоской по
+   нижнему краю. По полоске крупные детали находятся глазом сразу: одинаковые
+   номера сами по себе ничего не говорят о том, где ствол, а где винтик. */
+.parts__grid .tag {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-width: 0;
+  padding: 5px 4px 7px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.part__size {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  width: calc(var(--share, 0) * 100%);
+  background: currentColor;
+  opacity: 0.35;
+}
+/* Покрашенная часть — полосой своего цвета слева: цвет виден сразу, а не
+   точкой в полпикселя рядом с номером. */
+.parts__grid .tag.is-painted::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: var(--paint, var(--accent));
+}
+.parts__grid .tag.is-painted { padding-left: 9px; }
+.parts .tag.is-painted { border-color: var(--accent); color: var(--accent); }
+/* Отмечен для слияния. Инверсия, как у всего выбранного в этом интерфейсе, —
+   и она не спорит с рамкой покраски: та про цвет, эта про выбор. */
+.parts .tag.is-marked {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--surface);
+}
+.parts .tag.is-hover { border-color: var(--ink); color: var(--ink); }
+.parts .tag--shared { border-style: dashed; }
+/* Крестик у покрашенной части виден всегда: искать его наведением — то же
+   самое, что прятать. */
+.parts__x {
+  margin-left: 2px;
+  border: none;
+  background: none;
+  color: inherit;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+/* Кнопки дробления на чипе. Тот же вес, что у крестика: это соседние по
+   смыслу действия над одной и той же частью. */
+.parts__cut {
+  margin-left: 2px;
+  border: none;
+  background: none;
+  color: var(--ink-mute);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+.parts__cut:hover { color: var(--accent); }
+/* Номер своего материала части — в углу чипа, мелко: это принадлежность, а
+   не действие. */
+.part__mat {
+  position: absolute;
+  top: 1px;
+  right: 3px;
+  font-size: 8px;
+  line-height: 1;
+  color: var(--ink-mute);
+}
+
+/* Инструмент «Материал»: куда уйдёт следующая часть. Выбранная строка
+   инвертирована, как всё выбранное в этом интерфейсе. */
+.pmat__list {
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.pmat__item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--hairline-strong);
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+.pmat__item:hover { border-color: var(--ink); }
+.pmat__item.is-active {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--surface);
+}
+.pmat__num { flex: none; font-size: 9px; opacity: .7; font-variant-numeric: tabular-nums; }
+/* Родные материалы модели — своей группой под своими материалами частей. */
+.pmat__head {
+  margin: 6px 0 0;
+  font-size: 9.5px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+}
+.pmat__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pmat__note { margin: 0; font-size: 10.5px; line-height: 1.4; color: var(--ink-mute); }
+
+/* Поле цвета — мелкий квадрат в такой же волосяной рамке, как всё остальное:
+   нативный input иначе рисует рамку и подложку от системы. */
+.parts__color {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid var(--hairline-strong);
+  background: none;
+  cursor: pointer;
+}
+.parts__color { appearance: none; -webkit-appearance: none; }
+.parts__color::-webkit-color-swatch-wrapper { padding: 0; }
+.parts__color::-webkit-color-swatch { border: none; }
+.parts__color::-moz-color-swatch { border: none; }
+.parts__color:hover { border-color: var(--ink); }
+.parts__color.is-active { outline: 1px solid var(--ink); outline-offset: 2px; }
+
+/* Подробность резки живёт в полосе ЧАСТЕЙ, а не в палитре: она меняет сам
+   список, а не то, чем красят. Ползунок тот же, что у силы тонировки. */
+.parts__detail,
+.parts__strength {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+}
+/* Свой ползунок: нативный рисуется системным акцентом и круглой ручкой —
+   единственное скругление и единственная заливка на экране. */
+.parts__detail input,
+.parts__strength input {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 64px;
+  height: 18px;
+  margin: 0;
+  background: none;
+  cursor: pointer;
+}
+.parts__detail input::-webkit-slider-runnable-track,
+.parts__strength input::-webkit-slider-runnable-track {
+  height: 1px;
+  background: var(--hairline-strong);
+}
+.parts__detail input::-webkit-slider-thumb,
+.parts__strength input::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 3px;
+  height: 11px;
+  margin-top: -5px;
+  border: 0;
+  background: var(--ink);
+}
+.parts__detail input::-moz-range-track,
+.parts__strength input::-moz-range-track { height: 1px; background: var(--hairline-strong); }
+.parts__detail input::-moz-range-thumb,
+.parts__strength input::-moz-range-thumb {
+  width: 3px;
+  height: 11px;
+  border: 0;
+  border-radius: 0;
+  background: var(--ink);
+}
+
+/* Ручка направления градиента. Круг с волосяной стрелкой: угол в цифрах
+   человеку не нужен, ему нужно видеть, куда пойдёт переход. Значение в
+   градусах уходит в подсказку под полосой, пока ручку тянут. */
+.parts__dial {
+  flex: none;
+  position: relative;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 50%;   /* единственное скругление: это и есть круг */
+  background: none;
+  cursor: grab;
+  touch-action: none;
+}
+.parts__dial:hover { border-color: var(--ink); }
+.parts__dial:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+/* Стрелка растёт из центра к краю: половина высоты, начало — в середине. */
+.parts__needle {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 1px;
+  height: 9px;
+  margin-left: -0.5px;
+  background: var(--ink);
+  transform-origin: 50% 0;
+}
+
+/* Включённый режим на текстовой кнопке: у палитры их несколько подряд. */
+.parts .textbtn.is-active { color: var(--accent); border-color: var(--accent); }
+
+/* Подсказка — понизу кадра, вне колонки инструментов: она длинная, а в панели
+   шириной с ползунок из неё вышел бы столбец из одного слова. Указатель сквозь
+   неё проходит: модель под ней должна вращаться. Пустую не показываем — рамка
+   без текста читается как поломка. */
+.parts__hint {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  z-index: 2;
+  max-width: 46ch;
+  padding: 5px 8px;
+  border: 1px solid var(--hairline);
+  background: var(--surface);
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--ink-soft);
+  pointer-events: none;
+}
+.parts__hint:empty { display: none; }
+.parts__return {
+  /* Посередине сверху: слева полоса частей, справа палитра. */
+  position: absolute; left: 50%; top: 12px; z-index: 3;
+  transform: translateX(-50%);
+  padding: 6px 12px; white-space: nowrap;
+  border: 1px solid var(--accent);
+  background: var(--surface); color: var(--ink);
+  font-size: 12px; cursor: pointer;
+  transition: background var(--dur), color var(--dur);
+}
+.parts__return::before { content: "\2039"; margin-right: 8px; color: var(--accent); }
+.parts__return:hover { background: var(--accent); color: var(--surface); }
+.parts__return:hover::before { color: var(--surface); }
+.parts__return[hidden] { display: none; }
+
+/* Место части на текстуре: подсвечивается при наведении на кусок модели.
+   Картинка-маска на весь кадр, а не прямоугольник: у детали, лежащей на
+   развёртке наискось, прямоугольник накрывал половину текстуры и соседей
+   заодно. Заливку и контур рисует Python — те же треугольники, по которым
+   красит склейка. */
+.frame__uv {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  /* Вписываем так же, как саму текстуру: квадратные они бывают не всегда (у
+     тела шпиона 1024×512), и растянутая на весь кадр подсветка съезжала с
+     деталей — сверху и снизу у такого кадра поля, а не текстура. */
+  object-fit: contain;
+  pointer-events: none;
+}
+.parts .tag.is-hover { border-color: var(--accent); color: var(--accent); }
+
+/* Карточка материала под перетаскиванием картинки. */
+.frame.is-drop .frame__img { outline: 1px solid var(--accent); outline-offset: 3px; }
+
+/* Дочерняя система в дереве свойств: строка-ссылка без параметров. */
+.expert__kid {
+  padding: 5px 0 5px 14px;
+  font-size: 12px;
+  color: var(--ink-soft);
+  border-bottom: 1px solid var(--hairline);
+}
+

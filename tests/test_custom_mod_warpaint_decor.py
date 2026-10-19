@@ -14,9 +14,11 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from src.app.paintkit_editor import PaintkitEditor
 from src.app.session import AppSession
 from src.domain.preview.session import PreviewSession
 from src.services.custom_vpk_service import CustomVPKService
+from types import SimpleNamespace
 
 
 def _session(**preview) -> AppSession:
@@ -26,6 +28,7 @@ def _session(**preview) -> AppSession:
     for k, v in preview.items():
         setattr(s.preview, k, v)
     s.tf2_paths = lambda: {'root': 'C:/tf2'}
+    s.paintkits = PaintkitEditor(s)
     return s
 
 
@@ -35,26 +38,26 @@ class WarpaintOnModTests(unittest.TestCase):
         s = _session(custom_vpk_mode=True, custom_vpk_weapon='c_scattergun',
                      weapon_key='c_minigun')   # остался от прошлого предмета
         self.assertEqual(s._shown_weapon(), 'c_scattergun')
-        self.assertTrue(s._paintkit_model().endswith('c_scattergun.mdl'))
+        self.assertTrue(s._shown_mdl().endswith('c_scattergun.mdl'))
 
     def test_mod_with_own_model_gets_generic_kits(self):
         s = _session(custom_vpk_mode=True, custom_vpk_weapon='c_scattergun',
                      custom_vpk_own_model=True)
         with patch('src.data.paintkit_defs.for_model', return_value=[{'id': 1}]), \
              patch('src.data.paintkit_defs.generic_kits', return_value=[{'id': 2}]):
-            self.assertEqual(s.paintkits(), {'items': [{'id': 2}], 'generic': True})
+            self.assertEqual(s.paintkits.paintkits(), {'items': [{'id': 2}], 'generic': True})
 
     def test_texture_only_mod_keeps_game_kits(self):
         """Мод без MDL лежит на стоковой модели — её War Paint ложатся верно."""
         s = _session(custom_vpk_mode=True, custom_vpk_weapon='c_scattergun',
                      custom_vpk_own_model=False)
         with patch('src.data.paintkit_defs.for_model', return_value=[{'id': 1}]):
-            self.assertEqual(s.paintkits(), {'items': [{'id': 1}], 'generic': False})
+            self.assertEqual(s.paintkits.paintkits(), {'items': [{'id': 1}], 'generic': False})
 
     def test_own_smd_is_custom_geometry_too(self):
         s = _session(custom_smd_path='C:/tmp/my.smd')
         self.assertTrue(s._custom_geometry())
-        self.assertEqual(s._own_paintkits('C:/tf2'), [])
+        self.assertEqual(s.paintkits._own_paintkits('C:/tf2'), [])
 
     def test_reset_forgets_own_model(self):
         p = PreviewSession(custom_vpk_own_model=True)
@@ -85,7 +88,7 @@ class BypassSettingTests(unittest.TestCase):
         s.preview.textures.set_texture('c_pistol', png)
         s.parts = MagicMock(bake_plan=lambda paths: None, baked_path=lambda p: p)
         s._tint_risks = lambda paths: {}
-        s._decor_builds = lambda root: []
+        s.decor = SimpleNamespace(builds=lambda root: [])
         s._put = lambda *a, **k: None
         captured = {}
 

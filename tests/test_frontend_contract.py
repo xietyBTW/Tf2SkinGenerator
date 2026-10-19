@@ -73,7 +73,7 @@ def test_call_reaches_python(source: str, method: str, keys: list[str]) -> None:
 
 
 def test_allowed_methods_are_public_api() -> None:
-    """Белый список ведёт в api.py, а не в случайную функцию."""
+    """Белый список ведёт в пакет api, а не в случайную функцию."""
     from src.app import api
 
     for name, fn in ALLOWED.items():

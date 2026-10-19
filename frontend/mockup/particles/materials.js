@@ -11,9 +11,36 @@ import { t } from '../i18n.js';
 import { ask } from '../ask.js';
 import { chooseImage } from '../util.js';
 import { contextMenu } from '../menu.js';
-import { stage, say, withParticles } from '../stage.js';
+import { stage, say, withParticles, particles } from '../stage.js';
 import { bindAlbum } from '../album.js';
 import { pSystem } from './state.js';
+
+// ── Текстуры эффекта в движке ────────────────────────────────────────────
+// Файл приходит с текстурами только открытого эффекта (см. load_particles):
+// все 96 текстур item_fx - это 8,5 МБ и полторы секунды распаковки. Другой
+// эффект того же файла, новая дочерняя система или смена материала добирают
+// своё - и только когда движок говорит, что ему чего-то не хватает.
+
+/** Даёт движку текстуры эффекта `system`, которых у него ещё нет. */
+export async function loadEffectMaterials(system) {
+  const w = particles();
+  if (w && w.missingMaterials && !w.missingMaterials(system).length) return;
+  const more = await api.particleEffectMaterials(system);
+  withParticles((x) => x.addMaterials && x.addMaterials(more.materials, more.names));
+}
+
+/**
+ * После правки систем: если эффекту теперь нужна текстура, которой у движка
+ * нет (сменили материал, добавили дочернюю), - добрать и перестроить эффект.
+ * Без недостающих - ничего: ползунки шлют правки потоком.
+ */
+export async function ensureEffectMaterials() {
+  const w = particles();
+  const system = pSystem;
+  if (!w || !w.missingMaterials || !w.missingMaterials(system).length) return;
+  await loadEffectMaterials(system);
+  if (system === pSystem) withParticles((x) => x.setRootSystem(system));
+}
 
 // ── Текстуры эффекта ─────────────────────────────────────────────────────
 // Карточки материалов в той же половине сцены, где у оружия альбом текстур.
@@ -53,6 +80,7 @@ export async function applyTexture(material, file, sheet) {
   if (res.error) { say(res.error); return; }
   lastFile.set(material, file);
   withParticles((w) => w.loadParticleData({ ...res, rootName: pSystem }));
+  ensureEffectMaterials();
   await showParticleMaterials();
   say('');
 }
@@ -85,6 +113,7 @@ export async function materialMenu(e, mat) {
     const res = await api.setParticleMaterialToGame(mat.name, pickd);
     if (res.error) { say(res.error); return; }
     withParticles((w) => w.loadParticleData({ ...res, rootName: pSystem }));
+    ensureEffectMaterials();
     await showParticleMaterials();
     return;
   }
@@ -111,6 +140,7 @@ export async function materialMenu(e, mat) {
     const res = await api.renameParticleMaterial(mat.name, name);
     if (res.error) { say(res.error); return; }
     withParticles((w) => w.loadParticleData({ ...res, rootName: pSystem }));
+    ensureEffectMaterials();
     await showParticleMaterials();
     return;
   }
@@ -118,6 +148,7 @@ export async function materialMenu(e, mat) {
     const res = await api.resetParticleTexture(mat.name);
     if (res.error) { say(res.error); return; }
     withParticles((w) => w.loadParticleData({ ...res, rootName: pSystem }));
+    ensureEffectMaterials();
     await showParticleMaterials();
   }
 }

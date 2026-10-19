@@ -16,6 +16,7 @@ import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
+from src.app.edit_history import EditHistory
 from src.shared.logging_config import get_logger
 from src.shared.paths import export_dir
 from src.shared.text_search import plain
@@ -117,11 +118,17 @@ class ParticlesEditor:
         #: Разобранный PCF. Живёт между вызовами: правка параметров и сборка
         #: VPK работают с тем же деревом, что показано на экране.
         self.pcf = None
-        #: История правок эффекта: снимки и позиция в них.
-        self._particle_history: List[Any] = []
-        self._particle_pos = -1
+        #: История правок эффекта: тот же стек снимков, что у предмета.
+        self.history = EditHistory(limit=self.HISTORY_LIMIT)
         #: Во время отката новые снимки не пишем — иначе он сам стал бы правкой.
         self._restoring = False
+        #: Номер последнего открытия файла: открытым становится он, а не тот,
+        #: что разбирался дольше (см. `load_particles`).
+        self._load_seq = 0
+        self._load_lock = threading.Lock()
+        #: Открытый эффект: после правок движку уходят его текстуры, а не
+        #: все текстуры файла (у item_fx это 8,5 МБ на каждый Ctrl+Z).
+        self._shown = ''
 
 
     #: Сколько эффектов отдаём под поиском: систем в игре десять тысяч.
@@ -256,11 +263,22 @@ class ParticlesEditor:
         for kid, top in roots.items():
             self._children.setdefault(top, []).append(kid)
 
-        unusuals = self._unusual_effects(lang)
+        # Имя в items_game и в PCF бывает разного регистра (stamp_spin против
+        # Stamp_spin в stamp_spin.pcf), а игра сравнивает без регистра. Берём
+        # написание файла: иначе у эффекта не находился файл, и он не
+        # открывался, а система файла шла второй строкой без имени.
+        spelled = {system.lower(): system for system in index}
+
+        def as_in_file(effects: List[dict]) -> List[dict]:
+            return [{**fx, 'system': spelled.get(fx['system'].lower(), fx['system'])}
+                    for fx in effects]
+
+        unusuals = as_in_file(self._unusual_effects(lang))
         by_system = {fx['system']: fx for fx in unusuals}
         names = {fx['system']: fx['name'] for fx in unusuals if fx['name']}
         english = ({} if lang == 'en' else
-                   {fx['system']: fx['name'] for fx in self._unusual_effects('en')})
+                   {fx['system']: fx['name']
+                    for fx in as_in_file(self._unusual_effects('en'))})
         loc = parse_localization(paths['root'],
                                  'russian' if lang == 'ru' else 'english')
         loc_en = loc if lang == 'en' else parse_localization(paths['root'], 'english')
@@ -320,23 +338,32 @@ class ParticlesEditor:
             cache[lang] = unusual_effects.parse(text, loc)
         return cache[lang]
 
-    def load_particles(self, source: str) -> Dict[str, Any]:
+    def load_particles(self, source: str, system: str = '') -> Dict[str, Any]:
         """
-        Разбирает PCF и отдаёт всё, что нужно рендереру.
+        Разбирает PCF и отдаёт всё, что нужно рендереру, открытым сразу на
+        системе `system` (пусто или нет такой - первый корень).
 
-        Ответом, а не событием: разбор с материалами занимает около секунды, а
-        результат доходит до 9 МБ (VTF внутри уже развёрнуты в PNG data-URL).
-        Гонять такое через поток событий незачем — страница всё равно ничего
-        не может показать, пока не получит его целиком.
+        Ответом, а не событием: страница всё равно ничего не может показать,
+        пока не получит его целиком. Текстуры - только выбранного эффекта:
+        у item_fx их 96, все вместе это 8,5 МБ PNG в ответе и полторы
+        секунды распаковки VTF при первом открытии, а эффекту нужны две-три.
+        Другие эффекты файла добирают свои (`particle_effect_materials`).
+
+        Новый вызов обгоняет прежний ({'cancelled': True}): иначе файл,
+        который разбирался дольше, становился открытым ПОСЛЕ того, что
+        выбрали следом, и правки уходили не в тот файл, что на экране.
         """
         paths = self._host.tf2_paths()
         if 'error' in paths:
             return paths
 
         from src.services.particle_editor_service import (
-            ParticleEditorService, system_hierarchy,
+            ParticleEditorService, diff_systems, system_hierarchy,
         )
 
+        with self._load_lock:
+            self._load_seq += 1
+            mine = self._load_seq
         svc = ParticleEditorService()
         try:
             if source.startswith('particles/'):
@@ -347,22 +374,57 @@ class ParticlesEditor:
             logger.warning(f"PCF {source} не разобран: {exc}")
             return {'error': str(exc)}
 
-        self.pcf = svc
-        self._history_reset()
         systems = svc.systems_json()
         tree = tree_nodes(system_hierarchy(systems, order=svc.system_names()))
+        # Ключ именно такой: этот словарь уходит в loadParticleData движка
+        # как есть, а он читает rootName. Пустая сцена после загрузки
+        # выглядит поломкой - что-то показываем сразу.
+        root = system if system in systems else (tree[0]['key'] if tree else '')
+        if source.startswith('particles/'):
+            # Только что прочитан из игры - он и есть сток: разбирать тот же
+            # файл второй раз ради «всё совпадает» незачем. Системы стока
+            # запоминаем: правки дальше сравниваются с ними.
+            svc._stock_systems = systems
+            diff = {name: entry['status']
+                    for name, entry in diff_systems(systems, systems).items()}
+        else:
+            diff = None
+        with self._load_lock:
+            if mine != self._load_seq:
+                return {'cancelled': True}
+            self.pcf = svc
+        self._history_reset()
+        self._shown = root
         return {
             'systems': systems,
-            'materials': svc.materials_json(paths['root']),
+            'materials': svc.materials_json(
+                paths['root'], names=self._effect_materials(root, systems) if root else []),
             'tree': tree,
             # Что отличается от игры — метки в дереве. Открыли файл с диска
             # без игрового собрата — пусто.
-            'diff': self._particle_diff_all(systems),
-            # Ключ именно такой: этот словарь уходит в loadParticleData
-            # движка как есть, а он читает rootName. Показываем первый корень
-            # сразу — пустая сцена после секундной загрузки выглядит поломкой.
-            'rootName': tree[0]['key'] if tree else '',
+            'diff': self._particle_diff_all(systems) if diff is None else diff,
+            'rootName': root,
         }
+
+    def _shown_materials(self, tf2_root: str) -> Dict[str, dict]:
+        """Текстуры открытого эффекта для движка после правки; эффект ещё не
+        выбран - все текстуры файла. Чего не хватит другому эффекту, страница
+        доберёт при его выборе (`particle_effect_materials`)."""
+        names = self._effect_materials(self._shown) if self._shown else None
+        return self.pcf.materials_json(tf2_root, names=names)
+
+    def particle_effect_materials(self, system: str) -> Dict[str, Any]:
+        """Текстуры эффекта для движка ({материал: info}) - добираются при
+        выборе другой системы того же файла (см. `load_particles`)."""
+        paths = self._host.tf2_paths()
+        if self.pcf is None or 'error' in paths:
+            return {'materials': {}, 'names': []}
+        self._shown = system
+        names = self._effect_materials(system)
+        # names - что спрашивали: не найденное в игре движок запомнит как
+        # «нет» и не будет спрашивать его снова на каждую правку.
+        return {'materials': self.pcf.materials_json(paths['root'], names=names),
+                'names': names}
 
     def particle_params(self, system: str, lang: str = 'ru') -> List[dict]:
         """
@@ -597,55 +659,42 @@ class ParticlesEditor:
 
     def _history_reset(self) -> None:
         """Начальное состояние после загрузки PCF."""
-        self._particle_history = []
-        self._particle_pos = -1
-        if self.pcf is None:
-            return
-        snap = self.pcf.snapshot()
-        if snap is not None:
-            self._particle_history = [snap]
-            self._particle_pos = 0
+        self.history.reset(self.pcf.snapshot() if self.pcf is not None else None)
 
     def _history_commit(self) -> None:
         """Фиксирует состояние ПОСЛЕ правки. Во время отката молчит."""
-        if (self._restoring or self.pcf is None
-                or self._particle_pos < 0):
+        if self._restoring or self.pcf is None or self.history.pos < 0:
             return
         snap = self.pcf.snapshot()
-        if snap is None:
-            return
-        # Ветка возврата после новой правки теряет смысл.
-        del self._particle_history[self._particle_pos + 1:]
-        self._particle_history.append(snap)
-        if len(self._particle_history) > self.HISTORY_LIMIT:
-            self._particle_history.pop(0)
-        self._particle_pos = len(self._particle_history) - 1
+        if snap is not None:
+            self.history.commit(snap)
 
     def particle_history(self) -> Dict[str, Any]:
-        """Есть ли куда откатываться и возвращаться."""
-        return {'undo': self._particle_pos > 0,
-                'redo': 0 <= self._particle_pos < len(self._particle_history) - 1}
+        """Есть ли куда откатываться и возвращаться; `unsaved` - есть правки,
+        которых нет ни в одном сохранённом файле (уход на другой их выбросит)."""
+        return {**self.history.state(), 'unsaved': self.history.unsaved}
 
     def undo_particles(self, delta: int = -1) -> Dict[str, Any]:
         """Откат (-1) или возврат (+1) на шаг."""
         if (err := self._need_pcf()):
             return err
-        pos = self._particle_pos + int(delta)
-        if pos < 0 or pos >= len(self._particle_history):
+        pos = self.history.pos + int(delta)
+        snap = self.history.at(pos)
+        if snap is None:
             return {'error': 'дальше некуда'}
 
         self._restoring = True
         try:
-            if not self.pcf.restore(self._particle_history[pos]):
+            if not self.pcf.restore(snap):
                 return {'error': 'не удалось восстановить состояние'}
-            self._particle_pos = pos
+            self.history.move_to(pos)
             out = self._particles_state()
         finally:
             self._restoring = False
         # Материалы отдаём вместе: откат мог вернуть или убрать свою текстуру.
         paths = self._host.tf2_paths()
         if 'error' not in paths:
-            out['materials'] = self.pcf.materials_json(paths['root'])
+            out['materials'] = self._shown_materials(paths['root'])
         out.update(self.particle_history())
         return out
 
@@ -1056,7 +1105,7 @@ class ParticlesEditor:
     @staticmethod
     def _cp_model_candidates(mode: str, key: str, root: str):
         """(ключ кэша, пути MDL в VPK) — тем же правилом, что у 3D-превью
-        (`Preview3DWorker._mdl_candidates`), чтобы кэш был общий."""
+        (`smd_locator.mdl_candidates`), чтобы кэш был общий."""
         from src.data.player_characters import PLAYER_BODY_MODE_KEYS
         from src.data.player_hands import HAND_MODE_KEYS
         from src.domain.preview.model_key import model_key_for
@@ -1194,15 +1243,17 @@ class ParticlesEditor:
     # своя картинка добавляет в мод НОВЫЙ файл (в казуале обход sv_pure его
     # не подхватит), а перевод на существующий материал игры работает везде.
 
-    def _effect_materials(self, system: str) -> List[str]:
+    def _effect_materials(self, system: str,
+                          systems: Optional[Dict[str, dict]] = None) -> List[str]:
         """
         Материалы выбранного эффекта: сам корень плюс все дочерние.
 
         Именно эффекта, а не файла: в одном PCF десятки систем, и показывать
         карточку от чужого эффекта — предлагать заменить не ту текстуру.
-        Порядок обхода сохраняем, повторы убираем.
+        Порядок обхода сохраняем, повторы убираем. `systems` - уже собранные
+        системы, если они под рукой (сборка заново - десятки миллисекунд).
         """
-        systems = self.pcf.systems_json()
+        systems = self.pcf.systems_json() if systems is None else systems
         out: List[str] = []
         seen: set = set()
         visited: set = set()
@@ -1228,9 +1279,12 @@ class ParticlesEditor:
         paths = self._host.tf2_paths()
         if self.pcf is None or 'error' in paths:
             return []
-        found = self.pcf.materials_json(paths['root'])
+        if system:
+            self._shown = system
         names = (self._effect_materials(system) if system
                  else self.pcf.material_names())
+        # Распаковываем только карточки эффекта, а не все текстуры файла.
+        found = self.pcf.materials_json(paths['root'], names=names)
         out: List[dict] = []
         for name in names:
             info = found.get(name) or {}
@@ -1253,7 +1307,7 @@ class ParticlesEditor:
         root = '' if 'error' in paths else paths['root']
         return {
             'systems': self.pcf.systems_json(),
-            'materials': self.pcf.materials_json(root),
+            'materials': self._shown_materials(root),
         }
 
     def set_particle_texture(self, material: str, path: str,
@@ -1373,6 +1427,7 @@ class ParticlesEditor:
             self.pcf.save(str(dest))
         except Exception as exc:                     # noqa: BLE001 — граница
             return {'error': str(exc)}
+        self.history.mark_saved()
         return {'path': str(dest), 'size': self.pcf.serialized_size()}
 
     def export_particles_vpk(self, name: str = 'particles_mod.vpk',
@@ -1398,6 +1453,7 @@ class ParticlesEditor:
         except Exception as exc:                     # noqa: BLE001 — граница
             logger.warning(f"сборка VPK частиц не удалась: {exc}")
             return {'error': str(exc)}
+        self.history.mark_saved()
         return {
             'path': str(out),
             'textures_vpk': getattr(self.pcf, 'last_textures_vpk', None),

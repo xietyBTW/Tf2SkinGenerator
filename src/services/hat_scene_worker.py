@@ -1,5 +1,8 @@
 """
-Воркер сцены «На модели»: персонаж класса в игровой стойке, на нём — шапка.
+Воркер сцены «На персонаже»: персонаж класса в игровой стойке, на нём предмет.
+
+Предмет - шапка или надеваемое оружие без модели в руке (ботинки, щит,
+парашют): игра сажает его на персонажа так же, по именам костей.
 
 Шапку в игре не видят висящей в пустоте: она на голове, а персонаж держит
 оружие. Сцена собирается той же `viewmodel_animation.build_scene`, что насмешка:
@@ -85,13 +88,22 @@ class HatScenePreviewWorker(BaseWorker):
                  textures_vpk_path: str, tf2_root: str = "",
                  tf2_class: str = "", slot: str = "", lang: str = 'en',
                  hidden_bodygroups: Optional[Dict[str, int]] = None,
+                 weapon_key: str = '',
+                 custom_smd: str = '', custom_keep: bool = False,
                  parent=None):
         super().__init__(parent)
+        #: Надеваемое оружие вместо шапки (ботинки, щит): ключ предмета.
+        self.weapon_key = weapon_key or ''
+        #: Своя модель предмета (SMD) - слитая со скелетом игровой, как в
+        #: сборке: на персонаже видно то, что уйдёт в мод.
+        self.custom_smd = custom_smd or ''
+        self.custom_keep = bool(custom_keep)
         #: Что шапка прячет у персонажа ({бодигруппа: вариант}) — каска
         #: солдата под шапкой на голову. Без этого она торчала сквозь шапку.
         self.hidden_bodygroups = dict(hidden_bodygroups or {})
         #: {класс: модель шапки}; у одномодельной шапки модель у всех одна.
-        #: Путь как есть: он же ключ кэша декомпиляции у превью шапки.
+        #: Путь как есть: он же ключ кэша декомпиляции у превью шапки. У
+        #: оружия - список путей-кандидатов (ключ кэша тогда - weapon_key).
         self.hat_models = {c.lower(): m for c, m in (hat_models or {}).items() if m}
         self.misc_vpk_path = misc_vpk_path
         self.textures_vpk_path = textures_vpk_path
@@ -124,12 +136,17 @@ class HatScenePreviewWorker(BaseWorker):
             self.progress.emit(self._p['hat'])
             hat_mdl = self.hat_models[cls]
             # Ключ — путь модели, как у превью шапки: распакованное там
-            # берётся отсюда же, без второго Crowbar.
-            hat_dir = self._decompile(hat_mdl, hat_mdl)
+            # берётся отсюда же, без второго Crowbar. У оружия - его ключ.
+            if isinstance(hat_mdl, (list, tuple)):
+                hat_dir = self._decompile(self.weapon_key, list(hat_mdl))
+                item_stem = self.weapon_key
+            else:
+                hat_dir = self._decompile(hat_mdl, hat_mdl)
+                item_stem = os.path.basename(hat_mdl).removesuffix('.mdl')
             if not hat_dir:
                 return
-            hat_ref = body_smd(hat_dir) or smd_service.find_reference_smd(
-                hat_dir, os.path.basename(hat_mdl).removesuffix('.mdl'))
+            hat_ref = body_smd(hat_dir) or smd_service.find_reference_smd(hat_dir, item_stem)
+            hat_ref = self._custom_ref(hat_ref)
 
             self.progress.emit(self._p['player'])
             stem = CLASS_MODEL_STEM[cls]
@@ -182,7 +199,7 @@ class HatScenePreviewWorker(BaseWorker):
 
             self.progress.emit(self._p['texture'])
             self._emit_scene(reader, scene, (hat_dir, weapon_dir, player_dir))
-            logger.info(f"[wear] {os.path.basename(hat_mdl)}: класс {cls}, "
+            logger.info(f"[wear] {item_stem}: класс {cls}, "
                         f"слот {weapon.slot if weapon else '—'}, стойка {sequence.name}")
 
         except mds.DecompileError as exc:
@@ -204,7 +221,7 @@ class HatScenePreviewWorker(BaseWorker):
                 self.progress.emit(self._p[slow])
 
         result = mds.ensure_decompiled(
-            cache_key, self.misc_vpk_path, [mdl],
+            cache_key, self.misc_vpk_path, mdl if isinstance(mdl, list) else [mdl],
             cancelled=self.isInterruptionRequested, on_progress=stage,
         )
         if result is None:
@@ -212,6 +229,20 @@ class HatScenePreviewWorker(BaseWorker):
             self.failed.emit(self._p['no_models'])
             return None
         return result.directory
+
+    def _custom_ref(self, game_ref: str) -> str:
+        """Своя модель предмета, слитая со скелетом игровой (как в сборке)."""
+        if not (self.custom_smd and game_ref and os.path.exists(self.custom_smd)):
+            return game_ref
+        merged = os.path.join(self._preview_dir or '', 'custom_reference.smd')
+        try:
+            from src.services.smd_service import SMDService
+            SMDService.replace_model_sections(self.custom_smd, game_ref, merged,
+                                              keep_user_materials=self.custom_keep)
+        except Exception as exc:                              # noqa: BLE001
+            logger.warning(f"[wear] своя модель не слилась со скелетом: {exc}")
+            return game_ref
+        return merged
 
     def _stance_of(self, cls: str, stem: str, weapon, weapons):
         """

@@ -12,6 +12,7 @@ import { pSystem, pcfNodes, setDiff } from './state.js';
 import { attrField, supportedModules } from './fields.js';
 import { expertMenu } from './actions.js';
 import { fillTree, setTitle } from './tree.js';
+import { ensureEffectMaterials } from './materials.js';
 
 export const pfind = document.getElementById('pfind');
 
@@ -165,6 +166,7 @@ export async function showExpert(system) {
                                                 attr.name, value);
           if (res.error) { say(res.error); return; }
           withParticles((w) => w.updateSystems(res.systems, pSystem));
+          ensureEffectMaterials();
           setDiff(res.diff);
           markExpert(res.system_diff);
           fillTree(pcfNodes, pSystem);

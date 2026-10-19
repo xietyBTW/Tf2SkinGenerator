@@ -17,6 +17,7 @@ from unittest.mock import patch
 from src.services.qc_skin_parser import (
     classify_rows, is_team_row_pair, team_material_map,
 )
+from src.services.texture_build import main_texture
 from src.services.vpk_texture_builder import VpkTextureBuilder
 
 
@@ -110,7 +111,7 @@ class BluMainTextureGuardTests(unittest.TestCase):
     """
 
     def _call(self, blu_row, main="c_proto_medigun_glass", red_row=None):
-        with patch.object(VpkTextureBuilder, "_build_blu_team_texture") as spy:
+        with patch.object(main_texture, "build_blu_team_texture") as spy:
             VpkTextureBuilder._maybe_build_blu_team_texture(
                 weapon_key="c_proto_medigun", blu_row=blu_row, blu_is_team=True,
                 blu_mode="upload", blu_image_path="blu.png",

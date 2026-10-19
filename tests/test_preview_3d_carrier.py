@@ -347,8 +347,8 @@ class CustomModelTests(_WithFiles):
                 patch.object(self.session.controller, "stop", lambda: None), \
                 patch.object(self.session, "_on_model_ready",
                              lambda *a, **k: None):
-            asked = self.session.load_custom_model(self.smd)
-            done = self.session.load_custom_model(self.smd, keep=True)
+            asked = self.session.custom_model.load_custom_model(self.smd)
+            done = self.session.custom_model.load_custom_model(self.smd, keep=True)
         return seen, asked, done
 
     def test_carrier_stays_in_the_frame(self):

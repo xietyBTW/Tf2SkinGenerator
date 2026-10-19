@@ -51,7 +51,7 @@ EDIT_FIELDS = (
     'custom_smd_path', 'custom_qc_text', 'custom_source_path',
     # Подгонка и изгибы гирлянды под свою модель: своя форма гирлянды —
     # такая же правка, как своя геометрия предмета.
-    'decor_fit', 'decor_bends', 'decor_models',
+    'decor_fit', 'decor_bends', 'decor_models', 'decor_baked',
     # Своя модель снаряда в оружии — та же правка геометрии.
     'part_models',
 )
@@ -111,6 +111,8 @@ class PreviewSession:
     #: Свои модели гирлянд: {вид: SMD}. Кости и QC остаются стоковые (см.
     #: festive_decor.build), материалы — свои.
     decor_models: Dict[str, str] = field(default_factory=dict)
+    #: Вид гирлянды, вшитой в модель оружия (decor_bake); пусто - не вшита.
+    decor_baked: str = ''
     #: Своя геометрия деталей модели: {имя SMD детали без .smd: SMD человека}.
     #: Снаряд, заряженный в оружие (граната Loch-n-Load, ракета сигнальной):
     #: скелет и материал игровые, треугольники свои (with_part_models).
@@ -141,7 +143,7 @@ class PreviewSession:
 
     # ── Пер-текстурные файловые карты ─────────────────────────────────────── #
     #: {материал: {map_id: спецификация}} — detail / самосвечение / phong и т.п.
-    #: Уходят в сборку как есть: VTF по ним генерит vpk_texture_builder.
+    #: Уходят в сборку как есть: VTF по ним генерит texture_build.
     texture_maps: Dict[str, dict] = field(default_factory=dict)
     #: {материал: {map_id: запись}} — карты, что уже стоят в VMT загруженного
     #: мода (material_maps.detect_maps + превью). Не правка: в работу не идёт,
@@ -518,7 +520,7 @@ class PreviewSession:
         """Материал части главного материала при включённом варианте
         (Australium) показывает его игровой кадр: в игре строка варианта ведёт
         часть в свой `_gold` VMT — игровой VMT золота с игровой текстурой
-        (vpk_texture_builder._write_part_materials). Своя картинка части
+        (texture_build.part_textures.write_part_materials). Своя картинка части
         стоит только в строках её команды."""
         t = self.textures
         gold = _existing(t.australium_frame) if t.australium_active else None
@@ -705,9 +707,8 @@ class PreviewSession:
         from src.data.pickups import PICKUP_MODE_PREFIX
         from src.data.player_characters import PLAYER_BODY_MODE_KEYS, SPY_MASK_MODE_KEY
         from src.data.player_hands import HAND_MODE_KEYS
-        from src.data.weapons import (
-            MATERIAL_ONLY_WEAPON_KEYS, NO_BLU_WEAPON_KEYS, SPECIAL_MODES,
-        )
+        from src.data.weapons import SPECIAL_MODES
+        from src.data.weapon_quirks import MATERIAL_ONLY_WEAPON_KEYS, NO_BLU_WEAPON_KEYS
 
         key = self.weapon_key if weapon_key is None else weapon_key
         mode = (self.weapon_mode if mode is None else mode) or ''
@@ -811,6 +812,7 @@ class PreviewSession:
             'decor_bends': {kind: [dict(b) for b in bends]
                             for kind, bends in self.decor_bends.items() if bends},
             'decor_models': dict(self.decor_models),
+            'decor_baked': self.decor_baked,
             'part_models': dict(self.part_models),
         }
 
@@ -938,6 +940,7 @@ class PreviewSession:
                             in (edits.get('decor_bends') or {}).items() if bends}
         self.decor_models = {str(kind): str(smd) for kind, smd
                              in (edits.get('decor_models') or {}).items() if smd}
+        self.decor_baked = str(edits.get('decor_baked') or '')
         self.part_models = {str(part): str(smd) for part, smd
                             in (edits.get('part_models') or {}).items() if smd}
 
@@ -966,6 +969,7 @@ class PreviewSession:
         self.decor_fit = {}
         self.decor_bends = {}
         self.decor_models = {}
+        self.decor_baked = ''
         self.part_models = {}
 
     # ═══════════════════════════════════════════════════════════════════════ #
@@ -1091,6 +1095,7 @@ class PreviewSession:
         self.decor_fit = {}
         self.decor_bends = {}
         self.decor_models = {}
+        self.decor_baked = ''
         self.part_models = {}
         self.decor_cards = []
         self.textures.decor_stock = {}

@@ -51,7 +51,7 @@ class _StubService:
     def system_names(self):
         return list(self._systems)
 
-    def materials_json(self, root, cancel_check=None):
+    def materials_json(self, root, cancel_check=None, names=None):
         return {}
 
     def material_names(self):
@@ -342,7 +342,7 @@ class HistoryTests(unittest.TestCase):
 
     def test_after_load_there_is_nothing_to_undo(self):
         self.assertEqual(self.s.particles.particle_history(),
-                         {'undo': False, 'redo': False})
+                         {'undo': False, 'redo': False, 'unsaved': False})
 
     def test_edit_then_undo_and_redo(self):
         self.s.particles.set_particle_attr('sys', 'operators', 0, 'drag', 0.9)
@@ -356,6 +356,23 @@ class HistoryTests(unittest.TestCase):
         self.s.particles.undo_particles(1)
         self.assertEqual(self._drag(), 0.9)
 
+    def test_unsaved_follows_edits_undo_and_save(self):
+        import os
+        import tempfile
+        p = self.s.particles
+        p.set_particle_attr('sys', 'operators', 0, 'drag', 0.9)
+        self.assertTrue(p.particle_history()['unsaved'])
+        p.undo_particles(-1)                     # вернулись к открытому
+        self.assertFalse(p.particle_history()['unsaved'])
+        p.undo_particles(1)
+        p.pcf.save = lambda path: None               # запись на диск - не предмет теста
+        p.pcf.serialized_size = lambda: 0
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertNotIn('error', p.save_particles(os.path.join(tmp, 'x.pcf')))
+        self.assertFalse(p.particle_history()['unsaved'])
+        p.undo_particles(-1)                     # откат ушёл от сохранённого
+        self.assertTrue(p.particle_history()['unsaved'])
+
     def test_a_new_edit_drops_the_redo_branch(self):
         self.s.particles.set_particle_attr('sys', 'operators', 0, 'drag', 0.9)
         self.s.particles.undo_particles(-1)
@@ -365,9 +382,9 @@ class HistoryTests(unittest.TestCase):
     def test_undo_itself_is_not_an_edit(self):
         """Иначе откат добавлял бы снимок и возврат стал бы недостижим."""
         self.s.particles.set_particle_attr('sys', 'operators', 0, 'drag', 0.9)
-        before = len(self.s.particles._particle_history)
+        before = len(self.s.particles.history)
         self.s.particles.undo_particles(-1)
-        self.assertEqual(len(self.s.particles._particle_history), before)
+        self.assertEqual(len(self.s.particles.history), before)
 
     def test_beyond_the_edge_is_an_error(self):
         self.assertIn('error', self.s.particles.undo_particles(-1))
@@ -377,7 +394,7 @@ class HistoryTests(unittest.TestCase):
         """Снимок — копия всего дерева; помним ограниченное число шагов."""
         for i in range(self.s.particles.HISTORY_LIMIT + 10):
             self.s.particles.set_particle_attr('sys', 'operators', 0, 'drag', i / 100)
-        self.assertEqual(len(self.s.particles._particle_history), self.s.particles.HISTORY_LIMIT)
+        self.assertEqual(len(self.s.particles.history), self.s.particles.HISTORY_LIMIT)
 
     def test_without_a_loaded_pcf(self):
         self.assertIn('error', AppSession().particles.undo_particles(-1))
@@ -424,7 +441,7 @@ class _MaterialService(_StubService):
     def material_names(self):
         return list(self._materials)
 
-    def materials_json(self, root, cancel_check=None):
+    def materials_json(self, root, cancel_check=None, names=None):
         return self._materials
 
     def is_custom_material(self, name):
@@ -524,6 +541,30 @@ class MaterialTests(unittest.TestCase):
         self.assertEqual(empty.particles.particle_materials(), [])
         self.assertIn('error', empty.particles.reset_particle_texture('x'))
         self.assertIn('error', empty.particles.use_particle_texture_colors('sys'))
+
+
+class EffectCatalogTests(unittest.TestCase):
+    """Каталог эффектов: имя из items_game и система в файле."""
+
+    def test_name_from_the_game_finds_its_file_whatever_the_case(self):
+        # items_game зовёт эффект stamp_spin, а в stamp_spin.pcf система
+        # Stamp_spin: игра сравнивает без регистра, каталог тоже должен.
+        from types import SimpleNamespace
+        from unittest import mock
+
+        from src.app.particles_editor import ParticlesEditor
+        from src.services.particle_editor_service import ParticleEditorService
+
+        editor = ParticlesEditor(SimpleNamespace(tf2_paths=lambda: {'root': 'C:/tf2'}))
+        editor._unusual_effects = lambda lang: [
+            {'system': 'stamp_spin', 'name': 'Коллекционные марки', 'category': 'other'}]
+        with mock.patch.object(ParticleEditorService, 'system_index',
+                               return_value={'Stamp_spin': 'particles/stamp_spin.pcf'}), \
+             mock.patch.object(ParticleEditorService, 'system_roots', return_value={}), \
+             mock.patch('src.data.hats_parser.parse_localization', return_value={}):
+            rows, _ready = editor._effect_rows('ru')
+        self.assertEqual([(r['system'], r['file'], r['name']) for r in rows],
+                         [('Stamp_spin', 'particles/stamp_spin.pcf', 'Коллекционные марки')])
 
 
 if __name__ == '__main__':

@@ -42,6 +42,14 @@ def validate_vpk_filename(filename: str) -> Tuple[bool, Optional[str]]:
     return True, None
 
 
+def vpk_file_name(name: Optional[str], default: str) -> str:
+    """Имя мода из поля страницы: набрали без «.vpk» — дописываем, а не
+    отказываем в сборке (поле подсказывает имя с расширением, и человек его
+    стирает)."""
+    name = (name or '').strip() or default
+    return name if name.lower().endswith('.vpk') else name + '.vpk'
+
+
 SUGGEST_SUFFIX = '_mod.vpk'
 
 #: Режимы, которые предмет НЕ называют: это значение по умолчанию у раздела

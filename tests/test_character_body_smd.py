@@ -13,7 +13,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from src.services.preview_3d_worker import Preview3DWorker
+from src.services import qc_skin_parser
+from src.services.smd_locator import character_body_smd
 from src.services.smd_service import triangle_count
 
 
@@ -29,9 +30,8 @@ def write_smd(path: Path, triangles: int) -> None:
 
 def body_of(directory: Path):
     """Выбор тела так, как его делает воркер превью."""
-    worker = Preview3DWorker.__new__(Preview3DWorker)
-    worker._models = {}
-    return worker._character_body_smd(str(directory))
+    model = qc_skin_parser.load_model(str(directory))
+    return character_body_smd(str(directory), getattr(model, 'qc_path', None))
 
 
 class CharacterBodyTests(unittest.TestCase):

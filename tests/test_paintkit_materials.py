@@ -11,6 +11,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from src.app.paintkit_editor import PaintkitEditor
 from src.app.session import AppSession
 from src.domain.preview.session import PreviewSession
 from src.services.paintkit_worker import PaintkitBatch
@@ -25,17 +26,18 @@ def _meshes(model, card):
 
 
 def _session(cards, own=(), game=(), layout=None):
-    s = AppSession.__new__(AppSession)
-    s.preview = PreviewSession()
-    s.preview.textures.material_names = list(cards)
-    s.preview.custom_vpk_mode, s.preview.custom_vpk_weapon = True, 'c_detonator'
+    """Редактор War Paint на сеансе без __init__: поля сеанса - по месту."""
+    s = PaintkitEditor(AppSession.__new__(AppSession))
+    s._host.preview = PreviewSession()
+    s._host.preview.textures.material_names = list(cards)
+    s._host.preview.custom_vpk_mode, s._host.preview.custom_vpk_weapon = True, 'c_detonator'
     if layout:
-        s.preview.paintkit_layouts['7'] = layout
-    s.tf2_paths = lambda: {'root': 'C:/tf2', 'textures_vpk': '', 'misc_vpk': ''}
+        s._host.preview.paintkit_layouts['7'] = layout
+    s._host.tf2_paths = lambda: {'root': 'C:/tf2', 'textures_vpk': '', 'misc_vpk': ''}
     s._own_paintkits = lambda root, lang='ru': list(own)
     s._game_cards = lambda paths, item: list(game)
-    s._obj_path = ''
-    s.parts = SimpleNamespace(_mesh_of=_meshes)
+    s._host._obj_path = ''
+    s._host.parts = SimpleNamespace(_mesh_of=_meshes)
     return s
 
 
@@ -83,19 +85,19 @@ class UniversalTests(unittest.TestCase):
     def test_card_without_its_own_mesh_is_not_offered(self):
         """Вставка HUD или материал $texturegroup вне модели: меша нет."""
         s = _session(['body', 'smiley'])
-        s.parts = SimpleNamespace(_mesh_of=lambda model, card: (
+        s._host.parts = SimpleNamespace(_mesh_of=lambda model, card: (
             ('BODY', 'body') if card == 'body' else {'error': 'нет геометрии'}))
         self.assertEqual(_plans(s), [(['body'], 'BODY', None)])
 
     def test_single_mesh_mod_does_not_paint_its_garland_lights(self):
         """У одноматериальной модели любая карточка находит единственный меш."""
         s = _session(['c_ambassador', 'festive_lights_red'])
-        s.parts = SimpleNamespace(_mesh_of=lambda model, card: ('C_Ambassador', 'c_ambassador'))
+        s._host.parts = SimpleNamespace(_mesh_of=lambda model, card: ('C_Ambassador', 'c_ambassador'))
         self.assertEqual(_plans(s), [(['c_ambassador'], 'C_Ambassador', None)])
 
     def test_part_material_takes_its_source_picture(self):
         s = _session(['body', 'scope'])
-        s.preview.textures.part_cards = {'body_part1': 'body'}
+        s._host.preview.textures.part_cards = {'body_part1': 'body'}
         self.assertEqual(_plans(s), [(['body', 'body_part1'], 'BODY', None),
                                      (['scope'], 'SCOPE', None)])
         self.assertEqual(_plans(s, materials=['body_part1']),
@@ -103,12 +105,12 @@ class UniversalTests(unittest.TestCase):
 
     def test_part_of_a_game_material_gets_the_recipe(self):
         s = _session(['c_det', 'c_det_lens'], own=[LAYERED], game=['c_det'])
-        s.preview.textures.part_cards = {'c_det_part1': 'c_det'}
+        s._host.preview.textures.part_cards = {'c_det_part1': 'c_det'}
         self.assertEqual(_plans(s), [(['c_det', 'c_det_part1'], None, None)])
 
     def test_materials_list_for_panel(self):
         s = _session(['c_det', 'c_det_lens'], own=[LAYERED], game=['c_det'])
-        s.preview.textures.part_cards = {'c_det_part1': 'c_det'}
+        s._host.preview.textures.part_cards = {'c_det_part1': 'c_det'}
         with patch('src.services.mesh_parts_service.load', return_value=object()):
             got = s.paintkit_materials(15)['materials']
         self.assertEqual(got, [{'card': 'c_det', 'game': True, 'parts': True},
@@ -118,7 +120,7 @@ class UniversalTests(unittest.TestCase):
     def test_game_card_without_mesh_is_not_laid_by_parts(self):
         """Скин с другой пушки ложится по деталям: карточке игры без меша — нет."""
         s = _session(['c_det', 'c_det_shell'], own=[LAYERED], game=['c_det', 'c_det_shell'])
-        s.parts = SimpleNamespace(_mesh_of=lambda model, card: (
+        s._host.parts = SimpleNamespace(_mesh_of=lambda model, card: (
             ('C_DET', card) if card == 'c_det' else {'error': 'нет геометрии'}))
         with patch('src.services.mesh_parts_service.load', return_value=object()):
             got = s.paintkit_materials(15)['materials']
@@ -169,17 +171,17 @@ class ApplyTests(unittest.TestCase):
 
     def _apply(self, refuse=()):
         s = _session(['body', 'scope'])
-        s._work_dir = lambda: 'C:/tmp'
+        s._host._work_dir = lambda: 'C:/tmp'
         s._paintkit_job_for = lambda *args: None
         events, undo, steps, set_cards = [], [], [], []
-        s._put = lambda event, **kw: events.append((event, kw))
-        s.undo_edits = lambda delta=-1, lang='ru': undo.append(delta)
-        s._autosave = lambda step=True: steps.append(step)
+        s._host._put = lambda event, **kw: events.append((event, kw))
+        s._host.undo_edits = lambda delta=-1, lang='ru': undo.append(delta)
+        s._host._autosave = lambda step=True: steps.append(step)
 
         def set_texture(card, png):
             set_cards.append(card)
             return {'error': 'нельзя'} if card in refuse else {}
-        s.set_texture = set_texture
+        s._host.set_texture = set_texture
 
         class Batch:
             def __init__(self, jobs):

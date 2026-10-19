@@ -17,6 +17,7 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from src.services import texture_locator                       # noqa: E402
 from src.services.preview_3d_worker import Preview3DWorker   # noqa: E402
 from tests.fake_vpk import fake_reader, vmt                   # noqa: E402
 
@@ -359,7 +360,7 @@ def test_blu_comes_from_the_column_of_our_own_material():
     """Показываем только часы — синими стать могут лишь они, а не руки рядом."""
     with TemporaryDirectory() as tmp:
         model = _layout_model(QC_VIEWMODEL_WITH_ARMS, tmp)
-        assert Preview3DWorker._own_blu_names(model, ["c_pocket_watch"]) == [], \
+        assert texture_locator.own_blu_names(model, ["c_pocket_watch"]) == [], \
             "столбец часов в обеих строках один — команды у предмета нет"
 
 
@@ -367,7 +368,7 @@ def test_blu_of_a_neighbouring_column_is_not_stolen():
     """Руки командные, но красить пользователь просил не их."""
     with TemporaryDirectory() as tmp:
         model = _layout_model(QC_VIEWMODEL_WITH_ARMS, tmp)
-        names = Preview3DWorker._own_blu_names(model, ["spy_hands_red"])
+        names = texture_locator.own_blu_names(model, ["spy_hands_red"])
         assert names == ["spy_hands_blue"], "у своего столбца синяя пара своя"
 
 
@@ -375,8 +376,8 @@ def test_unmatched_materials_leave_the_decision_open():
     """Имена мешей с $texturegroup не сошлись — врать про команду нечем."""
     with TemporaryDirectory() as tmp:
         model = _layout_model(QC_SIMPLE_TEAM, tmp)
-        assert Preview3DWorker._own_blu_names(model, ["чужой_материал"]) is None
-        assert Preview3DWorker._own_blu_names(model, ["hat"]) == ["hat_blue"]
+        assert texture_locator.own_blu_names(model, ["чужой_материал"]) is None
+        assert texture_locator.own_blu_names(model, ["hat"]) == ["hat_blue"]
 
 
 #: Команда меняет НЕ материал геометрии, а добавку из $texturegroup: у
@@ -430,7 +431,7 @@ def test_team_material_outside_geometry_still_gets_blu():
 
 QC_HANDS_FIRST = """
 $modelname "v_watch.mdl"
-$cdmaterials "models\workshop\player\items\demo\hat\\"
+$cdmaterials "models\\workshop\\player\\items\\demo\\hat\\"
 
 $texturegroup "skinfamilies"
 {
@@ -452,7 +453,9 @@ def test_single_texture_prefers_the_material_that_is_on_screen():
         w, decomp = _worker(files, QC_HANDS_FIRST, tmp)
         w._decomp_dir = decomp
 
-        hands = w._extract_red_texture_via_qc(w._reader.paks)
-        watch = w._extract_red_texture_via_qc(w._reader.paks, ["c_pocket_watch"])
+        model = w._model(decomp)
+        hands = texture_locator.red_vtf_via_qc(w._reader.paks, model, w.weapon_key)
+        watch = texture_locator.red_vtf_via_qc(
+            w._reader.paks, model, w.weapon_key, ["c_pocket_watch"])
         assert hands == _png_bytes((200, 30, 30, 255))
         assert watch == _png_bytes((220, 180, 40, 255))

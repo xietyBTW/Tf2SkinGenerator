@@ -8,6 +8,7 @@ from unittest import mock
 import numpy as np
 
 from src.services import sheen_builder as sb
+from src.services import sheen_library as sl
 from src.services import sheen_patterns as sp
 from src.services import vmt_effects as fx
 
@@ -113,6 +114,131 @@ class SpecTests(unittest.TestCase):
             self.assertEqual(middle[5, 5], 0)
 
 
+def _picture(tmp: str, name: str = "logo.png", rgb=(255, 255, 255)) -> str:
+    """Квадрат 20×20 цвета rgb в центре прозрачной картинки 40×40."""
+    from PIL import Image
+    img = np.zeros((40, 40, 4), np.uint8)
+    img[10:30, 10:30] = (*rgb, 255)
+    path = Path(tmp) / name
+    Image.fromarray(img).save(path)
+    return str(path)
+
+
+class LayerOptionsTests(unittest.TestCase):
+    """Смешивание, повторы и настройки картинки."""
+
+    @staticmethod
+    def flash(**kw) -> dict:
+        return sb.new_layer("flash") | {"grain": 0, "fade": 0, "sharp": 0, "start": 0, "end": 1} | kw
+
+    def still(self, tmp, **kw) -> dict:
+        return sb.new_layer("image") | {"image": _picture(tmp), "mode": "still", "fade": 0,
+                                        "start": 0, "end": 1} | kw
+
+    def test_mask_shows_layers_below_only_through_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            # Список сверху вниз: маска над вспышкой.
+            spec = {"layers": [self.still(tmp, blend="mask"), self.flash()]}
+            mid = sb.render(spec, 30, 1.0)[15][..., 0]
+            self.assertGreater(mid[64, 64], 150)                 # сквозь квадрат видно
+            self.assertEqual(mid[5, 5], 0)                       # вне квадрата - нет
+            cut = sb.render({"layers": [self.still(tmp, blend="cut"), self.flash()]}, 30, 1.0)[15][..., 0]
+            self.assertEqual(cut[64, 64], 0)
+            self.assertGreater(cut[5, 5], 150)
+
+    def test_mask_below_does_nothing_to_layers_above(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            spec = {"layers": [self.flash(), self.still(tmp, blend="cut")]}
+            self.assertGreater(sb.render(spec, 30, 1.0)[15][64, 64, 0], 150)
+
+    def test_add_sums_and_lighten_takes_brightest(self):
+        half = self.flash(power=0.5)
+        lighten = sb.render({"layers": [half, half]}, 30, 1.0)[15][64, 64, 0]
+        added = sb.render({"layers": [half | {"blend": "add"}, half]}, 30, 1.0)[15][64, 64, 0]
+        self.assertAlmostEqual(int(added), 2 * int(lighten), delta=2)
+
+    def test_repeat_and_bounce(self):
+        layer = sb.clean_spec({"layers": [sb.new_layer("stripe") | {"repeat": 3}]})["layers"][0]
+        lay = sb._Layer(layer, 16, 32, 2.0)
+        self.assertAlmostEqual(lay.phase(0.5), 0.5)          # середина второго прохода
+        self.assertAlmostEqual(lay.phase(0.2), 0.6)
+        lay.bounce = True
+        self.assertAlmostEqual(lay.phase(0.5), 0.5)
+        self.assertAlmostEqual(lay.phase(0.4), 0.8)          # второй проход - назад
+        self.assertEqual(sb.clean_spec({"layers": [{"type": "flash", "repeat": 3.7}]})
+                         ["layers"][0]["repeat"], 4)
+
+    def test_image_size_position_and_invert(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            def frame(**kw):
+                return sb.render({"layers": [self.still(tmp, **kw)]}, 30, 1.0)[15][..., 0].astype(int)
+            small = frame(scale=0.5)
+            self.assertGreater(small[64, 64], 150)
+            self.assertEqual(small[64, 40], 0)                   # квадрат стал вдвое меньше
+            left = frame(pos_x=0.25)
+            self.assertGreater(left[64, 32], 150)
+            self.assertEqual(left[64, 96], 0)
+            # Негатив: белый квадрат гаснет, прозрачное остаётся тёмным.
+            inv = frame(invert="yes")
+            self.assertEqual((inv[64, 64], inv[5, 5]), (0, 0))
+
+    def test_picture_colours(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            layer = self.still(tmp, fill="image") | {"image": _picture(tmp, "red.png", (255, 0, 0))}
+            mid = sb.render({"layers": [layer]}, 30, 1.0)[15]
+            self.assertGreater(mid[64, 64, 0], 150)
+            self.assertEqual(int(mid[64, 64, 2]), 0)
+        # Цвета картинки - только у слоя-картинки.
+        self.assertEqual(sb.clean_spec({"layers": [{"type": "flash", "fill": "image"}]})
+                         ["layers"][0]["fill"], "solid")
+
+
+class PreviewTests(unittest.TestCase):
+    """Превью конструктора: отмена устаревшего расчёта, кэш листа и картинок."""
+
+    def test_cancel_stops_rendering(self):
+        asked = []
+        def cancelled():
+            asked.append(1)
+            return len(asked) > 3
+        with self.assertRaises(sb.Cancelled):
+            list(sb.iter_frames(sb.PRESETS["classic"]["spec"], 60, 3.0, cancelled=cancelled))
+        self.assertEqual(len(asked), 4)
+
+    def test_same_pattern_reuses_the_sheet(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            spec = sb.PRESETS["double"]["spec"]
+            first = sb.preview(spec, 30, 3.0, Path(tmp))
+            with mock.patch.object(sb, "preview_sheet") as again:
+                second = sb.preview(spec, 30, 3.0, Path(tmp))
+            again.assert_not_called()
+            self.assertEqual(first, second)
+            sb.preview(sb.PRESETS["pulse"]["spec"], 30, 3.0, Path(tmp))
+            self.assertEqual(len(list(Path(tmp).glob("*.png"))), 2)
+
+    def test_changed_picture_file_is_read_again(self):
+        import os
+        from PIL import Image
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _picture(tmp)
+            layer = sb.new_layer("image") | {"image": path, "mode": "still", "fade": 0}
+            self.assertGreater(sb.render({"layers": [layer]}, 30, 1.0)[15][64, 64, 0], 150)
+            Image.new("RGBA", (40, 40), (0, 0, 0, 0)).save(path)     # тот же путь, другое
+            st = os.stat(path)
+            os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns + 10**9))
+            self.assertEqual(sb.render({"layers": [layer]}, 30, 1.0)[15][..., 0].max(), 0)
+
+    def test_huge_picture_is_kept_small(self):
+        from PIL import Image
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "big.png"
+            Image.new("RGBA", (3000, 2000), (255, 255, 255, 255)).save(path)
+            st = path.stat()
+            src = sb._source(str(path), st.st_mtime_ns, st.st_size)
+            self.assertLessEqual(src.width * src.height, sb._SOURCE_PIXELS * 1.01)
+            self.assertAlmostEqual(src.width / src.height, 1.5, delta=0.01)
+
+
 class LibraryTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -126,9 +252,9 @@ class LibraryTests(unittest.TestCase):
         pic = Path(self.tmp.name) / "upload.png"
         Image.new("RGB", (8, 8), "white").save(pic)
         spec = {"layers": [sb.new_layer("image") | {"image": str(pic)}]}
-        pid = sb.save("", "Логотип", spec, 3.0)
-        self.assertRegex(pid, sb.ID_RE)
-        data = sb.load(pid)
+        pid = sl.save("", "Логотип", spec, 3.0)
+        self.assertRegex(pid, sl.ID_RE)
+        data = sl.load(pid)
         self.assertEqual((data["name"], data["length"]), ("Логотип", 3.0))
         # Странице — абсолютный путь (миниатюра), на диске — относительный.
         stored = Path(data["spec"]["layers"][0]["image"])
@@ -136,15 +262,15 @@ class LibraryTests(unittest.TestCase):
         self.assertIn('"images/', (sb.library_dir() / f"{pid}.json").read_text(encoding="utf-8"))
         pic.unlink()                                       # временный файл пропал
         self.assertTrue(stored.is_file())                  # копия в библиотеке цела
-        self.assertEqual([p["id"] for p in sb.list_patterns()], [pid])
-        self.assertEqual(sb.save(pid, "Новое имя", data["spec"], 2.0), pid)
-        self.assertEqual(sb.load(pid)["name"], "Новое имя")
-        self.assertTrue(sb.delete(pid))
-        self.assertIsNone(sb.load(pid))
-        self.assertFalse(sb.delete("../evil"))
+        self.assertEqual([p["id"] for p in sl.list_patterns()], [pid])
+        self.assertEqual(sl.save(pid, "Новое имя", data["spec"], 2.0), pid)
+        self.assertEqual(sl.load(pid)["name"], "Новое имя")
+        self.assertTrue(sl.delete(pid))
+        self.assertIsNone(sl.load(pid))
+        self.assertFalse(sl.delete("../evil"))
 
     def test_effect_and_build_use_the_pattern(self):
-        pid = sb.save("", "Две", sb.PRESETS["double"]["spec"], 2.0)
+        pid = sl.save("", "Две", sb.PRESETS["double"]["spec"], 2.0)
         bounds = {"scale_x": 30.0, "scale_y": 10.0, "offset_x": 0, "offset_y": 0, "direction": 0}
         out = fx.apply(fx.SHEEN, {"color": "#ffffff", "pattern": pid, "length": 2}, STOCK, "",
                        bounds)["text"]
@@ -156,13 +282,13 @@ class LibraryTests(unittest.TestCase):
         (mat / "gun.vmt").write_text(out, encoding="utf-8")
         self.assertEqual(sp.materialize(root, "console"), 2)
         # В моде — с отпечатком содержимого узора.
-        digest = sb.content_hash(pid)
+        digest = sl.content_hash(pid)
         vtf = root / "materials" / "console" / "tf2sg" / "sheen" / f"{pid}_h{digest}_a30_51.vtf"
         self.assertTrue(vtf.is_file())
         self.assertIn(f"console/tf2sg/sheen/{pid}_h{digest}_a30_51", (mat / "gun.vmt").read_text())
         # Правка узора — другой отпечаток, другой путь.
-        sb.save(pid, "Две", sb.PRESETS["running"]["spec"], 2.0)
-        self.assertNotEqual(sb.content_hash(pid), digest)
+        sl.save(pid, "Две", sb.PRESETS["running"]["spec"], 2.0)
+        self.assertNotEqual(sl.content_hash(pid), digest)
         from src.services.vtflib_wrapper import VTFLib
         frames, w, h = VTFLib.read_vtf_all_frames(str(vtf))
         self.assertEqual((len(frames), h, w), (51, *sb.mask_shape(3.0, "medium")))
@@ -180,8 +306,8 @@ class LibraryTests(unittest.TestCase):
         self.addCleanup(os.chdir, cwd)
         with mock.patch("src.services.work_store.WORK_DIR", Path("work")):
             layer = sb.new_layer("image") | {"image": str(pic), "mode": "still", "fade": 0}
-            pid = sb.save("", "Фото", {"layers": [layer]}, 2.0)
-            again = sb.load(pid)["spec"]                 # как страница получит узор
+            pid = sl.save("", "Фото", {"layers": [layer]}, 2.0)
+            again = sl.load(pid)["spec"]                 # как страница получит узор
             self.assertTrue(Path(again["layers"][0]["image"]).is_absolute())
             frames = sb.render(again, 30, 2.0)           # и пришлёт обратно в превью
             self.assertGreater(max(f[..., :3].max() for f in frames), 150)
@@ -224,7 +350,7 @@ class LibraryTests(unittest.TestCase):
         self.assertAlmostEqual(st["scale_x"], 3.5, places=4)      # ширина X
         self.assertAlmostEqual(st["scale_y"], 19.4, places=4)     # длина Z
         self.assertAlmostEqual(st["aspect"], 19.4 / 3.5, places=3)
-        pid = sb.save("", "Поворот", sb.PRESETS["double"]["spec"], 2.0)
+        pid = sl.save("", "Поворот", sb.PRESETS["double"]["spec"], 2.0)
         out = fx.apply(fx.SHEEN, {"pattern": pid, "length": 2}, STOCK, "", bounds)["text"]
         self.assertIn(f'tf2sg/sheen/{pid}_a55r_51', out)
         self.assertIn('"$sheenmapmaskdirection" "0"', out)
@@ -243,10 +369,10 @@ class LibraryTests(unittest.TestCase):
         self.assertEqual((w, h), (mh, mw))                        # повёрнута: длина по высоте
 
     def test_deleted_pattern_still_builds(self):
-        pid = sb.save("", "Старый", sb.PRESETS["pulse"]["spec"], 2.0)
-        self.assertTrue(sb.delete(pid))
-        self.assertEqual(sb.list_patterns(), [])               # из списка ушёл
-        self.assertIsNone(sb.load(pid))
+        pid = sl.save("", "Старый", sb.PRESETS["pulse"]["spec"], 2.0)
+        self.assertTrue(sl.delete(pid))
+        self.assertEqual(sl.list_patterns(), [])               # из списка ушёл
+        self.assertIsNone(sl.load(pid))
         root = Path(self.tmp.name) / "vpkroot"
         mat = root / "materials" / "models"
         mat.mkdir(parents=True)
@@ -258,7 +384,7 @@ class LibraryTests(unittest.TestCase):
         bad = Path(self.tmp.name) / "vector.png"
         bad.write_text("<svg></svg>")
         with self.assertRaises(ValueError):
-            sb.save("", "x", {"layers": [sb.new_layer("image") | {"image": str(bad)}]}, 2.0)
+            sl.save("", "x", {"layers": [sb.new_layer("image") | {"image": str(bad)}]}, 2.0)
         # В отрисовке — пустой слой, а не упавшая сборка.
         frames = sb.render({"layers": [sb.new_layer("image") | {"image": str(bad)}]}, 30, 3.0)
         self.assertEqual(max(f[..., 0].max() for f in frames), 0)

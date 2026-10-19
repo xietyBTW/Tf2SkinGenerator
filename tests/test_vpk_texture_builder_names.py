@@ -13,6 +13,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from src.services.texture_build import material_maps, panel_extras
 from src.services.vpk_texture_builder import VpkTextureBuilder
 
 
@@ -34,7 +35,7 @@ class PanelExtrasNamesTests(unittest.TestCase):
     def test_dotted_cards_render_under_the_model_names(self):
         with tempfile.TemporaryDirectory() as d:
             (Path(d) / "material_001.vtf").write_bytes(b"x")    # главный уже собран
-            with patch.object(VpkTextureBuilder, "_run_extra_render_jobs") as run:
+            with patch.object(panel_extras, "run_extra_render_jobs") as run:
                 VpkTextureBuilder._render_panel_extras(
                     {"Material.001": "a.png", "Paint.002": "b.png"}, set(), None,
                     _Slots(d), _settings)
@@ -47,7 +48,7 @@ class MaterialMapsNamesTests(unittest.TestCase):
             out = Path(d)
             (out / "paint_002.vmt").write_text("x")
             derive = {"selfillum": {"derive": True}}
-            with patch.object(VpkTextureBuilder, "_apply_maps_for_material") as apply:
+            with patch.object(material_maps, "apply_maps_for_material") as apply:
                 VpkTextureBuilder._build_material_maps(
                     {"Paint.002": derive, "Material.001": derive},
                     out, "material_001", out / "material_001.vmt", "console/x", (256, 256),

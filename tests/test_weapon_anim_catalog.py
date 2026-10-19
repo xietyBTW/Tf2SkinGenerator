@@ -1,14 +1,14 @@
 """
-Каталог анимаций класса: поиск последовательности по слоту и действию.
+Каталог анимаций класса: поиск последовательности для оружия и действия.
 
 Имена последовательностей наружу не выводятся (`sg_idle`, `db_idle`, `ss_idle`),
-зато у каждой в QC стоит активность, и она называет слот и действие явно.
-Проверяется именно разрешение имени активности — там, где легко ошибиться:
+зато у каждой в QC стоит активность. Какую активность играть, решает тот же
+путь, что в движке, и проверяется именно он — там, где легко ошибиться:
 
-  * `item2` — самостоятельный слот (Неумолимая сила), а `secondary2` — второй
-    вариант вторичного (Прерыватель). По написанию не отличить, порядок решает;
-  * у перезарядки в активности нет `VM_`;
-  * инструменты инженера названы через ACT_ENGINEER_*, а не по слоту.
+  * какую БАЗОВУЮ активность шлёт оружие (кулаки - HITLEFT, ближний бой -
+    HITCENTER, стрелковое - PRIMARYATTACK);
+  * подмена из items_game - окончательный ответ, запасных наборов нет;
+  * таблица ролей движка (`s_viewmodelacttable`) с её исключениями.
 """
 
 import unittest
@@ -91,14 +91,14 @@ $sequence "lost_anim" {
 }
 
 $sequence "primary_inspect_idle" {
-	"anims\primary_inspect_idle.smd"
+	"anims\\primary_inspect_idle.smd"
 	activity "ACT_PRIMARY_VM_INSPECT_IDLE" 1
 	fps 24
 	loop
 }
 
 $sequence "secondary_inspect_idle" {
-	"anims\secondary_inspect_idle.smd"
+	"anims\\secondary_inspect_idle.smd"
 	activity "ACT_SECONDARY_VM_INSPECT_IDLE" 1
 	fps 30
 	loop
@@ -154,154 +154,175 @@ class CatalogTests(unittest.TestCase):
             self.assertIsNone(cat.load(empty))
         self.assertIsNone(cat.load(""))
 
-    # ── Поиск ─────────────────────────────────────────────────────────────── #
+    # ── Поиск: путь движка ────────────────────────────────────────────────── #
+
+    def _find(self, action, slot, **kw):
+        found = self.catalog.find(cat.WeaponProfile(slot=slot, **kw), action)
+        return found.name if found else None
 
     def test_plain_slot(self):
-        self.assertEqual(self.catalog.find("primary", Action.IDLE).name, "sg_idle")
+        self.assertEqual(self._find(Action.IDLE, "primary"), "sg_idle")
 
-    def test_numbered_slot_is_taken_literally_first(self):
-        """item2 — слот сам по себе, а не «второй вариант item»."""
-        self.assertEqual(self.catalog.find("item2", Action.IDLE).name, "db_idle")
-
-    def test_numbered_slot_falls_back_to_a_variant(self):
-        """ACT_SECONDARY2_* нет — значит цифра означает вариант вторичного."""
-        self.assertEqual(self.catalog.find("secondary2", Action.IDLE).name,
-                         "ss_idle")
+    def test_numbered_role_is_taken_literally(self):
+        """item2 - самостоятельная роль (Неумолимая сила)."""
+        self.assertEqual(self._find(Action.IDLE, "item2"), "db_idle")
 
     def test_reload_activity_has_no_vm_part(self):
-        self.assertEqual(self.catalog.find("primary", Action.RELOAD_START).name,
+        self.assertEqual(self._find(Action.RELOAD_START, "primary"),
                          "sg_reload_start")
 
-    def test_melee_falls_back_to_the_all_class_set(self):
-        self.assertEqual(self.catalog.find("melee", Action.IDLE).name,
+    def test_melee_does_not_borrow_the_all_class_set(self):
+        """Чего у роли нет, того нет: всеклассовый набор - чужое оружие.
+
+        Так Кусай-хлеб получал на удар замах сковородой.
+        """
+        self.assertIsNone(self._find(Action.IDLE, "melee"))
+        self.assertEqual(self._find(Action.IDLE, "melee_allclass"),
                          "melee_allclass_idle")
 
-    def test_engineer_tools_are_found_through_an_alias(self):
-        self.assertEqual(self.catalog.find("building", Action.IDLE).name,
+    def test_building_plays_the_base_activity(self):
+        """У роли building строк в таблице нет: саппер шпиона - ACT_VM_IDLE."""
+        self.assertEqual(self._find(Action.IDLE, "building"), "c_sapper_idle")
+
+    def test_engineer_toolbox_comes_from_the_replacement(self):
+        box = {"ACT_VM_IDLE": "ACT_ENGINEER_BLD_VM_IDLE"}
+        self.assertEqual(self._find(Action.IDLE, "building", replacement=box),
                          "box_idle")
 
     def test_sequence_whose_smd_is_gone_is_not_offered(self):
         """Иначе поза бы «нашлась», а файла под ней не оказалось."""
-        self.assertIsNone(self.catalog.find("secondary", Action.IDLE))
+        self.assertIsNone(self._find(Action.IDLE, "secondary"))
 
-    def test_slot_that_the_game_marks_unused_resolves_to_nothing(self):
-        """У щитов и ботинок вьюмодели нет вовсе — items_game так и пишет."""
-        self.assertEqual(cat.activity_candidates("force_not_used", Action.IDLE), [])
-        self.assertIsNone(self.catalog.find("force_not_used", Action.IDLE))
-        self.assertIsNone(self.catalog.find("", Action.IDLE))
+    def test_slot_that_is_not_held_in_hands_resolves_to_nothing(self):
+        """Щиты, ботинки, тело шпиона: базовая ACT_VM_IDLE нашлась бы - саппер."""
+        for slot in ("force_not_used", "playerskin", ""):
+            self.assertIsNone(self._find(Action.IDLE, slot), slot)
 
     def test_unknown_action_for_this_weapon_is_none(self):
-        self.assertIsNone(self.catalog.find("item2", Action.RELOAD))
+        self.assertIsNone(self._find(Action.RELOAD, "item2"))
 
     def test_actions_for_lists_what_the_weapon_can_do(self):
         """Из этого списка интерфейс потом строит выбор анимации."""
-        self.assertEqual(set(self.catalog.actions_for("primary")),
+        primary = cat.WeaponProfile(slot="primary", loadout_slot="primary")
+        self.assertEqual(set(self.catalog.actions_for(primary)),
                          {Action.IDLE, Action.RELOAD_START, Action.INSPECT_IDLE})
-        self.assertEqual(set(self.catalog.actions_for("item2")), {Action.IDLE})
+        self.assertEqual(set(self.catalog.actions_for(cat.WeaponProfile(slot="item2"))),
+                         {Action.IDLE})
 
     # ── Осмотр: по слоту снаряжения ───────────────────────────────────────── #
 
     def test_inspect_follows_the_loadout_slot(self):
-        """Гранатомёт: слот анимаций secondary, слот снаряжения primary.
+        """Гранатомёт: роль secondary, слот снаряжения primary.
 
-        Игра берёт осмотр по слоту СНАРЯЖЕНИЯ (GetInspectActivity), и по слоту
-        анимаций гранатомёт получал осмотр липучкомёта — модель разваливалась.
+        Игра берёт осмотр по слоту СНАРЯЖЕНИЯ (GetInspectActivity), и по роли
+        гранатомёт получал осмотр липучкомёта - модель разваливалась.
         """
-        self.assertEqual(
-            self.catalog.find("secondary", Action.INSPECT_IDLE,
-                              inspect_slot="primary").name,
-            "primary_inspect_idle")
-        self.assertEqual(
-            set(self.catalog.actions_for("secondary", inspect_slot="primary")),
-            {Action.INSPECT_IDLE})     # лежит на диске только осмотр
+        self.assertEqual(self._find(Action.INSPECT_IDLE, "secondary",
+                                    loadout_slot="primary"),
+                         "primary_inspect_idle")
 
     def test_inspect_slot_does_not_touch_other_actions(self):
-        self.assertEqual(
-            self.catalog.find("primary", Action.IDLE, inspect_slot="secondary").name,
-            "sg_idle")
+        self.assertEqual(self._find(Action.IDLE, "primary", loadout_slot="secondary"),
+                         "sg_idle")
+
+    def test_no_inspect_outside_the_games_table(self):
+        """ПДА осматривать нельзя (`CanInspect`)."""
+        self.assertIsNone(cat.activity_for(
+            cat.WeaponProfile(slot="pda", loadout_slot="pda"), Action.INSPECT_IDLE))
 
     # ── Подмена активностей из items_game ─────────────────────────────────── #
 
-    def test_replacement_wins_over_the_slot(self):
-        """У куная слот остаётся melee, а играет он набор ITEM2.
-
-        Пока подмена не читалась, почти все ножи шпиона показывали анимацию
-        обычного ножа-бабочки — это и было заметно на экране.
-        """
+    def test_replacement_wins_over_the_role(self):
+        """У куная роль melee, а играет он набор ITEM2."""
         kunai = {"ACT_VM_IDLE": "ACT_ITEM2_VM_IDLE"}
-        self.assertEqual(self.catalog.find("melee", Action.IDLE).name,
-                         "melee_allclass_idle")
-        self.assertEqual(self.catalog.find("melee", Action.IDLE, kunai).name,
+        self.assertEqual(self._find(Action.IDLE, "melee", replacement=kunai),
                          "db_idle")   # первая последовательность ACT_ITEM2_VM_IDLE
 
-    def test_replacement_that_points_at_nothing_falls_back_to_the_slot(self):
-        """Чужая или устаревшая подмена не должна лишать оружие анимации."""
+    def test_replacement_that_points_at_nothing_gives_nothing(self):
+        """Подмена - окончательный ответ игры: запасного набора она не ищет."""
         nowhere = {"ACT_VM_IDLE": "ACT_NOSUCH_VM_IDLE"}
-        self.assertEqual(self.catalog.find("primary", Action.IDLE, nowhere).name,
-                         "sg_idle")
+        self.assertIsNone(self._find(Action.IDLE, "primary", replacement=nowhere))
 
     def test_replacement_key_may_carry_the_slot(self):
-        """Осмотр в таблице записан ключом СО слотом, а не голым именем.
-
-            ACT_MELEE_VM_INSPECT_IDLE → ACT_ITEM2_VM_INSPECT_IDLE
-
-        Пока разбирались только голые ключи, у куная и Вечной награды осмотр
-        так и брался от ножа-бабочки, хотя всё остальное играло из ITEM2.
-        """
+        """Осмотр подменяется ключом СО слотом: ACT_MELEE_VM_INSPECT_IDLE."""
         kunai = {"ACT_MELEE_VM_INSPECT_IDLE": "ACT_ITEM2_VM_INSPECT_IDLE"}
-        names = cat.activity_candidates("melee", Action.INSPECT_IDLE, kunai)
-        self.assertEqual(names[0], "ACT_ITEM2_VM_INSPECT_IDLE")
-        self.assertIn("ACT_MELEE_VM_INSPECT_IDLE", names)   # запасной остался
+        self.assertEqual(cat.activity_for(
+            cat.WeaponProfile(slot="melee", loadout_slot="melee", replacement=kunai),
+            Action.INSPECT_IDLE), "ACT_ITEM2_VM_INSPECT_IDLE")
 
-    def test_replacement_is_first_among_candidates(self):
-        names = cat.activity_candidates(
-            "melee", Action.IDLE, {"ACT_VM_IDLE": "ACT_ITEM2_VM_IDLE"})
-        self.assertEqual(names[0], "ACT_ITEM2_VM_IDLE")
+    # ── Удары: какую активность шлёт само оружие ──────────────────────────── #
 
-    # ── Действия, названные не как у стрелкового ───────────────────────────── #
+    def test_melee_attack_is_hitcenter_and_crit_is_swinghard(self):
+        knife = cat.WeaponProfile(slot="melee", loadout_slot="melee")
+        self.assertEqual(self.catalog.find(knife, Action.FIRE).name, "knife_stab_a")
+        self.assertEqual(cat.activity_for(knife, Action.CRIT),
+                         "ACT_MELEE_VM_SWINGHARD")
+        self.assertIsNone(cat.activity_for(knife, Action.ALT_FIRE))
 
-    def test_melee_attack_is_called_hitcenter(self):
-        """Удар ближнего боя — не PRIMARYATTACK, и без этого ножи и биты
-        оставались без единого действия «Выстрел» в списке."""
-        self.assertEqual(self.catalog.find("melee", Action.FIRE).name,
-                         "knife_stab_a")
+    def test_fists_punch_left_and_right(self):
+        """Кусай-хлеб: левый удар, правый, крит - и всё через подмену."""
+        bread = cat.WeaponProfile(
+            slot="melee", loadout_slot="melee", item_class="tf_weapon_fists",
+            replacement={"ACT_VM_HITLEFT": "ACT_BREADGLOVES_VM_HITLEFT",
+                         "ACT_VM_HITRIGHT": "ACT_BREADGLOVES_VM_HITRIGHT",
+                         "ACT_VM_SWINGHARD": "ACT_BREADGLOVES_VM_SWINGHARD"})
+        self.assertEqual(cat.activity_for(bread, Action.FIRE),
+                         "ACT_BREADGLOVES_VM_HITLEFT")
+        self.assertEqual(cat.activity_for(bread, Action.ALT_FIRE),
+                         "ACT_BREADGLOVES_VM_HITRIGHT")
+        self.assertEqual(cat.activity_for(bread, Action.CRIT),
+                         "ACT_BREADGLOVES_VM_SWINGHARD")
+
+    def test_stock_fists_keep_the_untranslated_hit(self):
+        """HITLEFT в таблице ролей нет - у стоковых кулаков он так и остаётся."""
+        fists = cat.WeaponProfile(slot="melee", loadout_slot="melee",
+                                  item_class="tf_weapon_fists")
+        self.assertEqual(cat.activity_for(fists, Action.FIRE), "ACT_VM_HITLEFT")
+
+    def test_gun_fires_primaryattack(self):
+        gun = cat.WeaponProfile(slot="secondary", loadout_slot="secondary")
+        self.assertEqual(cat.activity_for(gun, Action.FIRE),
+                         "ACT_SECONDARY_VM_PRIMARYATTACK")
+        self.assertIsNone(cat.activity_for(gun, Action.CRIT))
+
+    def test_buff_banner_translates_itself_to_item1(self):
+        """Горн с ролью melee играет ITEM1, а не лопату."""
+        horn = cat.WeaponProfile(slot="melee", loadout_slot="secondary",
+                                 item_class="tf_weapon_buff_item")
+        self.assertEqual(cat.activity_for(horn, Action.IDLE), "ACT_ITEM1_VM_IDLE")
+
+    def test_demoman_sword_uses_the_special_set(self):
+        sword = cat.WeaponProfile(slot="melee", loadout_slot="melee",
+                                  item_class="tf_weapon_sword", tf2_class="demoman")
+        self.assertEqual(cat.activity_for(sword, Action.IDLE), "ACT_VM_IDLE_SPECIAL")
+        self.assertEqual(cat.activity_for(sword, Action.FIRE),
+                         "ACT_VM_HITCENTER_SPECIAL")
+        katana = cat.WeaponProfile(slot="melee", loadout_slot="melee",
+                                   item_class="tf_weapon_katana", tf2_class="soldier")
+        self.assertEqual(cat.activity_for(katana, Action.IDLE), "ACT_MELEE_VM_IDLE")
 
     def test_spy_watch_uses_the_offhand_set(self):
-        """Часы невидимости — «вторая рука» шпиона."""
-        self.assertEqual(self.catalog.find("watch", Action.IDLE).name,
-                         "offhand_idle")
+        """Часы невидимости - «вторая рука» шпиона."""
+        self.assertEqual(self._find(Action.IDLE, "watch"), "offhand_idle")
 
-    def test_sapper_activity_has_no_slot_at_all(self):
-        """Саппер шпиона назван просто ACT_VM_IDLE.
+    # ── Таблица ролей ─────────────────────────────────────────────────────── #
 
-        Разрешено это только слоту building: общий запасной вариант «активность
-        без слота» выдавал бы саппер любому оружию, чью анимацию не нашли.
-        """
-        self.assertEqual(self.catalog.find("building", Action.IDLE).name,
-                         "box_idle")           # у инженера — свой ящик
-        catalog = self._catalog_without("box_idle")
-        self.assertEqual(catalog.find("building", Action.IDLE).name,
-                         "c_sapper_idle")      # у шпиона — саппер
-        self.assertIsNone(catalog.find("нет_такого_слота", Action.IDLE))
-
-    def _catalog_without(self, name: str):
-        """Тот же каталог, но без одной последовательности на диске."""
-        (self.dir / "anims" / f"{name}.smd").unlink()
-        return cat.load(str(self.dir))
-
-    # ── Порядок кандидатов ────────────────────────────────────────────────── #
-
-    def test_literal_name_is_tried_before_the_variant_split(self):
-        names = cat.activity_candidates("item2", Action.IDLE)
-        self.assertEqual(names[0], "ACT_ITEM2_VM_IDLE")
-        self.assertLess(names.index("ACT_ITEM2_VM_IDLE"),
-                        names.index("ACT_ITEM_VM_IDLE_2"))
-
-    def test_split_slot(self):
-        self.assertEqual(cat.split_slot("secondary2"), ("SECONDARY2", "_2"))
-        self.assertEqual(cat.split_slot("melee_allclass"), ("MELEE_ALLCLASS", ""))
-        self.assertEqual(cat.split_slot("force_not_used"), ("", ""))
-        self.assertEqual(cat.split_slot(""), ("", ""))
+    def test_role_table_rows(self):
+        """Строки `s_viewmodelacttable`, где легко ошибиться."""
+        rows = [
+            ("melee", "ACT_VM_HITCENTER", "ACT_MELEE_VM_HITCENTER"),
+            ("item2", "ACT_VM_HITCENTER", "ACT_VM_HITCENTER"),
+            ("melee", "ACT_VM_HITLEFT", "ACT_VM_HITLEFT"),
+            ("secondary2", "ACT_VM_IDLE", "ACT_SECONDARY2_VM_IDLE"),
+            ("secondary2", "ACT_VM_SECONDARYATTACK", "ACT_VM_SECONDARYATTACK"),
+            ("primary2", "ACT_VM_IDLE", "ACT_PRIMARY_VM_IDLE"),
+            ("primary2", "ACT_VM_RELOAD", "ACT_PRIMARY_VM_RELOAD_3"),
+            ("primary2", "ACT_RELOAD_START", "ACT_PRIMARY_RELOAD_START_3"),
+            ("item2", "ACT_RELOAD_START", "ACT_RELOAD_START"),
+            ("building", "ACT_VM_IDLE", "ACT_VM_IDLE"),
+        ]
+        for slot, base, expected in rows:
+            self.assertEqual(cat.translate(slot, base), expected, (slot, base))
 
 
 if __name__ == "__main__":

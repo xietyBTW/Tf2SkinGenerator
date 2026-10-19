@@ -1,0 +1,116 @@
+/*
+ * Появление и уход панелей, переход «Вместе / Текстура / Модель».
+ *
+ * Часть стилей страницы: файлы подключены в index.html в порядке каскада
+ * (style.css первым), порядок менять нельзя.
+ */
+
+/* ── Появление и уход панелей ─────────────────────────────────────────────
+   Всё, что переключается атрибутом hidden, раньше возникало рывком: display
+   не анимируется. `transition-behavior: allow-discrete` держит display до
+   конца перехода (уход), `@starting-style` задаёт кадр, С КОТОРОГО начинать
+   (появление). Чисто CSS, JS про это не знает. Список — явный; откуда
+   выезжать, задаёт `--reveal-from` у элемента (по умолчанию — чуть сверху). */
+[data-panels="float"] .catalog,
+.viewport__hint,
+#fpbar, #tauntbar, #wearbar, #skinbar, #bodybar, #festivebar, #hatstyles,
+#partsbar, #fitpanel, #partspaint,
+.build, .pbuild, .menu__list, .ctx, .console {
+  --reveal-from: translateY(-4px);
+  transition: opacity var(--dur-panel), transform var(--dur-panel),
+              display var(--dur-panel) allow-discrete;
+}
+[data-panels="float"] .catalog[hidden],
+.viewport__hint[hidden],
+#fpbar[hidden], #tauntbar[hidden], #wearbar[hidden], #skinbar[hidden], #bodybar[hidden], #festivebar[hidden],
+#hatstyles[hidden],
+#partsbar[hidden], #fitpanel[hidden], #partspaint[hidden],
+.build[hidden], .pbuild[hidden], .menu__list[hidden], .ctx[hidden],
+.console[hidden] {
+  opacity: 0;
+  transform: var(--reveal-from);
+}
+@starting-style {
+  [data-panels="float"] .catalog:not([hidden]),
+  .viewport__hint:not([hidden]),
+  #fpbar:not([hidden]), #tauntbar:not([hidden]), #wearbar:not([hidden]), #skinbar:not([hidden]),
+  #bodybar:not([hidden]), #festivebar:not([hidden]), #hatstyles:not([hidden]),
+  #partsbar:not([hidden]), #fitpanel:not([hidden]), #partspaint:not([hidden]),
+  .build:not([hidden]), .pbuild:not([hidden]), .menu__list:not([hidden]),
+  .ctx:not([hidden]), .console:not([hidden]) {
+    opacity: 0;
+    transform: var(--reveal-from);
+  }
+}
+/* Каталог на весь экран — без сдвига: он и так закрывает всё, хватит
+   проявления. Панель параметров снизу — выезжает снизу, консоль — справа. */
+[data-panels="float"] .catalog { --reveal-from: none; }
+.build, .pbuild { --reveal-from: translateY(10px); }
+.console { --reveal-from: translateX(16px); }
+/* Панели В КАДРЕ выезжают из-за его краёв, как половины стола: список частей
+   слева, палитры (части, подгонка) справа. Кадр обрезает (`overflow:
+   hidden`), так что за краем их не видно. Палитра — контейнер на весь кадр
+   со столбиком у правого края и панелью настроек в 280 px от него; сдвиг
+   контейнера на столько же уводит обе за край. */
+#partsbar { --reveal-from: translateX(calc(-100% - 12px)); }
+#fitpanel, #partspaint { --reveal-from: translateX(280px); }
+
+/* ── «Вместе / Текстура / Модель» ─────────────────────────────────────────
+   View Transitions: каждая половина — именованный участник. Та, что есть в
+   обоих кадрах, едет и растягивается сама (группа интерполирует рамку);
+   уходящая уезжает за СВОЙ край, приходящая выезжает из-за него: текстуры
+   слева, модель справа. `:only-child` — участник есть лишь в одном кадре,
+   то есть именно уходит или приходит, а не меняет размер. Снимки не
+   масштабируем (`object-fit: none`): при смене ширины вдвое картинку
+   иначе плющило бы. Хром вокруг стола не меняется — корень без анимации. */
+.half--flat  { view-transition-name: half-flat; }
+.half--model { view-transition-name: half-model; }
+/* Без кроссфейда корня — и без его сложения цветов (plus-lighter): два
+   непрозрачных снимка складывались в серую пелену на весь экран. */
+::view-transition-old(root), ::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+::view-transition-group(*) { animation-duration: var(--dur-panel); }
+::view-transition-old(*), ::view-transition-new(*) {
+  block-size: 100%;
+  object-fit: none;
+  animation-duration: var(--dur-panel);
+}
+::view-transition-old(half-flat):only-child  { animation-name: vt-out-left; }
+::view-transition-new(half-flat):only-child  { animation-name: vt-in-left; }
+::view-transition-old(half-model):only-child { animation-name: vt-out-right; }
+::view-transition-new(half-model):only-child { animation-name: vt-in-right; }
+@keyframes vt-out-left  { to   { transform: translateX(-100%); opacity: 0; } }
+@keyframes vt-in-left   { from { transform: translateX(-100%); opacity: 0; } }
+@keyframes vt-out-right { to   { transform: translateX(100%);  opacity: 0; } }
+@keyframes vt-in-right  { from { transform: translateX(100%);  opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) {
+    animation: none;
+  }
+}
+
+/* Смена раздела (оружие → шапки → частицы): содержимое стола подменяется
+   целиком и мгновенно — проявляем его заново, класс ставит catalog.js. */
+.is-fresh .title, .is-fresh .stage { animation: fade-in var(--dur-panel); }
+
+/* Диалоги: окно проявляется и чуть подъезжает, подложка проявляется.
+   `overlay` — чтобы на уходе окно не выпадало из верхнего слоя раньше,
+   чем догорит прозрачность. */
+.ask {
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity var(--dur-panel), transform var(--dur-panel),
+              display var(--dur-panel) allow-discrete,
+              overlay var(--dur-panel) allow-discrete;
+}
+.ask[open] { opacity: 1; transform: none; }
+@starting-style { .ask[open] { opacity: 0; transform: translateY(6px); } }
+.ask::backdrop {
+  transition: background var(--dur-panel), display var(--dur-panel) allow-discrete,
+              overlay var(--dur-panel) allow-discrete;
+}
+.ask:not([open])::backdrop { background: rgba(0, 0, 0, 0); }
+@starting-style { .ask[open]::backdrop { background: rgba(0, 0, 0, 0); } }
+

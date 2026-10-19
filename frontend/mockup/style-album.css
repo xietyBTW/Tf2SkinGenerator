@@ -1,0 +1,312 @@
+/*
+ * Вкладки материалов, альбом текстур (и в узкой половине), вьюпорт.
+ *
+ * Часть стилей страницы: файлы подключены в index.html в порядке каскада
+ * (style.css первым), порядок менять нельзя.
+ */
+
+/* ── Вкладки материалов ──────────────────────────────────────────────── */
+.mattabs {
+  display: flex;
+  gap: 16px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.mattabs::-webkit-scrollbar { display: none; }
+
+.mattab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 0 4px;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  background: none;
+  color: var(--ink-mute);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color var(--dur), border-color var(--dur);
+}
+.mattab:hover { color: var(--ink); }
+.mattab.is-active { color: var(--ink); border-bottom-color: var(--accent); }
+.mattab__mark { width: 4px; height: 4px; background: var(--accent); }
+
+/* ── Альбом текстур ──────────────────────────────────────────────────────
+   Материалов бывает много, каждый нужен в полный размер. Лента квадратов с
+   защёлкиванием: листается колесом, стрелками и вкладками. */
+.album__box {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  container-type: size;
+}
+
+.album {
+  display: flex;
+  align-items: stretch;
+  gap: 18px;
+  height: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x mandatory;
+  scroll-behavior: smooth;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+.album::-webkit-scrollbar { display: none; }
+
+/* Подпись входит В кадр: контейнер прокрутки режет всё, что вылезает.
+   --cap — её высота, на неё же уменьшается сторона квадрата. */
+.frame {
+  --cap: 26px;
+  position: relative;
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  inline-size: min(100cqw, calc(100cqh - var(--cap)));
+  scroll-snap-align: center;
+  cursor: pointer;
+}
+
+.frame__img {
+  position: relative;
+  aspect-ratio: 1;               /* текстуры всегда квадратные */
+  border: 1px solid var(--hairline-strong);
+  /* Шахматка под текстурой: у игровых текстур есть альфа, и на сплошном белом
+     они выглядят выцветшими — непонятно, где прозрачность, а где светлый
+     пиксель. */
+  background:
+    conic-gradient(var(--hairline) 25%, transparent 0 50%,
+                   var(--hairline) 0 75%, transparent 0)
+    0 0 / 16px 16px,
+    var(--surface);
+  transition: border-color var(--dur);
+  overflow: hidden;
+}
+
+/* Текстуру показываем целиком: обрезать её значило бы врать про содержимое. */
+.frame__img img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+/* Подсказка в пустой карточке: что сюда класть. Сквозь неё проходит и
+   указатель, и перенос файла — карточка остаётся целью. */
+.frame__hint {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  text-align: center;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--ink-mute);
+  pointer-events: none;
+}
+
+/* Новая картинка в карточке проявляется. Класс ставит страница ТОЛЬКО когда
+   картинка сменилась: альбом пересобирается на каждое обновление состояния,
+   и проявление всех карточек подряд было бы мерцанием. */
+.frame__img img.is-new { animation: fade-in var(--dur-panel); }
+/* Без fill-mode НАМЕРЕННО: удержанная анимацией прозрачность — это stacking
+   context навсегда, и меню инструментов из заголовка уезжало под кадр. */
+@keyframes fade-in { from { opacity: 0; } }
+.frame:hover .frame__img { border-color: var(--ink); }
+.frame.is-current .frame__img { border-color: var(--accent); }
+/* Кадр под перетаскиванием: рамка акцентом, чтобы было видно, куда упадёт. */
+.frame.is-drop .frame__img { border-color: var(--accent); border-style: dashed; }
+
+/* Инструменты кадра проявляются по наведению — в покое ничто не мешает
+   смотреть на текстуру. */
+.frame__tools {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: flex;
+  gap: 6px;
+  opacity: 0;
+  transition: opacity var(--dur);
+}
+.frame:hover .frame__tools { opacity: 1; }
+
+.frame__tool {
+  display: grid;                 /* внутри бывает и знак, и значок */
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  /* Своё поле у кнопки браузер ставит сам (1px 6px). Знаку оно не мешало —
+     его центрует text-align, — а значок в оставшиеся 8 точек не влезал, и
+     выравнивание по центру откатывалось к левому краю: иконка стояла на
+     четыре точки правее середины. */
+  padding: 0;
+  border: 1px solid var(--hairline-strong);
+  background: var(--surface);
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  transition: color var(--dur), border-color var(--dur);
+}
+.frame__tool:hover { color: var(--accent); border-color: var(--accent); }
+/* Шестерёнка материала в правке: горит и не прячется, пока правка открыта. */
+.frame__tool.is-on { color: var(--accent); border-color: var(--accent); }
+.frame:has(.frame__tool.is-on) .frame__tools { opacity: 1; }
+/* Одна текстура — её настройки и есть общие: вторая дверь в то же место
+   только путает. Своя запись (значок) у неё бывает от прошлых правок —
+   тогда шестерёнка остаётся, иначе запись не сбросить. */
+.frame:only-child:not(:has(.frame__badge)) .frame__tool:not(.frame__off) { display: none; }
+
+/* Наверху, а не внизу: снизу справа стоит размер, и в узком кадре они
+   наезжали друг на друга. */
+.frame__badge {
+  position: absolute;
+  left: 10px;
+  top: 10px;
+  padding: 3px 7px;
+  border: 1px solid var(--accent);
+  /* Пометка ложится поверх текстуры — без фона она читается через светлые
+     пиксели как каша. */
+  background: var(--surface);
+  color: var(--accent);
+  font-size: 9px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.frame__meta {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ink-mute);
+}
+
+.frame__name {
+  flex: none;
+  height: var(--cap);
+  padding-top: 8px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--ink-mute);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.frame.is-current .frame__name { color: var(--ink); }
+
+.album__step {
+  position: absolute;
+  top: calc(50% - 13px);
+  z-index: 2;
+  width: 30px;
+  height: 46px;
+  margin-top: -23px;
+  border: 1px solid var(--hairline-strong);
+  background: var(--surface);
+  color: var(--ink-soft);
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--dur), color var(--dur), border-color var(--dur);
+}
+.album__box:hover .album__step { opacity: 1; }
+.album__step:hover { color: var(--accent); border-color: var(--accent); }
+.album__step--prev { left: -1px; }
+.album__step--next { right: -1px; }
+
+/* ── Узкая половина: альбом листается сверху вниз ─────────────────────────
+   Кадр — квадрат со стороной min(ширина, высота − подпись). Как только
+   половина становится выше, чем шире (границу двигают мышью, см. split.js),
+   сторону задаёт ШИРИНА, и над кадром с под ним остаётся пустое место, а
+   листать его всё равно предлагают вбок — колесом вниз влево.
+
+   Порог 1:1 и есть тот самый момент: пока половина шире, кадр упирается в
+   высоту и рядом помещается следующий; как только уже — в ширину, и место
+   есть только по вертикали. Порог считает CSS, а не JS: контейнер уже
+   объявлен (`container-type: size`), и второй копии правила не нужно. */
+@container (max-aspect-ratio: 1 / 1) {
+  .album {
+    flex-direction: column;
+    align-items: center;
+    overflow-x: hidden;
+    overflow-y: auto;
+    scroll-snap-type: y mandatory;
+    overscroll-behavior-x: auto;
+    overscroll-behavior-y: contain;
+  }
+  /* Сторона кадра НЕ меняется: та же `min(ширина, высота − подпись)`. Ниже
+     порога она равна ширине — текстура и так занимает столбец целиком, — а у
+     самого порога формула не даёт кадру вылезти за высоту и обрезаться. */
+
+  /* Стрелки переезжают под верх и низ. Знак тот же, только повёрнут: своей
+     разметки под «вверх/вниз» для этого не нужно. */
+  .album__step {
+    top: auto;
+    right: auto;
+    left: calc(50% - 23px);
+    width: 46px;
+    height: 30px;
+    margin: 0;
+    font-size: 0;                  /* горизонтальный знак из разметки прячем */
+  }
+  .album__step::before { display: inline-block; font-size: 17px; transform: rotate(90deg); }
+  .album__step--prev { top: -1px; }
+  .album__step--prev::before { content: "\2039"; }
+  .album__step--next { bottom: -1px; }
+  .album__step--next::before { content: "\203A"; }
+}
+
+/* Счётчик не сжимается: при узкой колонке «01 / 01» ломался в столбик. Место
+   уступают кнопки — они переносятся (.acts). */
+/* Когда кнопки ушли в несколько строк, счётчик стоит у первой, а не
+   посередине столбика. */
+.album__count { flex: none; white-space: nowrap; align-self: flex-start;
+                font-family: var(--mono); font-size: 10.5px; color: var(--ink-mute); }
+.album__count b { color: var(--ink); font-weight: 600; }
+
+/* ── Вьюпорт ─────────────────────────────────────────────────────────── */
+.viewport {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  border: 1px solid var(--hairline);
+  background: var(--viewport);
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+
+.viewport__frame {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  display: block;
+}
+
+/* Подпись поверх вьювера: пока модели нет, он пустой, а сказать что-то надо.
+   Указатель сквозь неё проходит — иначе она мешала бы вращать модель. */
+.viewport__hint {
+  position: relative;
+  z-index: 1;
+  padding: 4px 10px;
+  background: var(--viewport);
+  font-size: 10px;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+  pointer-events: none;
+}
+.viewport__hint[hidden] { display: none; }
+

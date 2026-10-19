@@ -13,7 +13,28 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import mock
 
+from src.app.edit_history import EditHistory
 from src.app.session import AppSession
+
+
+class StackTests(unittest.TestCase):
+    """Сам стек снимков, без сеанса."""
+
+    def test_steps_dedupe_branch_and_limit(self):
+        h = EditHistory(lambda: '')
+        h.reset({'n': 0})
+        h.commit({'n': 0})                                   # тот же снимок - не шаг
+        self.assertEqual((len(h), h.state()), (1, {'undo': False, 'redo': False}))
+        h.commit({'n': 1})
+        h.commit({'n': 2})
+        h.move_to(1)
+        self.assertEqual(h.state(), {'undo': True, 'redo': True})
+        h.commit({'n': 9})                                   # новая ветка срезает «вперёд»
+        self.assertEqual((len(h), h.at(2), h.at(3)), (3, {'n': 9}, None))
+        for n in range(EditHistory.LIMIT + 5):
+            h.commit({'n': 100 + n})
+        self.assertEqual(len(h), EditHistory.LIMIT)
+        self.assertEqual(h.pos, EditHistory.LIMIT - 1)
 
 
 class _Session(unittest.TestCase):
@@ -68,12 +89,12 @@ class UndoRedoTests(_Session):
         self.assertIsNone(self.shown())
 
     def test_history_is_bounded(self):
-        for n in range(self.session.EDIT_HISTORY_LIMIT + 10):
+        for n in range(self.session.history.LIMIT + 10):
             path = str(self.tmp / f'{n}.png')
             Path(path).write_bytes(b'x')
             self.session.set_texture('weapon', path)
-        self.assertLessEqual(len(self.session._edit_history),
-                             self.session.EDIT_HISTORY_LIMIT)
+        self.assertLessEqual(len(self.session.history),
+                             self.session.history.LIMIT)
 
     def test_new_item_starts_a_new_history(self):
         self.session.set_texture('weapon', self.tex)
@@ -90,7 +111,7 @@ class GeometryTests(_Session):
         self.smd = self.tmp / 'own.smd'
         self.smd.write_text('version 1', encoding='utf-8')
         for target, kw in (
-            (self.session, {'attribute': '_custom_model_obj',
+            (self.session.custom_model, {'attribute': '_custom_model_obj',
                             'return_value': (str(self.tmp / 'own.obj'), ['own'])}),
             (self.session, {'attribute': '_on_model_ready'}),
             (self.session.controller, {'attribute': 'load_game_model'}),

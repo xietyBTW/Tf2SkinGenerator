@@ -5,7 +5,7 @@
 QC, применение замены модели, сборка доп. классовых/стилевых моделей шапок,
 копирование прекомпилированных моделей и запуск компиляции. Извлечено
 extract-class из ``VPKService``; методы статические, внутренние вызовы
-переиспользуют этот класс, вторичная текстура идёт в ``VpkTextureBuilder``,
+переиспользуют этот класс, вторичная текстура идёт в ``texture_build.panel_extras``,
 копирование скомпилированных моделей — напрямую в ``ModelService``.
 """
 
@@ -22,7 +22,7 @@ from src.services.model_service import ModelService
 from src.services.smd_service import SMDService
 from src.services.tf2_paths import build_hat_mdl_candidates
 from src.services.tf2_vpk_extract_service import TF2VPKExtractService
-from src.services.vpk_texture_builder import VpkTextureBuilder
+from src.services.texture_build import panel_extras
 from src.data.weapons import WEAPON_MDL_PATHS
 from src.data.player_characters import (
     PLAYER_BODY_MODE_KEYS,
@@ -785,7 +785,7 @@ class VpkModelPipeline:
                     f"выглядеть по-разному, в мод попадёт одна текстура."
                 )
             seen[key] = img
-            return bool(VpkTextureBuilder._render_extra_texture(
+            return bool(panel_extras.render_extra_texture(
                 name, img, vtf_dir, base_vmt_path, patched_cd,
                 size, format_type, flags, vtf_options))
 

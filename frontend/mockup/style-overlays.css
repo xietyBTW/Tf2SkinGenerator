@@ -1,0 +1,114 @@
+/*
+ * Кадр на всё окно (F11) и свой список вместо попапа <select>.
+ *
+ * Часть стилей страницы: файлы подключены в index.html в порядке каскада
+ * (style.css первым), порядок менять нельзя.
+ */
+
+/* ── Кадр на всё окно (F11) ────────────────────────────────────────────
+   Эффект частиц и модель смотрят целиком, а на обычном экране под сцену
+   отведена половина. Прячем всё, кроме неё: возврат — F11 или Esc. */
+:root[data-expanded="1"] .chrome,
+:root[data-expanded="1"] .dock,
+:root[data-expanded="1"] .title,
+:root[data-expanded="1"] .catalog,
+:root[data-expanded="1"] #build,
+:root[data-expanded="1"] #pbuild,
+:root[data-expanded="1"] .half--flat,
+:root[data-expanded="1"] .half__bar { display: none; }
+
+:root[data-expanded="1"] .half__foot { display: none; }
+
+/* Сцена во всё окно: отступы страницы под неё не нужны. */
+:root[data-expanded="1"] .stage {
+  padding: 0;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* Сцена занимает всю сетку: колонка одна, половина текстур убрана. */
+:root[data-expanded="1"] .work { grid-template-columns: minmax(0, 1fr); }
+:root[data-expanded="1"] .half--model { display: flex; }
+
+/* Отмена сборки стоит на месте «Собрать VPK», поэтому и весит так же —
+   но не зовёт: это не главное действие, а выход из него. */
+.btn--stop {
+  background: var(--surface);
+  border: 1px solid var(--hairline-strong);
+  color: var(--ink-soft);
+}
+.btn--stop:hover { border-color: var(--accent); color: var(--accent); }
+
+/* Галка-приписка к ответу в окне вопроса: стоит под списком вариантов и
+   относится к выбранному, поэтому и отбита от него, а не от кнопок. */
+.ask__check {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--hairline);
+}
+
+/* Обслуживание в настройках: действие и число рядом, одной строкой. */
+.cfg__maint {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+.cfg__maint .mono { color: var(--ink-mute); }
+
+/* Ссылка автора — тем же голосом, что остальные текстовые кнопки, и прижата
+   к левому краю ряда действий: браузерная синева тут чужая. */
+.cfg__support {
+  margin-right: auto;
+  text-decoration: none;
+}
+
+/* ── Свой список вместо нативного попапа <select> (dropdown.js) ─────────
+   Нативный настраивается ровно на цвет пунктов: ни рамки, ни отступа, ни
+   перехода. Здесь тот же язык, что у остальных всплывающих слоёв (.menu__list,
+   .picker): слой --overlay, волосяная рамка, никаких скруглений. */
+/* Координаты — оконные (`fixed`), а место считает dropdown.js. Абсолютный
+   список обрезала рамка прокручиваемого предка: у панели сборки и у диалогов
+   `overflow: auto`, и от списка форматов (26 пунктов) оставалась полоска в одну
+   строку. Узлом список при этом остаётся ВНУТРИ поля — приложенный к body, он
+   ушёл бы под модальный слой <dialog>. */
+.dropdown {
+  position: fixed;
+  z-index: 40;
+  max-height: 240px;
+  overflow: auto;
+  border: 1px solid var(--hairline-strong);
+  background: var(--overlay);
+  /* Появление: короткий сдвиг вверх и проявление. Длительность общая с
+     остальным интерфейсом, чтобы список не выбивался темпом. */
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity var(--dur), transform var(--dur);
+}
+.dropdown.is-open { opacity: 1; transform: none; }
+
+/* Снизу места нет — раскрываемся вверх (поля стоят и у нижнего края).
+   Место считает dropdown.js; здесь остаётся только направление появления. */
+.dropdown--up { transform: translateY(4px); }
+
+.dropdown__item {
+  display: block;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  background: none;
+  color: var(--ink-soft);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition: color var(--dur), background var(--dur);
+}
+.dropdown__item:hover { color: var(--ink); background: var(--surface); }
+.dropdown__item:disabled { color: var(--ink-mute); cursor: default; }
+/* Выбранное отмечается акцентом слева — как всё активное на странице. */
+.dropdown__item.is-active {
+  color: var(--ink);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* Пока список открыт, поле подчёркнуто акцентом: связь между ними видна. */
+.select:has(.dropdown) select { border-bottom-color: var(--accent); }
+

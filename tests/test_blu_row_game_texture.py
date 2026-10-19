@@ -12,6 +12,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from src.services import vmt_parse
+from src.services.texture_build import game_source
 from src.services.vpk_texture_builder import VpkTextureBuilder
 from src.shared.constants import EXTRA_TEX_USE_GAME_ORIGINAL
 
@@ -34,8 +35,8 @@ def build(folder, game_texture, red_row=("c_gun",), blu_row=("c_gun_blue",), ask
             asked.append(material)
         return EXTRA_TEX_USE_GAME_ORIGINAL
 
-    with patch.object(VpkTextureBuilder, "_game_texture", return_value=game_texture), \
-            patch.object(VpkTextureBuilder, "_get_original_vtf_bytes", return_value=b"VTF-copy"):
+    with patch.object(game_source, "game_texture", return_value=game_texture), \
+            patch.object(game_source, "get_original_vtf_bytes", return_value=b"VTF-copy"):
         VpkTextureBuilder._build_blu_row_textures(
             list(blu_row), {"red_row": list(red_row)}, "c_gun", "c_gun.vtf", None, slots, None,
             answer, "c_gun", None, False, {})

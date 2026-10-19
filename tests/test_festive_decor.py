@@ -252,8 +252,10 @@ class DecorStateTests(unittest.TestCase):
         self.assertEqual(t.decor_uploads(), {self.CARD: {"red": self.png, "blu": self.png}})
 
     def test_team_lights_are_edited_per_team(self):
-        # У огоньков фестивайзера синие кадры свои: правка на RED синих не
-        # трогает, и в сборку синяя пара уходит игровой.
+        # У огоньков фестивайзера синие кадры свои: правка на RED пишется
+        # только в RED, но синие без своей правки берут её - иначе в руках за
+        # BLU огоньки оставались игровыми (проверено в игре). Своя синяя -
+        # своя.
         t = self.s.textures
         red_png, blu_png = self.png, str(Path(self._tmp.name) / "b.png")
         Path(blu_png).write_bytes(b"y")
@@ -261,7 +263,10 @@ class DecorStateTests(unittest.TestCase):
         self.assertTrue(t.is_team_material(self.CARD))
         t.set_texture(self.CARD, red_png)
         self.assertNotIn(self.CARD, t.textures["blu"])
-        self.assertEqual(t.decor_uploads()[self.CARD], {"red": red_png, "blu": ""})
+        self.assertEqual(t.decor_uploads()[self.CARD], {"red": red_png, "blu": red_png})
+        t.active_team = "blu"
+        t.set_texture(self.CARD, blu_png)
+        self.assertEqual(t.decor_uploads()[self.CARD], {"red": red_png, "blu": blu_png})
 
     def test_stock_frame_lives_apart_from_weapon_maps(self):
         t = self.s.textures
@@ -548,7 +553,7 @@ class OwnGarlandTests(unittest.TestCase):
         self.assertEqual(back.decor_models, {})
 
     def test_obj_becomes_smd_with_its_textures(self):
-        from src.app.session import _garland_smd
+        from src.app.decor_editor import _garland_smd
         (self.dir / "g.png").write_bytes(b"x")
         (self.dir / "g.mtl").write_text("newmtl Bulb\nmap_Kd g.png\n", encoding="utf-8")
         (self.dir / "g.obj").write_text(
@@ -563,7 +568,7 @@ class OwnGarlandTests(unittest.TestCase):
         self.assertEqual((Path(copy).read_text(encoding="utf-8"), none), (OWN, {}))
 
     def test_unreadable_smd_is_refused(self):
-        from src.app.session import _garland_smd
+        from src.app.decor_editor import _garland_smd
         from src.services.mesh_import_service import MeshImportError
         (self.dir / "bad.smd").write_bytes(bytes([0xFF, 0xFE]) + b" junk")
         with self.assertRaises(MeshImportError):

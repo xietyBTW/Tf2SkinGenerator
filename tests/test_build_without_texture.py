@@ -16,6 +16,7 @@ from __future__ import annotations
 import os
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from src.app.session import AppSession
@@ -33,9 +34,9 @@ def _session() -> AppSession:
     s.tf2_paths = lambda: {'root': 'C:/tf2'}
     s.parts = MagicMock(bake_plan=lambda paths: None, baked_path=lambda p: p)
     s._tint_risks = lambda paths: {}
-    s._decor_builds = lambda root: []
+    s.decor = SimpleNamespace(builds=lambda root: [], baked=lambda: '')
     s._put = lambda *a, **k: None
-    s._vmt_target = lambda card='': ('c_pistol', card or 'c_pistol')
+    s.materials = SimpleNamespace(vmt_target=lambda card='': ('c_pistol', card or 'c_pistol'))
     return s
 
 
@@ -85,7 +86,8 @@ class BuildWithoutTextureTests(unittest.TestCase):
 
     def test_only_garland_keeps_the_decor_only_build(self):
         s = _session()
-        s._decor_builds = lambda root: [{'kind': 'xmas', 'mdl': 'm', 'textures': {}}]
+        s.decor = SimpleNamespace(builds=lambda root: [{'kind': 'xmas', 'mdl': 'm', 'textures': {}}],
+                                  baked=lambda: '')
         res, request = _build(s)
         self.assertTrue(res.get('started'), res)
         self.assertIsNone(request.image_path)
@@ -178,7 +180,7 @@ class VpkNameTests(unittest.TestCase):
     """Имя мода набрали без «.vpk» — сборка его дописывает, а не падает."""
 
     def test_extension_added_once(self):
-        from src.app.session import _vpk_name
+        from src.shared.validators import vpk_file_name as _vpk_name
         self.assertEqual(_vpk_name('mymod', 'mod.vpk'), 'mymod.vpk')
         self.assertEqual(_vpk_name(' mymod.VPK ', 'mod.vpk'), 'mymod.VPK')
         self.assertEqual(_vpk_name('', 'mod.vpk'), 'mod.vpk')

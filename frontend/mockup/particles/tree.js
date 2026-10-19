@@ -12,11 +12,13 @@ import { stage, say, sayBusy, withParticles } from '../stage.js';
 import { closeCat } from '../layout.js';
 import { els, fillFilters, applyToolsMenu } from '../catalog.js';
 import { plural } from '../util.js';
+import { ask } from '../ask.js';
+import { contextMenu } from '../menu.js';
 import { pcfNodes, pcfTree, pcfCollapsed, pSystem, setTree, pcfDiff, setDiff } from './state.js';
 import { systemMenu } from './actions.js';
 import { showParams } from './params.js';
 import { syncHistory, editorKey } from './playback.js';
-import { showParticleMaterials } from './materials.js';
+import { showParticleMaterials, loadEffectMaterials } from './materials.js';
 import { cpBox, cpFillIndexes } from './points.js';
 
 //: Имена эффектов из игры по имени системы: «Burning Flames» под
@@ -25,6 +27,25 @@ const fxNames = new Map();
 //: Какой файл открыт - чтобы по щелчку в списке эффектов не перечитывать его.
 let loadedFile = '';
 let loadedShort = '';
+//: Что сейчас в списке слева: дерево открытого файла или эффекты игры. Эффект,
+//: выбранный в «Все эффекты игры», открывает свой файл, но список остаётся
+//: списком: человек смотрит эффекты подряд, и прыжок в дерево файла это
+//: ломал. Правки (метки «изменено») перерисовывают дерево, только если оно
+//: и показано.
+let treeShown = false;
+
+/** Подсвечивает выбранный эффект в списке эффектов игры. */
+function markEffect(system) {
+  for (const b of els.grid.querySelectorAll('.fx')) {
+    b.classList.toggle('is-active', b.dataset.system === system);
+  }
+}
+
+/** Показывает дерево открытого файла (а не список эффектов игры). */
+export function showTree(selected = pSystem) {
+  treeShown = true;
+  fillTree(pcfNodes, selected);
+}
 
 /**
  * Заголовок: имя из игры, если оно есть, иначе имя системы; в подписи -
@@ -53,6 +74,7 @@ export const currentFile = () => loadedFile;
  * настоящая: родитель тянет детей за собой.
  */
 export function fillTree(nodes, selected) {
+  if (!treeShown) { markEffect(selected); return; }
   els.grid.innerHTML = '';
   // Источники - про список игры; у дерева файла им делать нечего.
   els.fSource.hidden = true;
@@ -140,6 +162,7 @@ const fxOpen = new Set();
  * `superrare_burning1`, никто не обязан.
  */
 export async function showEffects(query = '') {
+  treeShown = false;
   const mine = ++fxTurn;
   lastQuery = query;
   const res = await api.particleEffects(query, source);
@@ -226,6 +249,7 @@ function effectRow(it, depth, query, said = new Set()) {
                 + '<span class="fx__who"></span></span>'
                 + '<span class="fx__sys mono"></span>'
                 + '<span class="fx__file mono"></span>';
+  btn.dataset.system = it.system;
   btn.querySelector('.fx__name').textContent = it.name || it.system;
   // Чем вызывается - словами: «Огнемёт», «Турель». В группе по предмету
   // первый уже в заголовке, остальные (общие эффекты) - при строке.
@@ -235,11 +259,49 @@ function effectRow(it, depth, query, said = new Set()) {
   btn.querySelector('.fx__file').textContent =
     (it.file || '').replace(/^particles\//, '');
   btn.addEventListener('click', () => openEffect(it));
-  btn.addEventListener('contextmenu', (e) => {
-    if (it.file === loadedFile) systemMenu(e, it.system);
-  });
+  btn.addEventListener('contextmenu', (e) => effectMenu(e, it));
   row.append(twist, btn);
   return row;
+}
+
+/**
+ * Меню строки списка эффектов игры. «Перейти к файлу» есть всегда; у
+ * эффекта из уже открытого файла под ним - меню системы целиком.
+ */
+async function effectMenu(e, it) {
+  const go = { label: 'Перейти к файлу', hint: (it.file || '').replace(/^particles\//, ''),
+               value: 'goto', disabled: !it.file, run: () => goToFile(it) };
+  if (it.file && it.file === loadedFile) {
+    await systemMenu(e, it.system, [go]);
+    return;
+  }
+  if (await contextMenu(e, [go]) === 'goto') await go.run();
+}
+
+/** Раскрывает в дереве родителей системы, чтобы её строку было видно. */
+function revealInTree(system) {
+  const walk = (nodes) => nodes.some((n) => n.key === system
+    || (walk(n.kids) && (pcfCollapsed.delete(n.key), true)));
+  walk(pcfNodes);
+}
+
+/**
+ * «Перейти к файлу»: список слева становится деревом файла эффекта, эффект
+ * в нём выбран и виден. Каталог остаётся открытым - за этим и переходили.
+ */
+async function goToFile(it) {
+  if (it.file !== loadedFile) {
+    await loadPcf(it.file, '', it.system);
+    if (loadedFile !== it.file) return;
+  } else {
+    if ([...els.cat.options].some((o) => o.value === it.file)) els.cat.value = it.file;
+    const node = pcfTree.find((n) => n.key === it.system);
+    if (node && pSystem !== it.system) await pickSystem(null, node, { keepOpen: true });
+  }
+  els.note.hidden = true;
+  revealInTree(it.system);
+  showTree(it.system);
+  els.grid.querySelector('.tree__name.is-active')?.scrollIntoView({ block: 'center' });
 }
 
 /** Открывает эффект из списка: файл, если он другой, затем систему. */
@@ -249,16 +311,23 @@ async function openEffect(it) {
     return;
   }
   if (it.file !== loadedFile) {
-    await loadPcf(it.file);
-    // Файл не открылся - дерева нет, выбирать не из чего.
+    // Файл открывается сразу на этом эффекте: раньше он сначала строил
+    // первую систему файла (с её параметрами и текстурами) и только потом
+    // переключался - лишняя секунда и мелькание чужого эффекта.
+    await loadPcf(it.file, '', it.system, { keepList: true });
+    // Файл не открылся (или его обогнал следующий щелчок) - выбирать не из чего.
     if (loadedFile !== it.file) return;
+    if (pSystem === it.system) {
+      markEffect(it.system);
+      closeCat();
+      if (!cpBox.hidden) cpFillIndexes();
+      return;
+    }
   }
   const node = pcfTree.find((n) => n.key === it.system);
   if (!node) { say('В файле нет такой системы'); return; }
-  fillTree(pcfNodes, it.system);
-  const button = [...els.grid.querySelectorAll('.tree__name')]
-    .find((b) => b.firstChild && b.firstChild.textContent === node.name);
-  await pickSystem(button || document.createElement('button'), node);
+  markEffect(it.system);
+  await pickSystem(null, node);
 }
 
 /** Переводит кадр на движок частиц (или обратно на вьювер моделей). */
@@ -275,20 +344,41 @@ export function showParticleFrame(on) {
   stage.frame.hidden = on;
 }
 
-/** Загружает PCF и показывает первый эффект. */
-export async function loadPcf(source, label = '') {
+//: Номер последнего открытия файла и выбора системы: ответы на прежние
+//: щелчки приходят позже и не должны перебивать выбранное следом.
+let loadTurn = 0;
+let pickTurn = 0;
+
+/**
+ * Загружает PCF и показывает эффект `system` (пусто - первый). `keepList` -
+ * открыли из списка эффектов игры: список остаётся, дерево файла не рисуем.
+ */
+export async function loadPcf(source, label = '', system = '', { keepList = false } = {}) {
+  // Правки частиц живут только в открытом файле: другой файл их выбросит.
+  if (loadedFile && source !== loadedFile && (await api.particleHistory()).unsaved) {
+    const go = await ask({
+      title: t('Открыть другой файл?'),
+      text: t(`Правки в ${loadedShort} не сохранены и пропадут.`),
+      ok: t('Открыть'),
+    });
+    if (!go) return;
+  }
+  const mine = ++loadTurn;
+  pickTurn += 1;                 // выбор системы в старом файле уже не нужен
   const short = label || source.replace(/^particles\//, '');
   say(`Разбор ${short}…`);
-  els.grid.innerHTML = '';
-  const data = await api.loadParticles(source);
+  if (!keepList) els.grid.innerHTML = '';
+  const data = await api.loadParticles(source, system);
+  if (mine !== loadTurn || data.cancelled) return;
   if (data.error) { say(data.error); return; }
 
   setTree(data.tree || []);
   setDiff(data.diff || {});
   loadedFile = source;
   applyToolsMenu();            // «Сохранить PCF» - теперь есть что
-  // Выпадашка показывает открытый файл и когда его выбрали из списка игры.
-  if ([...els.cat.options].some((o) => o.value === source)) els.cat.value = source;
+  // Выпадашка показывает открытый файл, если дерево - его; из списка эффектов
+  // игры она остаётся на «Все эффекты», как и сам список.
+  if (!keepList && [...els.cat.options].some((o) => o.value === source)) els.cat.value = source;
   // Новый файл - свои узлы; старое состояние свёрнутости к ним не относится.
   pcfCollapsed.clear();
   // Дочерние сворачиваем сразу: сверху видно корни эффектов, а не всё подряд.
@@ -304,29 +394,48 @@ export async function loadPcf(source, label = '') {
   loadedShort = short;
   setTitle(data.rootName || short.replace(/\.pcf$/, ''));
 
-  fillTree(pcfNodes, data.rootName);
-  els.note.hidden = pcfTree.length > 0;
-  els.note.textContent = 'В этом файле систем нет.';
+  if (keepList) {
+    markEffect(data.rootName);
+  } else {
+    showTree(data.rootName);
+    els.note.hidden = pcfTree.length > 0;
+    els.note.textContent = 'В этом файле систем нет.';
+  }
   say('');
-  await syncHistory();
-  if (data.rootName) await showParams(data.rootName);
-  await showParticleMaterials();
+  await panels(data.rootName, syncHistory());
 }
 
-/** Выбор системы: движок строит эффект от названного узла. */
-export async function pickSystem(button, item) {
-  els.grid.querySelectorAll('.tree__name, .pick')
-          .forEach((b) => b.classList.remove('is-active'));
-  button.classList.add('is-active');
+/**
+ * Панели выбранной системы: параметры и карточки материалов - разом, а не
+ * по очереди. showParams ставит выбранную систему до первого ожидания,
+ * поэтому карточки, запрошенные следом, берут уже её.
+ */
+async function panels(system, ...more) {
+  await Promise.all([system ? showParams(system) : null, showParticleMaterials(), ...more]);
+}
+
+/** Выбор системы: движок строит эффект от названного узла. `keepOpen` - не
+ *  закрывать каталог (выбор из меню, а не щелчком по строке). */
+export async function pickSystem(button, item, { keepOpen = false } = {}) {
+  if (button) {
+    els.grid.querySelectorAll('.tree__name, .pick')
+            .forEach((b) => b.classList.remove('is-active'));
+    button.classList.add('is-active');
+  }
   setTitle(item.key);
-  closeCat();
+  if (!keepOpen) closeCat();
   // Пока собирается, кадр остаётся прежним: у эффекта распаковываются
   // текстуры, и без единого слова это читается как «ничего не произошло».
   // sayBusy, а не say: маленький эффект успевает раньше, чем подпись нужна.
   sayBusy('Собираю эффект…');
+  // Файл пришёл с текстурами только открытого эффекта - этому свои, и
+  // до постройки: эффект берёт текстуры в момент создания.
+  const mine = ++pickTurn;
+  await loadEffectMaterials(item.key);
+  if (mine !== pickTurn) return;
   withParticles((w) => w.setRootSystem(item.key));
-  await showParams(item.key);
-  await showParticleMaterials();
+  await panels(item.key);
+  if (mine !== pickTurn) return;
   say('');
   if (!cpBox.hidden) cpFillIndexes();
 }

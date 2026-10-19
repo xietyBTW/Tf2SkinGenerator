@@ -68,12 +68,12 @@ Sometimes two styles use the same material. In game they can't look different th
 
 ## Looking at it on a character
 
-The **On the model** scene puts the cosmetic on a class standing in the game's pose for the chosen weapon slot:
+The **On the character** scene puts the cosmetic on a class standing in the game's pose for the chosen weapon slot:
 
 - **Class** picks who wears it, when several classes can.
 - **Weapons** picks the slot: **Primary**, **Secondary**, **Melee**, plus **Sapper** and **PDA** for the classes that have them. The class holds the stock weapon of that slot, and the pose changes with it.
 
-![The Team Captain on the Soldier in the On the model scene, with the Weapons and Class rows below](../img/en/cosmetic-on-model.webp)
+![The Team Captain on the Soldier in the On the character scene, with the Weapons and Class rows below](../img/en/cosmetic-on-model.webp)
 
 This is the quickest way to check that a texture sits right on the head, and how the item looks next to the class's own colors.
 

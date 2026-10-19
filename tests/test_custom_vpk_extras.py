@@ -47,8 +47,8 @@ class ApplyMaterialExtrasTests(unittest.TestCase):
                         return_value=np.zeros((4, 4, 4), np.uint8)), \
              mock.patch('src.services.texture_service.TextureService.write_normal_vtf',
                         side_effect=fake_normal), \
-             mock.patch('src.services.vpk_texture_builder.VpkTextureBuilder'
-                        '._apply_maps_for_material') as apply_maps:
+             mock.patch('src.services.texture_build.material_maps'
+                        '.apply_maps_for_material') as apply_maps:
             problems = CustomVPKService._apply_material_extras(
                 self.textures, {}, maps, settings, self.vpkroot, self.temp, 'ru')
         return problems, apply_maps

@@ -1355,6 +1355,37 @@ window.loadParticleData = function(dataJson) {
   }
 };
 
+/** Добавляет текстуры ещё одного эффекта того же файла: файл приходит с
+    текстурами только открытого эффекта, остальные - при выборе. Готовые
+    GPU-текстуры не трогаем; «текстуры нет», запомненное раньше, забываем. */
+window.addMaterials = function(more, asked) {
+  for (const [name, info] of Object.entries(more || {})) {
+    if (textureCache[name] === null) delete textureCache[name];
+    if (!materialsJson[name]) materialsJson[name] = info;
+  }
+  // Спрошенные, но не найденные в игре - запоминаем «нет», чтобы страница
+  // не спрашивала их на каждую правку (null движок и так рисует фолбэком).
+  for (const name of asked || []) if (!(name in materialsJson)) materialsJson[name] = null;
+};
+
+/** Материалы эффекта `root` (с дочерними), о которых движок ещё не знает. */
+window.missingMaterials = function(root) {
+  const out = new Set();
+  const seen = new Set();
+  const stack = [root || currentRootName];
+  while (stack.length) {
+    const name = stack.pop();
+    if (seen.has(name)) continue;
+    seen.add(name);
+    const def = systemsJson[name];
+    if (!def) continue;
+    const mat = def.attrs && def.attrs.material && def.attrs.material.v;
+    if (mat && !(mat in materialsJson)) out.add(mat);
+    for (const child of def.children || []) stack.push(child.childName);
+  }
+  return [...out];
+};
+
 /** Обновление только определений систем (правка атрибутов): материалы и
     GPU-текстуры переиспользуются — без ремаршалинга PNG и роста VRAM. */
 window.updateSystems = function(systemsOnly, rootName) {

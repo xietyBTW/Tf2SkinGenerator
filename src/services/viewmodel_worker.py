@@ -146,9 +146,11 @@ class ViewmodelPreviewWorker(BaseWorker):
         #: командные, и на синей стороне они синие. Оружие красит панель —
         #: у него своя машинерия команд.
         self.team = (team or "red").lower()
-        #: Подмена активностей из items_game — заполняется в run().
-        self._replacement: dict = {}
-        self._inspect_slot: str = ""
+        #: Что items_game говорит об оружии в руках этого класса - в run().
+        self._profile = anim_catalog.WeaponProfile(slot="")
+        #: Модель в руке: сам предмет либо то, что держат вместо надетого
+        #: (дудка знамени при рюкзаке в каталоге) - заполняется в run().
+        self._hand_key = weapon_key
         self._p = self._PROGRESS.get(lang, self._PROGRESS['en'])
         self._preview_dir: Optional[str] = None
 
@@ -163,14 +165,18 @@ class ViewmodelPreviewWorker(BaseWorker):
             if tf2_class not in viewmodel_anims.CLASS_MODEL_STEM:
                 self.failed.emit(self._p['no_class'])
                 return
-            slot = viewmodel_anims.slot_for(self.weapon_key, self.tf2_root)
-            # Подмена активностей из items_game точнее слота: у куная и
-            # Большого добытчика слот остаётся melee, а играют они набор ITEM2.
+            # Слот, подмена и класс оружия - всё, по чему игра выбирает
+            # последовательность. Слот зависит от класса: дробовик инженера
+            # основной, у хэви - вторичный.
+            self._profile = anim_catalog.profile_for(
+                self.weapon_key, self.tf2_root, tf2_class)
+            # Знамя солдата в каталоге - рюкзак, а в руке у него дудка
+            # (items_game: extra_wearable и model_player). Рюкзак от первого
+            # лица не виден, показываем дудку с её анимациями.
             info = viewmodel_anims.anim_info(self.weapon_key, self.tf2_root)
-            self._replacement = info.replacement if info else {}
-            # Осмотр игра выбирает по слоту СНАРЯЖЕНИЯ, а не анимаций.
-            self._inspect_slot = viewmodel_anims.inspect_slot_for(
-                self.weapon_key, self.tf2_root)
+            self._hand_key = (info.held if info and info.held else self.weapon_key)
+            if self._hand_key != self.weapon_key:
+                logger.info(f"[fp] {self.weapon_key} надевается, в руке {self._hand_key}")
 
             # Часы шпиона показываются СВОЕЙ моделью вида: руки, часы и
             # последовательности лежат в ней вместе, и рук класса ей не надо.
@@ -185,7 +191,7 @@ class ViewmodelPreviewWorker(BaseWorker):
             weapon_dir, arms_dir, anims_dir = parts
 
             self.progress.emit(self._p['pose'])
-            sequence = self._find_sequence(anims_dir, slot)
+            sequence = self._find_sequence(anims_dir, self._profile)
             if sequence is None:
                 self.failed.emit(self._p['no_pose'])
                 return
@@ -250,7 +256,8 @@ class ViewmodelPreviewWorker(BaseWorker):
             return
 
         self.progress.emit(self._p['pose'])
-        sequence = self._find_sequence(view_dir, anim_catalog.VIEWMODEL_SLOT)
+        sequence = self._find_sequence(
+            view_dir, anim_catalog.WeaponProfile(slot=anim_catalog.VIEWMODEL_SLOT))
         if sequence is None:
             self.failed.emit(self._p['no_pose'])
             return
@@ -301,7 +308,7 @@ class ViewmodelPreviewWorker(BaseWorker):
         должны вытесняться при каждой его смене.
         """
         wanted = (
-            (self.weapon_key, self._mdl_candidates(self.weapon_key)),
+            (self._hand_key, self._mdl_candidates(self._hand_key)),
             (f"__arms_{tf2_class}", [viewmodel_anims.arms_mdl(tf2_class)]),
             (f"__anims_{tf2_class}", [viewmodel_anims.animations_mdl(tf2_class)]),
         )
@@ -337,17 +344,16 @@ class ViewmodelPreviewWorker(BaseWorker):
             fallback = WEAPON_MDL_PATHS.get(weapon_key)
             return [fallback] if fallback else []
 
-    def _find_sequence(self, anims_dir: str, slot: str):
+    def _find_sequence(self, anims_dir: str, profile):
         catalog = anim_catalog.load(anims_dir)
         if catalog is None:
             return None
+        slot = profile.slot
         # Что доступно этому оружию — наверх сразу: список нужен интерфейсу
         # даже тогда, когда выбранного действия у оружия нет.
-        available = [a.name for a in catalog.actions_for(
-            slot, self._replacement, self._inspect_slot)]
+        available = [a.name for a in catalog.actions_for(profile)]
         self.actions_available.emit(available)
-        sequence = catalog.find(slot, self.action, self._replacement,
-                                    self._inspect_slot)
+        sequence = catalog.find(profile, self.action)
         if sequence is None and available:
             # Набор действий у каждого оружия свой: перезарядки у биты нет.
             # Показать первое, что оно умеет, честнее, чем «вида от первого
@@ -356,8 +362,7 @@ class ViewmodelPreviewWorker(BaseWorker):
             logger.info(f"[fp] {self.weapon_key}: {self.action.name} нет для "
                         f"слота '{slot}' — показываю {available[0]}")
             self.action = Action[available[0]]
-            sequence = catalog.find(slot, self.action, self._replacement,
-                                    self._inspect_slot)
+            sequence = catalog.find(profile, self.action)
         if sequence is None:
             logger.info(
                 f"[fp] {self.weapon_key}: нет {self.action.name} для слота "
@@ -365,7 +370,7 @@ class ViewmodelPreviewWorker(BaseWorker):
             return None
         logger.info(
             f"[fp] {self.weapon_key}: слот '{slot}', {self.action.name} → "
-            f"{sequence.name}")
+            f"{sequence.name} ({sequence.activity})")
         return sequence
 
     def _emit_clip(self, arms_dir: str, sequence, arms_smd: str = "") -> None:
@@ -404,7 +409,7 @@ class ViewmodelPreviewWorker(BaseWorker):
         # игровому пути: с кастомной моделью weapon_smd указывает во временную
         # папку, и оригинал прошёл бы в сцену вторым мешем поверх своего.
         weapon_extra = _default_body_parts(
-            weapon_dir, smd_service.find_reference_smd(weapon_dir, self.weapon_key))
+            weapon_dir, smd_service.find_reference_smd(weapon_dir, self._hand_key))
         arms_extra = _default_body_parts(arms_dir, arms_smd)
         carrier_smd, carrier_extra, carrier_dir = self._carrier_smd()
 
@@ -448,8 +453,9 @@ class ViewmodelPreviewWorker(BaseWorker):
         ровно то, что попадёт в игру. Не получилось — показываем игровой меш и
         пишем в лог: превью не повод отменять показ.
         """
-        game_smd = smd_service.find_reference_smd(weapon_dir, self.weapon_key)
-        if not self.custom_smd_path or not game_smd:
+        game_smd = smd_service.find_reference_smd(weapon_dir, self._hand_key)
+        # Своя модель заменяет сам предмет (рюкзак), а не то, что в руке.
+        if not self.custom_smd_path or not game_smd or self._hand_key != self.weapon_key:
             return game_smd or ""
         if not os.path.exists(self.custom_smd_path):
             logger.warning(f"[fp] кастомной модели нет: {self.custom_smd_path}")
@@ -548,7 +554,8 @@ class ViewmodelPreviewWorker(BaseWorker):
         # Редактировать можно только САМ предмет: пушка-носитель под гирляндой
         # в превью есть, но текстуру на неё не бросишь.
         self.editable_materials.emit(
-            list(scene.get("weaponMaterials") or weapon_names)
+            [] if self._hand_key != self.weapon_key       # в руке не сам предмет
+            else list(scene.get("weaponMaterials") or weapon_names)
             if isinstance(scene, dict) else list(scene.weapon_materials))
         if textures:
             self.multi_material.emit(textures)

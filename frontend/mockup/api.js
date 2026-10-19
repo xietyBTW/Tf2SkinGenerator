@@ -99,7 +99,9 @@ export const revertParticleSystem = (system) =>
 export const revertParticleAttr = (system, group, index, attr) =>
   call('revert_particle_attr', { system, group, index, attr });
 export const particleFiles = () => cached('particle_files', {});
-export const loadParticles = (source) => call('load_particles', { source });
+export const loadParticles = (source, system = '') => call('load_particles', { source, system });
+export const particleEffectMaterials = (system) =>
+  call('particle_effect_materials', { system });
 export const particleParams = (system) => call('particle_params', { system });
 export const setParticleParam = (system, key, value) =>
   call('set_particle_param', { system, key, value });
@@ -184,6 +186,7 @@ export const paints       = () => call('paints', {});
 export const setPaint     = (key) => call('set_paint', { key });
 export const setAustralium = (active) => call('set_australium', { active });
 export const setFestive = (kind) => call('set_festive', { kind });
+export const bakeFestive = (kind) => call('bake_festive', { kind });
 export const setDecorFit = (fit) => call('set_decor_fit', { fit });
 export const setDecorBends = (bends) => call('set_decor_bends', { bends });
 export const setSkin      = (index) => call('set_skin', { index });
@@ -253,6 +256,7 @@ export const workState    = () => call('work_state');
 export const keepWork     = () => call('keep_work');
 export const restoreWork  = () => call('restore_work');
 export const forgetWork   = () => call('forget_work');
+export const deleteWork   = (key) => call('delete_work', { key });
 // Черновики: их не видно в библиотеке, поэтому убираются отдельно, из настроек.
 export const drafts       = () => call('drafts', {});
 export const forgetDrafts = (keys = null) => call('forget_drafts', { keys });
@@ -297,7 +301,8 @@ export const sheenBuilderSchema = () => cached('sheen_builder_schema', { lang: l
 export const sheenPatterns   = () => call('sheen_patterns_list', {});
 export const sheenPresetThumbs = () => call('sheen_preset_thumbs', {});
 export const sheenPatternLoad = (pattern_id) => call('sheen_pattern_load', { pattern_id });
-export const sheenPatternPreview = (spec, length) => call('sheen_pattern_preview', { spec, length });
+export const sheenPatternPreview = (spec, length, full) =>
+  call('sheen_pattern_preview', { spec, length, full });
 export const sheenPatternSave = (pattern_id, name, spec, length) =>
   call('sheen_pattern_save', { pattern_id, name, spec, length });
 export const sheenPatternDelete = (pattern_id) => call('sheen_pattern_delete', { pattern_id });
@@ -335,6 +340,10 @@ export const openVmt      = (material) => call('open_vmt', { material });
 export const saveVmt      = (material, content, original) =>
   call('save_vmt', { material, content, original });
 export const resetVmt     = (material) => call('reset_vmt', { material });
+// Без шестерёнки: правка уходит во все материалы предмета.
+export const saveVmtAll   = (material, content, before, original, materials) =>
+  call('save_vmt_all', { material, content, before, original, materials });
+export const resetVmtAll  = (materials) => call('reset_vmt_all', { materials });
 // full - собрать сцену целиком: страница просит это, когда дорожки не
 // легли (сцены в кадре не оказалось). Обычная смена анимации идёт без
 // него и обходится одними дорожками.

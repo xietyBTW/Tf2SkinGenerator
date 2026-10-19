@@ -10,7 +10,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from src.services import qc_skin_parser as q
-from src.services.vpk_service import VPKService
+from src.services.material_plan import apply_force_team
 
 SNIPER = ([['c_sniperrifle', 'c_sniperrifle_gold']] * 8
           + [['c_sniperrifle_gold', 'c_sniperrifle_gold']] * 2)
@@ -99,7 +99,7 @@ class ApplyForceTeamQcTests(unittest.TestCase):
                        return_value=str(d / 'c_sniperrifle.smd')), \
                  patch('src.services.smd_service.SMDService.ordered_unique_materials',
                        return_value=['c_sniperrifle']):
-                VPKService._apply_force_team(True, 'sniper_c_sniperrifle', str(qc),
+                apply_force_team(True, 'sniper_c_sniperrifle', str(qc),
                                              'c_sniperrifle', ctx)
             out = q.parse_texturegroup_rows(str(qc))
         self.assertEqual(len(out), 10)

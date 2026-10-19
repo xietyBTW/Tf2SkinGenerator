@@ -18,6 +18,7 @@ from unittest.mock import patch
 from src.services import part_materials as pm
 
 from tests.test_part_materials import SQUARES, names_in, smd, tri
+from types import SimpleNamespace
 
 
 #: SQUARES плюс второй родной материал c_y — квадрат на той же развёртке.
@@ -63,8 +64,7 @@ def _editor(folder, obj_text, names):
         def _card_key(host, material=''):
             return AppSession._card_key(host, material)
 
-        def _decor_for_card(host, card):
-            return None
+        decor = SimpleNamespace(for_card=lambda card: None)
 
         def _shape_changed(host):
             return False
@@ -72,8 +72,7 @@ def _editor(folder, obj_text, names):
         def _put(host, *args, **kwargs):
             pass
 
-        def _vmt_target(host, material=''):
-            return {'error': 'нет'}
+        materials = SimpleNamespace(vmt_target=lambda material='': {'error': 'нет'})
 
         def _work_dir(host):
             return folder
@@ -183,6 +182,7 @@ class StyleTests(unittest.TestCase):
 
 class WriterTests(unittest.TestCase):
     def test_style_row_takes_the_style_image_of_the_part(self):
+        from src.services.texture_build import game_source
         from src.services.vpk_texture_builder import VpkTextureBuilder
 
         with tempfile.TemporaryDirectory() as d:
@@ -205,7 +205,7 @@ class WriterTests(unittest.TestCase):
 
             spec = {"name": "c_x_part1", "base": "c_x", "image": "base.png",
                     "image_blu": None, "style_images": {"c_x_bloody": "blood.png"}}
-            with patch.object(VpkTextureBuilder, "_find_original_vmt", return_value=str(game)), \
+            with patch.object(game_source, "find_original_vmt", return_value=str(game)), \
                  patch("src.services.edited_vmt_service.EditedVMTService.get_edited_vmt",
                        return_value=None):
                 renders = VpkTextureBuilder._write_part_materials(

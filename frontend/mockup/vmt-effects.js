@@ -278,7 +278,7 @@ function field(f, values, changed = () => {}) {
         syncEdit();
       };
       const open = async (id) => {
-        const res = await openSheenBuilder({ patternId: id, length: values.length, color: values.color });
+        const res = await openSheenBuilder({ patternId: id, length: values.length });
         if (!res) return;
         await loadOwn();
         if (res.deleted) {

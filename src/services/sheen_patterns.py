@@ -31,8 +31,14 @@ from src.shared.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-#: Узоры (подписи - в форме эффекта, vmt_effects).
-PATTERNS = ("double", "pulse", "pulse2", "stripes", "sparkle", "mist", "calib")
+#: Старые готовые узоры. Эффект их больше не предлагает (готовые узоры теперь
+#: - шаблоны конструктора, sheen_builder.PRESETS), но маски по этим именам
+#: ещё собираются: на них ссылаются VMT уже сделанных работ.
+PATTERNS = ("double", "pulse", "pulse2", "stripes", "sparkle", "mist")
+
+#: Старый узор -> шаблон конструктора, которым он заменён в форме эффекта.
+LEGACY_PRESETS = {"double": "double", "pulse": "pulse", "pulse2": "pulse",
+                  "stripes": "running", "sparkle": "sparkle", "mist": "mist"}
 
 PREFIX = "tf2sg/sheen/"
 SIZE = 128
@@ -96,15 +102,30 @@ def parse(name: str) -> Optional[Tuple[str, int]]:
     return (m.group(1), frames) if MIN_FRAMES <= frames <= MAX_FRAMES else None
 
 
-#: Своя маска: id узора, (в моде) отпечаток содержимого, пропорция, кадры.
-_CUSTOM_RE = re.compile(r'^tf2sg/sheen/(u[0-9a-f]{8})(?:_h[0-9a-f]{8})?_a(\d+)(r?)_(\d+)$')
+#: Маска конструктора: id узора (свой u… или шаблон p_…), (в моде) отпечаток
+#: содержимого, пропорция, «r» - повёрнута, «k» - чёрный блеск, кадры.
+_CUSTOM_RE = re.compile(
+    r'^tf2sg/sheen/(u[0-9a-f]{8}|p_[a-z0-9]+)(?:_h[0-9a-f]{8})?_a(\d+)(r?)(k?)_(\d+)$')
 
 
-def custom_name(pattern_id: str, aspect: float, frames: int, rotate: bool = False) -> str:
+def custom_name(pattern_id: str, aspect: float, frames: int, rotate: bool = False,
+                dark: bool = False) -> str:
     """Своя маска из конструктора: id узора, пропорция оружия ×10 («r» -
-    маска повёрнута), кадры."""
+    маска повёрнута, «k» - только красный канал для чёрного блеска), кадры."""
     return (f"{PREFIX}{pattern_id}_a{int(round(max(0.5, min(12.0, aspect)) * 10))}"
-            f"{'r' if rotate else ''}_{int(frames)}")
+            f"{'r' if rotate else ''}{'k' if dark else ''}_{int(frames)}")
+
+
+def darkened(name: str) -> bool:
+    """Маска чёрного блеска: узор только в красном канале.
+
+    Непрозрачность прохода = яркость оттенка x КРАСНЫЙ канал маски, а цвет =
+    оттенок x маска по каналам (weapon_sheen_pass). Зелёный оттенок на красной
+    маске даёт цвет 0 при полной непрозрачности - полоса затемняет оружие.
+    Проверено в игре 2026-10-19 (обрез).
+    """
+    m = _CUSTOM_RE.match(str(name or '').strip().lower().replace('\\', '/'))
+    return bool(m and m.group(4))
 
 
 def parse_custom(name: str) -> Optional[Tuple[str, float, int]]:
@@ -112,7 +133,7 @@ def parse_custom(name: str) -> Optional[Tuple[str, float, int]]:
     m = _CUSTOM_RE.match(str(name or '').strip().lower().replace('\\', '/'))
     if not m:
         return None
-    frames = int(m.group(4))
+    frames = int(m.group(5))
     if not MIN_FRAMES <= frames <= MAX_FRAMES:
         return None
     return m.group(1), int(m.group(2)) / 10.0, frames
@@ -184,51 +205,10 @@ def _frame(pattern: str, t: float, u: np.ndarray, v: np.ndarray, extra) -> np.nd
     raise ValueError(f"unknown sheen pattern {pattern}")
 
 
-#: Калибровка крупнее: на 128 px цифры и буква не читаются на оружии.
-CALIB_SIZE = 256
-
-
-def _calibration(size: int = CALIB_SIZE) -> np.ndarray:
-    """Неподвижная картинка, по которой видно, как маска легла на модель:
-    сетка 4×4 толстыми линиями и крупные цифры 1…16 по порядку чтения
-    (слева направо, сверху вниз). Цифры несимметричны — по ним видно и
-    направление осей, и зеркало. Мелкие подписи на оружии не читались
-    (тест 2026-10-13). Белое на чёрном: маска умножает цвет блеска."""
-    from PIL import Image, ImageDraw, ImageFont
-
-    img = Image.new("L", (size, size), 0)
-    d = ImageDraw.Draw(img)
-    cell = size // 4
-
-    font = None
-    for name in ("arialbd.ttf", "arial.ttf", "DejaVuSans-Bold.ttf"):
-        try:
-            font = ImageFont.truetype(name, int(cell * 0.62))
-            break
-        except OSError:
-            continue
-    font = font or ImageFont.load_default()
-    for i in range(5):
-        d.line([(i * cell, 0), (i * cell, size)], fill=140, width=6)
-        d.line([(0, i * cell), (size, i * cell)], fill=140, width=6)
-    for row in range(4):
-        for col in range(4):
-            d.text((col * cell + cell // 2, row * cell + cell // 2), str(row * 4 + col + 1),
-                   fill=255, font=font, anchor="mm")
-    return np.asarray(img)
-
-
 def frames(pattern: str, count: int, size: int = SIZE) -> List[np.ndarray]:
     """Кадры маски RGBA uint8; кадр 0 пустой (игра его не рисует)."""
     if pattern not in PATTERNS:
         raise ValueError(f"unknown sheen pattern {pattern}")
-    if pattern == "calib":
-        # Картинка стоит весь проход: её успеваешь снять скриншотом.
-        lum = _calibration()
-        still = np.dstack([lum, lum, lum, np.full_like(lum, 255)])
-        blank = np.zeros_like(still)
-        blank[..., 3] = 255
-        return [blank] + [still] * (count - 1)
     v, u = np.mgrid[0:size, 0:size] / float(size)
     rng = np.random.default_rng(7)
     extra = None
@@ -276,19 +256,42 @@ def _bypass_folder() -> str:
         return "console"
 
 
-def materialize(vpkroot_dir: Path, folder: Optional[str] = None) -> int:
+#: Наш оттенок блеска и его яркость в VMT (vmt_effects._sheen).
+_TINT_RE = re.compile(r'("?\$tf2sg_sheen"?\s+")\[[^\]]*\](")', re.IGNORECASE)
+_BRIGHT_RE = re.compile(r'"?\$tf2sg_sheenbright"?\s+"?([\d.]+)', re.IGNORECASE)
+
+
+def _retint(text: str, palette: str) -> str:
+    """Оттенок своего узора - по его гамме на момент сборки."""
+    from src.services import sheen_palette
+    m = _BRIGHT_RE.search(text)
+    bright = float(m.group(1)) if m else 1.0
+    vec = " ".join(f"{c:g}" for c in sheen_palette.tint(palette, bright))
+    return _TINT_RE.sub(lambda t: f"{t.group(1)}[{vec}]{t.group(2)}", text)
+
+
+def materialize(vpkroot_dir: Path, folder: Optional[str] = None,
+                namespace: str = "") -> int:
     """Маски узоров, на которые ссылаются VMT мода, — в мод; сколько создано.
 
     Редактор пишет короткое имя `tf2sg/sheen/<узор>_<кадров>`; здесь ссылка
     в VMT мода переносится в папку-обход (`folder`, по умолчанию из
     настроек), и файл кладётся туда же. Не вышло — исключение: мод без маски
     в игре показал бы на оружии «шахматку».
+
+    `namespace` - своя подпапка мода (`<обход>/<мод>/tf2sg/sheen/…`). Без неё
+    два мода клали ровную кубмапу и одинаковые маски по одному пути:
+    прелоадер видел конфликт, а при разном содержимом один мод ломал бы
+    блеск другого.
     """
     root = Path(vpkroot_dir)
     materials = root / "materials"
     if not materials.is_dir():
         return 0
     folder = (_bypass_folder() if folder is None else folder).replace('\\', '/').strip('/').lower()
+    # Коротко: путь в VPK упирается в MAX_PATH vpk.exe.
+    space = re.sub(r'[^a-z0-9_]+', '_', namespace.lower()).strip('_')[:32]
+    folder = '/'.join(x for x in (folder, space) if x)
     wanted = set()
     for vmt in materials.rglob("*.vmt"):
         try:
@@ -299,6 +302,8 @@ def materialize(vpkroot_dir: Path, folder: Optional[str] = None) -> int:
         if "sheen" not in text.lower():
             continue
 
+        gamut = []                              # гамма своего узора в этом VMT
+
         def move(m):
             ref = m.group(2).replace('\\', '/').lower()
             short = ref[ref.index('tf2sg/sheen/'):]
@@ -306,13 +311,20 @@ def materialize(vpkroot_dir: Path, folder: Optional[str] = None) -> int:
             if own:
                 # В моде — с отпечатком содержимого: моды, собранные до и
                 # после правки узора, не делят один путь.
-                from src.services import sheen_builder
-                digest = sheen_builder.content_hash(own[0])
+                from src.services import sheen_builder, sheen_library, sheen_palette
+                digest = sheen_library.content_hash(own[0])
                 if not digest:
                     raise RuntimeError(f"sheen pattern {own[0]} not found in "
                                        f"{sheen_builder.library_dir()}")
+                dark = darkened(short)
+                if sheen_library.ID_RE.match(own[0]):
+                    # Гамма своего узора - по его цветам СЕЙЧАС: узор могли
+                    # перекрасить после того, как эффект встал в VMT.
+                    gamut.append(sheen_palette.palette_of(own[0]))
+                    dark = gamut[-1] == sheen_palette.COLD
                 short = (f"{PREFIX}{own[0]}_h{digest}_a{int(round(own[1] * 10))}"
-                         f"{'r' if rotated(short) else ''}_{own[2]}")
+                         f"{'r' if rotated(short) else ''}{'k' if dark else ''}"
+                         f"_{own[2]}")
             elif not parse(short):
                 return m.group(0)
             wanted.add(short)
@@ -323,6 +335,8 @@ def materialize(vpkroot_dir: Path, folder: Optional[str] = None) -> int:
             return m.group(1) + (f"{folder}/{FLAT_CUBE}" if folder else FLAT_CUBE)
 
         new = _CUBE_RE.sub(cube, _VMT_RE.sub(move, text))
+        if gamut:
+            new = _retint(new, gamut[-1])
         if new != text:
             vmt.write_bytes(new.encode("latin-1"))
     made = 0
@@ -339,13 +353,23 @@ def materialize(vpkroot_dir: Path, folder: Optional[str] = None) -> int:
             continue
         own = parse_custom(short)
         if own:
-            from src.services import sheen_builder
+            from src.services import sheen_builder, sheen_library
             pattern_id, aspect, count = own
-            data = sheen_builder.load(pattern_id, deleted=True)
+            data = sheen_library.load(pattern_id, deleted=True)
             if data is None:
                 raise RuntimeError(f"sheen pattern {pattern_id} not found in "
                                    f"{sheen_builder.library_dir()}")
-            pics = sheen_builder.render(data["spec"], count, aspect)
+            if sheen_library.ID_RE.match(pattern_id):
+                # Свой узор: гамма по цветам слоёв (sheen_palette).
+                pics = sheen_builder.render(data["spec"], count, aspect,
+                                            palette="cold" if darkened(short) else "warm")
+            else:
+                pics = sheen_builder.render(data["spec"], count, aspect)
+                if darkened(short):
+                    # Чёрный готовый узор: форма в красном, цвета нет.
+                    for pic in pics:
+                        pic[..., 0] = pic[..., :3].max(axis=-1)
+                        pic[..., 1:3] = 0
         else:
             pattern, count = parse(short)
             pics = frames(pattern, count)

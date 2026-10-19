@@ -11,7 +11,7 @@ import { say, withParticles } from '../stage.js';
 import { root } from '../layout.js';
 import { pSystem } from './state.js';
 import { applyStructure, PACTS } from './actions.js';
-import { showParticleMaterials } from './materials.js';
+import { showParticleMaterials, ensureEffectMaterials } from './materials.js';
 
 // ── Отмена правок ────────────────────────────────────────────────────────
 // Снимками занимается Python: он же и хранит дерево. Здесь только сочетание
@@ -23,6 +23,7 @@ export async function historyGo(delta) {
   await applyStructure(res);
   if (res.materials) {
     withParticles((w) => w.loadParticleData({ ...res, rootName: pSystem }));
+    ensureEffectMaterials();
     await showParticleMaterials();
   }
   say(delta < 0 ? 'Правка отменена' : 'Правка возвращена');

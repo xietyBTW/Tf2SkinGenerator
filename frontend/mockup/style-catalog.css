@@ -1,0 +1,183 @@
+/*
+ * Каталог предметов.
+ *
+ * Часть стилей страницы: файлы подключены в index.html в порядке каскада
+ * (style.css первым), порядок менять нельзя.
+ */
+
+/* ── Каталог предметов ───────────────────────────────────────────────────
+   Один блок на оба режима. Прибитый — узкая колонка слева, сетка сама
+   становится в один столбец. Плавающий — на весь экран. */
+.catalog {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.catalog__head { flex: none; display: flex; align-items: center; gap: var(--gap); }
+.catalog__search { flex: 1; }
+
+.catalog__filters {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.catalog__grid {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  /* Ряды — к верху. Сетка высотой во весь экран, и при двух рядах (фильтр
+     «Снайпер · Основное») по умолчанию лишняя высота делилась между ними —
+     карточки разъезжались. */
+  align-content: start;
+  gap: 22px 18px;
+  padding-bottom: 4px;
+}
+
+/* Полоса между модами из VPK и своими работами в «Кастомном моде» -
+   во всю ширину сетки, с подписью нижней группы. */
+.catalog__rule {
+  grid-column: 1 / -1;
+  display: flex; align-items: center; gap: 10px;
+  font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--ink-mute);
+}
+.catalog__rule::after { content: ""; flex: 1; border-top: 1px solid var(--hairline-strong); }
+
+.pick {
+  position: relative;       /* для пометки стилей (.pick__styles) */
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+/* Обложка — иконка предмета из рюкзака (materials/backpack/…), она квадратная. */
+.pick__box {
+  position: relative;
+  aspect-ratio: 1;
+  margin-bottom: 7px;
+  border: 1px solid var(--hairline-strong);
+  background: var(--viewport);
+  transition: border-color var(--dur);
+}
+/* Иконка вписывается целиком: у игровых картинок прозрачные поля, и обрезка
+   по краю срезала бы стволы и поля шляп. */
+.pick__icon {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.pick:hover .pick__box { border-color: var(--ink); }
+.pick.is-active .pick__box { border-color: var(--accent); }
+
+/* Обложка специального режима: свой значок вместо картинки из рюкзака (её у
+   спрея и эффектов смерти нет — см. catalog.js → SPECIAL_ART).
+
+   Размер долей от рамки, а не в пикселях: та же обложка бывает и во всю плитку
+   каталога, и меткой в 26 px у имени в прибитой панели. А вот линия долей быть
+   не может — `non-scaling-stroke` держит её волосяной в обоих размерах, иначе
+   на большой обложке она выходит в десяток пикселей. */
+.pick__art {
+  position: absolute;
+  left: 22%;
+  top: 22%;
+  width: 56%;
+  height: 56%;
+  /* Значок — содержимое карточки, а не её оправа: `--ink-soft` контрастнее
+     рамки в обеих темах, а `--ink-mute` терялся рядом с подписью. */
+  color: var(--ink-soft);
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.15;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.pick__art * { vector-effect: non-scaling-stroke; }
+/* Заливка только у капель баллончика — как у точек на кубике «Случайно». */
+.pick__art .pick__drop { fill: currentColor; stroke: none; }
+.pick:hover .pick__art { color: var(--ink); }
+.pick.is-active .pick__art { color: var(--accent); }
+.pick__name { font-size: 13px; }
+
+/* Имя и путь режем многоточием: у косметики пути вида
+   models/player/items/demo/... длиннее плитки и налезали на соседние. */
+.pick__name,
+.pick .mono {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pick.is-active .pick__name { font-weight: 600; }
+
+.catalog__cat { flex: none; }
+
+/* Видимостью рядов фильтров управляет ТОЛЬКО applyCategory в app.js.
+   Правила `[data-for] { display: none }` здесь быть не должно: скрипт снимает
+   inline-стиль у видимых рядов, и такое правило оставляло бы их скрытыми. */
+.catalog__empty { margin: 0; color: var(--ink-mute); font-size: 12px; }
+
+/* Прибитый режим: узкая колонка. Большие обложки в 230 пикселях съедают
+   экран — видно четыре предмета вместо пятнадцати. Поэтому там сетка
+   становится списком, а обложка — маленькой меткой слева от имени.
+   Компонент тот же, меняется только плотность. */
+[data-panels="pinned"] .catalog { border-right: 1px solid var(--hairline); padding-right: var(--gap); }
+[data-panels="pinned"] #closecat { display: none; }
+[data-panels="pinned"] .catalog__filters { gap: 10px; }
+[data-panels="pinned"] .catalog__grid {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+  border-top: 1px solid var(--hairline);
+}
+[data-panels="pinned"] .pick {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  align-items: center;
+  column-gap: 10px;
+  padding: 7px 0 7px 10px;
+  border-bottom: 1px solid var(--hairline);
+  border-left: 2px solid transparent;
+  transition: border-color var(--dur);
+}
+[data-panels="pinned"] .pick:hover { border-left-color: var(--hairline-strong); }
+[data-panels="pinned"] .pick.is-active { border-left-color: var(--accent); }
+[data-panels="pinned"] .pick__box {
+  grid-row: 1 / 3;
+  width: 26px;
+  height: 26px;
+  margin: 0;
+}
+[data-panels="pinned"] .pick__name,
+[data-panels="pinned"] .pick .mono { grid-column: 2; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Пометка стилей — отдельной колонкой справа от имени: на обложке в 26 px
+   ей места нет. Колонка `auto` появляется только у шапок со стилями. */
+[data-panels="pinned"] .pick:has(.pick__styles) {
+  grid-template-columns: 26px minmax(0, 1fr) auto;
+}
+[data-panels="pinned"] .pick__styles {
+  position: static;
+  grid-column: 3;
+  grid-row: 1 / 3;
+  align-self: center;
+  margin-right: 8px;
+  border: 1px solid var(--hairline);
+}
+
+/* Вложенность системы частиц: ребёнка видно, что он ребёнок. */
+.pick__name, .pick .mono { padding-left: calc(var(--depth, 0) * 9px); }
+

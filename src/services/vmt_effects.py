@@ -99,21 +99,22 @@ def _color_fields(label: Tuple[str, str]) -> List[dict]:
     ]
 
 
-#: Подписи своих узоров блеска (src/services/sheen_patterns.py).
-_SHEEN_PATTERN_LABELS = {
-    "double": ("Две полосы", "Two stripes"),
-    "pulse": ("Вспышка", "Flash"),
-    "pulse2": ("Двойная вспышка", "Double flash"),
-    "stripes": ("Бегущие полосы", "Running stripes"),
-    "sparkle": ("Искры", "Sparkles"),
-    "mist": ("Дымка", "Mist"),
-    "calib": ("Калибровка (тест)", "Calibration (test)"),
-}
+def _sheen_presets() -> List[Tuple[str, str, str]]:
+    """Готовые узоры блеска = шаблоны конструктора: (значение, ru, en)."""
+    from src.services.sheen_builder import PRESETS
+    from src.services.sheen_library import PRESET_PREFIX
+    return [(PRESET_PREFIX + k, *p["label"]) for k, p in PRESETS.items()]
 
 
-def _sheen_patterns() -> Dict[str, Tuple[str, str]]:
-    from src.services.sheen_patterns import PATTERNS
-    return {k: _SHEEN_PATTERN_LABELS[k] for k in PATTERNS}
+#: Значения «Узора», при которых цвет задаёт эффект: игра и готовые узоры.
+#: Свой узор красят его слои, и цвет эффекта ему не нужен (он белый).
+_SHEEN_TINTED = ["game", *[v for v, _ru, _en in _sheen_presets()]]
+
+
+def _tinted(field: dict) -> dict:
+    """Поле цвета блеска видно, пока узор не свой и блеск не чёрный."""
+    return {**field, "show_if": {**field.get("show_if", {}), "pattern": _SHEEN_TINTED,
+                                 "dark!": "on"}}
 
 
 # Поля форм. Подписи парами (ru, en): переводит Python, как и сами сниппеты.
@@ -149,23 +150,26 @@ EFFECTS: Dict[str, dict] = {
     SHEEN: {
         "replace": False,
         "fields": [
-            *_color_fields(("Цвет", "Color")),
-            {"key": "bright", "type": "range", "label": ("Яркость", "Brightness"),
-             "min": 0.3, "max": 3, "step": 0.1, "default": 1},
-            {"key": "look", "type": "choice", "label": ("Вид", "Look"),
-             "default": "normal",
-             "choices": [("normal", "Обычный", "Normal"),
-                         ("bright", "Ярче, как у австралия", "Brighter, like Australium")]},
             # `builder`: страница добавляет свои узоры из конструктора и
             # кнопку самого конструктора (sheen-builder.js).
             {"key": "pattern", "type": "choice", "label": ("Узор", "Pattern"),
              "default": "game", "builder": True,
-             "choices": [("game", "Как в игре", "As in game"),
-                         *[(k, ru, en) for k, (ru, en) in _sheen_patterns().items()]]},
+             "choices": [("game", "Как в игре", "As in game"), *_sheen_presets()]},
+            # Чёрный блеск готового узора: узор уходит в красный канал, оттенок
+            # без красного (sheen_palette). У своего узора гамму выбирают
+            # цвета его слоёв, поле ему не нужно.
+            {"key": "dark", "type": "choice", "label": ("Вид", "Look"),
+             "default": "off", "show_if": {"pattern": _SHEEN_TINTED[1:]},
+             "choices": [("off", "Светится", "Glows"),
+                         ("on", "Чёрный, затемняет", "Black, darkens")]},
+            *[_tinted(f) for f in _color_fields(("Цвет", "Color"))],
+            {"key": "bright", "type": "range", "label": ("Яркость", "Brightness"),
+             "min": 0.3, "max": 3, "step": 0.1, "default": 1},
+            # Длина своего узора задана в конструкторе.
             {"key": "length", "type": "range",
              "label": ("Длина прохода, сек", "Sweep length, s"),
              "min": 1, "max": 8, "step": 0.5, "default": 2.5,
-             "show_if": {"pattern!": "game"}},
+             "show_if": {"pattern": _SHEEN_TINTED[1:]}},
             {"key": "shine", "type": "choice", "label": ("Отблеск", "Shine"),
              "default": "flat", "show_if": {"pattern!": "game"},
              "choices": [("flat", "Ровный, узор виден целиком", "Even, the whole pattern shows"),
@@ -259,6 +263,15 @@ def _num(value, lo: float, hi: float, default: float) -> float:
     return min(hi, max(lo, v))
 
 
+def present(key: str, text: str) -> bool:
+    """Эффект уже стоит в материале (те же признаки, что у `values`)."""
+    marks = {GHOST: ("$additive", "1"), GLASS: (MARK + "glass", None),
+             SHEEN: (MARK + "sheen", None), CRIT: (MARK + "critred", None)}
+    var, want = marks.get(key, ("", None))
+    got = _value(text, var) if var else None
+    return got is not None and (want is None or got == want)
+
+
 def values(key: str, text: str) -> Dict[str, object]:
     """Значения формы: из материала, если эффект уже стоит, иначе по умолчанию."""
     out = {f["key"]: f["default"] for f in EFFECTS.get(key, {}).get("fields", [])}
@@ -294,7 +307,9 @@ def values(key: str, text: str) -> Dict[str, object]:
             out["speed"] = _num(rainbow[0], 0.5, 10, 3)
     elif key == SHEEN and _value(text, MARK + "sheen") is not None:
         bright = _num(_value(text, MARK + "sheenbright"), 0.3, 3, 1)
-        out["bright"] = round(bright, 1)
+        # Старое «Ярче, как у австралия» ($sheenindex 1) - это x1.8 к яркости.
+        boost = 1.8 if _value(text, MARK + "sheenidx") is not None else 1
+        out["bright"] = round(min(3, bright * boost), 1)
         tint = _vec(_value(text, MARK + "sheen"))
         if tint:
             out["color"] = _to_hex(_to_srgb(c / bright) for c in tint)
@@ -302,16 +317,21 @@ def values(key: str, text: str) -> Dict[str, object]:
         if rainbow:
             out["color_mode"] = "rainbow"
             out["speed"] = _num(rainbow[0], 0.5, 10, 3)
-        out["look"] = "bright" if _value(text, MARK + "sheenidx") is not None else "normal"
-        from src.services import sheen_patterns
+        from src.services import sheen_library, sheen_patterns
         mask = _value(text, "$sheenmapmask") or ""
         own = sheen_patterns.parse(mask)
         custom = sheen_patterns.parse_custom(mask)
         if own:
-            out["pattern"] = own[0]
+            # Старый готовый узор - тот же вид из шаблонов конструктора.
+            out["pattern"] = sheen_library.PRESET_PREFIX + sheen_patterns.LEGACY_PRESETS[own[0]]
             out["length"] = round((own[1] - 1) / sheen_patterns.FPS * 2) / 2
         elif custom:
             out["pattern"] = custom[0]
+            if sheen_library.ID_RE.match(custom[0]):
+                out["color"] = "#ffffff"        # оттенок своего узора - служебный
+            elif sheen_patterns.darkened(mask):
+                out["dark"] = "on"
+                out["color"] = "#ffffff"
             out["length"] = round((custom[2] - 1) / sheen_patterns.FPS * 2) / 2
         if own or custom:
             out["shine"] = ("flat" if sheen_patterns.is_flat_cube(_value(text, "$sheenmap"))
@@ -491,13 +511,22 @@ def _sheen(vals: Dict[str, object], text: str, bounds: Optional[dict],
                          "Выберите «Всегда, на любом оружии»."}
     if always and not bounds:
         return {"error": "Не удалось прочитать размеры модели для полосы блеска."}
-    bright = _num(vals.get("bright"), 0.3, 3, 1)
-    rainbow = vals.get("color_mode") == "rainbow"
-    # Шейдер берёт цвет линейным: цвет палитры переводим, иначе он бледнее.
-    tint = ((bright,) * 3 if rainbow
-            else tuple(_to_linear(c) * bright for c in _from_hex(vals.get("color"))))
+    from src.services import sheen_builder, sheen_library, sheen_palette, sheen_patterns
 
-    from src.services import sheen_patterns
+    pattern = str(vals.get("pattern") or "game")
+    # Свой узор красят его слои: гамму (тёплая с белым или холодная с
+    # чёрным) выбирают их цвета, оттенок эффекта - по ней, радуги нет.
+    painted = bool(sheen_library.ID_RE.match(pattern))
+    palette = sheen_palette.palette_of(pattern) if painted else None
+    # Чёрный: оттенок без красного на маске в красном канале (darkened).
+    dark = (palette == sheen_palette.COLD if painted
+            else vals.get("dark") == "on" and sheen_library.is_pattern(pattern))
+    bright = _num(vals.get("bright"), 0.3, 3, 1)
+    rainbow = vals.get("color_mode") == "rainbow" and not painted and not dark
+    # Шейдер берёт цвет линейным: цвет палитры переводим, иначе он бледнее.
+    tint = (sheen_palette.tint(sheen_palette.COLD if dark else sheen_palette.WARM, bright)
+            if dark or rainbow or painted
+            else tuple(_to_linear(c) * bright for c in _from_hex(vals.get("color"))))
 
     out = _drop_keys(_strip_marked_proxies(text, _SHEEN_MARK), MARK + "sheen")
     keys = [(MARK + "sheen", _fmt_vec(tint, 6)), (MARK + "sheenbright", f"{bright:g}")]
@@ -506,24 +535,23 @@ def _sheen(vals: Dict[str, object], text: str, bounds: Optional[dict],
     # по-прежнему сокращается с серией убийств. Файл маски достроит сборка
     # по имени (sheen_patterns.materialize).
     frames = _SHEEN_FRAMES
-    pattern = str(vals.get("pattern") or "game")
-    from src.services import sheen_builder
     stencil = _stencil(bounds)
     rotate = bool(stencil and stencil["rotate"])
     own = False
-    if pattern in sheen_patterns.PATTERNS:
-        own = True
-        frames = sheen_patterns.frames_for(_num(vals.get("length"), 1, 8, 2.5))
-        keys.append(("$sheenmapmask", sheen_patterns.texture_name(pattern, frames, rotate)))
-    elif sheen_builder.ID_RE.match(pattern):
-        # Узор из конструктора: в имени пропорция ЭТОГО оружия — сборка
-        # нарисует маску так, чтобы искры на нём были круглыми.
-        if sheen_builder.load(pattern) is None:
+    if sheen_library.is_pattern(pattern):
+        # Узор конструктора (свой или готовый шаблон): в имени пропорция
+        # ЭТОГО оружия — сборка нарисует маску так, чтобы искры на нём были
+        # круглыми.
+        data = sheen_library.load(pattern)
+        if data is None:
             return {"error": "Такого своего узора больше нет. Выберите другой."}
         own = True
-        frames = sheen_patterns.frames_for(_num(vals.get("length"), 1, 8, 2.5))
+        # Длина своего узора - из конструктора, у готового - из формы.
+        length = data["length"] if painted else vals.get("length")
+        frames = sheen_patterns.frames_for(_num(length, 1, 8, 2.5))
         aspect = stencil["aspect"] if stencil else sheen_builder.DEFAULT_ASPECT
-        keys.append(("$sheenmapmask", sheen_patterns.custom_name(pattern, aspect, frames, rotate)))
+        keys.append(("$sheenmapmask",
+                     sheen_patterns.custom_name(pattern, aspect, frames, rotate, dark)))
     elif (sheen_patterns.parse(_value(out, "$sheenmapmask") or "")
           or sheen_patterns.parse_custom(_value(out, "$sheenmapmask") or "")):
         # Назад к маске материала (у мода она могла быть своя), иначе стоковая.
@@ -544,10 +572,6 @@ def _sheen(vals: Dict[str, object], text: str, bounds: Optional[dict],
                          _SHEEN_MARK)
     tail += _proxy("Equals", [("srcVar1", MARK + "sheen"), ("resultVar", "$sheenmaptint")],
                    _SHEEN_MARK)
-    if vals.get("look") == "bright":
-        keys.append((MARK + "sheenidx", "1"))
-        tail += _proxy("Equals", [("srcVar1", MARK + "sheenidx"),
-                                  ("resultVar", "$sheenindex")], _SHEEN_MARK)
     if own and stencil:
         # Раскладка своей маски закреплена: игра у киллстрик-оружия каждый
         # кадр ставит свою (InitParams), наши Equals ниже её перебивают.
@@ -919,3 +943,7 @@ def _strip_marked_proxies(text: str, mark: str = _PROXY_MARK) -> str:
             kept.append(chunk)
         i = chunk_end
     return text[:m.end()] + ''.join(kept) + text[close:]
+
+
+#: Для переноса правки во все материалы (vmt_spread): наши прокси не в счёт.
+strip_marked_proxies = _strip_marked_proxies

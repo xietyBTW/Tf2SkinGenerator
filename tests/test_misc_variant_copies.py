@@ -12,6 +12,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from src.services import qc_skin_parser
+from src.services.texture_build import game_source
 from src.services.vpk_texture_builder import VpkTextureBuilder
 from src.shared.constants import EXTRA_TEX_USE_MAIN
 
@@ -82,7 +83,7 @@ class CopyMainTests(unittest.TestCase):
                 originals[name] = Path(game) / f"{name}.vmt"
                 originals[name].write_text(VMT.format(name))
             deferred = []
-            with patch.object(VpkTextureBuilder, "_find_original_vmt",
+            with patch.object(game_source, "find_original_vmt",
                               side_effect=lambda name, ctx, s: str(originals.get(name, "")) or None):
                 VpkTextureBuilder._build_extra_material_textures(
                     ["scout_head_red_invun", "eyeball_invun", "scout_blue_invun"], "scout",
@@ -117,7 +118,7 @@ class PairRulesTests(unittest.TestCase):
             originals[name].write_text(VMT.format(name))
         prepare(slots)
         deferred = []
-        with patch.object(VpkTextureBuilder, "_find_original_vmt",
+        with patch.object(game_source, "find_original_vmt",
                           side_effect=lambda name, ctx, s: str(originals.get(name, "")) or None):
             VpkTextureBuilder._build_extra_material_textures(
                 names, "scout", None, slots, None, lambda *_: EXTRA_TEX_USE_MAIN, None,
@@ -156,7 +157,7 @@ class PairRulesTests(unittest.TestCase):
             slots.vmt("scout_blue").write_text(ANIMATED.format("scout_blue"))
             orig = Path(game) / "scout_blue_invun.vmt"
             orig.write_text(VMT.format("scout_blue_invun"))
-            with patch.object(VpkTextureBuilder, "_find_original_vmt", return_value=str(orig)):
+            with patch.object(game_source, "find_original_vmt", return_value=str(orig)):
                 VpkTextureBuilder._finish_variant_copies(
                     [("scout_blue_invun", "scout_blue")], None, slots)
             self.assertEqual(slots.vtf("scout_blue_invun").read_bytes(), b"gif blue")
@@ -176,7 +177,7 @@ class SharedTextureTests(unittest.TestCase):
             slots.vmt("hvyweapon_red").write_text(VMT.format("x"))
             for name in ("hvyweapon_red_sheen", "hvyweapon_red_part1_blue"):
                 slots.vmt(name).write_text(VMT.format("player/hvyweapon/hvyweapon_red"))
-            with patch.object(VpkTextureBuilder, "_find_original_vmt",
+            with patch.object(game_source, "find_original_vmt",
                               side_effect=lambda name, ctx, s: str(body_game)
                               if name == "hvyweapon_red" else None):
                 VpkTextureBuilder._follow_shared_textures(None, slots)
@@ -195,7 +196,7 @@ class SharedTextureTests(unittest.TestCase):
             slots.vtf("hvyweapon_red").write_bytes(b"game body")
             slots.game_copies.add("hvyweapon_red")
             slots.vmt("hvyweapon_red_sheen").write_text(VMT.format("player/hvyweapon/hvyweapon_red"))
-            with patch.object(VpkTextureBuilder, "_find_original_vmt", return_value=str(body_game)):
+            with patch.object(game_source, "find_original_vmt", return_value=str(body_game)):
                 VpkTextureBuilder._follow_shared_textures(None, slots)
             self.assertNotIn("console", slots.vmt("hvyweapon_red_sheen").read_text())
 
@@ -220,7 +221,7 @@ class EditedVmtTests(unittest.TestCase):
             answers = {"scout_head_red_invun": EXTRA_TEX_USE_MAIN,
                        "scout_head_zombie": EXTRA_TEX_USE_GAME_ORIGINAL}
             with patch.object(EditedVMTService, "EDITED_VMT_DIR", edits), \
-                    patch.object(VpkTextureBuilder, "_find_original_vmt",
+                    patch.object(game_source, "find_original_vmt",
                                  side_effect=lambda name, ctx, s: str(originals.get(name, "")) or None):
                 for name in answers:
                     EditedVMTService.save_edited_vmt(

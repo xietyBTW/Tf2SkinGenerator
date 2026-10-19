@@ -10,6 +10,7 @@
 import os
 import tempfile
 import unittest
+from types import SimpleNamespace
 from pathlib import Path
 
 import numpy as np
@@ -210,14 +211,12 @@ class EditorTests(unittest.TestCase):
             def _card_key(host, material=''):
                 return AppSession._card_key(host, material)
 
-            def _decor_for_card(host, card):
-                return None
+            decor = SimpleNamespace(for_card=lambda card: None)
 
             def _shape_changed(host):
                 return False
 
-            def _vmt_target(host, material=''):
-                return {'error': 'нет'}
+            materials = SimpleNamespace(vmt_target=lambda material='': {'error': 'нет'})
 
             def _work_dir(host):
                 return d

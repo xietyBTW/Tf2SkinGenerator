@@ -90,10 +90,10 @@ class MulticlassHatBuildTests(unittest.TestCase):
                     return_value=str(smd)))
             m(patch(P + "PackagingService.create_vpk_file",
                     return_value=str(base / "out.vpk")))
-            m(patch(P + "TextureService.create_vtf",
+            m(patch("src.services.texture_service.TextureService.create_vtf",
                     side_effect=lambda png, out, *a, **k:
                         (Path(out) / f"{Path(png).stem}.vtf").write_bytes(b"VTF")))
-            m(patch(P + "TextureService.process_image",
+            m(patch("src.services.texture_service.TextureService.process_image",
                     side_effect=lambda i, o, s: Path(o).write_bytes(b"png")))
 
             ok, msg = VPKService.build_vpk(

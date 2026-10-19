@@ -13,6 +13,7 @@ import struct
 import tempfile
 import unittest
 import wave
+from types import SimpleNamespace
 
 from src.data import sound_catalog as sc
 from src.services import sound_build_service as builder
@@ -439,14 +440,14 @@ class SearchTests(unittest.TestCase):
     def test_separators_and_case_are_ignored(self):
         """Скаттерган в игре записан `Weapon_Scatter_Gun`, и буквальное
         совпадение подстроки не находило его по слову «scattergun»."""
-        from src.app.session import _plain
+        from src.shared.text_search import plain as _plain
 
         self.assertEqual(_plain('Weapon_Scatter_Gun.Single'),
                          'weaponscattergunsingle')
         self.assertIn(_plain('scattergun'), _plain('Weapon_Scatter_Gun.Single'))
 
     def test_russian_survives(self):
-        from src.app.session import _plain
+        from src.shared.text_search import plain as _plain
 
         self.assertEqual(_plain('Обрез Малыша'), 'обрезмалыша')
 
@@ -456,7 +457,7 @@ class RankTests(unittest.TestCase):
 
     @staticmethod
     def _row(name, terms, waves):
-        from src.app.session import _plain
+        from src.shared.text_search import plain as _plain
 
         plain = [_plain(t) for t in terms]
         return {'name': name, 'terms': tuple(plain), 'name_plain': _plain(name),
@@ -465,7 +466,7 @@ class RankTests(unittest.TestCase):
 
     def test_item_name_beats_file_name(self):
         """«pistol» — сначала пистолет, а не ракетница с пистолетным файлом."""
-        from src.app.session import _score
+        from src.app.sounds_editor import _score
 
         pistol = self._row('Weapon_Pistol.Single', ['Пистолет', 'Pistol'],
                            ['weapons/pistol_shoot.wav'])
@@ -474,14 +475,14 @@ class RankTests(unittest.TestCase):
         self.assertGreater(_score(pistol, ['pistol']), _score(flare, ['pistol']))
 
     def test_whole_term_beats_its_prefix(self):
-        from src.app.session import _score
+        from src.app.sounds_editor import _score
 
         bat = self._row('Weapon_Bat.Draw', ['Бита', 'Bat'], [])
         saber = self._row('Weapon_BatSaber.Draw', ['Бэт-сабля', 'Batsaber'], [])
         self.assertGreater(_score(bat, ['bat']), _score(saber, ['bat']))
 
     def test_every_word_must_match(self):
-        from src.app.session import _score
+        from src.app.sounds_editor import _score
 
         bat = self._row('Weapon_Bat.Draw', ['Бита', 'Bat', 'Scout', 'Melee'], [])
         self.assertGreater(_score(bat, ['scout', 'melee']), 0)
@@ -497,9 +498,9 @@ class FormatTests(unittest.TestCase):
     """
 
     def _check(self, wave_name, own_name):
-        from src.app.session import AppSession
+        from src.app.sounds_editor import SoundsEditor
 
-        return AppSession._wrong_format([wave_name], own_name)
+        return SoundsEditor._wrong_format([wave_name], own_name)
 
     def test_same_extension_passes(self):
         self.assertEqual(self._check('vo/heavy.mp3', 'C:/my.mp3'), '')
@@ -512,17 +513,17 @@ class FormatTests(unittest.TestCase):
     def test_mixed_kinds_accept_either(self):
         """У полусотни записей файлы разных расширений вперемешку: у моторки
         разведчика и wav, и mp3. Годится совпавший хоть с одним."""
-        from src.app.session import AppSession
+        from src.app.sounds_editor import SoundsEditor
 
         waves = ['vo/a.wav', 'vo/b.mp3', 'vo/c.mp3']
-        self.assertEqual(AppSession._wrong_format(waves, 'C:/my.wav'), '')
-        self.assertEqual(AppSession._wrong_format(waves, 'C:/my.mp3'), '')
-        self.assertIn('MP3/WAV', AppSession._wrong_format(waves, 'C:/my.ogg'))
+        self.assertEqual(SoundsEditor._wrong_format(waves, 'C:/my.wav'), '')
+        self.assertEqual(SoundsEditor._wrong_format(waves, 'C:/my.mp3'), '')
+        self.assertIn('MP3/WAV', SoundsEditor._wrong_format(waves, 'C:/my.ogg'))
 
     def test_entry_without_files_is_not_judged(self):
-        from src.app.session import AppSession
+        from src.app.sounds_editor import SoundsEditor
 
-        self.assertEqual(AppSession._wrong_format([], 'C:/my.wav'), '')
+        self.assertEqual(SoundsEditor._wrong_format([], 'C:/my.wav'), '')
 
 
 class ArchiveNameTests(unittest.TestCase):
@@ -607,12 +608,12 @@ class SaveTests(unittest.TestCase):
     """Достать игровой звук: переделать его иначе не из чего."""
 
     def _session(self, waves, folder, data=b'RIFF'):
-        from src.app.session import AppSession
+        from src.app.sounds_editor import SoundsEditor
 
-        session = AppSession.__new__(AppSession)
+        session = SoundsEditor.__new__(SoundsEditor)
         session._rows_any = lambda: [{'name': 'Weapon_Test.Single',
                                       'waves': waves}]
-        session._export_settings = lambda: (folder, 'PNG')
+        session._host = SimpleNamespace(_export_settings=lambda: (folder, 'PNG'))
         session.sound_bytes = lambda wave: data
         return session
 
@@ -650,9 +651,9 @@ class PickTests(unittest.TestCase):
     """
 
     def _session(self):
-        from src.app.session import AppSession
+        from src.app.sounds_editor import SoundsEditor
 
-        session = AppSession.__new__(AppSession)
+        session = SoundsEditor.__new__(SoundsEditor)
         session._wave_picks = {}
         session._rows_any = lambda: [
             {'name': 'Weapon_Bat.Miss', 'waves': ['weapons/miss.wav']},
@@ -725,23 +726,23 @@ class SubjectItemTests(unittest.TestCase):
     def test_article_is_tried_too(self):
         """Половина названий в игре с артиклем («The Buff Banner»), а
         называют их без него."""
-        from src.app.session import AppSession
+        from src.app.sounds_editor import SoundsEditor
 
-        session = AppSession.__new__(AppSession)
+        session = SoundsEditor.__new__(SoundsEditor)
         guess = {'theeyelander': ('Eyelander', ('demoman',), 'c_claymore')}
         self.assertEqual(session._by_item(guess, 'Eyelander')[2], 'c_claymore')
 
     def test_missing_item_is_not_an_error(self):
-        from src.app.session import AppSession
+        from src.app.sounds_editor import SoundsEditor
 
-        session = AppSession.__new__(AppSession)
+        session = SoundsEditor.__new__(SoundsEditor)
         self.assertIsNone(session._by_item({}, 'Такого предмета нет'))
 
     def test_entry_without_an_icon_does_not_count(self):
         """Имя нашлось, картинки нет — значит, ищем дальше."""
-        from src.app.session import AppSession
+        from src.app.sounds_editor import SoundsEditor
 
-        session = AppSession.__new__(AppSession)
+        session = SoundsEditor.__new__(SoundsEditor)
         self.assertIsNone(session._by_item({'bat': ('Bat', (), '')}, 'Bat'))
 
 

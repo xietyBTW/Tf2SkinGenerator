@@ -15,6 +15,7 @@ from PIL import Image
 
 from src.data.material_maps import detect_maps, normalize_maps
 from src.services import phongwarp, vmt_parse
+from src.services.texture_build import map_textures
 from src.services.vpk_texture_builder import VpkTextureBuilder
 
 
@@ -154,7 +155,7 @@ class ReviewFixesTests(PhongChannelsTests):
         self.assertTrue(doc.flag('$rimmask'))                 # родная маска цела
 
     def test_failed_phong_map_keeps_stock_tint(self):
-        with mock.patch.object(VpkTextureBuilder, '_compose_exponent', return_value=False):
+        with mock.patch.object(map_textures, 'compose_exponent', return_value=False):
             doc, _ = self.build('\t"$phongtint" "[1 0 0]"\n',
                                 {'phongcolor': {'enabled': True, 'tint': 'albedo'}})
         self.assertEqual(doc.get('$phongtint'), '[1 0 0]')

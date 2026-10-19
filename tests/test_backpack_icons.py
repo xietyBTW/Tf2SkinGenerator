@@ -101,7 +101,7 @@ class WeaponIconFromItemsGameTests(unittest.TestCase):
     def test_alias_and_extra_wearable(self):
         self.assertEqual(self.icon('c_dartgun', self.root),
                          'backpack/workshop/c_sydney_sleeper')
-        self.assertEqual(self.icon('c_batt_buffpack', self.root),
+        self.assertEqual(self.icon('c_buffpack', self.root),
                          'backpack/weapons/c_models/c_buffpack/c_buffpack')
 
     def test_unknown(self):

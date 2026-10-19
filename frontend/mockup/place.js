@@ -17,7 +17,8 @@ import * as api from './api.js';
 import { loadImage } from './util.js';
 import { applyView } from './preview.js';
 import { chooseFile } from './util.js';
-import { partsMaterial, hintParts, refreshParts } from './parts.js';
+import { hintParts, refreshParts } from './parts.js';
+import { P } from './parts-state.js';
 
 // ── Посадка картинки на часть ───────────────────────────────────────────
 // Раньше картинка растягивалась по прямоугольнику части: пропорции терялись,
@@ -842,7 +843,7 @@ function showLayers(layers, on, settle) {
 export async function editPartLayers(part, layer = -1) {
   let current = layer;
   for (;;) {
-    const shape = await api.partShape(partsMaterial, part, current);
+    const shape = await api.partShape(P.material, part, current);
     if (shape.error) { hintParts(shape.error); break; }
     const images = shape.images || [];
     if (!images.length || !shape.image) break;       // снять больше нечего
@@ -870,7 +871,7 @@ export async function editPartLayers(part, layer = -1) {
       if (!await persist(part, await api.upload(res.file), res.spec, current)) return;
     } else if (res.act === 'move') {
       hintParts('Переставляю…');
-      const moved = await api.movePartTexture(partsMaterial, part, res.layer, res.to);
+      const moved = await api.movePartTexture(P.material, part, res.layer, res.to);
       if (moved.error) { hintParts(moved.error); return; }
       applyView(moved);
       await refreshParts();
@@ -884,7 +885,7 @@ export async function editPartLayers(part, layer = -1) {
 /** Одно действие над картинками части - и модель с полосой частей следом. */
 async function persist(part, path, options, layer) {
   hintParts(path ? 'Наложение на часть…' : 'Перекладываю…');
-  const res = await api.setPartTexture(partsMaterial, part, path, options, layer);
+  const res = await api.setPartTexture(P.material, part, path, options, layer);
   if (res.error) { hintParts(res.error); return false; }
   applyView(res);
   await refreshParts();

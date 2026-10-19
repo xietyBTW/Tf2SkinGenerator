@@ -173,7 +173,7 @@ class PartsEditor:
         """
         from src.services import mesh_parts_service
 
-        decor = self._host._decor_for_card(material)
+        decor = self._host.decor.for_card(material)
         if not decor or material not in decor.materials:
             return {'error': 'Гирлянда не показана'}
         model = mesh_parts_service.load(decor.obj_path, self.preview.part_cuts,
@@ -185,7 +185,7 @@ class PartsEditor:
     def _parts_obj(self, obj_mat: str) -> str:
         """OBJ, в котором лежит материал: у гирлянды — свой."""
         from src.domain.preview.texture_state import is_decor
-        decor = self._host._decor_for_card(obj_mat) if is_decor(obj_mat) else None
+        decor = self._host.decor.for_card(obj_mat) if is_decor(obj_mat) else None
         return decor.obj_path if decor else self._host._obj_path
 
     def _slot(self, card: str, style: Optional[int] = None,
@@ -901,7 +901,7 @@ class PartsEditor:
         оригиналом: по нему сборка переносит правку на строки скина."""
         from src.services.edited_vmt_service import EditedVMTService as Vmt
 
-        target = self._host._vmt_target(base)
+        target = self._host.materials.vmt_target(base)
         if isinstance(target, dict):
             return
         key = target[1]
@@ -925,7 +925,7 @@ class PartsEditor:
         Dead Ringer показывает одну модель, а в мод кладёт материалы другой.
         Своя модель — можно: её SMD сборка кладёт на место игрового тем же
         порядком треугольников (part_materials.specs_for_custom_model)."""
-        from src.data.weapons import MATERIAL_ONLY_WEAPON_KEYS, PREVIEW_MDL_OVERRIDE
+        from src.data.weapon_quirks import MATERIAL_ONLY_WEAPON_KEYS, PREVIEW_MDL_OVERRIDE
         from src.domain.preview.texture_state import is_decor
 
         key = self.preview.weapon_key

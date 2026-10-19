@@ -94,14 +94,13 @@ def _run(worker, *, sequence=SEQUENCE, scene=SCENE, animated=ANIMATED,
     recorder = _Recorder(worker)
     recorder.asked = {}
 
-    def _find(slot, action, replacement=None, inspect_slot=""):
-        recorder.asked.update(slot=slot, action=action, replacement=replacement,
-                              inspect_slot=inspect_slot)
+    def _find(profile, action):
+        recorder.asked.update(profile=profile, action=action)
         return sequence
 
     catalog = SimpleNamespace(
         find=_find,
-        actions_for=lambda _slot, _rep=None, _insp="": dict.fromkeys(catalog_actions))
+        actions_for=lambda _profile: dict.fromkeys(catalog_actions))
     with patch.object(vw, "GameVpkReader", lambda *_a: SimpleNamespace(close=lambda: None)), \
          patch.object(vw.mds, "ensure_decompiled", decompile), \
          patch.object(vw.anim_catalog, "load", lambda _d: catalog), \
@@ -286,16 +285,51 @@ def test_activity_replacement_reaches_the_catalog():
     обычного ножа-бабочки.
     """
     kunai = {"ACT_VM_IDLE": "ACT_ITEM2_VM_IDLE"}
-    info = SimpleNamespace(slot="melee", item_slot="melee", replacement=kunai)
+    info = vw.viewmodel_anims.WeaponAnimInfo(
+        item_class="tf_weapon_knife", item_slot="melee",
+        animation_replacement=tuple(kunai.items()))
     with patch.object(vw.viewmodel_anims, "anim_info", lambda *_a: info):
         rec = _run(_worker("c_shogun_kunai"))
-    assert rec.asked["replacement"] == kunai
+    profile = rec.asked["profile"]
+    assert profile.replacement == kunai
+    assert profile.item_class == "tf_weapon_knife"
 
 
 def test_weapon_without_a_replacement_asks_with_an_empty_table():
     with patch.object(vw.viewmodel_anims, "anim_info", lambda *_a: None):
         rec = _run(_worker())
-    assert rec.asked["replacement"] == {}
+    assert rec.asked["profile"].replacement == {}
+
+
+def test_worn_item_puts_its_held_model_into_the_hand():
+    """Рюкзак знамени: в руку - дудка, редактировать в кадре нечего."""
+    info = vw.viewmodel_anims.WeaponAnimInfo(
+        item_class="tf_weapon_buff_item", anim_slot="melee", item_slot="secondary",
+        held="c_bugle")
+    asked = []
+
+    def decompile(key, *_a, **_k):
+        asked.append(key)
+        return Decompiled(directory=f"decomp/{key}", mdl_rel="x.mdl", cached=True)
+
+    with patch.object(vw.viewmodel_anims, "anim_info", lambda *_a: info):
+        rec = _run(_worker("c_buffpack", tf2_class="soldier"), decompile=decompile)
+    assert asked[0] == "c_bugle"
+    assert rec.data["editable_materials"] == []
+
+
+def test_slot_depends_on_the_class_holding_the_weapon():
+    """Дробовик: у инженера основной, у хэви - вторичный.
+
+    По общему слоту дробовик в руках хэви играл анимации минигана.
+    """
+    info = vw.viewmodel_anims.WeaponAnimInfo(
+        item_class="tf_weapon_shotgun", item_slot="primary",
+        class_slots=(("engineer", "primary"), ("heavy", "secondary")))
+    with patch.object(vw.viewmodel_anims, "anim_info", lambda *_a: info):
+        rec = _run(_worker("c_shotgun", tf2_class="heavy"))
+    assert rec.asked["profile"].slot == "secondary"
+    assert rec.asked["profile"].loadout_slot == "secondary"
 
 
 def test_available_actions_are_reported_for_the_selector():
@@ -312,7 +346,7 @@ def test_slot_comes_from_items_game_not_from_our_own_table():
     """
     with patch.object(vw.viewmodel_anims, "slot_for", return_value="secondary"):
         rec = _run(_worker("c_revolver"))
-    assert rec.asked["slot"] == "secondary"
+    assert rec.asked["profile"].slot == "secondary"
 
 
 

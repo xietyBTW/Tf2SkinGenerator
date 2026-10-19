@@ -9,7 +9,7 @@ from src.shared.logging_config import get_logger
 from src.shared.file_utils import ensure_directory_exists
 from src.shared.validators import sanitize_path
 from src.data.translations import TRANSLATIONS
-from src.data.weapons import WEAPON_TEXTURE_PATHS
+from src.data.weapon_quirks import WEAPON_TEXTURE_PATHS
 
 logger = get_logger(__name__)
 

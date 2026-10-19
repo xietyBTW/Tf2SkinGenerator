@@ -195,3 +195,9 @@ export function currentMaterial() {
   // означает «главный материал», и Python сам его подставит.
   return !mat || mat === SINGLE_TEX ? '' : mat;
 }
+
+/** Все материалы альбома (как currentMaterial: главный - пустой строкой). */
+export function allMaterials() {
+  return [...new Set(frames.map((f) => (!f.dataset.mat || f.dataset.mat === SINGLE_TEX
+    ? '' : f.dataset.mat)))];
+}

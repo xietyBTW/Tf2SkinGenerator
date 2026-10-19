@@ -1,0 +1,268 @@
+/*
+ * Конструктор узора блеска (sheen-builder.js).
+ *
+ * Часть стилей страницы: файлы подключены в index.html в порядке каскада
+ * (style.css первым), порядок менять нельзя.
+ */
+
+/* ── Конструктор узора блеска (sheen-builder.js) ─────────────────────── */
+/* Карточки с рамкой и своим фоном: превью, проход, слои, свойства, время.
+   Капсом - только заголовки карточек, подписи полей - обычным регистром:
+   иначе всё сливалось в одну серую ленту. */
+.sheenb { width: min(1180px, 96vw); }
+.sheenb__body { gap: 14px; }
+.sheenb__top { display: flex; align-items: center; gap: 12px; }
+.sheenb__title { margin: 0; white-space: nowrap; }
+.sheenb__name { flex: 1; min-width: 140px; max-width: 360px; font-size: 15px; }
+.sheenb__hist { font-size: 17px; padding: 0 4px; }
+.sheenb__hist:disabled { opacity: .3; cursor: default; }
+.sheenb__presets-btn { margin-left: auto; }
+
+.sheenb__main {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(330px, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+.sheenb__col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+
+.sheenb__card {
+  border: 1px solid var(--hairline);
+  background: var(--surface);
+  min-width: 0;
+}
+.sheenb__cardhead {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--hairline);
+}
+.sheenb__cardtitle {
+  flex: 1;
+  margin: 0;
+  font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--ink);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sheenb__cardbody { display: flex; flex-direction: column; gap: 10px; padding: 12px; }
+.sheenb__hint { font-size: 11px; color: var(--ink-mute); }
+.sheenb__note { margin: 0; font-size: 11.5px; line-height: 1.45; color: var(--ink-mute); }
+/* Слои, которых в игре не будет видно: тем же знаком, что и предупреждения карт. */
+.sheenb__gamut.is-warn { padding-left: 8px; border-left: 2px solid var(--accent); color: var(--ink-soft); }
+
+/* Строка поля: подпись слева, управление справа. */
+.sheenb__row {
+  display: grid;
+  grid-template-columns: 128px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  min-height: 30px;
+}
+.sheenb__lbl { font-size: 12.5px; color: var(--ink-soft); }
+.sheenb__rowctl { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.sheenb__rowctl .slider { flex: 1; min-width: 60px; }
+.sheenb__num { width: 58px; flex: none; }
+.sheenb__val { min-width: 64px; text-align: right; font-size: 11px; color: var(--ink-soft); }
+.sheenb__dash, .sheenb__unit { color: var(--ink-mute); font-size: 12px; }
+
+/* Превью */
+.sheenb__stage {
+  position: relative;
+  display: flex; align-items: center; justify-content: center;
+  min-height: 150px;
+  padding: 10px 0;
+  background:
+    repeating-conic-gradient(rgba(127, 127, 127, .08) 0 25%, transparent 0 50%) 0 0 / 16px 16px,
+    var(--viewport);
+}
+.sheenb__canvas { display: block; box-shadow: 0 6px 22px rgba(0, 0, 0, .35); }
+/* Рамка картинки слоя поверх плитки (sheen-transform.js): сама рамка мышь
+   не ловит, только её части - иначе картинку нельзя было бы бросить. */
+.sheenb__xform { position: absolute; overflow: visible; pointer-events: none; }
+.sheenb__xbox { fill: transparent; stroke: var(--accent); stroke-width: 1.5;
+  stroke-dasharray: 5 3; pointer-events: all; cursor: move; }
+.sheenb__xarm { stroke: var(--accent); stroke-width: 1.5; }
+.sheenb__xcorner { fill: var(--surface); stroke: var(--accent); stroke-width: 1.5;
+  pointer-events: all; cursor: nwse-resize; }
+.sheenb__xspin { fill: var(--accent); pointer-events: all; cursor: grab; }
+.sheenb__busy { position: absolute; right: 8px; top: 6px; font-size: 11px; color: var(--ink-mute); }
+.sheenb__busy[hidden] { display: none; }
+.sheenb__drop {
+  position: absolute; inset: 0;
+  display: none;
+  align-items: center; justify-content: center;
+  border: 2px dashed var(--accent);
+  background: rgba(0, 0, 0, .5);
+  color: #fff; font-size: 13px;
+}
+.sheenb__stage.is-over .sheenb__drop { display: flex; }
+/* Кнопки - ровно по центру, время - у правого края. */
+.sheenb__transport { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; }
+.sheenb__transportbtns { display: flex; align-items: center; gap: 14px; }
+.sheenb__play {
+  width: 36px; height: 36px; border-radius: 50%;
+  border: 1px solid var(--hairline-strong);
+  background: var(--bg); color: var(--ink);
+  font-size: 12px; cursor: pointer;
+}
+.sheenb__play:hover { border-color: var(--accent); color: var(--accent); }
+.sheenb__step { font-size: 11px; }
+.sheenb__clock { justify-self: end; font-size: 11px; color: var(--ink-soft); }
+
+/* Слои */
+.sheenb__card .sheenb__cardbody:has(> .sheenb__list) { padding: 0; gap: 0; }
+.sheenb__list { display: flex; flex-direction: column; }
+.sheenb__list > .sheenb__note { padding: 12px; }
+.sheenb__layer {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px 8px 9px;
+  border-left: 3px solid transparent;
+  border-bottom: 1px solid var(--hairline);
+  cursor: pointer;
+}
+.sheenb__layer:last-child { border-bottom: none; }
+.sheenb__layer:hover { background: var(--bg); }
+.sheenb__layer.is-active { border-left-color: var(--accent); background: var(--bg); }
+.sheenb__layer.is-off .sheenb__lname { color: var(--ink-mute); text-decoration: line-through; }
+.sheenb__layer.is-muted { opacity: .45; }
+.sheenb__layer.is-target { box-shadow: inset 0 2px 0 var(--accent); }
+.sheenb__lname { flex: 1; font-size: 13px; display: flex; align-items: center; gap: 8px; }
+.sheenb__badge {
+  font-size: 10px; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--accent); border: 1px solid var(--accent); padding: 0 4px;
+}
+.sheenb__glyph { display: inline-flex; width: 18px; height: 18px; flex: none; color: var(--ink-soft); }
+.sheenb__glyph svg { width: 100%; height: 100%; }
+.sheenb__swatch {
+  display: inline-block; width: 20px; height: 20px; flex: none;
+  border: 1px solid var(--hairline-strong); border-radius: 3px;
+}
+.sheenb__more { position: relative; }
+.sheenb__morebtn { font-size: 16px; line-height: 1; padding: 0 4px; opacity: .35; }
+.sheenb__layer:hover .sheenb__morebtn, .sheenb__layer.is-active .sheenb__morebtn { opacity: 1; }
+.sheenb__menu {
+  position: absolute; right: 0; top: calc(100% + 4px); z-index: 5;
+  display: flex; flex-direction: column;
+  min-width: 200px;
+  border: 1px solid var(--hairline-strong);
+  background: var(--overlay);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .35);
+}
+.sheenb__menu[hidden] { display: none; }
+.sheenb__menuitem {
+  padding: 8px 12px; text-align: left;
+  background: none; border: none; color: var(--ink);
+  font-size: 12.5px; cursor: pointer;
+}
+.sheenb__menuitem:hover { background: var(--bg); color: var(--accent); }
+.sheenb__addmenu {
+  display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px;
+  padding: 10px; border-bottom: 1px solid var(--hairline); background: var(--bg);
+}
+.sheenb__addmenu[hidden] { display: none; }
+.sheenb__addtype {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 8px 2px;
+  border: 1px solid var(--hairline); background: var(--surface); color: var(--ink);
+  font-size: 11.5px; cursor: pointer;
+}
+.sheenb__addtype:hover { border-color: var(--accent); color: var(--accent); }
+.sheenb__presets {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 10px; border-bottom: 1px solid var(--hairline); background: var(--bg);
+}
+.sheenb__presets[hidden] { display: none; }
+.sheenb__cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.sheenb__tile {
+  display: flex; flex-direction: column; gap: 4px; padding: 4px;
+  border: 1px solid var(--hairline); background: var(--surface); color: var(--ink);
+  text-align: left; cursor: pointer;
+}
+.sheenb__tile:hover { border-color: var(--accent); }
+.sheenb__tileimg { width: 100%; height: 44px; object-fit: fill; background: #2c2f33; }
+.sheenb__tilename { font-size: 12px; }
+
+/* Свойства слоя: секции, что сворачиваются */
+.sheenb__card--props .sheenb__cardbody { padding: 0; gap: 0; max-height: min(430px, 48vh); overflow-y: auto; }
+.sheenb__card--props .sheenb__cardbody > .sheenb__note { padding: 12px; }
+.sheenb__sec { border-bottom: 1px solid var(--hairline); }
+.sheenb__sec:last-child { border-bottom: none; }
+.sheenb__sechead {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 10px 12px;
+  background: none; border: none; color: var(--ink);
+  font-size: 13px; font-weight: 600; text-align: left; cursor: pointer;
+}
+.sheenb__sechead:hover { background: var(--bg); }
+.sheenb__chev { display: inline-block; width: 10px; color: var(--ink-mute); transition: transform .15s; }
+.sheenb__sec.is-open .sheenb__chev { transform: rotate(90deg); color: var(--accent); }
+.sheenb__sectitle { flex: 1; }
+.sheenb__secswatch { width: 34px; height: 12px; border: 1px solid var(--hairline-strong); border-radius: 2px; }
+.sheenb__secsum { font-size: 11px; font-weight: 400; color: var(--ink-mute); }
+.sheenb__secbody { display: none; flex-direction: column; gap: 8px; padding: 2px 12px 14px 30px; }
+.sheenb__sec.is-open .sheenb__secbody { display: flex; }
+.sheenb__seg { flex-wrap: wrap; }
+.sheenb__thumb { width: 76px; height: 46px; object-fit: contain; background: #000; }
+.sheenb__thumb[hidden] { display: none; }
+.sheenb__colour { display: flex; flex-direction: column; gap: 8px; }
+.sheenb__colour .lwarp__note:empty { display: none; }
+.sheenb__colour .lwarp__grad { margin-left: 140px; }
+.sheenb__gradtoggle { margin-left: auto; }
+
+/* Циферблат направления */
+.sheenb__dial { display: flex; align-items: center; gap: 10px; }
+.sheenb__dialsvg { width: 52px; height: 52px; cursor: grab; touch-action: none; flex: none; }
+.sheenb__dialsvg:active { cursor: grabbing; }
+.sheenb__dialring { fill: var(--bg); stroke: var(--hairline-strong); stroke-width: 1; }
+.sheenb__dialtick { stroke: var(--ink-mute); stroke-width: 1; }
+.sheenb__dialarrow line { stroke: var(--accent); stroke-width: 2.5; stroke-linecap: round; }
+.sheenb__dialarrow path { fill: var(--accent); }
+.sheenb__dialhub { fill: var(--ink); }
+
+/* Время прохода */
+.sheenb__card:has(.sheenb__ruler) { --tl-name: 140px; }
+.sheenb__card:has(.sheenb__ruler) .sheenb__cardbody { gap: 5px; }
+.sheenb__ruler {
+  display: grid; grid-template-columns: var(--tl-name) minmax(0, 1fr);
+  height: 18px; cursor: ew-resize;
+}
+.sheenb__rulertrack { position: relative; border-bottom: 1px solid var(--hairline-strong); }
+.sheenb__tick {
+  position: absolute; bottom: 0; height: 5px;
+  border-left: 1px solid var(--hairline-strong);
+  font-size: 10px; color: var(--ink-mute);
+}
+.sheenb__tick.is-major { height: 9px; padding-left: 3px; line-height: 0; }
+.sheenb__lanes { position: relative; display: flex; flex-direction: column; gap: 5px; }
+.sheenb__tlrow {
+  display: grid; grid-template-columns: var(--tl-name) minmax(0, 1fr);
+  align-items: center; font-size: 12.5px; color: var(--ink-soft);
+}
+.sheenb__tlrow.is-active { color: var(--ink); }
+.sheenb__tlname { display: flex; align-items: center; gap: 7px; cursor: pointer; overflow: hidden; white-space: nowrap; }
+.sheenb__tlname .sheenb__glyph { width: 15px; height: 15px; }
+.sheenb__track { position: relative; height: 22px; background: var(--bg); border-radius: 2px; }
+.sheenb__span {
+  position: absolute; top: 3px; bottom: 3px;
+  border: 1px solid rgba(0, 0, 0, .35); border-radius: 2px;
+  opacity: .55; cursor: grab; touch-action: none;
+}
+.sheenb__tlrow.is-active .sheenb__span { opacity: 1; box-shadow: 0 0 0 1px var(--accent); }
+.sheenb__span.is-off { opacity: .2; }
+.sheenb__handle { position: absolute; top: -3px; bottom: -3px; width: 9px; cursor: ew-resize; }
+.sheenb__handle--l { left: -5px; }
+.sheenb__handle--r { right: -5px; }
+.sheenb__playhead {
+  position: absolute; top: 0; bottom: 0; width: 2px;
+  background: var(--accent); pointer-events: none;
+}
+.sheenb__playhead[hidden] { display: none; }
+.sheenb__acts { padding-top: 2px; }
+.sheenb__del { margin-right: auto; color: var(--ink-mute); }
+.sheenb__del[hidden], .sheenb .ask__acts [hidden] { display: none; }
+.fxpick__own-patterns { display: contents; }
+.fxpick__builder { border-style: dashed; }
+/* Узкое окно: колонки друг под другом, а не друг на друге. */
+@media (max-width: 900px) {
+  .sheenb__main { grid-template-columns: minmax(0, 1fr); }
+  .sheenb__colour .lwarp__grad { margin-left: 0; }
+}

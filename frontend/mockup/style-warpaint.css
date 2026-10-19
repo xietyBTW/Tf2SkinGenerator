@@ -1,0 +1,418 @@
+/*
+ * Диалог, War Paint и раскладка узоров по деталям.
+ *
+ * Часть стилей страницы: файлы подключены в index.html в порядке каскада
+ * (style.css первым), порядок менять нельзя.
+ */
+
+/* ── Диалог ────────────────────────────────────────────────────────────
+   Одно окно на выбор из списка, ввод имени и подтверждение. */
+.ask {
+  width: min(440px, 92vw);
+  padding: 0;
+  border: 1px solid var(--hairline-strong);
+  background: var(--overlay);
+  color: var(--ink);
+}
+.ask::backdrop { background: rgba(0, 0, 0, .45); }
+.ask__body { display: flex; flex-direction: column; gap: 14px; padding: var(--rhythm); }
+.ask__title { margin: 0; }
+.ask__text {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-soft);
+  white-space: pre-wrap;
+}
+.ask__list {
+  display: flex;
+  flex-direction: column;
+  max-height: 46vh;
+  overflow: auto;
+  border-top: 1px solid var(--hairline);
+}
+.ask__item {
+  padding: 8px 2px;
+  border: 0;
+  border-bottom: 1px solid var(--hairline);
+  background: none;
+  color: var(--ink-soft);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: color var(--dur), background var(--dur);
+}
+.ask__group { margin: 10px 0 2px; padding-left: 2px; }
+/* Модель для точек: окно шире обычного вопроса — в нём сетка обложек */
+.ask.cpmodel { width: min(820px, 94vw); }
+.cpmodel__tabs, .cpmodel__row { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.cpmodel__grid { max-height: 56vh; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 14px 12px; }
+.ask__group:first-child { margin-top: 4px; }
+.ask__item:hover { color: var(--ink); background: var(--bg); }
+.ask__hint { display: block; margin-top: 3px; font-size: 11px; line-height: 1.45; color: var(--ink-mute); }
+.ask__item.is-active { color: var(--ink); border-bottom-color: var(--accent); }
+.ask__acts { display: flex; align-items: center; justify-content: flex-end; gap: 18px; }
+/* В узком окне кнопки переносятся, а не уезжают за край: у редактора VMT их
+   пять, и крайняя левая пряталась за границей окна. */
+.ask__acts { flex-wrap: wrap; row-gap: 10px; }
+
+/* Выбор классов: плитки 3×3 с эмблемой класса из игры. Не отмечен — эмблема
+   серая и приглушена, отмечен — цветная, с акцентной рамкой. */
+.ask.classpick { width: min(480px, 94vw); }
+.classpick__grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.classpick__tile {
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  padding: 14px 6px 12px;
+  border: 1px solid var(--hairline);
+  background: none;
+  color: var(--ink-mute);
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color var(--dur), color var(--dur), background var(--dur);
+}
+.classpick__tile img {
+  width: 40px; height: 40px;
+  filter: grayscale(1); opacity: .45;
+  transition: filter var(--dur), opacity var(--dur);
+}
+.classpick__tile:hover { border-color: var(--hairline-strong); color: var(--ink-soft); }
+.classpick__tile:hover img { opacity: .7; }
+.classpick__tile.is-active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  color: var(--ink);
+}
+.classpick__tile.is-active img { filter: none; opacity: 1; }
+.classpick__tile:focus-visible { outline: 1px solid var(--ink); outline-offset: 2px; }
+.classpick__bar { display: flex; align-items: center; gap: 16px; }
+.classpick__count { margin-left: auto; font-size: 11px; color: var(--ink-mute); font-variant-numeric: tabular-nums; }
+
+/* War Paint: панель на месте альбома. Модель справа остаётся на виду — на ней
+   идёт живой предпросмотр, поэтому это не модальное окно. */
+/* Панель встаёт на место содержимого альбома в общем потоке, а не поверх:
+   в узкой раскладке половины стоят друг под другом, и наложенная панель
+   наезжала бы на модель. */
+.half--flat.is-warpaint > :not(.wpanel) { display: none !important; }
+.half--flat.is-warpaint { overflow: hidden; }
+.wpanel {
+  flex: 1; min-height: 0;
+  display: flex; flex-direction: column; gap: 14px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+.wpanel[hidden] { display: none; }
+.wpanel__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.wpanel__head .label { margin: 0; }
+.wpanel__sub { margin: 4px 0 0; font-size: 12px; color: var(--ink-mute); }
+.wpanel__generic {
+  display: flex; align-items: center; gap: 14px;
+  padding: 10px 12px;
+  border-left: 2px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  font-size: 12px; line-height: 1.5; color: var(--ink-soft);
+}
+.wpanel__generic[hidden] { display: none; }
+.wpanel__generic p { margin: 0; flex: 1; }
+.wpanel__list {
+  flex: 1 0 160px; max-height: 60vh; overflow: auto;
+  display: flex; flex-direction: column;
+  border-top: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--hairline);
+}
+.wpanel__row {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 8px 10px;
+  border: 0; border-left: 2px solid transparent;
+  border-bottom: 1px solid var(--hairline);
+  background: none; color: var(--ink-soft);
+  font-size: 12.5px; text-align: left; cursor: pointer;
+  transition: color var(--dur), background var(--dur), border-color var(--dur);
+}
+.wpanel__row:hover { color: var(--ink); background: var(--surface); }
+.wpanel__row[aria-selected="true"] {
+  color: var(--ink); border-left-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.wpanel__tag { flex: none; font-family: var(--mono); font-size: 9.5px; letter-spacing: .06em; color: var(--ink-mute); }
+.wpanel__name { flex: none; max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Английское название — по нему скин знают в сообществе и ищут. */
+.wpanel__en {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 11.5px; color: var(--ink-mute);
+}
+/* Раздел «Украшенное оружие» — после War Paint. */
+.wpanel__section {
+  margin: 0; padding: 16px 10px 7px;
+  border-bottom: 1px solid var(--hairline);
+  font-size: 10px; font-weight: 500; letter-spacing: .16em; text-transform: uppercase;
+  color: var(--ink-mute); cursor: default;
+}
+.wpanel__empty { margin: 18px 10px; font-size: 12px; color: var(--ink-mute); }
+.wpanel__controls { display: flex; flex-direction: column; gap: 10px; }
+.wpanel__field { display: flex; align-items: center; gap: 12px; }
+.wpanel__wearname { font-size: 12px; color: var(--ink); }
+.wpanel__wears { display: grid; grid-template-columns: repeat(5, 1fr); }
+.wpanel__wear {
+  padding: 7px 0;
+  border: 1px solid var(--hairline-strong); margin-left: -1px;
+  background: none; color: var(--ink-soft);
+  font-family: var(--mono); font-size: 11px; letter-spacing: .08em; cursor: pointer;
+  transition: background var(--dur), color var(--dur);
+}
+.wpanel__wear:first-child { margin-left: 0; }
+.wpanel__wear:hover { color: var(--ink); }
+.wpanel__wear.is-active { position: relative; background: var(--ink); border-color: var(--ink); color: var(--surface); }
+.wpanel__seed { width: 190px; font-variant-numeric: tabular-nums; }
+.wpanel__status { margin: 0; min-height: 1.4em; font-size: 11.5px; color: var(--ink-mute); }
+/* Материалы: плитки-переключатели с миниатюрой, как плитки узоров раскладки.
+   Отмеченная — в цвете (и с предпросмотром War Paint), снятая — приглушена. */
+.wpanel__mats { display: flex; flex-direction: column; gap: 8px; }
+.wpanel__mats[hidden], .wpanel__matnote[hidden] { display: none; }
+.wpanel__matcount { font: 10.5px/1 var(--mono); color: var(--ink-mute); font-variant-numeric: tabular-nums; }
+.wpanel__matlist {
+  display: grid; gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+}
+.wmat {
+  position: relative;
+  display: flex; flex-direction: column; gap: 5px;
+  padding: 0; border: 0; background: none; min-width: 0;
+  color: var(--ink-mute); text-align: left; cursor: pointer;
+  transition: color var(--dur);
+}
+.wmat__swatch {
+  position: relative; display: block;
+  aspect-ratio: 1; width: 100%;
+  background: var(--viewport) center / cover no-repeat;
+  outline: 1px solid var(--hairline); outline-offset: -1px;
+  filter: grayscale(.7) opacity(.5);
+  transition: transform var(--dur-panel) cubic-bezier(.2, .7, .2, 1),
+              outline-color var(--dur), filter var(--dur-panel);
+}
+/* Флажок в углу: тот же квадрат, что у обычных галочек приложения. */
+.wmat__swatch::before {
+  content: ""; position: absolute; left: 5px; top: 5px;
+  width: 13px; height: 13px; box-sizing: border-box;
+  border: 1px solid var(--hairline-strong); background: var(--overlay);
+  transition: background var(--dur), border-color var(--dur);
+}
+.wmat__swatch::after {
+  content: ""; position: absolute; left: 9.5px; top: 5.5px;
+  width: 4px; height: 8px;
+  border-right: 1.5px solid var(--surface); border-bottom: 1.5px solid var(--surface);
+  transform: rotate(42deg) scale(0);
+  transition: transform var(--dur);
+}
+.wmat__name {
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden; overflow-wrap: break-word;
+  font-size: 11.5px; line-height: 1.3; color: inherit;
+}
+.wmat__tag { font: 9.5px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-mute); }
+.wmat:hover { color: var(--ink-soft); }
+.wmat:hover .wmat__swatch { transform: translateY(-2px); }
+.wmat:focus-visible { outline: none; }
+.wmat:focus-visible .wmat__swatch { outline: 1px solid var(--accent); outline-offset: 2px; }
+.wmat[aria-checked="true"] { color: var(--ink); }
+.wmat[aria-checked="true"] .wmat__swatch { filter: none; outline: 2px solid var(--ink); outline-offset: -2px; }
+.wmat[aria-checked="true"] .wmat__swatch::before { background: var(--ink); border-color: var(--ink); }
+.wmat[aria-checked="true"] .wmat__swatch::after { transform: rotate(42deg) scale(1); }
+/* Рецепт под одну пушку: на этот материал его не разложить. */
+.wmat:disabled { cursor: default; color: var(--ink-mute); }
+.wmat:disabled .wmat__swatch { transform: none; filter: grayscale(1) opacity(.3); }
+.wmat:disabled .wmat__swatch::before { display: none; }
+.wpanel__matnote { margin: 0; font-size: 11.5px; line-height: 1.5; color: var(--ink-mute); }
+#warpaint.is-active { color: var(--ink); }
+
+/* ── War Paint: два экрана панели ────────────────────────────────────────
+   Список раскрасок и раскладка по деталям лежат в одной клетке сетки: при
+   переходе уходящий экран ещё виден (allow-discrete держит display), и они
+   разъезжаются в стороны, а не встают друг под друга. */
+.wpanel__panes {
+  flex: 1 0 auto; min-height: 0;
+  display: grid; grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+  overflow-x: clip;
+}
+.wpanel__pane {
+  grid-area: 1 / 1;
+  display: flex; flex-direction: column; gap: 14px; min-width: 0; min-height: 0;
+  --pane-from: translateX(-28px);
+  transition: opacity var(--dur-panel), transform var(--dur-panel) cubic-bezier(.2, .7, .2, 1),
+              display var(--dur-panel) allow-discrete;
+}
+.wpanel__pane--layout { --pane-from: translateX(28px); }
+.wpanel__pane[hidden] { display: none; opacity: 0; transform: var(--pane-from); }
+@starting-style {
+  .wpanel__pane:not([hidden]) { opacity: 0; transform: var(--pane-from); }
+}
+.wpanel__parts[hidden] { display: none; }
+.wpanel__parts { flex-wrap: wrap; row-gap: 4px; }
+.wpanel__tune { color: var(--ink); border-bottom: 1px solid var(--accent); }
+
+/* ── Раскладка по деталям ─────────────────────────────────────────────── */
+.wlay__head { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
+.wlay__kit {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 13px; color: var(--ink);
+}
+.wlay__hint { margin: 0; font-size: 12px; line-height: 1.5; color: var(--ink-soft); }
+.wlay__hint b { font-weight: 500; color: var(--ink); }
+
+/* Плитки узоров: кисть (щелчок) и цель перетаскивания. */
+.wlay__layers {
+  display: grid; gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+}
+.wlay__tile {
+  position: relative;
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 0 0 8px; border: 0; background: none;
+  color: var(--ink-soft); text-align: left; cursor: pointer;
+  transition: color var(--dur);
+}
+.wlay__swatch {
+  position: relative; display: block;
+  aspect-ratio: 1; width: 100%;
+  background: var(--viewport) center / cover no-repeat;
+  outline: 1px solid var(--hairline); outline-offset: -1px;
+  transition: transform var(--dur-panel) cubic-bezier(.2, .7, .2, 1),
+              outline-color var(--dur), filter var(--dur);
+}
+/* Основа «поверх альбедо» — родная текстура оружия, узора у неё нет. */
+.wlay__swatch--bare {
+  background-image: repeating-linear-gradient(135deg, transparent 0 7px,
+                    color-mix(in srgb, var(--ink) 12%, transparent) 7px 8px);
+}
+.wlay__key {
+  position: absolute; left: 4px; top: 4px;
+  min-width: 16px; padding: 1px 4px;
+  background: var(--overlay); color: var(--ink-soft);
+  font: 10px/1.3 var(--mono); text-align: center;
+}
+.wlay__name { font-size: 12px; color: inherit; }
+.wlay__count { font: 10.5px/1 var(--mono); color: var(--ink-mute); font-variant-numeric: tabular-nums; }
+.wlay__tile::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2px;
+  background: var(--accent);
+  transform: scaleX(0); transform-origin: left;
+  transition: transform var(--dur-panel) cubic-bezier(.2, .7, .2, 1);
+}
+.wlay__tile:hover { color: var(--ink); }
+.wlay__tile:hover .wlay__swatch { transform: translateY(-2px); }
+.wlay__tile[aria-checked="true"] { color: var(--ink); }
+.wlay__tile[aria-checked="true"]::after { transform: scaleX(1); }
+.wlay__tile[aria-checked="true"] .wlay__swatch { outline: 2px solid var(--ink); outline-offset: -2px; }
+.wlay__tile[aria-checked="true"] .wlay__key { background: var(--ink); color: var(--surface); }
+.wlay__tile.is-empty .wlay__swatch { filter: grayscale(.6) opacity(.55); }
+/* Над плиткой держат перетаскиваемые детали. */
+.wlay__tile.is-drop .wlay__swatch {
+  transform: scale(1.05);
+  outline: 2px solid var(--accent); outline-offset: -2px;
+}
+.wlay__tile.is-bump .wlay__swatch { animation: wlay-bump 380ms cubic-bezier(.2, .7, .2, 1); }
+@keyframes wlay-bump {
+  30% { transform: scale(1.08); }
+  100% { transform: scale(1); }
+}
+
+.wlay__tools { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.wlay__tools [hidden] { display: none; }
+
+/* Детали: перетаскиваемые строки. */
+.wlay__units {
+  flex: 1 0 140px; max-height: 46vh; overflow: auto;
+  display: flex; flex-direction: column;
+  border-top: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--hairline);
+  user-select: none;
+}
+.wlay__unit {
+  display: grid; align-items: center; gap: 10px;
+  grid-template-columns: 22px minmax(0, 1fr) 56px 40px;
+  padding: 6px 10px 6px 8px;
+  border: 0; border-left: 2px solid transparent; border-bottom: 1px solid var(--hairline);
+  background: none; color: var(--ink-soft);
+  font-size: 12.5px; text-align: left; cursor: grab;
+  transition: color var(--dur), background var(--dur), border-color var(--dur), opacity var(--dur);
+}
+.wlay__unit:hover, .wlay__unit.is-hot { color: var(--ink); background: var(--surface); }
+.wlay__unit.is-hot { border-left-color: var(--hairline-strong); }
+.wlay__unit[aria-selected="true"] {
+  color: var(--ink); border-left-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.wlay__unit.is-dragging { opacity: .45; }
+.wlay__unit.is-flash { animation: wlay-flash 700ms ease-out; }
+@keyframes wlay-flash {
+  0% { background: color-mix(in srgb, var(--accent) 28%, transparent); }
+  100% { background: transparent; }
+}
+.wlay__chip {
+  width: 22px; height: 22px;
+  background: var(--viewport) center / cover no-repeat;
+  outline: 1px solid var(--hairline); outline-offset: -1px;
+}
+.wlay__chip.is-swap { animation: wlay-swap 320ms cubic-bezier(.2, .7, .2, 1); }
+@keyframes wlay-swap {
+  0% { transform: scale(.4) rotate(-12deg); opacity: 0; }
+  100% { transform: none; opacity: 1; }
+}
+.wlay__uname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wlay__uname small { margin-left: 6px; font-size: 11px; color: var(--ink-mute); }
+/* Деталь, узор которой выбрал человек, а не автомат. */
+.wlay__unit.is-manual .wlay__uname::after {
+  content: ""; display: inline-block; width: 5px; height: 5px; margin-left: 6px;
+  border-radius: 50%; background: var(--accent); vertical-align: middle;
+}
+.wlay__bar { height: 3px; background: var(--hairline); }
+.wlay__bar i {
+  display: block; height: 100%; width: var(--a);
+  background: var(--ink-mute);
+  transition: width var(--dur-panel), background var(--dur);
+}
+.wlay__unit[aria-selected="true"] .wlay__bar i,
+.wlay__unit.is-hot .wlay__bar i { background: var(--accent); }
+.wlay__pct { font: 10.5px/1 var(--mono); color: var(--ink-mute); text-align: right; font-variant-numeric: tabular-nums; }
+.wlay__status { margin: 0; min-height: 1.4em; font-size: 11.5px; color: var(--ink-mute); }
+
+/* Картинка под курсором при перетаскивании: сколько деталей несут. */
+.wlay__ghost {
+  position: fixed; left: -999px; top: -999px;
+  padding: 6px 10px;
+  background: var(--ink); color: var(--surface);
+  font-size: 12px; white-space: nowrap;
+}
+
+/* Раздел частиц: командные цвета и стили к эффекту отношения не имеют.
+   Панель сборки здесь НЕ прячем правилом: панелей две (#build и #pbuild),
+   обе с классом .build, и селектор по классу убрал бы заодно крутилки
+   эффекта. Какая из двух на экране — решает applyRightPanel в app.js. */
+[data-section="particles"] .teams,
+[data-section="particles"] .styles,
+/* Карты материала, VMT и «прочее» — про модель оружия, не про эффект. */
+[data-section="particles"] .half--flat .acts { display: none; }
+
+/* Совсем без обложек — на случай, если и метка лишняя. */
+.catalog.no-icons .pick__box { display: none; }
+[data-panels="pinned"] .catalog.no-icons .pick { grid-template-columns: minmax(0, 1fr); }
+[data-panels="pinned"] .catalog.no-icons .pick__name,
+[data-panels="pinned"] .catalog.no-icons .pick .mono { grid-column: 1; }
+
+/* Плавающий режим: на весь экран поверх работы. */
+[data-panels="float"] .catalog {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  gap: var(--gap);
+  padding: var(--rhythm) var(--rhythm) 0;
+  background: var(--bg);
+}
+[data-panels="float"] .catalog[hidden] { display: none; }
+[data-panels="float"] .catalog__search { font-size: 22px; font-weight: 300; padding: 8px 0; }
+[data-panels="float"] .catalog__filters { gap: 20px; }
+[data-panels="float"] .catalog__grid {
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 26px 22px;
+  padding-bottom: var(--rhythm);
+}
+

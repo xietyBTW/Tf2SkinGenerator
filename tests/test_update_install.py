@@ -242,10 +242,10 @@ class ProgressTests(unittest.TestCase):
             progress(1000, 1000)
             return Path('setup.exe')
 
-        with patch.object(self.api, 'update_status', return_value=self._info()), \
+        with patch.object(self.api.app_update, 'update_status', return_value=self._info()), \
              patch('src.services.update_checker.download_update', slow_download), \
              patch('src.services.update_checker.install_update'), \
-             patch.object(self.api, '_quit_soon'):
+             patch.object(self.api.app_update, '_quit_soon'):
             started = time.perf_counter()
             answer = self.api.install_update()
             elapsed = time.perf_counter() - started
@@ -275,10 +275,10 @@ class ProgressTests(unittest.TestCase):
             calls.append(url)
             return Path('setup.exe')
 
-        with patch.object(self.api, 'update_status', return_value=self._info()), \
+        with patch.object(self.api.app_update, 'update_status', return_value=self._info()), \
              patch('src.services.update_checker.download_update', counting), \
              patch('src.services.update_checker.install_update'), \
-             patch.object(self.api, '_quit_soon'):
+             patch.object(self.api.app_update, '_quit_soon'):
             self.api.install_update()
             import time
             for _ in range(100):
@@ -295,9 +295,9 @@ class ProgressTests(unittest.TestCase):
         def boom(url, **kw):
             raise RuntimeError('контрольная сумма не совпала')
 
-        with patch.object(self.api, 'update_status', return_value=self._info()), \
+        with patch.object(self.api.app_update, 'update_status', return_value=self._info()), \
              patch('src.services.update_checker.download_update', boom), \
-             patch.object(self.api, '_quit_soon'):
+             patch.object(self.api.app_update, '_quit_soon'):
             self.api.install_update()
             for _ in range(100):
                 if self.api.update_progress().get('state') == 'error':
@@ -308,7 +308,7 @@ class ProgressTests(unittest.TestCase):
         self.assertIn('контрольная сумма', state['error'])
 
     def test_nothing_to_install_is_refused_before_any_thread(self):
-        with patch.object(self.api, 'update_status',
+        with patch.object(self.api.app_update, 'update_status',
                           return_value=self._info(can_install=False)):
             answer = self.api.install_update()
         self.assertIn('error', answer)

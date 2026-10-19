@@ -6,6 +6,7 @@ import unittest
 
 from src.services import part_materials as pm
 from src.services import vmt_parse
+from types import SimpleNamespace
 
 V = "0 0 0 0 0 0 1 {u} 0 1 0 1"
 
@@ -287,8 +288,7 @@ class EditorTests(unittest.TestCase):
             def _card_key(host, material=''):
                 return AppSession._card_key(host, material)
 
-            def _decor_for_card(host, card):
-                return None
+            decor = SimpleNamespace(for_card=lambda card: None)
 
             def _shape_changed(host):
                 return bool(host._bodygroups)
@@ -296,8 +296,7 @@ class EditorTests(unittest.TestCase):
             def _put(host, *args, **kwargs):
                 pass
 
-            def _vmt_target(host, material=''):
-                return {'error': 'нет'}
+            materials = SimpleNamespace(vmt_target=lambda material='': {'error': 'нет'})
 
             def _work_dir(host):
                 return d

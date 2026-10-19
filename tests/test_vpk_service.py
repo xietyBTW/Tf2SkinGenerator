@@ -12,6 +12,7 @@ from src.data.translations import TRANSLATIONS
 from src.services.build_context import BuildContext
 from src.services.build_service import BuildService
 from src.services.vpk_service import VPKService
+from src.services.material_plan import plan_materials
 from src.services.vpk_texture_builder import VpkTextureBuilder
 from src.services.texture_service import TextureService
 from src.services.packaging_service import PackagingService
@@ -21,7 +22,7 @@ from src.shared.exceptions import VPKCreationError, RequiredFileMissingError as 
 
 
 class PlanMaterialsBypassTests(unittest.TestCase):
-    """_plan_materials должен прокинуть выбранную папку обхода в patch_qc_file."""
+    """plan_materials должен прокинуть выбранную папку обхода в patch_qc_file."""
 
     def _minimal_qc(self, tmp: str) -> str:
         qc = Path(tmp) / "m.qc"
@@ -44,7 +45,7 @@ class PlanMaterialsBypassTests(unittest.TestCase):
             ctx.create_directories()
             with patch("src.services.model_build_service.ModelBuildService.patch_qc_file",
                        side_effect=fake_patch):
-                VPKService._plan_materials(
+                plan_materials(
                     qc, "scout_c_x", "c_x", ctx, "c_x", None, None,
                     {}, None, False, "none", None, False, None, None,
                     bypass_prefix=bypass_prefix,
@@ -57,6 +58,31 @@ class PlanMaterialsBypassTests(unittest.TestCase):
     def test_vgui_prefix_forwarded(self):
         self.assertEqual(
             self._run("vgui\\replay\\thumbnails"), "vgui\\replay\\thumbnails")
+
+
+class PlanMaterialsOwnOnlyTests(unittest.TestCase):
+    """Часы-вьюмодель (Часы ярого поклонника): руки шпиона стоят в строке
+    первыми, но это общая текстура всего его оружия - главной должна стать
+    текстура часов, а руки не попадают в мод ни запросом, ни оригиналом."""
+
+    def test_watch_viewmodel_builds_only_the_watch(self):
+        rows = ('\t{ "spy_hands_red" "ttg_watch" "spy_hands_blue" }\n'
+                '\t{ "spy_hands_blue" "ttg_watch" "spy_hands_blue" }\n')
+        with tempfile.TemporaryDirectory() as tmp:
+            qc = Path(tmp) / "v_ttg_watch_spy.qc"
+            qc.write_text(
+                '$modelname "weapons/v_models/v_ttg_watch_spy.mdl"\n'
+                '$cdmaterials "models\\weapons\\c_items"\n'
+                '$texturegroup "skinfamilies"\n{\n' + rows + '}\n', encoding="utf-8")
+            ctx = BuildContext("id", "spy_v_ttg_watch_spy", "spy_hands_red", Path(tmp) / "ctx")
+            ctx.create_directories()
+            plan = plan_materials(
+                str(qc), "spy_v_ttg_watch_spy", "v_ttg_watch_spy", ctx, "spy_hands_red",
+                None, None, {}, None, False, "none", None, False, None, None)
+        self.assertEqual(plan.texture_filename, "ttg_watch")
+        self.assertEqual(plan.extra_materials, [])
+        self.assertEqual(plan.blu_row, [])
+        self.assertFalse([m for m in plan.blacklisted_extra if "hands" in m])
 
 
 class PlanMaterialsAskSplitTests(unittest.TestCase):
@@ -83,7 +109,7 @@ class PlanMaterialsAskSplitTests(unittest.TestCase):
                        "mask_spy": 5, "mask_scout": 5}
             with patch("src.data.material_filter._user_patterns", return_value=["=spy_red"]),                  patch("src.services.qc_skin_parser.mesh_material_weights",
                        return_value=weights):
-                plan = VPKService._plan_materials(
+                plan = plan_materials(
                     str(qc), "spy_body", "spy", ctx, "spy_head_red", None, None,
                     {}, None, False, "none", None, False, None, None,
                     misc_materials=["spy_red_invun", "SPY_RED_ZOMBIE", "spy_red",
@@ -927,7 +953,7 @@ class VPKServiceTests(unittest.TestCase):
                 patch("src.services.vpk_model_pipeline.VpkModelPipeline._resolve_replace_model_smd", return_value=str(user_smd)),
                 patch("src.services.vpk_model_pipeline.VpkModelPipeline._apply_model_replacement"),
                 patch("src.services.vpk_model_pipeline.VpkModelPipeline._find_decompiled_reference_smd", return_value=str(user_smd)),
-                patch("src.services.vpk_texture_builder.VpkTextureBuilder._remap_skin_data_to_smd", side_effect=lambda sbd, mats: sbd),
+                patch("src.services.texture_build.styles.remap_skin_data_to_smd", side_effect=lambda sbd, mats: sbd),
                 patch(P + "SMDService.ordered_unique_materials", return_value=["c_scattergun"]),
                 patch(P + "TF2Paths.resolve_textures_vpk", return_value="tf2_textures_dir.vpk"),
                 patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService.extract_vmt_file", return_value=str(vmt_source)),
@@ -1193,10 +1219,20 @@ class BuildVpkCharacterizationTests(unittest.TestCase):
     место, что ломалось ранее (фиолетовые текстуры).
     """
 
-    def _run_build(self, base: Path, panel_extra_textures: dict, *,
+    def _run_build(self, base: Path, panel_extra_textures: dict = None, *,
                    texturegroup_extras=(), extra_texture_callback=None,
                    material_maps=None, blu_mode="none", blu_image_path=None,
-                   blu_is_team=False, red_not_found=False):
+                   blu_is_team=False, red_not_found=False,
+                   mode="scout_c_scattergun", weapon_key="c_scattergun",
+                   cdmat="models/weapons/c_scattergun", patched_cdmat=None,
+                   tg=None, extra_patches=None, decompiled=None, **build_kwargs):
+        """Гоняет build_vpk с замоканными инструментами.
+
+        → (ok, msg, имена VTF). Полное дерево vpkroot в момент упаковки
+        ({путь: байты}) - в self.tree, моки из extra_patches - в self.mocks,
+        главный прогресс - в self.progress. decompiled - {имя: текст} файлов
+        декомпиляции (QC/SMD); их текст в момент упаковки - в self.decompiled.
+        """
         from contextlib import ExitStack
         from src.shared.constants import EXTRA_TEX_USE_GAME_ORIGINAL
         from src.services.build_context import BuildContext as _BC
@@ -1206,11 +1242,13 @@ class BuildVpkCharacterizationTests(unittest.TestCase):
         vmt_source = base / "src.vmt"
         vmt_source.write_text('"VertexLitGeneric"\n{\n}\n', encoding="utf-8")
 
-        ctx = _BC("id", "scout_c_scattergun", "c_scattergun", base / "ctx")
+        ctx = _BC("id", mode, weapon_key, base / "ctx")
         ctx.create_directories()
         ctx.decompile_dir.mkdir(parents=True, exist_ok=True)
-        qc = ctx.decompile_dir / "c_scattergun.qc"
+        qc = ctx.decompile_dir / f"{weapon_key}.qc"
         qc.write_text("// qc", encoding="utf-8")
+        for name, text in (decompiled or {}).items():
+            (ctx.decompile_dir / name).write_text(text, encoding="utf-8")
 
         def fake_create_vtf(png_path, output_dir, *a, **k):
             out = Path(output_dir) / f"{Path(png_path).stem}.vtf"
@@ -1223,9 +1261,22 @@ class BuildVpkCharacterizationTests(unittest.TestCase):
 
         def fake_create_vpk(ctx_arg, *a, **k):
             # Снимок дерева в МОМЕНТ упаковки (после — build делает ctx.cleanup()).
-            captured['vtf'] = sorted(p.name for p in Path(ctx_arg.vpkroot_dir).rglob("*.vtf"))
+            root = Path(ctx_arg.vpkroot_dir)
+            captured['vtf'] = sorted(p.name for p in root.rglob("*.vtf"))
+            captured['tree'] = {p.relative_to(root).as_posix(): p.read_bytes()
+                                for p in sorted(root.rglob("*")) if p.is_file()}
+            captured['decompiled'] = {n: (ctx.decompile_dir / n).read_text(encoding="utf-8")
+                                      for n in (decompiled or {})}
             return str(base / "out.vpk")
 
+        if tg is None:
+            tg = {"red_row": [weapon_key], "blu_row": [],
+                  "blu_is_team": blu_is_team,
+                  "main_texture": weapon_key,
+                  "extra_materials": list(texturegroup_extras),
+                  "all_rows": [[weapon_key]]}
+        self.progress = []
+        self.mocks = {}
         P = "src.services.vpk_service."
         with ExitStack() as es:
             m = es.enter_context
@@ -1234,23 +1285,32 @@ class BuildVpkCharacterizationTests(unittest.TestCase):
             m(patch(P + "TF2Paths.resolve", return_value=("studiomdl.exe", "tf2_misc_dir.vpk", str(base))))
             m(patch(P + "TF2Paths.resolve_textures_vpk", return_value="tf2_textures_dir.vpk"))
             m(patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService.check_mdl_exists", return_value=True))
-            m(patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService.extract_file_set", return_value=[str(base / "c_scattergun.mdl")]))
+            m(patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService.extract_file_set", return_value=[str(base / f"{weapon_key}.mdl")]))
             # Герметичность: не читаем и не пишем глобальный кэш декомпиляции,
-            # иначе соседние тесты поймают кэш-хит на c_scattergun. Патчим имена
-            # в namespace vpk_service (там импорт на уровне модуля).
+            # иначе соседние тесты поймают кэш-хит. Патчим имена там, где их
+            # зовут: чтение - в vpk_model_pipeline, запись - в vpk_service.
             m(patch("src.services.vpk_model_pipeline.get_cached_decompile", return_value=None))
             m(patch("src.services.vpk_model_pipeline.save_to_cache"))
+            m(patch(P + "save_to_cache"))
+            m(patch(P + "VPKService._is_attachment_only", return_value=False))
+            m(patch(P + "DirectoryPaths.TEMP_VMT_EXTRACT_DIR", base / "temp_vmt"))
+            m(patch(P + "data_dir", return_value=base / "data"))
+            # Правленые VMT человека (tools/edited_vmt) в снимок не попадают.
+            m(patch("src.services.edited_vmt_service.EditedVMTService.get_edited_vmt", return_value=None))
             m(patch("src.services.tf2_vpk_extract_service.TF2VPKExtractService.extract_vmt_file", return_value=str(vmt_source)))
             m(patch(P + "ModelBuildService.decompile", return_value=str(qc)))
-            m(patch(P + "ModelBuildService.extract_cdmaterials_path_from_qc", return_value="models/weapons/c_scattergun"))
-            m(patch(P + "ModelBuildService.extract_all_cdmaterials_paths_from_qc", return_value=["models/weapons/c_scattergun"]))
-            m(patch(P + "ModelBuildService.extract_texturegroup_filename", return_value="c_scattergun"))
-            m(patch(P + "ModelBuildService.extract_texturegroup_structure",
-                    return_value={"red_row": ["c_scattergun"], "blu_row": [],
-                                  "blu_is_team": blu_is_team,
-                                  "main_texture": "c_scattergun",
-                                  "extra_materials": list(texturegroup_extras),
-                                  "all_rows": [["c_scattergun"]]}))
+            # До patch_qc_file - игровой путь, после - путь обхода sv_pure.
+            cdmat_calls = []
+
+            def fake_cdmat(_qc):
+                cdmat_calls.append(_qc)
+                if len(cdmat_calls) == 1 or patched_cdmat is None:
+                    return cdmat
+                return patched_cdmat
+            m(patch(P + "ModelBuildService.extract_cdmaterials_path_from_qc", side_effect=fake_cdmat))
+            m(patch(P + "ModelBuildService.extract_all_cdmaterials_paths_from_qc", return_value=[cdmat]))
+            m(patch(P + "ModelBuildService.extract_texturegroup_filename", return_value=weapon_key))
+            m(patch(P + "ModelBuildService.extract_texturegroup_structure", return_value=tg))
             m(patch(P + "ModelBuildService.patch_qc_file"))
             m(patch(P + "ModelBuildService.compile"))
             m(patch(P + "ModelBuildService.remove_lod_files"))
@@ -1258,28 +1318,34 @@ class BuildVpkCharacterizationTests(unittest.TestCase):
             m(patch("src.services.vmt_service.VMTService.create_vmt_template_from_cdmaterials"))
             m(patch(P + "ModelService.copy_compiled_models_to_vpkroot"))
             m(patch(P + "PackagingService.create_vpk_file", side_effect=fake_create_vpk))
-            m(patch(P + "TextureService.create_vtf", side_effect=fake_create_vtf))
-            m(patch(P + "TextureService.process_image", side_effect=fake_process_image))
+            m(patch("src.services.texture_service.TextureService.create_vtf", side_effect=fake_create_vtf))
+            m(patch("src.services.texture_service.TextureService.process_image", side_effect=fake_process_image))
             if red_not_found:
                 # Имитируем «игровая RED-текстура не найдена» → должно дать warning.
-                m(patch("src.services.vpk_texture_builder.VpkTextureBuilder._get_original_vtf_bytes", return_value=None))
+                m(patch("src.services.texture_build.game_source.get_original_vtf_bytes", return_value=None))
+            for target, kw in (extra_patches or {}).items():
+                self.mocks[target] = m(patch(target, **kw))
             ok, msg = VPKService.build_vpk(
                 image_path=(EXTRA_TEX_USE_GAME_ORIGINAL if red_not_found else str(img)),
-                mode="scout_c_scattergun",
+                mode=mode,
                 filename="out.vpk",
                 size=(4, 4),
                 format_type="DXT1",
                 flags=[],
-                vtf_options={},
+                vtf_options=build_kwargs.pop("vtf_options", {}),
                 tf2_root_dir=str(base),
                 export_folder=str(base),
                 language="en",
-                panel_extra_textures=panel_extra_textures,
+                panel_extra_textures=panel_extra_textures or {},
                 extra_texture_callback=extra_texture_callback,
                 material_maps=material_maps,
                 blu_mode=blu_mode,
                 blu_image_path=blu_image_path,
+                progress_callback=lambda v, _m: self.progress.append(v),
+                **build_kwargs,
             )
+        self.tree = captured.get('tree')
+        self.decompiled = captured.get('decompiled')
         return ok, msg, captured.get('vtf', [])
 
     def test_produces_expected_vtf_tree(self):
@@ -1389,6 +1455,421 @@ class BuildVpkCharacterizationTests(unittest.TestCase):
             self.assertTrue(ok, msg)
             self.assertIn("Warnings:", msg)            # en по умолчанию
             self.assertIn("c_scattergun", msg)         # имя проблемного материала
+
+    # ── Снимки по веткам _build_model_mode_vpk (сетка под нарезку на шаги) ──
+
+    VMT = b'"VertexLitGeneric"\r\n{\r\n}\r\n'
+    VTF = b"VTF\x00marker"
+
+    def test_snapshot_weapon_team_extras_maps(self):
+        # Команда + доп. материал из $texturegroup + панельный + карта detail:
+        # полное дерево мода, VMT побайтно.
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            Image.new("RGB", (4, 4), color="green").save(base / "shell2.png")
+            Image.new("RGB", (4, 4), color="blue").save(base / "shell.png")
+            Image.new("RGB", (4, 4), color="white").save(base / "detail.png")
+            (base / "blu.vtf").write_bytes(b"VTF\x00blu")
+            tg = {"red_row": ["c_scattergun", "c_scattergun_shell2"],
+                  "blu_row": ["c_scattergun_blue", "c_scattergun_shell2_blue"],
+                  "blu_is_team": True, "main_texture": "c_scattergun",
+                  "extra_materials": ["c_scattergun_shell2"],
+                  "all_rows": [["c_scattergun", "c_scattergun_shell2"],
+                               ["c_scattergun_blue", "c_scattergun_shell2_blue"]]}
+            ok, msg, _ = self._run_build(
+                base, {"c_scattergun_shell": str(base / "shell.png")}, tg=tg,
+                extra_texture_callback=lambda *a: str(base / "shell2.png"),
+                material_maps={"c_scattergun": {"detail": {"image": str(base / "detail.png")}}},
+                blu_mode="upload", blu_image_path=str(base / "blu.vtf"))
+        self.assertTrue(ok, msg)
+        self.assertEqual(self.progress, [25, 40, 60, 80])
+        d = "materials/models/weapons/c_scattergun/"
+        detail_vmt = (b'"VertexLitGeneric"\r\n{\r\n'
+                      b'\t"$detail" "models/weapons/c_scattergun/c_scattergun_detail"\n'
+                      b'\t"$detailscale" "8"\n\t"$detailblendmode" "0"\n'
+                      b'\t"$detailblendfactor" "1"\n}\r\n')
+        self.assertEqual(self.tree, {
+            d + "c_scattergun.vmt": detail_vmt,
+            d + "c_scattergun.vtf": self.VTF,
+            d + "c_scattergun_blue.vmt": detail_vmt,
+            d + "c_scattergun_blue.vtf": self.VTF,
+            d + "c_scattergun_detail.vtf": self.VTF,
+            d + "c_scattergun_shell.vmt": self.VMT,
+            d + "c_scattergun_shell.vtf": self.VTF,
+            d + "c_scattergun_shell2.vmt": self.VMT,
+            d + "c_scattergun_shell2.vtf": self.VTF,
+            d + "c_scattergun_shell2_blue.vmt": self.VMT,
+            d + "c_scattergun_shell2_blue.vtf": self.VTF,
+        })
+
+    def test_snapshot_material_only_mirror_no_blu(self):
+        # Часы шпиона: без BLU (одна текстура), зеркальный VMT по игровому
+        # пути, модель в мод не кладётся.
+        P = "src.services.vpk_service."
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            (base / "blu.vtf").write_bytes(b"VTF\x00blu")
+            tg = {"red_row": ["c_pocket_watch"], "blu_row": ["c_pocket_watch_blue"],
+                  "blu_is_team": True, "main_texture": "c_pocket_watch",
+                  "extra_materials": [],
+                  "all_rows": [["c_pocket_watch"], ["c_pocket_watch_blue"]]}
+            ok, msg, _ = self._run_build(
+                base, mode="spy_c_pocket_watch", weapon_key="c_pocket_watch",
+                cdmat="models/weapons/c_items",
+                patched_cdmat="console/models/weapons/c_items", tg=tg,
+                blu_mode="upload", blu_image_path=str(base / "blu.vtf"),
+                extra_patches={P + "ModelService.copy_compiled_models_to_vpkroot": {}})
+        self.assertTrue(ok, msg)
+        self.assertEqual(self.mocks[P + "ModelService.copy_compiled_models_to_vpkroot"].call_count, 0)
+        tree = {k: v for k, v in self.tree.items() if k.startswith("materials/")}
+        self.assertEqual(tree, {
+            "materials/console/models/weapons/c_items/c_pocket_watch.vmt": self.VMT,
+            "materials/console/models/weapons/c_items/c_pocket_watch.vtf": self.VTF,
+            "materials/models/weapons/c_items/c_pocket_watch.vmt": self.VMT,
+        })
+        # Экран Звона смерти идёт своим путём - он в моде.
+        self.assertIn("scripts/screens/pda_spy_invis_pocket.res", self.tree)
+
+    def test_snapshot_pocket_watch_hud_inserts(self):
+        # Вставки циферблата по фиксированному пути: одна и та же картинка в
+        # двух слотах конвертируется один раз, VMT рядом с VTF.
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            Image.new("RGB", (4, 4), color="green").save(base / "a.png")
+            Image.new("RGB", (4, 4), color="green").save(base / "b.png")
+            tg = {"red_row": ["c_pocket_watch"], "blu_row": [], "blu_is_team": False,
+                  "main_texture": "c_pocket_watch", "extra_materials": [],
+                  "all_rows": [["c_pocket_watch"]]}
+            ok, msg, _ = self._run_build(
+                base, {"pocket_watch_fg": str(base / "a.png"),
+                       "pocket_watch_bg": str(base / "b.png")},
+                mode="spy_c_pocket_watch", weapon_key="c_pocket_watch",
+                cdmat="models/weapons/c_items",
+                patched_cdmat="console/models/weapons/c_items", tg=tg,
+                extra_patches={"src.services.texture_service.TextureService.create_vtf":
+                               {"side_effect": lambda png, out, *a, **k: (
+                                   Path(out) / f"{Path(png).stem}.vtf").write_bytes(
+                                       b"VTF\x00" + Path(png).stem.encode())}})
+        self.assertTrue(ok, msg)
+        d = "materials/vgui/replay/thumbnails/deadringer/"
+        hud = {k: v for k, v in self.tree.items() if k.startswith(d)}
+
+        def vmt(stem):
+            return ('"UnlitGeneric"\n{\n\t"$basetexture" '
+                    f'"vgui/replay/thumbnails/deadringer/{stem}"\n'
+                    '\t"$translucent" "1"\n\t"$vertexalpha" "1"\n}\n').replace("\n", "\r\n").encode()
+        self.assertEqual(hud, {
+            d + "pocket_watch_fg.vtf": b"VTF\x00pocket_watch_fg",
+            d + "pocket_watch_fg.vmt": vmt("pocket_watch_fg"),
+            d + "pocket_watch_bg.vtf": b"VTF\x00pocket_watch_fg",
+            d + "pocket_watch_bg.vmt": vmt("pocket_watch_bg"),
+        })
+
+    def test_snapshot_hands_mirror(self):
+        P = "src.services.vpk_service."
+        with tempfile.TemporaryDirectory() as tmp:
+            tg = {"red_row": ["scout_hands", "scout_red"],
+                  "blu_row": ["scout_hands", "scout_blue"],
+                  "blu_is_team": True, "main_texture": "scout_hands",
+                  "extra_materials": ["scout_red"],
+                  "all_rows": [["scout_hands", "scout_red"], ["scout_hands", "scout_blue"]]}
+            ok, msg, _ = self._run_build(
+                Path(tmp), mode="scout_hands", weapon_key="c_scout_arms",
+                cdmat="models/player/scout", patched_cdmat="console/models/player/scout",
+                tg=tg, extra_patches={P + "ModelBuildService.extract_texturegroup_filename":
+                                      {"return_value": "scout_hands"}})
+        self.assertTrue(ok, msg)
+        self.assertEqual(self.tree, {
+            "materials/console/models/player/scout/scout_hands.vmt": self.VMT,
+            "materials/console/models/player/scout/scout_hands.vtf": self.VTF,
+            "materials/models/player/scout/scout_hands.vmt": self.VMT,
+        })
+
+    ENGI_QC = (
+        '$modelname "weapons/c_models/c_engineer_arms.mdl"\n'
+        '$body "arms" "c_engineer_arms_reference.smd"\n'
+        '$cdmaterials "models\\\\player\\\\engineer"\n'
+        '$texturegroup "skinfamilies"\n{\n'
+        '\t{ "engineer_handl" "engineer_handr_red" "engineer_red" }\n'
+        '\t{ "engineer_handl" "engineer_handr_blue" "engineer_blue" }\n}\n')
+    ENGI_SMD = ('version 1\nnodes\n0 "root" -1\nend\nskeleton\ntime 0\n'
+                '0 0 0 0 0 0 0\nend\ntriangles\n'
+                + ''.join(f'{m}\n0 0 0 0 0 0 1 0 0\n0 0 0 0 0 0 1 0 0\n0 0 0 0 0 0 1 0 0\n'
+                          for m in ("engineer_handl", "engineer_handr_red", "engineer_red"))
+                + 'end\n')
+
+    def test_snapshot_hands_shoulder_isolation_and_promo(self):
+        # Изоляция плеч (engineer_red → vm_engineer_red и синий вариант) и
+        # промоушен нейтральной левой руки в командную: QC, SMD и дерево мода.
+        P = "src.services.vpk_service."
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            Image.new("RGB", (4, 4), color="green").save(base / "shoulder.png")
+            Image.new("RGB", (4, 4), color="blue").save(base / "handl_blu.png")
+            tg = {"red_row": ["engineer_handl", "engineer_handr_red", "engineer_red"],
+                  "blu_row": ["engineer_handl", "engineer_handr_blue", "engineer_blue"],
+                  "blu_is_team": True, "main_texture": "engineer_handl",
+                  "extra_materials": ["engineer_handr_red", "engineer_red"],
+                  "all_rows": [["engineer_handl", "engineer_handr_red", "engineer_red"],
+                               ["engineer_handl", "engineer_handr_blue", "engineer_blue"]]}
+            ok, msg, _ = self._run_build(
+                base, {"engineer_red": str(base / "shoulder.png")},
+                mode="engineer_hands", weapon_key="c_engineer_arms",
+                cdmat="models/player/engineer", patched_cdmat="console/models/player/engineer",
+                tg=tg, isolate_shoulders=True,
+                panel_blu_textures={"engineer_handl": str(base / "handl_blu.png")},
+                decompiled={"c_engineer_arms.qc": self.ENGI_QC,
+                            "c_engineer_arms_reference.smd": self.ENGI_SMD},
+                extra_patches={P + "ModelBuildService.extract_texturegroup_filename":
+                               {"return_value": "engineer_handl"}})
+        self.assertTrue(ok, msg)
+        c, m = "materials/console/models/player/engineer/", "materials/models/player/engineer/"
+        self.assertEqual(self.tree, {
+            c + "engineer_handl.vmt": self.VMT, c + "engineer_handl.vtf": self.VTF,
+            c + "engineer_handl_blue.vmt": self.VMT, c + "engineer_handl_blue.vtf": self.VTF,
+            c + "engineer_red.vmt": self.VMT, c + "engineer_red.vtf": self.VTF,
+            c + "vm_engineer_red.vmt": self.VMT, c + "vm_engineer_red.vtf": self.VTF,
+            m + "engineer_handl.vmt": self.VMT, m + "engineer_handl_blue.vmt": self.VMT,
+            m + "vm_engineer_red.vmt": self.VMT,
+        })
+        self.assertEqual(self.decompiled["c_engineer_arms.qc"], (
+            '$modelname "weapons/c_models/c_engineer_arms.mdl"\n\n'
+            '$texturegroup "skinfamilies"\n{\n'
+            '\t{ "engineer_handl" "engineer_handr_red" "vm_engineer_red" }\n'
+            '\t{ "engineer_handl_blue" "engineer_handr_blue" "vm_engineer_blue" }\n}\n\n'
+            '$body "arms" "c_engineer_arms_reference.smd"\n'
+            '$cdmaterials "models\\\\player\\\\engineer"\n'))
+        self.assertEqual(self.decompiled["c_engineer_arms_reference.smd"],
+                         self.ENGI_SMD.replace("engineer_red\n", "vm_engineer_red\n"))
+
+    def test_snapshot_custom_model_styles_and_qc_text(self):
+        # Своя модель: имена от материалов SMD, свой $texturegroup стилей,
+        # правленый человеком QC с синхронизированной группой.
+        PL = "src.services.vpk_model_pipeline.VpkModelPipeline."
+        smd = ('version 1\nnodes\n0 "root" -1\nend\nskeleton\ntime 0\n'
+               '0 0 0 0 0 0 0\nend\ntriangles\nMyMat\n'
+               + '0 0 0 0 0 0 1 0 0\n' * 3 + 'end\n')
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            (base / "user.smd").write_text(smd, encoding="utf-8")
+            ok, msg, _ = self._run_build(
+                base, {"MyMat": str(base / "img.png")},
+                replace_model_enabled=True, replace_model_path=str(base / "user.smd"),
+                replace_keep_materials=True,
+                custom_qc_text='$modelname "weapons/c_x.mdl"\n$body "b" "c_scattergun_reference.smd"\n',
+                skin_build_data={"mesh_materials": ["mymat"],
+                                 "tg_overrides": {1: {"mymat": "mymat_bloody"}},
+                                 "variant_files": {}},
+                decompiled={"c_scattergun_reference.smd": smd, "c_scattergun.qc": "// qc"},
+                extra_patches={PL + "_resolve_replace_model_smd": {"return_value": str(base / "user.smd")},
+                               PL + "_apply_model_replacement": {}})
+        self.assertTrue(ok, msg)
+        d = "materials/models/weapons/c_scattergun/"
+        self.assertEqual(self.tree, {d + "MyMat.vmt": self.VMT, d + "MyMat.vtf": self.VTF})
+        self.assertEqual(self.decompiled["c_scattergun_reference.smd"], smd)
+        self.assertEqual(self.decompiled["c_scattergun.qc"], (
+            '$modelname "weapons/c_x.mdl"\n\n'
+            '$texturegroup "skinfamilies"\n{\n\t{ "mymat" }\n\t{ "mymat_bloody" }\n}\n\n'
+            '$body "b" "c_scattergun_reference.smd"\n'
+            '$definebone "root" "" 0.000000 0.000000 0.000000 0.000000 0.000000 0.000000'
+            ' 0 0 0 0 0 0\n'))
+
+    def test_snapshot_blu_columns_and_extra_answers(self):
+        # Все ответы на вопросы доп. материалов и столбцов BLU: своя картинка,
+        # «из игры» (есть и нет в игре), «скопировать главную», пропуск;
+        # общий столбец, вариант без RED-пары, нормаль у синего.
+        from src.shared.constants import EXTRA_TEX_USE_GAME_ORIGINAL as GAME, EXTRA_TEX_USE_MAIN as MAIN
+        orig = "src.services.texture_build.game_source.get_original_vtf_bytes"
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            Image.new("RGB", (4, 4), color="green").save(base / "own.png")
+            own = str(base / "own.png")
+            answers = {"c_scattergun_shell": own, "c_scattergun_scope": GAME, "c_scattergun_strap": MAIN,
+                       "c_scattergun_skip": None, "c_scattergun_blue": GAME, "c_scattergun_shell_blue": own,
+                       "c_scattergun_scope_blue": MAIN, "c_lens": own, "c_scattergun_more": MAIN,
+                       "c_scattergun_more2": GAME}
+            red = ["c_scattergun", "c_scattergun_shell", "c_scattergun_scope", "c_scattergun_strap", "c_scattergun_skip", "c_lens"]
+            blu = ["c_scattergun_blue", "c_scattergun_shell_blue", "c_scattergun_scope_blue", "c_scattergun_strap_blue",
+                   "c_scattergun_skip_blue", "c_lens", "c_scattergun_more", "c_scattergun_more2"]
+            tg = {"red_row": red, "blu_row": blu, "blu_is_team": True, "main_texture": "c_scattergun",
+                  "extra_materials": red[1:5], "all_rows": [red, blu]}
+            ok, msg, _ = self._run_build(
+                base, tg=tg,
+                extra_texture_callback=lambda name, *a: answers.get(name),
+                vtf_options={"normal": True},
+                extra_patches={orig: {"side_effect": lambda name, *a, **k:
+                                      b"VTF\x00game" if name == "c_scattergun_scope" else None},
+                               "src.services.texture_service.TextureService.render_image_to_vtf":
+                               {"side_effect": lambda img, **k: (
+                                   Path(k["out_vtf_path"]).write_bytes(self.VTF), (None, True))[1]}})
+        self.assertTrue(ok, msg)
+        d = "materials/models/weapons/c_scattergun/"
+        game = b"VTF\x00game"
+
+        def vmt(normal=None):
+            bump = (f'\t"$bumpmap" "models/weapons/c_scattergun/{normal}"\n'.encode()
+                    if normal else b"")
+            return b'"VertexLitGeneric"\r\n{\r\n' + bump + b'}\r\n'
+        main = vmt("c_scattergun_normal")
+        expected = {
+            "c_lens": (main, self.VTF), "c_scattergun": (main, self.VTF),
+            "c_scattergun_blue": (vmt("c_scattergun_blue_normal"), self.VTF),
+            "c_scattergun_more": (main, self.VTF), "c_scattergun_more2": (main, self.VTF),
+            "c_scattergun_scope": (vmt(), game),
+            "c_scattergun_scope_blue": (vmt("c_scattergun_scope_blue_normal"), game),
+            "c_scattergun_shell": (main, self.VTF),
+            "c_scattergun_shell_blue": (vmt("c_scattergun_shell_blue_normal"), self.VTF),
+            "c_scattergun_strap": (main, self.VTF),
+        }
+        self.assertEqual(self.tree, {
+            f"{d}{name}.{ext}": data for name, pair in expected.items()
+            for ext, data in zip(("vmt", "vtf"), pair)})
+
+    def test_snapshot_hat_extra_classes_and_styles(self):
+        P = "src.services.vpk_service."
+        cls, sty = (P + "VpkModelPipeline._build_extra_class_hat_models",
+                    P + "VpkModelPipeline._build_extra_style_models")
+        hat = "models/player/items/all_class/hat_scout.mdl"
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            ok, msg, _ = self._run_build(
+                base, mode="hat", weapon_key="hat_scout",
+                cdmat="models/player/items/all_class",
+                patched_cdmat="console/models/player/items/all_class",
+                hat_mdl_path=hat,
+                hat_class_models={"scout": hat,
+                                  "heavy": "models/player/items/all_class/hat_heavy.mdl"},
+                hat_style_builds=[{"style": 1}],
+                extra_patches={cls: {}, sty: {}})
+            qc = str(base / "ctx" / "decompile" / "hat_scout.qc")
+            img = str(base / "img.png")
+        self.assertTrue(ok, msg)
+        self.assertEqual(self.tree, {
+            "materials/console/models/player/items/all_class/hat_scout.vmt": self.VMT,
+            "materials/console/models/player/items/all_class/hat_scout.vtf": self.VTF,
+        })
+        c = self.mocks[cls].call_args
+        self.assertEqual(c.args[1:10], (
+            hat, hat, None, False, "tf2_misc_dir.vpk", "studiomdl.exe",
+            c.args[7], str(base), "en"))
+        self.assertEqual(c.kwargs, {
+            "target_mdl_paths": ["models/player/items/all_class/hat_heavy.mdl"],
+            "bypass_prefix": "console", "part_specs": None,
+            "part_source_qc": qc, "part_names": {}})
+        s = self.mocks[sty].call_args
+        self.assertEqual(s.args[1], [{"style": 1}])
+        self.assertEqual(s.args[8:12], ((4, 4), "DXT1", [], {}))
+        self.assertEqual(s.kwargs, {
+            "bypass_prefix": "console",
+            "written_textures": {"console/models/player/items/all_class/hat_scout": img}})
+
+    def test_snapshot_decor_and_parts_plumbing(self):
+        P = "src.services.vpk_service."
+        dec, apply_, sec = ("src.services.decor_build.build_decor_models",
+                            "src.services.part_materials.apply_to_model",
+                            P + "VpkTextureBuilder._build_secondary_textures")
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            ok, msg, _ = self._run_build(
+                base, decor_builds=[{"model": "c_minigun_xmas"}],
+                part_materials=[{"name": "p1"}],
+                extra_patches={dec: {}, sec: {},
+                               apply_: {"return_value": {"p1": "c_scattergun_p1"}}})
+        self.assertTrue(ok, msg)
+        d = self.mocks[dec].call_args
+        self.assertEqual(d.args[1], [{"model": "c_minigun_xmas"}])
+        self.assertEqual({k: v for k, v in d.kwargs.items() if k != "emit_sub"}, {
+            "misc_vpk": "tf2_misc_dir.vpk", "textures_vpk": "tf2_textures_dir.vpk",
+            "studiomdl_exe": "studiomdl.exe", "tf_dir": str(base), "size": (4, 4),
+            "format_type": "DXT1", "flags": [], "vtf_options": {},
+            "bypass_prefix": "console", "language": "en"})
+        self.assertEqual(self.mocks[apply_].call_args.args[1], [{"name": "p1"}])
+        self.assertEqual(self.mocks[sec].call_args.kwargs, {
+            "part_variants": {"p1": "c_scattergun_p1"}, "part_specs": [{"name": "p1"}],
+            "blu_of": None, "strip_paints": False})
+
+    def test_snapshot_attachment_only_moves_cdmaterials(self):
+        P = "src.services.vpk_service."
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            ok, msg, _ = self._run_build(base, extra_patches={
+                P + "VPKService._is_attachment_only": {"return_value": True},
+                "src.services.decor_build._set_cdmaterials": {}})
+            qc = str(base / "ctx" / "decompile" / "c_scattergun.qc")
+        self.assertTrue(ok, msg)
+        self.assertIn("Warnings:", msg)
+        from src.services.decor_build import DECOR_MATERIALS_ROOT
+        self.assertEqual(
+            self.mocks["src.services.decor_build._set_cdmaterials"].call_args.args,
+            (qc, DECOR_MATERIALS_ROOT + "\\c_scattergun"))
+
+    def test_snapshot_errors(self):
+        P = "src.services.vpk_service."
+        cases = [
+            ({"cdmat": ""}, "Failed to extract path from $cdmaterials in QC file: {qc}"),
+            ({"patched_cdmat": ""},
+             "Failed to extract path from $cdmaterials after patching in QC file: {qc}"),
+            ({"extra_patches": {P + "ModelBuildService.extract_texturegroup_filename":
+                                {"return_value": ""}}},
+             "Failed to extract filename from $texturegroup in QC file: {qc}"),
+            ({"extra_patches": {P + "ModelBuildService.compile":
+                                {"side_effect": RuntimeError("boom")}}},
+             "Error while working with model: boom"),
+            ({"texture_mismatch_callback": lambda m: False,
+              "extra_patches": {P + "VPKService._ready_model_texture_mismatch":
+                                {"return_value": "differs"}}},
+             "Build cancelled: texture mismatch in SMD file."),
+        ]
+        for kw, expected in cases:
+            with self.subTest(expected=expected), tempfile.TemporaryDirectory() as tmp:
+                base = Path(tmp)
+                ok, msg, _ = self._run_build(base, **kw)
+                qc = str(base / "ctx" / "decompile" / "c_scattergun.qc")
+                self.assertEqual((ok, msg), (False, expected.format(qc=qc)))
+
+    def test_snapshot_cancel_points(self):
+        # Отмена проверяется перед 25/40/60/80 %: снимок прогресса до отмены.
+        for n, progress in enumerate([[], [25], [25, 40], [25, 40, 60]]):
+            calls = []
+
+            def cancel(n=n):
+                calls.append(1)
+                return len(calls) > n
+            with self.subTest(n=n), tempfile.TemporaryDirectory() as tmp:
+                ok, msg, _ = self._run_build(Path(tmp), cancel_callback=cancel)
+                self.assertEqual((ok, msg), (False, "Build cancelled by user"))
+                self.assertEqual(self.progress, progress)
+
+    def test_snapshot_spy_masks(self):
+        from src.data.player_characters import SPY_MASK_MODE_KEY
+        from src.shared.constants import EXTRA_TEX_USE_GAME_ORIGINAL
+        orig = "src.services.texture_build.game_source.get_original_vtf_bytes"
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            Image.new("RGB", (4, 4), color="red").save(base / "scout.png")
+            (base / "pyro.vtf").write_bytes(b"VTF\x00pyro")
+            answers = {"mask_scout": str(base / "scout.png"),
+                       "mask_soldier": EXTRA_TEX_USE_GAME_ORIGINAL,
+                       "mask_pyro": str(base / "pyro.vtf")}
+            ok, msg, _ = self._run_build(
+                base, mode=SPY_MASK_MODE_KEY, weapon_key="spy",
+                extra_texture_callback=lambda name, wk: answers.get(name),
+                extra_patches={orig: {"return_value": b"VTF\x00game"}})
+            self.assertEqual((ok, msg), (True, str(base / "out.vpk")))
+        vmt = lambda n: ('"VertexLitGeneric"\n{\n\t"$basetexture" '  # noqa: E731
+                         f'"models/player/spy/{n}"\n}}\n').replace("\n", "\r\n").encode()
+        d = "materials/models/player/spy/"
+        self.assertEqual(self.tree, {
+            d + "mask_pyro.vmt": vmt("mask_pyro"), d + "mask_pyro.vtf": b"VTF\x00pyro",
+            d + "mask_scout.vmt": vmt("mask_scout"), d + "mask_scout.vtf": self.VTF,
+            d + "mask_soldier.vmt": vmt("mask_soldier"), d + "mask_soldier.vtf": b"VTF\x00game",
+        })
+
+        with tempfile.TemporaryDirectory() as tmp:
+            ok, msg, _ = self._run_build(Path(tmp), mode=SPY_MASK_MODE_KEY, weapon_key="spy",
+                                         extra_texture_callback=lambda *a: None)
+            self.assertEqual((ok, msg), (False, TRANSLATIONS["en"].get(
+                'error_no_textures', 'No mask textures were provided.')))
 
 
 class BuildContextWarnTests(unittest.TestCase):

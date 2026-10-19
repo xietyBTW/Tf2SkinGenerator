@@ -17,17 +17,25 @@ from __future__ import annotations
 import os
 import queue
 import threading
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
+from src.app.custom_model_editor import CustomModelEditor
+from src.app.decor_editor import DecorEditor
+from src.app.edit_history import EditHistory
+from src.app.materials_editor import MaterialsEditor
+from src.app.paintkit_editor import PaintkitEditor
 from src.app.parts_editor import PartsEditor
+from src.app.sheen_editor import SheenEditor
 from src.app.particles_editor import ParticlesEditor
+from src.app.sounds_editor import SoundsEditor
+from src.app.tools_editor import ToolsEditor
 from src.app.preview_controller import (
     Preview3DController, SkinDetectController, SkyboxController,
     ViewmodelController, VpkModController,
 )
 from src.domain.preview.session import PreviewSession
 from src.shared.logging_config import get_logger
-from src.shared.text_search import plain as _plain
+from src.shared.validators import vpk_file_name
 
 logger = get_logger(__name__)
 
@@ -76,24 +84,6 @@ def _existing_path(path: Optional[str]) -> Optional[str]:
     return path if path and os.path.isfile(path) else None
 
 
-def _vpk_name(name: Optional[str], default: str) -> str:
-    """Имя мода из поля страницы: набрали без «.vpk» — дописываем, а не
-    отказываем в сборке (поле подсказывает имя с расширением, и человек его
-    стирает)."""
-    name = (name or '').strip() or default
-    return name if name.lower().endswith('.vpk') else name + '.vpk'
-
-
-def _in_work_dir(path: str) -> bool:
-    """Лежит ли путь в папке сохранённых работ (Windows регистр не различает)."""
-    from src.services.work_store import WORK_DIR
-    try:
-        root = os.path.normcase(str(WORK_DIR.resolve())) + os.sep
-        return os.path.normcase(os.path.abspath(path)).startswith(root)
-    except (OSError, ValueError):
-        return False
-
-
 def _viewmodel_rig() -> dict:
     """Камера вида от первого лица. Импорт отложен — модуль тянет сцену."""
     from src.services.viewmodel_scene import VIEWMODEL_RIG
@@ -108,64 +98,6 @@ def _skybox_mode():
 #: Сколько событий держим, если их никто не разбирает. Страница может быть
 #: закрыта или перезагружаться — тогда очередь не должна расти бесконечно.
 MAX_PENDING = 500
-
-
-def _sound_title(entry, items: List[str], known: str,
-                 classes: Dict[str, str]) -> str:
-    """Подпись строки: чей это звук, человеческими словами.
-
-    Порядок источников — от точного к догадке. Предмет называет items_game,
-    оружие опознаётся по имени субъекта, у реплики класс стоит прямо в имени
-    записи (`Scout.PainSharp01`) или выведен из пути к файлу. Если молчат все
-    — само имя субъекта.
-    """
-    from src.data.sound_catalog import WHO_NAMES
-
-    # Класс-субъект — раньше локализации: там он «ПОДРЫВНИК» капслоком с
-    # экрана выбора класса, а в каталоге классы зовутся как в данных.
-    if entry.subject.lower() in classes:
-        return classes[entry.subject.lower()]
-    if items:
-        return items[0]
-    if known:
-        return known
-    who = entry.who[0] if entry.who else ''
-    if who in classes:
-        return classes[who]
-    if '.' in entry.name:
-        return entry.subject.replace('_', ' ')
-    return WHO_NAMES.get(who) or entry.name.replace('_', ' ')
-
-
-
-#: Строка без разделителей и регистра — для поиска. В именах записей звука
-#: Valve непоследователен: `Weapon_Scatter_Gun` рядом с `Weapon_Shotgun`, и
-#: буквальное совпадение подстроки половину названий не находит. «ё» и «е»
-#: тоже одно и то же: «ракетомет» обязан находить «Ракетомёт».
-def _score(row: Dict[str, Any], words: List[str]) -> float:
-    """Насколько строка отвечает запросу. Меньше нуля — не отвечает вовсе.
-
-    Каждое слово обязано найтись; вес — по тому, ГДЕ нашлось: целый термин
-    (имя предмета, класс, слот, группа) дороже его начала, начало — дороже
-    вхождения в середину, а имя записи и путь файла — самое дешёвое. Так
-    «bat» ставит биту выше «BatSaber», а тот — выше «combat».
-    """
-    total = 0.0
-    terms = row['terms']
-    for w in words:
-        if w in terms:
-            total += 8
-        elif any(t.startswith(w) for t in terms):
-            total += 4
-        elif any(w in t for t in terms):
-            total += 2
-        elif w in row['name_plain']:
-            total += 1
-        elif w in row['blob']:
-            total += 0.5
-        else:
-            return -1
-    return total
 
 
 class AppSession:
@@ -186,15 +118,10 @@ class AppSession:
         # модель не должна трогать поля подложки, пока сцена в кадре.
         self.controller.scene_up = lambda: any(
             c.active for c in (self.viewmodel, self.taunt, self.death))
-        #: Свои звуки: {путь файла в игре: файл человека}. Только по файлам,
-        #: не по записям: игра подменяет файл, а один файл бывает у девяти
-        #: записей (`bat_miss.wav` — промах у девяти оружий), и хранить
-        #: выбор по записи значило бы врать остальным восьми, что они
-        #: нетронуты. Страница звуков живёт отдельно от предмета, и в
-        #: состоянии превью ей места нет.
-        self._wave_picks: Dict[str, str] = {}
-        self._sound_cache: List[Dict[str, Any]] = []
-        self._sound_lang: Optional[str] = None
+        #: Страница звуков: живёт отдельно от предмета.
+        self.sounds = SoundsEditor(self)
+        #: Карты материала и правка VMT карточек.
+        self.materials = MaterialsEditor(self)
         self.skybox = SkyboxController(self.preview)
         self.vpk_mod = VpkModController(self.preview)
         #: Воркер сборки. Один на сеанс: две сборки разом писали бы в одну
@@ -202,26 +129,19 @@ class AppSession:
         self._build = None
         #: Воркер экспорта UV-шаблона.
         self._uv = None
-        #: Текущий воркер-инструмент (извлечение, экспорт, объединение).
-        self._tool = None
-        #: Подготовленная декомпиляция модели: ждёт выбора файлов на странице.
-        #: Пока она жива, за ней числится временный каталог.
-        self._prepared: Optional[Dict[str, Any]] = None
-        #: Сконвертированная своя модель, ждущая ответа «готова / только
-        #: геометрия». Держим, чтобы не конвертировать SMD второй раз.
-        self._pending_model: Optional[Dict[str, Any]] = None
+        #: Инструменты: извлечение из игры, экспорт, объединение модов.
+        self.tools = ToolsEditor(self)
+        #: Своя модель вместо игровой и её QC.
+        self.custom_model = CustomModelEditor(self)
         #: Показанный мод из VPK — его же собираем как источник.
         self._vpk_mod_path: Optional[str] = None
         #: OBJ показанной модели — источник частей (см. mesh_parts_service).
         self._obj_path: str = ''
-        #: История правок предмета: снимки `user_edits()` и позиция в них.
-        #: Одна на всё — текстуры, части, свою модель, карты: красят и
-        #: подставляют на ощупь, и «попробовал, не понравилось» должно
-        #: откатываться, иначе человек боится трогать.
-        self._edit_history: List[Dict[str, Any]] = []
-        self._edit_pos = -1
-        #: {путь в папке работы: своя копия} — см. `_shield_work_files`.
-        self._undo_copies: Dict[str, str] = {}
+        #: История правок предмета (Ctrl+Z / Ctrl+Y): снимки `user_edits()`.
+        self.history = EditHistory(self._work_dir)
+        #: Правки одного действия на нескольких карточках (War Paint) - один
+        #: шаг истории: пока True, `_autosave` шаг не записывает.
+        self._edits_held = False
         #: Переключатель состояния модели в превью: {имя бодигруппы: вариант}.
         #: Пусто — как в игре по умолчанию (целая бутылка). Только показ: в
         #: мод уходят все варианты, игра переключает их сама.
@@ -230,19 +150,8 @@ class AppSession:
         #: материал своего снаряда, склейки частей после отмены. Номера
         #: треугольников нового снаряда знает только новый OBJ.
         self._after_model: List[Any] = []
-        #: Гирлянда поверх оружия (праздничная версия / фестивайзер) — только
-        #: показ, в сборку не идёт. Вид и предмет, для которого её включили;
-        #: готовые гирлянды предмета, чтобы повторное включение было мгновенным;
-        #: воркер сборки и кэш видов по ключу предмета.
-        self._decor_kind = ''
-        self._decor_for = ''
-        self._decors: Dict[str, Any] = {}
-        self._decor_worker = None
-        self._decor_options: tuple = ('', [])
-        #: Смена вида и событие готовой гирлянды — под одним замком: воркер
-        #: зовёт `_on_decor` из своего потока, и без замка он мог пройти
-        #: проверку за миг до выключения и прислать гирлянду уже после него.
-        self._decor_lock = threading.Lock()
+        #: Гирлянда поверх оружия (праздничная версия / фестивайзер).
+        self.decor = DecorEditor(self)
         #: Модели показанной шапки: {класс: mdl}. Пусто у обычной шапки — у неё
         #: одна модель на всех. Нужны сборке: мультиклассовая шапка собирается
         #: сразу под все выбранные классы.
@@ -268,6 +177,10 @@ class AppSession:
         #: нельзя — None и есть один из ответов («взять главную»), поэтому
         #: «ответа ещё нет» помечено своим сторожем.
         self._texture_choice = _NO_CHOICE
+        #: Блеск Killstreak: маска на модели и превью конструктора узора.
+        self.sheen = SheenEditor(self)
+        #: War Paint показанного оружия.
+        self.paintkits = PaintkitEditor(self)
         #: Редактор частиц: открытый PCF, его история и сборка.
         self.particles = ParticlesEditor(self)
         # У каждого подписчика СВОЯ очередь: с одной общей два открытых окна
@@ -551,7 +464,7 @@ class AppSession:
         self._vpk_mod_path = None
         self._bodygroups = {}          # состояние — свойство показанной модели
         self._after_model = []         # ждали модель прошлого предмета
-        self._forget_decor()           # и гирлянда: у нового предмета своя
+        self.decor.forget()           # и гирлянда: у нового предмета своя
         # Собранные сцены принадлежали ПРОШЛОМУ предмету: и вид от первого
         # лица, и насмешка. Не погасив их, мы получили бы кадр чужого
         # предмета поверх нового — воркер досчитает и пришлёт свою сцену.
@@ -579,14 +492,17 @@ class AppSession:
         logger.info(f"load_preview: mode={mode!r} key={weapon_key!r}")
         # Работа с подменённой моделью открывается на НЕЙ: игровая геометрия
         # показала бы чужую текстуру не на том, для чего её рисовали.
-        if not self._restore_custom_model(lang):
+        if not self.custom_model.restore(lang):
             self.controller.load_game_model(
                 weapon_key, mode, paths['misc_vpk'], paths['textures_vpk'], lang=lang,
                 bodygroups=self._bodygroups)
             # Стили ищем параллельно: QC после декомпиляции окажется в кэше,
-            # так что ждать своей очереди воркеру почти не придётся.
-            self.skins.detect(weapon_key, mode, paths['misc_vpk'], lang=lang)
+            # так что ждать своей очереди воркеру почти не придётся. У оружия
+            # `style` - строка скина, на которой открыть (Критокола у Бонка).
+            self.skins.detect(weapon_key, mode, paths['misc_vpk'], lang=lang,
+                              start_skin=0 if mode == 'hat' else int(style or 0))
         self._mode = mode
+        self.decor.show_baked(lang)
         return {'started': True, 'mode': mode, 'weapon_key': weapon_key,
                 # Какие стили уже правлены: страница ставит на них метку, иначе
                 # про правку соседнего стиля вспоминают только в игре.
@@ -791,7 +707,7 @@ class AppSession:
 
         # Гирлянда едет в руку костями пушки — как в игре: без флага
         # `model_display_flags` она видна и от первого лица.
-        decor = self._decor_scene_args(key)
+        decor = self.decor.scene_args(key)
         decor_smd = decor['decor_smd']
 
         # Та же сцена уже в кадре — меняем ОДНИ ДОРОЖКИ. Меш, скелет и
@@ -877,16 +793,25 @@ class AppSession:
     def load_wear(self, tf2_class: str = '', slot: str = '',
                   lang: str = 'ru') -> Dict[str, Any]:
         """
-        Сцена «На модели»: шапка на персонаже в игровой стойке.
+        Сцена «На персонаже»: предмет на классе в игровой стойке.
 
-        Класс — из тех, кто носит шапку; слот — какое стоковое оружие у него в
+        Класс — из тех, кто носит предмет; слот — какое стоковое оружие у него в
         руках (от него зависит и стойка). Пусто — первый класс и первый слот.
+        Оружие собирает `weapon_wear` (держат в руках или надевают).
         """
-        if getattr(self, '_mode', '') != 'hat':
-            return {'error': 'На модели показывается только косметика'}
         paths = self.tf2_paths()
         if 'error' in paths:
             return paths
+        if getattr(self, '_mode', '') != 'hat':
+            from src.app import weapon_wear
+            args = weapon_wear.scene_args(self, paths['root'])
+            if 'error' in args:
+                return args
+            self.viewmodel.stop()
+            self.taunt.load_wear(misc_vpk=paths['misc_vpk'], textures_vpk=paths['textures_vpk'],
+                                 tf2_root=paths['root'], tf2_class=tf2_class, slot=slot,
+                                 lang=lang, **args)
+            return {'started': True}
         item = self._hat_catalog_item(paths['root'], lang)
         # У мультиклассовой шапки модели по классам уже известны; у
         # одномодельной классы есть только в каталоге, модель у всех одна.
@@ -944,634 +869,9 @@ class AppSession:
             hides.update(styles[index].get('hidden_bodygroups') or {})
         return hides
 
-    # ── Звуки ─────────────────────────────────────────────────────────────── #
+    # Звуки — src/app/sounds_editor.py (self.sounds)
 
-    #: Сколько строк отдаём за раз. Записей в игре десять с половиной тысяч,
-    #: и рисовать их все — секунды на пустом месте; дальше страница просит
-    #: следующую порцию сама.
-    SOUND_PAGE = 400
-
-    #: Фасеты страницы звуков — в том порядке, в каком их показывает колонка.
-    SOUND_FACETS = ('section', 'who', 'group', 'variant', 'format')
-
-    def sounds(self, section: str = '', who: str = '', group: str = '',
-               variant: str = '', fmt: str = '', own: bool = False,
-               query: str = '', offset: int = 0,
-               lang: str = 'ru') -> Dict[str, Any]:
-        """Записи под фильтрами страницы и сами фильтры со счётчиками.
-
-        Один ответ на всё: строки, сколько их всего, и для каждого фасета —
-        сколько записей стоит за каждым его значением. Счётчик фасета
-        считается БЕЗ его собственного фильтра: выбрав «Scout», человек
-        видит, сколько у солдата, а не ноль у всех, кроме разведчика.
-        Раздел — ось главная, и его счётчики не зависят от остальных
-        фасетов вовсе: словари групп у разделов разные, и «Выстрел» иначе
-        гасил бы «Реплики».
-        """
-        from src.data import sound_catalog as sc
-
-        rows = self._sound_rows(lang)
-        section = (section or '').strip().lower()
-        who = (who or '').strip().lower()
-        group = (group or '').strip().lower()
-        variant = (variant or '').strip().lower()
-        fmt = (fmt or '').strip().lower()
-        # Разделители убираем с обеих сторон: скаттерган в игре записан
-        # `Weapon_Scatter_Gun`, и поиск «scattergun» его не находил.
-        words = [_plain(w) for w in (query or '').split() if _plain(w)]
-        picks = self._wave_picks
-
-        def is_own(row: Dict[str, Any]) -> bool:
-            return any(w in picks for w in row['waves'])
-
-        scores: Dict[str, float] = {}
-        counts: Dict[str, Dict[str, int]] = {f: {} for f in self.SOUND_FACETS}
-        #: Сколько записей стоит за «Все» в каждом фасете: сумма по значениям
-        #: не годится, у дробовика четыре класса, и он считался бы четырежды.
-        every: Dict[str, int] = {f: 0 for f in self.SOUND_FACETS}
-        hits: List[Dict[str, Any]] = []
-        #: Разделы, которые прочитались вовсе. Вкладка раздела стоит всегда,
-        #: даже когда под поиском в нём пусто: исчезающие вкладки читаются
-        #: как поломка, а ноль при слове — как ответ.
-        present: set = set()
-        for row in rows:
-            present.add(row['section'])
-            if own and not is_own(row):
-                continue
-            if words:
-                score = _score(row, words)
-                if score < 0:
-                    continue
-                scores[row['name']] = score
-            ok = {
-                'section': not section or row['section'] == section,
-                'who': not who or who in row['who'],
-                'group': not group or row['group'] == group,
-                'variant': not variant or (variant == 'mvm') == row['mvm'],
-                'format': not fmt or fmt in row['formats'],
-            }
-            if all(ok.values()):
-                hits.append(row)
-            tally = counts['section']
-            tally[row['section']] = tally.get(row['section'], 0) + 1
-            every['section'] += 1
-            if not ok['section']:
-                continue
-            for facet in ('who', 'group', 'variant', 'format'):
-                if not all(v for k, v in ok.items() if k != facet):
-                    continue
-                every[facet] += 1
-                keys = ({'who': row['who'], 'group': (row['group'],),
-                         'variant': ('mvm' if row['mvm'] else 'normal',),
-                         'format': row['formats']})[facet]
-                tally = counts[facet]
-                for key in keys:
-                    tally[key] = tally.get(key, 0) + 1
-
-        classes = {c['key'].lower(): c['name'] for c in self._classes(lang)}
-        who_names = {**{k: classes[k] for k in sc.CLASSES if k in classes},
-                     **sc.WHO_NAMES}
-        chosen = {'section': section, 'who': who, 'group': group,
-                  'variant': variant, 'format': fmt}
-        labels = {'section': sc.SECTION_NAMES, 'who': who_names,
-                  'group': sc.GROUP_NAMES, 'variant': sc.VARIANT_NAMES,
-                  'format': sc.FORMAT_NAMES}
-        facets = {
-            facet: [{'key': key, 'name': name, 'count': counts[facet].get(key, 0)}
-                    for key, name in labels[facet].items()
-                    if counts[facet].get(key) or key == chosen[facet]
-                    or (facet == 'section' and key in present)]
-            for facet in self.SOUND_FACETS}
-
-        # Под поиском — по убыванию совпадения: «pistol» должен начинаться с
-        # пистолета, а не с ракетницы, у которой пистолетный звук пустого
-        # магазина. Без поиска — порядок скрипта: он и так группирует.
-        if words:
-            hits.sort(key=lambda row: -scores[row['name']])
-        # `own` подставляем ЗДЕСЬ, а не храним в строках: иначе выбор одного
-        # звука обесценивал весь разобранный каталог, и следующий же список
-        # стоил секунду на пересборку десяти тысяч записей. Копию делаем
-        # только для порции, что уедет наружу.
-        offset = max(0, int(offset or 0))
-        hidden = ('blob', 'terms', 'labels', 'name_plain')
-        page = [{k: v for k, v in row.items() if k not in hidden}
-                | self._own_state(row)
-                for row in hits[offset:offset + self.SOUND_PAGE]]
-        return {'rows': page, 'total': len(hits), 'offset': offset,
-                'facets': facets, 'all': every,
-                # Ничего не нашлось — может, опечатка: «scatergun».
-                'suggest': (self._suggest(words, section, lang)
-                            if words and not hits else []),
-                # Пустой список сам по себе ничего не объясняет: страница по
-                # этому флагу отличает «сузил до нуля» от «скрипты игры не
-                # прочитались».
-                'loaded': bool(rows),
-                # Сколько своих звуков выбрано ВСЕГО. Страница видит только
-                # свою порцию списка, и считать по ней — значит терять
-                # выбранное, как только сменишь фильтр.
-                'picked': self._picked_total(),
-                'files': len(picks)}
-
-    def _own_state(self, row: Dict[str, Any]) -> Dict[str, Any]:
-        """Что у записи заменено: {own, own_waves, partial}.
-
-        `own` — свой файл, если он один на все файлы записи; `own_waves` —
-        по каждому файлу, откуда бы замена ни пришла (и через другую
-        запись с тем же файлом); `partial` — заменена часть.
-        """
-        picks = self._wave_picks
-        own_waves = {w: picks[w] for w in row['waves'] if w in picks}
-        paths = set(own_waves.values())
-        whole = len(own_waves) == len(row['waves']) and len(paths) == 1
-        return {'own': next(iter(paths)) if whole else '',
-                'own_waves': own_waves,
-                'partial': bool(own_waves) and not whole}
-
-    def _suggest(self, words: List[str], section: str,
-                 lang: str) -> List[str]:
-        """Похожие слова из словаря раздела: «scatergun» → «scattergun».
-
-        Словарь — как записи ЗОВУТ (имена предметов, классы, группы), без
-        имён файлов и ключей моделей: там мусора больше, чем подсказок.
-        Сравниваем по сжатому виду, показываем как пишут.
-        """
-        import difflib
-
-        vocab = self._sound_vocab(section, lang)
-        out: List[str] = []
-        # Сначала запрос целиком: «rocket lancher» — это «rocket launcher»,
-        # а не «rocket» и «launcher» по отдельности.
-        whole = ''.join(words)
-        for near in difflib.get_close_matches(whole, vocab, n=2, cutoff=0.8):
-            if near != whole and vocab[near] not in out:
-                out.append(vocab[near])
-        for w in words if not out else ():
-            for near in difflib.get_close_matches(w, vocab, n=2, cutoff=0.72):
-                label = vocab[near]
-                if near != w and label not in out:
-                    out.append(label)
-        return out[:3]
-
-    def _sound_vocab(self, section: str, lang: str) -> Dict[str, str]:
-        """{сжатое слово: как пишут} по разделу — один раз на язык и раздел."""
-        key = (section, lang)
-        cache = getattr(self, '_sound_vocab_cache', None)
-        if cache is None:
-            cache = self._sound_vocab_cache = {}
-        if key not in cache:
-            vocab: Dict[str, str] = {}
-            for row in self._sound_rows(lang):
-                if section and row['section'] != section:
-                    continue
-                for label in row['labels']:
-                    plain = _plain(label)
-                    # С цифрами — имена файлов-сирот (`rocket1`), не слова.
-                    if (len(plain) > 2 and '_' not in label
-                            and not any(c.isdigit() for c in plain)):
-                        vocab.setdefault(plain, label)
-            cache[key] = vocab
-        return cache[key]
-
-    def _classes(self, lang: str) -> List[Dict[str, str]]:
-        from src.app.api import classes as api_classes
-        return [c for c in api_classes(lang) if c.get('key')]
-
-    def _by_item(self, guess: Dict[str, tuple], item: str):
-        """Предмет по его имени в игре. None — такого имени нет.
-
-        Половина названий в игре с артиклем («The Buff Banner»), а называют их
-        без него — пробуем оба вида.
-        """
-        for stem in (_plain(item), 'the' + _plain(item)):
-            found = guess.get(stem)
-            if found and found[2]:
-                return found
-        return None
-
-    def _rows_any(self) -> List[Dict[str, Any]]:
-        """Каталог на ТОМ языке, что уже разобран.
-
-        Проверке формата и сборке язык безразличен — им нужны имена и файлы.
-        Спросив каталог на своём языке, они выбрасывали чужой разбор, и
-        страница платила за него ещё раз: две лишних секунды на каждый выбор.
-        """
-        return self._sound_rows(self._sound_lang or 'en')
-
-    def _sound_rows(self, lang: str = 'ru') -> List[Dict[str, Any]]:
-        """Каталог звуков как словари. Считается один раз на язык."""
-
-        from src.data import sound_catalog
-        from src.data.hats_parser import parse_localization
-        from src.data.weapon_model_index import get_items_game_path
-
-        if getattr(self, '_sound_lang', None) == lang:
-            return self._sound_cache
-        paths = self.tf2_paths()
-        if 'error' in paths:
-            return []
-        # Сам звук лежит в своём VPK: скрипты в общем, файлы в `tf2_sound_*`.
-        # Без него не нашлись бы «ничьи» файлы — те, чью связку с событием
-        # Valve держит в зашифрованных `tf_weapon_*.ctx`.
-        entries = sound_catalog.load(
-            [*self._sound_vpks(paths['tf_dir']),
-             paths['misc_vpk'], paths['textures_vpk']],
-            get_items_game_path(paths['root']))
-        # Предметы в items_game названы токенами (`TF_HamShank`) — человеку
-        # нужно имя из игры.
-        loc = parse_localization(paths['root'],
-                                 'russian' if lang == 'ru' else 'english')
-        # Английские имена — в поиск: их знают и те, кто играет по-русски.
-        loc_en = (loc if lang != 'ru'
-                  else parse_localization(paths['root'], 'english'))
-        titles = sound_catalog.GROUP_NAMES
-        # items_game называет предмет лишь у каждой шестой записи. Остальные
-        # опознаём по имени субъекта: `Weapon_Ambassador` — это `TF_Ambassador`
-        # в локализации и `c_ambassador` в каталоге оружия. Без этого «посол» и
-        # «нож» в поиске не находились вовсе: имена записей латинские.
-        guess = self._subject_index(loc, lang)
-        classes = {c['key'].lower(): c['name'] for c in self._classes(lang)}
-        who_names = {**classes, **sound_catalog.WHO_NAMES}
-        rows = []
-        for entry in entries:
-            items = [loc.get(token, loc.get(token.lower(), token))
-                     for token in entry.items]
-            items_en = [loc_en.get(token, loc_en.get(token.lower(), ''))
-                        for token in entry.items]
-            stem = _plain(entry.subject.removeprefix('Weapon_')
-                          .removeprefix('Weapon'))
-            found = guess.get(stem, ('', (), '', ()))
-            named = ''
-            if not found[2]:
-                # Рабочее имя Valve в звуке и имя предмета в игре сходятся не
-                # всегда: миниган там `Gatling`, «Мачина» — `SniperRailgun`.
-                named = sound_catalog.SUBJECT_ITEMS.get(entry.subject, '')
-                if named:
-                    found = self._by_item(guess, named) or found
-            known, cls, weapon_key = found[:3]
-            aliases = found[3] if len(found) > 3 else ()
-            if not known:
-                # Постройки: предмета нет, имя в игре есть.
-                for word in sound_catalog.words_of(entry.subject):
-                    token = sound_catalog.BUILDING_TOKENS.get(word)
-                    if token:
-                        known = loc.get(token, '')
-                        aliases = (loc_en.get(token, ''),)
-                        break
-            # Чей звук — от точного к догадке: items_game, каталог оружия,
-            # имя записи. Нет ничего — «прочие»: без ключа под фильтром до
-            # строки не добраться.
-            who = list(entry.classes or cls or entry.who) or ['other']
-            # У звуков мира говорящего нет (см. `make_entry`), а догадка по
-            # имени субъекта тут ложная: `Grenade.Roll` — не чья-то граната.
-            if entry.section == 'world':
-                who = ['other']
-            title = _sound_title(entry, items, known, classes)
-            row = {
-                'name': entry.name, 'event': entry.event,
-                'group': entry.group, 'section': entry.section,
-                'group_name': titles.get(entry.group, entry.group),
-                'waves': list(entry.waves),
-                # Дубли, свёрнутые в запись: по ним страница подписывает
-                # файлы именами записей игры.
-                'takes': list(entry.takes),
-                'channel': entry.channel, 'volume': entry.volume,
-                'level': entry.level, 'pitch': entry.pitch,
-                'formats': sorted({w.rsplit('.', 1)[-1].lower()
-                                   for w in entry.waves}),
-                'items': items,
-                'who': who,
-                'mvm': entry.mvm,
-                # У предмета берём его иконку из рюкзака, у остального —
-                # картинку по субъекту: портрет класса, значок постройки.
-                'icon': weapon_key or sound_catalog.icon_for(
-                    entry.subject, entry.section, who[0]),
-                # Подпись карточки: у связанной записи это сам предмет, иначе
-                # опознанное по имени, иначе класс или само имя субъекта.
-                'title': title,
-            }
-            # Слова для поиска — один раз здесь, а не на каждую букву. Термины
-            # — то, по чему запись ЗОВУТ: имя предмета на обоих языках, ключ
-            # модели, класс, слот, группа; совпадение с ними весит больше,
-            # чем случайное вхождение в путь файла (см. `_score`).
-            # `labels` — те же слова, но как их пишут люди: из них
-            # собираются подсказки «возможно, вы имели в виду».
-            row['labels'] = tuple(dict.fromkeys(
-                t.strip().lower() for t in (
-                    title, *items, *items_en, *aliases, named,
-                    *(who_names.get(w, '') for w in who), row['group_name'],
-                    entry.group)
-                if t.strip()))
-            row['terms'] = tuple(dict.fromkeys(
-                _plain(t) for t in (
-                    title, *items, *items_en, *aliases, named, stem,
-                    *(who_names.get(w, '') for w in who),
-                    entry.group, row['group_name'])
-                if _plain(t)))
-            # Поля через пробел, внутри поля разделителей нет: скаттерган в
-            # игре записан `Weapon_Scatter_Gun`, и «scattergun» обязан
-            # находиться, а склеивать соседние поля в одно слово незачем.
-            row['name_plain'] = _plain(entry.name)
-            row['blob'] = ' '.join(
-                [*row['terms'], row['name_plain'],
-                 *(_plain(w) for w in entry.waves)])
-            rows.append(row)
-        # Общие файлы: у кого ещё стоит тот же файл. Игра подменяет файл, и
-        # заменив «промах» у биты, человек заменил его и у бутылки — об этом
-        # надо сказать до сборки, а не после.
-        owners: Dict[str, List[str]] = {}
-        for row in rows:
-            for wave in row['waves']:
-                owners.setdefault(wave, []).append(row['name'])
-        for row in rows:
-            shared = {w: [n for n in owners[w] if n != row['name']]
-                      for w in row['waves'] if len(owners[w]) > 1}
-            row['shared'] = shared
-            row['shared_count'] = len({n for names in shared.values()
-                                       for n in names})
-        self._sound_lang, self._sound_cache = lang, rows
-        self._sound_vocab_cache = {}
-        return rows
-
-    def _subject_index(self, loc: Dict[str, str],
-                       lang: str) -> Dict[str, tuple]:
-        """{сжатое имя субъекта: (название предмета, классы, иконка)}.
-
-        Два источника: локализация знает больше всего названий
-        (`Weapon_Scatter_Gun` → «Обрез»), каталог оружия — единственный, кто
-        знает КЛАСС и картинку. Чего нет ни там, ни там, получает значок
-        раздела (`icon_for`) — на строку без картинки это не похоже.
-
-        Каталог индексируется и по ключу модели, и по имени на ОБОИХ языках:
-        `SUBJECT_ITEMS` называет предметы по-английски, и в русском
-        интерфейсе «Machina» иначе не находилась. Классов у предмета
-        бывает несколько — дробовик носят четверо, — и копятся все.
-        """
-        from src.data.weapons import (
-            TF2_WEAPONS, WEAPON_SLOT_TYPES, get_weapon_type_name,
-        )
-
-        out: Dict[str, tuple] = {}
-        for token, value in loc.items():
-            if not token.lower().startswith('tf_'):
-                continue
-            stem = _plain(token[3:].removeprefix('Weapon_').removeprefix('weapon_'))
-            if stem and stem not in out:
-                out[stem] = (value, (), '', ())
-
-        for cls_name, slots in TF2_WEAPONS.items():
-            cls = cls_name.lower()
-            for slot, weapons in slots.items():
-                # Тело и руки класса — не оружие.
-                if slot not in WEAPON_SLOT_TYPES:
-                    continue
-                # Слот на обоих языках — тоже слово для поиска: «scout melee»
-                # должен находить биту, а «основное» — обрез.
-                slot_terms = (slot, get_weapon_type_name(slot, 'ru'),
-                              get_weapon_type_name(slot, 'en'))
-                for key, names in weapons.items():
-                    if isinstance(names, dict):
-                        title = names.get(lang, names.get('ru', key))
-                        aliases = tuple(dict.fromkeys(names.values()))
-                    else:
-                        title, aliases = names, (names,)
-                    bare = key.removeprefix('c_').removeprefix('v_')
-                    # Ключ каталога часто с хвостом класса (`c_flaregun_pyro`),
-                    # а в звуке его нет — заводим и укороченный вид.
-                    stems = {_plain(bare), _plain(bare.removesuffix('_' + cls)),
-                             *(_plain(a) for a in aliases)}
-                    terms = (*aliases, bare, *slot_terms)
-                    for stem in stems:
-                        if not stem:
-                            continue
-                        was_name, was_cls, was_key, was_terms = out.get(
-                            stem, ('', (), '', ()))
-                        out[stem] = (was_name or title,
-                                     tuple(dict.fromkeys((*was_cls, cls))),
-                                     was_key or key,
-                                     tuple(dict.fromkeys((*was_terms, *terms))))
-        return out
-
-
-    def set_sound(self, name: str, path: Optional[str],
-                  wave: str = '') -> Dict[str, Any]:
-        """Кладёт свой файл на запись целиком или на один её файл.
-
-        `wave` — путь файла в игре. Пусто — замена на всю запись: у неё файлов
-        бывает несколько, и обычно это варианты одного звука, которые меняют
-        разом.
-        """
-        name = (name or '').strip()
-        wave = (wave or '').strip()
-        from src.services.sound_build_service import check_wav
-
-        if not name:
-            return {'error': 'Не выбран звук'}
-        if wave:
-            return self._set_wave(name, wave, path)
-        # Записи с таким именем может не быть вовсе: тогда сборка её
-        # молча пропустит, а в подвале будет висеть «Своих звуков: 1».
-        row = self._row(name)
-        if row is None:
-            return {'error': 'Такой записи в игре нет'}
-        skipped = 0
-        if not path:
-            for w in row['waves']:
-                self._wave_picks.pop(w, None)
-        else:
-            trouble = (self._wrong_format(row['waves'], path)
-                       or check_wav(path))
-            if trouble:
-                return {'error': f'Файл не подойдёт: {trouble}'}
-            # Только совпавшие по расширению: у части записей файлы разных
-            # форматов вперемешку, и WAV, положенный под именем `.mp3`,
-            # дал бы в игре тишину вместо звука.
-            kind = path.rsplit('.', 1)[-1].lower()
-            fit = [w for w in row['waves'] if w.lower().endswith('.' + kind)]
-            skipped = len(row['waves']) - len(fit)
-            self._wave_picks.update({w: path for w in fit})
-        return {'name': name, **self._own_state(row),
-                'total': self._picked_total(), 'files': len(self._wave_picks),
-                'skipped': skipped, 'affected': self._affected(row['waves'])}
-
-    def _affected(self, waves: List[str]) -> Dict[str, Dict[str, Any]]:
-        """Состояние всех записей, где стоят эти файлы, включая чужие.
-
-        Заменив «промах» у биты, человек заменил его и у бутылки: её строка
-        на странице обязана это показать сразу, а не после перезагрузки.
-        """
-        touched = set(waves)
-        return {r['name']: self._own_state(r) for r in self._rows_any()
-                if touched.intersection(r['waves'])}
-
-    def _row(self, name: str) -> Optional[Dict[str, Any]]:
-        """Запись каталога по имени. None — такой в игре нет."""
-        return next((r for r in self._rows_any() if r['name'] == name), None)
-
-    def _picked_total(self) -> int:
-        """Сколько записей затронуто заменами — включая те, до которых
-        замена дошла через общий файл."""
-        picks = self._wave_picks
-        if not picks:
-            return 0
-        return sum(1 for r in self._rows_any()
-                   if any(w in picks for w in r['waves']))
-
-    def clear_sounds(self) -> Dict[str, Any]:
-        """Снимает все свои звуки разом."""
-        self._wave_picks.clear()
-        return {'total': 0, 'files': 0}
-
-    def _set_wave(self, name: str, wave: str,
-                  path: Optional[str]) -> Dict[str, Any]:
-        """То же, но для ОДНОГО файла записи."""
-        row = self._row(name)
-        if row is None or wave not in row['waves']:
-            return {'error': 'Такого файла у этой записи нет'}
-        if not path:
-            self._wave_picks.pop(wave, None)
-        else:
-            from src.services.sound_build_service import check_wav
-
-            trouble = self._wrong_format([wave], path) or check_wav(path)
-            if trouble:
-                return {'error': f'Файл не подойдёт: {trouble}'}
-            self._wave_picks[wave] = path
-        return {'name': name, 'wave': wave, **self._own_state(row),
-                'total': self._picked_total(), 'files': len(self._wave_picks),
-                'affected': self._affected([wave])}
-
-    @staticmethod
-    def _wrong_format(waves: List[str], path: str) -> str:
-        """Пусто, если расширение файла подходит этим путям. Иначе — чем плохо.
-
-        Игра зовёт файл по имени из записи, вместе с расширением: положив WAV
-        под именем `.mp3`, мы получим в игре тишину. Реплики почти все в MP3,
-        оружие почти всё в WAV — перепутать легко.
-
-        У полусотни записей файлы РАЗНЫХ расширений вперемешку (у моторки
-        разведчика и wav, и mp3). Годится файл, совпавший хоть с одним: свои
-        достанутся им, чужие останутся игровыми (см. `build_sounds`).
-        """
-        want = {w.rsplit('.', 1)[-1].lower() for w in waves}
-        got = (path or '').rsplit('.', 1)[-1].lower()
-        if not want or got in want:
-            return ''
-        return ('игра ждёт здесь {}, а это {} - звук просто не зазвучит'
-                .format('/'.join(sorted(k.upper() for k in want)),
-                        got.upper() or '?'))
-
-    def _sound_vpks(self, tf_dir: str) -> List[str]:
-        """Все звуковые VPK игры плюс общий.
-
-        Скрипты лежат в `tf2_misc`, а сами файлы — в отдельных архивах, и их
-        несколько: `tf2_sound_misc` и по одному на язык озвучки
-        (`tf2_sound_vo_english`). Имена не перечисляем — у человека может быть
-        поставлена другая озвучка, и реплики из неё молчали бы.
-        """
-        import os
-
-        out: List[str] = []
-        # Рядом с `tf` лежит `hl2` — общее содержимое движка. Часть звуков
-        # игрока и мира (`common/wpn_select.wav`, `items/smallmedkit1.wav`)
-        # взята оттуда, и в архивах TF2 их нет вовсе.
-        for folder in (tf_dir, os.path.join(os.path.dirname(tf_dir), 'hl2')):
-            try:
-                names = sorted(os.listdir(folder))
-            except OSError:
-                continue
-            out += [os.path.join(folder, name) for name in names
-                    if name.endswith('_dir.vpk') and '_sound' in name]
-        return out
-
-    def sound_bytes(self, wave_path: str) -> Optional[bytes]:
-        """Игровой звуковой файл как есть — странице его проигрывать."""
-
-        from src.services import vtf_preview_service as vps
-
-        paths = self.tf2_paths()
-        if 'error' in paths:
-            return None
-        name = 'sound/' + (wave_path or '').replace(chr(92), '/').lstrip('/')
-        # Скрипт пишет имя как попало (`vo/heavy_PainSevere01.mp3`), а в архиве
-        # всё лежит строчными: у Valve так во всех звуковых VPK. Игра при
-        # поиске регистр не различает, библиотека — различает.
-        for pak in vps.open_vpks([*self._sound_vpks(paths['tf_dir']),
-                                  paths['misc_vpk']]):
-            for candidate in (name, name.lower()):
-                try:
-                    return pak[candidate].read()
-                except KeyError:
-                    continue
-        return None
-
-    def save_sound(self, name: str, wave: str = '') -> Dict[str, Any]:
-        """Кладёт игровой звук записи в папку экспорта.
-
-        Чтобы переделать звук, его сперва надо достать. Раньше единственным
-        способом было прослушать его в приложении — а дальше человек оставался
-        без файла. Сохраняем ИГРОВОЙ звук, а не выбранный: свой у него и так
-        на диске.
-        """
-        row = self._row(name)
-        if row is None:
-            return {'error': 'Такой записи в игре нет'}
-
-        # Один файл или все — у записи их бывает до восьмидесяти.
-        wanted = ([wave] if wave in row['waves'] else
-                  [] if wave else list(row['waves']))
-        if not wanted:
-            return {'error': 'Такого файла у этой записи нет'}
-
-        export_folder, _ = self._export_settings()
-        os.makedirs(export_folder, exist_ok=True)
-        saved: List[str] = []
-        for wave in wanted:
-            data = self.sound_bytes(wave)
-            if not data:
-                continue
-            # Только имя файла: путь внутри игры сюда переносить незачем, а
-            # `..` в нём увёл бы запись мимо папки экспорта.
-            target = os.path.join(export_folder, os.path.basename(wave))
-            try:
-                with open(target, 'wb') as f:
-                    f.write(data)
-            except OSError as exc:
-                return {'error': f'Не удалось сохранить: {exc}'}
-            saved.append(target)
-        if not saved:
-            return {'error': 'Файла этого звука в игре нет'}
-        logger.info(f"[звук] сохранено из игры: {len(saved)} в {export_folder}")
-        return {'path': saved[0], 'files': len(saved)}
-
-    def build_sounds(self, filename: str = '') -> Dict[str, Any]:
-        """Собирает VPK из выбранных звуков.
-
-        Заменяем ВСЕ файлы записи: у полутора сотен записей их несколько, игра
-        берёт случайный, и подменив один мы бы слышали свой звук через раз.
-        """
-        from src.services import sound_build_service as builder
-
-        if not self._wave_picks:
-            return {'error': 'Не выбрано ни одного своего звука'}
-        by_wave = dict(self._wave_picks)
-
-        from src.shared.validators import validate_vpk_filename
-
-        export_folder, _ = self._export_settings()
-        name = _vpk_name(filename, 'sounds_mod')
-        # Имя приходит из поля на странице и становится путём файла: тем же
-        # правилом, что у сборки текстур, отсекаем слэши и точки-родители.
-        good, trouble = validate_vpk_filename(name)
-        if not good:
-            return {'error': trouble}
-        try:
-            path = builder.build(by_wave, name, export_folder)
-        except Exception as exc:                          # noqa: BLE001
-            logger.error(f"[звук] сборка не удалась: {exc}", exc_info=True)
-            return {'error': str(exc)}
-        logger.info(f"[звук] собрано: {path}")
-        return {'path': path, 'files': len(by_wave),
-                'sounds': self._picked_total()}
+    # ── Скайбокс, текстура и сборка ───────────────────────────────────────── #
 
     def _sky_names_to_build(self) -> Optional[list]:
         """Какие имена небес перекрывает мод: выбранное либо ВСЕ стоковые.
@@ -1693,9 +993,12 @@ class AppSession:
         Параметры формата приходят от страницы, а ЧТО именно собирать — из
         сеанса: какие текстуры пользователь положил на какие материалы. Второй
         раз спрашивать это у представления незачем, оно и так лишь отражение.
-        """
-        from src.services.build_request import BuildRequest
 
+        Шаги: свои картинки из превью (`_build_images`) → испечённые склейки
+        частей → вопрос про краску игры (`_answer_tint`) → запрос сборки
+        (`_build_request`) → воркер (`_start_build`). Любой шаг до воркера
+        может вернуть ответ странице: ошибку или вопрос.
+        """
         if self._build is not None and self._build.isRunning():
             return {'error': 'Сборка уже идёт'}
 
@@ -1707,6 +1010,28 @@ class AppSession:
         if not mode:
             return {'error': 'Сначала выберите предмет'}
 
+        images = self._build_images(mode, paths, params)
+        if isinstance(images, dict):
+            return images
+        # Гифка на части: превью держит один кадр, сборке нужны все. Полные
+        # склейки печёт воркер (это десятки секунд), а запрос уже смотрит на
+        # их будущие пути.
+        plan = self.parts.bake_plan([images.image, *images.extra.values(),
+                                     *self.preview.textures.blu_uploaded_paths().values(),
+                                     *images.decor_paths(), *images.part_paths(),
+                                     *images.style_paths()])
+        images.remap(self.parts.baked_path, decor=True)
+        question = self._answer_tint(images, mode, params)
+        if question:
+            return question
+        return self._start_build(self._build_request(images, mode, paths, params), plan)
+
+    def _build_images(self, mode: str, paths: Dict[str, str],
+                      params: Dict[str, Any]) -> Any:
+        """Свои картинки сборки из превью (BuildImages) или ответ странице:
+        ошибка, если собирать нечего, или {'confirm_empty'} - «изменений нет,
+        всё равно собрать?»."""
+        from src.app.build_images import BuildImages
         from src.data.skyboxes import SKYBOX_MODE
 
         t = self.preview.textures
@@ -1729,7 +1054,7 @@ class AppSession:
         sky = t.skybox_build_data() if mode == SKYBOX_MODE else {}
         # Гирлянды поверх оружия собираются своими моделями: правлена может
         # быть одна гирлянда, и оружие тогда в мод не идёт вовсе.
-        decor = self._decor_builds(paths['root']) if mode != SKYBOX_MODE else []
+        decor = self.decor.builds(paths['root']) if mode != SKYBOX_MODE else []
         if mode == SKYBOX_MODE:
             image = sky.get('equirect') or None
             extra = {}
@@ -1750,79 +1075,57 @@ class AppSession:
             main_from_game = weapon_edits or not decor
         elif mode != SKYBOX_MODE and not image and not extra and not decor:
             return {'error': 'Не загружено ни одной своей текстуры'}
+        return BuildImages(
+            image=image, extra=extra,
+            blu={m: p for m, p in t.blu_uploaded_paths().items() if m not in own_parts},
+            decor=decor, parts=self._part_material_specs() or [],
+            styles=self._own_style_data(), sky=sky, main_from_game=main_from_game)
 
-        # Гифка на части: превью держит один кадр, сборке нужны все. Полные
-        # склейки печёт воркер (это десятки секунд), а запрос уже смотрит на
-        # их будущие пути.
-        decor_paths = [p for d in decor for teams in d['textures'].values()
-                       for p in teams.values()]
-        part_specs = self._part_material_specs() or []
-        part_paths = [*(s[k] for s in part_specs for k in ('image', 'image_blu') if s[k]),
-                      *(p for s in part_specs for p in s['style_images'].values())]
-        own_styles = self._own_style_data()
-        style_paths = list((own_styles or {}).get('variant_files', {}).values())
-        plan = self.parts.bake_plan([image, *extra.values(),
-                                     *t.blu_uploaded_paths().values(), *decor_paths,
-                                     *part_paths, *style_paths])
-        baked = self.parts.baked_path
-        image = baked(image)
-        extra = {mat: baked(p) for mat, p in extra.items()}
-        for d in decor:
-            d['textures'] = {mat: {team: baked(p) for team, p in teams.items()}
-                             for mat, teams in d['textures'].items()}
-        blu = {mat: baked(p) for mat, p in t.blu_uploaded_paths().items()
-               if mat not in own_parts}
-        for s in part_specs:
-            s['image'], s['image_blu'] = baked(s['image']), baked(s['image_blu'])
-            s['style_images'] = {row: baked(p) for row, p in s['style_images'].items()}
-        if own_styles:
-            own_styles['variant_files'] = {name: baked(p) for name, p
-                                           in own_styles['variant_files'].items()}
+    def _answer_tint(self, images: Any, mode: str,
+                     params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        Краска игры по альфе ($blendtintbybasealpha): своя картинка без
+        альфы в игре перекрасится ЦЕЛИКОМ, а превью показывает её как есть.
+        Спрашиваем до сборки; ответ приходит тем же вызовом (`tint_mode`).
+        У шапки со снятой галкой «Краски из игры» красить нечего.
 
-        # Краска игры по альфе ($blendtintbybasealpha): своя картинка без
-        # альфы в игре перекрасится ЦЕЛИКОМ, а превью показывает её как есть.
-        # Спрашиваем до сборки; ответ приходит тем же вызовом (`tint_mode`).
-        # У шапки со снятой галкой «Краски из игры» красить нечего.
+        Вопрос странице ({'confirm_tint'}) или None; ответ «none»/«mask»
+        подменяет картинки исправленными.
+        """
         tint_mode = str(params.get('tint_mode') or '')
-        if not (mode == 'hat' and not params.get('hat_paints', True)):
-            risks = self._tint_risks([image, *extra.values(), *blu.values(),
-                                      *(s[k] for s in part_specs
-                                        for k in ('image', 'image_blu') if s[k]),
-                                      *(p for s in part_specs
-                                        for p in s['style_images'].values()),
-                                      *(own_styles or {}).get('variant_files', {}).values()])
-            if risks and tint_mode not in ('none', 'mask', 'strip', 'keep'):
-                from src.services import vmt_tint
-                spec = next(iter(risks.values()))[0]
-                return {'confirm_tint': {
-                    'color': vmt_tint.color_name(spec.color, params.get('lang') or 'ru'),
-                    'hex': '#%02x%02x%02x' % spec.color}}
-            if tint_mode in ('none', 'mask'):
-                fixed = self._fix_tint(risks, tint_mode)
-                image = fixed.get(image, image)
-                extra = {mat: fixed.get(p, p) for mat, p in extra.items()}
-                blu = {mat: fixed.get(p, p) for mat, p in blu.items()}
-                for s in part_specs:
-                    for k in ('image', 'image_blu'):
-                        s[k] = fixed.get(s[k], s[k])
-                    s['style_images'] = {row: fixed.get(p, p)
-                                         for row, p in s['style_images'].items()}
-                if own_styles:
-                    own_styles['variant_files'] = {
-                        name: fixed.get(p, p) for name, p in own_styles['variant_files'].items()}
+        if mode == 'hat' and not params.get('hat_paints', True):
+            return None
+        risks = self._tint_risks(images.own_paths())
+        if risks and tint_mode not in ('none', 'mask', 'strip', 'keep'):
+            from src.services import vmt_tint
+            spec = next(iter(risks.values()))[0]
+            return {'confirm_tint': {
+                'color': vmt_tint.color_name(spec.color, params.get('lang') or 'ru'),
+                'hex': '#%02x%02x%02x' % spec.color}}
+        if tint_mode in ('none', 'mask'):
+            fixed = self._fix_tint(risks, tint_mode)
+            images.remap(lambda p: fixed.get(p, p))
+        return None
 
+    def _build_request(self, images: Any, mode: str, paths: Dict[str, str],
+                       params: Dict[str, Any]) -> Any:
+        """BuildRequest из картинок сборки, параметров страницы и сеанса."""
+        from src.data.skyboxes import SKYBOX_MODE
+        from src.services.build_request import BuildRequest
+
+        tint_mode = str(params.get('tint_mode') or '')
         hat_primary, hat_models = (self._hat_build_models(params.get('hat_classes'))
                                    if mode == 'hat' else (None, None))
-
         size = int(params.get('size') or 512)
-        if main_from_game:
+        image = images.image
+        if images.main_from_game:
             from src.shared.constants import EXTRA_TEX_USE_GAME_ORIGINAL
             image = EXTRA_TEX_USE_GAME_ORIGINAL
-        request = BuildRequest(
+        return BuildRequest(
             image_path=image,
-            main_from_game=main_from_game,
+            main_from_game=images.main_from_game,
             mode=mode,
-            filename=_vpk_name(params.get('filename'), 'mod.vpk'),
+            filename=vpk_file_name(params.get('filename'), 'mod.vpk'),
             size=(size, size),
             format_type=params.get('format') or 'DXT5',
             flags=list(params.get('flags') or []),
@@ -1832,12 +1135,12 @@ class AppSession:
             # всегда уходил в «export» от текущей папки процесса.
             export_folder=self._export_settings()[0],
             language=params.get('lang') or 'ru',
-            panel_extra_textures=extra or None,
+            panel_extra_textures=images.extra or None,
             # «Прочее» со страницы: сборка спрашивает про эти материалы так
             # же, как про доп. материалы геометрии.
             misc_materials=list(self.preview.misc_materials) or None,
-            panel_blu_textures=blu or None,
-            force_team=bool(t.force_team),
+            panel_blu_textures=images.blu or None,
+            force_team=bool(self.preview.textures.force_team),
             isolate_shoulders=bool(params.get('isolate_shoulders')),
             # Карты материала (detail / самосвечение / phong): VTF по ним
             # генерит сборка, а VMT дописывает сама — страница их только
@@ -1858,17 +1161,17 @@ class AppSession:
             # склеивал.
             hat_style_builds=(self._hat_style_builds(params.get('hat_classes'))
                               if mode == 'hat' else None),
-            decor_builds=decor or None,
+            decor_builds=images.decor or None,
             # Своя модель снаряда в оружии: на игровой модели и на своей.
             part_models=(dict(self.preview.part_models) or None
                          if not self.preview.custom_vpk_mode else None),
             # Части-материалы: у игровой и у своей модели (у мода из VPK
             # номера треугольников превью — чужие).
-            part_materials=(part_specs or None
+            part_materials=(images.parts or None
                             if not self.preview.custom_vpk_mode else None),
             # Стили своей модели «со своими материалами» (и её Australium):
             # таблицу скинов сборка собирает из них сама.
-            skin_build_data=own_styles,
+            skin_build_data=images.styles,
             # Папка обхода sv_pure из настроек (console / vgui): без неё
             # сборка молча оставалась на умолчании console.
             bypass_method=self._bypass_method(),
@@ -1890,9 +1193,11 @@ class AppSession:
             # выбранном разрешении.
             skybox_sky_names=(self._sky_names_to_build()
                               if mode == SKYBOX_MODE else None),
-            skybox_face_overrides=(sky.get('face_overrides') or None),
+            skybox_face_overrides=(images.sky.get('face_overrides') or None),
         )
 
+    def _start_build(self, request: Any, plan: Any) -> Dict[str, Any]:
+        """Запускает воркер сборки и переводит его сигналы в события страницы."""
         from src.services.build_worker import BuildWorker
         w = BuildWorker(request=request,
                         prepare=(lambda report: self.parts.bake(plan, report))
@@ -2071,7 +1376,7 @@ class AppSession:
         p, t = self.preview, self.preview.textures
         found = []
         for card in [''] + list(t.material_names or []):
-            target = self._vmt_target(card)
+            target = self.materials.vmt_target(card)
             if isinstance(target, tuple):
                 edited = EditedVMTService.get_edited_vmt(target[1])
                 if edited and os.path.exists(edited):
@@ -2087,41 +1392,16 @@ class AppSession:
             found.append('part_materials')
         if t.force_team:
             found.append('team')
+        if self.decor.baked():
+            found.append('festive')           # гирлянда вшита в модель оружия
         if (params.get('options') or {}).get('normal'):
             found.append('normal')            # рельеф строится и из игровой
         if params.get('isolate_shoulders'):
             found.append('shoulders')
         return found
 
-    def _decor_builds(self, tf2_root: str) -> List[Dict[str, Any]]:
-        """Правленые гирлянды предмета — для сборки, показаны они или нет.
+    # Гирлянда поверх оружия — src/app/decor_editor.py (self.decor)
 
-        Правка гирлянды — часть работы, как текстура: выключенный показ её не
-        отменяет. Текстуры — по материалу гирлянды, обе команды (карточка
-        нейтральна, пока синюю не задали отдельно).
-        """
-        from src.services import festive_decor
-
-        key = self._shown_weapon()
-        models = festive_decor.kinds(key, tf2_root) if key else {}
-        uploads = self.preview.textures.decor_uploads()
-        out = []
-        for kind, mdl in models.items():
-            textures = {}
-            for card, teams in uploads.items():
-                card_kind, material = festive_decor.parse_card(card)
-                if card_kind == kind and material:
-                    textures[material] = dict(teams)
-            fit = self.preview.decor_fit.get(kind)
-            bends = self.preview.decor_bends.get(kind) or []
-            smd = self.preview.decor_models.get(kind) or ''
-            if textures or fit or bends or smd:
-                out.append({'kind': kind, 'mdl': mdl, 'smd': smd,
-                            'fit': dict(fit) if fit else None,
-                            'bends': [dict(b) for b in bends], 'textures': textures,
-                            # Оружие — ради позы превью: изгибы сделаны в ней.
-                            'weapon': key})
-        return out
 
     def cancel_build(self) -> Dict[str, Any]:
         """Останавливает идущую сборку.
@@ -2399,7 +1679,7 @@ class AppSession:
         # У своей геометрии развёртка другая: родная нормаль легла бы мимо.
         if self.preview.custom_smd_path:
             return None
-        vmt = self.open_vmt(material)
+        vmt = self.materials.open_vmt(material)
         paths = self.tf2_paths()
         if 'content' not in vmt or 'error' in paths:
             return None
@@ -2421,541 +1701,17 @@ class AppSession:
 
     # ── War Paint ─────────────────────────────────────────────────────── #
 
-    def sheen_mask_params(self) -> Optional[Dict[str, Any]]:
-        """Положение полосы блеска для показанного оружия — из заголовка его
-        MDL в игре (vmt_effects.sheen_mask_params). None — не оружие или нет
-        игры. Своя геометрия: берётся стоковая модель, полоса может лечь
-        чуть иначе."""
-        from src.services import vmt_effects
-        from src.services.game_vpk_reader import GameVpkReader
+    # Блеск Killstreak — src/app/sheen_editor.py (self.sheen)
 
-        if not self._shown_weapon():
-            return None
-        # Мод из VPK со своей моделью: полоса - по ней. У куная из мода
-        # модель на 2.5 единицы длиннее стоковой, и низ выпадал из маски.
-        p = self.preview
-        if p.custom_vpk_mode and p.custom_vpk_own_model and self._vpk_mod_path:
-            data = self._mod_mdl(self._shown_weapon())
-            if data:
-                return vmt_effects.sheen_mask_params(data)
-        paths = self.tf2_paths()
-        if 'error' in paths:
-            return None
-        from src.services.paintkit_worker import _find_mdl
 
-        reader = GameVpkReader([paths['misc_vpk']])
-        try:
-            # Не у всех оружий модель лежит в c_models/<ключ>/: тогда по имени.
-            data = _find_mdl(reader, self._paintkit_model())
-        finally:
-            reader.close()
-        return vmt_effects.sheen_mask_params(data) if data else None
-
-    def _mod_mdl(self, weapon_key: str) -> Optional[bytes]:
-        """MDL оружия из архива показанного мода (имя = ключ оружия;
-        гирлянда того же мода - отдельный файл и сюда не попадает)."""
-        import vpk as vpklib
-        try:
-            pak = vpklib.open(self._vpk_mod_path)
-            for name in pak:
-                if (name.lower().endswith('.mdl')
-                        and os.path.basename(name)[:-4].lower() == weapon_key.lower()):
-                    return pak[name].read()
-        except Exception as exc:                             # noqa: BLE001
-            logger.warning(f'MDL мода не прочитан: {exc}')
-        return None
-
-    def _sheen_aspect(self) -> tuple:
-        """(пропорция показанного оружия, оружие ли это) — как в имени маски."""
-        from src.services import sheen_builder
-        try:
-            bounds = self.sheen_mask_params()
-        except Exception:                                  # noqa: BLE001
-            bounds = None
-        aspect = (bounds['stencil']['aspect'] if bounds and bounds.get('stencil')
-                  else sheen_builder.DEFAULT_ASPECT)
-        return round(min(12.0, max(0.5, aspect)), 1), bool(bounds)
-
-    def sheen_preset_thumbs(self) -> Dict[str, Any]:
-        import tempfile
-        from pathlib import Path
-
-        from src.services import sheen_builder
-
-        aspect, _weapon = self._sheen_aspect()
-        out = Path(tempfile.gettempdir()) / 'tf2sg_sheen_thumbs'
-        thumbs = {}
-        for key, p in sheen_builder.PRESETS.items():
-            png = out / f'{key}_{aspect}.png'
-            thumbs[key] = str(png) if png.exists() else sheen_builder.thumbnail(p['spec'], aspect, png)
-        return {'thumbs': thumbs, 'aspect': aspect}
-
-    def sheen_pattern_preview(self, spec: Dict[str, Any], length: float) -> Dict[str, Any]:
-        """Кадры узора из конструктора картинкой-сеткой — в пропорции
-        показанного оружия (как ляжет в игре), иначе обычного ствола."""
-        import hashlib
-        import json
-        import tempfile
-        from pathlib import Path
-
-        from src.services import sheen_builder, sheen_patterns
-
-        aspect, weapon = self._sheen_aspect()             # как в имени маски
-        frames = sheen_patterns.frames_for(float(length or 2.5))
-        spec = sheen_builder.clean_spec(spec)
-        key = hashlib.sha1(json.dumps([spec, frames, aspect], sort_keys=True)
-                           .encode()).hexdigest()[:16]
-        out = Path(tempfile.gettempdir()) / 'tf2sg_sheen' / f'{key}.png'
-        if out.parent.is_dir():
-            olds = sorted((p for p in out.parent.glob('*.png') if p != out),
-                          key=lambda p: p.stat().st_mtime, reverse=True)
-            for old in olds[4:]:
-                old.unlink(missing_ok=True)
-        res = sheen_builder.preview_sheet(spec, frames, aspect, out)
-        res.update(aspect=aspect, weapon=weapon)
-        return res
-
-    def _paintkit_model(self) -> str:
+    def _shown_mdl(self) -> str:
         """Файл модели показанного оружия — по нему War Paint и ищутся."""
         from src.data.weapons import WEAPON_MDL_PATHS
         key = self._shown_weapon()
         return WEAPON_MDL_PATHS.get(key) or f'{key}.mdl'
 
-    def _own_paintkits(self, tf2_root: str, lang: str = 'ru') -> List[dict]:
-        """
-        War Paint игры для показанного оружия.
+    # War Paint — src/app/paintkit_editor.py (self.paintkits)
 
-        На своей геометрии их нет: рецепт Valve кладёт узор по маскам под
-        развёртку СТОКОВОЙ модели, и на чужой развёртке он лёг бы мимо. Там
-        работает универсальный режим — по частям самой модели.
-        """
-        from src.data import paintkit_defs
-        if self._custom_geometry():
-            return []
-        return paintkit_defs.for_model(tf2_root, self._paintkit_model(), lang)
-
-    def paintkits(self, lang: str = 'ru') -> Dict[str, Any]:
-        """
-        War Paint для показанного оружия.
-
-        Есть свои в игре — отдаются они (``generic: False``). Нет (или модель
-        своя) — все War Paint с шаблоном в универсальном режиме
-        (``generic: True``): узор раскладывается по частям модели, см.
-        paintkit_generic. Следом в обоих случаях — украшенное оружие
-        коллекций с других пушек (``decorated``): в игре каждый такой скин
-        есть только у своих, здесь он ложится по деталям.
-        """
-        from src.data import paintkit_defs
-
-        paths = self.tf2_paths()
-        if 'error' in paths:
-            return paths
-        if not self._shown_weapon():
-            return {'items': [], 'generic': False}
-        own = self._own_paintkits(paths['root'], lang)
-        kits = own or paintkit_defs.generic_kits(paths['root'], lang)
-        ids = {k['id'] for k in kits}
-        decorated = [k for k in paintkit_defs.decorated_kits(paths['root'], lang)
-                     if k['id'] not in ids]
-        return {'items': kits + decorated, 'generic': not own}
-
-    def _paintkit_offer(self, paths: Dict[str, str], item: int,
-                        real: bool) -> Tuple[List[str], List[str], List[str]]:
-        """
-        (карточки, на которые War Paint может лечь; те из них, что красит
-        игра; те, на которые узор ляжет по деталям). ``real`` — War Paint
-        игры, а не универсальный режим: карточку игры рецепт красит и без
-        своего меша, по деталям — нет.
-
-        Карточке без своего меша (вставки HUD, материал $texturegroup вне
-        модели, огоньки гирлянды мода) узор по деталям не положить: у
-        одноматериальной модели она нашла бы единственный меш, и War Paint
-        лёг бы по чужой развёртке, у многоматериальной — не нашла бы ничего.
-        Материал части идёт за своим исходным: развёртка у них общая, и
-        картинка исходного ложится на него как есть.
-        """
-        from src.domain.preview.texture_state import is_decor
-        from src.services import mesh_parts_service
-
-        t = self.preview.textures
-        main = t.stable_main()
-        game = self._game_cards(paths, item) if real else []
-        model = mesh_parts_service.load(self._obj_path, self.preview.part_cuts,
-                                        self.preview.part_regions)
-
-        def own_mesh(card: str) -> bool:
-            found = self.parts._mesh_of(model, card) if model else None
-            return isinstance(found, tuple) and found[0].lower() == card.lower()
-
-        cards: List[str] = []
-        spread: List[str] = []
-        for card in t.material_names:
-            if not card or is_decor(card):
-                continue
-            # У главной меш найдётся всегда: без своего узор ляжет по самому
-            # большому материалу модели (_paintkit_generic).
-            mesh = card == main or own_mesh(card)
-            if mesh or card in game:
-                group = [card, *(p for p, src in t.part_cards.items() if src == card)]
-                cards += group
-                if mesh:
-                    spread += group
-        cards += [c for c in game if c not in cards]
-        return cards, [c for c in cards if c in game or t.part_cards.get(c) in game], spread
-
-    def _game_cards(self, paths: Dict[str, str], item: int) -> List[str]:
-        """
-        Карточки, на которые War Paint кладёт сама игра: материалы с прокси
-        WeaponSkin у модели, куда игра его кладёт (items_game; у Детонатора
-        это ещё и гильза). Модель и её VMT за сеанс не меняются — ответ
-        запоминается.
-        """
-        from src.data import paintkit_defs
-        from src.services.game_vpk_reader import GameVpkReader
-        from src.services.paintkit_worker import paintable_materials
-
-        defs = paintkit_defs.load(paths['root'])
-        mdl = ((paintkit_defs.item_model_path(paths['root'], defs, item) if defs else '')
-               or self._paintkit_model())
-        known = self.__dict__.setdefault('_paintable_by_model', {})
-        if mdl not in known:
-            reader = GameVpkReader([paths['textures_vpk'], paths['misc_vpk']])
-            try:
-                known[mdl] = paintable_materials(reader, mdl)
-            finally:
-                reader.close()
-        return self._paintkit_targets(known[mdl], self.preview.textures.stable_main())
-
-    def paintkit_materials(self, item: int = 0) -> Dict[str, Any]:
-        """
-        Материалы оружия для панели War Paint: [{card, game, parts}].
-
-        ``game`` — War Paint на этот материал кладёт сама игра (у War Paint
-        игры они отмечены по умолчанию, остальные — по желанию, узором по
-        своим деталям). В универсальном режиме ``game`` нет ни у кого, и
-        отмечены все. ``parts`` — у материала есть своя геометрия, и узор по
-        деталям на него ляжет. Спрашивается при открытии панели: у
-        многоматериальной модели материалы приходят позже самой модели.
-        """
-        paths = self.tf2_paths()
-        if 'error' in paths:
-            return paths
-        own = self._own_paintkits(paths['root'])
-        # Куда War Paint кладёт игра — по модели этой пушки: у скина с другой
-        # пушки ``item`` её, а не этой.
-        if own and not any(k['item'] == int(item) for k in own):
-            item = own[0]['item']
-        cards, game, spread = self._paintkit_offer(paths, item, bool(own))
-        return {'materials': [{'card': c, 'game': c in game, 'parts': c in spread}
-                              for c in cards]}
-
-    def _paintkit_generic(self, card: str, layout: int, assign) -> Any:
-        """Универсальный режим для карточки: узор по её деталям — или ошибка.
-
-        Поверх игровой текстуры своей команды, а не поверх прошлой правки:
-        иначе War Paint накладывался бы на War Paint.
-        """
-        from src.services import mesh_parts_service
-
-        t = self.preview.textures
-        # Не через _parts_model: тот отказывает при включённом переключателе
-        # (разбитая бутылка), а узору хватает геометрии в кадре — воркер
-        # разбирает ту же модель заново.
-        model = mesh_parts_service.load(self._obj_path, self.preview.part_cuts,
-                                        self.preview.part_regions)
-        found = (self.parts._mesh_of(model, card) if model
-                 else {'error': 'Модель ещё не загружена'})
-        if isinstance(found, dict) and card != t.stable_main():
-            # Чужой узор не подставляем: у главной запасной ход — самый
-            # большой материал модели, у второстепенной он лёг бы мимо.
-            return found
-        return {'obj_path': self._obj_path, 'cuts': self.preview.part_cuts,
-                'regions': self.preview.part_regions, 'card': card,
-                'obj_material': found[0] if isinstance(found, tuple) else '',
-                'base_png': t.game_base(card, t.active_team) or t.resolve_base(card) or '',
-                'layout_seed': int(layout), 'assign': assign}
-
-    def _paintkit_plans(self, kit: int, item: int, layout: int,
-                        materials: Optional[List[str]] = None):
-        """
-        Что собрать: [(карточки, универсальный режим или None, forced, метка)]
-        — или ошибка.
-
-        War Paint игры собирается рецептом Valve один раз и ложится на
-        карточки, которые красит игра. Остальные материалы, как и все
-        материалы оружия без War Paint в игре, получают узор по своим
-        деталям — каждый отдельной сборкой: развёртка у каждого своя.
-        Материал части получает картинку своего исходного. ``materials`` —
-        что красить; None — что отмечено в панели по умолчанию
-        (paintkit_materials). Раскладка человека относится к главной
-        карточке: её детали он и раскладывал.
-
-        Метка — отпечаток всего, от чего зависит картинка, кроме аргументов в
-        имени: оружие, карточки, его OBJ, разрезы частей, базовая текстура.
-        Без неё у универсального режима (донор у всех пушек один) с тем же
-        сидом всплывала бы картинка с развёрткой прошлой пушки или прошлых
-        разрезов.
-        """
-        import hashlib
-        import json
-
-        from src.data import paintkit_defs
-
-        paths = self.tf2_paths()
-        if 'error' in paths:
-            return paths
-        t = self.preview.textures
-        main = t.stable_main()
-        if not main or not self._shown_weapon():
-            return {'error': 'Сначала выберите оружие'}
-        own = next((k for k in self._own_paintkits(paths['root'])
-                    if k['id'] == int(kit) and k['item'] == int(item)), None)
-        cards, game, spread = self._paintkit_offer(paths, item, own is not None)
-        wanted = set((game if own else cards) if materials is None else materials)
-        # Рецепт под одну пушку по деталям других материалов не разложить.
-        by_parts = own is None or own.get('by_parts', False)
-        chosen = [c for c in cards if c in wanted and (c in game or (by_parts and c in spread))]
-        if not chosen:
-            return {'error': 'Отметьте хотя бы один материал'}
-        assign = self.preview.paintkit_layouts.get(str(int(kit))) or None
-
-        plans = []
-        painted = [c for c in chosen if c in game]
-        if painted:
-            forced = None
-            if assign:
-                # Свой War Paint с раскладкой человека: группы Valve
-                # выбираются заново переменными select.
-                from src.services.paintkit_layout import own_forced, own_groups
-                defs = paintkit_defs.load(paths['root'])
-                kit_obj, item_obj = (paintkit_defs.find_item(defs, kit, item)
-                                     if defs else (None, None))
-                layers, over = (paintkit_defs.template_layers(defs, kit_obj)
-                                if kit_obj else ([], False))
-                found = defs.variables(kit_obj, item_obj, 1) if layers and item_obj else None
-                if found:
-                    forced = own_forced(own_groups(found[1], layers, over), assign,
-                                        layers, over) or None
-            plans.append((painted, None, forced))
-        by_source: Dict[str, List[str]] = {}
-        for card in chosen:
-            if card not in game:
-                by_source.setdefault(t.part_cards.get(card, card), []).append(card)
-        for source, members in by_source.items():
-            generic = self._paintkit_generic(source, layout,
-                                             assign if source == main and not own else None)
-            if 'error' in generic:
-                return generic
-            plans.append((members, generic, None))
-
-        try:
-            obj_mtime = os.path.getmtime(self._obj_path) if self._obj_path else 0
-        except OSError:
-            obj_mtime = 0
-        out = []
-        for cards_of, generic, forced in plans:
-            stamp = json.dumps([self._shown_weapon(), cards_of, generic, forced, obj_mtime],
-                               sort_keys=True, default=str)
-            out.append((cards_of, generic, forced,
-                        hashlib.sha1(stamp.encode('utf-8')).hexdigest()[:10]))
-        return out
-
-    def _paintkit_job_for(self, kit: int, item: int, wear: int, seed: int, size: int,
-                          generic, forced, out: str):
-        """Воркер War Paint под текущее оружие и команду."""
-        from src.services.paintkit_worker import PaintkitWorker
-        from src.shared.constants import Team
-
-        paths = self.tf2_paths()
-        t = self.preview.textures
-        team = 'blue' if t.active_team == Team.BLU else 'red'
-        return PaintkitWorker(paths['root'], paths['textures_vpk'], paths['misc_vpk'],
-                              kit, item, wear, team, seed, out, size=size,
-                              generic=generic, forced=forced)
-
-    def preview_paintkit(self, kit: int, item: int, wear: int = 1, seed: int = 0,
-                         layout: int = 0, materials: Optional[List[str]] = None
-                         ) -> Dict[str, Any]:
-        """
-        Быстрый предпросмотр War Paint (512 px): страница кладёт его на модель
-        временно, пока человек выбирает. В текстуры ничего не пишется.
-        Ответ — {images: {карточка: png}}.
-
-        Синхронно: при кэше текстур это доли секунды на материал, а страница
-        всё равно ждёт картинку, чтобы показать. Одновременно считается один.
-        """
-        seed = int(seed) & ((1 << 64) - 1)
-        team = self.preview.textures.active_team
-        plans = self._paintkit_plans(kit, item, layout, materials)
-        if isinstance(plans, dict):
-            return plans
-        images = {}
-        lock = self.__dict__.setdefault('_paintkit_preview_lock', threading.Lock())
-        with lock:
-            for cards, generic, forced, tag in plans:
-                out = os.path.join(self._work_dir(), f'warpaint_prev_{int(kit)}_{int(item)}'
-                                   f'_w{int(wear)}_{seed}_{int(layout)}_{team}_{tag}.png')
-                if not os.path.isfile(out):
-                    ok, message = self._paintkit_job_for(kit, item, wear, seed, 512,
-                                                         generic, forced, out).work()
-                    if not ok:
-                        return {'error': message}
-                images.update((card, out) for card in cards)
-        return {'images': images}
-
-    def apply_paintkit(self, kit: int, item: int, wear: int = 1, seed: int = 0,
-                       size: int = 1024, layout: int = 0,
-                       materials: Optional[List[str]] = None) -> Dict[str, Any]:
-        """
-        Собирает War Paint в текстуры и кладёт их на карточки (см.
-        _paintkit_plans): War Paint игры — туда, куда его кладёт игра
-        (материалы с прокси WeaponSkin), и по желанию на остальные материалы
-        узором по их деталям. У оружия без War Paint в игре узор ложится на
-        каждый отмеченный материал по его деталям (``layout`` перемешивает,
-        какой узор на какой детали).
-
-        Собирается под активную команду: у War Paint с командными узорами RED
-        и BLU разные, и человек накладывает второй, переключив команду. Дальше
-        это обычные свои текстуры — их можно дорисовать и собрать в мод.
-        Результат приходит событием ``paintkit_ready``.
-        """
-        from src.services.paintkit_worker import PaintkitBatch
-        from src.shared.constants import Team
-
-        job = getattr(self, '_paintkit_job', None)
-        if job is not None and job.isRunning():
-            return {'error': 'War Paint уже накладывается'}
-        t = self.preview.textures
-        weapon_key = self._shown_weapon()
-        team = 'blue' if t.active_team == Team.BLU else 'red'
-        seed = int(seed) & ((1 << 64) - 1)
-        size = min(max(int(size), 256), 2048)
-        plans = self._paintkit_plans(kit, item, layout, materials)
-        if isinstance(plans, dict):
-            return plans
-        w = PaintkitBatch([
-            (cards, self._paintkit_job_for(
-                kit, item, wear, seed, size, generic, forced,
-                os.path.join(self._work_dir(), f'warpaint_{int(kit)}_{int(item)}'
-                             f'_w{int(wear)}_{team}_{seed}_{int(layout)}_{size}_{tag}.png')))
-            for cards, generic, forced, tag in plans])
-        w.progress.connect(lambda _pct, text: self._put('progress', text=text))
-
-        def done(ok: bool, message: str) -> None:
-            # Пока собиралось, человек мог уйти на другое оружие: чужой War
-            # Paint на новую пушку не кладём.
-            same = (self._shown_weapon() == weapon_key
-                    and ('blue' if self.preview.textures.active_team == Team.BLU
-                         else 'red') == team)
-            applied = 0
-            try:
-                if ok and same:
-                    # Один War Paint — один шаг отмены, сколько бы карточек
-                    # он ни покрасил.
-                    self._edits_held = True
-                    try:
-                        for card, png in [(c, png) for cards, png in w.done for c in cards]:
-                            res = self.set_texture(card, png) or {}
-                            if 'error' in res:
-                                ok, message = False, res['error']
-                                break
-                            applied += 1
-                    finally:
-                        self._edits_held = False
-                    if ok:
-                        self._autosave()
-            except Exception as exc:                      # noqa: BLE001
-                logger.error(f'[paintkit] {exc}', exc_info=True)
-                ok, message = False, str(exc)
-            if applied and not ok:
-                # Не легло на одну карточку — снимаем и с остальных: War Paint
-                # на половине оружия выглядел бы наложенным целиком. Шаг
-                # отмены ещё не записан, и последний снимок — то, что было до.
-                try:
-                    self.undo_edits(0)
-                except Exception as exc:                  # noqa: BLE001
-                    logger.error(f'[paintkit] откат: {exc}', exc_info=True)
-            self._put('paintkit_ready', ok=bool(ok and same),
-                      message='' if ok and same else (message or 'Оружие сменилось'),
-                      missing=list(w.missing))
-
-        w.finished.connect(done)
-        self._paintkit_job = w
-        w.start()
-        return {'started': True, 'team': team}
-
-    def paintkit_layout(self, kit: int, item: int, layout: int = 0) -> Dict[str, Any]:
-        """
-        Раскладка War Paint по деталям для углублённого режима: слои с
-        плитками узоров, детали с их слоем и карта треугольников для вьювера.
-        См. paintkit_layout.describe.
-        """
-        from src.data import paintkit_defs
-        from src.services import paintkit_layout
-        from src.services.game_vpk_reader import GameVpkReader
-        from src.services.paintkit_worker import LOOKS_MASK, make_loader
-
-        paths = self.tf2_paths()
-        if 'error' in paths:
-            return paths
-        material = self.preview.textures.stable_main()
-        if not material or not self._shown_weapon():
-            return {'error': 'Сначала выберите оружие'}
-        defs = paintkit_defs.load(paths['root'])
-        kit_obj, item_obj = paintkit_defs.find_item(defs, kit, item) if defs else (None, None)
-        if not (kit_obj and item_obj):
-            return {'error': 'Этот War Paint не ложится на это оружие'}
-        found = self.parts._parts_model(material)
-        if isinstance(found, dict):
-            return found
-        model, obj_mat, card = found
-        own = any(k['id'] == int(kit) and k['item'] == int(item)
-                  for k in self._own_paintkits(paths['root']))
-        reader = GameVpkReader([paths['textures_vpk'], paths['misc_vpk']])
-        try:
-            res = paintkit_layout.describe(
-                defs, kit_obj, item_obj, model, obj_mat, own,
-                make_loader(reader, LOOKS_MASK), make_loader(reader, 128),
-                os.path.join(self._work_dir(), 'warpaint_layers'),
-                self.preview.paintkit_layouts.get(str(int(kit))), int(layout))
-        finally:
-            reader.close()
-        if 'error' not in res:
-            res['material'] = card
-        return res
-
-    def set_paintkit_layout(self, kit: int, assign: Optional[Dict[str, int]] = None
-                            ) -> Dict[str, Any]:
-        """Раскладка человека для War Paint ``kit``: {деталь: слой}; пусто — автомат."""
-        clean = {}
-        for k, v in (assign or {}).items():
-            try:
-                layer = int(v)
-            except (TypeError, ValueError):
-                continue
-            if isinstance(k, str) and len(k) < 16 and 0 <= layer < 64:
-                clean[k] = layer
-        if clean:
-            self.preview.paintkit_layouts[str(int(kit))] = clean
-        else:
-            self.preview.paintkit_layouts.pop(str(int(kit)), None)
-        # Раскладка — черновик до «Применить»: шагом отмены она не считается.
-        self._autosave(step=False)
-        return {'ok': True}
-
-    def _paintkit_targets(self, paintable: List[str], main: str) -> List[str]:
-        """Карточки под War Paint: материалы WeaponSkin среди карточек, иначе главная.
-
-        Синие пары (c_detonator_blue) карточек не имеют — их заполняет команда
-        BLU той же карточки, поэтому сравниваются только имена карточек.
-        """
-        wanted = {m.lower() for m in paintable or []}
-        cards = [c for c in (self.preview.textures.material_names or [])
-                 if c and c.lower() in wanted]
-        if main and main not in cards and (not wanted or main.lower() in wanted
-                                           or not cards):
-            cards.insert(0, main)
-        return cards
 
     def load_vpk_mod(self, path: str = '', lang: str = 'ru') -> Dict[str, Any]:
         """
@@ -2975,7 +1731,7 @@ class AppSession:
             return paths
 
         self.controller.stop()
-        self._forget_decor()
+        self.decor.forget()
         self._vpk_mod_path = path
         # Показанный мод — это и есть предмет: приложение так же переключает
         # категорию на «Кастомный мод» и ставит режим 'custom'.
@@ -3047,359 +1803,8 @@ class AppSession:
     # Своя модель и её QC
     # ═══════════════════════════════════════════════════════════════════════ #
 
-    def _carrier_for_preview(self):
-        """Пушка, на которой висит текущий предмет. Пусто — ни на чём.
+    # Своя модель и её QC — src/app/custom_model_editor.py (self.custom_model)
 
-        Праздничное оружие — навесная гирлянда: в кадре она не одна, и всё,
-        что рисует предмет, обязано рисовать и носителя.
-        """
-        from src.services import carrier_model
-
-        paths = self.tf2_paths()
-        key = self.preview.weapon_key
-        if 'error' in paths or not key:
-            return carrier_model.NONE
-        return carrier_model.find(key, paths['misc_vpk'], paths['root'])
-
-    def load_custom_model(self, path: str = '', keep: Optional[bool] = None,
-                          lang: str = 'ru') -> Dict[str, Any]:
-        """
-        Подставляет свою геометрию вместо игровой.
-
-        Два шага, потому что от ответа зависит всё дальнейшее. «Готова» —
-        модель со своими материалами: карточки берутся из её SMD, доступна
-        правка QC. «Только геометрия» — на экране геометрия пользователя, а
-        карточки и текстуры приезжают из игрового QC (там всё сводится к
-        игровым текстурам).
-
-        Рекомендацию считаем здесь: больше одного редактируемого материала —
-        почти наверняка готовая модель.
-        """
-        import os
-
-        from src.domain.preview.material_cards import editable_material_cards
-        from src.services import mesh_import_service
-
-        pending = self._pending_model
-        if keep is not None and pending and pending['src'] == (path or pending['src']):
-            # Второй заход после ответа: SMD уже сконвертирован.
-            smd, obj, materials = pending['smd'], pending['obj'], pending['materials']
-            source, fit = pending['source'], pending['fit']
-        else:
-            if not path or not os.path.isfile(path):
-                return {'error': 'Файл модели не найден'}
-            # Источник помним у любой модели: подгонка (масштаб, поворот,
-            # сдвиг) пересобирает SMD из него. У OBJ/GLB SMD делаем сами.
-            source, fit = path, mesh_import_service.Fit()
-            try:
-                smd = self._bake_imported_mesh(path, fit)
-            except mesh_import_service.MeshImportError as exc:
-                return {'error': str(exc)}
-            obj, materials = self._custom_model_obj(smd, ghost=True)
-            if obj is None:
-                return {'error': 'SMD не сконвертировался'}
-
-        cards = [c.name for c in editable_material_cards(materials)]
-        if keep is None:
-            self._pending_model = {'src': path, 'smd': smd, 'obj': obj,
-                                   'materials': materials, 'source': source,
-                                   'fit': fit}
-            return {'ask_keep': True, 'materials': cards,
-                    'recommend_keep': len(cards) > 1}
-
-        self._pending_model = None
-        with self._lock:
-            p = self.preview
-            # Главный материал ИГРОВОЙ модели — до сброса: карточки «только
-            # геометрии» приедут теми же именами, но позже, а текстуру из
-            # файла класть надо сейчас.
-            game_main = p.textures.stable_main()
-            # Своя геометрия — свои треугольники: части прежней модели на ней
-            # ничего не значат.
-            p.forget_parts_layout()
-            p.custom_smd_path = smd
-            p.custom_obj_path = obj
-            p.custom_keep_materials = bool(keep)
-            p.custom_qc_text = None
-            p.custom_source_path = source
-            p.custom_fit = fit.to_dict() if fit else None
-            p.reset_skins()
-            # Командные кадры и вариант остались от ИГРОВОЙ модели — на чужой
-            # геометрии они показывали бы не то. Для «только геометрии» их
-            # вернёт воркер карточек.
-            p.reset_team_frames()
-            p.reset_misc()
-
-        self._show_custom_model(obj, cards, lang)
-
-        # Базовый цвет из MTL/glTF — сразу в слоты: «готовой» модели по её
-        # материалам, «только геометрии» — первый найденный на главный
-        # игровой материал (все её материалы схлопнутся в него).
-        placed = self._place_imported_textures(
-            source, cards if keep else [game_main] if game_main else [])
-
-        self._autosave()
-        logger.info(f"своя модель: {smd} keep={bool(keep)} материалов={len(cards)}")
-        return {'started': True, 'keep': bool(keep), 'materials': cards,
-                'obj': obj, 'fit': p.custom_fit, 'textures': placed,
-                'simplified': (getattr(self, '_imported_simplified', None)
-                               if source else None)}
-
-    def _show_custom_model(self, obj: str, cards: List[str], lang: str) -> None:
-        """
-        Ставит свою геометрию в кадр.
-
-        `obj` — её OBJ для вьювера, `cards` — материалы из SMD. У «готовой»
-        модели они и есть карточки; у «только геометрии» карточки игровые, их
-        привозит воркер без геометрии. Состояние (`custom_smd_path`, `keep`)
-        к этому моменту уже выставлено — либо загрузкой, либо вернувшейся
-        работой.
-        """
-        p = self.preview
-        with self._lock:
-            p.custom_obj_path = obj
-            if p.custom_keep_materials:
-                p.textures.material_names = cards
-                p.textures.main_material = cards[0] if cards else None
-
-        # Габариты считает та же дорожка, что и у игровой модели.
-        self.controller.stop()
-        # Сцена в руках собрана под ПРОШЛУЮ геометрию: забыть её, иначе
-        # следующий запрос вида от первого лица получит одни дорожки.
-        self.viewmodel.stop()
-        self._on_model_ready(obj, '')
-        # Подложку носителя `stop()` не отменяет: она про геометрию в кадре, а
-        # та никуда не делась. Без возврата пушка под своей гирляндой серая.
-        with self._lock:
-            self.controller.apply_scene_extra()
-
-        paths = self.tf2_paths()
-        mode = getattr(self, '_mode', '')
-        if 'error' in paths or not mode or not p.weapon_key:
-            return
-        # Стили оригинала пригодятся и своей модели: по ним переопределяют
-        # текстуры вариантов. Сброшены выше — ищем заново.
-        self.skins.detect(p.weapon_key, mode, paths['misc_vpk'], lang=lang)
-        if not p.custom_keep_materials:
-            self.controller.load_game_model(
-                p.weapon_key, mode, paths['misc_vpk'], paths['textures_vpk'],
-                lang=lang, geometry=False)
-
-    def _restore_custom_model(self, lang: str = 'ru') -> bool:
-        """
-        Своя модель из вернувшейся работы — в кадр. False — ставить нечего.
-
-        Работа помнит SMD, а кадр после возврата показывал ИГРОВУЮ модель:
-        текстура, нарисованная под свою геометрию, ложилась на чужую, и на
-        экране было не то, что уйдёт в сборку. OBJ для вьювера живёт один
-        запуск, поэтому собираем его заново из того же SMD.
-        """
-        from src.domain.preview.material_cards import editable_material_cards
-
-        p = self.preview
-        smd = p.custom_smd_path
-        if not smd or not os.path.isfile(smd) or self._vpk_mod_path:
-            return False
-        # Призрак оригинала нужен подгонке, а она есть только у импорта.
-        obj, materials = self._custom_model_obj(smd, ghost=bool(p.custom_source_path))
-        if obj is None:
-            logger.warning(f"своя модель из работы не показана: {smd}")
-            return False
-        cards = [c.name for c in editable_material_cards(materials)]
-        with self._lock:
-            # Кадры команд и «Прочее» — от игровой геометрии; правки человека
-            # (текстуры, «сделать командным») уже на месте, их не трогаем.
-            force = p.textures.force_team
-            p.reset_team_frames()
-            p.reset_misc()
-            p.textures.force_team = force
-        self._show_custom_model(obj, cards, lang)
-        return True
-
-    def _place_imported_textures(self, source: Optional[str], cards: List[str]) -> int:
-        """Кладёт текстуры импортированной модели на карточки; сколько легло.
-
-        `cards` — материалы «готовой» модели (свои имена) либо один главный
-        игровой материал «только геометрии»: в него схлопнутся все её
-        материалы, туда же идёт первая найденная картинка.
-        """
-        cached = getattr(self, '_imported_mesh', None)
-        if not source or not cached or cached[0] != source or not cards:
-            return 0
-        textures = cached[1].textures if cached[1] is not None else {}
-        if not textures:
-            return 0
-        by_card = [(m, textures[m]) for m in cards if m in textures]
-        pairs = by_card or [(cards[0], next(iter(textures.values())))]
-        with self._lock:
-            for material, path in pairs:
-                self.preview.textures.set_texture(material, path)
-        return len(pairs)
-
-    def _custom_model_obj(self, smd: str, ghost: bool):
-        """OBJ своей модели для превью: (путь, материалы модели) или (None, []).
-
-        `ghost` — добавить полупрозрачный оригинал оружия ориентиром для
-        подгонки: без него человек не знает, куда повернуть и насколько
-        увеличить. Его материалы идут с приставкой `ghost:` — вьювер по ней
-        рисует призрак, а карточек по ним нет.
-        """
-        import os
-        import tempfile
-
-        from src.services import carrier_model, decompile_cache
-        from src.services.smd_service import SMDService
-        from src.services.smd_to_obj_service import MeshPart, SmdToObjService
-
-        obj_dir = tempfile.mkdtemp(prefix='tf2_smd_preview_')
-        obj = os.path.join(obj_dir, 'model.obj')
-        # Пушка-НОСИТЕЛЬ остаётся в кадре: у праздничного оружия своей
-        # моделью заменяют гирлянду, а не пушку под ней. У обычного
-        # оружия носителя нет, и список пуст — на них это не влияет.
-        carrier = self._carrier_for_preview()
-        parts = [MeshPart(smd_path=smd, extra_smd_paths=tuple(carrier.smds))]
-        if ghost:
-            key = self.preview.weapon_key or ''
-            qc = decompile_cache.find_cached_qc_for_weapon(key) if key else None
-            ref = SMDService.find_reference_smd(os.path.dirname(qc), key) if qc else None
-            if ref:
-                parts.append(MeshPart(smd_path=ref, material_prefix='ghost:'))
-            else:
-                logger.info('призрак оригинала не показан: модель ещё не разобрана')
-        ok, materials = SmdToObjService.convert_parts(parts, obj)
-        if not ok or not os.path.exists(obj):
-            return None, []
-        # Материалы носителя и призрака предмету не принадлежат: карточек по
-        # ним нет и в сборку они не идут — иначе своя модель гирлянды тянула
-        # бы за собой ещё и текстуру базового обреза.
-        own = carrier_model.materials(carrier)
-        materials = [m for m in (materials or [])
-                     if m not in own and not m.startswith('ghost:')]
-        return obj, materials
-
-    def _bake_imported_mesh(self, source: str, fit) -> str:
-        """SMD с запечённой подгонкой: из OBJ/GLB — свой, из SMD — тот же с
-        пересчитанными вершинами; лимиты studiomdl — ошибкой."""
-        import os
-        import tempfile
-
-        from src.services import mesh_import_service
-
-        # Разобранный меш держим: подгонка правится ползунком, и разбирать
-        # 65k треугольников заново на каждый шаг — секунда впустую.
-        cached = getattr(self, '_imported_mesh', None)
-        if cached and cached[0] == source:
-            _, mesh, out_dir = cached
-        elif source.lower().endswith('.smd'):
-            # Свой SMD: кости и веса остаются, двигаются только вершины.
-            # Без подгонки файл идёт как есть — ничего не переписываем.
-            self._imported_simplified = None
-            if fit == mesh_import_service.Fit():
-                return source
-            out_dir = tempfile.mkdtemp(prefix='tf2_mesh_import_')
-            self._imported_mesh = (source, None, out_dir)
-            mesh = None
-        else:
-            mesh = mesh_import_service.load_mesh(source)
-            # Скульпт из интернета на сотни тысяч треугольников studiomdl не
-            # возьмёт — упрощаем сами, с сохранением UV; человеку об этом
-            # скажет ответ загрузки. Слишком много материалов так не лечится.
-            self._imported_simplified = None
-            if mesh_import_service.over_limits(mesh):
-                before = mesh.triangle_count
-                mesh = mesh_import_service.simplify(mesh)
-                self._imported_simplified = (before, mesh.triangle_count)
-            problem = mesh_import_service.check_limits(mesh)
-            if problem:
-                raise mesh_import_service.MeshImportError(problem)
-            if not mesh.has_uv:
-                logger.warning(f"у модели нет UV-развёртки: {source}")
-            # Одна папка на источник: SMD перезаписывается, а не плодится
-            # по 15 МБ на каждый шаг ползунка.
-            out_dir = tempfile.mkdtemp(prefix='tf2_mesh_import_')
-            self._imported_mesh = (source, mesh, out_dir)
-        stem = os.path.splitext(os.path.basename(source))[0]
-        out = os.path.join(out_dir, stem + '.smd')
-        if mesh is None:
-            return mesh_import_service.transform_smd(source, out, fit)
-        return mesh_import_service.write_smd(mesh, out, fit)
-
-    def set_custom_fit(self, fit: Optional[dict] = None) -> Dict[str, Any]:
-        """Подгонка импортированной модели: пересобирает SMD с запечённым
-        трансформом. Сцену превью не перегружает — вьювер крутит модель сам
-        тем же трансформом; SMD нужен сборке и виду от первого лица."""
-        from src.services import mesh_import_service
-
-        p = self.preview
-        if not p.custom_source_path:
-            return {'error': 'Подгонка есть только у импортированной модели'}
-        parsed = mesh_import_service.Fit.from_dict(fit)
-        try:
-            smd = self._bake_imported_mesh(p.custom_source_path, parsed)
-        except mesh_import_service.MeshImportError as exc:
-            return {'error': str(exc)}
-        with self._lock:
-            p.custom_smd_path = smd
-            p.custom_fit = parsed.to_dict()
-        self._autosave()
-        return {'fit': p.custom_fit}
-
-    def drop_custom_model(self, lang: str = 'ru') -> Dict[str, Any]:
-        """Забывает свою модель и возвращает в кадр игровую.
-
-        Раньше сброс был только в состоянии: в кадре и в альбоме оставались
-        своя геометрия и её карточки до перезагрузки предмета. Игровую модель
-        грузим той же дорожкой, что и выбор предмета — с её карточками и
-        стилями; правки текстур при этом остаются.
-        """
-        p = self.preview
-        key, mode = p.weapon_key, getattr(self, '_mode', '')
-        with self._lock:
-            p.begin_game_model()
-            p.custom_qc_text = None
-        self._pending_model = None
-        self._imported_mesh = None
-        self.viewmodel.stop()        # сцена в руках была со своей моделью
-        paths = self.tf2_paths()
-        if key and mode and 'error' not in paths:
-            self.controller.load_game_model(
-                key, mode, paths['misc_vpk'], paths['textures_vpk'], lang=lang)
-            self.skins.detect(key, mode, paths['misc_vpk'], lang=lang)
-        self._autosave()
-        return {'dropped': True}
-
-    def qc_text(self) -> Dict[str, Any]:
-        """
-        QC для правки: сохранённый пользователем либо исправленный авто-QC.
-
-        Правка QC имеет смысл только у «готовой» модели: у замены геометрии
-        сборка собирает QC сама под игровые материалы.
-        """
-        from src.services import decompile_cache
-        from src.services.model_build_service import ModelBuildService
-
-        p = self.preview
-        if not p.custom_keep_materials:
-            return {'error': 'QC правится только у своей готовой модели'}
-
-        if p.custom_qc_text:
-            # $texturegroup синхронизируем со стилями, правки человека при этом
-            # не теряются.
-            return {'text': ModelBuildService.replace_texturegroup_in_text(
-                p.custom_qc_text, ''), 'edited': True}
-
-        qc_path = decompile_cache.find_cached_qc_for_weapon(p.weapon_key)
-        text = ModelBuildService.make_corrected_qc(qc_path or '', p.weapon_key, '')
-        if not text.strip():
-            return {'error': 'QC ещё не извлечён из игры - дождитесь загрузки модели'}
-        return {'text': text, 'edited': False}
-
-    def save_qc(self, text: str = '') -> Dict[str, Any]:
-        """Запоминает правку QC; пустой текст — вернуться к авто-QC."""
-        with self._lock:
-            self.preview.custom_qc_text = text.strip() or None
-        self._autosave()
-        return {'edited': bool(self.preview.custom_qc_text)}
 
     # ═══════════════════════════════════════════════════════════════════════ #
     # Работа над предметом: сохранение правок между запусками
@@ -3441,73 +1846,24 @@ class AppSession:
     # История правок предмета: Ctrl+Z / Ctrl+Y
     # ═══════════════════════════════════════════════════════════════════════ #
 
-    #: Глубже тридцати шагов не помнит никто.
-    EDIT_HISTORY_LIMIT = 30
+    # Сам стек снимков — src/app/edit_history.py (self.history); здесь —
+    # снимок из состояния превью и то, как он ложится обратно на предмет.
 
     def _edits_reset(self) -> None:
-        """Точка отсчёта: предмет открыт (с работой или без). Раньше неё
-        откатываться нельзя — там правки другого предмета."""
-        self._edit_history = [self._edit_snapshot()]
-        self._edit_pos = 0
+        """Точка отсчёта истории: предмет открыт (с работой или без)."""
+        self.history.reset(self._edit_snapshot())
 
     def _edit_snapshot(self) -> Dict[str, Any]:
         """Снимок правок — то же, что уходит на диск, своей копией."""
-        import copy
-        return self._shield_work_files(copy.deepcopy(self.preview.user_edits()))
-
-    def _shield_work_files(self, node: Any) -> Any:
-        """
-        Пути в папку работы заменяет своими копиями.
-
-        Вернувшаяся с диска работа ссылается в `work/<ключ>/files`, а
-        автосохранение при каждой записи убирает оттуда всё, на что правки
-        больше не ссылаются (и всю папку, когда правок не осталось). Снимку
-        истории эти файлы ещё нужны: сняли текстуру — Ctrl+Z обязан её
-        вернуть. Копия делается один раз на файл и живёт с сеансом.
-        """
-        if isinstance(node, dict):
-            return {k: self._shield_work_files(v) for k, v in node.items()}
-        if isinstance(node, list):
-            return [self._shield_work_files(v) for v in node]
-        if not isinstance(node, str) or not _in_work_dir(node):
-            return node
-        import shutil
-        try:
-            stat = os.stat(node)
-        except OSError:
-            return node
-        # Ключ — вместе с размером и временем: под тем же именем в папке
-        # работы позже может лежать другой файл, и старая копия соврала бы.
-        key = f"{node}|{stat.st_size}|{stat.st_mtime_ns}"
-        owned = self._undo_copies.get(key)
-        if owned is None:
-            owned = os.path.join(self._work_dir(),
-                                 f"undo_{len(self._undo_copies)}_{os.path.basename(node)}")
-            try:
-                shutil.copy2(node, owned)
-            except OSError as exc:
-                logger.warning(f"копия для отмены не сделана: {exc}")
-                return node
-            self._undo_copies[key] = owned
-        return owned
+        return self.history.snapshot(self.preview.user_edits())
 
     def _edits_commit(self) -> None:
-        """Шаг истории после правки. Снимок, равный текущему, не дублируем:
-        часть правок пишет состояние дважды (положил текстуру и тут же
-        пересобрал склейку), и Ctrl+Z на них был бы холостым."""
-        snap = self._edit_snapshot()
-        if self._edit_history and snap == self._edit_history[self._edit_pos]:
-            return
-        del self._edit_history[self._edit_pos + 1:]
-        self._edit_history.append(snap)
-        if len(self._edit_history) > self.EDIT_HISTORY_LIMIT:
-            self._edit_history.pop(0)
-        self._edit_pos = len(self._edit_history) - 1
+        """Шаг истории после правки (повтор текущего снимка не пишется)."""
+        self.history.commit(self._edit_snapshot())
 
     def edit_history(self) -> Dict[str, Any]:
         """Есть ли куда откатываться и что возвращать."""
-        return {'undo': self._edit_pos > 0,
-                'redo': 0 <= self._edit_pos < len(self._edit_history) - 1}
+        return self.history.state()
 
     def undo_edits(self, delta: int = -1, lang: str = 'ru') -> Dict[str, Any]:
         """
@@ -3522,10 +1878,10 @@ class AppSession:
         from src.data.skyboxes import SKYBOX_MODE, SKY_PANO_KEY
         from src.services import mesh_import_service
 
-        pos = self._edit_pos + int(delta)
-        if pos < 0 or pos >= len(self._edit_history):
+        pos = self.history.pos + int(delta)
+        snap = self.history.at(pos)
+        if snap is None:
             return {'error': 'Отменять нечего' if delta < 0 else 'Возвращать нечего'}
-        snap = self._edit_history[pos]
         p = self.preview
         mode = getattr(self, '_mode', '')
 
@@ -3546,7 +1902,7 @@ class AppSession:
             # OBJ своей модели живёт один запуск — не терять, пока SMD тот же.
             if p.custom_smd_path == was_smd:
                 p.custom_obj_path = obj
-            self._edit_pos = pos
+            self.history.move_to(pos)
 
         paths = self.tf2_paths()
         if to_game:
@@ -3556,12 +1912,12 @@ class AppSession:
                     p.weapon_key, mode, paths['misc_vpk'], paths['textures_vpk'], lang=lang)
                 self.skins.detect(p.weapon_key, mode, paths['misc_vpk'], lang=lang)
         elif p.custom_smd_path != was_smd:
-            self._restore_custom_model(lang)
+            self.custom_model.restore(lang)
         elif p.custom_source_path and p.custom_fit != was_fit:
             # SMD импортированной модели один на все подгонки: на диске лежит
             # последняя, а снимок вернул прежние числа — запечь их заново.
             try:
-                smd = self._bake_imported_mesh(
+                smd = self.custom_model.bake_imported_mesh(
                     p.custom_source_path, mesh_import_service.Fit.from_dict(p.custom_fit))
                 with self._lock:
                     p.custom_smd_path = smd
@@ -3579,7 +1935,7 @@ class AppSession:
             self._after_model.append(lambda: self._recompose_after_undo(painted, pos))
         else:
             self.parts.recompose_slots(painted)
-        self._reshow_decor(was_decor, lang)
+        self.decor.reshow(was_decor, lang)
         if shell_moved:
             self._reload_item(lang)
 
@@ -3593,7 +1949,7 @@ class AppSession:
         # Склейки пересобраны под новыми именами — снимок должен знать их,
         # иначе следующая же правка легла бы в историю дважды.
         with self._lock:
-            self._edit_history[pos] = self._edit_snapshot()
+            self.history.refresh(pos, self._edit_snapshot())
         self._autosave()
         return {**self.view_state(), **self.edit_history()}
 
@@ -3602,8 +1958,8 @@ class AppSession:
         этого шага узнаёт их новые имена (как в `undo_edits`)."""
         self.parts.recompose_slots(slots)
         with self._lock:
-            if self._edit_pos == pos and pos < len(self._edit_history):
-                self._edit_history[pos] = self._edit_snapshot()
+            if self.history.pos == pos:
+                self.history.refresh(pos, self._edit_snapshot())
         self._autosave(step=False)
 
     def _item_id(self) -> Dict[str, Any]:
@@ -3681,8 +2037,8 @@ class AppSession:
         # Своя модель — тоже правка: состояние её забыло, а в кадре она
         # оставалась до перезагрузки предмета.
         if had_custom:
-            self.drop_custom_model(lang)
-        self._reshow_decor(was_decor, lang)
+            self.custom_model.drop_custom_model(lang)
+        self.decor.reshow(was_decor, lang)
         return self.view_state()
 
     def keep_work(self) -> Dict[str, Any]:
@@ -3702,8 +2058,8 @@ class AppSession:
         if not self._restore_work(asked=True):
             return {'error': 'Сохранённых правок у этого предмета нет'}
         # В работе была своя модель — в кадре должна стоять она, а не игровая.
-        self._restore_custom_model(lang)
-        self._reshow_decor(was_decor, lang)
+        self.custom_model.restore(lang)
+        self.decor.reshow(was_decor, lang)
         # Вместе с правками вернулись и снимки соседних стилей — пометить.
         return {**self.view_state(), 'edited_styles': sorted(self._hat_styles)}
 
@@ -3751,7 +2107,8 @@ class AppSession:
                 'kept': work_store.is_kept(key)}
 
     # ═══════════════════════════════════════════════════════════════════════ #
-    # Карты материала и правка VMT
+    # Карточка материала. Карты и правка VMT — src/app/materials_editor.py
+    # (self.materials)
     # ═══════════════════════════════════════════════════════════════════════ #
 
     def _card_key(self, material: str = '') -> str:
@@ -3773,322 +2130,9 @@ class AppSession:
             material = names[0] if names else ''
         return '' if material == SINGLE_TEX_KEY else material
 
-    def texture_maps(self, material: str = '') -> Dict[str, Any]:
-        """Карты материала для показа в диалоге.
-
-        У мода из VPK это и карты из VMT самого мода (``{"mod": True,
-        "preview": …}``) — они отмечены, а не пусты. Сохранённая запись
-        важнее: снятая (``off``) не показывается, оставленная — с превью мода.
-        """
-        key = self._card_key(material)
-        mod = self.preview.mod_maps.get(key) or {}
-        out = {map_id: dict(entry) for map_id, entry in mod.items()}
-        for map_id, entry in (self.preview.texture_maps.get(key) or {}).items():
-            if entry.get('off'):
-                out.pop(map_id, None)
-            elif entry.get('mod') and map_id in mod:
-                out[map_id] = {**mod[map_id], **entry}
-            else:
-                out[map_id] = dict(entry)
-        return out
-
-    def set_texture_maps(self, material: str = '',
-                         maps: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """
-        Записывает карты материала. Пустой набор снимает их совсем.
-
-        Присланное проверяется (``normalize_maps``): запись уходит в генератор
-        VTF и в VMT, и мусорный ключ там превращается в сломанный материал.
-        Полоска из конструктора (``generate``) рисуется здесь же в PNG — дальше
-        она обычная картинка карты, и сборка о конструкторе не знает.
-
-        Карта мода, которой в присланном нет, сохраняется отметкой ``off``:
-        сборка уберёт её из VMT. Без отметки «снял» не отличить от «не
-        трогал» — и после перезапуска карта мода вернулась бы.
-        """
-        from src.data.material_maps import MATERIAL_MAPS, normalize_maps
-
-        if not getattr(self, '_mode', ''):
-            return {'error': 'Сначала выберите предмет'}
-
-        key = self._card_key(material)
-        maps = {map_id: dict(entry) for map_id, entry in (maps or {}).items()
-                if isinstance(entry, dict)}
-        for map_id, entry in maps.items():
-            name = (MATERIAL_MAPS.get(map_id) or {}).get('generator')
-            if name and isinstance(entry.get('generate'), dict):
-                entry['image'] = self._generated_png(name, entry['generate'])
-        for map_id in self.preview.mod_maps.get(key) or {}:
-            maps.setdefault(map_id, {'off': True})
-        clean = normalize_maps(maps)
-        with self._lock:
-            if clean:
-                self.preview.texture_maps[key] = clean
-            else:
-                self.preview.texture_maps.pop(key, None)
-        self._autosave()
-        return {'material': key, 'maps': clean}
-
-    def _generated_png(self, name: str, params: Dict[str, Any]) -> str:
-        """PNG карты из конструктора (lightwarp, phongwarp) — рядом с
-        загрузками страницы (работа копирует его к себе, как любую картинку
-        карты). Дальше это обычная картинка, сборка о конструкторе не знает."""
-        import hashlib
-        import json
-        import tempfile
-        from pathlib import Path
-
-        from src.data.material_maps import generator
-
-        module = generator(name)
-        params = module.clean_params(params)
-        digest = hashlib.sha1(json.dumps(params, sort_keys=True).encode()).hexdigest()[:12]
-        out = Path(tempfile.gettempdir()) / 'tf2sg_uploads' / f'{name}_{digest}.png'
-        out.parent.mkdir(parents=True, exist_ok=True)
-        return module.write_png(params, str(out), self._game_root())
-
-    @staticmethod
-    def _game_root() -> str:
-        """Папка игры из настроек — без проверок tf2_paths: превью полоски
-        дёргается на каждое движение ползунка, а основа нужна только для
-        чтения VPK (нет игры — основа x/2)."""
-        from src.config.app_config import AppConfig
-        return (AppConfig.load_config().get('tf2_game_folder') or '').strip()
-
-    def lightwarp_ramp(self, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """Полоска конструктора для живого превью: 256 цветов [r, g, b] и
-        она же точками."""
-        from src.services import lightwarp
-
-        params = lightwarp.clean_params(params or {})
-        strip = lightwarp.ramp(params, self._game_root())
-        # Точки той же полоски — для «Сделать точками»: любую основу со всеми
-        # настройками можно дальше править руками.
-        return {'params': params, 'ramp': strip.tolist(), 'stops': lightwarp.to_stops(strip)}
-
-    def map_preview(self, material: str = '', map_id: str = 'selfillum',
-                    spec: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """
-        Картинки для превью карты материала: текстура материала, её альфа и
-        сама карта - та же, что построит сборка (derive_effect_map /
-        process_image / карта мода). Смешивает их страница по формуле шейдера.
-
-        `map`: самосвечение, отражение, маска обводки - L; Phong-карта - RGBA
-        (R - размер блика); detail - RGBA в своём размере (она тайлится).
-        `mask`: у Phong-карты «Авто» - где блестит (сборка кладёт её в альфу
-        нормали). `env`: у отражения - шесть граней кубмапы строкой.
-
-        Не больше 256 px: превью, а не сборка. Имена по содержимому - браузер
-        не покажет старую картинку из кэша.
-        """
-        import hashlib
-        import tempfile
-        from pathlib import Path
-
-        from PIL import Image
-
-        from src.services.texture_service import TextureService
-
-        key = self._card_key(material)
-        tex = self.preview.textures.resolve_base(key)
-        if not tex or not os.path.isfile(tex):
-            # Без текстуры шар отражения и обводки всё равно показываем.
-            tex = None
-            if map_id == 'selfillum':
-                return {'error': 'У материала нет текстуры для превью'}
-        spec = dict(spec or {})
-        out = Path(tempfile.gettempdir()) / 'tf2sg_mapview'
-        out.mkdir(parents=True, exist_ok=True)
-        stamp = hashlib.sha1(repr((key, tex, tex and os.path.getmtime(tex), map_id, sorted(
-            (k, str(v)) for k, v in spec.items()))).encode()).hexdigest()[:12]
-
-        result = {'texture': '', 'alpha': '', 'map': '', 'mask': ''}
-        size = None
-        if tex:
-            with Image.open(tex) as img:
-                rgba = img.convert('RGBA')
-            rgba.thumbnail((256, 256), Image.LANCZOS)
-            size = rgba.size
-            texture = out / f'tex_{stamp}.png'
-            alpha = out / f'alpha_{stamp}.png'
-            rgba.convert('RGB').save(texture)
-            rgba.getchannel('A').save(alpha)
-            result.update(texture=str(texture), alpha=str(alpha))
-
-        kind = {'selfillum': 'selfillum', 'phongexp': 'phong'}.get(map_id, 'envmapmask')
-        colour = map_id in ('phongexp', 'detail')
-        thr = str(spec.get('threshold', '')).strip()
-        thr = int(thr) if thr.isdigit() else None
-        made = out / f'map_{stamp}.png'
-        # Имя по входным данным, но не по содержимому карты мода или файла:
-        # прошлый файл с тем же именем мог остаться от другого материала.
-        made.unlink(missing_ok=True)
-        source = None
-        if spec.get('derive') and tex:
-            if map_id != 'detail':
-                TextureService.derive_effect_map(str(texture), str(made), kind, size,
-                                                 threshold=None if colour else thr)
-            if map_id == 'phongexp':
-                # Где блестит: сборка кладёт маску в альфу нормали
-                # (VpkTextureBuilder: «Авто-блеск»), по яркости и порогу.
-                mask = out / f'mask_{stamp}.png'
-                TextureService.derive_effect_map(str(texture), str(mask), 'envmapmask',
-                                                 size, threshold=thr)
-                result['mask'] = str(mask)
-        elif spec.get('image') and os.path.isfile(spec['image']):
-            source = spec['image']
-        elif spec.get('mod'):
-            source = ((self.preview.mod_maps.get(key) or {}).get(map_id) or {}).get('preview')
-        if source and os.path.isfile(source):
-            with Image.open(source) as img:
-                pic = img.convert('RGBA' if colour else 'L')
-            if map_id == 'detail' or not size:
-                pic.thumbnail((256, 256), Image.LANCZOS)   # detail: своя развёртка × $detailscale
-            else:
-                pic = pic.resize(size, Image.LANCZOS)
-            pic.save(made)
-        if made.exists():
-            with Image.open(made) as img:
-                pic = img.convert('RGBA' if colour else 'L')
-            if colour:
-                # Альфа отдельно: браузер обнуляет цвет там, где альфа 0, а у
-                # Phong-карты альфа - маска обводки, у detail она нужна режиму 2.
-                if map_id == 'detail':
-                    alpha_map = out / f'map_alpha_{stamp}.png'
-                    pic.getchannel('A').save(alpha_map)
-                    result['map_alpha'] = str(alpha_map)
-                pic = pic.convert('RGB')
-            pic.save(made)
-            result['map'] = str(made)
-        if map_id == 'envmapmask':
-            result.update(self._cubemap_strip(material, spec.get('cubemap') or 'keep'))
-        return result
-
-    def _cubemap_strip(self, material: str, choice: str) -> Dict[str, Any]:
-        """Окружение отражения для превью: шесть граней кубмапы строкой
-        (+X -X +Y -Y +Z -Z, как в VTF). `env_cubemap` - окружение карты, его
-        в файлах нет: показываем студийный cubemap_specular001 (`stand_in`)."""
-        import tempfile
-        from pathlib import Path
-
-        import numpy as np
-        from PIL import Image
-
-        from src.data.material_maps import CUBEMAPS
-        from src.services import vmt_parse
-        from src.services.game_vpk_reader import GameVpkReader
-        from src.services.vtflib_wrapper import VTFLib
-
-        name = CUBEMAPS.get(choice)
-        if choice == 'keep':
-            vmt = self.open_vmt(material)
-            name = vmt_parse.parse(vmt.get('content') or '').path('$envmap') or ''
-        stand_in = not name or name == 'env_cubemap'     # path() уже с прямыми слэшами
-        if stand_in:
-            name = CUBEMAPS['specular']
-        out = Path(tempfile.gettempdir()) / 'tf2sg_mapview' / (
-            'env_' + name.replace('/', '_') + '.png')
-        if not out.exists():
-            paths = self.tf2_paths()
-            if 'error' in paths:
-                return {'env': '', 'stand_in': stand_in}
-            reader = GameVpkReader([paths['textures_vpk'], paths['misc_vpk']])
-            try:
-                data = reader.find_vtf_for_basetexture(name)
-            finally:
-                reader.close()
-            if not data:
-                return {'env': '', 'stand_in': stand_in}
-            vtf = out.with_suffix('.vtf')
-            vtf.write_bytes(data)
-            try:
-                faces = []
-                for face in range(6):
-                    raw, w, h = VTFLib.read_vtf_as_rgba(str(vtf), face)
-                    faces.append(np.frombuffer(raw, np.uint8).reshape(h, w, 4)[..., :3])
-                Image.fromarray(np.concatenate(faces, axis=1)).save(out)
-            except Exception as exc:                       # noqa: BLE001
-                logger.warning(f'[maps] кубмапа {name} не читается: {exc}')
-                return {'env': '', 'stand_in': stand_in}
-            finally:
-                vtf.unlink(missing_ok=True)
-        return {'env': str(out), 'stand_in': stand_in}
-
-    @staticmethod
-    def phongwarp_preview(params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """Градиент блика для живого превью — уменьшенный (64×64)."""
-        from src.services import phongwarp
-
-        params = phongwarp.clean_params(params or {})
-        return {'params': params, 'image': phongwarp.preview(params)}
-
-    def add_to_style(self, material: str = '') -> Dict[str, Any]:
-        """Добавляет материал в активный стиль (пустой карточкой)."""
-        with self._lock:
-            ok = self.preview.add_to_style(material)
-        if not ok:
-            return {'error': 'В стиль можно добавить только материал модели'}
-        self._autosave()
-        return self.view_state()
-
-    def drop_from_style(self, material: str = '') -> Dict[str, Any]:
-        """Убирает материал из стиля — он вернётся к базовой текстуре."""
-        with self._lock:
-            self.preview.drop_from_style(material)
-        self._autosave()
-        return self.view_state()
-
-    def texture_settings(self, material: str = '') -> Dict[str, Any]:
-        """Свои настройки материала или пусто, если он собирается как все."""
-        key = self._card_key(material)
-        return {'material': key,
-                'settings': dict(self.preview.texture_overrides.get(key, {}))}
-
-    def set_texture_settings(self, material: str = '',
-                             settings: Optional[Dict[str, Any]] = None
-                             ) -> Dict[str, Any]:
-        """
-        Задаёт материалу свои настройки сборки; пустые — возврат к глобальным.
-
-        Страница присылает полный набор (разрешение, формат, флаги, опции):
-        частичная запись потребовала бы знать здесь, что именно на ней сейчас
-        показано, а показанное — уже отражение этого состояния.
-        """
-        from src.data.texture_overrides import override_badge
-
-        if not getattr(self, '_mode', ''):
-            return {'error': 'Сначала выберите предмет'}
-
-        key = self._card_key(material)
-        clean = {k: v for k, v in (settings or {}).items()
-                 if k in ('size', 'format', 'flags', 'options') and v is not None}
-        with self._lock:
-            if clean:
-                self.preview.texture_overrides[key] = clean
-            else:
-                self.preview.texture_overrides.pop(key, None)
-        self._autosave()
-        return {'material': key, 'settings': clean,
-                'badge': override_badge(clean)}
-
-    def texture_badges(self) -> Dict[str, str]:
-        """{материал: подпись} — у каких карточек свои настройки сборки."""
-        from src.data.texture_overrides import override_badge
-        return {mat: override_badge(ov)
-                for mat, ov in self.preview.texture_overrides.items() if ov}
-
     # ═══════════════════════════════════════════════════════════════════════ #
     # Части модели — src/app/parts_editor.py (self.parts)
     # ═══════════════════════════════════════════════════════════════════════ #
-
-    def _decor_for_card(self, card: str):
-        """Разобранная гирлянда, к которой относится карточка, — даже если
-        сейчас показана другая или показ выключен: отмена и сборка гифок
-        пересобирают склейки гирлянды и без неё в кадре."""
-        from src.services import festive_decor
-        kind, _material = festive_decor.parse_card(card)
-        decor = self._decors.get(kind) if kind else None
-        return decor if decor and decor.weapon_key == self._shown_weapon() else None
 
 
     def _tint_risks(self, paths) -> Dict[str, Any]:
@@ -4151,146 +2195,6 @@ class AppSession:
             atexit.register(shutil.rmtree, folder, ignore_errors=True)
         return folder
 
-    def _vmt_target(self, material: str = '') -> Any:
-        """(ключ правки, ключ модели, имя материала) либо словарь с ошибкой."""
-        from src.data.weapons import SPECIAL_MODES
-        from src.services import vmt_source_service
-
-        mode = getattr(self, '_mode', '')
-        if not mode:
-            return {'error': 'Сначала выберите предмет'}
-        if mode == 'custom':
-            # Мод из VPK: правится VMT самого мода (путь в архиве вместо
-            # ключа оружия), правка - под ключом этого мода.
-            from src.services.edited_vmt_service import EditedVMTService
-            card = self._card_key(material)
-            vmt = self.preview.mod_vmts.get(card)
-            if not (vmt and self._vpk_mod_path):
-                return {'error': 'У этой текстуры в моде нет VMT'}
-            return vmt, EditedVMTService.mod_key(self._vpk_mod_path, card)
-        if mode in SPECIAL_MODES:
-            return {'error': 'Для этого режима редактор VMT недоступен'}
-
-        target = vmt_source_service.resolve_target(
-            mode, hat_mdl=self.preview.weapon_key)
-        if target is None:
-            return {'error': 'Для этого режима редактор VMT недоступен'}
-
-        weapon_key, _display = target
-        # Ключ хранения правки — имя материала: у главного он совпадает с
-        # texture_filename, который сборка и ищет.
-        return weapon_key, (self._card_key(material) or weapon_key)
-
-    def _vmt_label(self, edit_key: str, material: str) -> str:
-        """Имя материала для страницы - она шлёт его обратно при сохранении.
-        У мода из VPK ключ хранения свой (EditedVMTService.mod_key), и
-        вернувшись, он не находил карточку: «нет VMT»."""
-        if getattr(self, '_mode', '') == 'custom':
-            return self._card_key(material)
-        return edit_key
-
-    def open_vmt(self, material: str = '', lang: str = 'ru') -> Dict[str, Any]:
-        """
-        Отдаёт текст VMT для правки: сохранённую версию либо игровой оригинал.
-
-        Оригинал возвращается всегда отдельным полем — по нему работает
-        «вернуть как в игре», и без него сброс вернул бы саму правку.
-        """
-        from src.services.edited_vmt_service import EditedVMTService
-
-        target = self._vmt_target(material)
-        if isinstance(target, dict):
-            return target
-        weapon_key, edit_key = target
-        mode = getattr(self, '_mode', '')
-
-        paths = self.tf2_paths()
-        tf2_root = '' if 'error' in paths else paths['root']
-
-        original = None
-        edited_path = EditedVMTService.get_edited_vmt(edit_key)
-        if edited_path and os.path.exists(edited_path):
-            original = EditedVMTService.read_original_backup(edit_key)
-            if original is None and tf2_root:
-                original = self._vmt_original(mode, weapon_key, tf2_root, edit_key, lang)
-            try:
-                with open(edited_path, 'r', encoding='utf-8', errors='replace') as f:
-                    content = f.read()
-            except OSError as exc:
-                return {'error': f'не прочитать правку: {exc}'}
-            return {'material': self._vmt_label(edit_key, material), 'content': content,
-                    'original': original if original is not None else content,
-                    'edited': True}
-
-        if not tf2_root:
-            return paths
-        original = self._vmt_original(mode, weapon_key, tf2_root, edit_key, lang)
-        if original is None:
-            return {'error': f'Оригинальный VMT для «{edit_key}» не найден'}
-        return {'material': self._vmt_label(edit_key, material), 'content': original,
-                'original': original, 'edited': False}
-
-    def _vmt_original(self, mode: str, weapon_key: str, tf2_root: str,
-                      edit_key: str, lang: str) -> Optional[str]:
-        """
-        С чего начинается правка VMT материала.
-
-        У части, ставшей своим материалом, в игре VMT нет: она начинается с
-        игрового VMT исходного. Правку исходного, какой та была при создании,
-        материал части получил копией (PartsEditor._fork_vmt); поздние правки
-        исходного его не касаются (src/services/part_materials.py).
-        """
-        from src.services import vmt_source_service
-
-        if mode == 'custom':
-            return self._mod_vmt_text(weapon_key)
-        base = self.preview.textures.part_cards.get(edit_key)
-        if base is not None:
-            edit_key = self._card_key(base) or weapon_key
-        if not tf2_root:
-            return None
-        return vmt_source_service.original_content(
-            mode, weapon_key, tf2_root, edit_key, lang)
-
-    def _mod_vmt_text(self, vmt_rel: str) -> Optional[str]:
-        """VMT из архива показанного мода - оригинал для его редактора."""
-        import vpk as vpklib
-        try:
-            data = vpklib.open(self._vpk_mod_path)[vmt_rel].read()
-        except Exception as exc:                             # noqa: BLE001
-            logger.warning(f'VMT мода не прочитан ({vmt_rel}): {exc}')
-            return None
-        try:
-            return data.decode('utf-8')
-        except UnicodeDecodeError:
-            return data.decode('cp1251', errors='replace')
-
-    def save_vmt(self, material: str = '', content: str = '',
-                 original: str = '', lang: str = 'ru') -> Dict[str, Any]:
-        """Сохраняет правку VMT. Сломанный синтаксис не сохраняется."""
-        from src.services import vmt_source_service
-
-        target = self._vmt_target(material)
-        if isinstance(target, dict):
-            return target
-        _weapon_key, edit_key = target
-
-        ok, error, saved = vmt_source_service.save_edit(
-            edit_key, content, original or None, lang)
-        if not ok:
-            return {'error': error}
-        return {'material': self._vmt_label(edit_key, material), 'content': saved, 'edited': True}
-
-    def reset_vmt(self, material: str = '') -> Dict[str, Any]:
-        """Удаляет правку: материал вернётся к игровому оригиналу."""
-        from src.services.edited_vmt_service import EditedVMTService
-
-        target = self._vmt_target(material)
-        if isinstance(target, dict):
-            return target
-        _weapon_key, edit_key = target
-        EditedVMTService.delete_edited_vmt(edit_key)
-        return {'material': self._vmt_label(edit_key, material), 'edited': False}
 
     # ═══════════════════════════════════════════════════════════════════════ #
     # Инструменты: извлечение оригиналов и объединение модов
@@ -4312,264 +2216,8 @@ class AppSession:
         return (str(export_dir()),
                 AppConfig.load_config().get('export_image_format') or 'PNG')
 
-    def _run_tool(self, worker, done: str = 'tool_done') -> Dict[str, Any]:
-        """
-        Запускает воркер-инструмент и переводит его сигналы в события.
+    # Инструменты — src/app/tools_editor.py (self.tools)
 
-        Инструмент один на сеанс: две декомпиляции разом дерутся за один
-        временный каталог — в приложении это ровно та же проверка
-        (``_worker_busy``).
-        """
-        worker.progress.connect(lambda pct, text: self._put('progress', text=text))
-        worker.finished.connect(
-            lambda ok, msg: self._put(done, ok=bool(ok), message=msg))
-        worker.error.connect(
-            lambda msg: self._put(done, ok=False, message=msg))
-        self._tool = worker
-        worker.start()
-        return {'started': True}
-
-    def _tool_busy(self) -> bool:
-        return self._tool is not None and self._tool.isRunning()
-
-    def extract_model(self, lang: str = 'ru') -> Dict[str, Any]:
-        """
-        Декомпилирует модель предмета и отдаёт список готовых файлов.
-
-        Операция двухшаговая, как и в приложении: сначала файлы готовятся во
-        временном каталоге, потом человек выбирает, что из них сохранить
-        (``export_model_files``). Список приезжает событием ``extract_files``.
-        """
-        from src.domain.preview.model_key import model_key_for
-
-        mode = getattr(self, '_mode', '')
-        # Ключ предмета берём тот же, по которому грузилось превью: у шапок он
-        # свой на каждую вещь и из режима не выводится.
-        key = self.preview.weapon_key or model_key_for(mode)
-        if not key:
-            return {'error': f'Для режима «{mode}» модели нет'}
-
-        paths = self.tf2_paths()
-        if 'error' in paths:
-            return paths
-        if self._tool_busy():
-            return {'error': 'Извлечение уже идёт'}
-
-        from src.services.extract_model_worker import ExtractModelWorker
-        w = ExtractModelWorker(tf2_root_dir=paths['root'], mode=mode,
-                               weapon_key=key, language=lang)
-        w.progress.connect(lambda pct, text: self._put('progress', text=text))
-        w.finished.connect(lambda ok, msg: self._model_prepared(w, ok, msg))
-        w.error.connect(lambda msg: self._put('extract_files', ok=False,
-                                              message=msg, files=[], selected=[]))
-        self._tool = w
-        w.start()
-        return {'started': True}
-
-    def _model_prepared(self, worker, ok: bool, message: str) -> None:
-        """Файлы готовы во временном каталоге — ждём выбора страницы."""
-        from src.services.extract_model_service import ExtractModelService
-
-        files = list(getattr(worker, 'prepared_files', None) or [])
-        temp = getattr(worker, 'prepared_temp_dir', None)
-        decompile = getattr(worker, 'prepared_decompile_dir', None)
-        if not (ok and files and temp and decompile):
-            if temp:
-                ExtractModelService.cleanup_temp_dir(temp)
-            self._prepared = None
-            self._put('extract_files', ok=False, message=message,
-                      files=[], selected=[])
-            return
-
-        self._prepared = {'temp': temp, 'decompile': decompile,
-                          'key': worker.weapon_key}
-        self._put('extract_files', ok=True, message=message, files=files,
-                  selected=ExtractModelService.default_export_selection(files))
-
-    def export_model_files(self, files: Optional[List[str]] = None,
-                           lang: str = 'ru') -> Dict[str, Any]:
-        """
-        Сохраняет выбранные файлы модели в папку экспорта.
-
-        Пустой список — отказ: временный каталог тогда убирается сразу, иначе
-        декомпиляция висела бы в temp до перезапуска.
-        """
-        from src.services.extract_model_service import ExtractModelService
-
-        prepared = self._prepared
-        if not prepared:
-            return {'error': 'Сначала извлеките модель'}
-
-        chosen = [f for f in (files or []) if f]
-        if not chosen:
-            ExtractModelService.cleanup_temp_dir(prepared['temp'])
-            self._prepared = None
-            return {'cancelled': True}
-        if self._tool_busy():
-            return {'error': 'Извлечение уже идёт'}
-
-        export_folder, _ = self._export_settings()
-        from src.services.export_model_files_worker import ExportModelFilesWorker
-        w = ExportModelFilesWorker(
-            temp_dir=prepared['temp'],
-            decompile_dir=prepared['decompile'],
-            selected_files=chosen,
-            export_folder=export_folder,
-            weapon_key=prepared['key'],
-            language=lang,
-        )
-        self._prepared = None
-        return self._run_tool(w)
-
-    def character_textures(self) -> List[str]:
-        """
-        Текстуры персонажа в игровом VPK — из них выбирают, что извлекать.
-
-        У тела персонажа их бывает под два десятка (лицо, части формы,
-        экипировка), поэтому приложение спрашивает, а не тащит всё подряд.
-        """
-        from src.data.player_characters import PLAYER_CHARACTERS
-
-        folder = PLAYER_CHARACTERS.get(getattr(self, '_mode', ''), {}).get('folder')
-        if not folder:
-            return []
-        paths = self.tf2_paths()
-        if 'error' in paths:
-            return []
-
-        from src.services.vpk_cache import open_vpk_cached
-        try:
-            pak = open_vpk_cached(paths['textures_vpk'])
-        except OSError as exc:
-            logger.warning(f"не открыть VPK текстур: {exc}")
-            return []
-        if pak is None:
-            return []
-
-        prefix = f"materials/models/player/{folder}/"
-        return sorted(
-            path[len(prefix):-4] for path in pak
-            if path.startswith(prefix) and path.lower().endswith('.vtf')
-            and '/' not in path[len(prefix):]
-        )
-
-    def extract_texture(self, textures: Optional[List[str]] = None,
-                        lang: str = 'ru') -> Dict[str, Any]:
-        """
-        Извлекает оригинальные текстуры предмета в папку экспорта.
-
-        У тела персонажа выбор обязателен: без списка возвращается
-        ``need_textures`` — страница спрашивает, что брать, и зовёт снова.
-        """
-        from src.data.player_characters import (
-            PLAYER_BODY_MODE_KEYS, PLAYER_CHARACTERS,
-        )
-        from src.data.player_hands import HAND_MODE_KEYS, get_hand_textures
-        from src.data.weapons import SPECIAL_MODES
-        from src.domain.preview.model_key import model_key_for
-
-        mode = getattr(self, '_mode', '')
-        if not mode:
-            return {'error': 'Сначала выберите предмет'}
-        if mode in SPECIAL_MODES:
-            return {'error': 'Для этого режима оригинальной текстуры нет'}
-
-        paths = self.tf2_paths()
-        if 'error' in paths:
-            return paths
-        if self._tool_busy():
-            return {'error': 'Извлечение уже идёт'}
-
-        export_folder, export_format = self._export_settings()
-
-        # Шапка: своя цепочка QC → VMT → $baseTexture, у каждой вещи своя модель.
-        if mode == 'hat':
-            key = self.preview.weapon_key
-            if not key:
-                return {'error': 'Сначала выберите шапку'}
-            from src.services.hat_texture_extract_worker import HatTextureExtractWorker
-            return self._run_tool(HatTextureExtractWorker(
-                hat_mdl_path=key, tf2_root_dir=paths['root'],
-                export_folder=export_folder, export_format=export_format,
-                language=lang))
-
-        is_body = mode in PLAYER_BODY_MODE_KEYS
-
-        if is_body:
-            if not textures:
-                return {'need_textures': self.character_textures()}
-            folder = PLAYER_CHARACTERS.get(mode, {}).get('folder', '')
-            explicit = [(folder, name) for name in textures]
-        elif mode in HAND_MODE_KEYS:
-            explicit = get_hand_textures(mode)
-        else:
-            explicit = None
-
-        # У рук ключ — модель предплечья: под ним лежит QC в кэше декомпиляции,
-        # и служба берёт из него ПОЛНЫЙ $texturegroup — те же текстуры, что
-        # положит сборка (список в player_hands бывает неполным).
-        #
-        # У тела персонажа ключ не передаём НАМЕРЕННО: там список выбрал
-        # человек, и подмена его группой из QC вернула бы всё подряд.
-        key = '' if is_body else model_key_for(mode)
-        if not key and not is_body:
-            return {'error': f'Для режима «{mode}» текстуры не найти'}
-
-        from src.services.extract_texture_worker import ExtractTextureWorker
-        return self._run_tool(ExtractTextureWorker(
-            textures_vpk_path=paths['textures_vpk'],
-            weapon_key=key,
-            export_folder=export_folder,
-            export_format=export_format,
-            language=lang,
-            hand_textures=explicit,
-            use_explicit_list=bool(explicit),
-        ))
-
-    def export_vpks(self) -> List[str]:
-        """Имена собранных модов в папке экспорта — из них выбирают, что слить."""
-        from pathlib import Path
-        export_folder, _ = self._export_settings()
-        folder = Path(export_folder)
-        if not folder.is_dir():
-            return []
-        return sorted((f.name for f in folder.glob('*.vpk')), key=str.lower)
-
-    def merge_vpk(self, files: Optional[List[str]] = None, name: str = '',
-                  confirmed: bool = False, lang: str = 'ru') -> Dict[str, Any]:
-        """
-        Сливает несколько модов из папки экспорта в один VPK.
-
-        Моды, трогающие одно оружие, друг друга затирают — о таких сначала
-        предупреждаем (``duplicates``) и ждём подтверждения, как это делает
-        окно приложения.
-        """
-        from pathlib import Path
-        from src.services.merge_vpk_service import MergeVPKService
-
-        chosen = [f for f in (files or []) if f]
-        if len(chosen) < 2:
-            return {'error': 'Выберите хотя бы два мода'}
-        if not name.strip():
-            return {'error': 'Задайте имя выходного файла'}
-        if self._tool_busy():
-            return {'error': 'Объединение уже идёт'}
-
-        export_folder, _ = self._export_settings()
-        # От страницы берём только имена: путь собираем сами, иначе она могла бы
-        # указать файл за пределами папки экспорта.
-        paths = [Path(export_folder) / Path(f).name for f in chosen]
-        missing = [p.name for p in paths if not p.is_file()]
-        if missing:
-            return {'error': 'Не найдены: ' + ', '.join(missing)}
-
-        if not confirmed:
-            duplicates = MergeVPKService.check_duplicate_weapons(paths)
-            if duplicates:
-                return {'duplicates': {str(k): list(v) for k, v in duplicates.items()}}
-
-        from src.services.merge_vpk_worker import MergeVpkWorker
-        return self._run_tool(MergeVpkWorker(paths, name.strip(), export_folder, lang))
 
     def set_skin(self, index: int) -> Dict[str, Any]:
         """Переключает вариантный стиль. Что показывать — пересчитает домен."""
@@ -4610,7 +2258,7 @@ class AppSession:
             # Командной бывает и одна гирлянда: у обреза цвет команды не
             # меняется, а огоньки фестивайзера у синих синие.
             'has_teams': (self.preview.has_team_variant(is_hands) or t.force_team
-                          or bool(self._decor_shown() and self._decor_shown().has_team)),
+                          or bool(self.decor.shown() and self.decor.shown().has_team)),
             'blu_matches_red': self.preview.blu_matches_red,
             'has_australium': bool(t.australium_frame),
             'australium_active': t.australium_active,
@@ -4634,7 +2282,7 @@ class AppSession:
             # Подгонка есть только у импортированной модели (OBJ/GLB) и только
             # пока она в кадре (custom_obj_path): у SMD из Blender человек уже
             # всё выставил сам. Вернувшаяся с диска работа собирает OBJ заново
-            # (`_restore_custom_model`), и подгонка у неё есть.
+            # (`custom_model.restore`), и подгонка у неё есть.
             'custom_fit': ((self.preview.custom_fit or {'scale': 1, 'rotate': [0, 0, 0],
                                                         'offset': [0, 0, 0]})
                            if self.preview.custom_source_path
@@ -4650,19 +2298,21 @@ class AppSession:
             # Состояния модели (бодигруппы): переключатель под кадром.
             'bodygroups': self.bodygroups(),
             # Праздничная версия: какие гирлянды есть и какая включена.
-            'festive_options': self.festive_options(),
-            'festive': (self._decor_kind
-                        if self._decor_kind and self._decor_for == self._shown_weapon()
+            'festive_options': self.decor.festive_options(),
+            'festive': (self.decor.kind
+                        if self.decor.kind and self.decor.shown_for == self._shown_weapon()
                         else ''),
             # Свои текстуры гирлянды для вьювера ({меш: {команда: [кадры]}}):
             # её меши он красит своим слоем, мимо раздачи текстур предмета.
             # У мигающих лампочек своя картинка приходит кадрами мигания.
-            'decor_textures': self._decor_textures_for_viewer(),
+            'decor_textures': self.decor.textures_for_viewer(),
             # Подгонка показанной гирлянды и какие виды правлены (метка на
             # кнопке — правка гирлянды живёт и при выключенном показе).
-            'decor_fit': self.preview.decor_fit.get(self._decor_kind),
-            'decor_bends': self.preview.decor_bends.get(self._decor_kind) or [],
-            'festive_edited': self._decor_edited_kinds(),
+            'decor_fit': self.preview.decor_fit.get(self.decor.kind),
+            'decor_bends': self.preview.decor_bends.get(self.decor.kind) or [],
+            'festive_edited': self.decor.edited_kinds(),
+            'festive_baked': self.decor.baked(),
+            'can_bake_festive': not self.preview.custom_vpk_mode,
             # Виды гирлянд со своей моделью: «Убрать свою модель» спросит, что.
             'decor_models': sorted(self.preview.decor_models),
             # Есть ли что делить на части. Кнопка иначе висела бы доступной у
@@ -4929,8 +2579,8 @@ class AppSession:
             # что-то поправить, — шаг той правки, а снимок загрузки остаётся без
             # материала, и Ctrl+Z к нему вернёт снаряд без него. Чинить —
             # дописывать материал во все снимки от загрузки до текущего.
-            if self._edit_history:
-                self._edit_history[self._edit_pos] = self._edit_snapshot()
+            if len(self.history):
+                self.history.refresh(self.history.pos, self._edit_snapshot())
         self._autosave(step=False)
 
     def _strip_uv_maps(self, name: str, lang: str) -> None:
@@ -4939,12 +2589,12 @@ class AppSession:
         развёртка другая, и они легли бы на неё пятнами."""
         from src.services import part_materials as pm
 
-        got = self.open_vmt(name, lang)
+        got = self.materials.open_vmt(name, lang)
         if 'error' in got:
             return
         clean = pm.without_uv_maps(got['content'])
         if clean != got['content']:
-            saved = self.save_vmt(name, clean, got.get('original') or got['content'], lang)
+            saved = self.materials.save_vmt(name, clean, got.get('original') or got['content'], lang)
             if 'error' in saved:
                 logger.warning(f"VMT своего снаряда {name} не поправлен: {saved['error']}")
 
@@ -4966,7 +2616,7 @@ class AppSession:
     def stop_preview(self) -> Dict[str, Any]:
         self.controller.stop()
         # Уход от предмета: досчитанная гирлянда легла бы на чужой кадр.
-        self._forget_decor()
+        self.decor.forget()
         return {'stopped': True}
 
     # ═══════════════════════════════════════════════════════════════════════ #
@@ -4990,310 +2640,6 @@ class AppSession:
         p = self.preview
         return bool(p.custom_smd_path or (p.custom_vpk_mode and p.custom_vpk_own_model))
 
-    def festive_options(self) -> List[str]:
-        """Какие гирлянды игра вешает на показанное оружие (по порядку показа).
-
-        Спрашивается при каждом состоянии показа, поэтому ответ держим до
-        смены предмета: items_game уже разобран, но путь к игре читает конфиг.
-        """
-        from src.services import festive_decor
-
-        key = self._shown_weapon()
-        if self._decor_options[0] != key:
-            paths = self.tf2_paths() if key else {'error': ''}
-            found = ([] if 'error' in paths
-                     else list(festive_decor.kinds(key, paths['root'])))
-            self._decor_options = (key, found)
-        return list(self._decor_options[1])
-
-    def set_festive(self, kind: str = '', lang: str = 'ru') -> Dict[str, Any]:
-        """
-        Показывает праздничную версию оружия: гирлянду поверх модели.
-
-        Гирлянда приезжает событием `festive_decor` и живёт во вьювере своим
-        слоем; её материалы становятся карточками `deco:<вид>/<материал>`.
-        Правки гирлянды (текстуры, части, подгонка) — часть работы и уходят в
-        мод отдельной моделью (decor_build); выключенный показ их не
-        отменяет и ничего не стоит. Первое включение — разбор модели
-        гирлянды (около секунды), дальше из памяти.
-        """
-        kind = str(kind or '')
-        key = self._shown_weapon()
-        if kind and kind not in self.festive_options():
-            return {'error': 'У этого предмета такой версии нет'}
-        with self._decor_lock:
-            self._decor_kind, self._decor_for = kind, key if kind else ''
-            # Карточки прошлой гирлянды уходят сразу: новая ещё строится, а
-            # выключенной в альбоме делать нечего. Правки её остаются в работе.
-            self._show_decor_cards(None)
-            if not kind:
-                self._put('festive_decor', kind='')
-        self._stop_decor()
-        # Синюю команду могла включить одна гирлянда: у самого предмета её
-        # нет, а у новой гирлянды может не быть (или она ещё строится) — кнопки
-        # пропадут, и BLU залип бы невидимым, вместе с синими руками в кадре.
-        from src.shared.constants import Team
-        t = self.preview.textures
-        if not (self.preview.has_team_variant(False) or t.force_team):
-            t.active_team = Team.RED
-        if not kind:
-            return self.view_state()
-        own = self.preview.decor_models.get(kind) or ''
-        cached = self._decors.get(kind)
-        if cached is not None and cached.weapon_key == key and cached.source == own:
-            self._show_decor_cards(cached)
-            self._put('festive_decor', **cached.as_event())
-            return self.view_state()
-        self._decors.pop(kind, None)
-
-        paths = self.tf2_paths()
-        if 'error' in paths:
-            with self._decor_lock:
-                self._decor_kind = self._decor_for = ''
-            return paths
-        from src.services.festive_decor import FestiveDecorWorker
-        w = FestiveDecorWorker(key, kind, paths['misc_vpk'],
-                               paths['textures_vpk'], paths['root'], lang=lang,
-                               custom_smd=own)
-        w.progress.connect(lambda text: self._put('progress', text=text))
-        w.ready.connect(self._on_decor)
-        w.failed.connect(lambda message: self._on_decor_failed(key, kind, message))
-        self._decor_worker = w
-        w.start()
-        return self.view_state()
-
-    def _reshow_decor(self, was: Dict[str, str], lang: str) -> None:
-        """Показанная гирлянда сменила модель (отмена, сброс, возврат работы) —
-        собрать её заново; `was` — decor_models до перемены."""
-        kind = self._decor_kind
-        if kind and was.get(kind) != self.preview.decor_models.get(kind):
-            self.set_festive(kind, lang)
-
-    def load_decor_model(self, kind: str, path: str, lang: str = 'ru') -> Dict[str, Any]:
-        """Своя модель гирлянды вида `kind` вместо стоковой.
-
-        Независима от своей модели оружия: заменить можно и то, и другое.
-        Скелет и QC остаются стоковыми (festive_decor.build), материалы —
-        свои; картинки из MTL/glTF сразу ложатся на их карточки. Гирлянда
-        включается — иначе замену не видно.
-        """
-        from src.services import festive_decor, mesh_import_service
-        from src.services.smd_service import SMDService
-
-        kind = str(kind or '')
-        if kind not in self.festive_options():
-            return {'error': 'У этого предмета такой версии нет'}
-        if not path or not os.path.isfile(path):
-            return {'error': 'Файл модели не найден'}
-        try:
-            smd, textures = _garland_smd(path)
-        except mesh_import_service.MeshImportError as exc:
-            return {'error': str(exc)}
-        with self._lock:
-            # Краска и части прежней гирлянды — по её треугольникам.
-            self.preview.forget_decor_look(kind)
-            self.preview.decor_models[kind] = smd
-            for material, image in textures.items():
-                name = SMDService._sanitize_material_name(material)
-                self.preview.textures.set_texture(festive_decor.card(kind, name), image)
-        self._autosave()
-        return {**self.set_festive(kind, lang), 'textures': len(textures)}
-
-    def drop_decor_model(self, kind: str, lang: str = 'ru') -> Dict[str, Any]:
-        """Возвращает стоковую модель гирлянды вида `kind`."""
-        kind = str(kind or '')
-        with self._lock:
-            dropped = self.preview.decor_models.pop(kind, None)
-            if dropped:
-                self.preview.forget_decor_look(kind)
-        if not dropped:
-            return self.view_state()
-        self._autosave()
-        if kind == self._decor_kind:
-            return self.set_festive(kind, lang)
-        return self.view_state()
-
-    def _decor_textures_for_viewer(self) -> Dict[str, Dict[str, List[str]]]:
-        """Свои текстуры гирлянды кадрами: мигают так же, как в игре.
-
-        Кадры считаются один раз на картинку (ключ — путь и время файла) —
-        состояние показа спрашивают после каждого действия.
-        """
-        from src.services import festive_decor
-
-        cache = getattr(self, '_blink_cache', None)
-        if cache is None:
-            cache = self._blink_cache = {}
-        out: Dict[str, Dict[str, List[str]]] = {}
-        for card, teams in self.preview.textures.decor_uploads().items():
-            decor = self._decor_for_card(card)
-            stock = (decor.materials.get(card) or {}) if decor else {}
-            out[card] = {}
-            for team, path in teams.items():
-                if not path:
-                    out[card][team] = []
-                    continue
-                frames = stock.get(team) or []
-                try:
-                    key = (card, team, path, os.path.getmtime(path), tuple(frames))
-                except OSError:
-                    continue
-                if key not in cache:
-                    import tempfile
-                    # Каждый мазок кистью — новая склейка, а с ней и новые
-                    # кадры; старые больше не покажут.
-                    if len(cache) > 64:
-                        cache.clear()
-                    target = tempfile.mkdtemp(prefix='tf2sg_blink_')
-                    cache[key] = festive_decor.blink_like(
-                        path, frames, target, card.replace(':', '_').replace('/', '_'))
-                out[card][team] = cache[key]
-        return out
-
-    def _decor_edited_kinds(self) -> List[str]:
-        """Виды гирлянд, у которых есть правки: текстуры или подгонка."""
-        from src.services import festive_decor
-        kinds = (set(self.preview.decor_fit) | set(self.preview.decor_bends)
-                 | set(self.preview.decor_models))
-        kinds.update(festive_decor.parse_card(c)[0]
-                     for c in self.preview.textures.decor_uploads())
-        kinds.discard('')
-        return sorted(kinds)
-
-    def _decor_shown(self):
-        """Готовая гирлянда, которая сейчас включена; None — выключена."""
-        decor = self._decors.get(self._decor_kind) if self._decor_kind else None
-        if decor is None or decor.weapon_key != self._shown_weapon():
-            return None
-        return decor
-
-    def _on_decor(self, decor) -> None:
-        # Пока строилась, человек мог выключить её, выбрать другую или уйти
-        # к другому предмету.
-        with self._decor_lock:
-            if ((decor.weapon_key, decor.kind) != (self._decor_for, self._decor_kind)
-                    or decor.weapon_key != self._shown_weapon()):
-                return
-            self._decors[decor.kind] = decor
-            self._show_decor_cards(decor)
-            self._put('festive_decor', **decor.as_event())
-
-    def _on_decor_failed(self, key: str, kind: str, message: str) -> None:
-        with self._decor_lock:
-            if (key, kind) != (self._decor_for, self._decor_kind):
-                return
-            self._decor_kind = self._decor_for = ''
-            self._put('festive_failed', kind=kind)
-        logger.warning(f"гирлянда не собралась: {key}/{kind}: {message}")
-
-    def _stop_decor(self) -> None:
-        # Ждём воркер БЕЗ замка: его `_on_decor` сам берёт замок, и остановка
-        # под ним простояла бы все три секунды.
-        w, self._decor_worker = self._decor_worker, None
-        if w is not None:
-            w.stop(3000)
-
-    def _forget_decor(self) -> None:
-        """Новый предмет: гирлянда прошлого к нему не относится.
-
-        Вьюверу говорим об этом сами: работа и мод из VPK открываются без
-        сброса кадра, и оставшаяся гирлянда повисла бы на новой модели.
-        """
-        with self._decor_lock:
-            if self._decor_kind:
-                self._put('festive_decor', kind='')
-            self._decor_kind = self._decor_for = ''
-            self._decors = {}
-            self._decor_options = ('', [])
-            self._show_decor_cards(None)
-        self._stop_decor()
-
-    def _show_decor_cards(self, decor) -> None:
-        """Карточки гирлянды в альбоме и её игровые кадры (None — убрать).
-
-        Кадры кладутся в своё поле (`decor_stock`), а не в карты модели
-        оружия: те переписываются каждой загрузкой модели — сменил состояние
-        бутылки, и карточка гирлянды осталась бы пустой.
-        """
-        from src.shared.constants import Team
-        with self._lock:
-            p = self.preview
-            if decor is None:
-                p.decor_cards = []
-                p.textures.decor_stock = {}
-                return
-            p.decor_cards = list(decor.materials)
-            # Основа карточки — «все лампочки горят», а не первый кадр: в нём
-            # один цвет погашен, и кисть по нему дала бы тёмный цвет.
-            p.textures.decor_stock = {
-                team: {c: (m.get('lit') or {}).get(team) or m[team][0]
-                       for c, m in decor.materials.items() if m[team]}
-                for team in (Team.RED, Team.BLU)}
-
-    def set_decor_fit(self, fit: Optional[dict] = None) -> Dict[str, Any]:
-        """Подгонка показанной гирлянды под свою модель.
-
-        Вьювер двигает гирлянду сам и сразу; здесь — только числа. Их берут
-        сборка (модель гирлянды пересобирается с запечённым сдвигом) и вид от
-        первого лица. Единица не хранится: стоковая гирлянда — не правка.
-        """
-        from src.services import mesh_import_service
-
-        kind = self._decor_kind
-        if not kind or not self._decor_shown():
-            return {'error': 'Сначала включите праздничную версию'}
-        parsed = mesh_import_service.Fit.from_dict(fit)
-        with self._lock:
-            if parsed == mesh_import_service.Fit():
-                self.preview.decor_fit.pop(kind, None)
-            else:
-                self.preview.decor_fit[kind] = parsed.to_dict()
-        self._autosave()
-        return {'fit': self.preview.decor_fit.get(kind)}
-
-    def set_decor_bends(self, bends: Optional[List[dict]] = None) -> Dict[str, Any]:
-        """Изгибы показанной гирлянды — списком целиком.
-
-        Вьювер гнёт гирлянду сам и присылает итог после каждого движения;
-        список целиком, а не «добавить»: так же приходят «выпрямить» (пусто)
-        и откат, и порядок движений не зависит от порядка запросов.
-        """
-        kind = self._decor_kind
-        if not kind or not self._decor_shown():
-            return {'error': 'Сначала включите праздничную версию'}
-        import math
-
-        clean = []
-        for bend in bends or ():
-            try:
-                c = [float(v) for v in bend['c']][:3]
-                d = [float(v) for v in bend['d']][:3]
-                r = float(bend['r'])
-            except (KeyError, TypeError, ValueError):
-                return {'error': 'Изгиб без точки, радиуса или сдвига'}
-            # nan в SMD ломает компиляцию модели — такой изгиб не берём.
-            if (len(c) == 3 and len(d) == 3 and r > 0
-                    and all(map(math.isfinite, [*c, *d, r]))):
-                clean.append({'c': c, 'r': r, 'd': d})
-        with self._lock:
-            if clean:
-                self.preview.decor_bends[kind] = clean
-            else:
-                self.preview.decor_bends.pop(kind, None)
-        self._autosave()
-        return {'bends': self.preview.decor_bends.get(kind, [])}
-
-    def _decor_scene_args(self, key: str) -> Dict[str, str]:
-        """Гирлянда для сцены в руках: SMD с правками и имена её мешей."""
-        from src.services import festive_decor
-        decor = self._decor_shown()
-        if not decor or decor.weapon_key != key:
-            return {'decor_smd': '', 'decor_prefix': festive_decor.PREFIX}
-        return {'decor_smd': festive_decor.shaped_smd(
-                    decor.smd_path, self.preview.decor_fit.get(decor.kind),
-                    self.preview.decor_bends.get(decor.kind),
-                    festive_decor.weapon_pose(decor.weapon_key, decor.smd_path)),
-                'decor_prefix': festive_decor.card(decor.kind, '')}
 
     def warm_up(self) -> None:
         """Греет индексы игровых архивов в фоне, пока страница рисуется.
@@ -5314,7 +2660,7 @@ class AppSession:
                     return
                 open_vpks([paths['misc_vpk'], paths['textures_vpk'],
                            *TF2Paths.resolve_hl2_vpks(paths['root']),
-                           *self._sound_vpks(paths['tf_dir'])])
+                           *self.sounds.sound_vpks(paths['tf_dir'])])
                 # Банки краски — разбор items_game на секунду; первому
                 # щелчку по «Краске» ждать его незачем.
                 from src.config.app_config import AppConfig
@@ -5412,36 +2758,3 @@ def _part_smd(path: str, part_smd: str, out_dir: str):
     return mesh_import_service.write_smd(mesh, out, fit), texture, simplified
 
 
-def _garland_smd(path: str):
-    """(SMD, {материал: картинка}) своей гирлянды. SMD — как есть, OBJ/GLB
-    переводятся в SMD с теми же лимитами и упрощением, что у своей модели.
-
-    Raises:
-        mesh_import_service.MeshImportError: модель не читается или не влезет.
-    """
-    import tempfile
-
-    from src.services import mesh_import_service
-
-    import shutil
-
-    out_dir = tempfile.mkdtemp(prefix='tf2sg_garland_')
-    if path.lower().endswith('.smd'):
-        # Копия: загрузки лежат под постоянным именем, и следующий файл с тем
-        # же именем подменил бы гирлянду в работе (и в кэше показа).
-        try:
-            with open(path, encoding='utf-8') as f:
-                ok = 'triangles' in f.read()
-        except (OSError, UnicodeDecodeError):
-            ok = False
-        if not ok:
-            raise mesh_import_service.MeshImportError('SMD не читается: нет треугольников')
-        return shutil.copy2(path, os.path.join(out_dir, os.path.basename(path))), {}
-    mesh = mesh_import_service.load_mesh(path)
-    if mesh_import_service.over_limits(mesh):
-        mesh = mesh_import_service.simplify(mesh)
-    problem = mesh_import_service.check_limits(mesh)
-    if problem:
-        raise mesh_import_service.MeshImportError(problem)
-    out = os.path.join(out_dir, os.path.splitext(os.path.basename(path))[0] + '.smd')
-    return mesh_import_service.write_smd(mesh, out), dict(mesh.textures or {})

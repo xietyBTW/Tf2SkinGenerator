@@ -138,6 +138,12 @@ The lights are a separate model, and you can work on them separately:
 
 Edits of the lights go into the mod as a separate model and don't affect other weapons. A dot next to the version name means its lights were changed.
 
+### Make a weapon festive
+
+Normally the game shows the lights only on the festive version of a weapon or with a Festivizer. **Make festive** under the 3D view builds the lights into the weapon model itself, so in game they hang on the regular weapon for anyone who installs the mod. If the weapon has two kinds of lights, the app asks which one to build in.
+
+Only one set of lights can be built in, so instead of the version choice the row says which one it is. You can repaint, replace and fit them the same way as usual. The mod also empties the weapon's own lights, so the owner of a festive version doesn't see them twice. **Remove the lights** puts everything back.
+
 ## Removing a custom model
 
 **Remove custom model** brings back the game model. If you replaced more than one model (the weapon, its lights, the projectile in the weapon), the app asks which one to restore. **Discard edits** under the album removes the custom model too, together with all other edits of the item.

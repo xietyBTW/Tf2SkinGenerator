@@ -15,6 +15,7 @@ import { pcfNodes, pcfTree, pSystem, setTree, setSystem, pcfDiff, setDiff } from
 import { fillTree, setTitle } from './tree.js';
 import { syncHistory } from './playback.js';
 import { showParams } from './params.js';
+import { ensureEffectMaterials } from './materials.js';
 
 
 // ── Действия над системой ────────────────────────────────────────────────
@@ -35,6 +36,7 @@ export async function applyStructure(res, { reselect = null } = {}) {
   }
   if (res.systems) {
     withParticles((w) => w.updateSystems(res.systems, pSystem));
+    ensureEffectMaterials();
   }
   if (pSystem) await showParams(pSystem);
   await syncHistory();
@@ -278,6 +280,7 @@ export const PACTS = {
     const res = await api.useParticleTextureColors(pSystem);
     if (res.error) { say(res.error); return; }
     withParticles((w) => w.loadParticleData({ ...res, rootName: pSystem }));
+    ensureEffectMaterials();
     await showParams(pSystem);
     say(res.removed ? `Удалено модулей цвета: ${res.removed}`
                     : 'Модулей цвета не было - текстуры уже в родных цветах');
@@ -322,13 +325,22 @@ export function copyItems(label) {
   ];
 }
 
-/** Меню системы - то же, что было на дереве систем в приложении. */
-export async function systemMenu(e, name) {
+/**
+ * Меню системы - то же, что было на дереве систем в приложении. `lead` -
+ * свои пункты сверху ({label, value, run}): у строки списка эффектов это
+ * «Перейти к файлу».
+ */
+export async function systemMenu(e, name, lead = []) {
+  // Действия работают с выбранной системой, но выбор - только если пункт
+  // выбран: закрытое меню оставляло выбранной систему под курсором, и правки
+  // панели (она показывает прежнюю) уходили не в ту систему.
+  const prev = pSystem;
   setSystem(name);
   // «Вернуть как в игре» - только когда есть что возвращать: у стоковой
   // системы пункт погашен, у файла без игрового собрата его нет вовсе.
   const status = pcfDiff.get(name);
   const chosen = await contextMenu(e, [
+    ...lead, ...(lead.length ? [null] : []),
     { label: 'Добавить слой со своей текстурой…', value: 'layer' },
     null,
     { label: 'Переименовать систему…', value: 'rename' },
@@ -342,7 +354,10 @@ export async function systemMenu(e, name) {
     null,
     ...copyItems(null),
   ]);
-  if (chosen) await PACTS[chosen]();
+  const own = lead.find((item) => item.value === chosen);
+  if (!chosen || own) setSystem(prev);
+  if (own) await own.run();
+  else if (chosen) await PACTS[chosen]();
 }
 
 /** Меню в дереве свойств. Что предложить - решает узел под курсором. */

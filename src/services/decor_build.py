@@ -67,7 +67,8 @@ def build_decor_models(
     built = 0
     for entry in entries or ():
         mdl = (entry.get('mdl') or '').replace('\\', '/').lower()
-        if not mdl:
+        # Вшитую в оружие собирает decor_bake вместе с моделью оружия.
+        if not mdl or entry.get('bake'):
             continue
         stem = Path(mdl).stem
         if emit_sub:
@@ -89,27 +90,48 @@ def build_decor_models(
 def _build_one(ctx, entry: dict, mdl: str, stem: str, misc_vpk: str,
                textures_vpk: str, studiomdl_exe: str, tf_dir: str,
                size, format_type, flags, vtf_options, bypass_prefix) -> None:
-    from src.services import mesh_import_service, qc_skin_parser, smd_service
-    from src.services import model_decompile_service as mds
-    from src.services.game_vpk_reader import GameVpkReader
     from src.services.model_build_service import ModelBuildService
     from src.services.model_service import ModelService
 
+    work, model, ref = prepare(ctx, entry, mdl, stem, misc_vpk)
+    comp_dir = work / "compile"
+    comp_dir.mkdir(parents=True, exist_ok=True)
+    original_cd = list(model.cdmaterials)
+    own_dir = f"{DECOR_MATERIALS_ROOT}\\{stem}"
+    _set_cdmaterials(model.qc_path, own_dir)
+    ModelBuildService.patch_qc_file(model.qc_path, bypass_prefix)
+    patched = ModelBuildService.apply_cdmaterials_prefix(own_dir, bypass_prefix)
+
+    ModelBuildService.compile(model.qc_path, str(comp_dir), studiomdl_exe, tf_dir)
+    sub = type('SubCtx', (), {'compile_dir': comp_dir, 'vpkroot_dir': ctx.vpkroot_dir})()
+    ModelService.copy_compiled_models_to_vpkroot(sub, model.qc_path)
+    write_materials(ctx.vpkroot_dir, entry, model, ref, original_cd, patched, work,
+                    misc_vpk=misc_vpk, textures_vpk=textures_vpk, size=size,
+                    format_type=format_type, flags=flags, vtf_options=vtf_options)
+
+
+def prepare(ctx, entry: dict, mdl: str, stem: str, misc_vpk: str):
+    """Разобранная гирлянда с правками формы: своя модель, изгибы, подгонка.
+
+    Returns:
+        (рабочая папка, QcModel копии разбора, её меш SMD).
+    """
+    from src.services import festive_decor, mesh_import_service, qc_skin_parser, smd_service
+    from src.services import model_decompile_service as mds
+
     work = Path(ctx.temp_dir) / f"decor_{stem}"
-    decomp_dir, comp_dir = work / "decompile", work / "compile"
+    decomp_dir = work / "decompile"
     found = mds.ensure_decompiled(stem, misc_vpk, [mdl])
     if found is None:
         raise FileNotFoundError(f"{mdl} нет в игре")
     # Копия: правим QC и SMD, а кэш декомпиляции общий с превью.
     shutil.copytree(found.directory, decomp_dir, dirs_exist_ok=True)
-    comp_dir.mkdir(parents=True, exist_ok=True)
 
     model = qc_skin_parser.load_model(str(decomp_dir))
     ref = smd_service.find_reference_smd(str(decomp_dir), stem)
     if model is None or not ref:
         raise FileNotFoundError(f"в разборе {stem} нет QC или меша")
 
-    from src.services import festive_decor
     # Своя модель — на скелет стоковой, как в превью (festive_decor.build).
     if entry.get('smd'):
         festive_decor.own_on_stock(entry['smd'], ref, ref)
@@ -120,21 +142,20 @@ def _build_one(ctx, entry: dict, mdl: str, stem: str, misc_vpk: str,
     fit = mesh_import_service.Fit.from_dict(entry.get('fit'))
     if entry.get('fit') and fit != mesh_import_service.Fit():
         mesh_import_service.transform_smd(ref, ref, fit)
+    return work, model, ref
 
-    original_cd = list(model.cdmaterials)
+
+def write_materials(vpkroot_dir, entry: dict, model, ref: str, original_cd: List[str],
+                    patched: str, work: Path, *, misc_vpk: str, textures_vpk: str,
+                    size, format_type, flags, vtf_options) -> None:
+    """VMT (и свои VTF) каждого материала гирлянды в папку `patched`."""
+    from src.services import festive_decor
+    from src.services.game_vpk_reader import GameVpkReader
+
+    stem = Path(model.qc_path).stem
     materials = _all_materials(model, ref)
     team_map = {red.lower(): blu for red, blu in model.team_map.items()}
-
-    own_dir = f"{DECOR_MATERIALS_ROOT}\\{stem}"
-    _set_cdmaterials(model.qc_path, own_dir)
-    ModelBuildService.patch_qc_file(model.qc_path, bypass_prefix)
-    patched = ModelBuildService.apply_cdmaterials_prefix(own_dir, bypass_prefix)
-
-    ModelBuildService.compile(model.qc_path, str(comp_dir), studiomdl_exe, tf_dir)
-    sub = type('SubCtx', (), {'compile_dir': comp_dir, 'vpkroot_dir': ctx.vpkroot_dir})()
-    ModelService.copy_compiled_models_to_vpkroot(sub, model.qc_path)
-
-    out_dir = Path(ctx.vpkroot_dir, "materials", *patched.replace('\\', '/').split('/'))
+    out_dir = Path(vpkroot_dir, "materials", *patched.replace('\\', '/').split('/'))
     out_dir.mkdir(parents=True, exist_ok=True)
     images = _images_by_material(entry.get('textures') or {}, team_map)
     reader = GameVpkReader([textures_vpk, misc_vpk])
@@ -166,9 +187,9 @@ def _build_one(ctx, entry: dict, mdl: str, stem: str, misc_vpk: str,
             (out_dir / f"{name}.vmt").write_text(text, encoding="utf-8")
     finally:
         reader.close()
-    logger.info(f"[гирлянда] {stem}: собрана, подгонка={fit.to_dict()}, "
-                f"изгибов {len(entry.get('bends') or [])}, "
-                f"своих текстур {len(images)}, материалы в {patched}")
+    logger.info(f"[гирлянда] {stem}: изгибов {len(entry.get('bends') or [])}, "
+                f"подгонка {entry.get('fit')}, своих текстур {len(images)}, "
+                f"материалы в {patched}")
 
 
 def _all_materials(model, ref_smd: str) -> List[str]:
@@ -190,8 +211,8 @@ def _images_by_material(textures: Dict[str, dict], team_map: Dict[str, str]) -> 
     материалом; синяя картинка уходит его командной паре из $texturegroup.
 
     Материал без командной пары один на обе команды — ему годится любая
-    из двух картинок. У командного синяя пара без своей правки остаётся
-    игровой: красные лампочки у синих были бы чужими."""
+    из двух картинок. Команду без своей правки PreviewTextureState.decor_uploads
+    уже заполнил картинкой другой; пустая здесь - только без правок вовсе."""
     out: Dict[str, str] = {}
     for red, teams in textures.items():
         red_img, blu_img = (teams or {}).get('red'), (teams or {}).get('blu')

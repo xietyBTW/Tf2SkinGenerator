@@ -153,9 +153,8 @@ def attachment_only_models(tf2_root: str) -> set:
 
 #: Ключи нашего списка, которых items_game не знает под этим именем: модель
 #: в каталоге старая или переименованная, а иконка объявлена у нынешней.
-_ICON_ALIASES = {
+MODEL_ALIASES = {
     "c_dartgun": "c_sydney_sleeper",      # Sydney Sleeper
-    "c_batt_buffpack": "c_buffpack",      # Buff Banner (extra_wearable)
     "tankerboots": "mantreads",           # Mantreads
 }
 _ANY_MDL_RE = re.compile(r'"([^"]+\.mdl)"', re.IGNORECASE)
@@ -216,7 +215,7 @@ def weapon_icon(weapon_key: str, tf2_root: str) -> Optional[str]:
 
     key = weapon_key.lower()
     mdl = WEAPON_MDL_PATHS.get(weapon_key, "")
-    candidates = (key, _ICON_ALIASES.get(key),
+    candidates = (key, MODEL_ALIASES.get(key),
                   os.path.splitext(os.path.basename(mdl.lower()))[0] if mdl else None,
                   "c_" + key[2:] if key.startswith("w_") else None)
     with _icon_lock:

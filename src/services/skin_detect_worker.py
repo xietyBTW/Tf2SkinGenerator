@@ -62,6 +62,7 @@ class SkinDetectWorker(BaseWorker):
             if not info:
                 self.failed.emit("no_skin_info")
                 return
+            info = self._with_item_styles(info)
             logger.info(
                 f"[SKIN] {self.weapon_key}: num_skins={info.get('num_skins')} "
                 f"roles={info.get('roles')} is_team={info.get('is_team')} "
@@ -71,6 +72,37 @@ class SkinDetectWorker(BaseWorker):
         except Exception as exc:
             logger.warning(f"[SKIN] detect failed for {self.weapon_key}: {exc}", exc_info=True)
             self.failed.emit(str(exc))
+
+    def _with_item_styles(self, info: dict) -> dict:
+        """
+        Строки скина, которые в игре - отдельный предмет («Критокола» - строка 2
+        модели Бонка), становятся стилями с его именем. QC знает их только как
+        «Skin N», а безымянные строки в полосу стилей не идут - и такую
+        текстуру было не выбрать и не поправить.
+        """
+        from src.data.item_skin_styles import styled_skins
+        from src.data.weapon_model_index import tf2_root_from_misc_vpk
+
+        if self.mode == "hat":
+            return info
+        root = tf2_root_from_misc_vpk(self.misc_vpk_path)
+        named = styled_skins(self.weapon_key, root, self._lang) if root else []
+        rows = info.get('rows') or []
+        have = {int(index) for _label, index in info.get('styles') or ()}
+        # Строка-копия более ранней (у «Ботоубийц» огнемёта строки 3/5/7 -
+        # та же синяя: их цвет даёт навешенная голова робота) - не стиль:
+        # править в ней нечего, текстура общая.
+        extra = [(name, skin) for name, skin in named
+                 if 0 < skin < len(rows) and skin not in have and rows[skin] not in rows[:skin]]
+        if not extra:
+            return info
+        titles = dict((skin, name) for name, skin in extra)
+        return {
+            **info,
+            'styles': [*(info.get('styles') or []), *extra],
+            'skins': [{**s, 'role': titles.get(s.get('index'), s.get('role'))}
+                      for s in info.get('skins') or []],
+        }
 
     # ── получение QC ─────────────────────────────────────────────────────── #
 
@@ -86,7 +118,7 @@ class SkinDetectWorker(BaseWorker):
         return self._extract_and_decompile()
 
     def _mdl_rel(self) -> str:
-        from src.data.weapons import PREVIEW_MDL_OVERRIDE
+        from src.data.weapon_quirks import PREVIEW_MDL_OVERRIDE
         from src.data.player_characters import PLAYER_BODY_MODE_KEYS as _PBK, SPY_MASK_MODE_KEY as _SMK
         override = PREVIEW_MDL_OVERRIDE.get(self.weapon_key)
         if self.mode == "hat" or self.mode in _PBK or self.mode == _SMK:
@@ -100,7 +132,7 @@ class SkinDetectWorker(BaseWorker):
 
     def _mdl_candidates(self) -> list:
         """Пути MDL внутри VPK в порядке приоритета."""
-        from src.data.weapons import PREVIEW_MDL_OVERRIDE
+        from src.data.weapon_quirks import PREVIEW_MDL_OVERRIDE
         from src.data.player_characters import PLAYER_BODY_MODE_KEYS as _PBK
 
         mdl_rel = self._mdl_rel()

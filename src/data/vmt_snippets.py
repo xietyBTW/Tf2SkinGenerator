@@ -504,7 +504,7 @@ VMT_SNIPPETS = {
             "Цвет блеска киллстрика",
             "",
             "Свой цвет блеска Killstreak вместо цвета набора. Можно радугу, "
-            "ярче, как у австралия, свой узор или блеск всегда, даже без киллстрика. "
+            "готовый или свой узор, блеск всегда, даже без киллстрика. "
             "Видно только вам.",
         ),
         (
@@ -549,7 +549,7 @@ VMT_SNIPPETS_EN = {
     "Особые материалы": "Special materials",
     "Призрачная оболочка": ("Ghost shell", "The weapon becomes a translucent glowing shell: only the reflection with bright edges is visible. Pick the color and reflection. Needs reflections in game: with mat_specular 0 the weapon is not visible at all."),
     "Стекло": ("Glass", "The middle or the whole weapon turns into glass that distorts the world behind it, like the Spy's cloak. The material's texture stays."),
-    "Цвет блеска киллстрика": ("Killstreak sheen color", "Your own Killstreak sheen color instead of the kit color. Rainbow, brighter like Australium, your own pattern, or a sheen always, even without a killstreak. Only you see it."),
+    "Цвет блеска киллстрика": ("Killstreak sheen color", "Your own Killstreak sheen color instead of the kit color. Rainbow, a ready or your own pattern, or a sheen always, even without a killstreak. Only you see it."),
     "Цвет свечения крита": ("Crit glow color", "Your own crit glow color on the weapon, separately for RED and BLU. Only you see it."),
     "Каркас": ("Wireframe", "The model is drawn as a mesh of edges. Texture and color stay. Worth checking in game: the flag is rare."),
     "Свечение": ("Glow", "Parts of the texture glow in the dark. The mask is a black-and-white texture: white glows."),
